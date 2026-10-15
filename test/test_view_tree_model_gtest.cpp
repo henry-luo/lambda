@@ -490,6 +490,9 @@ TEST(ResourceAdmissionTest, ASharedWarmImageCacheCannotBypassTheSelectedDocument
     EXPECT_EQ(load_document_image(&allowed, &ui, remote), pixels);
     EXPECT_EQ(load_document_image(&denied, &ui, remote), nullptr);
     EXPECT_EQ(load_document_image(&denied, &ui, "/retained.png"), nullptr);
+    ui.document = nullptr;
+    EXPECT_EQ(load_document_image(&allowed, &ui, remote), pixels);
+    EXPECT_EQ(ui.document, nullptr);
     image_cache_cleanup(&ui);
     url_destroy(allowed.url); allowed.url = nullptr;
     url_destroy(denied.url); denied.url = nullptr;
@@ -2710,7 +2713,10 @@ TEST_F(SecondaryViewTest, ImagesUseTheSameProducerInFootnotesAndRepeatedRunningF
         EXPECT_EQ(node->image_box->image.get(), footnote->image_box->image.get());
     }
     EXPECT_EQ(logos, 2u);
-    EXPECT_EQ(note_image->embed, nullptr); EXPECT_EQ(running_image->embed, nullptr);
+    // DOM image slots are the workspace; the edition owns a separate resource (D4.5.1v4)
+    ASSERT_NE(note_image->embed, nullptr); ASSERT_NE(running_image->embed, nullptr);
+    EXPECT_NE(footnote->image_box->image.get(), note_image->embedp()->img.get());
+    image_cache_cleanup(shared_ui());
     ImageSurface* snapshot = render_secondary_page_snapshot(tree, 1, 2.0f); ASSERT_NE(snapshot, nullptr);
     Color blue = {snapshot_pixel(snapshot, (size_t)((footnote->rect.x + 15.0f) * 2.0f), (size_t)((footnote->rect.y + 5.0f) * 2.0f))};
     EXPECT_GT(blue.b, 200); EXPECT_LT(blue.r, 30);
@@ -13889,6 +13895,96 @@ TEST_F(SecondaryViewTest, PagedFlowMatchesContinuousLayoutWithoutBreaks) {
         EXPECT_FLOAT_EQ(flat[i].x, paged[i].x); EXPECT_FLOAT_EQ(flat[i].y, paged[i].y);
         EXPECT_FLOAT_EQ(flat[i].width, paged[i].width); EXPECT_FLOAT_EQ(flat[i].height, paged[i].height);
     }
+}
+
+TEST_F(SecondaryViewTest, PagedFlowRepeatsPageFixedContentIncludingBlankPages) {
+    init_vector_engine();
+    stylesheet("@page { size: 200px 100px; margin: 10px } p, div, span { margin: 0; font: 10px/12px Arial } ");
+    ASSERT_NE(block("First", "height: 30px"), nullptr);
+    DomElement* container = block("Last", "break-before: right"); ASSERT_NE(container, nullptr);
+    DomElement* fixed = block("Fixed", "position: fixed; top: 3px; left: 7px; width: 40px; height: 12px; background: blue", "div", container);
+    ASSERT_NE(fixed, nullptr);
+    DomElement* contained = block(nullptr, "contain: paint; height: 20px", "div", container);
+    ASSERT_NE(contained, nullptr);
+    DomElement* local_fixed = block("Local", "position: fixed; top: 2px; left: 3px; width: 25px; height: 12px", "div", contained);
+    ASSERT_NE(local_fixed, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    ASSERT_TRUE(tree->model->pages.get()[1]->blank);
+    ViewNodeState* boxes = view_tree_node_state(tree, fixed, false); ASSERT_NE(boxes, nullptr);
+    size_t count = 0;
+    for (LayoutViewNode* node = boxes->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->paint_box) continue;
+        count++;
+        EXPECT_EQ(occurrence_page(node), count);
+        EXPECT_FLOAT_EQ(node->rect.x, 17.0f); EXPECT_FLOAT_EQ(node->rect.y, 13.0f);
+        EXPECT_FLOAT_EQ(node->rect.width, 40.0f); EXPECT_FLOAT_EQ(node->rect.height, 12.0f);
+        ASSERT_NE(node->computed_boundary, nullptr);
+        EXPECT_EQ(node->computed_boundary->background->color.b, 255);
+    }
+    EXPECT_EQ(count, 3u);
+    ViewNodeState* text = view_tree_node_state(tree, fixed->first_child, false); ASSERT_NE(text, nullptr);
+    count = 0;
+    for (LayoutViewNode* node = text->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->glyph_run) continue;
+        count++; EXPECT_EQ(occurrence_page(node), count);
+    }
+    EXPECT_EQ(count, 3u);
+    ViewNodeState* local_boxes = view_tree_node_state(tree, local_fixed, false); ASSERT_NE(local_boxes, nullptr);
+    count = 0;
+    for (LayoutViewNode* node = local_boxes->first_occurrence; node; node = node->next_occurrence)
+        if (node->paint_box) { count++; EXPECT_EQ(occurrence_page(node), 3u); }
+    EXPECT_EQ(count, 1u);
+    for (uint32_t page = 1; page <= 3; page++) {
+        SCOPED_TRACE(page);
+        ImageSurface* snapshot = render_secondary_page_snapshot(tree, page, 1.0f); ASSERT_NE(snapshot, nullptr);
+        Color pixel = {snapshot_pixel(snapshot, 54, 19)};
+        EXPECT_GT(pixel.b, 240); EXPECT_LT(pixel.r, 15); EXPECT_LT(pixel.g, 15);
+        ASSERT_TRUE(create_dir("temp/paged-integration-current"));
+        char path[96]; snprintf(path, sizeof(path), "temp/paged-integration-current/fixed-page-%u.png", page);
+        save_surface_to_png(snapshot, path);
+        image_surface_destroy(snapshot);
+    }
+    EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-integration-current/fixed.pdf"));
+}
+
+TEST_F(SecondaryViewTest, PagedFlowFootnoteNumbersFollowHeadingCounterSets) {
+    stylesheet("@page { size: 240px 200px; margin: 10px } h2, p, div, span { margin: 0; font: 10px/12px Arial } "
+        ".fn { float: footnote } .fn::footnote-call { content: '[' counter(footnote) ']' } "
+        ".fn::footnote-marker { content: counter(footnote) ': '; white-space: pre }");
+    DomElement* notes[2] = {};
+    for (size_t i = 0; i < 2; i++) {
+        ASSERT_NE(block("Heading", i ? "counter-set: footnote 1" : "counter-set: footnote 4", "h2"), nullptr);
+        DomElement* body = block("Call "); ASSERT_NE(body, nullptr);
+        notes[i] = block("Note", nullptr, "span", body); ASSERT_NE(notes[i], nullptr);
+        ASSERT_TRUE(notes[i]->set_attribute("class", "fn"));
+    }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_NE(source_glyph_text(tree, notes[0], "[5]"), nullptr);
+    ASSERT_NE(source_glyph_text(tree, notes[0], "5: "), nullptr);
+    ASSERT_NE(source_glyph_text(tree, notes[1], "[2]"), nullptr);
+    ASSERT_NE(source_glyph_text(tree, notes[1], "2: "), nullptr);
+}
+
+TEST_F(SecondaryViewTest, PagedFlowMarginFontsKeepEachPagesComputedSize) {
+    stylesheet("@page { size: 200px 120px; margin: 20px; @bottom-center { content: 'M'; font: 10px Arial } } "
+        "@page:left { @bottom-center { font: 20px Arial } } p, div { margin: 0; font: 10px/12px Arial }");
+    ASSERT_NE(block("First"), nullptr); ASSERT_NE(block("Second", "break-before: page"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    size_t count = 0;
+    for (size_t i = 0; i < tree->model->node_id_count; i++) {
+        LayoutViewNode* node = tree->model->nodes.get()[i];
+        if (!node || !node->glyph_run || node->role != VIEW_FRAGMENT_MARGIN) continue;
+        count++;
+        EXPECT_STREQ(node->glyph_run->text, "M");
+        EXPECT_FLOAT_EQ(node->glyph_run->font_size, occurrence_page(node) == 1 ? 10.0f : 20.0f);
+    }
+    EXPECT_EQ(count, 2u);
 }
 
 // a break is a strut before the line that would cross the fragmentainer end: boxes

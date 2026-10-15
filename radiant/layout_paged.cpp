@@ -966,6 +966,11 @@ struct PagedFlowAnchor {
     View* box;                 // or the box it precedes
 };
 struct PagedFlowTable;
+struct PagedFixedBox {
+    ViewBlock* block;
+    float origin_x, origin_y;
+    PagedFixedBox* next;
+};
 struct PagedFlowParagraph {    // one block container's uninterrupted inline run
     ViewBlock* block;
     PagedFlowLine* lines;
@@ -1034,6 +1039,9 @@ struct PagedFlowState {
     float* publish_ends;       // its body end per fragmentainer from its first
     size_t publish_last;       // the fragmentainer holding its bottom
     View* publish_skip;        // a child the walk leaves for later (a broken table's footer group)
+    PagedFixedBox* fixed_boxes;
+    PagedFixedBox* last_fixed_box;
+    bool publishing_fixed;
     PagedMarkSource** pending; // mark sources waiting for the content that binds them to a page
     size_t pending_count, pending_capacity;
     PagedMarkSource** open_targets; // targets whose content publication is inside
@@ -2939,7 +2947,7 @@ static void paged_flow_anchor(PagedFlowState* state, LayoutContext* lycon, DomEl
 // content, and a target collects the pages its content reaches; repeated
 // table occurrences record nothing
 static bool paged_publish_mark(PagedFlowState* state, DomNode* node, bool hidden) {
-    if (state->publish_role != VIEW_FRAGMENT_BODY || !hashmap_count(state->composition->mark_sources)) return false;
+    if (state->publishing_fixed || state->publish_role != VIEW_FRAGMENT_BODY || !hashmap_count(state->composition->mark_sources)) return false;
     PagedMarkSource* mark = paged_flow_mark(state, node, false);
     if (!mark) return false;
     Pool* pool = state->composition->pool;
@@ -2996,7 +3004,7 @@ static TypesetStatus paged_publish_pending(PagedFlowState* state, uint32_t page)
 // and the open targets reach it
 static TypesetStatus paged_publish_content(PagedFlowState* state, size_t index) {
     const ViewPageBox* page = state->fragmentainers[index].page;
-    if (state->publish_role != VIEW_FRAGMENT_BODY || !page) return TYPESET_OK;
+    if (state->publishing_fixed || state->publish_role != VIEW_FRAGMENT_BODY || !page) return TYPESET_OK;
     uint32_t number = page->page_number;
     TypesetStatus status = state->pending_count ? paged_publish_pending(state, number) : TYPESET_OK;
     for (size_t i = 0; i < state->open_target_count; i++) {
@@ -3362,7 +3370,7 @@ static LayoutViewNode* paged_publish_append(PagedFlowState* state, LayoutViewNod
     LayoutViewNode* node = view_tree_fragment_append(state->tree, parent, source, rect, text_start, text_length);
     if (node) {
         node->role = state->publish_role;
-        node->generated = source != (DomNode*)view || state->publish_role != VIEW_FRAGMENT_BODY;
+        node->generated = state->publishing_fixed || source != (DomNode*)view || state->publish_role != VIEW_FRAGMENT_BODY;
         node->first_fragment = node->last_fragment = true;
     }
     return node;
@@ -3434,6 +3442,13 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
     ImageSurface* image = render_media_image_surface(block);
     if (!image) return TYPESET_OK;
     ViewTree* tree = state->tree;
+    if (block->embed && block->embedp()->selected_image_source) {
+        // D4.5.1v4: an edition owns its images after the host cache and DOM workspace retire
+        image = load_document_image_resource(tree->model->document, &tree->model->image_resources,
+            block->embedp()->selected_image_source);
+        if (!image) return paged_flow_fail(state, TYPESET_UNPLACEABLE, block,
+            "the edition could not retain its image resource");
+    }
     PaintImageBox* box = (PaintImageBox*)arena_alloc(tree->model->arena, sizeof(PaintImageBox));
     if (!box) return TYPESET_OUT_OF_MEMORY;
     *box = {};
@@ -3475,6 +3490,17 @@ static FontProp* paged_flow_font(PagedFlowState* state, FontProp* source) {
     composition->flow_fonts[composition->flow_font_count++] = source;
     composition->flow_fonts[composition->flow_font_count++] = copy;
     return copy;
+}
+
+static bool paged_flow_forget_font_source(DomNode* node, void* context) {
+    PagedComposition* composition = (PagedComposition*)context;
+    FontProp* font = nullptr;
+    if (node->is_text()) font = node->as_text()->font;
+    else if (node->is_element()) font = node->as_element()->font;
+    // published copies stay pinned; a reused DOM prop must acquire a fresh copy after restyling
+    for (size_t i = 0; font && i < composition->flow_font_count; i += 2)
+        if (composition->flow_fonts[i] == font) composition->flow_fonts[i] = nullptr;
+    return true;
 }
 
 // the edition keeps a box's background colour; images, gradients and layers stay with the browsing painter
@@ -3633,6 +3659,27 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
         // a display:none subtree or a running element binds its assignments where the walk passes it
         if (!child->view_type && node->is_element()) paged_publish_mark(state, node, true);
         if (!child->view_type || child == state->publish_skip) continue;
+        if (!state->publishing_fixed && child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            if (block->position && block->positionp()->position == CSS_VALUE_FIXED &&
+                find_containing_block(block, CSS_VALUE_FIXED) == find_initial_containing_view_block(block) &&
+                state->tree->model->environment.presentation == VIEW_PRESENTATION_PAGED) {
+                // page-fixed content is independent of its source parent's fragment and repeats once per sheet
+                bool collected = false;
+                for (PagedFixedBox* fixed = state->fixed_boxes; fixed; fixed = fixed->next)
+                    if (fixed->block == block) { collected = true; break; }
+                if (collected) continue;
+                PagedFixedBox* fixed = (PagedFixedBox*)pool_calloc(state->composition->pool, sizeof(PagedFixedBox));
+                if (!fixed) return TYPESET_OUT_OF_MEMORY;
+                // remove the source parent's page offset while retaining its local containing-block offsets
+                float page_top = state->fragmentainers[paged_fragmentainer_index(state, origin_y)].top;
+                *fixed = {block, origin_x, origin_y - page_top, nullptr};
+                if (state->last_fixed_box) state->last_fixed_box->next = fixed;
+                else state->fixed_boxes = fixed;
+                state->last_fixed_box = fixed;
+                continue;
+            }
+        }
         TypesetStatus status = TYPESET_OK;
         if (child->view_type == RDT_VIEW_TEXT) status = paged_publish_text(state, lam::view_require_text(child), origin_x, origin_y, parents);
         else if (child->is_block()) status = paged_publish_block(state, lam::view_require_block(child), origin_x, origin_y, parents, false);
@@ -3984,6 +4031,7 @@ static TypesetStatus paged_anchors_finish(PagedFlowState* state) {
 }
 
 static TypesetStatus paged_publish_anchors(PagedFlowState* state, LayoutContext* lycon);
+static TypesetStatus paged_publish_fixed(PagedFlowState* state);
 
 static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* lycon) {
     ViewBlock* root = paged_flow_root(state);
@@ -3996,6 +4044,7 @@ static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* ly
         fragmentainer.rect.y += fragmentainer.float_top;
     }
     state->pending_count = state->open_target_count = 0; state->content_page = 0;
+    state->fixed_boxes = state->last_fixed_box = nullptr;
     TypesetStatus status = paged_publish_block(state, root, 0.0f, 0.0f, nullptr, true);
     // sources after the last content bind to the last page
     const ViewPageBox* last = state->fragmentainer_count ? state->fragmentainers[state->fragmentainer_count - 1].page : nullptr;
@@ -4008,7 +4057,8 @@ static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* ly
 // publisher's walk places its views in one fragmentainer at the rectangle; the
 // element's own fragment, returned, is the occurrence of the material's box
 static LayoutViewNode* paged_detached_publish(PagedFlowState* state, DomElement* element, RdtLogicalRect rect,
-        LayoutViewNode* parent, ViewFragmentRole role, ViewPageBox* page, TypesetStatus* status) {
+        LayoutViewNode* parent, ViewFragmentRole role, ViewPageBox* page, TypesetStatus* status,
+        float origin_x = 0.0f, float origin_y = 0.0f) {
     ViewBlock* view = lam::view_as_block((View*)element);
     *status = TYPESET_OK;
     if (!view) return nullptr;
@@ -4018,10 +4068,23 @@ static LayoutViewNode* paged_detached_publish(PagedFlowState* state, DomElement*
     PagedFragmentainer local = {0.0f, INFINITY, INFINITY, page, 0, rect, parent};
     state->fragmentainers = &local; state->fragmentainer_count = 1; state->publish_role = role;
     LayoutViewNode* before = parent->last_child;
-    *status = paged_publish_block(state, view, 0.0f, 0.0f, nullptr, false);
+    *status = paged_publish_block(state, view, origin_x, origin_y, nullptr, false);
     state->fragmentainers = saved; state->fragmentainer_count = saved_count; state->publish_role = saved_role;
     LayoutViewNode* node = parent->last_child;
     return node != before ? node : nullptr;
+}
+
+static TypesetStatus paged_publish_fixed(PagedFlowState* state) {
+    TypesetStatus status = TYPESET_OK;
+    state->publishing_fixed = true;
+    for (size_t i = 0; status == TYPESET_OK && i < state->tree->model->page_count; i++) {
+        ViewPageBox* page = state->tree->model->pages.get()[i];
+        for (PagedFixedBox* fixed = state->fixed_boxes; status == TYPESET_OK && fixed; fixed = fixed->next)
+            paged_detached_publish(state, fixed->block, page->style->content_rect, &page->node,
+                VIEW_FRAGMENT_STATIC, page, &status, fixed->origin_x, fixed->origin_y);
+    }
+    state->publishing_fixed = false;
+    return status;
 }
 
 static float paged_margin_pair(PagedIntrinsic a, PagedIntrinsic b, float available) {
@@ -4126,8 +4189,16 @@ static DomElement* paged_margin_element(PagedFlowState* state, size_t box, ViewC
 
 // the generated boxes of one page's margin boxes give their declarations back on every path
 struct PagedMarginBorrows {
+    PagedComposition* composition = nullptr;
     DomElement* elements[CSS_PAGE_MARGIN_BOX_COUNT] = {};
-    ~PagedMarginBorrows() { for (DomElement* element : elements) if (element) dom_element_borrow_specified_style(element, nullptr); }
+    ~PagedMarginBorrows() {
+        for (DomElement* element : elements) if (element) {
+            // detached margin views borrow their declarations' strings; retire those props before returning the borrow
+            view_geometry_walk_dom_tree(element, paged_flow_forget_font_source, composition);
+            view_pool_reset_retained_subtree(element->doc->view_tree, element);
+            dom_element_borrow_specified_style(element, nullptr);
+        }
+    }
 };
 
 static TypesetStatus paged_margin_layout(PagedFlowState* state, LayoutContext* lycon, ViewPageBox* page) {
@@ -4137,6 +4208,7 @@ static TypesetStatus paged_margin_layout(PagedFlowState* state, LayoutContext* l
     PagedComposition* composition = state->composition;
     DomElement* elements[CSS_PAGE_MARGIN_BOX_COUNT] = {};
     PagedMarginBorrows borrows;
+    borrows.composition = composition;
     RdtLogicalRect rects[CSS_PAGE_MARGIN_BOX_COUNT] = {};
     ViewCssStyle* base = composition->root_style;
     for (size_t i = 0; i < CSS_PAGE_MARGIN_BOX_COUNT; i++) {
@@ -4411,6 +4483,7 @@ static TypesetStatus paged_flow_compose_pages(PagedFlowState* state, LayoutConte
         status = paged_margin_layout(state, lycon, tree->model->pages.get()[i]);
         if (status == TYPESET_OK) status = paged_flow_static_layout(state, lycon, tree->model->pages.get()[i]);
     }
+    if (status == TYPESET_OK) status = paged_publish_fixed(state);
     return status;
 }
 

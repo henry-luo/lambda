@@ -309,11 +309,6 @@ bool document_dependency_admits(const DomDocument* document, const char* source)
     return resolved && input_resource_policy_admits(document->resource_policy, resolved.get());
 }
 
-ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source) {
-    if (!document_dependency_admits(document, source)) return nullptr;
-    return load_image(uicon, source);
-}
-
 static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap>* cache,
         UiContext* animation_ui, const char* img_url) {
     if (!document || !cache || !img_url) return nullptr;
@@ -749,6 +744,16 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
 
 ImageSurface* load_image(UiContext* uicon, const char* source) {
     return uicon ? load_image_resource(uicon->document, &uicon->image_cache, uicon, source) : nullptr;
+}
+
+ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source) {
+    if (!uicon || !document_dependency_admits(document, source)) return nullptr;
+    // embedded and secondary layouts load against their document, even when the host shows another
+    DomDocument* previous = uicon->document;
+    uicon->document = lam::up(document);
+    ImageSurface* image = load_image_resource(document, &uicon->image_cache, uicon, source);
+    uicon->document = lam::up(previous);
+    return image;
 }
 
 ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<hashmap>* cache,
