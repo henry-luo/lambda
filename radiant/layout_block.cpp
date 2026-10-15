@@ -7173,49 +7173,25 @@ static void layout_apply_image_natural_ratio_constraints(
         natural_height <= 0.0f || !used_width || !used_height) {
         return;
     }
-    bool border_box = layout_uses_border_box(block);
-    float padding_border_width = layout_padding_border_axis(block, true);
-    float padding_border_height = layout_padding_border_axis(block, false);
-    float natural_border_width = natural_width + padding_border_width;
-    float natural_border_height = natural_height + padding_border_height;
-    float min_width = layout_explicit_min_axis_or(block, true, -1.0f);
-    float max_width = layout_explicit_max_axis_or(block, true, -1.0f);
-    float min_height = layout_explicit_min_axis_or(block, false, -1.0f);
-    float max_height = layout_explicit_max_axis_or(block, false, -1.0f);
-    // CSS 2.1 §10.4: intrinsic-ratio sizing resolves each maximum as at
-    // least its corresponding minimum before selecting the violation row.
-    if (min_width >= 0.0f && (max_width < 0.0f || max_width < min_width)) {
-        max_width = min_width;
-    }
-    if (min_height >= 0.0f && (max_height < 0.0f || max_height < min_height)) {
-        max_height = min_height;
-    }
-
-    auto apply_ratio_constraint = [&](float natural_size, float constraint,
-                                      float padding_border_size, bool horizontal,
-                                      bool minimum) {
-        if (constraint < 0.0f ||
-            (minimum ? natural_size >= constraint : natural_size <= constraint)) return;
-        float constrained_size = border_box
-            ? max(constraint - padding_border_size, 0.0f) : constraint;
-        if (horizontal) {
-            *used_width = constrained_size;
-            *used_height = constrained_size * natural_height / natural_width;
-            if (height_blocks_ratio_transfer) *height_blocks_ratio_transfer = true;
-        } else {
-            *used_width = constrained_size * natural_width / natural_height;
-            *used_height = constrained_size;
-            if (width_blocks_ratio_transfer) *width_blocks_ratio_transfer = true;
-        }
+    auto content_constraint = [&](bool horizontal, bool minimum, float fallback) {
+        float value = minimum ? layout_explicit_min_axis_or(block, horizontal, -1.0f)
+            : layout_explicit_max_axis_or(block, horizontal, -1.0f);
+        return value < 0.0f ? fallback : layout_content_size_if_border_box(block, value, horizontal);
     };
-    for (bool horizontal : {false, true}) {
-        float natural_size = horizontal ? natural_border_width : natural_border_height;
-        float padding_border_size = horizontal
-            ? padding_border_width : padding_border_height;
-        float min_size = horizontal ? min_width : min_height;
-        float max_size = horizontal ? max_width : max_height;
-        apply_ratio_constraint(natural_size, min_size, padding_border_size, horizontal, true);
-        apply_ratio_constraint(natural_size, max_size, padding_border_size, horizontal, false);
+    ReplacedIntrinsicFacts facts = {};
+    facts.natural_width = natural_width; facts.natural_height = natural_height;
+    facts.has_natural_width = facts.has_natural_height = true;
+    ReplacedSizeConstraints constraints = {NAN, NAN,
+        content_constraint(true, true, 0.0f), content_constraint(false, true, 0.0f),
+        content_constraint(true, false, INFINITY), content_constraint(false, false, INFINITY),
+        natural_width / natural_height, 0.0f, 0.0f, true};
+    // solve both axes together: conflicting bounds intentionally break the natural ratio.
+    layout_replaced_content_size(&facts, &constraints, natural_width, used_width, used_height);
+    bool conflicting = constraints.min_width / natural_width > constraints.max_height / natural_height ||
+        constraints.min_height / natural_height > constraints.max_width / natural_width;
+    if (conflicting) {
+        if (width_blocks_ratio_transfer) *width_blocks_ratio_transfer = true;
+        if (height_blocks_ratio_transfer) *height_blocks_ratio_transfer = true;
     }
 }
 
@@ -8121,6 +8097,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
             // css 2.1 §10.3.2/§10.6.2: a percentage against a definite zero
             // containing block is zero; intrinsic image dimensions must not replace it.
+            if (lycon->paged) paged_image_size(lycon, block, w, h);
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
                 // The 300x150 SVG fallback is a pair of fallback axes, not a
                 // natural ratio; `aspect-ratio: auto <ratio>` must use its ratio.

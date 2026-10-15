@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "page_document.hpp"
 #include "layout_table.hpp"
+#include "layout_paged.hpp"
 #include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
 #include "../lib/log.h"
@@ -3787,7 +3788,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     }
 }
 
-static bool table_view_is_caption(ViewBlock* child) {
+bool table_view_is_caption(ViewBlock* child) {
     if (!child) return false;
     DisplayValue child_display = resolve_display_value((void*)child);
     return child->tag() == MARKUP_NAME_CAPTION ||
@@ -7322,6 +7323,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table, meta, col_widths, columns, &table_width, table_padding_horizontal);
     }
     float* col_x_positions = scope.array_zero<float>((size_t)columns + 1);
+    float label_separation = lycon->paged
+        ? paged_label_body_columns(lycon, table, meta, table_width) : 0.0f;
     BoxMetrics table_box = layout_box_metrics(table);
     float table_padding_left = table->tb->border_collapse
         ? 0.0f : max(table_box.padding.left, 0.0f);
@@ -7336,6 +7339,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (int i = 1; i <= columns; i++) {
         col_x_positions[i] = i <= effective_columns
             ? col_x_positions[i-1] + col_widths[i-1] : col_x_positions[0];
+        if (i == 1) col_x_positions[i] += label_separation;
         if (!table->tb->border_collapse && column_spacing > 0.0f &&
             i <= effective_columns) {
             // CSS 2.1: Separate borders add spacing between columns.

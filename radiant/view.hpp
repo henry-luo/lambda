@@ -2598,6 +2598,7 @@ typedef struct GridProp {
 typedef struct EmbedProp {
     lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
     float content_image_resolution; // selected srcset/image-set density; 0 means 1x
+    float native_image_width, native_image_height; // computed object size, independent of its CSS viewport
     lam::Own<char> selected_image_source; // view-property pool owns the selected URL
     lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
@@ -2613,6 +2614,7 @@ typedef struct EmbedProp {
     bool object_position_y_is_percent;
     bool has_controls;       // true if <video controls> attribute present
     bool broken_alt_fallback; // true when an unloaded <img> is rendered as alt text
+    bool native_image_sized;
 } EmbedProp;
 
 // tier-2: view-pool, rebuilt each relayout

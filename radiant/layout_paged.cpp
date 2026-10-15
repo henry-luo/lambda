@@ -3263,6 +3263,72 @@ static void paged_box_anchors_break(PagedFlowState* state, ViewBlock* block, Blo
     }
 }
 
+float paged_label_body_columns(LayoutContext* lycon, ViewTable* table, TableMetadata* metadata, float width) {
+    PagedFlowState* state = lycon->paged;
+    if (state->status != TYPESET_OK || table->is_synthetic()) return 0.0f;
+    const ViewCssStyle* style = view_css_resolve(state->tree, table);
+    if (!style) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, table, nullptr); return 0.0f; }
+    if (!style->label_body || !style->label_body->grid) return 0.0f;
+    bool valid = metadata->column_count == 2 && metadata->row_count == 1 &&
+        !table->tb->border_spacing_h && !table->tb->border_spacing_v;
+    size_t cells = 0;
+    table->each_cell([&](ViewTableRow*, ViewTableCell* cell) {
+        cells++;
+        valid &= cell->td->col_span == 1 && cell->td->row_span == 1;
+    });
+    table->each_direct_block([&](ViewBlock* child) {
+        valid &= child->view_type != RDT_VIEW_TABLE_COLUMN && child->view_type != RDT_VIEW_TABLE_COLUMN_GROUP &&
+            !table_view_is_caption(child);
+    });
+    if (!valid || cells != 2) {
+        paged_flow_fail(state, TYPESET_INVALID, table,
+            "label/body grid requires one two-cell row without columns, captions or grid spacing");
+        return 0.0f;
+    }
+    if (layout_box_metrics(table).pad_border_h != 0.0f) {
+        paged_flow_fail(state, TYPESET_INVALID, table,
+            "label/body grid horizontal decoration requires reference-relative indent geometry");
+        return 0.0f;
+    }
+    float label, separation, body;
+    if (!radiant_label_body_size(radiant_label_body_geometry(style), width, &label, &separation, &body)) {
+        paged_flow_fail(state, TYPESET_INVALID, table,
+            "label/body geometry overlaps or leaves a nonpositive part width");
+        return 0.0f;
+    }
+    // the separation is a gap, so neither cell's background paints it.
+    metadata->col_widths[0] = label;
+    metadata->col_widths[1] = body;
+    return separation;
+}
+
+void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height) {
+    PagedFlowState* state = lycon->paged;
+    block->embed->native_image_sized = false;
+    if (state->status != TYPESET_OK) return;
+    const ViewCssStyle* style = view_css_resolve(state->tree, block);
+    if (!style) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
+    const RadiantImageSpec* spec = style->image_spec;
+    if (!spec) return;
+    TypesetStatus admitted = paged_style_traits_admit(state->composition, style);
+    if (admitted != TYPESET_OK) { state->status = admitted; return; }
+    float width = lycon->block.given_width < 0.0f ? NAN
+        : layout_content_size_if_border_box(block, lycon->block.given_width, true);
+    float height = lycon->block.given_height < 0.0f ? NAN
+        : layout_content_size_if_border_box(block, lycon->block.given_height, false);
+    float content_width, content_height;
+    if (!radiant_image_size(spec, natural_width, natural_height, &width, &height, &content_width, &content_height)) {
+        paged_flow_fail(state, TYPESET_UNPLACEABLE, block, "native image allowed scales cannot satisfy the content size");
+        return;
+    }
+    lycon->block.given_width = layout_border_size_if_content_box(block, width, true);
+    lycon->block.given_height = layout_border_size_if_content_box(block, height, false);
+    // copy values into the workspace; its embed must not borrow an edition's style lifetime.
+    block->embed->native_image_width = content_width;
+    block->embed->native_image_height = content_height;
+    block->embed->native_image_sized = true;
+}
+
 void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa_block) {
     PagedFlowState* state = lycon->paged;
     if (state->outside || state->status != TYPESET_OK || !paged_flow_block(block) || !paged_flow_fragmentable(lycon, block)) return;
@@ -3299,6 +3365,9 @@ void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa
     }
     // layout_block saved the parent before this hook; children inherit the updated reference, not that stale copy.
     lycon->block.paged_reference_width = pa_block->paged_reference_width;
+    // style resolution preceded the run restart; percentage widths need the new containing block.
+    if (block->blk && !isnan(block->block()->given_width_percent))
+        layout_store_given_axis(lycon, block, pa_block->content_width * block->block()->given_width_percent * 0.01f, true);
     if (moving < end && state->status == TYPESET_OK) paged_box_anchors_break(state, block, pa_block, moving, end);
 }
 
@@ -3701,6 +3770,9 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
     box->raster_scale = tree->model->environment.device_scale;
     box->opacity = 255;
     box->image_rect = render_media_image_rect(block, image, box->content_rect, 1.0f);
+    box->overflow_visible = block->embed && block->embedp()->native_image_sized &&
+        (!block->scroller || (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
+            block->scroll()->overflow_y == CSS_VALUE_VISIBLE));
     node->image_box = lam::up(box);
     // a sliced replaced box clips its image to the fragment
     if (!node->first_fragment || !node->last_fragment) node->clip_content = true;
@@ -3963,6 +4035,12 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
             if (!style) return TYPESET_OUT_OF_MEMORY;
             TypesetStatus admitted = paged_style_traits_admit(state->composition, style);
             if (admitted != TYPESET_OK) return admitted;
+            // native documents require their graphic resource; a failed load must not publish an empty area.
+            if (node->as_element()->tag() == MARKUP_NAME_IMG &&
+                radiant_page_element(state->tree->model->document->root, "page-document") &&
+                !render_media_image_surface(lam::view_as_block(child)))
+                return paged_flow_fail(state, TYPESET_UNPLACEABLE, node,
+                    "image source is unavailable or requires a sampled media producer");
         }
         if (!state->publishing_fixed && child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
@@ -4953,14 +5031,18 @@ static TypesetStatus paged_flow_pass(ViewTree* tree, PagedComposition* compositi
         // the flow is laid out at the page body size; the host viewport and any
         // viewport meta are restored afterwards
         float saved_viewport_width = ui->viewport_width, saved_viewport_height = ui->viewport_height;
+        float saved_device_scale = ui->device_scale;
         int saved_meta_width = document->viewport.width, saved_meta_height = document->viewport.height;
         ui->viewport_width = first.width; ui->viewport_height = first.height;
+        ui->device_scale = tree->model->environment.device_scale;
         document->viewport.width = document->viewport.height = 0;
         CssEngine* engine = (CssEngine*)document->services.cached_css_engine;
         bool saved_print = engine && engine->context.print_media;
+        double saved_density = engine ? engine->context.device_pixel_ratio : 1.0;
         bool print = tree->model->environment.print_media;
-        if (engine && saved_print != print) {
+        if (engine && (saved_print != print || saved_density != tree->model->environment.device_scale)) {
             engine->context.print_media = print;
+            engine->context.device_pixel_ratio = tree->model->environment.device_scale;
             radiant_recascade_document_styles(document, document->root);
         }
         // paged_flow_pass_begin opens the checkpoint of each pass and the hooks
@@ -4968,8 +5050,12 @@ static TypesetStatus paged_flow_pass(ViewTree* tree, PagedComposition* compositi
         // checkpoint and composes the pages before the layout context closes
         layout_html_doc(ui, document, false, state);
         ui->viewport_width = saved_viewport_width; ui->viewport_height = saved_viewport_height;
+        ui->device_scale = saved_device_scale;
         document->viewport.width = saved_meta_width; document->viewport.height = saved_meta_height;
-        if (engine && saved_print != print) engine->context.print_media = saved_print;
+        if (engine) {
+            engine->context.print_media = saved_print;
+            engine->context.device_pixel_ratio = saved_density;
+        }
         status = state->status;
         if (status == TYPESET_OK && !state->composed)
             status = paged_flow_fail(state, TYPESET_INVALID, document->root, "the page flow layout ended before its pages were composed");

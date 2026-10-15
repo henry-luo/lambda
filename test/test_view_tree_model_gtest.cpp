@@ -1542,6 +1542,13 @@ static LayoutViewNode* source_image_fragment(ViewTree* tree, DomNode* source) {
     return nullptr;
 }
 
+static void expect_independent_workspace_image(const LayoutViewNode* fragment, DomElement* source) {
+    // D4.5.1v4 / paged design §1.3.5: the workspace survives layout; editions own separate resources.
+    ASSERT_NE(fragment, nullptr); ASSERT_NE(fragment->image_box, nullptr);
+    ASSERT_NE(source->embed, nullptr); ASSERT_NE(source->embedp()->img, nullptr);
+    EXPECT_NE(fragment->image_box->image.get(), source->embedp()->img.get());
+}
+
 TEST(RadiantImageSizing, IntrinsicPercentFitAndIndependentViewportAxesRetainTheirOwnBases) {
     const struct { RadiantImageAxis x, y; bool non_uniform; float width, height, content_width, content_height; } cases[] = {
         {{RADIANT_IMAGE_AUTO, 0}, {RADIANT_IMAGE_AUTO, 0}, false, NAN, NAN, 60, 30},
@@ -1824,6 +1831,12 @@ TEST_F(SecondaryViewTest, NativeImageContentSizingPositionsClipsAndRetainsTheExa
     ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     node = source_image_fragment(tree, image); ASSERT_NE(node, nullptr); EXPECT_TRUE(node->image_box->overflow_visible);
     EXPECT_FLOAT_EQ(node->image_box->image_rect.width, 90.0f); EXPECT_FLOAT_EQ(node->image_box->image_rect.x, -20.0f);
+    // removing a native override must clear the workspace object size before CSS fill resumes.
+    ASSERT_TRUE(image->remove_attribute("r:content-width")); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    node = source_image_fragment(tree, image); ASSERT_NE(node, nullptr);
+    EXPECT_FLOAT_EQ(node->image_box->image_rect.width, 60.0f);
+    EXPECT_FLOAT_EQ(node->image_box->image_rect.height, 40.0f);
     ASSERT_TRUE(image->set_attribute("r:scaling", "invalid")); ASSERT_TRUE(view_tree_model_reset(tree));
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
     EXPECT_STREQ(diagnostic.reason, "invalid native image content size or scaling");
@@ -2243,7 +2256,9 @@ TEST_F(SecondaryViewTest, ResponsiveImagesKeepIndependentDensityAndReselectWitho
     EXPECT_FLOAT_EQ(low->rect.width, 20); EXPECT_FLOAT_EQ(low->rect.height, 10);
     EXPECT_FLOAT_EQ(high->image_box->image_rect.width, 10);
     EXPECT_EQ(high->image_box->image->width, 20); EXPECT_EQ(low->image_box->image->width, 20);
-    EXPECT_EQ(img->embed, nullptr);
+    expect_independent_workspace_image(low, img);
+    EXPECT_FLOAT_EQ(shared_ui()->device_scale, 1.0f);
+    EXPECT_EQ(((CssEngine*)doc.services.cached_css_engine)->context.device_pixel_ratio, 1.0);
     EXPECT_TRUE(render_secondary_view_to_pdf(dense, "temp/paged-media-responsive/density.pdf"));
     ImageSurface* pixels = render_secondary_page_snapshot(dense, 1, 2.0f); ASSERT_NE(pixels, nullptr);
     EXPECT_EQ(pixels->width, 240); EXPECT_EQ(pixels->height, 160);
@@ -2361,7 +2376,8 @@ TEST_F(SecondaryViewTest, SvgIntrinsicAxesFlowThroughIndependentPhysicalPages) {
         EXPECT_FLOAT_EQ(fragment->rect.width, widths[i]); EXPECT_FLOAT_EQ(fragment->rect.height, heights[i]);
         EXPECT_FLOAT_EQ(fragment->image_box->image_rect.width, widths[i]);
         EXPECT_FLOAT_EQ(fragment->image_box->image_rect.height, heights[i]);
-        EXPECT_EQ(images[i]->embed, nullptr); EXPECT_EQ(images[i]->width, 0.0f);
+        expect_independent_workspace_image(fragment, images[i]);
+        EXPECT_FLOAT_EQ(images[i]->width, widths[i]);
     }
     ASSERT_TRUE(create_dir("temp/paged-media-svg-intrinsics"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-svg-intrinsics/native-axis-pages.pdf"));
@@ -2413,7 +2429,7 @@ TEST_F(SecondaryViewTest, AdjacentImagesWrapAtAtomicBoundariesAndResumeOnTheNext
         ImageSurface* snapshot = render_secondary_page_snapshot(tree, i + 1, 2.0f); ASSERT_NE(snapshot, nullptr);
         Color red = {snapshot_pixel(snapshot, 24, 24)}; EXPECT_GT(red.r, 200); EXPECT_LT(red.b, 30);
         image_surface_destroy(snapshot);
-        EXPECT_EQ(images[i]->embed, nullptr);
+        expect_independent_workspace_image(fragment, images[i]);
     }
     ASSERT_TRUE(create_dir("temp/paged-media-image-wrap"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-image-wrap/adjacent-images.pdf"));
@@ -2610,7 +2626,7 @@ TEST_F(SecondaryViewTest, ImageAssetsBelongToEachEditionAndSurviveTheRetainedPag
     LayoutViewNode* first = source_image_fragment(a, image), *second = source_image_fragment(b, image);
     ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
     ImageSurface* old = first->image_box->image; auto handle = old->self;
-    EXPECT_NE(old, second->image_box->image.get()); EXPECT_EQ(image->embed, nullptr);
+    EXPECT_NE(old, second->image_box->image.get()); expect_independent_workspace_image(second, image);
     ViewPageSelection all = {true, nullptr, 0}; ViewPreviewOptions preview_options = view_preview_options_default();
     ViewTree* preview = view_tree_page_instances_create(a, &all, &preview_options); ASSERT_NE(preview, nullptr);
     ASSERT_TRUE(view_tree_model_reset(a)); EXPECT_EQ(image_surface_lookup(handle), old);
@@ -2628,17 +2644,20 @@ TEST_F(SecondaryViewTest, ImageSizingUsesHtmlHintsAndRatioConstraintsWithoutStre
     stylesheet("@page { size: 240px 200px; margin: 10px } p, div { margin: 0 }");
     const char* styles[] = {"display: block", "display: block; max-width: 10px", "display: block; min-width: 30px; max-height: 10px",
         "display: block; width: 30px; aspect-ratio: 1 / 1", "display: block; width: 30px; aspect-ratio: auto 1 / 1",
-        "display: block; width: 32px; height: 22px; box-sizing: border-box; padding: 1px; border: 2px solid blue"};
-    const float widths[] = {40.0f, 10.0f, 30.0f, 30.0f, 30.0f, 26.0f};
-    const float heights[] = {20.0f, 5.0f, 10.0f, 30.0f, 15.0f, 16.0f};
-    DomElement* images[6] = {};
-    for (size_t i = 0; i < 6; i++) {
+        "display: block; width: 32px; height: 22px; box-sizing: border-box; padding: 1px; border: 2px solid blue",
+        "display: block; max-width: 10px; min-height: 15px",
+        "display: block; min-width: 36px; max-height: 16px; box-sizing: border-box; padding: 1px; border: 2px solid blue"};
+    const float widths[] = {40.0f, 10.0f, 30.0f, 30.0f, 30.0f, 26.0f, 10.0f, 30.0f};
+    const float heights[] = {20.0f, 5.0f, 10.0f, 30.0f, 15.0f, 16.0f, 15.0f, 10.0f};
+    constexpr size_t count = sizeof(styles) / sizeof(*styles);
+    DomElement* images[count] = {};
+    for (size_t i = 0; i < count; i++) {
         images[i] = image(styles[i]); ASSERT_NE(images[i], nullptr);
     }
     ASSERT_TRUE(images[0]->set_attribute("width", "40"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
     ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
-    for (size_t i = 0; i < 6; i++) {
+    for (size_t i = 0; i < count; i++) {
         SCOPED_TRACE(i); LayoutViewNode* fragment = source_image_fragment(tree, images[i]); ASSERT_NE(fragment, nullptr);
         EXPECT_FLOAT_EQ(fragment->image_box->content_rect.width, widths[i]);
         EXPECT_FLOAT_EQ(fragment->image_box->content_rect.height, heights[i]);
@@ -2740,8 +2759,7 @@ TEST_F(SecondaryViewTest, PagedImagesRemainAtomicWhenTheFollowingPageChangesWidt
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(tree->model->page_count, 2u);
-    EXPECT_FLOAT_EQ(image->x, 71.25f); EXPECT_FLOAT_EQ(image->width, 123.5f);
-    EXPECT_EQ(image->embed, nullptr);
+    expect_independent_workspace_image(source_image_fragment(tree, image), image);
     ViewNodeState* state = view_tree_node_state(tree, image, false); ASSERT_NE(state, nullptr);
     size_t visible = 0;
     for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {

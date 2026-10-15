@@ -4,6 +4,8 @@
 struct DomElement;
 struct CollapsedBorder;
 struct ViewTable;
+struct ViewBlock;
+bool table_view_is_caption(ViewBlock* child);
 
 // captions belong to the transparent wrapper, outside the grid's border box.
 RdtLogicalRect layout_table_grid_rect(const ViewTable* table);

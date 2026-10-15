@@ -5,6 +5,10 @@
 
 struct PaintList;
 struct RadiantSourceOrigin;
+struct LayoutContext;
+struct TableMetadata;
+// native list geometry refines the shared table tracks before cell layout.
+float paged_label_body_columns(LayoutContext* lycon, ViewTable* table, TableMetadata* metadata, float width);
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
     size_t max_nodes;

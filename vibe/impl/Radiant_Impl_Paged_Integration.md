@@ -510,3 +510,66 @@ files reproduces the same failure on interpreter and JIT; the working CLI and
 sources are not replaced. This existing callback-integration gap remains open.
 Evidence: `temp/failed_tests_lambda_gate.log` and
 `temp/head-pdf-comparison/result.json` (revision and binary checksum).
+
+### 2026-10-16: image sizing and label/body track integration
+
+**Bounded repair.** Native image and label/body values survived in source
+metadata but never reached the browsing engine's used geometry. The common
+image path now calls `radiant_image_size`, copies the resulting object dimensions
+into the workspace embed, and uses the shared object-position painter. Publication
+retains those dimensions, the selected resource and native overflow policy under
+**D4.5.1v4 / D4.1.4v5**. Removing a native override restores CSS image sizing.
+Native graphic URLs resolve inherited XML Base before resource admission; denied
+or missing native graphics fail without publishing an empty edition. An invalid
+scale grammar remains invalid, while incompatible valid scale sets are
+unplaceable.
+
+The ordinary table algorithm now accepts the computed label/body tracks and an
+unpainted separation gap, retaining inherited declaration-owner lengths and list
+contexts. Unsupported grid shapes and overlapping geometry use the existing
+native diagnostics. A run restart also recomputes percentage widths against its
+new containing block: style resolution ran before that restart and otherwise
+left each table using the preceding page's width. The host UI and CSS image
+selection both use the edition's device scale during composition, then restore
+their previous values.
+
+**Shared sizing defect.** Sequential natural-image constraints could enlarge an
+axis for its minimum, then shrink it below that minimum when the opposite axis
+hit its maximum. `layout_apply_image_natural_ratio_constraints` now uses the
+existing joint `layout_replaced_content_size` solver; incompatible intervals
+prevent later ratio transfer from undoing their independent bounds. The existing
+image-sizing case additionally checks the opposite axis and border-box edges.
+
+**Test migration.** Five image cases still asserted that layout left DOM embeds
+empty or source geometry untouched. Those assertions contradicted §1.3.5 of
+`Radiant_Layout_Paged_Media` and this plan's §3.4. They now assert independently
+owned workspace/edition image resources. Existing geometry, pixel, retained
+preview and resource-release checks remain; responsive selection additionally
+checks restoration of the host density settings. No remaining failing case is
+excluded or has its expected geometry relaxed.
+
+**Focused verification.** The complete binary passes **452/613**, versus
+433/613 before this repair; its baseline selection improves **310/490 →
+329/490**, with no previously passing case failing. The integer-cast lint and
+`git diff --check` pass. The remaining **161** failures include table continuations
+at changing widths, native flow/whitespace/folio integration and additional
+legacy-model expectations. In particular,
+`NativeLabelBodyContinuationRetainsEverySourceByteOnceAcrossChangingWidths`
+still needs per-continuation track remeasurement and folio binding; this repair
+does not claim P6/P7 completion. Current native evidence:
+`temp/view_reuse_final_all.{json,log}`; first assertions for the remaining cases
+are in `temp/view_reuse_remaining.json`.
+
+**Aggregate qualification.** The rebuilt Radiant gate completes with **5,702
+pass, 155 accepted partial, 161 fail and one skip** of 6,019. All failures belong
+to the remaining View Reuse selection. The layout baseline has **3,143 pass /
+151 accepted partial / zero regressions** of 3,294; UI automation passes 609/609,
+DOM UI 157/157, native text/layout 128/128, application views 195/195 and native
+Scene3D 28/28. Render visual passes its gate with 207 passes, four expected
+failures and one skip. The initial restricted run was interrupted after local
+HTTP socket-bind denials and macOS graphics XPC hangs; rerunning the already
+built binaries with native graphics and local HTTP access resolves those
+environment failures. Final aggregate log:
+`temp/view_reuse_radiant_gate_native.log`. The gate remains red solely on the
+161 recorded paged cases; broader native/FO integration and legacy test
+migration remain open.

@@ -618,7 +618,7 @@ void radiant_native_resolved(LayoutContext* lycon, DomElement* element) {
     if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
     ViewBlock* block = lam::view_as_block((View*)element);
     if (!block) return;
-    if (DomElement* table = page_label_grid(element)) {
+    if (DomElement* table = lycon->paged ? nullptr : page_label_grid(element)) {
         // the label's content ends a label separation before the body starts (XSL 1.1 §7.30.12)
         block->ensure_boundary(lycon);
         if (block->boundary_mut())

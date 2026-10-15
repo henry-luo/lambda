@@ -14,6 +14,7 @@ static bool intrinsic_view_uses_border_box(ViewBlock* view, DomElement* element)
 }
 
 #include "view.hpp" // For FormDefaults
+#include "page_document.hpp"
 #include "rdt_video.h"
 #include "render.hpp"
 #include "../lib/font/font.h"
@@ -2912,7 +2913,13 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
         ? layout_resolve_replaced_image_source(element, engine, &density, &dimensions) : nullptr);
     const char* source = tag == MARKUP_NAME_IMG ? selected_source.get() : element->get_attribute(MARKUP_NAME_DATA);
-    return layout_admit_replaced_image_surface(lycon, block, source, density);
+    // native graphics resolve XML Base before the common loader enforces resource admission.
+    bool native = radiant_page_element(lycon->doc->root, "page-document");
+    const char* resolved = native && source
+        ? radiant_page_resource_url(element, source, layout_prop_pool(lycon), 256) : nullptr;
+    ImageSurface* image = layout_admit_replaced_image_surface(lycon, block, native ? resolved : source, density);
+    if (resolved) pool_free(layout_prop_pool(lycon), (void*)resolved);
+    return image;
 }
 
 CssEnum get_element_font_variant(DomElement* element) {

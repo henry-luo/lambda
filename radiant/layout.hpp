@@ -4500,6 +4500,8 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
 void paged_line_start(LayoutContext* lycon, ViewBlock* block);
+// native content dimensions size the object and only fill unspecified viewport axes.
+void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height);
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
     const CssValue* value, bool* handled);
 // after a post-hoc margin adjustment moved a finished block by delta: the
