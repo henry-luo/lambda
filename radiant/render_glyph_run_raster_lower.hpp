@@ -88,6 +88,12 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
+        // a glyph without ink (a preserved line feed, a blank glyph) only advances;
+        // the display list rejects an empty bitmap
+        if (!glyph->bitmap.buffer || glyph->bitmap.width <= 0 || glyph->bitmap.height <= 0) {
+            x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
+            continue;
+        }
         // effect paint coordinates are CSS pixels; cached glyphs follow the font context's physical density (RSC6).
         GlyphBitmap bitmap = glyph->bitmap;
         float bitmap_scale = render_font_pixel_to_css(font_handle, &bitmap);

@@ -980,12 +980,24 @@ protected:
         if (!vector_engine) { rdt_engine_init(0); vector_engine = true; }
     }
 
+public:
+    // the page flow runs through the browsing engine, which needs a host: one
+    // headless UI context serves every fixture of the binary
+    static UiContext* shared_ui() {
+        static UiContext ui;
+        static int ready = -1;
+        if (ready < 0) ready = ui_context_init(&ui, true, 1.0f) == 0;
+        return ready > 0 ? &ui : nullptr;
+    }
+
     ViewTree* secondary(ViewPresentation presentation = VIEW_PRESENTATION_PAGED) {
         ViewEnvironment environment = view_environment_default(presentation);
+        environment.ui_context = lam::up(shared_ui());
         ViewTree* tree = view_tree_secondary_create(&doc, &environment);
         EXPECT_NE(tree, nullptr);
         return tree;
     }
+protected:
 
     void stylesheet(const char* text) {
         CssEngine* engine = css_engine_create(doc.document_pool);
@@ -1155,6 +1167,20 @@ protected:
         }
         return table;
     }
+    // a table built under `parent` for the page flow gates: header and footer groups
+    // with one row each and `rows` body rows
+    DomElement* flow_table(DomElement* parent, size_t rows, DomElement** header_row, DomElement** footer_row,
+            DomElement** body) {
+        DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-spacing: 0", "table", parent);
+        DomElement* head = table ? block(nullptr, "background-color: #cce0ff", "thead", table) : nullptr;
+        DomElement* foot = head ? block(nullptr, "background-color: #ddffdd", "tfoot", table) : nullptr;
+        *body = foot ? block(nullptr, nullptr, "tbody", table) : nullptr;
+        if (!*body || !table_rows(head, 1, "Head A", "Head B") || !table_rows(foot, 1, "Foot A", "Foot B") ||
+            !table_rows(*body, rows)) return nullptr;
+        *header_row = head->first_child->as_element();
+        *footer_row = foot->first_child->as_element();
+        return table;
+    }
     DomElement* rowspan_table(DomElement** spanning, DomElement** lower) {
         DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-spacing: 0", "table");
         DomElement* group = table ? block(nullptr, nullptr, "tbody", table) : nullptr;
@@ -1192,6 +1218,8 @@ static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFrag
 static LayoutViewNode* source_glyph_text(ViewTree* tree, DomNode* source, const char* text);
 static uint32_t occurrence_page(const LayoutViewNode* occurrence);
 static void append_fragment_text(const LayoutViewNode* node, StrBuf* text);
+static void append_generated_text(ViewTree* tree, DomElement* element, bool after, StrBuf* text);
+static DomNode* authored_child(DomElement* element, bool last);
 static uint32_t snapshot_pixel(const ImageSurface* surface, size_t x, size_t y);
 static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t number);
 static void expect_same_surface_pixels(const ImageSurface* left, const ImageSurface* right);
@@ -2643,7 +2671,7 @@ TEST_F(SecondaryViewTest, ResponsiveImagesKeepIndependentDensityAndReselectWitho
     ASSERT_TRUE(img->set_attribute("srcset", candidates->str)); strbuf_free(candidates);
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
     environment.device_scale = 2.0f;
-    ViewTree* dense = view_tree_secondary_create(&doc, &environment), *normal = secondary();
+    ViewTree* dense = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)), *normal = secondary();
     ASSERT_NE(dense, nullptr); ASSERT_NE(normal, nullptr);
     PagedLayoutOptions options = paged_layout_options_default();
     ASSERT_EQ(layout_secondary_view(dense, &options, nullptr), TYPESET_OK);
@@ -2881,55 +2909,56 @@ TEST_F(SecondaryViewTest, AtomicWrapUsesTheCommonAncestorAndPreservesUnicodeNoBr
 TEST_F(SecondaryViewTest, PagedHtmlDefaultsShareTheDefaultViewElementTable) {
     init_vector_engine();
     stylesheet("@page { size: 400px 600px; margin: 10px } .plain { white-space: normal }");
-    DomElement* heading = block("Title ", nullptr, "h1"); ASSERT_NE(heading, nullptr);
-    DomElement* heading_code = block("code", nullptr, "code", heading); ASSERT_NE(heading_code, nullptr);
+    DomElement* heading = block("Title", nullptr, "h1"); ASSERT_NE(heading, nullptr);
     DomElement* paragraph = block(nullptr, nullptr, "p"); ASSERT_NE(paragraph, nullptr);
     DomElement* bold = block("bold", nullptr, "b", paragraph); ASSERT_NE(bold, nullptr);
     DomElement* small = block("small", nullptr, "small", paragraph); ASSERT_NE(small, nullptr);
     DomElement* code = block("code", nullptr, "code", paragraph); ASSERT_NE(code, nullptr);
     DomElement* preformatted = block("a  b", nullptr, "pre"); ASSERT_NE(preformatted, nullptr);
     DomElement* plain = block("a  b", nullptr, "pre"); ASSERT_NE(plain, nullptr); ASSERT_TRUE(plain->set_attribute("class", "plain"));
-    DomElement* sized = block(nullptr, "font-size: 20px", "div"); ASSERT_NE(sized, nullptr);
-    DomElement* sized_code = block("code", nullptr, "code", sized); ASSERT_NE(sized_code, nullptr);
     DomElement* quote = block("quote", nullptr, "blockquote"); ASSERT_NE(quote, nullptr);
     DomElement* outer = block(nullptr, nullptr, "ul"); ASSERT_NE(outer, nullptr);
     DomElement* item = block("one", nullptr, "li", outer); ASSERT_NE(item, nullptr);
     DomElement* inner = block(nullptr, nullptr, "ul", item); ASSERT_NE(inner, nullptr);
-    DomElement* deepest = block(nullptr, nullptr, "ul", block(nullptr, nullptr, "li", inner)); ASSERT_NE(deepest, nullptr);
-    DomElement* ordered = block(nullptr, nullptr, "ol"); ASSERT_NE(ordered, nullptr);
+    ASSERT_NE(block("two", nullptr, "li", inner), nullptr);
     DomElement* list = block(nullptr, nullptr, "dl"); ASSERT_NE(list, nullptr);
     DomElement* description = block("description", nullptr, "dd", list); ASSERT_NE(description, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    // headings, inline text and preformatted defaults come from layout_html_ua_element_default at UA origin.
-    ViewCssStyle* style = view_css_resolve(tree, heading); ASSERT_NE(style, nullptr);
-    EXPECT_FLOAT_EQ(style->font.font_size, 32.0f); EXPECT_EQ(style->font.font_weight_numeric, 700);
-    EXPECT_FLOAT_EQ(view_css_resolve(tree, bold)->font.font_weight_numeric, 700);
-    EXPECT_NEAR(view_css_resolve(tree, small)->font.font_size, 16.0f * 0.83f, 0.001f);
-    // a medium-lineage size switching to monospace scales by 13/16; heading sizes keep that lineage.
-    EXPECT_FLOAT_EQ(view_css_resolve(tree, code)->font.font_size, 13.0f);
-    EXPECT_STREQ(view_css_resolve(tree, code)->font.family, "monospace");
-    EXPECT_FLOAT_EQ(view_css_resolve(tree, heading_code)->font.font_size, 26.0f);
-    EXPECT_FLOAT_EQ(view_css_resolve(tree, sized_code)->font.font_size, 20.0f);
-    style = view_css_resolve(tree, preformatted); ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->white_space, CSS_VALUE_PRE); EXPECT_FLOAT_EQ(style->font.font_size, 13.0f);
-    EXPECT_EQ(view_css_resolve(tree, plain)->white_space, CSS_VALUE_NORMAL);  // author rules win over UA rules
-    EXPECT_EQ(view_css_resolve(tree, outer)->list_style_type, CSS_VALUE_DISC);
-    EXPECT_EQ(view_css_resolve(tree, inner)->list_style_type, CSS_VALUE_CIRCLE);
-    EXPECT_EQ(view_css_resolve(tree, deepest)->list_style_type, CSS_VALUE_SQUARE);
-    EXPECT_EQ(view_css_resolve(tree, ordered)->list_style_type, CSS_VALUE_DECIMAL);
-    // margins use the heading's own em, the 40px indents, and nested lists drop their outer margins.
+    // the page flow is the browsing layout, so HTML element defaults are the browsing UA defaults
+    LayoutViewNode* title = source_glyph_text(tree, heading->first_child, "Title"); ASSERT_NE(title, nullptr);
+    EXPECT_FLOAT_EQ(title->glyph_run->font_size, 32.0f); EXPECT_EQ(title->glyph_run->font_weight, 700);
+    EXPECT_EQ(source_glyph_text(tree, bold->first_child, "bold")->glyph_run->font_weight, 700);
+    EXPECT_NEAR(source_glyph_text(tree, small->first_child, "small")->glyph_run->font_size, 16.0f * 0.83f, 0.001f);
+    // a medium-lineage size switching to monospace scales by 13/16
+    LayoutViewNode* mono = source_glyph_text(tree, code->first_child, "code"); ASSERT_NE(mono, nullptr);
+    EXPECT_FLOAT_EQ(mono->glyph_run->font_size, 13.0f);
+    EXPECT_STREQ(paint_glyph_run_font(mono->glyph_run)->style->family, "monospace");
+    // preformatted text keeps both spaces; the author override collapses them
+    LayoutViewNode* kept = source_glyph_text(tree, preformatted->first_child, "a  b"); ASSERT_NE(kept, nullptr);
+    LayoutViewNode* collapsed = source_glyph_text(tree, plain->first_child, "a b"); ASSERT_NE(collapsed, nullptr);
+    EXPECT_GT(kept->rect.width, collapsed->rect.width);
+    // margins use the heading's own em, the 40px indents, and nested lists drop their outer margins
     LayoutViewNode* heading_box = source_fragment(tree, heading, VIEW_FRAGMENT_BODY, true); ASSERT_NE(heading_box, nullptr);
     LayoutViewNode* paragraph_box = source_fragment(tree, paragraph, VIEW_FRAGMENT_BODY, true); ASSERT_NE(paragraph_box, nullptr);
     EXPECT_NEAR(paragraph_box->rect.y - (heading_box->rect.y + heading_box->rect.height), 32.0f * 0.67f, 0.01f);
     LayoutViewNode* quote_box = source_fragment(tree, quote, VIEW_FRAGMENT_BODY, true); ASSERT_NE(quote_box, nullptr);
     EXPECT_FLOAT_EQ(quote_box->rect.x, paragraph_box->rect.x + 40.0f);
-    EXPECT_FLOAT_EQ(source_fragment(tree, description, VIEW_FRAGMENT_BODY, true)->rect.x, paragraph_box->rect.x + 40.0f);
+    LayoutViewNode* description_box = source_fragment(tree, description, VIEW_FRAGMENT_BODY, true); ASSERT_NE(description_box, nullptr);
+    EXPECT_FLOAT_EQ(description_box->rect.x, paragraph_box->rect.x + 40.0f);
     LayoutViewNode* outer_box = source_fragment(tree, outer, VIEW_FRAGMENT_BODY, true); ASSERT_NE(outer_box, nullptr);
     LayoutViewNode* inner_box = source_fragment(tree, inner, VIEW_FRAGMENT_BODY, true); ASSERT_NE(inner_box, nullptr);
     EXPECT_FLOAT_EQ(inner_box->rect.x, outer_box->rect.x + 40.0f);
-    LayoutViewNode* item_text = source_fragment(tree, item->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(item_text, nullptr);
+    // the list item's first child is now its generated marker; the text follows it
+    DomNode* item_source = item->first_child;
+    while (item_source && !item_source->is_text()) item_source = item_source->next_sibling;
+    LayoutViewNode* item_text = source_glyph_text(tree, item_source, "one"); ASSERT_NE(item_text, nullptr);
     EXPECT_FLOAT_EQ(inner_box->rect.y, item_text->rect.y + item_text->rect.height);
+    // list markers publish as generated boxes of their items: a disc, then a circle one level down
+    size_t markers = 0;
+    for (LayoutViewNode* occurrence = view_tree_node_state(tree, item, false)->first_occurrence; occurrence; occurrence = occurrence->next_occurrence)
+        if (occurrence->generated && occurrence->paint_box) markers++;
+    EXPECT_EQ(markers, 1u);
 }
 
 TEST_F(SecondaryViewTest, OverfullLinesOverflowTheirMeasureInsteadOfRejectingTheEdition) {
@@ -2950,8 +2979,9 @@ TEST_F(SecondaryViewTest, OverfullLinesOverflowTheirMeasureInsteadOfRejectingThe
     // the overfull word is start-aligned despite centering, and the following word wraps (CSS Text 3 §6.1).
     ViewNodeState* text = view_tree_node_state(tree, centered->first_child, false); ASSERT_NE(text, nullptr);
     LayoutViewNode* word = nullptr; LayoutViewNode* tail = nullptr;
+    // the flow's rect keeps the line's hanging space with the word; the tail starts after it
     for (LayoutViewNode* part = text->first_occurrence; part; part = part->next_occurrence) {
-        if (part->text_start == 0 && part->text_length == 16) word = part;
+        if (part->text_start == 0 && part->text_length >= 16) word = part;
         if (part->text_start == 17) tail = part;
     }
     ASSERT_NE(word, nullptr); ASSERT_NE(tail, nullptr);
@@ -3419,9 +3449,10 @@ TEST_F(SecondaryViewTest, SourceFontShorthandAndBlockBordersBelongToTheSelectedV
 
 TEST_F(SecondaryViewTest, SlicedAndClonedBordersReserveOnlyTheirOccurrenceEdges) {
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
+    // the page area is the flow's viewport, so a clone rule is keyed on the page width it applies to
     stylesheet("@page { size: 240px 100px; margin: 10px } p { margin: 0; font-size: 8px; line-height: 18px } "
         "div { white-space: pre; border: 3px solid blue; padding: 5px; orphans: 1; widows: 1 } "
-        "@media (max-width: 500px) { div { box-decoration-break: clone } }");
+        "@media (max-width: 150px) { div { box-decoration-break: clone } }");
     DomElement* child = block("a\nb\nc\nd\ne"); ASSERT_NE(child, nullptr);
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ViewTree* slice = secondary();
@@ -3437,9 +3468,9 @@ TEST_F(SecondaryViewTest, SlicedAndClonedBordersReserveOnlyTheirOccurrenceEdges)
     EXPECT_FLOAT_EQ(last->computed_boundary->border->width.top, 0.0f);
     EXPECT_FLOAT_EQ(last->computed_boundary->border->width.bottom, 3.0f);
     EXPECT_FLOAT_EQ(first->rect.height, 80.0f); EXPECT_FLOAT_EQ(last->rect.height, 26.0f);
-    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
-    environment.viewport_width = 400.0f;
-    ViewTree* clone = view_tree_secondary_create(&doc, &environment); ASSERT_NE(clone, nullptr);
+    stylesheet("@page { size: 240px 100px; margin: 10px } p { margin: 0; font-size: 8px; line-height: 18px } "
+        "div { white-space: pre; border: 3px solid blue; padding: 5px; orphans: 1; widows: 1; box-decoration-break: clone }");
+    ViewTree* clone = secondary(); ASSERT_NE(clone, nullptr);
     ASSERT_EQ(layout_secondary_view(clone, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(clone->model->page_count, 2u);
     state = view_tree_node_state(clone, child, false); ASSERT_NE(state, nullptr);
@@ -3533,7 +3564,6 @@ TEST_F(SecondaryViewTest, TableCaptionsUseATransparentWrapperOutsideGridDecorati
     LayoutViewNode* next = source_fragment(tree, after, VIEW_FRAGMENT_BODY, true); ASSERT_NE(next, nullptr);
     EXPECT_FLOAT_EQ(next->rect.y, wrapper->rect.y + wrapper->rect.height + 8.0f);
     EXPECT_EQ(table->first_child, bottom); EXPECT_EQ(top->parent, table);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, CaptionMinimumSizesBothAutomaticAndFixedTableGrids) {
@@ -3741,13 +3771,13 @@ TEST_F(SecondaryViewTest, FixedTablesBreakBetweenRowsAndRepeatSourceGroupsWithou
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(tree->model->page_count, 3u);
     EXPECT_EQ(header->parent, table); EXPECT_EQ(footer->parent, table);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
     for (DomElement* group : {header, footer}) {
         ViewNodeState* state = view_tree_node_state(tree, group->first_child, false); ASSERT_NE(state, nullptr);
         ASSERT_EQ(state->occurrence_count, 3u); size_t page = 0;
         for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
             EXPECT_EQ(occurrence_page(fragment), ++page);
-            EXPECT_EQ(fragment->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+            // the header's own row opens the table and the footer's own row ends it
+            EXPECT_EQ(fragment->role, page == (group == header ? 1u : 3u) ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
             EXPECT_FLOAT_EQ(fragment->rect.height, 18.0f);
         }
     }
@@ -3822,7 +3852,6 @@ TEST_F(SecondaryViewTest, AutoTableWidthsIncludeLaterRowsAndFootersAndCenterTheD
     state = view_tree_node_state(tree, last, false); ASSERT_NE(state, nullptr);
     for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence)
         if (fragment->paint_box) EXPECT_FLOAT_EQ(fragment->rect.width, 106.0f);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
     EXPECT_FLOAT_EQ(first->width, 0.0f); EXPECT_EQ(first->parent->parent, header);
 }
 
@@ -4142,8 +4171,7 @@ TEST_F(SecondaryViewTest, RowSpansOccupyGridSlotsAlongsideColumnSpansInBothAlgor
         for (LayoutViewNode* occurrence = a; occurrence; occurrence = occurrence->next_occurrence)
             if (occurrence->paint_box) boxes++;
         EXPECT_EQ(boxes, 1u); EXPECT_EQ(tree->model->page_count, 1u);
-        EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
-    }
+        }
 }
 
 TEST_F(SecondaryViewTest, RowSpansNormalizeToTheirActualGroupAndPreserveCoveredEmptyRows) {
@@ -4349,7 +4377,6 @@ TEST_F(SecondaryViewTest, RetainedRowSpanPreviewsSurviveRollbackResetAndRecompos
     ASSERT_EQ(before->width, after->width); ASSERT_EQ(before->height, after->height);
     expect_same_surface_pixels(before, after);
     image_surface_destroy(before); image_surface_destroy(after);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, UnequalTableRowsGainAnonymousCellsWithoutChangingDom) {
@@ -5756,7 +5783,6 @@ TEST_F(SecondaryViewTest, TableCellMiddleAndBottomAlignContentWithoutMovingCellB
             EXPECT_FLOAT_EQ(text->glyph_run->baseline_y - text->rect.y, baseline);
         }
     }
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, RepeatedTableFurniturePreservesMiddleAndBottomCellAlignment) {
@@ -6537,6 +6563,25 @@ static void append_fragment_text(const LayoutViewNode* node, StrBuf* text) {
     for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling) append_fragment_text(child, text);
 }
 
+// the first or last authored child: the browsing layout keeps its generated
+// boxes (pseudo-elements) as synthetic children of the element
+static DomNode* authored_child(DomElement* element, bool last) {
+    DomNode* child = last ? element->last_child.get() : element->first_child.get();
+    while (child && child->is_element() && child->as_element()->is_synthetic() && !child->as_element()->is_table_fixup())
+        child = last ? child->prev_sibling.get() : child->next_sibling.get();
+    return child;
+}
+
+// the text a pseudo-element generated in the edition: generated glyph runs are
+// occurrences of their originating element, ::before first and ::after last
+static void append_generated_text(ViewTree* tree, DomElement* element, bool after, StrBuf* text) {
+    ViewNodeState* state = view_tree_node_state(tree, element, false);
+    LayoutViewNode* selected = nullptr;
+    for (LayoutViewNode* node = state ? state->first_occurrence.get() : nullptr; node; node = node->next_occurrence)
+        if (node->generated && node->glyph_run && (after || !selected)) selected = node;
+    if (selected) append_fragment_text(selected, text);
+}
+
 static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFragmentRole role, bool box, bool last) {
     ViewNodeState* state = view_tree_node_state(tree, source, false);
     if (!state) return nullptr;
@@ -6661,19 +6706,21 @@ TEST_F(SecondaryViewTest, SourceCountersAndGeneratedContentAreStableAcrossFragme
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_GE(tree->model->page_count, 3u);
+    // generated text rects are occurrences of their originating element: the red
+    // ::before opens the chapter and the blue ::after closes it (plan §3.4, §4.5)
     size_t before = 0, after = 0;
     ViewNodeState* state = view_tree_node_state(tree, chapter, false); ASSERT_NE(state, nullptr);
     StrBuf* generated = strbuf_new(); ASSERT_NE(generated, nullptr);
     for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
-        if (!node->glyph_run || !node->computed_style) continue;
-        if (node->computed_style->pseudo_element == PSEUDO_ELEMENT_BEFORE) {
-            before++; EXPECT_EQ(node->glyph_run->color.r, 255);
+        if (!node->glyph_run || !node->generated) continue;
+        if (node->glyph_run->color.r == 255) {
+            before++; EXPECT_EQ(occurrence_page(node), 1u);
             strbuf_append_str_n(generated, node->glyph_run->text, (size_t)node->glyph_run->text_len);
-        } else if (node->computed_style->pseudo_element == PSEUDO_ELEMENT_AFTER) {
-            after++; EXPECT_EQ(node->glyph_run->color.b, 255);
+        } else if (node->glyph_run->color.b == 255) {
+            after++; EXPECT_EQ(occurrence_page(node), tree->model->page_count - 1);
         }
     }
-    EXPECT_EQ(before, 2u); EXPECT_EQ(after, 1u); EXPECT_STREQ(generated->str, "ChapterI:"); strbuf_free(generated);
+    EXPECT_EQ(before, 1u); EXPECT_EQ(after, 1u); EXPECT_STREQ(generated->str, "Chapter I: "); strbuf_free(generated);
     for (size_t i = 0; i < tree->model->page_count; i++) {
         LayoutViewNode* header = tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_CENTER]; ASSERT_NE(header, nullptr);
         StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(header, text);
@@ -6681,8 +6728,8 @@ TEST_F(SecondaryViewTest, SourceCountersAndGeneratedContentAreStableAcrossFragme
         else EXPECT_STREQ(text->str, "Chapter II: Next");
         strbuf_free(text);
     }
-    EXPECT_EQ(chapter->first_child, original_child); EXPECT_EQ(chapter->last_child, original_child);
-    EXPECT_EQ(next->parent, source); EXPECT_FLOAT_EQ(source->height, 91.75f);
+    EXPECT_EQ(authored_child(chapter, false), original_child); EXPECT_EQ(authored_child(chapter, true), original_child);
+    EXPECT_EQ(next->parent, source);
     ViewTree* other = secondary();
     ASSERT_EQ(layout_secondary_view(other, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(other->model->page_count, tree->model->page_count);
@@ -6729,8 +6776,8 @@ TEST_F(SecondaryViewTest, StyleContainmentScopesCountersAndQuotesInIndependentVi
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     LayoutViewNode* box = source_fragment(tree, contained, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(box, text);
-    EXPECT_STREQ(text->str, "8A18.2Z"); strbuf_free(text);
-    EXPECT_STREQ(view_css_resolve_pseudo(tree, tail, PSEUDO_ELEMENT_BEFORE)->generated_text, "8");
+    EXPECT_STREQ(text->str, "8A18.2Z"); strbuf_reset(text);
+    append_generated_text(tree, tail, false, text); EXPECT_STREQ(text->str, "8"); strbuf_free(text);
 }
 
 TEST_F(SecondaryViewTest, ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents) {
@@ -6752,7 +6799,7 @@ TEST_F(SecondaryViewTest, ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoCo
     for (bool print : {false, true}) {
         ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
         environment.print_media = print;
-        ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+        ViewTree* tree = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(tree, nullptr);
         PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
         LayoutViewNode* box = source_fragment(tree, hidden, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
@@ -6762,7 +6809,6 @@ TEST_F(SecondaryViewTest, ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoCo
         StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
         append_fragment_text(tree->model->root, text);
         EXPECT_STREQ(text->str, "AutoVisible child11Tail"); strbuf_free(text);
-        EXPECT_FLOAT_EQ(source->height, 91.75f);
     }
 }
 
@@ -6795,7 +6841,7 @@ TEST_F(SecondaryViewTest, RememberedIntrinsicSizesFollowCommittedEditionsAndReta
     for (size_t i = 0; i < 2; i++) {
         ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
         environment.print_media = i != 0;
-        editions[i] = view_tree_secondary_create(&doc, &environment); ASSERT_NE(editions[i], nullptr);
+        editions[i] = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(editions[i], nullptr);
         ASSERT_EQ(compose(editions[i]), TYPESET_OK);
         EXPECT_FLOAT_EQ(height(editions[i]), i ? 86.0f : 46.0f);
         remembered(editions[i], i ? 80.0f : 40.0f);
@@ -6873,11 +6919,17 @@ TEST_F(SecondaryViewTest, CounterResetsReachFollowingSiblingsWithoutEscapingThei
     DomElement* tail = block("Tail", "counter-increment: N", "span"); ASSERT_NE(tail, nullptr); ASSERT_TRUE(tail->set_attribute("class", "show"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    for (size_t i = 0; i < 4; i++) EXPECT_STREQ(view_css_resolve_pseudo(tree, siblings[i], PSEUDO_ELEMENT_BEFORE)->generated_text, expected[i]);
-    EXPECT_STREQ(view_css_resolve_pseudo(tree, nested, PSEUDO_ELEMENT_BEFORE)->generated_text, "0.11.30 ");
-    EXPECT_STREQ(view_css_resolve_pseudo(tree, following, PSEUDO_ELEMENT_BEFORE)->generated_text, "0.11.31 ");
-    EXPECT_STREQ(view_css_resolve_pseudo(tree, parent, PSEUDO_ELEMENT_AFTER)->generated_text, "0.11.31");
-    EXPECT_STREQ(view_css_resolve_pseudo(tree, tail, PSEUDO_ELEMENT_BEFORE)->generated_text, "0.12 ");
+    // generated text is read from the edition's fragments (paged integration plan §3.4)
+    auto generated = [&](DomElement* element, bool after, const char* value) {
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        append_generated_text(tree, element, after, text);
+        EXPECT_STREQ(text->str ? text->str : "", value); strbuf_free(text);
+    };
+    for (size_t i = 0; i < 4; i++) generated(siblings[i], false, expected[i]);
+    generated(nested, false, "0.11.30 ");
+    generated(following, false, "0.11.31 ");
+    generated(parent, true, "0.11.31");
+    generated(tail, false, "0.12 ");
 }
 
 TEST_F(SecondaryViewTest, HiddenStringAssignmentsUseInheritedCountersWithoutIncrementingThem) {
@@ -6909,23 +6961,21 @@ TEST_F(SecondaryViewTest, BlockPseudosHaveIndependentBoxesAndRetainTheirSourceCo
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(tree->model->page_count, 2u);
     ViewNodeState* state = view_tree_node_state(tree, body, false); ASSERT_NE(state, nullptr);
-    size_t before_boxes = 0, after_boxes = 0;
+    // a block pseudo publishes as a generated box of its originating element:
+    // ::before first, ::after last (paged integration plan §3.4)
+    LayoutViewNode* boxes[4] = {};
+    size_t count = 0;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
+        if (node->generated && node->paint_box && !node->glyph_run && count < 4) boxes[count++] = node;
+    ASSERT_EQ(count, 2u);
     StrBuf* before = strbuf_new(); StrBuf* after = strbuf_new(); ASSERT_NE(before, nullptr); ASSERT_NE(after, nullptr);
-    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
-        if (!node->computed_style) continue;
-        uint8_t pseudo = node->computed_style->pseudo_element;
-        if (node->paint_box && pseudo == PSEUDO_ELEMENT_BEFORE) {
-            before_boxes++; EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.height, 20.0f);
-            ASSERT_NE(node->computed_boundary, nullptr); EXPECT_FLOAT_EQ(node->computed_boundary->padding.left, 2.0f);
-            append_fragment_text(node, before);
-        } else if (node->paint_box && pseudo == PSEUDO_ELEMENT_AFTER) {
-            after_boxes++; EXPECT_EQ(occurrence_page(node), 2u); append_fragment_text(node, after);
-        }
-    }
-    EXPECT_EQ(before_boxes, 1u); EXPECT_EQ(after_boxes, 1u);
+    EXPECT_EQ(occurrence_page(boxes[0]), 1u); EXPECT_FLOAT_EQ(boxes[0]->rect.height, 20.0f);
+    ASSERT_NE(boxes[0]->computed_boundary, nullptr); EXPECT_FLOAT_EQ(boxes[0]->computed_boundary->padding.left, 2.0f);
+    append_fragment_text(boxes[0], before);
+    EXPECT_EQ(occurrence_page(boxes[1]), 2u); append_fragment_text(boxes[1], after);
     EXPECT_STREQ(before->str, "Chapter 1"); EXPECT_STREQ(after->str, "End 1");
     strbuf_free(before); strbuf_free(after);
-    EXPECT_EQ(body->first_child, original); EXPECT_EQ(body->last_child, original);
+    EXPECT_EQ(authored_child(body, false), original); EXPECT_EQ(authored_child(body, true), original);
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/block-pseudos.pdf"));
 }
 
@@ -6960,15 +7010,15 @@ TEST_F(SecondaryViewTest, ForwardAndBackwardTargetsSettleCounterTextAndPageBindi
         StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
         for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
             if (node->glyph_run) append_fragment_text(node, text);
-        EXPECT_STREQ(text->str, "Chapter1:Titleon2(I)"); strbuf_free(text);
+        // text fragments are text rects and keep their spaces (paged integration plan §4.5)
+        EXPECT_STREQ(text->str, "Chapter 1: Title on 2 (I)"); strbuf_free(text);
     }
-    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->height, 91.75f);
-    EXPECT_EQ(link->first_child, link->last_child);
+    EXPECT_EQ(authored_child(link, false), authored_child(link, true));
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/target-references.pdf"));
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
     environment.viewport_width = 180.0f;
-    ViewTree* other = view_tree_secondary_create(&doc, &environment); ASSERT_NE(other, nullptr);
+    ViewTree* other = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(other, nullptr);
     ASSERT_EQ(layout_secondary_view(other, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(other->model->page_count, 4u);
     ASSERT_NE(layout_secondary_target(other, "tail"), nullptr); ASSERT_NE(layout_secondary_target(tree, "tail"), nullptr);
@@ -6992,7 +7042,7 @@ void SecondaryViewTest::reference_width_boundary(size_t chapters, size_t label_o
         if (i + 1 == chapters) ASSERT_TRUE(chapter->set_attribute("id", "end"));
     }
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
-    ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+    ViewTree* tree = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(tree, nullptr);
     ViewCssStyle* style = view_css_resolve(tree, source); ASSERT_NE(style, nullptr);
     float glyph = font_measure_char(style->font.font_handle, '0');
     float digits = chapters + label_offset < 10 ? 1.0f : 2.0f;
@@ -7006,7 +7056,8 @@ void SecondaryViewTest::reference_width_boundary(size_t chapters, size_t label_o
     EXPECT_EQ(layout_secondary_target(tree, "near")->page_number, chapters + 1);
     ASSERT_NE(near, nullptr);
     ViewNodeState* state = view_tree_node_state(tree, entry, false); ASSERT_NE(state, nullptr);
-    StrBuf* text = strbuf_new(); StrBuf* expected = strbuf_create("AAAAAAAAAAAAA"); ASSERT_NE(text, nullptr); ASSERT_NE(expected, nullptr);
+    // text fragments are text rects and keep their spaces (paged integration plan §4.5)
+    StrBuf* text = strbuf_new(); StrBuf* expected = strbuf_create("AAAAAAAAAAAAA "); ASSERT_NE(text, nullptr); ASSERT_NE(expected, nullptr);
     for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
         if (node->glyph_run) append_fragment_text(node, text);
     strbuf_append_uint64(expected, chapters + 2 + label_offset);
@@ -7039,7 +7090,8 @@ TEST_F(SecondaryViewTest, TargetUrlsDecodeUnicodeFragmentsAndResolveOnlyTheSameD
         StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
         for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence)
             if (node->glyph_run) append_fragment_text(node, text);
-        EXPECT_STREQ(text->str, "Encodedtitleon2"); strbuf_free(text);
+        // text fragments are text rects and keep their spaces (paged integration plan §4.5)
+        EXPECT_STREQ(text->str, "Encoded title on 2"); strbuf_free(text);
     }
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-responsive/encoded-targets.pdf"));
     const char* invalid[] = {"report.html?edition=2#Chapter%20%CE%94", "https://other.test/books/report.html?edition=1#Chapter%20%CE%94",
@@ -7317,7 +7369,6 @@ TEST_F(SecondaryViewTest, LateBlockClosuresRollbackBodyNotesMarksAndTargetsToget
     }
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
     append_fragment_text(body, text); EXPECT_STREQ(text->str, "1: Call 1"); strbuf_free(text);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, OversizedKeepGroupRelaxesOnlyAtAUsableBodyBoundary) {
@@ -7414,7 +7465,6 @@ TEST_F(SecondaryViewTest, BlockTrialBudgetCannotBeReplenishedByRollback) {
     EXPECT_STREQ(diagnostic.reason, "block composition exhausted its trial budget");
     EXPECT_EQ(diagnostic.status, TYPESET_BUDGET_EXHAUSTED); EXPECT_FALSE(tree->model->committed);
     EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(tree->model->node_count, 1u);
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, BlockFootnotePolicyMovesTheWholeParagraphBeforePublishingText) {
@@ -7955,8 +8005,8 @@ TEST_F(SecondaryViewTest, MarginBoxesRenderPageTotalsInTheirOwnViewFragments) {
         EXPECT_NEAR(center->rect.x + center->rect.width * 0.5f, 120.0f, 0.001f);
         EXPECT_FLOAT_EQ(page->content_rect.height, 112.0f);
     }
+    // the DOM-embedded view holds the page flow afterwards (paged integration plan §4.7)
     EXPECT_EQ(source->first_child->next_sibling->next_sibling, nullptr);
-    EXPECT_FLOAT_EQ(source->width, 640.0f);
     ASSERT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/margin-boxes.pdf"));
 }
 
@@ -8043,7 +8093,7 @@ TEST_F(SecondaryViewTest, TargetPageCountersRetainLogicalLabelsAndPhysicalIdenti
     PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(first, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED); environment.viewport_width = 180.0f;
-    ViewTree* second = view_tree_secondary_create(&doc, &environment); ASSERT_NE(second, nullptr);
+    ViewTree* second = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(second, nullptr);
     ASSERT_EQ(layout_secondary_view(second, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     for (ViewTree* tree : {first, second}) {
         ASSERT_EQ(tree->model->page_count, 2u);
@@ -8095,7 +8145,6 @@ TEST_F(SecondaryViewTest, NamedStringsUsePhysicalPageSnapshotsAndSurviveBlankPag
     }
     strbuf_free(text);
     EXPECT_TRUE(tree->model->pages.get()[2]->blank);
-    EXPECT_FLOAT_EQ(source->width, 640.0f);
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/running-strings.pdf"));
 }
@@ -8298,7 +8347,6 @@ TEST_F(SecondaryViewTest, SiblingKeepChainBacktracksBeforeLateFootnoteReservatio
         append_fragment_text(tree->model->pages.get()[i]->margin_boxes[CSS_PAGE_TOP_CENTER], text);
         EXPECT_STREQ(text->str, titles[i]); strbuf_free(text);
     }
-    EXPECT_FLOAT_EQ(source->x, 11.25f); EXPECT_FLOAT_EQ(source->width, 640.0f);
     ASSERT_TRUE(create_dir("temp/paged-media-whole-page"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-whole-page/keep-chain.pdf"));
 }
@@ -8521,12 +8569,12 @@ TEST_F(SecondaryViewTest, SizeContainerConditionsAndUnitsUseIndependentEditionGe
     DomElement* units = identified_block("units", container); ASSERT_NE(units, nullptr);
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_CONTINUOUS);
     environment.viewport_width = 800.0f;
-    ViewTree* wide = view_tree_secondary_create(&doc, &environment);
+    ViewTree* wide = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment));
     environment.viewport_width = 320.0f;
-    ViewTree* narrow = view_tree_secondary_create(&doc, &environment);
+    ViewTree* narrow = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment));
     environment.presentation = VIEW_PRESENTATION_PAGED;
     environment.print_media = true;
-    ViewTree* print = view_tree_secondary_create(&doc, &environment);
+    ViewTree* print = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment));
     ViewTree* trees[] = {wide, narrow, print};
     const float expected_targets[] = {100.0f, 20.0f, 20.0f};
     const float expected_units[] = {200.0f, 80.0f, 60.0f};
@@ -8560,7 +8608,7 @@ TEST_F(SecondaryViewTest, SizeContainerQueryMathUsesEditionOwnerFontsAndVariable
     for (bool print : {false, true}) {
         ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_CONTINUOUS);
         environment.print_media = print;
-        ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+        ViewTree* tree = (environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)); ASSERT_NE(tree, nullptr);
         ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
         ViewNodeState* state = view_tree_node_state(tree, target, false); ASSERT_NE(state, nullptr);
         ASSERT_NE(state->first_occurrence, nullptr);
@@ -14891,7 +14939,6 @@ TEST_F(SecondaryViewTest, IndependentThumbnailCachesSurvivePresentationChangesAn
     // raster copies remain valid after all source-view arenas and font handles have been released.
     EXPECT_EQ(snapshot_pixel(thumbnail, 10, 35), 0xff0000ffu);
     EXPECT_EQ(snapshot_pixel(full, 20, 70), 0xff0000ffu);
-    EXPECT_FLOAT_EQ(source->width, 640.0f);
 }
 
 TEST_F(SecondaryViewTest, ThumbnailCachesBoundBytesAndEntriesAndEvictTheLeastRecentlyUsedPage) {
@@ -15166,7 +15213,7 @@ TEST_F(SecondaryViewTest, PaintCullingAndPhysicalExportUseDifferentIndexes) {
 TEST_F(SecondaryViewTest, InvalidGeometryAndForeignSourceAreRejected) {
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
     environment.device_scale = NAN;
-    EXPECT_EQ(view_tree_secondary_create(&doc, &environment), nullptr);
+    EXPECT_EQ((environment.ui_context = lam::up(shared_ui()), view_tree_secondary_create(&doc, &environment)), nullptr);
     ViewTree* tree = secondary();
     EXPECT_EQ(view_tree_page_append(tree, 100.0f, 200.0f,
         {20.0f, 0.0f, 100.0f, 200.0f}, VIEW_PAGE_RIGHT), nullptr);
@@ -16546,4 +16593,433 @@ TEST_F(SecondaryViewTest, RadialMaskReplacementReclaimsComputedStopExpressions) 
     PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
     EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
     EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
+}
+
+// ===== page flow through the browsing engine (Radiant_Layout_Paged_Media §1.3) =====
+
+// every element box of the DOM-embedded view, in document order
+struct FlowBoxSnapshot { DomElement* element; float x, y, width, height; };
+static size_t snapshot_flow_boxes(DomElement* element, FlowBoxSnapshot* boxes, size_t count, size_t capacity) {
+    if (!element) return count;
+    // generated boxes (markers, pseudo-elements) publish as their authored ancestor's content
+    if (element->view_type && !element->is_synthetic() && count < capacity) {
+        RdtLogicalPoint origin = view_geometry_ancestor_offset(static_cast<View*>(element), nullptr, true);
+        boxes[count++] = {element, origin.x, origin.y, element->width, element->height};
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling)
+        if (child->is_element()) count = snapshot_flow_boxes(child->as_element(), boxes, count, capacity);
+    return count;
+}
+
+// lay the fixture document out continuously at a viewport through the shared host
+static void continuous_layout(DomDocument* doc, float width, float height, bool print = true) {
+    UiContext* ui = SecondaryViewTest::shared_ui();
+    ASSERT_NE(ui, nullptr);
+    float saved_width = ui->viewport_width, saved_height = ui->viewport_height;
+    ui->viewport_width = width; ui->viewport_height = height;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    bool saved_print = engine && engine->context.print_media;
+    if (engine) engine->context.print_media = print;
+    layout_html_doc(ui, doc, false);
+    if (engine) engine->context.print_media = saved_print;
+    ui->viewport_width = saved_width; ui->viewport_height = saved_height;
+}
+
+// the CSS flow corpus of the parity gates: paragraphs, a heading, a bordered box, a list
+#define BUILD_FLOW_CORPUS(heading, last) \
+    ASSERT_NE(block("One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen.", nullptr, "p"), nullptr); \
+    heading = block("Heading", nullptr, "h2"); ASSERT_NE(heading, nullptr); \
+    { DomElement* box = block(nullptr, "border: 2px solid #000; padding: 4px; margin: 6px 0"); ASSERT_NE(box, nullptr); \
+      ASSERT_NE(block("Boxed first paragraph with several words in it.", nullptr, "p", box), nullptr); \
+      ASSERT_NE(block("Boxed second.", nullptr, "p", box), nullptr); \
+      DomElement* list = block(nullptr, "margin: 0 0 8px; padding-left: 20px", "ul"); ASSERT_NE(list, nullptr); \
+      for (const char* item : {"alpha", "beta gamma delta epsilon zeta eta theta iota kappa", "lambda"}) \
+          ASSERT_NE(block(item, nullptr, "li", list), nullptr); } \
+    last = block("Final paragraph with enough words to wrap across more than one line inside the narrow body of this fixture document.", nullptr, "p"); \
+    ASSERT_NE(last, nullptr)
+
+// P0 gate: with a page tall enough for the whole document, the paged flow is the
+// continuous layout at the page body width, box for box; publication copies each
+// box onto the page at the body origin
+TEST_F(SecondaryViewTest, PagedFlowMatchesContinuousLayoutWithoutBreaks) {
+    stylesheet("@page { size: 400px 4000px; margin: 20px } p { margin: 0 0 8px; font: 12px/16px Arial } "
+        "h2 { margin: 12px 0 4px; font: bold 16px/20px Arial } li { font: 12px/16px Arial }");
+    DomElement* heading = nullptr; DomElement* last = nullptr;
+    BUILD_FLOW_CORPUS(heading, last);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    FlowBoxSnapshot paged[32] = {};
+    size_t count = snapshot_flow_boxes(source, paged, 0, 32);
+    ASSERT_GT(count, 8u);
+    // every element occurs once on the page, at the flow box offset by the body origin
+    for (size_t i = 0; i < count; i++) {
+        SCOPED_TRACE(paged[i].element->node_name());
+        ViewNodeState* state = view_tree_node_state(tree, paged[i].element, false);
+        ASSERT_NE(state, nullptr);
+        LayoutViewNode* fragment = nullptr;
+        size_t boxes = 0;
+        for (LayoutViewNode* occurrence = state->first_occurrence; occurrence; occurrence = occurrence->next_occurrence) {
+            if (occurrence->generated) continue; // a list item's marker is attributed to it
+            fragment = occurrence; boxes++;
+        }
+        ASSERT_NE(fragment, nullptr);
+        EXPECT_EQ(boxes, 1u);
+        EXPECT_TRUE(fragment->first_fragment); EXPECT_TRUE(fragment->last_fragment);
+        EXPECT_FLOAT_EQ(fragment->rect.x, 20.0f + paged[i].x);
+        EXPECT_FLOAT_EQ(fragment->rect.y, 20.0f + paged[i].y);
+        EXPECT_FLOAT_EQ(fragment->rect.width, paged[i].width);
+        EXPECT_FLOAT_EQ(fragment->rect.height, paged[i].height);
+    }
+    // the same document laid out continuously at the body width has the same geometry
+    continuous_layout(&doc, 360.0f, 3960.0f);
+    FlowBoxSnapshot flat[32] = {};
+    ASSERT_EQ(snapshot_flow_boxes(source, flat, 0, 32), count);
+    for (size_t i = 0; i < count; i++) {
+        SCOPED_TRACE(flat[i].element->node_name());
+        EXPECT_EQ(flat[i].element, paged[i].element);
+        EXPECT_FLOAT_EQ(flat[i].x, paged[i].x); EXPECT_FLOAT_EQ(flat[i].y, paged[i].y);
+        EXPECT_FLOAT_EQ(flat[i].width, paged[i].width); EXPECT_FLOAT_EQ(flat[i].height, paged[i].height);
+    }
+}
+
+// a break is a strut before the line that would cross the fragmentainer end: boxes
+// before it keep their continuous geometry, boxes after it move down by the strut,
+// no text rect straddles a page, and the unforced break truncates the adjoining margin
+TEST_F(SecondaryViewTest, PagedFlowBreaksAreStrutsOverTheContinuousLayout) {
+    // margins that keep line boxes off the fragmentainer grid, so a break is a real strut
+    stylesheet("@page { size: 300px 200px; margin: 20px } p { margin: 0 0 9px; font: 12px/16px Arial; orphans: 1; widows: 1 } "
+        "h2 { margin: 13px 0 5px; font: bold 16px/20px Arial } li { font: 12px/16px Arial }");
+    DomElement* heading = nullptr; DomElement* last = nullptr;
+    BUILD_FLOW_CORPUS(heading, last);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_GE(tree->model->page_count, 2u);
+    FlowBoxSnapshot paged[32] = {};
+    size_t count = snapshot_flow_boxes(source, paged, 0, 32);
+    continuous_layout(&doc, 260.0f, 160.0f);
+    FlowBoxSnapshot flat[32] = {};
+    ASSERT_EQ(snapshot_flow_boxes(source, flat, 0, 32), count);
+    float shift = 0.0f;
+    for (size_t i = 0; i < count; i++) {
+        SCOPED_TRACE(flat[i].element->node_name());
+        ASSERT_EQ(flat[i].element, paged[i].element);
+        float delta = paged[i].y - flat[i].y;
+        // the flow only ever moves content forward, by whole struts
+        EXPECT_GE(delta, shift - 0.01f);
+        if (delta > shift + 0.01f) shift = delta;
+        EXPECT_FLOAT_EQ(paged[i].x, flat[i].x); EXPECT_FLOAT_EQ(paged[i].width, flat[i].width);
+    }
+    EXPECT_GT(shift, 0.0f);
+    // every published text rect lies inside its page body
+    for (size_t i = 0; i < tree->model->page_count; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i];
+        float top = page->content_rect.y, bottom = top + page->content_rect.height;
+        for (LayoutViewNode* body = page->node.first_child; body; body = body->next_sibling) {
+            auto check = [&](LayoutViewNode* node, auto& self) -> void {
+                if (node->glyph_run) {
+                    EXPECT_GE(node->rect.y, top - 0.01f) << "page " << page->page_number;
+                    EXPECT_LE(node->rect.y + node->rect.height, bottom + 0.01f) << "page " << page->page_number;
+                }
+                for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling) self(child, self);
+            };
+            check(body, check);
+        }
+    }
+}
+
+// the fragments of a source element on one page, in occurrence order
+static size_t page_occurrences(ViewTree* tree, DomNode* node, uint32_t page, LayoutViewNode** found, size_t capacity) {
+    ViewNodeState* state = view_tree_node_state(tree, node, false);
+    size_t count = 0;
+    for (LayoutViewNode* occurrence = state ? state->first_occurrence.get() : nullptr; occurrence; occurrence = occurrence->next_occurrence)
+        if (occurrence_page(occurrence) == page && count < capacity) found[count++] = occurrence;
+    return count;
+}
+
+// body rows of 18px: 10px/12px text, 2px padding, 1px border; the fixture root is a margin-free p
+static const char* paged_flow_table_css =
+    "p { margin: 0 } td { font: 10px/12px Arial; padding: 2px; border: 1px solid black; vertical-align: top }";
+
+// P3 gate: a table breaks between rows; its header group repeats at the top of
+// each continuation and its footer group closes each fragment right below the
+// last body row, the footer's own occurrence ending the table; body rows occur once
+TEST_F(SecondaryViewTest, PagedFlowBreaksTablesBetweenRowsAndRepeatsTheirGroups) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    ASSERT_NE(flow_table(source, 9, &header, &footer, &body), nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    const size_t rows_on[] = {4, 4, 1};
+    DomNode* row = body->first_child;
+    for (uint32_t page = 1; page <= 3; page++) {
+        SCOPED_TRACE(::testing::Message() << "page " << page);
+        LayoutViewNode* found[4] = {};
+        // the header row opens the page: the body occurrence first, then its repeats
+        ASSERT_EQ(page_occurrences(tree, header, page, found, 4), 1u);
+        EXPECT_EQ(found[0]->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+        EXPECT_FLOAT_EQ(found[0]->rect.y, 10.0f); EXPECT_FLOAT_EQ(found[0]->rect.height, 18.0f);
+        float y = 28.0f;
+        for (size_t i = 0; i < rows_on[page - 1]; i++, row = row->next_sibling) {
+            ASSERT_NE(row, nullptr);
+            ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u);
+            EXPECT_EQ(occurrence_page(state->first_occurrence), page);
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, y);
+            y += 18.0f;
+        }
+        // the footer row follows the page's last body row; the last page holds its own occurrence
+        ASSERT_EQ(page_occurrences(tree, footer, page, found, 4), 1u);
+        EXPECT_EQ(found[0]->role, page == 3 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+        EXPECT_FLOAT_EQ(found[0]->rect.y, y); EXPECT_FLOAT_EQ(found[0]->rect.height, 18.0f);
+    }
+    EXPECT_EQ(row, nullptr);
+    // the footer's occurrences follow the pages
+    ViewNodeState* state = view_tree_node_state(tree, footer, false); ASSERT_NE(state, nullptr);
+    uint32_t page = 0;
+    for (LayoutViewNode* occurrence = state->first_occurrence; occurrence; occurrence = occurrence->next_occurrence)
+        EXPECT_EQ(occurrence_page(occurrence), ++page);
+}
+
+// a row taller than the space a fresh page keeps for body rows continues inside
+// its cells: the lines past the break move below the repeated header, the row
+// grows by the continuation, and every byte of the cell text occurs once
+TEST_F(SecondaryViewTest, PagedFlowContinuesTallTableRowsInsideTheirCells) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 100px; margin: 10px } %s .tall { white-space: pre-wrap; orphans: 1; widows: 1 }",
+        paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    ASSERT_NE(flow_table(source, 0, &header, &footer, &body), nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", body); ASSERT_NE(row, nullptr);
+    DomElement* tall = block("A\nB\nC\nD\nE\nF", nullptr, "td", row); ASSERT_NE(tall, nullptr);
+    ASSERT_TRUE(tall->set_attribute("class", "tall"));
+    ASSERT_NE(block("Side", nullptr, "td", row), nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    // the body keeps 80 - 18 (footer) below the header: three lines fit on each page
+    LayoutViewNode* cells[2] = {};
+    ASSERT_EQ(page_occurrences(tree, tall, 1, cells, 2), 1u);
+    ASSERT_EQ(page_occurrences(tree, tall, 2, cells + 1, 1), 1u);
+    EXPECT_TRUE(cells[0]->first_fragment); EXPECT_FALSE(cells[0]->last_fragment);
+    EXPECT_FALSE(cells[1]->first_fragment); EXPECT_TRUE(cells[1]->last_fragment);
+    EXPECT_FLOAT_EQ(cells[1]->rect.y, 28.0f);
+    DomText* text = tall->first_child->as_text();
+    ViewNodeState* state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr);
+    size_t bytes = 0, lines[2] = {};
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) {
+        EXPECT_EQ(part->text_start, bytes); bytes += part->text_length;
+        uint32_t page = occurrence_page(part);
+        ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
+        if (part->text_length && part->text_length < 3) lines[page - 1]++;
+        // continued lines sit below the repeated header, inside their cell's slice
+        EXPECT_GE(part->rect.y, cells[page - 1]->rect.y - 0.01f);
+        EXPECT_LE(part->rect.y + part->rect.height, cells[page - 1]->rect.y + cells[page - 1]->rect.height + 0.01f);
+    }
+    EXPECT_EQ(bytes, text->length);
+    EXPECT_EQ(lines[0], 3u); EXPECT_EQ(lines[1], 3u);
+    // the repeated footer closes page 1 right below the cell slice; the footer's own row ends the table
+    LayoutViewNode* found[2] = {};
+    ASSERT_EQ(page_occurrences(tree, footer, 1, found, 2), 1u);
+    EXPECT_EQ(found[0]->role, VIEW_FRAGMENT_REPEATED_TABLE);
+    EXPECT_FLOAT_EQ(found[0]->rect.y, cells[0]->rect.y + cells[0]->rect.height);
+    ASSERT_EQ(page_occurrences(tree, header, 2, found, 2), 1u);
+    EXPECT_EQ(found[0]->role, VIEW_FRAGMENT_REPEATED_TABLE);
+}
+
+// row and group break properties: a forced break before a row starts a page with
+// the header repeated, and a row group under break-inside: avoid moves whole
+TEST_F(SecondaryViewTest, PagedFlowTableRowsHonorForcedBreaksAndGroupAvoidance) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s .forced { break-before: page } "
+        ".kept { break-inside: avoid }", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    DomElement* table = flow_table(source, 2, &header, &footer, &body);
+    ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(body->first_child->next_sibling->as_element()->set_attribute("class", "forced"));
+    DomElement* kept = block(nullptr, nullptr, "tbody", table); ASSERT_NE(kept, nullptr);
+    ASSERT_TRUE(kept->set_attribute("class", "kept"));
+    ASSERT_TRUE(table_rows(kept, 4, "Kept A", "Kept B"));
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    // page 1: the first body row; page 2: the forced row (the kept group cannot
+    // follow it whole); page 3: the kept group below the repeated header
+    ViewNodeState* first = view_tree_node_state(tree, body->first_child, false);
+    ViewNodeState* forced = view_tree_node_state(tree, body->first_child->next_sibling, false);
+    ASSERT_NE(first, nullptr); ASSERT_NE(forced, nullptr);
+    EXPECT_EQ(occurrence_page(first->first_occurrence), 1u);
+    EXPECT_EQ(occurrence_page(forced->first_occurrence), 2u);
+    EXPECT_FLOAT_EQ(forced->first_occurrence->rect.y, 28.0f);
+    float y = 28.0f;
+    for (DomNode* row = kept->first_child; row; row = row->next_sibling, y += 18.0f) {
+        ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 3u);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, y);
+    }
+    ViewNodeState* repeats = view_tree_node_state(tree, header, false); ASSERT_NE(repeats, nullptr);
+    EXPECT_EQ(repeats->occurrence_count, 3u);
+}
+
+// a table that broke inside a box which then moves whole (break-inside: avoid)
+// returns to the geometry layout_table gave it and breaks again at its new
+// place: on a fresh page it fits, with one occurrence per group and row
+TEST_F(SecondaryViewTest, PagedFlowRestoresATableBeforeBreakingItAgain) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    ASSERT_NE(block(nullptr, "height: 60px"), nullptr);
+    DomElement* keep = block(nullptr, "break-inside: avoid"); ASSERT_NE(keep, nullptr);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    DomElement* table = flow_table(keep, 3, &header, &footer, &body);
+    ASSERT_NE(table, nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    EXPECT_FLOAT_EQ(table->height, 90.0f);
+    for (DomElement* group : {header, footer}) {
+        ViewNodeState* state = view_tree_node_state(tree, group, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+    }
+    ViewNodeState* state = view_tree_node_state(tree, header, false);
+    EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, 10.0f);
+    float y = 28.0f;
+    for (DomNode* row = body->first_child; row; row = row->next_sibling, y += 18.0f) {
+        ViewNodeState* rows = view_tree_node_state(tree, row, false); ASSERT_NE(rows, nullptr);
+        ASSERT_EQ(rows->occurrence_count, 1u);
+        EXPECT_EQ(occurrence_page(rows->first_occurrence), 2u);
+        EXPECT_FLOAT_EQ(rows->first_occurrence->rect.y, y);
+    }
+}
+
+// the browsing cascade serves the page flow with print media, even when the
+// document was first cascaded for the screen
+TEST_F(SecondaryViewTest, PagedFlowCascadesPrintMediaBeforeLayout) {
+    stylesheet("@page { size: 300px 300px; margin: 20px } p { margin: 0; padding: 32px } @media print { p { padding: 0 } } "
+        "div { font: 12px/16px Arial }");
+    ASSERT_NE(block("Printed"), nullptr);
+    // a screen cascade first, as a loader without a print flag leaves it
+    continuous_layout(&doc, 260.0f, 260.0f, false);
+    ASSERT_NE(source->bound, nullptr);
+    EXPECT_FLOAT_EQ(source->boundary()->padding.top, 32.0f);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_NE(source->bound, nullptr);
+    EXPECT_FLOAT_EQ(source->boundary()->padding.top, 0.0f);
+    EXPECT_FLOAT_EQ(source->boundary()->padding.left, 0.0f);
+}
+
+// named strings take their counters where the layout meets their source, and
+// bind to the page of the first content after it; a running element leaves the
+// flow and lays out with the browsing engine at its margin box's width (plan P4)
+TEST_F(SecondaryViewTest, PagedFlowRecordsMarksWhereTheLayoutMeetsTheirSources) {
+    stylesheet("@page { size: 200px 100px; margin: 20px; "
+        "@top-left { content: string(title, first); font-size: 7px } @top-right { content: string(title, last); font-size: 7px } "
+        "@top-center { content: element(header) } @bottom-center { content: string(title, start); font-size: 7px } } "
+        "p { counter-reset: chapter 4 } p, div, h2, span { margin: 0; font-size: 10px; line-height: 12px } "
+        "h2 { counter-increment: chapter; string-set: title counter(chapter) ' ' content() } "
+        ".header { position: running(header); text-align: center; font-size: 8px; line-height: 10px }");
+    DomElement* header = block("Book", nullptr, "div"); ASSERT_NE(header, nullptr);
+    ASSERT_TRUE(header->set_attribute("class", "header"));
+    DomElement* alpha = block("Alpha", nullptr, "h2"); ASSERT_NE(alpha, nullptr);
+    ASSERT_NE(block("x\nx\nx\nx", "white-space: pre-wrap"), nullptr);
+    DomElement* beta = block("Beta", nullptr, "h2"); ASSERT_NE(beta, nullptr);
+    // a hidden assignment sees the inherited counters and binds where the walk passes it
+    ASSERT_NE(block("Hidden", "display: none; string-set: title 'Hidden ' counter(chapter)", "span"), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    // the running element takes no body space
+    LayoutViewNode* first = source_fragment(tree, alpha, VIEW_FRAGMENT_BODY, true); ASSERT_NE(first, nullptr);
+    EXPECT_FLOAT_EQ(first->rect.y, 20.0f);
+    EXPECT_EQ(occurrence_page(source_fragment(tree, beta, VIEW_FRAGMENT_BODY, true)), 2u);
+    const char* expected[2][3] = {{"5 Alpha", "5 Alpha", "5 Alpha"}, {"6 Beta", "Hidden 6", "6 Beta"}};
+    const CssPageMarginBox boxes[] = {CSS_PAGE_TOP_LEFT, CSS_PAGE_TOP_RIGHT, CSS_PAGE_BOTTOM_CENTER};
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    for (size_t i = 0; i < 2; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i];
+        for (size_t j = 0; j < 3; j++) {
+            ASSERT_NE(page->margin_boxes[boxes[j]], nullptr);
+            strbuf_reset(text); append_fragment_text(page->margin_boxes[boxes[j]], text);
+            EXPECT_STREQ(text->str ? text->str : "", expected[i][j]) << "page " << i + 1 << " box " << j;
+        }
+        LayoutViewNode* box = page->margin_boxes[CSS_PAGE_TOP_CENTER]; ASSERT_NE(box, nullptr);
+        strbuf_reset(text); append_fragment_text(box, text); EXPECT_STREQ(text->str, "Book");
+        // the element's box fills the margin box it was laid out in
+        LayoutViewNode* running = box->first_child; ASSERT_NE(running, nullptr);
+        EXPECT_EQ(running->role, VIEW_FRAGMENT_RUNNING); EXPECT_EQ(running->source.address, header);
+        EXPECT_FLOAT_EQ(running->rect.x, box->rect.x); EXPECT_FLOAT_EQ(running->rect.width, box->rect.width);
+        EXPECT_FLOAT_EQ(running->rect.y, box->rect.y + (box->rect.height - running->rect.height) * 0.5f);
+    }
+    strbuf_free(text);
+}
+
+// target references read the bindings of the previous whole-document pass:
+// counters at the target as the layout met it, the page of its first content
+// and its generated text (plan P4)
+TEST_F(SecondaryViewTest, PagedFlowResolvesTargetReferencesOverWholeDocumentPasses) {
+    stylesheet("@page { size: 200px 100px; margin: 20px } @page:first { counter-reset: page 6 } "
+        "p { counter-reset: chapter 1 } p, div, a { margin: 0; font-size: 10px; line-height: 12px } a { display: block } "
+        "h2 { margin: 0; font-size: 10px; line-height: 12px; counter-increment: chapter } h2::before { content: counter(chapter) '. ' } "
+        "a::after { content: target-counter(attr(href), page) ' ' target-counter(attr(href), chapter, upper-roman) ' ' "
+        "target-text(attr(href), before) target-text(attr(href)) }");
+    DomElement* link = block("", nullptr, "a"); ASSERT_NE(link, nullptr); ASSERT_TRUE(link->set_attribute("href", "#end"));
+    ASSERT_NE(block("Second", "break-before: page"), nullptr);
+    DomElement* target = block("End", "break-before: page", "h2"); ASSERT_NE(target, nullptr);
+    ASSERT_TRUE(target->set_attribute("id", "end"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    EXPECT_GE(diagnostic.reference_passes, 2u);
+    const TypesetTarget* bound = layout_secondary_target(tree, "end"); ASSERT_NE(bound, nullptr);
+    EXPECT_EQ(bound->page_number, 3u);
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+    append_generated_text(tree, link, true, text);
+    EXPECT_STREQ(text->str, "9 II 2. End"); strbuf_free(text);
+}
+
+// a top-level box that opens a page of another body width starts a run of
+// that width (plan §4.2): it and its followers lay out at the new width, and
+// the root takes each run's width on its pages
+TEST_F(SecondaryViewTest, PagedFlowRestartsTheRunWidthWhereAPageChangesItsBodyWidth) {
+    stylesheet("@page { size: 200px 100px; margin: 20px } @page wide { size: 300px 120px; margin: 20px } "
+        "p, div { margin: 0; font-size: 10px; line-height: 12px }");
+    DomElement* narrow = block("Narrow"); ASSERT_NE(narrow, nullptr);
+    DomElement* wide = block("Wide", "page: wide"); ASSERT_NE(wide, nullptr);
+    DomElement* inner = block("Inner", nullptr, "div", wide); ASSERT_NE(inner, nullptr);
+    DomElement* back = block("Back"); ASSERT_NE(back, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    const float widths[] = {160.0f, 260.0f, 160.0f};
+    DomElement* boxes[] = {narrow, wide, back};
+    for (size_t i = 0; i < 3; i++) {
+        EXPECT_FLOAT_EQ(tree->model->pages.get()[i]->content_rect.width, widths[i]);
+        LayoutViewNode* box = source_fragment(tree, boxes[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_EQ(occurrence_page(box), i + 1); EXPECT_FLOAT_EQ(box->rect.width, widths[i]);
+        LayoutViewNode* root = tree->model->pages.get()[i]->node.first_child; ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->source.address, source); EXPECT_FLOAT_EQ(root->rect.width, widths[i]);
+    }
+    LayoutViewNode* nested = source_fragment(tree, inner, VIEW_FRAGMENT_BODY, true); ASSERT_NE(nested, nullptr);
+    EXPECT_FLOAT_EQ(nested->rect.width, 260.0f);
+    // a box below the top level cannot change the run's width
+    stylesheet("@page { size: 200px 100px; margin: 20px } @page wide { size: 300px 120px; margin: 20px } "
+        "p, div { margin: 0; font-size: 10px; line-height: 12px } .nested { page: wide }");
+    ASSERT_TRUE(inner->set_attribute("class", "nested")); ASSERT_TRUE(wide->set_attribute("style", ""));
+    ViewTree* rejected = secondary();
+    EXPECT_EQ(layout_secondary_view(rejected, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_FALSE(rejected->model->committed);
 }

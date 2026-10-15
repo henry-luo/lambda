@@ -760,7 +760,9 @@ static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run
     pdf_set_color(ctx, run->color);
     if (!path || !pdf_render_path(ctx, path, transform) || HPDF_Page_Fill(ctx->current_page) != HPDF_OK) {
         ctx->paint_state.unsupported_count++;
-        log_error("[PDF_GLYPH_RUN] selected glyph outline could not be painted");
+        FontHandle* handle = font_box_handle(paint_glyph_run_font(run));
+        log_error("[PDF_GLYPH_RUN] selected glyph outline could not be painted: %d bytes of text, handle=%p size=%.2f",
+            run->text_len, (void*)handle, handle ? font_handle_get_size_px(handle) : -1.0f);
     }
     if (path) rdt_path_free(path);
 }
@@ -1266,7 +1268,6 @@ static bool pdf_has_border_radius(const BorderProp* border) {
 // Render text view
 static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
-    CssEnum text_transform = render_text_inherited_transform(text);
 
     // Calculate absolute position using block context (like SVG renderer)
     // Extract the text content
@@ -1276,36 +1277,19 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     while ((text_rect = paint_iterator.next())) {
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
-    lam::Temp<char> text_content(render_text_create_export_segment(
-        str, text_rect, text_transform, true, get_white_space_value(text)));
-
+    PaintGlyphRun run = {};
+    lam::Temp<char> text_content(render_text_rect_glyph_run(text, text_rect, &ctx->font, ctx->color,
+        ctx->block.x, ctx->block.y, &run));
     if (!text_content.get() || !text_content.get()[0]) continue;
 
     // Set font if available
-    float font_size = 16.0f;
     if (ctx->current_font) {
-        font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
-        HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
+        HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, run.font_size);
     }
-
-    CssEnum justify_mode = text_justify_computed_value(text->parent);
-    RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
-
-    float baseline_y = render_text_baseline_y(&ctx->font, y);
-    PaintGlyphRun run = {};
-    run.font = lam::up(&ctx->font);
-    run.color = ctx->color;
-    run.text = lam::up(text_content.get());
-    run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: text run byte length is bounded by TextRect input.
+    // the PDF font table selects by the authored family, not the resolved face name
+    run.font_family = lam::up(ctx->font.style ? (const char*)ctx->font.style->family.get() : nullptr);
     // effect fallback retains commands until rasterization, so the paint list keeps the text
     if (ctx && ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
-    run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
-    run.font_size = font_size;
-    run.x = base_x;
-    run.baseline_y = baseline_y;
-    run.word_spacing = justification.word;
-    run.cjk_spacing = justification.character;
-    run.justify_mode = justify_mode;
     DomElement* parent = text->parent ? text->parent->as_element() : nullptr;
     if (parent && render_paint_text_background(pdf_active_paint_list(ctx), ctx->ui_context,
             parent, &run, {ctx->block.x, ctx->block.y, parent->width, parent->height})) {

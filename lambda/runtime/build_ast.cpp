@@ -8,6 +8,7 @@
 #include "write_set.hpp"
 #include "parse_type_pattern.hpp"
 #include "grammar/grammar.hpp"
+#include "binary_schema.hpp"
 #include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -6894,11 +6895,17 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     case AST_NODE_LIST:
     case AST_NODE_ARRAY:
     case AST_NODE_MAP:
+    case AST_NODE_OBJECT_LITERAL:
     case AST_NODE_ELEMENT: {
         AstNode* item = ((AstArrayNode*)node)->item;
         for (; item; item = item->next) {
             walk_lambda_ast(item, visitor, data, descend_functions);
         }
+        // element content is a separate edge after the resolver splits attributes.
+        if (node->node_type == AST_NODE_ELEMENT)
+            walk_lambda_ast(((AstElementNode*)node)->content, visitor, data, descend_functions);
+        else if (node->node_type == AST_NODE_OBJECT_LITERAL)
+            walk_lambda_ast(((AstObjectLiteralNode*)node)->content, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_VARIABLE_DECLARATOR:
@@ -8061,9 +8068,11 @@ typedef struct CallColourWalk {
     AstFuncNode* function;  // innermost enclosing function; NULL at module level
     // S16.7.6: a procedural REPL session's module level is a `pn` body
     bool module_is_proc;
+    bool functional_element = false;
 } CallColourWalk;
 
 static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
+    if (walk->functional_element) return false;
     AstFuncNode* fn = walk->function;
     if (!fn || !((TypeFunc*)fn->type)->is_colour_poly) return false;
     node = ast_unwrap_primary(node);
@@ -8187,6 +8196,14 @@ static void colour_walk_constraint(Transpiler* tp, AstNode* constraint);
 
 static bool colour_walk_visit(AstNode* node, void* data) {
     CallColourWalk* walk = (CallColourWalk*)data;
+    if ((node->node_type == AST_NODE_ELEMENT || node->node_type == AST_NODE_OBJECT_LITERAL) &&
+            !walk->functional_element) {
+        // S12.1.1v3: construction stays pure even inside a procedural statement.
+        CallColourWalk literal = *walk;
+        literal.functional_element = true;
+        walk_lambda_ast(node, colour_walk_visit, &literal, true);
+        return false;
+    }
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         AstFuncNode* fn = (AstFuncNode*)node;
@@ -8200,8 +8217,8 @@ static bool colour_walk_visit(AstNode* node, void* data) {
             colour_walk_constraint(walk->tp, constraint);
         }
     }
-    bool in_proc = walk->function ? walk->function->node_type == AST_NODE_PROC
-        : walk->module_is_proc;
+    bool in_proc = !walk->functional_element && (walk->function
+        ? walk->function->node_type == AST_NODE_PROC : walk->module_is_proc);
     if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
         colour_walk_call(walk, (AstCallNode*)node);
     }
@@ -14170,7 +14187,8 @@ enum { LSF_GRAMMAR_BODY, LSF_GRAMMAR_TAIL };
 enum { LSF_PATTERN_ISLAND, LSF_PATTERN_PREBOUND, LSF_PATTERN_TAIL };
 
 // LSF_OBJECT_TYPE tail: its members in source order, and its base name.
-enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_TAIL };
+enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_LAYOUT, LSF_OBJECT_TAIL };
+enum { LSF_OBJECT_FIELD_DEFAULT, LSF_OBJECT_FIELD_LAYOUT, LSF_OBJECT_FIELD_TAIL };
 
 // LSF_CONTENT: the body of a braced `if`/`else` branch, which has a scope.
 enum { LSF_CONTENT_BRANCH = 1u << 0 };
@@ -14485,6 +14503,9 @@ static void syntax_object_begin(LambdaSyntaxSink* sink,
         LSF_OBJECT_TYPE, LSF_OBJECT_TAIL);
     object->name = direct_token_name(tp, reduction->secondary_token);
     object->is_public = (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
+    StrView base_name = source_span_text(tp, reduction->detail_token.span);
+    object->is_binary_schema = base_name.length == 6 &&
+        memcmp(base_name.str, "binary", 6) == 0;
     object->local_type_index = -1;
     syntax_tail_set_span(&syntax_tail((AstNode*)object,
         sizeof(AstObjectTypeNode))[LSF_OBJECT_BASE], reduction->detail_token.span);
@@ -14497,11 +14518,12 @@ static AstNode* syntax_object_field(LambdaSyntaxSink* sink,
     if (!reduction->child_count) return NULL;
     AstNamedNode* field = (AstNamedNode*)alloc_syntax_node(sink->tp,
         AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode),
-        LSF_OBJECT_FIELD, 1);
+        LSF_OBJECT_FIELD, LSF_OBJECT_FIELD_TAIL);
     field->name = direct_token_name(sink->tp, reduction->detail_token);
     field->as = syntax_child(reduction, 0);
-    syntax_tail((AstNode*)field, sizeof(AstNamedNode))[0] =
-        syntax_child(reduction, 1);
+    void** tail = syntax_tail((AstNode*)field, sizeof(AstNamedNode));
+    tail[LSF_OBJECT_FIELD_DEFAULT] = syntax_child(reduction, 1);
+    tail[LSF_OBJECT_FIELD_LAYOUT] = syntax_child(reduction, 2);
     syntax_object_member(sink, OBJECT_PART_FIELD, (AstNode*)field);
     return syntax_child(reduction, 0);
 }
@@ -14777,7 +14799,8 @@ static AstNode* syntax_type_slot_reduction(LambdaSyntaxSink* sink,
     }
     AstNode* node = syntax_type_slot(sink, span,
         (flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE)
-            ? TYPE_PATTERN_RETURN_VALUE : TYPE_PATTERN_FULL);
+            ? TYPE_PATTERN_RETURN_VALUE : (flags & LAMBDA_REDUCTION_FLAG_BINARY_FIELD)
+            ? TYPE_PATTERN_BINARY_FIELD : TYPE_PATTERN_FULL);
     if (flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE) {
         // `T to e` re-reads as one range type; the parts reduced on the way
         // still resolve first, in source order
@@ -14989,6 +15012,11 @@ static AstNode* syntax_statement(LambdaSyntaxSink* sink,
         return syntax_object_content(sink, reduction);
     case LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT:
         if (child0) syntax_object_member(sink, OBJECT_PART_CONSTRAINT, child0);
+        return child0;
+    case LAMBDA_REDUCTION_FORM_TYPE_OBJECT_LAYOUT:
+        if (sink->type_object_depth)
+            syntax_tail((AstNode*)sink->object_nodes[sink->type_object_depth - 1],
+                sizeof(AstObjectTypeNode))[LSF_OBJECT_LAYOUT] = child0;
         return child0;
     case LAMBDA_REDUCTION_FORM_VAR: {
         AstLetNode* var = (AstLetNode*)alloc_syntax_node(tp, AST_NODE_VAR_STAM,
@@ -15626,7 +15654,7 @@ static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
         StrView base_name) {
     Transpiler* tp = r->tp;
     TypeObject* object_type = (TypeObject*)pool_calloc(tp->pool,
-        sizeof(TypeObject));
+        object->is_binary_schema ? sizeof(TypeBinarySchema) : sizeof(TypeObject));
     // D2.6.6v2 phase 2 (S2.1.1v3): a nominal type IS a map or an element; the
     // object tag is gone. Default to map and refine at resolver_object_end,
     // which is the first point a content pattern is known.
@@ -15658,8 +15686,284 @@ static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
     r->object_byte_offset = 0;
     lambda_ast_register_name(tp, (AstNode*)object);
     r->object_scope = lambda_ast_enter_scope(tp, false);
-    resolver_object_copy_base(r, base_name);
+    if (!object->is_binary_schema) resolver_object_copy_base(r, base_name);
     r->type_object_depth++;
+}
+
+static AstNode* binary_schema_metadata(AstNode* node, const char* name) {
+    node = ast_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_MAP) return nullptr;
+    for (AstNode* item = ((AstMapNode*)node)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* named = (AstNamedNode*)item;
+        if (named->name && named->name->len == strlen(name) &&
+                memcmp(named->name->chars, name, named->name->len) == 0)
+            return named->as;
+    }
+    return nullptr;
+}
+
+static bool binary_schema_metadata_text(Transpiler* tp, AstNode* metadata,
+        const char* name, const char* expected) {
+    Item value = ItemNull;
+    AstNode* node = binary_schema_metadata(metadata, name);
+    return node && ast_static_literal_item(tp, node, &value) &&
+        is_text_type_id(get_type_id(value)) && value.get_len() == strlen(expected) &&
+        memcmp(value.get_chars(), expected, value.get_len()) == 0;
+}
+
+static bool binary_schema_validate_metadata(Transpiler* tp, AstNode* metadata,
+        bool root, bool native) {
+    if (!metadata) return true;
+    AstNode* map = ast_unwrap_primary(metadata);
+    if (!map || map->node_type != AST_NODE_MAP || metadata->next) {
+        record_semantic_error_span(tp, metadata->source_span, ERR_SEMANTIC_ERROR,
+            "binary schema metadata must be a single literal map");
+        return false;
+    }
+    bool valid = true;
+    for (AstNode* item = ((AstMapNode*)map)->item; item; item = item->next) {
+        AstNamedNode* entry = (AstNamedNode*)item;
+        if (item->node_type != AST_NODE_KEY_EXPR || !entry->name) {
+            record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema metadata requires named fields");
+            valid = false;
+            continue;
+        }
+        const char* name = entry->name->chars;
+        bool admitted = root ? strcmp(name, "layout") == 0 || strcmp(name, "binding") == 0 ||
+            strcmp(name, "endian") == 0 || strcmp(name, "version") == 0 : strcmp(name, "pointer") == 0 || strcmp(name, "offset") == 0;
+        if (!admitted) {
+            record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
+                "unsupported binary schema metadata '%s'", name);
+            valid = false;
+            continue;
+        }
+        for (AstNode* prior = ((AstMapNode*)map)->item; prior != item; prior = prior->next) {
+            if (prior->node_type == AST_NODE_KEY_EXPR && ((AstNamedNode*)prior)->name &&
+                    strcmp(((AstNamedNode*)prior)->name->chars, name) == 0) {
+                record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
+                    "duplicate binary schema metadata '%s'", name);
+                valid = false;
+            }
+        }
+        if (strcmp(name, "offset") == 0) {
+            if (native) {
+                record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
+                    "native schema field locations come from the host binding");
+                valid = false;
+            }
+            continue;
+        }
+        Item value = ItemNull;
+        bool text = ast_static_literal_item(tp, entry->as, &value) &&
+            is_text_type_id(get_type_id(value));
+        bool accepted = text;
+        if (strcmp(name, "binding") == 0 || strcmp(name, "version") == 0) accepted = text && native && value.get_len() &&
+            !memchr(value.get_chars(), 0, value.get_len());
+        else if (strcmp(name, "endian") == 0) accepted =
+            binary_schema_metadata_text(tp, metadata, name, "native") || (!native &&
+            (binary_schema_metadata_text(tp, metadata, name, "little") ||
+             binary_schema_metadata_text(tp, metadata, name, "big")));
+        else accepted = native && binary_schema_metadata_text(tp, metadata, name, "native");
+        if (!accepted) {
+            record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
+                "invalid binary schema metadata '%s'", name);
+            valid = false;
+        }
+    }
+    return valid;
+}
+
+static bool binary_schema_field_kind(Type* type, BinaryFieldKind* kind, size_t* size) {
+    struct Scalar { Type* type; BinaryFieldKind kind; size_t size; };
+    const Scalar scalars[] = {
+        {&TYPE_BOOL, BINARY_FIELD_BOOL, 1}, {&TYPE_I8, BINARY_FIELD_I8, 1},
+        {&TYPE_U8, BINARY_FIELD_U8, 1}, {&TYPE_I16, BINARY_FIELD_I16, 2},
+        {&TYPE_U16, BINARY_FIELD_U16, 2}, {&TYPE_I32, BINARY_FIELD_I32, 4},
+        {&TYPE_U32, BINARY_FIELD_U32, 4}, {&TYPE_INT64, BINARY_FIELD_I64, 8},
+        {&TYPE_UINT64, BINARY_FIELD_U64, 8}, {&TYPE_F32, BINARY_FIELD_F32, 4},
+        {&TYPE_FLOAT64, BINARY_FIELD_F64, 8}, {&TYPE_FLOAT, BINARY_FIELD_F64, 8},
+    };
+    for (const Scalar& scalar : scalars) {
+        if (type == scalar.type) { *kind = scalar.kind; *size = scalar.size; return true; }
+    }
+    return false;
+}
+
+static void resolve_binary_schema(LambdaResolver* r) {
+    Transpiler* tp = r->tp;
+    TypeBinarySchema* type = (TypeBinarySchema*)r->object_type;
+    AstNode* metadata = (AstNode*)syntax_tail((AstNode*)r->object_node,
+        sizeof(AstObjectTypeNode))[LSF_OBJECT_LAYOUT];
+    BinarySchema& schema = type->layout;
+    schema.tag = r->object_node->name->chars;
+    schema.binding_abi = BINARY_SCHEMA_BINDING_ABI;
+    schema.endian = BINARY_SCHEMA_INHERIT;
+    if (binary_schema_metadata_text(tp, metadata, "endian", "big")) schema.endian = BINARY_SCHEMA_BIG;
+    else if (binary_schema_metadata_text(tp, metadata, "endian", "little")) schema.endian = BINARY_SCHEMA_LITTLE;
+    bool native = binary_schema_metadata_text(tp, metadata, "layout", "native");
+    if (native || binary_schema_metadata_text(tp, metadata, "endian", "native")) schema.endian = BINARY_SCHEMA_NATIVE;
+    if (!binary_schema_validate_metadata(tp, metadata, true, native)) return;
+    if (r->object_node->constraints) {
+        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+            "binary schema predicates are not supported; use '& {…}' for layout metadata");
+        return;
+    }
+    if (r->object_node->content || r->object_node->methods) {
+        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+            "binary schema declarations admit fields, without methods or content patterns");
+        return;
+    }
+    Item binding = ItemNull;
+    AstNode* binding_node = binary_schema_metadata(metadata, "binding");
+    if (binding_node && ast_static_literal_item(tp, binding_node, &binding) &&
+            is_text_type_id(get_type_id(binding))) {
+        char* copy = (char*)pool_calloc(tp->pool, binding.get_len() + 1);
+        memcpy(copy, binding.get_chars(), binding.get_len());
+        schema.binding = copy;
+    }
+    if (native && !schema.binding) {
+        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+            "native binary schema requires a binding name");
+    }
+    Item version = ItemNull;
+    AstNode* version_node = binary_schema_metadata(metadata, "version");
+    if (version_node && ast_static_literal_item(tp, version_node, &version) &&
+            is_text_type_id(get_type_id(version))) {
+        char* copy = (char*)pool_calloc(tp->pool, version.get_len() + 1);
+        memcpy(copy, version.get_chars(), version.get_len());
+        schema.binding_version = copy;
+    }
+    schema.field_count = r->object_type->length;
+    BinarySchemaField* fields = (BinarySchemaField*)pool_calloc(tp->pool,
+        schema.field_count * sizeof(BinarySchemaField));
+    schema.fields = fields;
+    if (!fields && schema.field_count) {
+        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+            "cannot allocate binary schema field descriptors");
+        return;
+    }
+    size_t index = 0, offset = 0;
+    for (AstNode* item = r->object_node->item; item; item = item->next, index++) {
+        AstNamedNode* field = (AstNamedNode*)item;
+        BinarySchemaField& physical = fields[index];
+        physical.name = field->name->chars;
+        Type* logical = unwrap_simple_type_type(field->type);
+        AstNode* annotation = ast_unwrap_primary(field->as);
+        AstNode* field_metadata = (AstNode*)syntax_tail(item,
+            sizeof(AstNamedNode))[LSF_OBJECT_FIELD_LAYOUT];
+        if (annotation && annotation->node_type == AST_NODE_CONSTRAINED_TYPE) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema field predicates are not supported; use '& {…}' for layout metadata");
+            continue;
+        }
+        if (!binary_schema_validate_metadata(tp, field_metadata, false, native)) continue;
+        if (syntax_tail((AstNode*)field, sizeof(AstNamedNode))[0]) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema fields cannot have default values");
+        }
+        for (size_t prior = 0; prior < index; prior++) {
+            if (fields[prior].name && strcmp(fields[prior].name, physical.name) == 0)
+                record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                    "duplicate binary schema field '%s'", physical.name);
+        }
+        if (logical && logical->type_id == LMD_TYPE_TYPE && logical->kind == TYPE_KIND_UNARY &&
+                ((TypeUnary*)logical)->op == OPERATOR_OPTIONAL) {
+            physical.nullable = true;
+            logical = unwrap_simple_type_type(((TypeUnary*)logical)->operand);
+        }
+        bool span = logical && logical->type_id == LMD_TYPE_TYPE && logical->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)logical)->op == OPERATOR_ARRAY;
+        if (span) {
+            TypeUnary* array = (TypeUnary*)logical;
+            logical = unwrap_simple_type_type(array->operand);
+            AstNode* count_node = annotation;
+            if (count_node && count_node->node_type == AST_NODE_UNARY_TYPE &&
+                    ((AstUnaryNode*)count_node)->op == OPERATOR_OPTIONAL)
+                count_node = ast_unwrap_primary(((AstUnaryNode*)count_node)->operand);
+            StrView count_field = {};
+            bool count_valid = count_node && count_node->node_type == AST_NODE_UNARY_TYPE &&
+                ((AstUnaryNode*)count_node)->op == OPERATOR_ARRAY &&
+                binary_schema_parse_count(((AstUnaryNode*)count_node)->op_str, &physical.fixed_count, &count_field);
+            if (!count_valid && array->max_count >= 0 && array->max_count == array->min_count) {
+                physical.fixed_count = (uint64_t)array->max_count;
+                count_valid = true;
+            }
+            if (!native || !binary_schema_metadata_text(tp, field_metadata, "pointer", "native") || !count_valid) {
+                record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                    "counted spans require a native pointer and an explicit integer or count field");
+                continue;
+            }
+            physical.has_fixed_count = !count_field.length;
+            if (count_field.length) {
+                physical.count_field = name_pool_create_strview(tp->name_pool, count_field)->chars;
+            }
+        }
+        const BinarySchema* nested = binary_schema_from_type(logical);
+        if (nested && (bool)nested->binding != native) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "nested binary schemas must use the same address domain");
+        }
+        if (span) {
+            physical.logical_type = logical;
+            physical.kind = logical == &TYPE_BINARY ? BINARY_FIELD_BYTES : BINARY_FIELD_SPAN;
+            physical.storage_size = 0;
+            physical.target = nested;
+            size_t width = 0;
+            if (nested) physical.element_kind = BINARY_FIELD_RECORD;
+            else if (logical == &TYPE_BINARY) physical.element_kind = BINARY_FIELD_U8;
+            else if (!binary_schema_field_kind(logical, &physical.element_kind, &width))
+                record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                    "native span elements require a fixed-width scalar or native record");
+        } else if (nested) {
+            physical.target = nested;
+            physical.kind = BINARY_FIELD_RECORD;
+            physical.storage_size = nested->byte_size;
+        } else if (native && (logical == &TYPE_STRING || logical == &TYPE_BINARY || logical == &TYPE_ANY)) {
+            physical.kind = BINARY_FIELD_ITEM;
+            physical.storage_size = sizeof(Item);
+            physical.logical_type = logical;
+        } else if (!binary_schema_field_kind(logical, &physical.kind, &physical.storage_size)) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema field requires a fixed-width scalar or binary schema type");
+        }
+        if (!span && binary_schema_metadata_text(tp, field_metadata, "pointer", "native")) {
+            if (!native || !nested) record_semantic_error_span(tp, field->source_span,
+                ERR_SEMANTIC_ERROR, "native pointer field requires a native schema and record target");
+            physical.kind = BINARY_FIELD_REFERENCE;
+            physical.storage_size = sizeof(void*);
+        }
+        if (physical.nullable && physical.kind != BINARY_FIELD_REFERENCE && physical.kind != BINARY_FIELD_ITEM && !span)
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "nullable binary fields require a native reference or boxed native value");
+        AstNode* at = binary_schema_metadata(field_metadata, "offset");
+        int64_t explicit_offset = 0;
+        if (at && (!ast_constant_integer_value(tp, at, &explicit_offset) || explicit_offset < 0)) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema field offset must be a nonnegative constant integer");
+        } else if (at) offset = (size_t)explicit_offset;
+        physical.offset = offset;
+        if (physical.storage_size > SIZE_MAX - offset) {
+            record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                "binary schema field size overflows its layout");
+        } else offset += physical.storage_size;
+        if (offset > schema.byte_size) schema.byte_size = offset;
+    }
+    for (size_t i = 0; i < schema.field_count; i++) {
+        if (!fields[i].count_field) continue;
+        const BinarySchemaField* count = nullptr;
+        for (size_t j = 0; j < schema.field_count; j++)
+            if (strcmp(fields[j].name, fields[i].count_field) == 0) count = &fields[j];
+        if (!count || count->kind < BINARY_FIELD_I8 || count->kind > BINARY_FIELD_U64)
+            record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+                "native span count must name an admitted integer field");
+    }
+    // This declaration describes physical storage, rather than a nominal map constructor.
+    type->type_id = LMD_TYPE_TYPE;
+    type->kind = TYPE_KIND_BINARY_SCHEMA;
+    type->is_nominal = false;
+    type->nominal = nullptr;
 }
 
 static void resolver_object_end(LambdaResolver* r) {
@@ -15710,6 +16014,7 @@ static void resolver_object_end(LambdaResolver* r) {
     direct_prepare_trusted_field_index((TypeMap*)r->object_type, r->tp->pool);
     arraylist_append(r->tp->type_list, r->object_node->type);
     r->object_type->type_index = r->tp->type_list->length - 1;
+    if (r->object_node->is_binary_schema) resolve_binary_schema(r);
     lambda_ast_leave_scope(r->tp, r->object_scope);
     r->object_node = NULL;
     r->object_type = NULL;
@@ -16613,6 +16918,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         void** tail = syntax_tail(node, sizeof(AstObjectTypeNode));
         resolver_object_begin(r, object, source_span_text(tp,
             syntax_tail_span(&tail[LSF_OBJECT_BASE])));
+        resolve_walk(r, (AstNode*)tail[LSF_OBJECT_LAYOUT]);
         LambdaSyntaxParts* parts = (LambdaSyntaxParts*)tail[LSF_OBJECT_PARTS];
         for (uint32_t i = 0; parts && i < parts->count && !r->failed; i++) {
             LambdaSyntaxPart* part = &parts->items[i];
@@ -16631,12 +16937,15 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolver_object_end(r);
         break;
     }
-    case LSF_OBJECT_FIELD:
+    case LSF_OBJECT_FIELD: {
         resolve_walk(r, ((AstNamedNode*)node)->as);
-        resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(AstNamedNode))[0]);
+        void** tail = syntax_tail(node, sizeof(AstNamedNode));
+        resolve_walk(r, (AstNode*)tail[LSF_OBJECT_FIELD_LAYOUT]);
+        resolve_walk(r, (AstNode*)tail[LSF_OBJECT_FIELD_DEFAULT]);
         resolve_diagnostics(r, node);
         resolve_object_field(r, (AstNamedNode*)node);
         break;
+    }
     case LSF_OBJECT_CONTENT:
         resolve_walk(r, ((AstListNode*)node)->item);
         resolve_diagnostics(r, node);

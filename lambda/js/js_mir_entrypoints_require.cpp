@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
+#include "js_source_module.hpp"
 #include "../jube/jube_registry.h"
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_trace_events.hpp"
@@ -2473,8 +2474,83 @@ static Item js_execute_dynamic_import_module(Runtime* runtime,
     return transpile_js_module_to_mir(runtime, source, filename);
 }
 
-// dynamic import() — synchronous load, wrapped in a resolved Promise
+static Item js_source_dynamic_import_job(Item environment) {
+    Item* slots = (Item*)(uintptr_t)environment.item;
+    if (!slots) return ItemError;
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> request(roots, slots[0]), path(roots, slots[1]), status(roots, ItemNull), ns(roots, ItemNull);
+    JsModuleRuntimeState* policy = &js_runtime_state.modules;
+    Runtime* runtime = policy->source_ops->ensure_runtime(policy->source_owner);
+    if (!runtime) status.set(policy->source_ops->error(policy->source_owner,
+        JS_SOURCE_MODULE_TYPE, "import(): module runtime unavailable"));
+    JsSourceModuleRecord* record = NULL;
+    if (!item_is_error(status.get())) status.set(js_module_load_link(runtime, policy->source_ops,
+        policy->source_owner, it2s(path.get())->chars, NULL, 0, &record));
+    if (!item_is_error(status.get())) status.set(js_module_evaluate(record));
+    if (!item_is_error(status.get())) ns.set(js_module_namespace_create(record));
+    if (item_is_error(ns.get())) status.set(ns.get());
+    if (!item_is_error(status.get())) {
+        ModuleDescriptor* completion = record->descriptor->async_cycle_root
+            ? record->descriptor->async_cycle_root : record->descriptor;
+        if (item_is_error(completion->evaluation_error)) status.set(completion->evaluation_error);
+        else status.set(js_p5_chain_dynamic_import(completion->awaited_target, ns.get(), request.get()));
+    }
+    if (item_is_error(status.get())) {
+        status.set(policy->source_ops->error_value(policy->source_owner, status.get()));
+        js_promise_reject_existing(request.get(), status.get());
+    }
+    return make_js_undefined();
+}
+
+static Item js_source_dynamic_import(Item specifier, const char* reference) {
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> value(roots, js_retain_scalar(specifier)), request(roots, js_promise_create_pending()),
+        path(roots, ItemNull), callback(roots, ItemNull), failure(roots, ItemNull);
+    if (item_is_error(request.get())) return request.get();
+    JsModuleRuntimeState* policy = &js_runtime_state.modules;
+    value.set(policy->source_ops->to_string(policy->source_owner, value.get()));
+    if (item_is_error(value.get())) failure.set(value.get());
+    else {
+        Runtime* runtime = policy->source_ops->ensure_runtime(policy->source_owner);
+        String* text = it2s(value.get());
+        if (!runtime || !text || memchr(text->chars, 0, text->len)) {
+            failure.set(policy->source_ops->error(policy->source_owner, JS_SOURCE_MODULE_TYPE,
+                "import(): invalid module request"));
+        } else {
+            char resolved[4096];
+            js_resolve_script_module_path(runtime, reference, text->chars, (int)text->len,
+                resolved, sizeof(resolved));
+            path.set(js_make_string(resolved));
+            if (item_is_error(path.get())) failure.set(path.get());
+        }
+    }
+    if (!item_is_error(failure.get())) {
+        Item* environment = js_alloc_env(2);
+        if (!environment) failure.set(ItemError);
+        else {
+            environment[0] = request.get(); environment[1] = path.get();
+            callback.set(js_new_native_closure(js_source_dynamic_import_job, 0, environment, 2));
+            if (item_is_error(callback.get())) failure.set(callback.get());
+            else js_microtask_enqueue(callback.get());
+        }
+    }
+    if (item_is_error(failure.get())) {
+        failure.set(policy->source_ops->error_value(policy->source_owner, failure.get()));
+        js_promise_reject_existing(request.get(), failure.get());
+    }
+    return request.get();
+}
+
 extern "C" Item js_dynamic_import(Item specifier) {
+    return js_dynamic_import_at(specifier, context ? context->current_file : NULL);
+}
+
+// source policies queue their frontend's loader; the default LJS path stays unchanged.
+extern "C" Item js_dynamic_import_at(Item specifier, const char* reference) {
+    if (js_active_runtime_state && js_runtime_state.modules.source_ops)
+        return js_source_dynamic_import(specifier, reference);
     RootFrame roots(5);
     Rooted<Item> specifier_string_root(roots, js_to_string(specifier));
     if (item_is_error(specifier_string_root.get()) ||
@@ -2493,7 +2569,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
     }
 
     char resolved_path[2048];
-    const char* base_file = context ? context->current_file : NULL;
+    const char* base_file = reference;
     if (base_file && base_file[0] && base_file[0] != '<') {
         jm_resolve_module_path(base_file, spec->chars, (int)spec->len,
                                resolved_path, (int)sizeof(resolved_path));
@@ -2566,7 +2642,6 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // had a pending TLA target captured, return a Promise chained on that
     // target so dynamic-import .then/.finally callbacks fire in spec order
     // (importing modules' callbacks fire after the underlying TLA settles).
-    extern Item js_p5_chain_dynamic_import(Item, Item);
     Item awaited = js_module_get_awaited_target(resolved_spec_root.get());
     if (get_type_id(awaited) == LMD_TYPE_NULL &&
             js_module_needs_async_settle(resolved_spec_root.get())) {
@@ -2580,7 +2655,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
         awaited = js_module_get_awaited_target(resolved_spec_root.get());
     }
     if (get_type_id(awaited) != LMD_TYPE_NULL) {
-        return js_p5_chain_dynamic_import(awaited, namespace_root.get());
+        return js_p5_chain_dynamic_import(awaited, namespace_root.get(), ItemNull);
     }
     // Wrap the namespace in a resolved Promise
     return js_promise_resolve(namespace_root.get());

@@ -13,12 +13,35 @@ pub fn load(pkg) map^ {
     let fonts = c.child(elements,"fontScheme",c.A);
     if (root != null and (root.uri != c.A or root.tag != "theme"))
         raise c.fail("invalid-package","Invalid document theme",pkg.main)
-    else {colors:map([for (entry in c.children(scheme,null,c.A),
+    else {fills:c.children(c.child(c.child(elements,"fmtScheme",c.A),"fillStyleLst",c.A),null,c.A),
+        effects:c.children(c.child(c.child(elements,"fmtScheme",c.A),"effectStyleLst",c.A),null,c.A),
+        colors:map([for (entry in c.children(scheme,null,c.A),
             let rgb = c.child(entry,"srgbClr",c.A), let system = c.child(entry,"sysClr",c.A),
             let value = if (rgb != null) c.attr(rgb,"val","") else c.attr(system,"lastClr","")
             where valid_hex(value)) (entry.tag,value)]),
         fonts:map([for (kind in ["major","minor"])
             (kind,c.attr(c.child(c.child(fonts,kind ++ "Font",c.A),"latin",c.A),"typeface",""))])}
+}
+
+// DrawingML colors use unqualified attributes; unsupported transforms must not become guessed colors.
+pub fn drawing_color(node, theme, placeholder = null) {
+    let colors = c.children(node,null,c.A)
+    let color = c.first(colors)
+    let value = c.attr(color,"val","")
+    let rgb = if (color.tag == "srgbClr") value else if (color.tag == "sysClr") c.attr(color,"lastClr","")
+        else if (color.tag == "schemeClr" and value != "phClr") theme.colors[value] else null;
+    if (len(colors) != 1 or len(c.children(color,null,null)) > 0) null
+    else if (color.tag == "schemeClr" and value == "phClr") placeholder
+    else if (valid_hex(rgb)) "#" ++ rgb else null
+}
+pub fn drawing_fill(properties, style, theme) {
+    let direct = c.child(properties,"solidFill",c.A)
+    let ref = c.child(style,"fillRef",c.A)
+    let index = c.as_int(c.attr(ref,"idx",""),-1)
+    let fill = if (index > 0 and index <= len(theme.fills)) theme.fills[index-1] else null;
+    if (c.child(properties,"noFill",c.A) != null) "transparent"
+    else if (direct != null) drawing_color(direct,theme)
+    else if (fill.tag == "solidFill") drawing_color(fill,theme,drawing_color(ref,theme)) else null
 }
 
 fn modified(rgb, shade, tint) {

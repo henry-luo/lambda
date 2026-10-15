@@ -62,7 +62,7 @@ static RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     return p;
 }
 
-static const char* render_clip_css_value(ViewElement* view) {
+const char* render_clip_css_value(ViewElement* view) {
     if (!view) return nullptr;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     CssDeclaration* declaration = dom_element_get_specified_value(element, CSS_PROPERTY_CLIP_PATH);

@@ -3506,3 +3506,14 @@ TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
     EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_HIT][1], 255u);
     expect_trace_off_same("uri_error_cache", source, output);
 }
+
+TEST(JsOpt, BuiltinQuantifiedClassesUseWideBulkReplace) {
+    const char* source = R"JS(let cases=[['\\d+','é12漢34😀','é#漢#😀'],['\\D+','é12漢34😀','#12#34#'],['\\w+','éAb_漢09😀','é#漢#😀'],['\\W+','éAb_漢09😀','#Ab_#09#'],['\\s+','é\t \u00a0漢\u3000😀','é#漢#😀'],['\\S+','é\t \u00a0漢\u3000😀','#\t \u00a0#\u3000#']];let ok=true;for(let row of cases){let r=new RegExp(row[0],'g');r.lastIndex=99;ok=ok&&row[1].replace(r,'#')===row[2]&&r.lastIndex===0}if(!ok)throw new Error('wide class replacement');console.log('OPT_OK');)JS";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("regexp_wide_bulk_classes", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GE(trace.events[JS_OPT_REGEX_BULK_REPLACE_HIT][1], 6u);
+    expect_trace_off_same("regexp_wide_bulk_classes", source, output, "ast");
+}

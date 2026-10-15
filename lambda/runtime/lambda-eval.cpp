@@ -9,9 +9,11 @@
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "type_contract.hpp"
+#include "binary_schema.hpp"
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
 #include "interp.hpp"
+#include "output_demand.hpp"
 #include "doc_context.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -2167,6 +2169,28 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
         "fn_call_into");
 }
 
+Item fn_call_emit(Function* fn, List* args, List* destination) {
+    RootFrame roots(2);
+    Rooted<Function*> callable(roots, fn);
+    Rooted<List*> output(roots, destination);
+    Item refused = lambda_fn_colour_guard(callable.get(), args ? args->items : nullptr,
+        args ? (int)args->length : 0, LAMBDA_COLOUR_GUARD_CALLEE);
+    if (get_type_id(refused) == LMD_TYPE_ERROR) return refused;
+    if (callable.get() && callable.get()->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED &&
+            ast_output_function((const AstFuncNode*)callable.get()->def)) {
+        int physical = 0;
+        bool adapter = false;
+        Item checked = lambda_dynamic_check_signature(callable.get(), args ? (int)args->length : 0,
+            LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call_emit", &physical, &adapter);
+        if (get_type_id(checked) == LMD_TYPE_ERROR) return checked;
+        if (!adapter) return interp_call_emit(callable.get(), args ? args->items : nullptr,
+            args ? (int)args->length : 0, output.get());
+    }
+    LAMBDA_SCALAR_HOME(result_home);
+    Item value = fn_call_into(callable.get(), args, &result_home);
+    return output_content_append(output.get(), value);
+}
+
 // S12.3.4 `call(f, args)` — dynamic application. Shared body for both colours;
 // `caller_is_proc` is fixed by the ENCLOSING context at lowering time, which is
 // what selects the error convention (S12.3.4: fn returns, pn raises). The
@@ -2454,6 +2478,15 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
     context->validator->set_fast_mode(false);
     if (validation) *validation = result;
     return result && result->valid;
+}
+
+static Bool runtime_type_membership(Item value, Type* expected) {
+    uint64_t failure_version = virtual_failure_version;
+    ValidationResult* result = context && context->validator
+        ? schema_validator_validate_type(context->validator, value.to_const(), expected) : nullptr;
+    // a failed virtual read is an error, rather than a negative type match.
+    if (virtual_failure_version != failure_version) return BOOL_ERROR;
+    return result && result->valid ? BOOL_TRUE : BOOL_FALSE;
 }
 
 static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
@@ -2854,6 +2887,10 @@ Bool fn_is(Item a, Item b) {
     }
 
     Type* b_type = b.type;
+    if (const BinarySchema* schema = binary_schema_from_type(b_type)) {
+        if (get_type_id(virtual_content_error(a)) == LMD_TYPE_ERROR) return BOOL_ERROR;
+        return binary_schema_matches(a, schema) ? BOOL_TRUE : BOOL_FALSE;
+    }
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         TypePattern* pattern = (TypePattern*)b_type;
@@ -2891,8 +2928,7 @@ Bool fn_is(Item a, Item b) {
     }
 
     if (b_type->kind == TYPE_KIND_UNARY || b_type->kind == TYPE_KIND_BINARY) {
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+        return runtime_type_membership(a, b_type);
     }
 
     // a range type may arrive bare (type lists register it raw) or wrapped
@@ -2915,8 +2951,7 @@ Bool fn_is(Item a, Item b) {
     Type* actual_type = item_static_type_for_is(a, &actual_type_scratch);
     if (type_b->type->type_id != LMD_TYPE_NUM_SIZED &&
             (type_b->type->kind == TYPE_KIND_UNARY || type_b->type->kind == TYPE_KIND_BINARY)) {
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+        return runtime_type_membership(a, type_b->type);
     }
 
     switch (type_b->type->type_id) {
@@ -2984,8 +3019,7 @@ Bool fn_is(Item a, Item b) {
                 (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
         }
         {
-            ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-            return result->valid ? BOOL_TRUE : BOOL_FALSE;
+            return runtime_type_membership(a, type_b->type);
         }
     case LMD_TYPE_FUNC:
         return lambda_function_admitted(a, a_type_id, type_b->type)
@@ -3826,7 +3860,9 @@ Bool fn_sym_eq_ptr(Symbol* a, Symbol* b) {
 
 // 3-states comparison (public entry point)
 Bool fn_eq(Item a_item, Item b_item) {
-    return fn_eq_depth(a_item, b_item, 0, EQUALITY_VALUE);
+    uint64_t failure_version = virtual_failure_version;
+    Bool result = fn_eq_depth(a_item, b_item, 0, EQUALITY_VALUE);
+    return virtual_failure_version == failure_version ? result : BOOL_ERROR;
 }
 
 Bool fn_eq_strict(Item a_item, Item b_item) {
@@ -11891,7 +11927,8 @@ TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target
 static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     TypeId container_type = get_type_id(map_item);
     TypeId key_type = get_type_id(key);
-    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT && container_type != LMD_TYPE_ARRAY) ||
+    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT &&
+            container_type != LMD_TYPE_ARRAY && container_type != LMD_TYPE_ARRAY_NUM) ||
             (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL)) {
         return false;
     }
@@ -11915,7 +11952,7 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
     Map* map = map_item.map;
     if (!map || value_type == LMD_TYPE_ERROR) return false;
-    if (!is_element && map->map_kind != MAP_KIND_PLAIN &&
+    if (!is_element && container_type != LMD_TYPE_ARRAY_NUM && map->map_kind != MAP_KIND_PLAIN &&
             map->map_kind != MAP_KIND_ORDERED) return false;
     // UI-mode elements keep their attribute buffers in the context arena, which
     // only the private path allocates from
@@ -11924,8 +11961,9 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     Input* tree = runtime_shape_tree();
     // a tree node takes its kind from its parent, so a container whose type is
     // of the other kind keeps the private path
-    // an Array's attribute face is a TypeMap; its indexed storage has a separate contract.
-    TypeId shape_kind = container_type == LMD_TYPE_ARRAY ? LMD_TYPE_MAP : container_type;
+    // both array carriers use a TypeMap attribute face; ArrayNum's map_kind selects its numeric lane.
+    TypeId shape_kind = container_type == LMD_TYPE_ARRAY || container_type == LMD_TYPE_ARRAY_NUM
+        ? LMD_TYPE_MAP : container_type;
     if (!old_type || !tree || old_type->type_id != shape_kind) return false;
     // `{}`, a fresh map and a computed-key literal all start at the root, so
     // they share one path; every other type is the parent itself
@@ -11969,7 +12007,8 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     // upcast below is valid and only the attribute face is touched (the content
     // items are left alone).
     TypeId extend_tid = get_type_id(map_item);
-    if (!lambda_type_id_has_attr_face(extend_tid) && extend_tid != LMD_TYPE_ARRAY) return false;
+    if (!lambda_type_id_has_attr_face(extend_tid) && extend_tid != LMD_TYPE_ARRAY &&
+            extend_tid != LMD_TYPE_ARRAY_NUM) return false;
     Map* map = map_item.map;
     if (!map || !map->type || !context || !context->pool) return false;
     const char* key_chars = NULL;

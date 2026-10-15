@@ -81,6 +81,7 @@ static InlineProp make_inline_prop_default() {
     // inline consumers use Visibility, not the CSS keyword enumeration.
     value.visibility = VIS_VISIBLE;
     value.mix_blend_mode = CSS_VALUE_NORMAL;
+    value.isolation = CSS_VALUE_AUTO;
     return value;
 }
 

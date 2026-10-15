@@ -877,6 +877,19 @@ static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
     arraylist_free(views);
 }
 
+static bool target_negative_layer(void* context, View* owner, View* layer) {
+    EventContext* evcon = (EventContext*)context;
+    View* saved = evcon->negative_path;
+    evcon->negative_path = lam::up(layer);
+    target_stacking_view(evcon, radiant_stack_path_child(owner, layer));
+    evcon->negative_path = lam::up(saved);
+    return !evcon->target;
+}
+
+static void target_negative_z_descendants(EventContext* evcon, ViewBlock* block) {
+    if (!evcon->target) radiant_stack_visit_negative_z_descendants(block, true, evcon, target_negative_layer);
+}
+
 static void target_custom_layout_children(EventContext* evcon, ViewBlock* block) {
     if (!evcon || !block || !block->custom_layout_paint_prop()) return;
     RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
@@ -1146,7 +1159,9 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
         if (view_span->font) {
             setup_font(evcon->ui_context, &evcon->font, view_span->font);
         }
-        target_children(evcon, view);
+        if (evcon->negative_path) target_stacking_view(evcon,
+            radiant_stack_path_child(view_span, evcon->negative_path));
+        else target_children(evcon, view);
     }
     evcon->font = pa_font;
     log_leave();
@@ -1197,6 +1212,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         return;
     }
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
+    bool path_only = evcon->negative_path && evcon->negative_path != static_cast<View*>(block);
+    if (evcon->negative_path == static_cast<View*>(block)) evcon->negative_path = nullptr;
     float pointer_x = evcon->event.mouse_position.x, pointer_y = evcon->event.mouse_position.y;
     RdtMatrix matrix, inverse;
     if (view_get_transform_matrix(static_cast<View*>(block), &matrix)) {
@@ -1236,7 +1253,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     View* view = NULL;
     bool hover = false;
     if (block->scroller && block->scroll_mut()->pane) {
-        hover = !self_unhittable && scrollpane_target(evcon, block);
+        hover = !path_only && !self_unhittable && scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
@@ -1285,6 +1302,11 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // children, positioned ones included, paint inside the clip; the block's
     // own border box stays hittable below
     if (clipped_out || view_contents_are_skipped(block)) goto RETURN;
+
+    if (path_only) {
+        target_stacking_view(evcon, radiant_stack_path_child(block, evcon->negative_path));
+        goto RETURN;
+    }
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
@@ -1413,6 +1435,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
+    target_negative_z_descendants(evcon, block);
+
     RETURN:
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
@@ -1429,7 +1453,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
-    if (!self_unhittable && !evcon->target &&
+    if (!path_only && !self_unhittable && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),

@@ -20,16 +20,21 @@ pub fn graphic(node) {
     let style = {*:stroke(node),fill:if (model.attr(node,"pattern") == "solid") model.attr(node,"fill") else "url(#fill-" ++ model.id(node) ++ ")"};
     shapes.graphic(model.attr(node,"variant"),model.box(node),style)
 }
-pub fn marker(node,side) {
-    let kind = model.attr(node,side ++ "-arrow")
+// previews and diagram connectors share the same marker geometry.
+fn arrow_marker(kind,target) {
     let paths = {triangle:"M 0 0 L 12 6 L 0 12 Z",open:"M 1 1 L 11 6 L 1 11",
         diamond:"M 0 6 L 6 0 L 12 6 L 6 12 Z",bar:"M 11 0 V 12"};
-    if (kind == "none") null else <marker id:"arrow-" ++ side ++ "-" ++ model.id(node),viewBox:"0 0 12 12",
+    if (kind == "none") null else <marker id:target,viewBox:"0 0 12 12",
         refX:12,refY:6,markerWidth:14,markerHeight:14,markerUnits:"userSpaceOnUse",orient:"auto-start-reverse",overflow:"visible",
         (if (kind == "circle") <circle cx:6,cy:6,r:5,fill:"context-stroke">
         else <path d:paths[kind],fill:if (kind == "open" or kind == "bar") "none" else "context-stroke",
             stroke:"context-stroke",'stroke-width':1.4,'stroke-linecap':"round",'stroke-linejoin':"round">)>
 }
+pub fn marker(node,side) => arrow_marker(model.attr(node,side ++ "-arrow"),"arrow-" ++ side ++ "-" ++ model.id(node))
+pub fn arrow_preview(kind,side,target) => <svg class:"arrow-preview",width:58,height:22,viewBox:"0 0 64 24",'aria-hidden':"true",
+    <defs (arrow_marker(kind,target))>
+    <path d:"M 10 12 H 54",fill:"none",stroke:"currentColor",'stroke-width':1.6,
+        ["marker-" ++ side]:if (kind == "none") "none" else "url(#" ++ target ++ ")">>
 pub fn text(node,b,label,edge=false) {
     let lines = split(label,"\n")
     let size = model.attr(node,"font-size")

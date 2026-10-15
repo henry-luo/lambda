@@ -3142,7 +3142,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
  * Get pseudo-element content with counter resolution
  * This version handles counter() and counters() functions
  */
-struct DomContentBindings { DomElement* element; void* counters; };
+struct DomContentBindings { DomElement* element; void* counters; DomContentFunctionHook hook; void* hook_context; };
 
 static const char* dom_content_attribute(void* context, const char* name) {
     return ((DomContentBindings*)context)->element->get_attribute(name);
@@ -3152,6 +3152,11 @@ static const char* dom_content_quote(void* context, bool open, int depth) {
 }
 static bool dom_content_function(void* context, const CssFunction* function, StrBuf* text) {
     DomContentBindings* bindings = (DomContentBindings*)context;
+    if (bindings->hook) {
+        bool handled = false;
+        bool ok = bindings->hook(bindings->hook_context, bindings->element, function, text, &handled);
+        if (handled) return ok;
+    }
     bool multiple = css_function_name_is(function, "counters");
     if (!multiple && !css_function_name_is(function, "counter")) return true;
     if (!bindings->counters || function->arg_count < (multiple ? 2 : 1)) return true;
@@ -3170,16 +3175,16 @@ static bool dom_content_function(void* context, const CssFunction* function, Str
 }
 
 bool dom_element_append_content(DomElement* element, const CssValue* value,
-        void* counters, int* quote_depth, StrBuf* text) {
+        void* counters, int* quote_depth, StrBuf* text, DomContentFunctionHook hook, void* hook_context) {
     if (!element) return false;
-    DomContentBindings data = {element, counters};
+    DomContentBindings data = {element, counters, hook, hook_context};
     CssContentBindings bindings = {&data, dom_content_attribute, dom_content_quote, dom_content_function};
     return css_content_append(value, &bindings, quote_depth, text);
 }
 
 const char* dom_element_get_pseudo_element_content_with_counters(
         DomElement* element, int pseudo_element, void* counter_context, Arena* arena,
-        int* quote_depth) {
+        int* quote_depth, DomContentFunctionHook hook, void* hook_context) {
     if (!element || !arena) return nullptr;
     PseudoStyleKind kind = pseudo_element == 1 ? PSEUDO_STYLE_BEFORE : pseudo_element == 2 ? PSEUDO_STYLE_AFTER : PSEUDO_STYLE_MARKER;
     if (pseudo_element != 1 && pseudo_element != 2 && pseudo_element != 6) return nullptr;
@@ -3190,7 +3195,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     if (!text) return nullptr;
     int local_quote_depth = 0;
     bool ok = dom_element_append_content(element, declaration->value, counter_context,
-        quote_depth ? quote_depth : &local_quote_depth, text);
+        quote_depth ? quote_depth : &local_quote_depth, text, hook, hook_context);
     const char* result = ok ? arena_dup_n(arena, text->str ? text->str : "", text->length) : nullptr;
     strbuf_free(text);
     return result;

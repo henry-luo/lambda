@@ -3533,6 +3533,9 @@ static DomDocument* create_layout_css_document(
         return nullptr;
     }
     css_engine_set_viewport(engine, viewport_width, viewport_height);
+    // the document keeps its engine so later recascades (viewport, print media,
+    // container queries) see the same rules the loader cascaded with
+    document->services.cached_css_engine = engine;
     if (out_engine) *out_engine = engine;
     return document;
 }

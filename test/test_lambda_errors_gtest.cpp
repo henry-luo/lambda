@@ -1801,6 +1801,32 @@ TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedStatically) {
         "error[E207]: argument 1 expected pn, got fn");
 }
 
+TEST_F(NegativeScriptTest, ElementConstructionRejectsProceduresInsidePn) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/element_calls_pn.ls", true,
+        "error[E224]");
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/negative/semantic/element_calls_pn.ls", nullptr};
+    ShellOptions options = {};
+    options.timeout_ms = 10000;
+    ShellResult dumped = shell_exec(LAMBDA_EXE, args, &options);
+    EXPECT_NE(dumped.exit_code, 0);
+    EXPECT_FALSE(dumped.timed_out);
+    EXPECT_NE(strstr(dumped.stderr_buf ? dumped.stderr_buf : "", "error[E224]"), nullptr);
+    shell_result_free(&dumped);
+}
+
+TEST_F(NegativeScriptTest, ElementConstructionGuardsDynamicProcedures) {
+    static const char* const scripts[] = {
+        "test/lambda/negative/runtime/element_dynamic_content_pn.ls",
+        "test/lambda/negative/runtime/element_dynamic_attribute_pn.ls",
+        "test/lambda/negative/runtime/element_polymorphic_pn.ls",
+    };
+    for (const char* script : scripts) {
+        ExpectRejectedOnEveryTier(script, true,
+            "error[E224]: cannot call a procedure (pn) from a function (fn): load_parts");
+    }
+}
+
 TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedAtRuntime) {
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/fn_pn_colour_mismatch.ls",
         "expected fn, got pn logsq");

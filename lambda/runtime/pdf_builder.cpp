@@ -19,6 +19,8 @@ struct PDFBuilder : MarkOutputBuilder {
     LambdaErrorCode failure;
     const char* failure_message;
     bool finished;
+    bool measuring;
+    size_t measured_size;
 };
 
 static void pdf_fail(PDFBuilder* builder, const char* message,
@@ -41,7 +43,17 @@ static bool pdf_reserve(PDFBuilder* builder, size_t size) {
 }
 
 static void pdf_write(PDFBuilder* builder, const char* data, size_t size) {
+    if (builder->measuring) {
+        if (size > SIZE_MAX - builder->measured_size) pdf_fail(builder, "PDF byte length overflow");
+        else if (!builder->failure) builder->measured_size += size;
+        return;
+    }
     if (pdf_reserve(builder, size)) strbuf_append_str_n(builder->buffer, data, size);
+}
+
+static void pdf_zeros(PDFBuilder* builder, size_t size) {
+    if (builder->measuring) { pdf_write(builder, nullptr, size); return; }
+    if (pdf_reserve(builder, size)) strbuf_append_char_n(builder->buffer, '0', size);
 }
 
 static void pdf_text(PDFBuilder* builder, const char* text) {
@@ -49,6 +61,7 @@ static void pdf_text(PDFBuilder* builder, const char* text) {
 }
 
 static void pdf_hex(PDFBuilder* builder, const void* data, size_t size) {
+    if (builder->measuring && size <= SIZE_MAX / 2) { pdf_write(builder, nullptr, size * 2); return; }
     if (size > SIZE_MAX / 2 || !pdf_reserve(builder, size * 2)) {
         pdf_fail(builder, "PDF hex string allocation failed", ERR_OUT_OF_MEMORY);
         return;
@@ -77,7 +90,11 @@ static void pdf_string(PDFBuilder* builder, String* string) {
         if ((unsigned char)string->chars[i] >= 128) { ascii = false; break; }
     }
     if (ascii) {
-        if (!escape_append_pdf_literal(builder->buffer, string->chars, string->len))
+        size_t size = 0;
+        if (builder->measuring) {
+            if (escape_pdf_literal_size(string->chars, string->len, &size)) pdf_write(builder, nullptr, size);
+            else pdf_fail(builder, "PDF literal string length overflow");
+        } else if (!escape_append_pdf_literal(builder->buffer, string->chars, string->len))
             pdf_fail(builder, "PDF literal string allocation failed", ERR_OUT_OF_MEMORY);
         return;
     }
@@ -109,8 +126,7 @@ static void pdf_number_text(PDFBuilder* builder, const char* number) {
     int digit = 0;
     if (point <= 0) {
         pdf_text(builder, "0.");
-        if (pdf_reserve(builder, (size_t)-point))
-            strbuf_append_char_n(builder->buffer, '0', (size_t)-point);
+        pdf_zeros(builder, (size_t)-point);
     }
     for (const char* p = number; p < exponent && !builder->failure; p++) {
         if (*p == '.') continue;
@@ -118,8 +134,7 @@ static void pdf_number_text(PDFBuilder* builder, const char* number) {
         pdf_write(builder, p, 1);
         digit++;
     }
-    if (point > digit && pdf_reserve(builder, (size_t)(point - digit)))
-        strbuf_append_char_n(builder->buffer, '0', (size_t)(point - digit));
+    if (point > digit) pdf_zeros(builder, (size_t)(point - digit));
 }
 
 static void pdf_number(PDFBuilder* builder, Item item) {
@@ -139,8 +154,14 @@ static void pdf_number(PDFBuilder* builder, Item item) {
             return;
         }
         if (get_type_id(item) == LMD_TYPE_INT) {
-            if (pdf_reserve(builder, DBL_MAX_10_EXP + 4))
-                print_int_value(builder->buffer, part.float_value);
+            // integer formatting has bounded scratch, shared by both destination modes.
+            StrBuf* number_buffer = strbuf_new_cap(DBL_MAX_10_EXP + 4);
+            if (!number_buffer) pdf_fail(builder, "PDF number allocation failed", ERR_OUT_OF_MEMORY);
+            else {
+                print_int_value(number_buffer, part.float_value);
+                pdf_write(builder, number_buffer->str, number_buffer->length);
+                strbuf_free(number_buffer);
+            }
             return;
         }
         lambda_double_to_shortest(part.float_value, number, sizeof(number));
@@ -288,6 +309,8 @@ static void pdf_builder_append(MarkOutputBuilder* base, Item item) {
     } else if (type == LMD_TYPE_BINARY) {
         Binary* binary = item.get_safe_binary();
         if (binary) { data = (const char*)binary_data(binary); size = binary_length(binary); }
+    } else if (type == LMD_TYPE_ELEMENT && virtual_output_bytes(item, &data, &size)) {
+        // completed PDF values compose as immutable byte contributions.
     } else {
         pdf_fail(builder, "PDF file content requires strings, binaries, maps, null, or lists of them");
         return;
@@ -313,7 +336,7 @@ static bool pdf_builder_finish(MarkOutputBuilder* base) {
 
 static bool pdf_builder_bytes(const MarkOutputBuilder* base, const char** data, size_t* size) {
     const PDFBuilder* builder = static_cast<const PDFBuilder*>(base);
-    if (!builder->finished || builder->failure) return false;
+    if (!builder->finished || builder->failure || builder->measuring) return false;
     *data = builder->buffer->str;
     *size = builder->buffer->length;
     return true;
@@ -325,17 +348,62 @@ static void pdf_builder_destroy(MarkOutputBuilder* base) {
     mem_free(builder);
 }
 
+static Item pdf_builder_error(const MarkOutputBuilder* base) {
+    const PDFBuilder* builder = static_cast<const PDFBuilder*>(base);
+    return builder->failure ? err2it_or_error(err_create_heap(builder->failure,
+        builder->failure_message, nullptr)) : ItemNull;
+}
+
+static size_t pdf_builder_size(const MarkOutputBuilder* base) {
+    const PDFBuilder* builder = static_cast<const PDFBuilder*>(base);
+    return builder->measuring ? builder->measured_size : builder->buffer->length;
+}
+
+static bool pdf_builder_rewind(MarkOutputBuilder* base, size_t size) {
+    PDFBuilder* builder = static_cast<PDFBuilder*>(base);
+    if (builder->finished || size > pdf_builder_size(base)) return false;
+    if (builder->measuring) builder->measured_size = size;
+    else { builder->buffer->length = size; builder->buffer->str[size] = '\0'; }
+    builder->failure = ERR_OK;
+    builder->failure_message = nullptr;
+    return true;
+}
+
 static const MarkOutputBuilderOps pdf_builder_ops = {
-    pdf_builder_append, pdf_builder_finish, pdf_builder_bytes, pdf_builder_destroy
+    pdf_builder_append, pdf_builder_finish, pdf_builder_bytes, pdf_builder_destroy,
+    pdf_builder_error, pdf_builder_size, pdf_builder_rewind
 };
 
-MarkOutputBuilder* pdf_builder_create() {
+MarkOutputBuilder* pdf_builder_create(bool measuring) {
     PDFBuilder* builder = (PDFBuilder*)mem_calloc(1, sizeof(PDFBuilder), MEM_CAT_FORMAT);
     if (!builder) return NULL;
     builder->ops = &pdf_builder_ops;
+    builder->measuring = measuring;
     builder->buffer = strbuf_new();
     if (!builder->buffer) { mem_free(builder); return NULL; }
     return builder;
+}
+
+Item output_content_append(List* destination, Item value) {
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    list_push_spread(destination, value);
+    MarkOutputBuilder* builder = container_is_virtual_list(destination)
+        ? virtual_output_builder(destination) : nullptr;
+    return builder && builder->ops->error ? builder->ops->error(builder) : ItemNull;
+}
+
+uint64_t output_content_checkpoint(List* destination) {
+    MarkOutputBuilder* builder = container_is_virtual_list(destination) ? virtual_output_builder(destination) : nullptr;
+    return builder && builder->ops->size ? builder->ops->size(builder) : 0;
+}
+
+void output_content_rewind(List* destination, uint64_t size) {
+    MarkOutputBuilder* builder = container_is_virtual_list(destination) ? virtual_output_builder(destination) : nullptr;
+    if (builder && builder->ops->rewind) builder->ops->rewind(builder, (size_t)size);
+}
+
+Bool output_content_is_virtual(List* destination) {
+    return destination && container_is_virtual_list(destination) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 void elmt_content_begin(Element* element) {

@@ -945,7 +945,8 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
             }
         } else {
             // Append into the retained builder; unscoped scratch cannot live inside an inline trial.
-            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf);
+            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf,
+                lycon->paged ? paged_content_function : nullptr, lycon);
         }
     }
     if (text_buf->length > 0) {
@@ -1335,7 +1336,7 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     if (apply_counters) apply_pseudo_counter_ops(lycon, style);
     const char* content = dom_element_get_pseudo_element_content_with_counters(
         origin, pseudo, lycon->counter_context, lycon->pass_arena,
-        &lycon->counter_context->quote_depth);
+        &lycon->counter_context->quote_depth, lycon->paged ? paged_content_function : nullptr, lycon);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
     DomNode* first = pseudo_element->first_child;
@@ -4624,7 +4625,7 @@ static void layout_resolve_auto_margins_after_width_change(
     block->x += block->boundary()->margin.left - old_margin_left;
 }
 
-static void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block) {
+void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.advance_y = block->height;
     lycon->block.advance_y -= layout_axis_decoration_end(block->bound, LAYOUT_AXIS_Y);
     if (block->display.inner == CSS_VALUE_FLEX && block->is_element() && block->scroller) {
@@ -7527,6 +7528,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->blk->vertical_geometry_published = false;
     }
     block->x = pa_line->left;  block->y = pa_block->advance_y;
+    // a page flow consumes forced breaks and a full fragmentainer before the box is placed
+    if (lycon->paged) paged_block_before(lycon, block, pa_block);
     bool is_float = layout_position_is_floated(block->position);
     *out_original_margin_top = 0.0f;
     *out_sibling_margin_collapsed_before_layout = false;
@@ -10490,6 +10493,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     break;
                 }
                 bool parent_child_collapsed = false;
+                // the post-hoc collapses below move an already laid out subtree;
+                // a page flow re-anchors the struts inside it afterwards
+                ViewBlock* paged_parent = !lycon->paged ? nullptr :
+                    collapse_parent_view && collapse_parent_view->is_block()
+                    ? lam::view_require_block(collapse_parent_view)
+                    : layout_nearest_block_ancestor(block->parent_view());
+                float paged_y_before = block->y;
+                float paged_parent_y_before = paged_parent ? paged_parent->y : 0.0f;
                 if (first_in_flow_child == block) {  // first in-flow child
                     // CSS Box 4 §margin-trim: block-start trims the first child's block-start
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
@@ -10609,6 +10620,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                     }
                 }
+                if (lycon->paged) {
+                    float moved = block->y - paged_y_before +
+                        (paged_parent ? paged_parent->y - paged_parent_y_before : 0.0f);
+                    if (moved != 0.0f) paged_block_moved(lycon, block, moved);
+                }
                 // CSS 2.2 Section 8.3.1: Self-collapsing blocks
                 // CSS 2.1 §8.3.1: Elements with clearance CAN be self-collapsing.
                 bool is_self_collapsing = layout_block_is_self_collapsing(block);
@@ -10703,6 +10719,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.left + layout_block_child_width_contribution(
                         &lycon->block, block));
             }
+            // the parent cursor passed the child: a page flow applies break-after,
+            // monolithic and keep rules while the parent is still open
+            if (lycon->paged) paged_block_after(lycon, block);
             if (!is_float) {
                 assert(lycon->line.is_line_start);
             }

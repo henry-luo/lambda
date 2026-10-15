@@ -51,7 +51,7 @@ static Type* ndim_plain_leaf(Type* operand, int layers) {
 // or a character allocates, so the container stays rooted across the walk.
 static ValidationResult* validate_sequence_elements(SchemaValidator* validator,
         Item container, int64_t count, Type* operand_type) {
-    TypeType wrapper;
+    TypeType wrapper = {};
     wrapper.type_id = LMD_TYPE_TYPE;
     wrapper.type = operand_type;
     RootFrame roots(1);
@@ -104,7 +104,7 @@ static ValidationResult* validate_single_item_occurrence(
         // Validate the single item against the operand type
         Type* operand_type = unwrap_type(type_unary->operand);
         if (operand_type) {
-            TypeType temp_wrapper;
+            TypeType temp_wrapper = {};
             temp_wrapper.type_id = LMD_TYPE_TYPE;
             temp_wrapper.type = operand_type;
             return validate_against_base_type(validator, item, &temp_wrapper);
@@ -347,7 +347,7 @@ static ValidationResult* validate_list_occurrence(
 
     // Validate each list element
     if (list && count > 0) {
-        TypeType temp_wrapper;
+        TypeType temp_wrapper = {};
         temp_wrapper.type_id = LMD_TYPE_TYPE;
         temp_wrapper.type = operand_type;
 
@@ -378,9 +378,9 @@ ValidationResult* validate_occurrence_type(
               type_unary->op, type_unary->min_count, type_unary->max_count);
 
     TypeId item_type_id = item.type_id();
-
     // Check if item is a list/array/range
     bool is_container = (item_type_id == LMD_TYPE_ARRAY ||
+                         item_type_id == LMD_TYPE_VARRAY ||
                          item_type_id == LMD_TYPE_ARRAY_NUM ||
                          item_type_id == LMD_TYPE_RANGE);
 
@@ -398,8 +398,18 @@ ValidationResult* validate_occurrence_type(
     }
 
     // Handle typed arrays specially
-    ValidationResult* as_run =
-        item_type_id == LMD_TYPE_ARRAY_NUM
+    ValidationResult* as_run = nullptr;
+    if (item_type_id == LMD_TYPE_VARRAY) {
+        if (ValidationResult* failure = prepare_virtual_validation(validator, item)) return failure;
+        Item value = {.item = item.item};
+        int64_t count = varray_count(value.varray);
+        as_run = create_validation_result(validator->get_pool());
+        Type* operand = unwrap_type(type_unary->operand);
+        if (check_count_constraint(count, get_container_count_constraint(type_unary), as_run, validator, "Array") && operand)
+            as_run = validate_sequence_elements(validator, value, count, operand);
+        else as_run->valid = false;
+        // virtual arrays also reach the whole-container run-of-one fallback below.
+    } else as_run = item_type_id == LMD_TYPE_ARRAY_NUM
             ? validate_array_num_occurrence(validator, item.array_num, type_unary)
         : item_type_id == LMD_TYPE_RANGE
             ? validate_range_occurrence(validator, item.range, type_unary)
@@ -417,7 +427,7 @@ ValidationResult* validate_occurrence_type(
             bounds.min <= 1 && (bounds.max < 0 || bounds.max >= 1)) {
         Type* operand = unwrap_type(type_unary->operand);
         if (operand) {
-            TypeType wrapper;
+            TypeType wrapper = {};
             wrapper.type_id = LMD_TYPE_TYPE;
             wrapper.type = operand;
             ValidationResult* as_one = validate_against_base_type(validator, item, &wrapper);

@@ -1,0 +1,7 @@
+[{
+    file: "biz-plan1",
+    checks: [true, true, true, true, true, true, true, true, true, true, true, true, true]
+  }, {
+    file: "biz-plan2",
+    checks: [true, true, true, true, true, true, true, true, true, true, true, true, true]
+  }]

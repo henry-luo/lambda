@@ -9,6 +9,7 @@
 
 #include "interp.hpp"
 #include "../io/mark_output_builder.hpp"
+#include "output_demand.hpp"
 #include <signal.h>
 #include "compiler_worker_stack.h"
 #include "lambda-root-frame.hpp"
@@ -760,6 +761,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
 static void exec_declaration(InterpFrame* f, AstNode* node);
+static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destination);
 
 static bool interp_is_list_producer(AstNode* node) {
     node = ast_unwrap_primary(node);
@@ -1979,7 +1981,8 @@ static Item interp_check_contract_return(InterpFrame* f, AstCallNode* node,
     return lambda_type_check(result_root.get(), contract, "function return");
 }
 
-static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
+static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
+        List* output_destination = nullptr, bool* emitted = nullptr) {
     int source_argc = node->interp_call_shape_planned
         ? (int)node->interp_source_argc : 0;
     if (!node->interp_call_shape_planned) {
@@ -2582,6 +2585,10 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     List args = {};
     args.length = dispatch_argc;
     args.items = (Item*)(void*)words;
+    if (output_destination) {
+        if (emitted) *emitted = true;
+        return fn_call_emit(fn, dispatch_argc ? &args : nullptr, output_destination);
+    }
     uint64_t result_home = 0;
     Item result = fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
     // LR12-11: same call-site mark as the borrowed path above
@@ -3189,19 +3196,24 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
 // One handler evaluation owns one operand completion. The error arm is a
 // local branch on that completion; it does not use a recovery boundary and a
 // failure produced by the body remains the body's own returned outcome.
-static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
-    Scratch operand(f);
+static Item eval_handler(InterpFrame* f, AstHandlerNode* handler, uint64_t* destination = nullptr) {
+    // the operand is live during evaluation, before the planned arm scratch
+    // window starts; give it an independent precise root.
+    RootFrame roots(1);
+    Rooted<Item> operand(roots, ItemNull);
+    uint64_t checkpoint = destination ? output_content_checkpoint((List*)(uintptr_t)*destination) : 0;
     bool local_fault_operand = handler->is_statement && f->fn &&
         f->fn->node_type == AST_NODE_PROC;
-    operand.set(local_fault_operand
+    operand.set(destination ? interp_emit_output(f, handler->operand, destination) : local_fault_operand
         ? interp_eval_local_fault_operand(f, handler->operand)
         : eval_expr(f, handler->operand));
     if (interp_frame_pending(f)) return operand.get();
 
     Item operand_value = operand.get();
     if (item_is_error(operand_value)) {
+        if (destination) output_content_rewind((List*)(uintptr_t)*destination, checkpoint);
         InterpErrorContextGuard error_scope(f->st, operand.home());
-        Item body_value = eval_expr(f, handler->body);
+        Item body_value = destination ? interp_emit_output(f, handler->body, destination) : eval_expr(f, handler->body);
         // A statement handler discards only a normal arm result. An error
         // created by the selected body is a fresh completion and must leave
         // this activation instead of being converted to statement null.
@@ -3553,6 +3565,8 @@ typedef struct ForCtx {
     AstForNode*  node;
     uint64_t*    output;    // rooted Array* accumulator slot, NULL when discarded
     uint64_t*    keys;      // rooted Array* sort-key stream for ordered expressions
+    uint64_t*    destination;
+    Rooted<Item>* output_error;
     // D8.1.1v18: this statement is the activation's handoff loop, entered with
     // the frame's scratch at `statement_scratch` (its own slots sit above it)
     bool         handoff;
@@ -3591,6 +3605,10 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
 // `fn_group_by_keys_items` has replaced the row scope with the `into` value.
 static bool interp_for_emit_value(ForCtx* fc) {
     InterpFrame* f = fc->f;
+    if (fc->destination) {
+        fc->output_error->set(interp_emit_output(f, fc->node->then, fc->destination));
+        return !interp_frame_pending(f) && !item_is_error(fc->output_error->get());
+    }
     // a for body is an item position: a nested for splices (S2.5.2v2)
     Item value = interp_eval_sequence_item(f, fc->node->then);
     if (interp_frame_pending(f)) return false;
@@ -4109,7 +4127,8 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
     return interp_for_finalize_output(f, for_node, out_slot.home(), key_slot.home());
 }
 
-static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded);
+static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded,
+    uint64_t* destination = nullptr);
 
 // A for-expression is a list whatever its clauses (S2.5.2v2): none is null
 // (or, in an item position, the skip marker), one is its item (S2.5.5v2).
@@ -4120,13 +4139,18 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
     return item_position ? list_collapse_item(result) : list_collapse_value(result);
 }
 
-static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded) {
+static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded,
+        uint64_t* destination) {
     AstLoopNode* loop = (AstLoopNode*)for_node->loop;
     if (!loop) return ItemNull;
 
     ForCtx fc = {};
     fc.f = f;
     fc.node = for_node;
+    RootFrame roots(1);
+    Rooted<Item> output_error(roots, ItemNull);
+    fc.destination = destination;
+    fc.output_error = &output_error;
     fc.statement_scratch = f->scratch_top;
     // A procedural `for` statement still runs its body, but its comprehension
     // stream is dead when the enclosing block discards it.
@@ -4155,6 +4179,7 @@ static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_de
     // D8.1.1v18: a numbered statement walks under its handoff scope
     if (for_node->interp_handoff_ordinal) interp_for_handoff_walk(&fc, loop);
     else interp_for_level(&fc, loop);
+    if (destination) return output_error.get();
     if (!result_demanded) return ItemNull;
 
     return interp_for_finalize_output(f, for_node, out_slot.home(), key_slot.home());
@@ -4249,6 +4274,12 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
         // as MIR's element lowering does.
         AstListNode* content_list = (AstListNode*)node->content;
         for (AstNode* c = content_list ? content_list->item : NULL; c; c = c->next) {
+            if (container_is_virtual_list(acc.get().container)) {
+                Item status = interp_emit_output(f, c, acc.home());
+                if (interp_frame_pending(f)) return acc.get();
+                if (item_is_error(status)) return status;
+                continue;
+            }
             Item value = interp_eval_sequence_item(f, c);
             if (interp_frame_pending(f)) return acc.get();
             // Re-read the element: content evaluation is a safepoint.
@@ -4460,21 +4491,18 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
 // A list block is not a content block: `(let x = …, body)` keeps its bindings
 // in `declare` and its values in `item`, and it never runs side-effect
 // statements. Mirrors transpile_list.
+static void interp_exec_list_declarations(InterpFrame* f, AstNode* declarations) {
+    if (!declarations) return;
+    AstLetNode wrapper = {};
+    wrapper.node_type = AST_NODE_LET_STAM;
+    wrapper.declare = declarations;
+    exec_declaration(f, (AstNode*)&wrapper);
+}
+
 static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     bool item_position = interp_take_list_item_position(f, (AstNode*)list_node);
-    for (AstNode* decl = list_node->declare; decl; decl = decl->next) {
-        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
-            Item bound = eval_expr(f, named->init);
-            if (interp_frame_pending(f)) return bound;
-            if (!interp_bind_declared_value(f, named, bound)) {
-                return interp_signal_payload(f);
-            }
-        } else if (decl->node_type == AST_NODE_DECOMPOSE) {
-            exec_declaration(f, decl);
-            if (interp_frame_pending(f)) return ItemNull;
-        }
-    }
+    interp_exec_list_declarations(f, list_node->declare);
+    if (interp_frame_pending(f)) return interp_signal_payload(f);
     // A let-list's declarations live in declare, so each of its items is a value,
     // a function literal included: (let a = 1, (x) => x + a) is that function, as
     // emit_list_value makes it. Only a plain list sets declaration items apart.
@@ -4513,6 +4541,48 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     }
     List* built = (List*)(uintptr_t)acc.get().item;
     return item_position ? list_end_item(built) : list_end(built);
+}
+
+static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destination) {
+    AstNode* value = ast_unwrap_primary_to_leaf(node);
+    if (!value) return ItemNull;
+    if (value->node_type == AST_NODE_FOR_EXPR && ast_output_stream_for((AstForNode*)value))
+        return eval_for_stream(f, (AstForNode*)value, false, destination);
+    if (value->node_type == AST_NODE_UNARY && ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE)
+        return interp_emit_output(f, ((AstUnaryNode*)value)->operand, destination);
+    if (value->node_type == AST_NODE_HANDLER_EXPR && !((AstHandlerNode*)value)->value_body)
+        return eval_handler(f, (AstHandlerNode*)value, destination);
+    if (value->node_type == AST_NODE_LIST || value->node_type == AST_NODE_CONTENT) {
+        AstListNode* list_node = (AstListNode*)value;
+        interp_exec_list_declarations(f, list_node->declare);
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
+        for (AstNode* item = list_node->item; item; item = item->next) {
+            if (!list_node->declare && is_declaration_node(item->node_type)) {
+                exec_declaration(f, item);
+                if (interp_frame_pending(f)) return interp_signal_payload(f);
+                continue;
+            }
+            Item status = interp_emit_output(f, item, destination);
+            if (interp_frame_pending(f) || item_is_error(status)) return status;
+        }
+        return ItemNull;
+    }
+    if (value->node_type == AST_NODE_IF_EXPR || value->node_type == AST_NODE_CONDITIONAL_EXPR) {
+        AstIfNode* branch = (AstIfNode*)value;
+        Item condition = eval_expr(f, branch->cond);
+        if (interp_frame_pending(f)) return interp_signal_payload(f);
+        return interp_emit_output(f, is_truthy(condition) ? branch->then : branch->otherwise, destination);
+    }
+    RootFrame roots(1);
+    Rooted<Item> result(roots, ItemNull);
+    AstFuncNode* direct = value->node_type == AST_NODE_CALL_EXPR
+        ? ast_direct_call_function((AstCallNode*)value) : nullptr;
+    bool emitted = false;
+    result.set(ast_output_function(direct)
+        ? eval_call(f, (AstCallNode*)value, nullptr, (List*)(uintptr_t)*destination, &emitted)
+        : interp_eval_sequence_item(f, node));
+    if (interp_frame_pending(f)) return interp_signal_payload(f);
+    return emitted ? result.get() : output_content_append((List*)(uintptr_t)*destination, result.get());
 }
 
 // ---------------------------------------------------------------------------
@@ -5716,13 +5786,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         if (decl && decl->node_type == AST_NODE_OBJECT_TYPE) {
             AstObjectTypeNode* object = (AstObjectTypeNode*)decl;
-            TypeType* type = object->type && object->type->type_id == LMD_TYPE_TYPE
-                ? (TypeType*)object->type : NULL;
-            TypeObject* object_type = type && type->type_id == LMD_TYPE_TYPE
-                ? (TypeObject*)type->type : NULL;
-            return interp_ptr_item(object_type
-                ? const_type_with_tl(object_type->type_index, f->module->type_list)
-                : &LIT_TYPE_ERROR);
+            // Import registration can change a shared descriptor's index; its
+            // declaration-owned Type value retains identity across module lists.
+            return interp_ptr_item(object->type ? object->type : &LIT_TYPE_ERROR);
         }
         if (decl && (decl->node_type == AST_NODE_STRING_PATTERN ||
                 decl->node_type == AST_NODE_SYMBOL_PATTERN)) {
@@ -6284,13 +6350,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        TypeType* type = object->type && object->type->type_id == LMD_TYPE_TYPE
-            ? (TypeType*)object->type : NULL;
-        TypeObject* object_type = type && type->type_id == LMD_TYPE_TYPE
-            ? (TypeObject*)type->type : NULL;
-        return interp_ptr_item(object_type
-            ? const_type_with_tl(object_type->type_index, f->module->type_list)
-            : &LIT_TYPE_ERROR);
+        return interp_ptr_item(object->type ? object->type : &LIT_TYPE_ERROR);
     }
     case AST_NODE_PATTERN_ISLAND: {
         AstPatternIslandNode* island = (AstPatternIslandNode*)node;
@@ -6991,7 +7051,7 @@ public:
 };
 
 static Item interp_call_internal(Function* fn, const Item* args, int argc,
-        const InterpBorrowedCall* borrowed) {
+        const InterpBorrowedCall* borrowed, uint64_t* output_destination = nullptr) {
     InterpState* st = interp_current_state();
     if (!st) {
         log_error("interp: no interpreter state for an interpreted call");
@@ -7183,7 +7243,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 &method_index, NULL, subject);
             uint64_t iterations = 0;
             for (;;) {
-                result = eval_expr(frame, fn_node->body);
+                result = output_destination ? interp_emit_output(frame, fn_node->body, output_destination)
+                    : eval_expr(frame, fn_node->body);
                 if (frame->signal == EvalSignal::TAIL_CALL_JIT) {
                     Function* callable = frame->callable_slot
                         ? (Function*)(uintptr_t)*frame->callable_slot : NULL;
@@ -7225,7 +7286,9 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                     }
                     frame->st->top = frame->caller;
                     st->depth++;
-                    Item tail_result = fn_call(callable, &tail_args);
+                    Item tail_result = output_destination
+                        ? fn_call_emit(callable, &tail_args, (List*)(uintptr_t)*output_destination)
+                        : fn_call(callable, &tail_args);
                     if (spread) mem_free(spread);
                     return tail_result;
                 }
@@ -7348,6 +7411,12 @@ static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
 
 extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
     return interp_call_internal(fn, args, argc, NULL);
+}
+
+Item interp_call_emit(Function* fn, const Item* args, int argc, List* destination) {
+    RootFrame roots(1);
+    Rooted<List*> output(roots, destination);
+    return interp_call_internal(fn, args, argc, nullptr, output.home());
 }
 
 // T21-3b (D8.1.1v6): the borrowed-mode entry. A generated caller (a

@@ -26,6 +26,7 @@
 #include <cstring>
 #ifndef _WIN32
 #include <setjmp.h>
+#include <errno.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/resource.h>
@@ -535,17 +536,18 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         const JsPreambleState* preamble, bool has_preamble,
         uint64_t* result_home, volatile long* harness_us, bool mvp_lmd) {
     if (mvp_lmd) {
-        if (inline_module_source || has_preamble || ast_harness || test262_native_harness) {
-            fputs("MVP_FAILURE admission -\nMVP batch requires a complete classic source\n", stdout);
+        if (has_preamble || ast_harness || test262_native_harness) {
+            fputs("MVP_FAILURE admission -\nMVP batch requires a complete source\n", stdout);
             return ItemError;
         }
         MvpLmdHost host = {0, NULL, stdout, true};
-        MvpLmdExecution* execution = mvp_lmd_execute(source, source_len, NULL, &host);
+        MvpLmdOptions options = {filename, inline_module_source};
+        MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, source_len, NULL, &host, &options);
         MvpLmdFailurePhase phase;
         const char* type = NULL;
         const char* diagnostic = mvp_lmd_diagnostic(execution, &phase, &type);
         if (diagnostic) {
-            const char* phases[] = {"success", "parse", "admission", "runtime", "internal"};
+            const char* phases[] = {"success", "parse", "admission", "resolution", "runtime", "internal"};
             fputs("MVP_FAILURE ", stdout); fputs(phases[phase], stdout);
             fputc(' ', stdout); fputs(type ? type : "-", stdout); fputc('\n', stdout);
             fputs(diagnostic, stdout); fputc('\n', stdout);
@@ -1936,14 +1938,17 @@ int exec_convert(int argc, char* argv[]) {
 
 #ifndef _WIN32
 // per-script timeout support for test-batch mode
-static sigjmp_buf batch_timeout_jmp;
-static volatile sig_atomic_t batch_timeout_active = 0;
+static __thread sigjmp_buf batch_timeout_jmp;
+static __thread volatile sig_atomic_t batch_timeout_active = 0;
+// the owner is registered before handlers are installed and never changes during a batch.
+static pthread_t batch_timeout_owner;
+static __thread volatile sig_atomic_t batch_timeout_owner_thread = 0;
 
 #ifndef LAMBDA_NO_JS
 // MIR error recovery for batch mode: longjmp instead of exit(1)
-static jmp_buf mir_error_jmp;
-static volatile sig_atomic_t mir_error_active = 0;
-static char mir_error_msg[256];
+static __thread jmp_buf mir_error_jmp;
+static __thread volatile sig_atomic_t mir_error_active = 0;
+static __thread char mir_error_msg[256];
 
 static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t error_type, const char *format, ...) {
     va_list ap;
@@ -1960,8 +1965,8 @@ static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t e
 }
 
 // SIGSEGV/SIGBUS recovery for batch mode: catch runtime crashes in JIT code
-static sigjmp_buf batch_crash_jmp;
-static volatile sig_atomic_t batch_crash_active = 0;
+static __thread sigjmp_buf batch_crash_jmp;
+static __thread volatile sig_atomic_t batch_crash_active = 0;
 
 static void batch_crash_handler(int sig) {
     if (batch_crash_active) {
@@ -1975,7 +1980,13 @@ static void batch_crash_handler(int sig) {
 #endif // LAMBDA_NO_JS
 
 static void batch_alarm_handler(int sig) {
-    (void)sig;
+    if (!batch_timeout_owner_thread) {
+        // D5.3.6v2/D6.3.3v2: a process alarm must not jump across threads or stacks.
+        int saved_errno = errno;
+        if (pthread_kill(batch_timeout_owner, sig) != 0) _exit(124);
+        errno = saved_errno;
+        return;
+    }
     if (batch_timeout_active) {
         batch_timeout_active = 0;
         siglongjmp(batch_timeout_jmp, 1);
@@ -2744,6 +2755,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             size_t length = 0;
             bool print = false;
             bool timing = false;
+            bool module = false;
             bool invalid = false;
             const char** script_arguments = (const char**)mem_calloc((size_t)argc + 2, sizeof(char*), MEM_CAT_JS_RUNTIME);
             if (!script_arguments) { runtime_cleanup(&runtime); return lambda_main_finish(1); }
@@ -2752,6 +2764,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             for (int arg = 2; arg < argc; arg++) {
                 if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
                 if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
+                if (strcmp(argv[arg], "--module") == 0) { module = true; continue; }
                 if ((!strcmp(argv[arg], "-e") || !strcmp(argv[arg], "--eval") ||
                      !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
                     print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
@@ -2769,7 +2782,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             double execution_ms = 0;
             script_arguments[1] = filename ? filename : "[eval]";
             MvpLmdHost host = {script_argc, script_arguments, stdout};
-            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL, &host);
+            MvpLmdOptions options = {filename, module};
+            MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, length, timing ? &execution_ms : NULL, &host, &options);
             const char* error = mvp_lmd_diagnostic(execution);
             if (error) { fputs(error, stderr); fputc('\n', stderr); }
             else if (print) {
@@ -4578,6 +4592,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
     // Handle test-batch command: run multiple scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "test-batch") == 0) {
+#ifndef _WIN32
+        batch_timeout_owner = pthread_self();
+        batch_timeout_owner_thread = 1;
+#endif
         log_debug("Entering test-batch command handler");
 
         int batch_timeout = 60; // default per-script timeout in seconds
@@ -4645,8 +4663,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
-                batch_timeout_active = 1;
                 if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
+                    batch_timeout_active = 1;
                     alarm(batch_timeout);
                     result = run_script_file(&runtime, script_path, run_main);
                     alarm(0);
@@ -4728,6 +4746,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef LAMBDA_NO_JS
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
+#ifndef _WIN32
+        batch_timeout_owner = pthread_self();
+        batch_timeout_owner_thread = 1;
+#endif
         // file-backed Node batches still need normal process exit hooks;
         // harness/inline test262 batches opt into lifecycle suppression per test.
         js_batch_execution_mode = 0;
@@ -5163,10 +5185,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
-                batch_timeout_active = 1;
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
+                        batch_timeout_active = 1;
                         alarm(batch_timeout);
                         uint64_t result_home = 0;
                         Item res = js_test262_execute_batch_source(&runtime,

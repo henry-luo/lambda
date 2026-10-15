@@ -2786,6 +2786,36 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
     EXPECT_LE(radiant_query_font_build_count() - builds_before, 1u);
 }
 
+class RadiantFormControls : public RadiantTextQuery {};
+
+TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRelease) {
+    DomElement* owner = load("test/html/select_retained_refresh.html");
+    ASSERT_NE(owner, nullptr);
+    layout_html_doc(&ui, document, false);
+    DocState* state = dom_engine_document_ensure_state(document, "select_refresh_test");
+    ASSERT_NE(state, nullptr);
+    DomElement* select = dom_find_element_by_id(owner, "select");
+    ASSERT_NE(select, nullptr);
+    FormControlProp* form = select->form;
+    ASSERT_NE(form, nullptr);
+    doc_state_open_dropdown(state, select);
+    form_control_set_hover_index(state, select, 2);
+    ASSERT_EQ(state->open_dropdown, select);
+    // restyling retains the control; releasing it later must still dismiss its popup.
+    view_pool_reset_retained_subtree(document->view_tree, owner);
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(select->form, form);
+    EXPECT_EQ(state->open_dropdown, select);
+    EXPECT_TRUE(form_control_is_dropdown_open(state, select));
+    EXPECT_EQ(form_control_get_selected_index(state, select), 1);
+    EXPECT_EQ(form_control_get_hover_index(state, select), 2);
+    EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
+    form_control_release_prop(select);
+    EXPECT_EQ(state->open_dropdown, nullptr);
+    EXPECT_EQ(select->form, nullptr);
+    EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
+}
+
 class RadiantTextLayout : public RadiantTextQuery {
 protected:
     void expect_snapshot_capture(const char* path, float final_width) {

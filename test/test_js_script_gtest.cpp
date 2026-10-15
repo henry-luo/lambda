@@ -615,6 +615,63 @@ TEST(JsIteratorClose, RawAsyncCloseDistinguishesAbsentReturnFromUndefined) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsIteratorClose, RecordAsyncClosePreservesAbsentAndUndefined) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char bootstrap[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, bootstrap,
+        sizeof(bootstrap) - 1, "iterator-close-record-bootstrap.js", NULL)));
+
+    {
+        RootFrame roots(6);
+        const char source[] =
+            "[{ [Symbol.asyncIterator]() { return this; } },"
+            " { [Symbol.asyncIterator]() { return this; } }];";
+        Rooted<Item> iterators(roots, js_interp_execute_source(&runtime, source,
+            sizeof(source) - 1, "iterator-close-record.js", NULL));
+        ASSERT_FALSE(item_is_error(iterators.get()));
+        ASSERT_EQ(get_type_id(iterators.get()), LMD_TYPE_ARRAY);
+        ASSERT_EQ(iterators.get().array->length, 2);
+        Rooted<Item> absent_record(roots, ItemNull);
+        Rooted<Item> callable_record(roots, ItemNull);
+        Rooted<Item> return_fn(roots,
+            js_new_native_function(js_test_async_close_returns_undefined));
+        Rooted<Item> return_key(roots, js_name_item("return", 6));
+        Rooted<Item> raw_array(roots, js_array_new(0));
+        ASSERT_FALSE(item_is_error(raw_array.get()));
+        ASSERT_FALSE(item_is_error(js_set_key_default(iterators.get().array->items[1],
+            return_key.get(), return_fn.get())));
+        ASSERT_FALSE(item_is_error(js_set_key_default(raw_array.get(),
+            return_key.get(), return_fn.get())));
+
+        absent_record.set(js_get_async_iterator(iterators.get().array->items[0]));
+        callable_record.set(js_get_async_iterator(iterators.get().array->items[1]));
+        ASSERT_FALSE(item_is_error(absent_record.get()));
+        ASSERT_FALSE(item_is_error(callable_record.get()));
+        Item absent_result = js_async_iterator_record_close_result(absent_record.get());
+        ASSERT_FALSE(item_is_error(absent_result));
+        EXPECT_FALSE(js_async_iterator_close_needs_await(absent_result));
+        Item undefined_result = js_async_iterator_record_close_result(callable_record.get());
+        ASSERT_FALSE(item_is_error(undefined_result));
+        EXPECT_TRUE(js_async_iterator_close_needs_await(undefined_result));
+        EXPECT_EQ(undefined_result.item, make_js_undefined().item);
+
+        // a guest array is still a raw iterator, never an implicit private record.
+        Item raw_result = js_async_iterator_close_result(raw_array.get());
+        ASSERT_FALSE(item_is_error(raw_result));
+        EXPECT_TRUE(js_async_iterator_close_needs_await(raw_result));
+        EXPECT_EQ(raw_result.item, make_js_undefined().item);
+
+        JitImportMetadata metadata = {};
+        ASSERT_TRUE(jit_import_get_metadata("js_async_iterator_record_close_result", &metadata));
+        EXPECT_EQ(metadata.gc_effect, JIT_EFFECT_MAY_GC);
+        EXPECT_EQ(metadata.reentry_effect, JIT_REENTRY_YES);
+        EXPECT_EQ(metadata.ret_class, JIT_VALUE_BOXED_ITEM);
+    }
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
     EXPECT_TRUE(js_ast_child_catalog_complete());
 }
@@ -4822,16 +4879,17 @@ TEST(JsInterpreter, ResumesNestedAwaitAtItsInnerOperand) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
+TEST(JsInterpreter, ClosesForAwaitIteratorAfterBodyAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
+    // async iterator values are passed through; an explicit body await supplies the abrupt completion.
     const char source[] =
         "async function run() { let closed = false; let iterator = { "
         "next: function() { return Promise.resolve({ value: Promise.reject('x'), done: false }); }, "
         "return: function() { closed = true; return Promise.resolve({ done: true }); } }; "
         "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
-        "try { for await (let value of iterator) {} } catch (error) {} return closed; } run();";
+        "try { for await (let value of iterator) { await value; } } catch (error) {} return closed; } run();";
     Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "for-await-value-rejection.js", NULL);
 
@@ -4939,17 +4997,18 @@ TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
+TEST(JsMir, ClosesForAwaitIteratorAfterBodyAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
+    // async iterator values are passed through; an explicit body await supplies the abrupt completion.
     const char source[] =
         "async function run() { let closed = false; let iterator = { "
         "next: function() { return Promise.resolve({ value: Promise.reject('x'), done: false }); }, "
         "return: function() { closed = true; return Promise.resolve({ done: true }); } }; "
         "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
-        "try { for await (let value of iterator) {} } catch (error) {} return closed; } run();";
+        "try { for await (let value of iterator) { await value; } } catch (error) {} return closed; } run();";
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-value-rejection.js", NULL);
 
@@ -5521,4 +5580,161 @@ TEST(JsInterpreter, RegistersNavigatorServiceWorkerWithoutPersistence) {
     EXPECT_EQ(result.item, b2it(true));
 
     runtime_cleanup(&runtime);
+}
+
+TEST(JsRegExp, MatchIndicesNamedPairUsesPropertyStorage) {
+    const char* backends[] = {"ast", "mir"};
+    const bool collect_modes[] = {false, true};
+    for (const char* backend : backends) {
+        for (bool collect : collect_modes) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(collect);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            Item setup = transpile_js_to_mir(&runtime, "0;", "indices-storage-setup.js", NULL);
+            EXPECT_FALSE(item_is_error(setup));
+            if (!item_is_error(setup)) {
+                gc_heap_t* gc = runtime.eval_context->heap->gc;
+                gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                gc_set_poison_freed(gc, collect ? 1 : 0);
+                const char source[] = "let a=/(?<a>a)(?<b>b)?/du.exec('za'),u=/(?<π>a)/du.exec('za');let pair=a.indices.groups.a,unicodePair=u.indices.groups['π'];let garbage=[];for(let i=0;i<32;i++)garbage.push({i});pair===a.indices[1]&&pair[0]===1&&pair[1]===2&&a.indices.groups.b===undefined&&Object.getPrototypeOf(a.indices.groups)===null&&unicodePair===u.indices[1]&&unicodePair[0]===1&&unicodePair[1]===2";
+                Item result = transpile_js_to_mir(&runtime, source, "indices-storage.js", NULL);
+                EXPECT_FALSE(item_is_error(result));
+                if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                gc_set_force_collect_interval(gc, 0);
+                gc_set_poison_freed(gc, 0);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsRegExp, EscapedNamesReuseDecoderAndRejectOverflow) {
+    const char* backends[] = {"ast", "mir"};
+    const bool collect_modes[] = {false, true};
+    for (const char* backend : backends) {
+        for (bool collect : collect_modes) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(collect);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            Item setup = transpile_js_to_mir(&runtime, "0;", "escaped-names-setup.js", NULL);
+            EXPECT_FALSE(item_is_error(setup));
+            if (!item_is_error(setup)) {
+                gc_heap_t* gc = runtime.eval_context->heap->gc;
+                gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                gc_set_poison_freed(gc, collect ? 1 : 0);
+                const char source[] = "let caught=false;try{new RegExp('(?<\\\\u{100000061}>a)','u')}catch(e){caught=e instanceof SyntaxError}let p='(?<\\\\u{00000000061}>a)',r=new RegExp(p,'du'),m=r.exec('za');let extra=[];for(let i=0;i<16;i++)extra.push({i});caught&&r.source===p&&m.groups.a==='a'&&m.indices.groups.a===m.indices[1]&&m.indices[1][0]===1&&m.indices[1][1]===2";
+                Item result = transpile_js_to_mir(&runtime, source, "escaped-names.js", NULL);
+                EXPECT_FALSE(item_is_error(result));
+                if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                gc_set_force_collect_interval(gc, 0);
+                gc_set_poison_freed(gc, 0);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsForAwait, PreservesAsyncIteratorValuesWithoutUnwrapping) {
+    const char source[] = R"JS(
+async function run() {
+  let closed=0,next=0,reads=0,seen=0,promise=Promise.reject('x');
+  promise.catch(function(){});
+  let thenable={};
+  Object.defineProperty(thenable,'then',{get:function(){reads++;throw 'unexpected unwrap';}});
+  let iterator={next:function(){next++;return Promise.resolve(next===1?{value:promise,done:false}:next===2?{value:thenable,done:false}:{done:true});},return:function(){closed++;return Promise.resolve({done:true});}};
+  iterator[Symbol.asyncIterator]=function(){return iterator;};
+  for await(let value of iterator){if(value!==(seen===0?promise:thenable))throw 'value identity';seen++;}
+  return seen===2&&next===3&&closed===0&&reads===0;
+}
+run();
+)JS";
+    for (int mir = 0; mir < 2; mir++) {
+        SCOPED_TRACE(mir ? "MIR" : "AST");
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Item promise;
+        if (mir) {
+            ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
+            promise = transpile_js_to_mir(&runtime, source, "async-iterator-value-identity.js", NULL);
+            ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
+        } else {
+            promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+                "async-iterator-value-identity.js", NULL);
+        }
+        ASSERT_FALSE(item_is_error(promise));
+        Item result = js_await_sync(promise);
+        ASSERT_FALSE(item_is_error(result));
+        EXPECT_EQ(result.item, b2it(true));
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsRegExp, BuiltinQuantifiedClassReplaceUsesWideSubjectSpans) {
+    const char* cases[] = {
+        // class families.
+        R"JS(let cases=[['\\d+','é12漢34😀','é#漢#😀'],['\\D+','é12漢34😀','#12#34#'],['\\w+','éAb_漢09😀','é#漢#😀'],['\\W+','éAb_漢09😀','#Ab_#09#'],['\\s+','é\t \u00a0漢\u3000😀','é#漢#😀'],['\\S+','é\t \u00a0漢\u3000😀','#\t \u00a0#\u3000#']];let ok=true;for(let row of cases){let r=new RegExp(row[0],'g');r.lastIndex=99;ok=ok&&row[1].replace(r,'#')===row[2]&&r.lastIndex===0}ok)JS",
+        // nul surrogates.
+        R"JS(let s='\0\ud800A \udc00😀\0';s.replace(new RegExp('\\S+','g'),'#')==='# #'&&s.replace(new RegExp('\\W+','g'),'#')==='#A#'&&'\u180e\uFEFF'.replace(new RegExp('\\S+','g'),'#')==='#\uFEFF')JS",
+        // substitution templates.
+        R"JS('é 12 漢'.replace(new RegExp('\\d+','g'),"[$$][$&][$`][$'][$1][$<x>]")==='é [$][12][é ][ 漢][$1][$<x>] 漢'&&'😀12😃'.replace(new RegExp('\\d+','g'),"$`|$&|$'")==='😀😀|12|😃😃')JS",
+        // sticky legacy state.
+        R"JS(new RegExp('(x)').exec('x');let r=new RegExp('\\S+','gy');r.lastIndex=99;let out='é 漢'.replace(r,'#');out==='# 漢'&&r.lastIndex===0&&RegExp.input==='é 漢'&&RegExp.lastMatch==='é'&&RegExp.leftContext===''&&RegExp.rightContext===' 漢'&&RegExp.$1==='')JS",
+        // no match state.
+        R"JS(new RegExp('a').exec('za');let before=RegExp.lastMatch,r=new RegExp('\\S+','g');r.lastIndex=99;let s='\u00a0\u3000';s.replace(r,'#')===s&&r.lastIndex===0&&RegExp.lastMatch===before)JS",
+        // flags and anchors.
+        R"JS('é12漢34'.replace(new RegExp('\\d+','gi'),'#')==='é#漢#'&&'é\u00a0漢'.replace(new RegExp('\\s+','gi'),'#')==='é#漢'&&'é 漢'.replace(new RegExp('^\\S+','g'),'#')==='# 漢'&&'é 漢'.replace(new RegExp('\\S+$','g'),'#')==='é #')JS",
+        // own exec fallback.
+        R"JS(let r=new RegExp('\\S+','g'),calls=0;r.exec=function(s){calls++;if(calls>1)return null;let value=['z'];value.index=0;value.input=s;return value};let out='é'.replace(r,'[$&]');out==='[z]'&&calls===2)JS",
+        // prototype exec fallback.
+        R"JS(let r=new RegExp('\\S+','g'),saved=RegExp.prototype.exec,calls=0,out;try{RegExp.prototype.exec=function(s){calls++;return saved.call(this,s)};out='é'.replace(r,'#')}finally{RegExp.prototype.exec=saved}out==='#'&&calls===2)JS",
+        // lastindex writable fallback.
+        R"JS(let r=new RegExp('\\S+','g'),caught=false,coercions=0;Object.defineProperty(r,'lastIndex',{writable:false});try{'é'.replace(r,{toString(){coercions++;return '#'}})}catch(e){caught=e instanceof TypeError}caught&&coercions===1)JS",
+        // coercion rechecks exec.
+        R"JS(let r=new RegExp('\\S+','g'),calls=0,converted=0;let replacement={toString(){converted++;r.exec=function(){calls++;return null};let garbage=[];for(let i=0;i<12;i++)garbage.push({i});return '#'}};'é'.replace(r,replacement)==='é'&&converted===1&&calls===1)JS",
+        // callback utf16 indices.
+        R"JS(let seen=[],input='😀12😃34',out=input.replace(new RegExp('\\d+','g'),function(match,index,original){seen.push(index);return original===input?'#':'bad'});out==='😀#😃#'&&seen.length===2&&seen[0]===2&&seen[1]===6)JS",
+        // retained results.
+        R"JS(let out=('é'+String.fromCharCode(0)+'😀 漢').replace(new RegExp('\\S+','g'),'['+'好'+']');let legacy=RegExp.lastMatch,garbage=[];for(let i=0;i<32;i++)garbage.push({i,text:'discard'+i});out==='[好] [好]'&&legacy==='漢'&&RegExp.input==='é\0😀 漢')JS",
+        // fallback modes.
+        R"JS('😀12漢'.replace(new RegExp('\\D+','gu'),'#')==='#12#'&&'é12漢'.replace(new RegExp('\\d+','gd'),'#')==='é#漢'&&'éAb_漢09'.replace(new RegExp('\\w+','gi'),'#')==='é#漢#'&&'é\n12\n漢\n34'.replace(new RegExp('^\\d+','gm'),'#')==='é\n#\n漢\n#')JS",
+        // coercion recompile.
+        R"JS(let first=new RegExp('\\S+','g'),second=new RegExp('\\S+','g'),calls=0;let subject={toString(){calls++;first.compile('\\d+','g');return 'é12漢'}};let replacement={toString(){calls++;second.compile('\\d+','g');return '#'}};let a=first[Symbol.replace](subject,'#'),b='é12漢'.replace(second,replacement);a==='é#漢'&&b==='é#漢'&&calls===2&&first.lastIndex===0&&second.lastIndex===0)JS",
+        // multiple context templates.
+        R"JS('é1 漢2'.replace(new RegExp('\\d+','g'),"[$`|$&|$']")==='é[é|1| 漢2] 漢[é1 漢|2|]')JS",
+        // terminal empty matches.
+        R"JS(let r=new RegExp('(?:)','g');let out='ab'.replace(r,'-'),last=RegExp.lastMatch,left=RegExp.leftContext,right=RegExp.rightContext;out==='-a-b-'&&r.lastIndex===0&&last===''&&left==='ab'&&right===''&&''.replace(new RegExp('(?:)','g'),'-')==='-'&&'b'.replace(new RegExp('a*','g'),'-')==='-b-')JS",
+        // more than million runs.
+        R"JS(let count=1000003,ok=true;for(let text of ['é','a']){let input=(text+' ').repeat(count),r=new RegExp('\\S+','g'),out=input.replace(r,'#');let last=RegExp.lastMatch,left=RegExp.leftContext,right=RegExp.rightContext,original=RegExp.input;ok=ok&&out==='# '.repeat(count)&&r.lastIndex===0&&last===text&&left===input.slice(0,-2)&&right===' '&&original===input}ok)JS",
+    };
+    const char* backends[] = {"ast", "mir"};
+    const bool collect_modes[] = {false, true};
+    for (const char* backend : backends) {
+        for (bool collect : collect_modes) {
+            for (const char* source : cases) {
+                SCOPED_TRACE(backend);
+                SCOPED_TRACE(collect);
+                SCOPED_TRACE(source);
+                JsExecutionBackendScope selected(backend);
+                Runtime runtime = {};
+                runtime_init(&runtime);
+                Item setup = transpile_js_to_mir(&runtime, "0;", "regexp-wide-setup.js", NULL);
+                EXPECT_FALSE(item_is_error(setup));
+                if (!item_is_error(setup)) {
+                    gc_heap_t* gc = runtime.eval_context->heap->gc;
+                    gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                    gc_set_poison_freed(gc, collect ? 1 : 0);
+                    Item result = transpile_js_to_mir(&runtime, source, "regexp-wide-replace.js", NULL);
+                    EXPECT_FALSE(item_is_error(result));
+                    if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                    gc_set_force_collect_interval(gc, 0);
+                    gc_set_poison_freed(gc, 0);
+                }
+                runtime_cleanup(&runtime);
+            }
+        }
+    }
 }

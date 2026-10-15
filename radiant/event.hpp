@@ -4584,6 +4584,7 @@ struct EditingTargetRange;
 typedef struct EventContext {
     RdtEvent event;
     View* target;
+    lam::Up<View> negative_path; // borrowed target while replaying a lifted negative layer's ancestry
     TextRect* target_text_rect;
     bool target_text_offset_valid;
     int target_text_offset;

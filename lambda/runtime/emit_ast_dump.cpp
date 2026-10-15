@@ -107,9 +107,14 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source,
             parse_error.message ? parse_error.message : "direct AST reduction failed");
         return false;
     }
-    lambda_ast_finalize_script(tp, direct_root);
     tp->ast_root = (AstNode*)direct_root;
-    return true;
+    // finalization needs the published lexical/index graph used by normal compilation.
+    ArrayList* functions = NULL;
+    bool valid = lambda_ast_rebind_direct_scope_graph_with_functions(tp, direct_root, &functions) &&
+        ast_index_build_profile(&tp->ast_index, tp->ast_root, &lambda_profile) &&
+        lambda_ast_finalize_script_with_functions(tp, direct_root, functions);
+    arraylist_free(functions);
+    return valid;
 }
 
 // get source text from the parser-neutral span retained on every AST node.
@@ -783,6 +788,10 @@ int emit_ast_dump_file(const char* script_path) {
 
     Transpiler tp;
     emit_init_direct_transpiler(&tp, &parse, script_path);
+    struct IndexCleanup {
+        AstIndex* index;
+        ~IndexCleanup() { ast_index_destroy(index); }
+    } index_cleanup = {&tp.ast_index};
     tp.directory = import_directory;
     tp.runtime = &runtime;
 

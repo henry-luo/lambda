@@ -8,7 +8,7 @@ let strike = d.convert(root ++ "strikethrough.docx")^
 let underline = d.convert(root ++ "underline.docx")^
 let bom = d.convert(root ++ "utf8-bom.docx")^
 let strict = d.convert(root ++ "strict-format.docx")^
-let unsupported_zip = d.convert(root ++ "tiny-picture-target-base-relative.docx") ^ { ^.code };
+let base_picture = d.convert(root ++ "tiny-picture-target-base-relative.docx")^;
 [
     paragraph.text == "Walking on imported air\n\n",
     table.text == "Above\n\nTop left\tTop right\nBottom left\tBottom right\nBelow\n\n",
@@ -20,6 +20,6 @@ let unsupported_zip = d.convert(root ++ "tiny-picture-target-base-relative.docx"
     contains(underline.html,"<u>Sunset</u>"),
     bom.text == "This XML has a byte order mark.\n\n",
     strict.text == "Test\n\n",
-    all([for (r in [paragraph,table,numbered,picture,strike,underline,bom,strict]) len(r.diagnostics) == 0]),
-    unsupported_zip == 407
+    all([for (r in [paragraph,table,numbered,picture,strike,underline,bom,strict,base_picture]) len(r.diagnostics) == 0]),
+    base_picture.html == picture.html
 ]

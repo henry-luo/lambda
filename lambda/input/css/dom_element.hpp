@@ -1780,8 +1780,13 @@ bool dom_element_has_after_content(DomElement* element);
  */
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element);
 struct StrBuf;
+// a layout mode may resolve content functions the DOM evaluator does not know
+// (target-counter(), content(), page counters); it sets `handled` for those
+typedef bool (*DomContentFunctionHook)(void* context, DomElement* element,
+    const CssFunction* function, StrBuf* text, bool* handled);
 bool dom_element_append_content(DomElement* element, const CssValue* value,
-    void* counter_context, int* quote_depth, StrBuf* text);
+    void* counter_context, int* quote_depth, StrBuf* text,
+    DomContentFunctionHook hook = nullptr, void* hook_context = nullptr);
 
 /**
  * Get pseudo-element content with counter resolution
@@ -1791,7 +1796,7 @@ bool dom_element_append_content(DomElement* element, const CssValue* value,
  */
 const char* dom_element_get_pseudo_element_content_with_counters(
     DomElement* element, int pseudo_element, void* counter_context, Arena* arena,
-    int* quote_depth = nullptr);
+    int* quote_depth = nullptr, DomContentFunctionHook hook = nullptr, void* hook_context = nullptr);
 
 /**
  * Remove a CSS property from an element

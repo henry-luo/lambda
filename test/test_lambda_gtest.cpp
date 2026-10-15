@@ -357,6 +357,12 @@ struct TierParityFixture {
     const char* interp_unsupported = nullptr;
 };
 static const TierParityFixture kTune27TierParity[] = {
+    // S12.1.1v3: procedural preparation and pure construction on every tier.
+    {"test/lambda/proc/element_prepared_parts.ls",
+     "test/lambda/proc/element_prepared_parts.txt"},
+    {"test/lambda/pdf/output_pages.ls", "test/lambda/pdf/output_pages.txt"},
+    {"test/lambda/pdf/output_functional.ls", "test/lambda/pdf/output_functional.txt"},
+    {"test/lambda/pdf/output_streaming.ls", "test/lambda/pdf/output_streaming.txt"},
     {"test/lambda/zip_input.ls", "test/lambda/zip_input.txt"},
     {"test/lambda/zip_jar.ls", "test/lambda/zip_jar.txt"},
     {"test/lambda/zip_errors.ls", "test/lambda/zip_errors.txt"},

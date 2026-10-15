@@ -1615,7 +1615,7 @@ Scope, reuse inventory, helper disclosures and evidence:
 
 ## 34. Ninety percent of LJS Test262 coverage
 
-**In progress (2026-10-14).** Reach **36,235 distinct fully passing cases** from
+**In progress (2026-10-15).** Reach **36,235 distinct fully passing cases** from
 the frozen **40,261-case LJS baseline**, with every required execution mode
 passing on one MVP build. This is 90% of LJS's supported population, not the
 entire upstream corpus. The §33 audit establishes 21,747 passes, so the target
@@ -1657,97 +1657,102 @@ older unresolved performance differences against their original controls and
 the user's text-search deferral. The four jq workloads remain historical-only.
 Report coverage, feature completion and performance acceptance separately.
 
-Initial increments add `with` object environments/unscopables through existing
-capture cells and shared LJS lookup, native Error subclasses retaining Lambda
-nominal ancestry (**S11.3.1v2**), and Array `flatMap`, `findLast` and
-`findLastIndex` through the existing visitor/flattening operations. Follow-up
-fixes preserve native Error branding, implement Annex B call-target errors,
-validate concise arrow/meta-property/ImportCall targets, initialize named-function
-self captures before defaults, and reuse guarded Map entry stores.
+### Implemented scope
 
-Private fields, methods, accessors and `#name in` now execute natively
-using fresh private NameRefs, Lambda shapes and existing mutable capture cells
-(**D3.4.3v5**, **S8.2.2v6**, **D6.2.3v2**). Brands belong to each evaluated class
-and receiver, including constructor-returned objects and revoked proxies; public
-reflection excludes private names. Shared analysis now retains enclosing bindings
-for class computed keys and validates private declarations/initializers. Oversized
-class environments retain their existing closure-capacity limit and remain unsupported.
+- **Language and dynamic source:** private brands, builtin subclass construction,
+  class strictness/early errors and Function/eval reuse shared class, interpreter
+  and environment operations. MIR caller cells remain live across direct eval;
+  parameter-expression functions retain separate parameter/body environments
+  (**S11.3.1v2**, **D3.4.3v5**, **D6.2.3v2**, **D8.1.3v24**).
+- **Library and storage:** Array/String/Object additions, native weak collections,
+  Set/grouping, Date, typed arrays, ArrayBuffer/DataView and RegExp protocols reuse
+  existing kernels through frontend policies. Shared buffers, resize/detach,
+  species and subclass construction retain precise ownership and existing
+  ordinary numeric-array proofs (**D1.3v3**, **D2.6.9v3**, **D5.2–D5.3**).
+- **Async and modules:** Promise jobs, generators, async iteration, suspended
+  dynamic source, static/dynamic imports, live exports, namespace reflection and
+  top-level await use existing activations, queues, module registry and Lambda
+  module-state slabs. Only module namespace exotics use VMap
+  (**D5.3.3**, **D7.2.1**, **D8.5.1v7**).
+- **Compiler and ownership:** shared exceptional iterator cleanup and cold
+  top-level property operations reduce oversized MIR functions. Ordinary loop
+  paths retain their prior proofs. Dynamic nominal parents stay alive through
+  existing closure storage; module teardown retires every descriptor root
+  (**D3.4.8**, **D5.1.1v3**, **D5.2–D5.3**, **D8.4.1v2**).
 
-The interpreter bridge, remaining library/storage/async/module work and builtin
-subclass interactions remain open.
+### Current verification
 
-The buffer/view increment adds ArrayBuffer and DataView, including shared views,
-numeric/BigInt access, resize, transfer, species-aware slice and Test262
-detachment. It reuses the existing backing-store operations with frontend
-coercion/prototype policies (**D1.3v3**, **D2.6.9v3**); subclasses retain Lambda
-nominal ancestry (**S2.1.3v2**, **D6.2.3v2**) and precise GC ownership
-(**D5.2–D5.3**). Existing numeric-array MIR specialization is retained.
-Focused and forced/poisoned-GC checks pass **211/211** each; shared gates pass
-**6,850/6,850 Lambda/Input** and **40,261/40,261 LJS Test262**. The complete
-MVP audit now passes **25,406/40,261 IDs (63.1%)**: **22,311 positive and 3,095
-negative**, a gain of **603** with zero lost passes from the preceding audit.
-All **593** buffer/view-family passes satisfy every required mode. No new
-crash/timeout IDs were introduced; the six existing timeouts and sole strict
-`delete this` failure remain unsuccessful. Another **10,829 passes** are needed
-for 90%.
+The integrated increment adds ordinary Array copying methods/`Array.of`,
+String HTML/Unicode methods and single-agent SharedArrayBuffer through shared
+algorithms and frontend policies (**D1.3v3**, **D5.2–D5.3**). It repairs computed
+String-method admission, contextual `of` declaration lookahead, multiple
+iteration declarations and lexical bindings named `let`. Numeric indexing
+proofs, existing method IDs and original failing fixtures are preserved.
+Atomics, agents, new realms and native Array subclass allocation remain outside
+this increment.
 
-The Date increment shares calendar/parsing/formatting kernels with LJS through
-frontend operation policies (**D1.3v3**). Private Lambda shape fields own each
-instance's DateValue; subclass ancestry and precise roots follow **D6.2.3v2**
-and **D5.2–D5.3**. Focused and forced/poisoned-GC checks pass **215/215** each;
-shared gates pass **6,854/6,854 Lambda/Input** and **40,261/40,261 LJS Test262**.
-All **609** selected Date cases pass their canonical mode. The complete MVP
-required-mode audit remains incomplete. Timing is deferred at the user's request
-while feature work continues; the coverage and performance figures here remain
-those of buffer7.
+Three coding workers deliver scoped patches; the integrating agent reviews and
+verifies immutable release builds. Pin `parallel45`, SHA-256
+`89dfb9fb90f5a1705796f9f20820e72147572cdd09b95ba7ecbe8c3fe053c8c4`,
+passes **647/647** focused tests normally and under forced/poisoned GC,
+**205/205** native JS tests, **51/51** backtracker tests, **6/6** affected
+native groups under forced GC and forty additional shared AST/MIR ownership/
+semantic checks. Its independently verified selected audit passes **616/616**
+cases in every required mode, including **594/594** additional strict variants,
+regaining the four archived selected controls. Shared LJS reports
+**40,261/40,261** passing after recovery, zero regressions and no slow cases.
+An initial batch abort remains explicit: crash-report review identifies unsafe
+cross-thread watchdog recovery; an owner-bound fix is integrated for final
+verification under **D5.3.6v2/D6.3.3v2**. Lambda/Input passes **7,395/7,395**,
+including the **313/313** GC sweep. These selected results are not
+whole-population coverage or a clean batch-stability claim.
 
-The typed-array follow-up shares LJS storage and conversion operations through
-frontend policies (**D1.3v3**, **D2.6.9v3**). It adds numeric/BigInt constructors,
-buffer aliases, indexed reflection, subclass construction, iterator projections
-and the species getter. Array.from now covers array-like input and custom
-constructors through the shared collector. Subarray adds shared-buffer views,
-length tracking and custom species construction through the existing LJS
-algorithms. Lambda shapes and precise roots retain ownership across
-coercion, resize and detach (**D5.2–D5.3**, **D6.2.3v2**). Existing numeric-only
-constructor proofs retain their fast path; publishing unused global constructors
-does not invalidate ordinary-array optimizations. Other typed-array methods,
-the dynamic-source interpreter bridge and realm support remain open. The preceding
-typed-view pin passes **223/223** focused and GC-stress checks, **292/315** selected IDs in
-every required mode, and **40,261/40,261** full-LJS Test262 cases. This retains
-**72** additional selected passes over the preceding typed-view increment.
-Shared MIR root analysis now reuses one predecessor graph (**D5.3.1**,
-**D8.6.1**); the Lambda/Input gate passes **6,863/6,863**. Isolated replays
-resolve interrupted results; **23** selected cases remain unsupported, and the
-original timeout captures remain archived. Detailed evidence is recorded in the
-implementation plan; no new whole-population coverage or performance claim is made.
+Implemented followups reuse shared `substr` coercion/UTF16/scalar ownership,
+planned Number prototypes for inherited properties and the shared scope walker
+for duplicate lexical iteration targets. Bounded property/cache emission reduces
+oversized reflective entries while retaining known shapes and closed/small
+paths (**D1.3v3**, **D8.4.1v2**). ImportCall validates arity/spread/bare-new grammar;
+the same compiler budget also bounds newly
+started guarded inlines in oversized reflective entries. It adds no helper and
+preserves direct inlining, active inline bodies and separate functions.
 
-The next typed-array increment adds map/filter, forEach, every/some, four find
-variants and both reductions through the shared callback algorithm. Species,
-conversion and exact-root ownership reuse the existing runtime operations
-(**D1.3v3**, **D5.2–D5.3**). Focused and forced-GC checks pass **227/227** each.
-All required modes pass for **807/842** selected IDs: **515/550** callback cases
-and all **292** preceding selected passes. Full-LJS passes **40,261/40,261**.
-The remaining 35 selected cases require the dynamic-Function interpreter bridge.
-The Lambda/Input gate passes **6,880/6,881** twice, with one LaTeX corpus timeout
-that passes three isolated replays; aggregate acceptance remains open. A planner
-follow-up admits computed typed-method calls and passes **227/227** focused
-checks. A further planner change uses inferred non-numeric keys to admit saved
-method aliases while retaining numeric-loop specialization (**D8.4.1v2**).
-That follow-up passes **227/227** focused and **227/227** forced/poisoned-GC
-checks. Its fresh audit also passes **807/842** selected IDs in every required
-mode, including **779/779** additional strict variants, with no timeouts, missing
-outcomes or lost preceding selected passes. Full-LJS also passes
-**40,261/40,261**, zero regressions. Its Lambda/Input gate is in progress;
-whole-population coverage and timing remain open.
+The previous candidate's full native suite exposed an async-iterator helper ABI
+regression. The original raw-iterator API is restored, and the explicitly named
+record adapter reuses the same algorithm. Its original failing assertion remains
+unchanged. Stale local collection-freeze, async-value-await and Annex B fixture
+expectations were corrected against ECMA-262 and exact Node/LJS controls, with
+additional negative/identity checks. No Test262 harness, corpus, deadline or
+expected result was changed (**D1.3v3**, **D8.1.3v24**).
 
-The latest matched-release screen passes **84/84** output/backend contracts;
-two independent 31-round repeats cover the same eleven suspects. A 99-round
-follow-up leaves `object_retype_escaped` about **0.5–0.6%** slower by medians,
-positive against one control and inconclusive against the other. Its cause is
-unresolved. Sieve remains roughly **3 µs** slower against its original control
-(**0.091 vs 0.088 ms**); other historical gaps retain their controls and status.
-All captures, including noisy ones, are retained. Complete performance
-acceptance remains open. No jq workload was executed.
+The latest completed whole-population audit is archived `parallel38`, SHA-256
+`8747e0880ae733144dd4849b67ca8dc307ff92036b72345b2b7da7f2b36140c1`:
+**37,445/40,261 (93.0%)** pass every required mode, **1,210** above the
+**36,235** target. Independent verification checks raw captures, exact isolated
+replays, required strict modes and immutable provenance. It loses no passes
+from the original `typed_methods4` whole audit; four later selected controls
+remain timeout losses on this archived build. Coverage therefore clears 90%
+for pin38 while the full phase remains open. Pin44's unfinished whole audit is
+superseded by the pin45 fixes, with its partial logs retained. The refreshed
+full audit follows the watchdog fix and final integration gates; selected gains
+are never added to pin38's score.
 
-Dependencies, reuse boundaries, acceptance cases and evidence requirements:
-[implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).
+Remaining work verifies watchdog recovery and the current build's full coverage.
+Known boundaries include
+some with/module-eval contexts, realm and Unicode-sets support, library residuals
+and oversized compiler cases. The current increment reuses shared empty-eval
+recognition and guarded native RegExp replacement, retaining syntax/coercion/
+Unicode/ownership checks (**D1.3v3**, **D8.1.3v24**, **D8.4.1v2**).
+Performance verification resumed on 2026-10-15. The current merged checkout's
+private release pin47 passes **647/647** focused checks and all **84/84** non-jq
+benchmark output/backend contracts. Its seven-round screen and longer repeats
+find substantial typed-array regressions, plus smaller Hashmap, Navier–Stokes
+and Fast-diff regressions. **28/31** longer confirmations complete before the
+user stops further testing and requests repairs; the incomplete captures remain
+explicit. Performance acceptance fails on pin47. Repairs reuse solved storage
+proofs, Lambda's array attribute face and existing primitive/constructor/RegExp
+operations (**D2.6.6v3**, **D3.4.3v5**, **D8.4.1v2**); no new helper or normality
+flag is introduced. The private release repair build compiles and links;
+post-repair correctness and speed remain unmeasured. The standalone Mandelbrot
+output path retains a conservative full-storage fallback, documented in the plan.
+Detailed implementation, evidence and
+residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

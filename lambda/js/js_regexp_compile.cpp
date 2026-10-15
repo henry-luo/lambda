@@ -5,9 +5,126 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/utf.h"
+#include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+static bool js_regexp_append_decoded_name(const char* pat, int len, int* pi, StrBuf* out) {
+    // decode only name regions; malformed escapes stay for frontend validation.
+    int i = *pi;
+    bool any = false;
+    while (i < len && pat[i] != '>') {
+        if (pat[i] == '\\' && i + 1 < len && pat[i + 1] == 'u') {
+            uint32_t cp = 0; int consumed = 0;
+            if (i + 2 < len && pat[i + 2] == '{') {
+                int j = i + 3, val = 0, digits = 0;
+                while (j < len && pat[j] != '}') {
+                    int hv = str_hex_val(pat[j]);
+                    if (hv < 0) { digits = -1; break; }
+                    // reject out-of-range values before accumulation can wrap into a valid name.
+                    if (val > (0x10FFFF - hv) / 16) { digits = -1; break; }
+                    val = val * 16 + hv; digits++; j++;
+                }
+                if (digits > 0 && j < len && pat[j] == '}' && val <= 0x10FFFF) {
+                    cp = (uint32_t)val; consumed = (j + 1) - i;
+                }
+            } else if (i + 5 < len) {
+                int h0 = str_hex_val(pat[i + 2]), h1 = str_hex_val(pat[i + 3]);
+                int h2 = str_hex_val(pat[i + 4]), h3 = str_hex_val(pat[i + 5]);
+                if (h0 >= 0 && h1 >= 0 && h2 >= 0 && h3 >= 0) {
+                    uint32_t u = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+                    consumed = 6;
+                    // combine a high+low surrogate pair into one code point.
+                    if (utf_is_high_surrogate(u) && i + 11 < len &&
+                        pat[i + 6] == '\\' && pat[i + 7] == 'u') {
+                        int l0 = str_hex_val(pat[i + 8]), l1 = str_hex_val(pat[i + 9]);
+                        int l2 = str_hex_val(pat[i + 10]), l3 = str_hex_val(pat[i + 11]);
+                        if (l0 >= 0 && l1 >= 0 && l2 >= 0 && l3 >= 0) {
+                            uint32_t lo = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
+                            uint32_t pair_cp = utf16_decode_pair((uint16_t)u, (uint16_t)lo);
+                            if (pair_cp != 0) {
+                                u = pair_cp;
+                                consumed = 12;
+                            }
+                        }
+                    }
+                    cp = u;
+                }
+            }
+            if (consumed > 0) {
+                char ub[8];
+                int n = (int)utf8_encode(cp, ub);
+                strbuf_append_str_n(out, ub, n);
+                i += consumed;
+                any = true;
+                continue;
+            }
+        }
+        strbuf_append_char(out, pat[i]);
+        i++;
+    }
+    *pi = i;
+    return any;
+}
+
+bool js_regexp_decode_name_escapes(const char* pat, int len, StrBuf** out) {
+    if (!out) return false;
+    *out = NULL;
+    if (!pat || len <= 0) return true;
+    // ordinary patterns keep the original spelling without allocating a normalization buffer.
+    bool has_u = false, has_name = false;
+    for (int i = 0; i + 1 < len; i++) {
+        if (pat[i] == '\\' && pat[i + 1] == 'u') has_u = true;
+        else if (pat[i] == '(' && pat[i + 1] == '?' && i + 2 < len && pat[i + 2] == '<') has_name = true;
+        else if (pat[i] == '\\' && pat[i + 1] == 'k') has_name = true;
+        if (has_u && has_name) break;
+    }
+    if (!has_u || !has_name) return true;
+
+    // decoding only shrinks the spelling, so appends cannot need another allocation.
+    StrBuf* result = strbuf_new_cap((size_t)len + 1);
+    if (!result) return false;
+    bool changed = false;
+    bool in_class = false;
+    int i = 0;
+    while (i < len) {
+        char c = pat[i];
+        if (c == '\\' && i + 1 < len) {
+            // \k<name> named backreference — decode escapes in the name.
+            if (!in_class && pat[i + 1] == 'k' && i + 2 < len && pat[i + 2] == '<') {
+                strbuf_append_str(result, "\\k<");
+                int j = i + 3;
+                if (js_regexp_append_decoded_name(pat, len, &j, result)) changed = true;
+                if (j < len && pat[j] == '>') { strbuf_append_char(result, '>'); j++; }
+                i = j;
+                continue;
+            }
+            strbuf_append_char(result, c);
+            strbuf_append_char(result, pat[i + 1]);
+            i += 2;
+            continue;
+        }
+        if (c == '[') { in_class = true; strbuf_append_char(result, c); i++; continue; }
+        if (c == ']' && in_class) { in_class = false; strbuf_append_char(result, c); i++; continue; }
+        // (?<name> named group (not lookbehind (?<= / (?<!)
+        if (!in_class && c == '(' && i + 2 < len && pat[i + 1] == '?' && pat[i + 2] == '<' &&
+            !(i + 3 < len && (pat[i + 3] == '=' || pat[i + 3] == '!'))) {
+            strbuf_append_str(result, "(?<");
+            int j = i + 3;
+            if (js_regexp_append_decoded_name(pat, len, &j, result)) changed = true;
+            if (j < len && pat[j] == '>') { strbuf_append_char(result, '>'); j++; }
+            i = j;
+            continue;
+        }
+        strbuf_append_char(result, c);
+        i++;
+    }
+    if (changed) *out = result;
+    else strbuf_free(result);
+    return true;
+}
 
 typedef struct JsRegExpNameRef {
     const char* name;

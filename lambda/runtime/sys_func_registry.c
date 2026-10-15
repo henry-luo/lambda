@@ -67,10 +67,11 @@ extern Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_get_async_iterator(Item iterable);
-extern Item js_async_iterator_step_result(Item iterator);
+extern Item js_async_iterator_step_result(Item record);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
 extern Item js_async_iterator_close_result(Item iterator);
+extern Item js_async_iterator_record_close_result(Item record);
 extern bool js_async_iterator_close_needs_await(Item result);
 extern bool js_is_object_value(Item value);
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -422,6 +423,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_BINARY, "binary", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
      false, &TYPE_BINARY, true},
+
+    {SYSFUNC_BINARY_DECODE, "binary_decode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "fn_binary_decode", FPTR(fn_binary_decode), NULL, NULL, false, 0,
+     false, NULL, true},
 
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_number", NULL, NULL, NULL, false, 0},  // unimplemented
@@ -1677,6 +1682,11 @@ JitImport jit_runtime_imports[] = {
     {"elmt", FPTR(elmt)},
     {"elmt_with_tl", FPTR(elmt_with_tl)},
     {"elmt_content_begin", FPTR(elmt_content_begin)},
+    {"output_content_append", FPTR(output_content_append)},
+    {"output_content_checkpoint", FPTR(output_content_checkpoint)},
+    {"output_content_rewind", FPTR(output_content_rewind)},
+    {"output_content_is_virtual", FPTR(output_content_is_virtual)},
+    {"fn_call_emit", FPTR(fn_call_emit)},
     {"elmt_literal_begin", FPTR(elmt_literal_begin)},
     {"elmt_fill", FPTR(elmt_fill)},
     {"elmt_get", FPTR(elmt_get)},
@@ -3246,6 +3256,9 @@ JitImport jit_runtime_imports[] = {
     {"js_iterator_result_done", FPTR(js_iterator_result_done)},
     {"js_iterator_result_value", FPTR(js_iterator_result_value)},
     {"js_async_iterator_close_result", FPTR(js_async_iterator_close_result),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_async_iterator_record_close_result", FPTR(js_async_iterator_record_close_result),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_async_iterator_close_needs_await", FPTR(js_async_iterator_close_needs_await),

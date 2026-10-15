@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 30.1.0 (2026-10-14)
+**Spec version:** 33.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -454,7 +454,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   header is public ABI for MIR and the GC; the asserts are the enforcement.
   [OB22]
 
-- **D2.6.12v2*** **Virtual output lists carry their builder.** A PDF file's
+- **D2.6.12v3*** **Virtual output lists carry their builder.** A PDF file's
   content destination extends the existing List prefix (through Element)
   with a builder pointer. Its `is_virtual` representation flag dispatches
   content append to that builder instead of an Item array; it is independent
@@ -463,8 +463,14 @@ language-visible counterparts are the semantics spec's SI ledger.
   or allocator context is installed or changed. Finish and ownership follow
   the extended destination. The PDFBuilder's MVP object encoder reads borrowed
   map/array storage and writes bytes directly, retaining no source Item edges;
-  document construction stays in Lambda. Producer forwarding and the remaining
-  lifecycle and observation contracts are tracked in DO32/SO48.
+  document construction stays in Lambda. Emitting and counting destinations
+  share the same encoder; counting retains byte lengths without output bytes.
+  Pure result-demand lowering passes a rooted destination explicitly through
+  eligible calls and control flow. Checked appends return a separate completion
+  status; handlers checkpoint and rewind their operand's bytes and failure
+  state. Nested file constructors own separate destinations. Completed files
+  compose as bytes and support an owned `binary(file)` snapshot (S2.6.6v3).
+  General retained-child observation/mutation remains DO32/SO48.
   [PDF_Output §5.4–§5.6]
 
 ### D2.7 The scalar-GC invariant
@@ -559,10 +565,10 @@ that carries them.
 
 ### D3.1 First-class type values
 
-- **D3.1.1v4*** A type value is a `Type*` graph node under one compact
+- **D3.1.1v5*** A type value is a `Type*` graph node under one compact
   TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` (simple, unary,
   binary, pattern, constrained, range, parameter, binder, or bound-name
-  reference). Composite, pattern, range, constrained, and binder types share
+  reference, grammar/rule, or binary schema). Composite, pattern, range, constrained, binder and binary-schema types share
   the tag rather than spending tag-budget entries (D2.1.4). A range kind
   carries static bounds for inclusive membership while preserving the value's
   storage domain; a pattern kind carries its domain tag and compiled content
@@ -791,6 +797,29 @@ that carries them.
   attachment and the collector follows its direct shape-to-cell edge.
   Descriptor transitions do not reinterpret an accessor cell as an `Item`.
   Detailed representation, GC, and transition rules: [JSCU33].
+
+### D3.5 Physical binary schemas
+
+- **D3.5.1v2*** Binary schemas compile to immutable, module-owned field
+  descriptors; one schema-backed Velmt backend serves bounded byte buffers
+  and declared native layouts. Native fields use compiler-derived locations,
+  widths and typed reference loads, including inherited members and ownership
+  wrappers. A single manifest generates the native bindings and Lambda
+  declarations. Admission checks the binding ABI, complete manifest revision,
+  selected logical/storage kinds, typed targets and span stride/extent
+  contracts before publication. A mismatch rejects admission; a byte buffer
+  cannot grant native memory access. [Binary_Schema §10]
+- **D3.5.2v2*** Native schema views retain an invalidatable lifetime control;
+  the host pins the admitted storage, and invalidation precedes its release.
+  Every record and VArray subview shares that control. Counted native spans
+  validate counts against host-admitted allocation extents before lazy access.
+  Structural reads, enumeration and validation check invalidation before
+  treating a count as empty. Precisely trace declared native Item fields,
+  including records in spans, before publishing a carrier and while it lives;
+  retain byte-source edges; never scan arbitrary native memory. Field
+  access checks validity before touching storage. No native address or
+  ownership transfer becomes script-visible. [D4.5.1v4, D5.3.3–D5.3.4;
+  Binary_Schema §10]
 
 ## D4 Memory Management
 
@@ -1268,13 +1297,17 @@ that carries them.
 
 ### D6.1 The effect coloring
 
-- **D6.1.1** `fn`/`pn` is a one-bit, declared, compiler-checked effect
+- **D6.1.1v2** `fn`/`pn` is a one-bit, declared, compiler-checked effect
   system (semantics §S12.1), realized as **infrastructure, not
   documentation**: purity is a core AST flag (guest builders mark
   all-effectful), and every callable surface carries the bit — sys-func
   registry rows, Jube module signatures (the `fn`/`pn` prefix is
   mandatory — *purity is never accidental*), and the runtime-function
-  catalog. [U14, NM §6.2, Lang_Hosting §7.1]
+  catalog. The AST effect walk visits both attribute and content edges of
+  element literals and establishes their pure construction boundary even
+  inside a procedure. Unknown callable colours retain the runtime guard;
+  ordinary preceding procedure statements retain their procedural context.
+  [S12.1.1v3; U14, NM §6.2, Lang_Hosting §7.1]
 - **D6.1.2** The bit is load-bearing across the runtime: it is the
   const-folder's soundness gate, the stream-fusion and parallelization
   license (*Polars/DuckDB must trust their UDFs; Lambda verifies*), the
@@ -2024,12 +2057,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   No ID-keyed per-node fact table (D2.4.1, D3.2.3, D3.3.1v2). Profiles answer
   typed semantic questions and extension nodes; they do not own alternate pass
   schedules. [U29, U30v2]
-- **D8.2.6*** Core expression lowering is demand-driven and returns the full
+- **D8.2.6v2*** Core expression lowering is demand-driven and returns the full
   `MirValue` of D2.4.2. `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and
   `BRANCH` may avoid materialization but never change semantics; unsupported
   demand falls back to generic lowering. Carrier conversion remains
   `em_require_rep()` (D2.4.3), semantic coercion remains profile-owned, and
-  root/final-store ownership remains emitter-only (D5.3.4). [U31, U32]
+  root/final-store ownership remains emitter-only (D5.3.4). PDF output demand
+  additionally carries an explicit destination and a checked completion status
+  (D2.6.12v3). Eligible pure result paths may append directly; ordinary calls,
+  argument/local values, explicit arrays and constrained returns retain their
+  materialization and type boundaries. No ambient output context is installed.
+  [U31, U32; PDF_Output §5.5]
 
 ### D8.3 Dual-function compiling
 
@@ -2440,6 +2478,7 @@ slice; no formal semantic ruling or document semver changes.
 
 | Ruling | Status |
 |---|---|
+| D3.5.1v2–D3.5.2v2 | **Native P2 profile implemented 2026-10-15.** One manifest generates compiler-checked bindings and Lambda declarations with matching complete revisions. Native record/scalar spans validate counts, capacity and stride, share invalidation controls and precisely trace record Item edges during publication and collection. Structural reads, enumeration, validation and formatting reject stale views. Buffer counted arrays, offset references and general cyclic schemas remain separate extensions. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.2.5 | **Implemented 2026-10-07 (USER).** MVP-Lmd preserves finite INT Items through storage and boxed calls, classifies INT/FLOAT as JS Number, and uses range-proven native integer regions plus checked boxed add/subtract/remainder. Widening retains JS binary64 rounding and signed zero. Shared finite boxing/unboxing/band emitters also serve Lambda; no runtime helper was added. Focused tests pass normally and under forced GC; the shared-emitter baseline passes 6284/6284 and the unchanged Test262 baseline 40261/40261. Archived release evidence and conservative proof limits: [JS_MVP_Lmd §9.6](../vibe/jube/JS_MVP_Lmd.md#96-archived-integer-evidence--2026-10-07). |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
@@ -2464,7 +2503,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.8.2–D2.8.3 | **Built 2026-09-27 (LR12-24), on the D6.1.3 fact.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D2.9.1–D2.9.2 | **Implemented 2026-10-02.** Twenty fixtures migrated with unchanged contents; Lambda/input baseline 6,162/6,162, MIME detection 13/13, new extension regression matches on interp/jit/auto, and 15 CLI checks pass. Verification and existing fixture residue: [Input_System appendix](../vibe/input/Input_System.md#appendix--mark-extension-migration-2026-10-02). |
 | D2.9.3 | **Implemented 2026-10-07.** Format `slides` parses with the Mark parser (`input.cpp`); the `slides` document transform (`lambda.slide.present.present`) backs the `.slides` view/layout route; no filename detection was added. The three demo decks were converted from `.ls` and re-format byte-identically to their generator output; five slide UI fixtures open `.slides` decks. Record: [Lambda_Pkg_Slide_Presentation §0](../vibe/Lambda_Pkg_Slide_Presentation.md). |
-| D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
+| D3.1.1v5 | Binary schemas use `TYPE_KIND_BINARY_SCHEMA` under the existing Type tag (2026-10-15); imported declaration values retain descriptor identity across module type lists. The general `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3v5 | **Implemented 2026-09-25 ([Impl_Element_Type_Sharing](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) P0–P3).** Maps built through `map_put` — every `MarkBuilder` parser and every JS object — share through the per-`Input` tree (`map_put_with_data_growth`): the edge table dates from 2026-06-25, the shared root and the bounds (256 edges from the root, 16 from any other type, 1,024 map types per `Input`) from 2026-09-09; maps stopped interning through the shape pool on 2026-08-08. Parsed elements share since P1: `ElementBuilder` starts each element on its tag's root (`elmt_tree_root`) and `putToElement` adds attributes through the tree (`elmt_put_tree`), under their own budget of 16,384 per `Input`. Editor rebuilds since P2 replay their field list through the tree (`type_tree_root_like`, `type_tree_follow`), editing in place only a type the container owns — the old guard had also rewritten tree and literal types, re-laying a sibling map's fields. P3 deleted the shape pool (`shape_pool.cpp`, `Input::shape_pool`, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`). Verification: peak RSS on a 13 MiB layout-test corpus (203K elements, 1,775 types) 184.0 → 120.2 MB and on a 13 MiB page corpus 109.6 → 85.8 MB, parse 1.42× and 1.39× faster; 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to the pre-change build; the map budget took the test262 batch peak from 5,662 to 891 MB (2026-09-09). Since 2026-09-25 tree nodes and edges come from the `Input`'s arena and go with the `Input` (D4.1.4v4, D4.2.6; `input_tree_alloc`); the element-root table stays a pool block and frees its old copy when it grows; JavaScript descriptor retags (`js_property_attrs.cpp`) keep `js_input`'s pool. **v3 implemented 2026-09-25** (`transition_target_for_key`): a child extends its parent's chain in place while the parent's `last` has no successor, and takes the parent's lookup table while it has room and holds no entry with the added field's identity (`typemap_hash_holds_equal`); an entry the tree appends records its position (`ShapeEntry::chain_index`, in padding) and `typemap_hash_entry_is_own` rejects a descendant's; an in-place child shares the parent's `slot_entries`. Every walk goes through `FOR_EACH_MAP_FIELD` / `typemap_next_field` / `shape_chain_next_until` — the link is renamed `ShapeEntry::chain_next`, 181 walks were converted, and lint `no-raw-shape-chain-walk` flags a raw read — and the collector stops at `last` (`LAMBDA_GC_OFF_TYPE_MAP_LAST`). Verification (release, medians of five): one 1,000-key JSON object's parse peak 94.1 → 16.5 MB (debug: 98.8 → 17.4 MB; a 1,000-key JS object 84.7 → 18.4 MB); 13 MiB HTML corpora (real-site pages 99.3 → 99.0 MB, layout tests 104.7 → 104.5 MB) and 60K 20-field JSON records (102.7 MB) unchanged in memory and parse time; Lambda baseline 5,924/5,924, Radiant baseline green, test262 baseline 40,261/40,261 with an unchanged batch peak (643.9 vs 639.8 MB); `TransitionTreePrefixSharingTest` (6). **v4 implemented 2026-10-05** ([LR03-38](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-38>)): `map_extend_open_shape` first tries `map_extend_via_runtime_tree`, which holds the tree `Input` as a context capsule extension (`RUNTIME_SHAPE_TREE_OWNER`, so `EvalContext`'s layout is unchanged), tests node membership by `type_index` against that `Input`'s type list (`type_tree_owns`), adds through `type_tree_add_map_field`, and grows the map's data by doubling. `fn_map_set` answers a plain string key from the type's hash table, hit or miss, instead of walking every field. Building a 512-key map 512 times went from 9.8 s and 11.9 GB to linear time (64 builds of 1,024 keys in 11 ms, debug); fixture `proc/map_runtime_shape_tree.ls`, in the forced-collection sweep. **v5 implemented 2026-10-06** ([Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0–P3): the runtime tree keeps external-parent edges in a table keyed by a structural fingerprint of the parent (`external_parent_edges`), mints children with the parent's names copied into its arena (`clone_shape_entries_owned`, `copy_external_identity`), and reuses a child only when `external_child_matches_parent` finds every copied value equal to the live parent's; retype edges (`type_tree_retype_field`) share the target of a type-changing write, whose data move `container_move_to_type` serves the private rebuild too; `runtime_result_shape`, group-by groups and join tuples start on the tree; the tree is dropped with its heap generation (`runtime_shape_tree_release`, [LR03-43](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-43>)). Lambda `Symbol` keys and JS identity keys take edges (D3.4.4v4). Debug peak RSS for 16 builds of a 1,024-key map: from a literal 1.43 GB → 33 MB, from a parsed object 1.43 GB → 34 MB (16 documents of one shape share one path), from a spread 1.43 GB → 33 MB. Lambda baseline green but the environmental `pdf_svg_page_resources`; test262 with no semantic regression (three unicode-identifier cases flag batch time under load; a paired A/B measured no difference). **Residue:** a declined add (fan-out 16/256 or the budget; P1.5 measured both caps on 268 benchmarks and the Lambda corpus and kept them, since nothing declines below the root and a 2,048-edge root cost 9-10% CPU in linear edge walks), JavaScript shapes, spread link-slot types, qualified keys (LR03-40) keep private types. **Admission reuse completed 2026-10-09:** `type_tree_retype_contract` shares structural admission layouts through the same bounded retype edges; the edge compares the full field contract pointer, rather than its coarse TypeId, so `number`, `any` and distinct union contracts cannot alias. A declined edge retains the private rebuild. `TransitionTreeRetypeTest.FullAdmissionContractsShareBoundedLayoutsWithoutAliasingTheirTypeId` checks preserved extra fields, immutable parents, independent contracts, owner lifetime and 4,096 repeated admissions without arena/type-list growth (D3.4.5, D4.5.1v4). |
 | D3.4.4v4 | **Ruled 2026-10-06 (USER, with S8.2.2v4; the JavaScript namespace mapping accepted the same day); not yet built.** Every read conforms (byte confirmation at each map and element access; identity kinds by record). The transition trees' edge match (`transition_target_for_key`), `typemap_shape_entries_equal`/`typemap_hash_holds_equal` and `map_existing_shape_entry` still take a differing id as a different name, so one spelling has one edge per name pool and a pooled key never shares an edge with an unpooled spelling; and the `property_key_requires_identity` gates at `type_tree_add_map_field`, `map_put_with_data_growth`, `elmt_put_tree` and `type_tree_follow` keep `SYMBOL`/`PRIVATE` keys off every tree although their edges already compare `(name_id, key_kind)`. Plan: [Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0; design record: [Design_Name_Identity](../vibe/Lambda_Design_Name_Identity.md) NI17, NI18. Unruled: the interop spelling of a JavaScript key seen from Lambda (`js.symbol.for.k`). |
@@ -2549,6 +2588,14 @@ construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
 dictionary encoding, and `output` are implemented.
 The builder owns no Item edges and is released by the existing GC external
 payload hook. Producer-return lists and retained-content contracts remain DO32.
+
+**D2.6.12v3 / D8.2.6v2 — pure output demand, 2026-10-15.** Both tiers forward
+eligible pure result paths to an explicit rooted destination with checked
+completion and handler checkpoints/rewind. Counting and emitting share the
+encoder; Lambda freezes stream payloads, measures object lengths and emits
+without a document-sized fragment Item array. Generic/constrained calls can
+materialize; full helper and production-export qualification remains DO32.
+[Phase 2 §13](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#13-functional-generation-and-p3p5-continuation--2026-10-15).
 [Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
 
 ## Appendix B — Open Design Issues (DO#)
@@ -2762,11 +2809,11 @@ Numbered `DO#` (design-open); each links to its record.
   eager tier's time by right.
 - **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
-- **DO32** Virtual PDF output follow-up: producer destination forwarding,
-  retained-file representation (SO48), structured encoder placement, byte
-  accounting, expression rollback, and phase-2 native helpers. The MVP uses
-  builder-owned bytes with precise wrapper lifetime, and does not promise
-  elimination of producer-return lists or migration of Radiant export.
+- **DO32** Virtual PDF output follow-up: extend pure-producer demand coverage,
+  retained-child representation (SO48), remaining object encodings, phase-2
+  native helpers and production Radiant integration. Explicit pure-result
+  demand, shared counting/encoding, byte accounting and expression rollback
+  are ruled in D2.6.12v3/D8.2.6v2; general value calls may still materialize.
   [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
 
 ## Appendix C — Decision-Record Index
@@ -2785,6 +2832,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D2.9 | Mark file extensions (2026-10-02) | `input/Input_System.md` §Mark file extensions |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13/TE-19; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
+| D3.5 | Binary Schema fixed-record/native profile | `Lambda_Type_Binary_Schema.md` §10 |
 | D3.4 | Shape_Pool §1–§8; Shape_Transitions §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33; JS Tune10 §9.3–§9.9 | `Lambda_Shape_Pool.md`, `Lambda_Design_Shape_Transitions.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md`, `jube/JS_Tune10_Fast_Paths (done).md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |

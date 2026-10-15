@@ -1,0 +1,21 @@
+{
+  "name": "Nested flex panels measure scroll overflow from their children",
+  "html": "test/ui/test_nested_flex_scrollbar.html",
+  "viewport": {"width": 520, "height": 280},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#pane"}, "width": 220, "height": 180},
+    {"type": "assert_pixel", "x": 238, "y": 35, "min_r": 185, "max_r": 200, "min_g": 185, "max_g": 200, "min_b": 185, "max_b": 200},
+    {"type": "assert_pixel", "x": 35, "y": 198, "min_r": 185, "max_r": 200, "min_g": 185, "max_g": 200, "min_b": 185, "max_b": 200},
+    {"type": "scroll", "target": {"selector": "#pane"}, "dx": -1, "dy": -1},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_scroll_x": 50, "view_scroll_y": 50, "tolerance": 1},
+    {"type": "assert_rect", "target": {"selector": "#content"}, "relative_to": "#pane", "x": -40, "y": -40, "tolerance": 1},
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 214, "offset_y": 45}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "scrollbar_v_dragging": true},
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 214, "offset_y": 65}},
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 214, "offset_y": 65}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "scrollbar_v_dragging": false},
+    {"type": "assert_rect", "target": {"selector": "#pane"}, "width": 220, "height": 180},
+    {"type": "type", "target": {"selector": "#late"}, "text": "Revealed field"},
+    {"type": "assert_value", "target": {"selector": "#late"}, "equals": "Revealed field"}
+  ]
+}

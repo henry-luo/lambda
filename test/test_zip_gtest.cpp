@@ -206,6 +206,33 @@ TEST_F(ZipTest, StoredCrcFailureAndSnapshotOwnership) {
     strbuf_free(bytes); arraylist_free(entries);
 }
 
+TEST_F(ZipTest, ExtractionVersionUsesLowByteInBothHeaders) {
+    ZipOutputEntry file = {"a", (const uint8_t*)"hello", 5, 0100644, 0, false};
+    ArrayList* entries = arraylist_new(1); arraylist_append(entries, &file);
+    StrBuf* bytes = strbuf_new();
+    ASSERT_TRUE(zip_write_entries(entries, nullptr, bytes, &error));
+    uint8_t* data = (uint8_t*)bytes->str;
+    size_t central = read_le32(data + bytes->length - 6);
+    for (uint16_t platform : {0u, 3u, 19u, 255u}) {
+        for (uint16_t version : {20u, 45u, 63u}) {
+            write_le16(data + 4, (platform << 8) | version);
+            write_le16(data + central + 6, (platform << 8) | version);
+            ZipArchive* archive = zip_archive_open(data, bytes->length, nullptr, nullptr, 0, &error);
+            if (version <= 45) {
+                ASSERT_NE(archive, nullptr) << error.message;
+                ByteSpan payload = {};
+                ASSERT_TRUE(zip_entry_bytes(archive, find(archive, "a"), &payload, &error));
+                EXPECT_EQ(payload.length, 5u);
+                EXPECT_EQ(memcmp(byte_span_data(&payload), "hello", 5), 0);
+                zip_archive_release(archive);
+            } else EXPECT_EQ(archive, nullptr);
+        }
+    }
+    write_le16(data + central + 6, 20);
+    EXPECT_EQ(zip_archive_open(data, bytes->length, nullptr, nullptr, 0, &error), nullptr);
+    strbuf_free(bytes); arraylist_free(entries);
+}
+
 TEST_F(ZipTest, LegacyNamesNormalizeAndExplicitDirectoriesMerge) {
     ZipOutputEntry dir = {"dir/", nullptr, 0, 0, 0, true};
     ZipOutputEntry file = {"dir/e", (const uint8_t*)"x", 1, 0, 0, false};

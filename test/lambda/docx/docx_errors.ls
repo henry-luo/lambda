@@ -11,7 +11,7 @@ let remote = d.convert("https://example.invalid/file.docx") ^ { ^.code };
 let table = d.convert("test/input/docx/unsupported-table-child.docx")^;
 [
     all([for (item in cases) (d.convert("test/input/docx/" ++ item.file ++ ".docx") ^ { ^.code }) == item.code]),
-    [for (issue in r.diagnostics) issue.code] == ["unsupported-drawing","unsafe-or-missing-link","unsupported-element"],
+    [for (issue in r.diagnostics) issue.code] == ["unsupported-drawing","unsafe-or-missing-link","missing-annotation"],
     all([for (issue in r.diagnostics) issue.part == "word/document.xml" and issue.severity == "warning"]),
     not contains(r.html,"javascript:"),
     r.text == "Unsafe\n\n",

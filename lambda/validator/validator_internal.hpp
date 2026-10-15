@@ -427,12 +427,13 @@ void merge_errors(
  * @return true if count is valid, false otherwise
  */
 bool check_count_constraint(
-    int count,
+    int64_t count,
     CountConstraint constraint,
     ValidationResult* result,
     SchemaValidator* validator,
     const char* container_type  // "list", "array", etc.
 );
+ValidationResult* prepare_virtual_validation(SchemaValidator* validator, ConstItem item);
 
 // ==================== Pattern Validation (Forward Declarations) ====================
 

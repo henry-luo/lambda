@@ -219,6 +219,10 @@ void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* bl
     render_walk_positioned_children(&backend, &walk_state, block);
 }
 
+void render_raster_positioned_view(RasterRenderContext* rdcon, ViewBlock* block) {
+    render_raster_dispatch_block(rdcon, block, false);
+}
+
 void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view) {
     if (!rdcon || !view) return;
     RenderBackend backend;

@@ -1,7 +1,10 @@
 #include "mvp_lmd_runtime.h"
+#include "mvp_lmd_async.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_source_module.hpp"
+#include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
 #include "../js_well_known_names.h"
 #include "../../input/input.hpp"
@@ -25,6 +28,8 @@ MvpLmdClass* mvp_lmd_class_record(Item owner) {
         ? (MvpLmdClass*)nominal->extension_data : NULL;
 }
 static Item get_prototype_with_library(Item object, MvpLmdLibraryState* library) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object)) return ItemNull;
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_is(object)) return js_get_prototype(object);
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object, LMD_PROXY_PROTOTYPE);
     TypeId kind = get_type_id(object);
     if (kind == LMD_TYPE_FUNC && !mvp_lmd_class_record(object)) {
@@ -81,6 +86,14 @@ extern "C" Item mvp_lmd_get_prototype(Item object) {
     return get_prototype_with_library(object, mvp_lmd_program_library());
 }
 extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object))
+        return Item{.item = b2it(prevent != 0)};
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_is(object)) {
+        // the native carrier owns this state; generic LJS object gates exclude VMAP.
+        JsPromise* promise = (JsPromise*)object.vmap;
+        if (prevent) promise->extensible = false;
+        return Item{.item = b2it(prevent || promise->extensible)};
+    }
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object,
         prevent ? LMD_PROXY_PREVENT : LMD_PROXY_EXTENSIBLE);
     if (get_type_id(object) == LMD_TYPE_FUNC && !mvp_lmd_class_record(object)) {
@@ -100,7 +113,7 @@ extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
 }
 extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
     TypeId kind = get_type_id(prototype);
-    if (kind != LMD_TYPE_MAP && kind != LMD_TYPE_ARRAY && kind != LMD_TYPE_FUNC && kind != LMD_TYPE_NULL)
+    if (kind != LMD_TYPE_NULL && !mvp_lmd_is_object(prototype))
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, prototype, ItemNull, object, LMD_PROXY_SET_PROTOTYPE);
     RootFrame roots(3);
@@ -120,6 +133,13 @@ extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
         if (mvp_lmd_is_proxy(cursor.get())) break;
         cursor.set(mvp_lmd_get_prototype(cursor.get()));
         if (item_is_error(cursor.get())) return cursor.get();
+    }
+    if (get_type_id(held.get()) == LMD_TYPE_VMAP && js_promise_is(held.get())) {
+        // validation above uses MVP callables; publish only the shared carrier's traced link.
+        JsPromise* promise = (JsPromise*)held.get().vmap;
+        promise->prototype_override = parent.get();
+        promise->has_prototype_override = true;
+        return Item{.item = ITEM_TRUE};
     }
     Map* map = mvp_lmd_property_map(held.get(), true);
     MvpLmdLibraryState* library = mvp_lmd_program_library();
@@ -295,6 +315,26 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     }
     if (get_type_id(owner) == LMD_TYPE_ARRAY)
         return mvp_lmd_array_property(owner, name, value, operation, receiver);
+    if (!fixed && get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner)) {
+        int opcode = operation & ~LMD_PROP_STRICT;
+        if (opcode >= LMD_PROP_KEYS && opcode <= LMD_PROP_ENTRIES)
+            return js_module_namespace_project(owner, opcode - LMD_PROP_KEYS);
+        if (opcode == LMD_PROP_OWN) {
+            JsPropertyDescriptor descriptor = {};
+            return js_module_namespace_get_own(owner, name, &descriptor);
+        }
+        JsModuleNamespaceOperation method = opcode == LMD_PROP_HAS
+            ? JS_MODULE_NAMESPACE_HAS : opcode == LMD_PROP_DELETE ? JS_MODULE_NAMESPACE_DELETE :
+            opcode == LMD_PROP_SET ? JS_MODULE_NAMESPACE_SET : JS_MODULE_NAMESPACE_GET;
+        Item result = js_module_namespace_property(owner, name, method);
+        if ((opcode == LMD_PROP_DELETE || opcode == LMD_PROP_SET) && result.item == ITEM_FALSE &&
+                (operation & LMD_PROP_STRICT)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        return opcode == LMD_PROP_SET && !item_is_error(result) ? value : result;
+    }
+    if (!fixed && get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner))
+        return operation >= LMD_PROP_KEYS && operation <= LMD_PROP_ENTRIES
+            ? mvp_lmd_object_project(owner, operation - LMD_PROP_KEYS)
+            : mvp_lmd_promise_property(owner, name, value, operation, receiver);
     if (!fixed && get_type_id(owner) == LMD_TYPE_MAP && owner.map->map_kind == MAP_KIND_TYPED_ARRAY) {
         double index;
         if (mvp_lmd_typed_array_index(owner, name, &index))
@@ -463,7 +503,7 @@ extern "C" Item mvp_lmd_property_with_receiver(Item owner, Item name, Item value
     return mvp_lmd_class_property_impl<false>(owner, name, value, operation, NULL, receiver);
 }
 
-extern "C" Item mvp_lmd_class_super(Item function, int64_t constructor) {
+extern "C" Item mvp_lmd_function_home(Item function, int64_t constructor) {
     if (get_type_id(function) != LMD_TYPE_FUNC ||
             function.function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function.function->requires_runtime_context)
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -471,17 +511,21 @@ extern "C" Item mvp_lmd_class_super(Item function, int64_t constructor) {
     if (fn->home_slot) {
         if (!fn->closure_env || fn->home_slot > fn->closure_field_count) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         Item home = ((Item*)fn->closure_env)[fn->home_slot - 1];
-        if (get_type_id(home) == LMD_TYPE_FUNC) return mvp_lmd_class_super(home, constructor);
+        if (get_type_id(home) == LMD_TYPE_FUNC) return mvp_lmd_function_home(home, constructor);
         if (constructor || get_type_id(home) != LMD_TYPE_MAP) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-        return mvp_lmd_get_prototype(home);
+        return home;
     }
     if (!fn->home) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return mvp_lmd_get_prototype(mvp_lmd_class_values(fn->home)[constructor || fn->static_method ? 0 : 1]);
+    return mvp_lmd_class_values(fn->home)[constructor || fn->static_method ? 0 : 1];
+}
+extern "C" Item mvp_lmd_class_super(Item function, int64_t constructor) {
+    Item home = mvp_lmd_function_home(function, constructor);
+    return item_is_error(home) ? home : mvp_lmd_get_prototype(home);
 }
 extern "C" Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t derived) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM ||
-            type == LMD_TYPE_FUNC || type == LMD_TYPE_ERROR) return value;
+    // Promise carriers are objects too; explicit constructor returns retain identity.
+    if (mvp_lmd_is_object(value) || type == LMD_TYPE_ERROR) return value;
     if (derived && value.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return receiver.item == ITEM_JS_TDZ ? mvp_lmd_fail(LMD_MVP_REFERENCE, 0) : receiver;
 }
@@ -534,6 +578,46 @@ extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receive
     }
     return object.get();
 }
+Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback) {
+    if (!fallback || !mvp_lmd_is_constructor(new_target)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> target(roots, new_target), prototype(roots, ItemNull), object(roots, ItemNull);
+    String* key = heap_create_name("prototype", 9);
+    if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    prototype.set(mvp_lmd_property_with_receiver(target.get(), Item{.item = s2it(key)},
+        ItemNull, LMD_PROP_GET, target.get()));
+    if (item_is_error(prototype.get())) return prototype.get();
+    if (!mvp_lmd_is_object(prototype.get()))
+        prototype.set(mvp_lmd_program_library(fallback->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
+    MvpLmdClass* actual = mvp_lmd_class_record(target.get());
+    // a source subclass can still require its native base's physical carrier.
+    // ordinary construction keeps its live prototype without claiming that ancestry.
+    // the caller's ordinary allocation class is already admitted; only a different newTarget needs this walk.
+    if (actual && actual != fallback) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library(fallback->program);
+        for (TypeNominal* nominal = &actual->nominal; nominal; nominal = nominal->base) {
+            if (nominal == &library->object.nominal) break;
+            if (nominal->extension != &mvp_lmd_class_extension || !nominal->extension_data) {
+                actual = NULL; break;
+            }
+            Item constructor = mvp_lmd_class_values((MvpLmdClass*)nominal->extension_data)[0];
+            if (get_type_id(constructor) != LMD_TYPE_FUNC ||
+                    constructor.function->entry_abi != FN_ENTRY_ABI_MVP_LMD ||
+                    ((MvpLmdCallable*)constructor.function)->native_constructor) {
+                actual = NULL; break;
+            }
+        }
+    }
+    MvpLmdClass* allocation = actual ? actual : fallback;
+    object.set(mvp_lmd_object_new(&allocation->shape, 0));
+    if (item_is_error(object.get())) return object.get();
+    if (prototype.get().item != mvp_lmd_class_values(allocation)[1].item) {
+        Item linked = mvp_lmd_set_prototype(object.get(), prototype.get());
+        if (item_is_error(linked)) return linked;
+    }
+    return object.get();
+}
 extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments,
         int64_t argc, Item new_target) {
     if (mvp_lmd_is_proxy(callee)) return mvp_lmd_proxy_invoke(callee, receiver, arguments, argc, new_target);
@@ -550,7 +634,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         if (new_target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         MvpLmdClass* cls = fn->home;
         MvpLmdLibraryState* library = mvp_lmd_program_library(fn->program);
-        if (cls->constructor_id < 0 && cls->ast->superclass && (cls->dynamic || (library && library->mutable_prototypes))) {
+        if (!mvp_lmd_class_has_constructor(cls) && cls->ast->superclass && (cls->dynamic || (library && library->mutable_prototypes))) {
             // default derived constructors follow the live constructor link; nominal ancestry stays fixed.
             RootFrame observed(1);
             if (!observed.valid()) return ItemError;
@@ -560,7 +644,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             self.set(mvp_lmd_class_invoke(prototype.get(), receiver, arguments, argc, target.get()));
             return item_is_error(self.get()) ? self.get() : mvp_lmd_class_initialize_instance(held.get(), self.get());
         }
-        while (cls->constructor_id < 0 && cls->nominal.base) {
+        while (!mvp_lmd_class_has_constructor(cls) && cls->nominal.base) {
             if (cls->has_instance_elements) {
                 MvpLmdClass* base = (MvpLmdClass*)cls->nominal.base->extension_data;
                 self.set(mvp_lmd_class_invoke(mvp_lmd_class_values(base)[0], receiver, arguments, argc, target.get()));
@@ -584,7 +668,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             self.set(mvp_lmd_object_new(reusable && reusable->allocation_shape
                 ? reusable->allocation_shape : &actual->shape, 0));
             if (item_is_error(self.get())) return self.get();
-            if (mvp_lmd_is_proxy(target.get())) {
+            if (mvp_lmd_is_proxy(target.get()) || (cls->dynamic && target.get().item != held.get().item)) {
                 RootFrame observed(1);
                 if (!observed.valid()) return ItemError;
                 Rooted<Item> prototype(observed, ItemNull);
@@ -599,7 +683,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
                 Item initialized = mvp_lmd_class_initialize_instance(held.get(), self.get());
                 if (item_is_error(initialized)) return initialized;
             }
-            if (cls->constructor_id < 0) return self.get();
+            if (!mvp_lmd_class_has_constructor(cls)) return self.get();
         }
     } else if (new_target.item != ITEM_JS_UNDEFINED && fn->native_constructor) {
         if (new_target.item != callee.item && !fn->custom_new_target && fn->ptr != (fn_ptr)mvp_lmd_function_bound)
@@ -619,25 +703,8 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             self.set(mvp_lmd_object_new(&properties->shape, 0));
             if (item_is_error(self.get())) return self.get();
         } else {
-            if (!mvp_lmd_is_constructor(target.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-            RootFrame observed(1);
-            if (!observed.valid()) return ItemError;
-            Rooted<Item> prototype(observed, ItemNull);
-            String* key = heap_create_name("prototype", 9);
-            if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            prototype.set(mvp_lmd_property_with_receiver(target.get(), Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, target.get()));
-            if (item_is_error(prototype.get())) return prototype.get();
-            TypeId type = get_type_id(prototype.get());
-            if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC)
-                prototype.set(mvp_lmd_program_library(fn->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
-            // a known newTarget determines nominal allocation; its live prototype remains independent.
-            MvpLmdClass* actual = target.get().item == held.get().item ? properties : mvp_lmd_class_record(target.get());
-            self.set(mvp_lmd_object_new(actual ? &actual->shape : &properties->shape, 0));
+            self.set(mvp_lmd_object_from_constructor(target.get(), properties));
             if (item_is_error(self.get())) return self.get();
-            if (prototype.get().item != mvp_lmd_class_values(properties)[1].item) {
-                Item linked = mvp_lmd_set_prototype(self.get(), prototype.get());
-                if (item_is_error(linked)) return linked;
-            }
         }
     }
     // the caller roots the borrowed argument span; each MIR activation owns its receiver roots.

@@ -4,8 +4,8 @@
 
 #include <stdio.h>
 
-bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length) {
-    if (!out || (!text && length)) return false;
+bool escape_pdf_literal_size(const char* text, size_t length, size_t* size) {
+    if (!size || (!text && length)) return false;
     size_t encoded_length = 2;
     for (size_t i = 0; i < length; i++) {
         unsigned char byte = (unsigned char)text[i];
@@ -14,6 +14,13 @@ bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length) {
         if (width > SIZE_MAX - encoded_length) return false;
         encoded_length += width;
     }
+    *size = encoded_length;
+    return true;
+}
+
+bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length) {
+    size_t encoded_length = 0;
+    if (!out || !escape_pdf_literal_size(text, length, &encoded_length)) return false;
     if (encoded_length > SIZE_MAX - out->length - 1 ||
             !strbuf_ensure_cap(out, out->length + encoded_length + 1)) return false;
 

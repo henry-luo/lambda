@@ -6943,6 +6943,7 @@ enum CssSimpleKeywordRule : uint8_t {
     CSS_SIMPLE_KEYWORD_BASELINE_SOURCE,
     CSS_SIMPLE_KEYWORD_TRANSFORM_STYLE,
     CSS_SIMPLE_KEYWORD_BACKFACE_VISIBILITY,
+    CSS_SIMPLE_KEYWORD_ISOLATION,
 };
 
 struct CssSimpleKeywordSpec {
@@ -6972,6 +6973,8 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_ANY, offsetof(BlockProp, dominant_baseline)},
         {CSS_PROPERTY_MIX_BLEND_MODE, CSS_SIMPLE_KEYWORD_INLINE,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(InlineProp, mix_blend_mode)},
+        {CSS_PROPERTY_ISOLATION, CSS_SIMPLE_KEYWORD_INLINE,
+         CSS_SIMPLE_KEYWORD_ISOLATION, offsetof(InlineProp, isolation)},
         {CSS_PROPERTY_TEXT_TRANSFORM, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, text_transform)},
         // inline and block direction use the same computed inheritance and CSS-wide defaults.
@@ -7026,6 +7029,8 @@ static bool css_simple_keyword_is_valid(CssEnum keyword, CssSimpleKeywordRule ru
                 keyword == CSS_VALUE_LAST;
         case CSS_SIMPLE_KEYWORD_POSITIVE:
             return keyword > 0;
+        case CSS_SIMPLE_KEYWORD_ISOLATION:
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_ISOLATE;
         case CSS_SIMPLE_KEYWORD_NO_INHERIT:
             return keyword > 0 && keyword != CSS_VALUE_INHERIT;
     }
@@ -9566,15 +9571,22 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_Z_INDEX: {
             ensure_span_position(lycon, span);
             span->position->z_index = 0;
+            // auto and numeric zero share a level but establish different stacking contexts.
+            span->position->has_z_index = false;
             if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
                 // inherit the parent's computed stack level instead of reusing its font-relative recipe.
                 DomElement* parent = current_element ? dom_parent_element(current_element) : nullptr;
-                if (parent) span->position->z_index = parent->positionp()->z_index;
+                if (parent) {
+                    span->position->z_index = parent->positionp()->z_index;
+                    span->position->has_z_index = parent->positionp()->has_z_index;
+                }
             } else {
                 double level = 0.0;
                 if (layout_compute_css_integer(lycon, prop_id, value,
-                        (double)INT_MIN, (double)INT_MAX, &level))
+                        (double)INT_MIN, (double)INT_MAX, &level)) {
                     span->position->z_index = (int)level; // INT_CAST_OK: bounded integer stack level
+                    span->position->has_z_index = true;
+                }
             }
             break;
         }

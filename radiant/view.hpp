@@ -1132,6 +1132,7 @@ struct InlineProp {
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
     CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
+    CssEnum isolation;       // isolate keeps negative descendants in this stacking context
     bool has_svg_fill;
     bool svg_fill_none;
     bool has_svg_stroke;
@@ -1931,6 +1932,7 @@ typedef struct PositionProp {
         float inset_percents[4];
     };
     int z_index;            // stacking order
+    bool has_z_index;       // numeric zero creates a context; auto does not
     int custom_layout_z_index; // layout(fn) pass-scoped stacking overlay
     union {
         struct { bool has_top, has_right, has_bottom, has_left; };

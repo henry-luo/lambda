@@ -5,8 +5,10 @@
   "events":[
     {"type":"advance_time","ms":50},
     {"type":"select_option","target":{"selector":"#object-list"},"value":"e1"},
-    {"type":"select_option","target":{"selector":"#prop-start-arrow"},"value":"diamond"},
-    {"type":"select_option","target":{"selector":"#prop-end-arrow"},"value":"circle"},
+    {"type":"click","target":{"selector":"#prop-start-arrow"}},
+    {"type":"click","target":{"selector":"#start-arrow-option-diamond"}},
+    {"type":"click","target":{"selector":"#prop-end-arrow"}},
+    {"type":"click","target":{"selector":"#end-arrow-option-circle"}},
     {"type":"select_option","target":{"selector":"#prop-from-port"},"value":"north"},
     {"type":"select_option","target":{"selector":"#prop-to-port"},"value":"south"},
     {"type":"select_option","target":{"selector":"#prop-routing"},"value":"curved"},

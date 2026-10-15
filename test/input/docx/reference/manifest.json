@@ -2,6 +2,72 @@
   "commit": "791a189230977143cde64dbf9f1d24dce96ac8a1",
   "fixtures": [
     {
+      "file": "comments.docx",
+      "sha256": "adc9f524d176f562db830c346c1e9e21c6a6aa6768d9c09892a423f1257fe17c",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/comments.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "embedded-style-map.docx",
+      "sha256": "3c21d6901093577e52f9681c0af36b01d1127385234077772a8e95d332d08c9e",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/embedded-style-map.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "empty.docx",
+      "sha256": "fd9160a87bcbe94570d998499f1b1ed9b39f381fde1688c2ed2b0b0a6d562bf2",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/empty.docx",
+      "producer": {},
+      "expected": "semantic-import"
+    },
+    {
+      "file": "endnotes.docx",
+      "sha256": "8b0275a08427605e57e0ca7596bc89fb4c00e4b9a5cdae2b1941c619c2496014",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/endnotes.docx",
+      "producer": {},
+      "expected": "semantic-import"
+    },
+    {
+      "file": "external-picture.docx",
+      "sha256": "2f5dbcf27f3dcec02e81535de21b81a2719e0acfd73158750cb7f91249e628f5",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/external-picture.docx",
+      "producer": {
+        "Application": "LibreOffice/3.5$Linux_X86_64 LibreOffice_project/350m1$Build-2"
+      },
+      "expected": "diagnostic-import",
+      "diagnostics": [
+        "external-image"
+      ]
+    },
+    {
+      "file": "footnote-hyperlink.docx",
+      "sha256": "1024a9054d06dc14d69a59f3b0d9d98361f755d5aff93f7b4f27b4af27fa8295",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/footnote-hyperlink.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "footnotes.docx",
+      "sha256": "a3d786ba3ad53833dd3d5e01bd55e93b628c1287d8f9210eb94cb7533f270306",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/footnotes.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
       "file": "simple-list.docx",
       "sha256": "ed3c015cf411d07b08bf34264ff709363740b0747af355479088079d0796dfb3",
       "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/simple-list.docx",
@@ -52,6 +118,19 @@
       "expected": "semantic-import"
     },
     {
+      "file": "text-box.docx",
+      "sha256": "a94f4c516bec29b7c2e2e219ad1799700f0eecd0ebf25ef7f8fc59c14db8fdc9",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/text-box.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "diagnostic-import",
+      "diagnostics": [
+        "unsupported-text-box-layout"
+      ]
+    },
+    {
       "file": "tiny-picture-target-base-relative.docx",
       "sha256": "7ce8d0d134ce59d89217eeee8e604ec5c60f57ff726f38ccda8201c2e8fedf12",
       "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/tiny-picture-target-base-relative.docx",
@@ -59,7 +138,7 @@
         "Application": "Microsoft Office Word",
         "AppVersion": "14.0000"
       },
-      "expected": "zip-version-rejection"
+      "expected": "semantic-import"
     },
     {
       "file": "tiny-picture.docx",

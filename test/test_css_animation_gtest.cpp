@@ -1192,6 +1192,49 @@ TEST_F(MotionCascadeTest, ZIndexMathPreservesIntegerAndDeclarationOwnerSemantics
     EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
 }
 
+TEST_F(MotionCascadeTest, ZIndexComputedLevelsRetainNumericStackingContextIdentity) {
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.set_synthetic(true);
+    PositionProp parent_position = POSITION_PROP_DEFAULT;
+    parent.position = lam::view_prop(&parent_position);
+    element.parent = lam::up(static_cast<DomNode*>(&parent));
+    PositionProp position = POSITION_PROP_DEFAULT;
+    position.position = CSS_VALUE_RELATIVE;
+    element.position = lam::view_prop(&position);
+    FontProp font = {};
+    font.font_size = 20.0f;
+    LayoutContext context = {};
+    context.pool = lam::up(pool); context.css_value_scratch = lam::up(pool);
+    context.doc = lam::up(&doc); context.elmt = lam::up(&element);
+    context.view = lam::up(static_cast<View*>(&element));
+    context.font.style = lam::up(&font); context.font.current_font_size = font.font_size;
+    auto resolve = [&](const char* text, int level, bool numeric) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+        ASSERT_NE(declaration, nullptr);
+        resolve_css_property(CSS_PROPERTY_Z_INDEX, declaration, &context);
+        EXPECT_EQ(position.z_index, level);
+        EXPECT_EQ(position.has_z_index, numeric);
+        EXPECT_EQ(radiant_stack_is_context(&element), numeric);
+    };
+    resolve("z-index:0", 0, true);
+    resolve("z-index:auto", 0, false);
+    resolve("z-index:calc(1em / 10px - 2)", 0, true);
+    resolve("z-index:initial", 0, false);
+    resolve("z-index:calc(-1.5)", -1, true);
+    resolve("z-index:unset", 0, false);
+    // inheritance must carry numeric-zero identity as well as the resolved stack level.
+    parent_position.has_z_index = true;
+    resolve("z-index:inherit", 0, true);
+    parent_position.z_index = 4;
+    resolve("z-index:inherit", 4, true);
+    parent_position.z_index = 0;
+    parent_position.has_z_index = false;
+    resolve("z-index:inherit", 0, false);
+    element.position = nullptr;
+    element.parent = nullptr;
+}
+
 TEST_F(MotionCascadeTest, ItemOrderMathUsesLiveAndInheritedDeclarationFonts) {
     apply("font-size:20px"); apply("order:calc(1em / 10px)");
     doc.js.mutation_count = 1;

@@ -94,13 +94,6 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
 
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
-#ifdef __APPLE__
-extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
-                                               uint64_t* result_home) asm("_fn_call3_into");
-#else
-extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
-                                               uint64_t* result_home) asm("fn_call3_into");
-#endif
 Item vmap_get_by_item(VMap* vm, Item key);
 
 #define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
@@ -5076,6 +5069,22 @@ static Item fn_radiant_physics(Item node,Item request) {
     return scene3d_physics_control(element,operation.get());
 }
 static const JubeFuncDef radiant_functions[] = {
+    {"pdf_walk", "fn(path: string, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk},
+    {"pdf_walk_source", "fn(source: string, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk_source, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_walk_source(Item source, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk_source},
+    {"pdf_glyph_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_glyph_path, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_glyph_path(Item context)", (fn_ptr)fn_radiant_pdf_glyph_path},
+    {"pdf_clip_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_clip_path, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_clip_path(Item context)", (fn_ptr)fn_radiant_pdf_clip_path},
+    {"pdf_image", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_image, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_image(Item context)", (fn_ptr)fn_radiant_pdf_image},
+    {"pdf_object", "fn(dictionary: map) -> any", (fn_ptr)fn_radiant_pdf_object, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_object(Item dictionary)", (fn_ptr)fn_radiant_pdf_object},
+    {"pdf_deflate", "fn(bytes: binary) -> any", (fn_ptr)fn_radiant_pdf_deflate, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_deflate(Item bytes)", (fn_ptr)fn_radiant_pdf_deflate},
+    {"pdf_measure", "fn(content: any) -> any", (fn_ptr)fn_radiant_pdf_measure, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_measure(Item content)", (fn_ptr)fn_radiant_pdf_measure},
     {"image_job", "pn(owner: any, request: map) -> any^", (fn_ptr)fn_radiant_image_job, JUBE_FN_NONE,
      "Item fn_radiant_image_job(Item owner, Item request)", (fn_ptr)fn_radiant_image_job},
     {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,

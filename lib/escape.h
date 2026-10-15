@@ -46,6 +46,7 @@ char escape_decode_js_char(char c);
 /* Append a length-delimited PDF literal byte string, including parentheses.
  * Return false on overflow/allocation failure without appending partial text. */
 bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length);
+bool escape_pdf_literal_size(const char* text, size_t length, size_t* size);
 
 /* Decode four UTF-16 escape digits and an immediately following low surrogate.
  * When replacement is set, lone surrogate code units become U+FFFD. */

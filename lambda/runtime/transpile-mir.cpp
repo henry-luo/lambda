@@ -9,6 +9,7 @@
 #include "template_registry.h"
 #include "type_contract.hpp"
 #include "ast_build.hpp"
+#include "output_demand.hpp"
 #include "mir_emitter_shared.hpp"
 #include "mir_shape_candidates.hpp"
 #include "mir_loop_invariants.hpp"
@@ -624,6 +625,7 @@ struct MirTranspiler {
     bool block_returned;
     // T30-5: non-null while an inlined leaf body is being emitted
     MirInlineFrame* inline_frame;
+    unsigned output_inline_depth;
 
     // Phase 4: Native function info map — tracks which functions have native
     // (unboxed) versions and their parameter/return types.
@@ -1465,6 +1467,7 @@ static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t mir_box_sequence_item(MirTranspiler* mt, AstNode* item);
+static MIR_reg_t mir_emit_output_expr(MirTranspiler* mt, AstNode* node, int destination_root);
 static bool mir_take_list_item_position(MirTranspiler* mt, AstNode* producer);
 static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
         ValueRep required, MirValue* out);
@@ -10403,7 +10406,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 log_debug("mir: resolving imported object type '%.*s' via const_type(%d)",
                     (int)obj_node->name->len, obj_node->name->chars, ot->type_index);
                 return mir_value_from_reg(mt, (AstNode*)ident,
-                    transpile_const_type(mt, ot->type_index),
+                    mir_emit_declared_type_value(mt, obj_node->type),
                     VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
             }
         }
@@ -10516,7 +10519,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 log_debug("mir: resolving local object type '%s' via const_type(%d)",
                     name_buf, ot->type_index);
                 return mir_value_from_reg(mt, (AstNode*)ident,
-                    transpile_const_type(mt, ot->type_index),
+                    mir_emit_declared_type_value(mt, obj_node->type),
                     VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
             }
         }
@@ -17493,8 +17496,10 @@ static void mir_emit_for_where_clause(MirTranspiler* mt, AstForNode* for_node,
 }
 
 static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
-        MIR_reg_t output, MIR_reg_t keys_arr, bool result_demanded) {
-    if (result_demanded) {
+        MIR_reg_t output, MIR_reg_t keys_arr, bool result_demanded, int destination_root = -1) {
+    if (destination_root >= 0) {
+        emit_return_if_item_error(mt, mir_emit_output_expr(mt, for_node->then, destination_root));
+    } else if (result_demanded) {
         // a for body is an item position: a nested for splices (S2.5.2v2)
         MIR_reg_t boxed_result = for_node->then
             ? mir_box_sequence_item(mt, for_node->then) : emit_null_item_reg(mt);
@@ -18108,7 +18113,7 @@ struct MirNonTailScope {
 };
 
 static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
-        bool result_demanded) {
+        bool result_demanded, int destination_root = -1) {
     MirNonTailScope not_tail(mt);
     MirFlowScope flow(mt);
     // Before push_scope: a binding this body widens is declared OUTSIDE the
@@ -18575,7 +18580,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
 
     mir_emit_for_let_clause(mt, for_node);
     mir_emit_for_where_clause(mt, for_node, innermost_continue);
-    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded, destination_root);
 
     // Close nested loops (in reverse order, innermost first)
     for (int ni = nested_count - 1; ni >= 0; ni--) {
@@ -18635,14 +18640,14 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
 }
 
 static MirValue transpile_for(MirTranspiler* mt, AstForNode* for_node,
-        bool result_demanded) {
+        bool result_demanded, int destination_root = -1) {
     // D8.3.4: an iterator body is a separate control-flow region.
     mir_binder_raw_guard_cse_clear(mt);
 
     bool saved_item_position = mt->for_finish_item_position;
     bool saved_block_returned = mt->block_returned;
     mt->for_finish_item_position = mir_take_list_item_position(mt, (AstNode*)for_node);
-    MIR_reg_t result = emit_for_result(mt, for_node, result_demanded);
+    MIR_reg_t result = emit_for_result(mt, for_node, result_demanded, destination_root);
     mt->for_finish_item_position = saved_item_position;
     // a loop body may return, but the loop exit remains reachable when no item runs.
     mt->block_returned = saved_block_returned;
@@ -21819,11 +21824,16 @@ static bool handler_body_consumes_error_value(AstNode* node) {
         rhs->node_type == AST_NODE_CURRENT_ITEM);
 }
 
-static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler) {
+static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler, int destination_root = -1) {
+    MIR_reg_t checkpoint = destination_root >= 0
+        ? emit_call_1(mt, "output_content_checkpoint", MIR_T_I64, MIR_T_P,
+            MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, destination_root, "output_live"))) : 0;
     bool saved_in_handler_operand = mt->in_handler_operand;
     mt->in_handler_operand = true;
     MIR_reg_t operand;
-    if (handler->is_statement && mt->in_proc) {
+    if (destination_root >= 0) {
+        operand = mir_emit_output_expr(mt, handler->operand, destination_root);
+    } else if (handler->is_statement && mt->in_proc) {
         // Procedural handlers own the local fault regime.  The frame protects
         // only the operand; the recovery body runs after that frame is retired.
         operand = transpile_local_fault_expression(mt, handler->operand).reg;
@@ -21891,12 +21901,20 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
         MIR_new_label_op(mt->ctx, done)));
 
     emit_label(mt, handle);
+    if (destination_root >= 0) {
+        // recovery owns only its operand's bytes, including encoder failures.
+        emit_call_void_2(mt, "output_content_rewind", MIR_T_P,
+            MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, destination_root, "output_live")),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, checkpoint));
+    }
     MIR_reg_t saved_handler_error = mt->handler_error_reg;
     bool saved_in_handler = mt->in_handler;
     mt->handler_error_reg = operand;
     mt->in_handler = true;
     mt->block_returned = false;
-    MIR_reg_t body_value = transpile_box_item(mt, handler->body);
+    MIR_reg_t body_value = destination_root >= 0
+        ? mir_emit_output_expr(mt, handler->body, destination_root)
+        : transpile_box_item(mt, handler->body);
     bool error_arm_exits = mt->block_returned;
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
@@ -25471,8 +25489,15 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
     }
 
     bool file_destination = is_file_element_type(type);
+    MirInlineFrame file_frame = {0, 0, LMD_TYPE_ANY};
+    MirInlineFrame* saved_output_frame = mt->inline_frame;
     MIR_reg_t finished = 0;
     if (file_destination) {
+        // A constructor failure is its value; an enclosing handler must see
+        // it before deciding whether to propagate out of the caller.
+        file_frame.exit = new_label(mt);
+        file_frame.result = new_reg(mt, "file_result", MIR_T_I64);
+        mt->inline_frame = &file_frame;
         // Select after attributes; a virtual file must preserve finish errors.
         el = load_gc_root_slot(mt, el_root, "file_live");
         emit_call_void_1(mt, "elmt_content_begin", MIR_T_P, MIR_new_reg_op(mt->ctx, el));
@@ -25522,6 +25547,20 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             // Use list_push_spread for each content item, then list_end
             while (content_item) {
                 mir_note_value_captured(mt, content_item);  // S9.3.1
+                MIR_label_t ordinary = file_destination ? new_label(mt) : 0;
+                MIR_label_t appended = file_destination ? new_label(mt) : 0;
+                if (file_destination) {
+                    el = load_gc_root_slot(mt, el_root, "el_live");
+                    // the C Bool return guarantees only its low byte on every ABI.
+                    MIR_reg_t virtual_file = emit_uext8(mt, emit_call_1(mt, "output_content_is_virtual", MIR_T_I64,
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, el)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, ordinary), MIR_new_reg_op(mt->ctx, virtual_file)));
+                    emit_return_if_item_error(mt, mir_emit_output_expr(mt, content_item, el_root));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, appended)));
+                    emit_label(mt, ordinary);
+                    mt->inline_frame = saved_output_frame;
+                }
                 MIR_reg_t val = mir_box_sequence_item(mt, content_item);
                 int content_root = create_gc_root_slot(mt, val);
                 val = load_gc_root_slot(mt, content_root, "el_content");
@@ -25529,6 +25568,10 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
                 emit_call_void_2(mt, "list_push_spread",
                     MIR_T_P, MIR_new_reg_op(mt->ctx, el),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                if (file_destination) {
+                    mt->inline_frame = &file_frame;
+                    emit_label(mt, appended);
+                }
                 content_item = content_item->next;
             }
             el = load_gc_root_slot(mt, el_root, "el_live");
@@ -25544,7 +25587,14 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
         // else: no attrs and no content — element is just a bare pointer,
     }
 
-    return file_destination ? finished : load_gc_root_slot(mt, el_root, "el_rv");
+    if (file_destination) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, file_frame.result),
+            MIR_new_reg_op(mt->ctx, finished)));
+        emit_label(mt, file_frame.exit);
+        mt->inline_frame = saved_output_frame;
+        return file_frame.result;
+    }
+    return load_gc_root_slot(mt, el_root, "el_rv");
 }
 
 // ============================================================================
@@ -30630,8 +30680,8 @@ static bool mir_inline_call_ok(MirTranspiler* mt, AstCallNode* call,
 
 // Resolve a direct local body without assuming either scalar or aggregate
 // result shape. Both inline consumers use the same target/ABI identity.
-static NativeFuncInfo* mir_direct_inline_info(MirTranspiler* mt,
-        AstCallNode* call, AstFuncNode** out_fn) {
+static AstFuncNode* mir_direct_local_function(MirTranspiler* mt,
+        AstCallNode* call, NativeFuncInfo** out_info = NULL) {
     AstFuncNode* fn = call ? ast_direct_call_function(call) : NULL;
     AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
     AstIdentNode* ident = function && function->node_type == AST_NODE_IDENT
@@ -30640,9 +30690,16 @@ static NativeFuncInfo* mir_direct_inline_info(MirTranspiler* mt,
     if (!fn || !ident || !ident->entry || mir_var_for_ident(mt, ident)) return NULL;
     StrBuf* name_buf = strbuf_new_cap(64);
     mir_write_fn_name(mt, name_buf, fn, ident->entry->import);
-    NativeFuncInfo* info = find_local_func(mt, name_buf->str)
-        ? find_native_func_info(mt, name_buf->str) : NULL;
+    bool local = find_local_func(mt, name_buf->str) != NULL;
+    if (out_info) *out_info = local ? find_native_func_info(mt, name_buf->str) : NULL;
     strbuf_free(name_buf);
+    return local ? fn : NULL;
+}
+
+static NativeFuncInfo* mir_direct_inline_info(MirTranspiler* mt,
+        AstCallNode* call, AstFuncNode** out_fn) {
+    NativeFuncInfo* info = NULL;
+    AstFuncNode* fn = mir_direct_local_function(mt, call, &info);
     if (out_fn) *out_fn = fn;
     return info;
 }
@@ -30857,6 +30914,7 @@ static MIR_reg_t mir_inline_emit_return(MirTranspiler* mt, AstNode* value) {
 // in the native lane of `info->return_type`.
 static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
         AstFuncNode* fn, NativeFuncInfo* info) {
+    MirInlineFrame* saved_inline_frame = mt->inline_frame;
     log_debug("mir-inline: '%.*s' at a direct call site",
         (int)fn->name->len, fn->name->chars);
     // arguments first, in order, as the call would evaluate them
@@ -30968,7 +31026,7 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
             info->return_type == LMD_TYPE_FLOAT ? MIR_DMOV : MIR_MOV,
             MIR_new_reg_op(mt->ctx, frame.result), MIR_new_reg_op(mt->ctx, lane)));
     }
-    mt->inline_frame = NULL;
+    mt->inline_frame = saved_inline_frame;
     mt->typed_array_inbounds_assumed = saved_inbounds;
     mt->typed_array_dense_store_assumed = saved_dense_store;
     mt->local_reads_assumed = saved_local_reads;
@@ -30983,6 +31041,128 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
     for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
         if (arrays[i]) mir_rebind_var_entry(mt, arrays[i], array_bindings[i]);
     }
+    return frame.result;
+}
+
+// A direct pure result can borrow the caller's output destination. Bind only
+// unconstrained parameters here; other calls retain their normal firewalls.
+static bool mir_output_call_eligible(MirTranspiler* mt, AstCallNode* call, AstFuncNode** target) {
+    AstFuncNode* fn = mir_direct_local_function(mt, call);
+    if (mt->output_inline_depth >= 8 ||
+            !ast_output_function(fn) || fn->captures) return false;
+    int count = 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next, count++) {
+        if (arg->node_type == AST_NODE_NAMED_ARG || ast_is_omitted_argument(arg)) return false;
+    }
+    if (count != ((TypeFunc*)fn->type)->param_count || count > LAMBDA_MAX_FUNCTION_ARGS) return false;
+    for (int i = 0; i < count; i++) if (mir_param_is_declared(fn, i)) return false;
+    *target = fn;
+    return true;
+}
+
+static MIR_reg_t mir_emit_output_call(MirTranspiler* mt, AstCallNode* call,
+        AstFuncNode* fn, int destination_root) {
+    int argument_roots[LAMBDA_MAX_FUNCTION_ARGS];
+    int count = 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) {
+        MIR_reg_t value = transpile_box_item(mt, arg);
+        argument_roots[count++] = create_gc_root_slot(mt, value);
+    }
+    push_scope(mt);
+    int index = 0;
+    for (AstNamedNode* param = fn->param; param; param = (AstNamedNode*)param->next, index++) {
+        MIR_reg_t value = load_gc_root_slot(mt, argument_roots[index], "output_argument");
+        emit_return_if_item_error(mt, value);
+        mir_bind_item_var(mt, param->name, param->entry, &TYPE_ANY, value);
+    }
+    bool saved_inbounds = mt->typed_array_inbounds_assumed;
+    bool saved_store = mt->typed_array_dense_store_assumed;
+    bool saved_reads = mt->local_reads_assumed;
+    AstNode* saved_body = mt->func_body;
+    mt->typed_array_inbounds_assumed = false;
+    mt->typed_array_dense_store_assumed = false;
+    mt->local_reads_assumed = false;
+    mt->func_body = fn->body;
+    mt->output_inline_depth++;
+    MIR_reg_t status = mir_emit_output_expr(mt, fn->body, destination_root);
+    mt->output_inline_depth--;
+    mt->func_body = saved_body;
+    mt->typed_array_inbounds_assumed = saved_inbounds;
+    mt->typed_array_dense_store_assumed = saved_store;
+    mt->local_reads_assumed = saved_reads;
+    pop_scope(mt);
+    return status;
+}
+
+// Explicit output demand is local to this expression. Ordinary value calls,
+// arrays and bound intermediates keep their existing materialization boundary.
+static MIR_reg_t mir_emit_output_expr(MirTranspiler* mt, AstNode* node, int destination_root) {
+    MirInlineFrame frame = {new_label(mt), new_reg(mt, "output_status", MIR_T_I64), LMD_TYPE_ANY};
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, frame.result),
+        MIR_new_uint_op(mt->ctx, ITEM_NULL)));
+    MirInlineFrame* saved_frame = mt->inline_frame;
+    bool saved_returned = mt->block_returned;
+    bool saved_tail = mt->in_tail_position;
+    bool saved_proc = mt->in_proc;
+    mt->inline_frame = &frame;
+    mt->block_returned = false;
+    mt->in_tail_position = false;
+    mt->in_proc = false;
+    AstNode* value = ast_unwrap_primary_to_leaf(node);
+    MIR_reg_t status = 0;
+    if (!value) {
+        status = emit_null_item_reg(mt);
+    } else if (value->node_type == AST_NODE_FOR_EXPR && ast_output_stream_for((AstForNode*)value)) {
+        status = transpile_for(mt, (AstForNode*)value, false, destination_root).reg;
+    } else if (value->node_type == AST_NODE_UNARY && ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE) {
+        status = mir_emit_output_expr(mt, ((AstUnaryNode*)value)->operand, destination_root);
+    } else if (value->node_type == AST_NODE_HANDLER_EXPR && !((AstHandlerNode*)value)->value_body) {
+        status = emit_handler_result(mt, (AstHandlerNode*)value, destination_root);
+    } else if (value->node_type == AST_NODE_LIST || value->node_type == AST_NODE_CONTENT) {
+        MirFlowScope flow(mt);
+        push_scope(mt);
+        AstListNode* list = (AstListNode*)value;
+        transpile_lexical_list_declarations(mt, list->declare);
+        for (AstNode* item = list->item; item; item = item->next) {
+            if (!list->declare && is_declaration_node(item->node_type)) transpile_discard_expr(mt, item);
+            else emit_return_if_item_error(mt, mir_emit_output_expr(mt, item, destination_root));
+        }
+        pop_scope(mt);
+        status = emit_null_item_reg(mt);
+    } else if (value->node_type == AST_NODE_IF_EXPR || value->node_type == AST_NODE_CONDITIONAL_EXPR) {
+        MirFlowScope flow(mt);
+        AstIfNode* branch = (AstIfNode*)value;
+        MIR_reg_t condition = em_lower_condition(&mt->em, branch->cond);
+        MIR_label_t otherwise = new_label(mt), done = new_label(mt);
+        status = new_reg(mt, "output_branch", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, otherwise),
+            MIR_new_reg_op(mt->ctx, condition)));
+        MIR_reg_t then_status = mir_emit_output_expr(mt, branch->then, destination_root);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, status), MIR_new_reg_op(mt->ctx, then_status)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+        emit_label(mt, otherwise);
+        MIR_reg_t else_status = mir_emit_output_expr(mt, branch->otherwise, destination_root);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, status), MIR_new_reg_op(mt->ctx, else_status)));
+        emit_label(mt, done);
+    } else {
+        AstFuncNode* fn = NULL;
+        if (value->node_type == AST_NODE_CALL_EXPR && mir_output_call_eligible(mt, (AstCallNode*)value, &fn)) {
+            status = mir_emit_output_call(mt, (AstCallNode*)value, fn, destination_root);
+        } else {
+            MIR_reg_t item = mir_box_sequence_item(mt, node);
+            int item_root = create_gc_root_slot(mt, item);
+            MIR_reg_t destination = load_gc_root_slot(mt, destination_root, "output_live");
+            item = load_gc_root_slot(mt, item_root, "output_item");
+            status = emit_call_2(mt, "output_content_append", MIR_T_I64,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, destination), MIR_T_I64, MIR_new_reg_op(mt->ctx, item));
+        }
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, frame.result), MIR_new_reg_op(mt->ctx, status)));
+    emit_label(mt, frame.exit);
+    mt->inline_frame = saved_frame;
+    mt->block_returned = saved_returned;
+    mt->in_tail_position = saved_tail;
+    mt->in_proc = saved_proc;
     return frame.result;
 }
 
@@ -37910,7 +38090,9 @@ static MirValue transpile_object_type_value(MirTranspiler* mt,
         TypeType* type = (TypeType*)object_type_node->type;
         if (type->type) {
             TypeObject* object_type = (TypeObject*)type->type;
-            result = transpile_const_type(mt, object_type->type_index);
+            // Resolve the declaration in this module's list, not the index
+            // last assigned when another module imported the shared type.
+            result = mir_emit_declared_type_value(mt, object_type_node->type);
             // Registering a method is part of materializing the object type;
             // it does not alter the raw Type* carrier published below.
             for (AstNode* method_node = object_type_node->methods; method_node;

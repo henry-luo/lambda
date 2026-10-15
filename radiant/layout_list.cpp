@@ -809,6 +809,8 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
             if (span->block()->counter_set) counter_set(context, span->block()->counter_set);
         }
         if (list_item) layout_apply_list_item_counter(lycon, block, element);
+        // named strings and target counters take the element's own operations
+        if (lycon->paged && element) paged_element_enter(lycon, element);
     }
     // the element's own operations precede the boundary; generated children follow it.
     if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }

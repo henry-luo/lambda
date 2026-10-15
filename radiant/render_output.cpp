@@ -6,6 +6,7 @@
 #include "page_document.hpp"
 #include "view_tree_css.hpp"
 #include "render_glyph_run_raster_lower.hpp"
+#include "render_effect_raster_fallback.hpp"
 #include "event.hpp"
 
 #include "../lib/tagged.hpp"
@@ -27,6 +28,21 @@
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
+        float viewport_height, float density, ImageSurface** surface, Rect* placement,
+        DisplayList* backdrop) {
+    if (!surface || !placement) return false;
+    *surface = nullptr;
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    RenderEffectRasterImage image = {};
+    if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
+            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER")) return false;
+    *surface = image.surface;
+    *placement = {image.x, image.y, image.width, image.height};
+    return true;
+}
 
 static void render_paged_origin_error(const PagedLayoutDiagnostic& diagnostic) {
     const RadiantSourceOrigin* origin = diagnostic.origin;
@@ -88,6 +104,7 @@ typedef struct RenderExportHtmlRequest {
     InputResourcePolicy resource_policy;
     bool paged;
     const RenderPagedOptions* paged_options;
+    bool defer_scripts;
 } RenderExportHtmlRequest;
 
 typedef struct RenderExportTransformRequest {
@@ -127,7 +144,7 @@ static DomDocument* render_export_load_html_document(RenderExportSession* sessio
     if (html_request && html_request->paged) config.paged_media = html_request->paged_options ? html_request->paged_options : &paged_defaults;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
-            layout_width, layout_height, &config, nullptr, false,
+            layout_width, layout_height, &config, nullptr, html_request->defer_scripts,
             session->print_media)
         : nullptr;
 }
@@ -462,7 +479,8 @@ static bool render_export_session_begin_internal(
                                           session->document);
     process_document_font_faces(session->ui_context, session->document);
     if (paged) {
-        // The settled shared DOM owns this output view; no embedded geometry is overwritten.
+        // the page flow is laid out by the browsing engine through this host (design §1.3)
+        environment.ui_context = lam::up(session->ui_context.get());
         session->paged_view = lam::up(view_tree_secondary_create(session->document, &environment));
         PagedLayoutOptions options = paged_layout_options_default();
         PagedLayoutDiagnostic diagnostic = {};
@@ -539,13 +557,23 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media, bool paged, float device_scale) {
+                                 bool print_media, bool paged, float device_scale, bool execute_scripts) {
     RenderExportHtmlRequest request = {html_file, INPUT_RESOURCE_ALLOW_NETWORK, paged};
+    request.defer_scripts = !execute_scripts;
     // explicit device environments select assets independently of vector export density (RSC6–RSC7).
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
         output_scale, device_scale, false, print_media, paged,
         render_export_load_html_document, &request);
+}
+
+bool render_export_session_begin_source(RenderExportSession* session, const char* source,
+        int viewport_width, int viewport_height, bool paged) {
+    // source documents use the script-free loader and own their private layout edition.
+    RenderExportSourceRequest request = {source, nullptr, true};
+    return render_export_session_begin_internal(session, viewport_width, viewport_height,
+        viewport_width, viewport_height, 1.0f, 1.0f, false, true, paged,
+        render_export_load_html_source, &request);
 }
 
 bool render_export_session_begin_raster(RenderExportSession* session,
@@ -801,6 +829,7 @@ bool render_paged_window_compose(UiContext* ui) {
     DomDocument* doc = ui->document;
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
     environment.device_scale = ui->device_scale;
+    environment.ui_context = lam::up(ui);
     ViewTree* tree = view_tree_secondary_create(doc, &environment);
     PagedLayoutOptions layout = paged_layout_options_default();
     layout.right_binding = ui->paged_options->preview.right_binding;
