@@ -1,0 +1,5 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="inlines">
+  <info><title>Inline vocabulary</title></info>
+  <para><email>lambda@example.org</email>; <quote>quoted</quote>; <filename class="directory">docs/</filename>; <replaceable>file</replaceable>; <wordasword>alpha</wordasword>; x<superscript>2</superscript> and y<subscript>i</subscript>.</para>
+  <para><productname class="trade">Lambda</productname> <phrase>words</phrase> <command>lambda</command> <userinput>help</userinput> <computeroutput>ready</computeroutput> <emphasis role="notice bold">Marked</emphasis>.</para>
+</article>

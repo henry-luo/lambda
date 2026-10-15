@@ -378,6 +378,14 @@ its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
+**DocBook documents:** `lambda view test/input/docbook/showcase.xml` opens the
+original DocBook 5.x `.xml` through `lambda.doc.docbook` (D7.2.4). The covered
+roots (`article`, `book`, `set`, `part`, `reference`) are recognized by their
+namespace, including prefixed names. The viewer
+loads bundled xslTNG CSS and captured images directly; no export step is
+required. The file browser retains the original XML in its Source tab.
+See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
+
 **Supported formats:**
 
 `.docx`, `.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
@@ -402,6 +410,7 @@ lambda view documents/
 lambda view assets.zip
 lambda view report.docx
 lambda view report.docx --archive
+lambda view test/input/docbook/showcase.xml
 lambda view application.jar
 ```
 

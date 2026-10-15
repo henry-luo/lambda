@@ -1,0 +1,13 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="article">
+  <info><title>Lambda DocBook</title></info>
+  <para xml:id="opening">Before <emphasis>mixed</emphasis> after &amp; &lt;safe&gt;.</para>
+  <section xml:id="first"><title>First section</title>
+    <para>See <xref linkend="second"/> and <link xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://docbook.org/">DocBook</link>.</para>
+    <itemizedlist><listitem><para>One</para></listitem><listitem><para>Two</para></listitem></itemizedlist>
+    <orderedlist startingnumber="3"><listitem><para>Three</para></listitem><listitem><para>Four</para></listitem></orderedlist>
+    <programlisting xml:space="preserve">  first &lt;line&gt;
+    second
+</programlisting>
+  </section>
+  <section xml:id="second"><title>Second section</title><para>Finish <literal>x</literal> <emphasis role="bold">strong</emphasis>.</para></section>
+</article>

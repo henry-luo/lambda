@@ -1,0 +1,5 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="media">
+  <info><title>Captured media</title></info>
+  <para>An image follows.</para>
+  <mediaobject><imageobject><imagedata fileref="sample.svg"/></imageobject><textobject><phrase>Example square</phrase></textobject></mediaobject>
+</article>

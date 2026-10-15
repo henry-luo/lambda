@@ -11,6 +11,14 @@ Radiant is Lambda's HTML/CSS/SVG layout, rendering and interaction engine. It tu
 
 HTML is the browsing input. LaTeX, Markdown, XML, Lambda script results and diagram sources reach Radiant through document converters. Explicit paged rendering also accepts Markdown (through its browsing loader and GitHub-style stylesheet), XSL-FO (`.fo`, `.xslfo`), native Radiant page documents (`.rpd`) and fixed PDF pages. These paged inputs have a narrower formatting profile than the browsing engine; see [§8.1](#81-paged-media-and-formatting-inputs) and [Lambda_CLI.md](Lambda_CLI.md).
 
+DocBook 5.x `.xml` documents can be opened directly with
+`lambda view test/input/docbook/showcase.xml`. Namespace-aware XML dispatch
+selects the shipped `lambda.doc.docbook` package and its upstream xslTNG CSS
+(D7.2.4). The current profile covers core document structures, tables, notes
+and navigation; [DocBook format support](Markup_Formats_Support.md#312-docbook)
+records the remaining gaps. Transformation parity and Radiant layout coverage
+are separate checks, and the original CSS retains external font imports.
+
 **Document and views.** Browsing CSS and layout use the parsed Lambda/Mark DOM, and scripts mutate those same nodes. Paged composition creates an independent secondary view with its own computed styles, fragments and retained page geometry; it does not overwrite browsing geometry. Resource ownership follows **D4.5.1v4** and **D4.1.4v5** in [Lambda_Formal_Design.md](Lambda_Formal_Design.md). See [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md) and [RAD_00](dev/radiant/RAD_00_Overview.md) for the general pipeline.
 
 > **Status (alpha, audited 2026-10-10; focused text/image/clip/focus/export checks refreshed 2026-10-12; paged Markdown, overfull-line, collapsed-border and HTML-default checks added 2026-10-14).** This matrix describes the current source in `lambda/input/css/`, `lambda/dom/`, `radiant/` and `lib/font/`, with focused native, UI and export evidence. Legend: ✅ supported · ◐ partial, with remaining gaps stated · ❌ not supported. *Parsed only* means syntax is accepted without a consumer; *not verified* means implementation or runtime evidence is insufficient. Support in browsing, raster output, vector export and explicit paged composition can differ.

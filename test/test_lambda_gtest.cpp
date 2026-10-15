@@ -21,6 +21,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
     "test/lambda/chart",
     "test/lambda/docx",
+    "test/lambda/docbook",
     "test/lambda/latex",
     "test/lambda/math",
     "test/lambda/music",
@@ -48,6 +49,19 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(DocBookTests, PinnedXslTngBodiesAgree) {
+    const char* modes[] = {NULL, "--chunked"};
+    for (const char* mode : modes) {
+        const char* args[] = {"python3", "test/docbook_reference_check.py", mode, NULL};
+        ShellOptions options = {};
+        options.timeout_ms = 60000;
+        options.merge_stderr = true;
+        ShellResult result = shell_exec("python3", args, &options);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
 
 TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
@@ -117,6 +131,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/docbook/proc",
     "test/demo/photo/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",

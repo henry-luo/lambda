@@ -876,6 +876,24 @@ TEST(RadiantViewTest, LoadsXmlAsHeadlessView) {
     test_radiant_view_expect_case(5);
 }
 
+TEST(RadiantViewTest, LoadsOriginalDocBookAsHeadlessView) {
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/input/docbook/showcase.xml", "test/ui/docbook_source.json", nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 8 passed, 0 failed"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, BrowserPreviewsOriginalDocBook) {
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "lmd/package/doc/doc_viewer.ls", "test/ui/doc_viewer_docbook_preview.json", nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 5 passed, 0 failed"), nullptr) << output;
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, LoadsMarkdownAsHeadlessView) {
     test_radiant_view_expect_case(6);
 }

@@ -1,0 +1,50 @@
+{
+  "version": "2.8.5",
+  "repository": "https://codeberg.org/DocBook/xslTNG",
+  "commit": "b26a7c42445b5aae1e3e6cda866513427b2b061c",
+  "source_archive_sha256": "3c3e113f12a9fbc3bb8fccf9dd2960def38e11c97053d56338541b1cef477b5a",
+  "distribution": {
+    "filename": "docbook-xslTNG-2.8.5.zip",
+    "url": "https://codeberg.org/DocBook/xslTNG/releases/download/2.8.5/docbook-xslTNG-2.8.5.zip",
+    "sha256": "7c915be8a7fbd217e04aef6a863d449339117d34254a8d48013f46490b5c7193"
+  },
+  "oracle": {
+    "processor": "Saxon-HE",
+    "version": "12.10",
+    "jar_sha256": "b571af282f25d7301059f788b9a149aab8b5cdc14ef3d212dc5425d3dcbb9a97"
+  },
+  "resources": [
+    {
+      "source": "resources/css/docbook.css",
+      "path": "css/docbook.css",
+      "media_type": "text/css",
+      "sha256": "e7edace4db2df0fa5beb51fb4d3f6bb204700eff4900eb0ad3fa15bb714fa0c4"
+    },
+    {
+      "source": "resources/css/draft-left.svg",
+      "path": "css/draft-left.svg",
+      "media_type": "image/svg+xml",
+      "sha256": "490d050db97a9827e338313ee3b4e9b24b6c515f1fdec278c9d60bb46a0af19e"
+    },
+    {
+      "source": "resources/css/draft-right.svg",
+      "path": "css/draft-right.svg",
+      "media_type": "image/svg+xml",
+      "sha256": "e91f220e55c8d6677f66bece420b6224623c1d9016e1a82be2375ae605d8186d"
+    }
+  ],
+  "translation_inputs": [
+    {
+      "path": "xslt/modules/functions.xsl",
+      "sha256": "45c8029cd54a3af07a24d74ba06bcb32635c206fd793c4433514e30219c174e0"
+    },
+    {
+      "path": "xslt/locale/en.xml",
+      "sha256": "202f392d6efb85bfa73d822ab8b7a74cf3081836e2c8e1ecbff38cc4d033db70"
+    },
+    {
+      "path": "xslt/modules/inlines.xsl",
+      "sha256": "644abc7c5746c216d0cb2de8b9ab7972d935744d4f36c4242454bd78632f08ea"
+    }
+  ]
+}

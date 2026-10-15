@@ -19,6 +19,7 @@ import media: .media
 import docx: .docx
 import docx_view: .docx.view
 import docx_css: .docx.css
+import xml: .xml
 
 let PROJECT_ROOT = "."
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
@@ -317,6 +318,12 @@ fn xml_has_stylesheet(parsed) {
       string(name(child)) == "?xml-stylesheet" and len(content(child)) > 0)
       contains(content(child)[0], "href=")])
   }
+}
+
+fn xml_is_docbook(parsed) {
+  let root = xml.root(parsed);
+  if (not (root is element)) false else
+    xml.expanded(name(root),xml.bindings(root)).uri == "http://docbook.org/ns/docbook"
 }
 
 fn selected_preview(file) {
@@ -893,8 +900,8 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
       <div class:"document-content"
       , if (preview_mode == "view") {
         if (property_format(~.file["extension"]) == "xml" and
-            ~.file["xml_stylesheet"]) {
-          // The file loader resolves the PI's href and applies its CSS in this frame.
+            ~.file["xml_rendered"]) {
+          // The XML loader selects DocBook presentation or the declared CSS in this frame.
           <iframe id:"xml-preview", class:"document-preview",
             src:absolute_file_path(~.file["file_path"])>
         } else if (property_format(~.file["extension"]) != null) {
@@ -1126,7 +1133,8 @@ on document_select(entry) {
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
   let file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"],
-    xml_stylesheet: (if (format == "xml" and type(entry.source) != element) xml_has_stylesheet(parsed) else false)}
+    xml_rendered: (if (format == "xml" and type(entry.source) != element)
+      xml_has_stylesheet(parsed) or xml_is_docbook(parsed) else false)}
   let properties = if (format == "properties") properties_tree(parsed) else parsed
   let open_paths = property_initial_open_paths(properties, format)
   let eml = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null

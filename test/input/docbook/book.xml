@@ -1,0 +1,11 @@
+<book xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="book">
+  <info><title>A small book</title><subtitle>Native publishing</subtitle></info>
+  <preface xml:id="preface"><title>Preface</title><para>Introduction.</para></preface>
+  <chapter xml:id="chapter-one"><title>Getting started</title>
+    <para>Read <xref linkend="chapter-two"/>.</para>
+    <section xml:id="install"><title>Installation</title><para>Install.</para></section>
+    <section xml:id="run"><title>Execution</title><section xml:id="nested"><title>Nested section</title><para>Run.</para></section></section>
+  </chapter>
+  <chapter xml:id="chapter-two"><title>Next steps</title><para>Continue.</para></chapter>
+  <appendix xml:id="appendix"><title>Reference</title><para>Appendix.</para></appendix>
+</book>

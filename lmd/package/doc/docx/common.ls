@@ -1,4 +1,5 @@
 // DOCX uses ordinary immutable Items (D7.2.1/D7.2.4); XML names are expanded before interpretation.
+import xml: lambda.doc.xml
 pub let W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 pub let R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 pub let P = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -28,23 +29,15 @@ pub fn uri(value) => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/m
     else if (value == "http://purl.oclc.org/ooxml/drawingml/chart") CH
     else value
 
-fn expanded(qname, bindings, attribute = false) {
-    let parts = split(string(qname),":")
-    let ns = if (len(parts) == 1) (if (attribute) "" else get(bindings,"xmlns",""))
-        else get(bindings,"xmlns:" ++ parts[0],"");
-    {local:parts[len(parts)-1], uri:uri(ns)}
-}
 pub fn xml_node(node, inherited = {}) {
     if (node is string) node else if (not (node is element)) null else {
         let attributes = map(node)
-        let bindings = {*:inherited, *:map([for (key,value in attributes
-            where string(key) == "xmlns" or starts_with(string(key),"xmlns:")) (key,value)]),
-            ["xmlns:xml"]:"http://www.w3.org/XML/1998/namespace"}
-        let tag = expanded(name(node),bindings);
-        {tag:tag.local, uri:tag.uri,
+        let bindings = xml.bindings(node,inherited)
+        let tag = xml.expanded(name(node),bindings);
+        {tag:tag.local, uri:uri(tag.uri),
             attrs:map([for (key,value in attributes where string(key) != "xmlns" and
-                not starts_with(string(key),"xmlns:"), let n = expanded(key,bindings,true))
-                (n.uri ++ "#" ++ n.local,value)]),
+                not starts_with(string(key),"xmlns:"), let n = xml.expanded(key,bindings,true))
+                (uri(n.uri) ++ "#" ++ n.local,value)]),
             children:[for (child in content(node) where child is string or (child is element and
                 not starts_with(string(name(child)),"?") and not starts_with(string(name(child)),"!")))
                 xml_node(child,bindings)]}

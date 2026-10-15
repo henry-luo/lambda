@@ -29,6 +29,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 13. [Tests](#13-tests)
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
 15. [docx — Word DOCX Import](#15-docx--word-docx-import)
+16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
 
 ---
 
@@ -49,6 +50,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
+| `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
@@ -1435,6 +1437,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
 | `eps` | `test/lambda/eps/`; native parsing/scanning in `test/test_input_eps_gtest.cpp` |
@@ -1612,3 +1615,96 @@ Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
+
+## 16. docbook — DocBook to HTML/CSS
+
+Open the original sample directly with
+`./lambda.exe view test/input/docbook/showcase.xml`. The XML viewer recognizes
+DocBook namespaces and uses the package's HTML/CSS presentation (D7.2.4);
+the document browser keeps the original XML in its Source tab.
+The usual extension is `.xml`; the namespace
+`http://docbook.org/ns/docbook` identifies DocBook. The current direct-view
+roots are `article`, `book`, `set`, `part`, and `reference`.
+
+`lambda.doc.docbook` is an initial native Lambda port of the official DocBook
+xslTNG 2.8.5 HTML/CSS transformation (D7.2.4). Java and XSLT are used only to
+regenerate reference fixtures; package execution has no Java dependency.
+
+```lambda
+import docbook: lambda.doc.docbook
+let xml = "<article xmlns='http://docbook.org/ns/docbook' version='5.2'><info><title>Hello</title></info><para>DocBook in Lambda.</para></article>"
+let source = parse(xml, {type:"xml", flavor:"document"})^
+let publication = docbook.convert(source)^
+publication.document
+```
+
+| API | Contract |
+|-----|----------|
+| `convert(source, options = null)` | Pure conversion of a parsed XML tree or source snapshot into a publication. |
+| `to_html(source, options = null)` | Pure conversion/serialization to one complete HTML string; rejects chunked mode. |
+| `read(path, options = null)` | Procedure acquiring strict XML and referenced local media into an immutable snapshot. |
+| `write(publication, destination)` | Procedure writing all HTML pages and captured assets into a local directory. |
+
+Pure conversion receives all resources as data; it never fetches missing input
+(S12.1.1v3). Parse strings explicitly, preserving significant XML whitespace;
+`flavor:"document"` retains it and rejects DTDs. A snapshot has `document`,
+`source_uri`, `base_uri`, and a `resources` map keyed by resolved URI with
+`{bytes, media_type}` entries. Unavailable media produces a diagnostic.
+
+```lambda
+import docbook: lambda.doc.docbook
+pn main() {
+    let source = docbook.read("test/input/docbook/book.xml")^
+    let publication = docbook.convert(source, {output:"chunked"})^
+    docbook.write(publication, "temp/docbook-example")^
+}
+```
+
+A publication contains `document` (the entry page), `entry`, ordered `pages`
+(`{path, document}`), `assets`, `toc`, `metadata`, `diagnostics`, and
+`compatibility`. The latter identifies the upstream commit, support profile
+and intentional differences. `external_stylesheets` lists the original CSS's
+external Google Fonts imports; those font bytes are not bundled or fetched
+by conversion.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `output` | `"single"` | `"chunked"` computes page ownership, navigation, and cross-file links. |
+| `target` | `"browser"` | `"radiant"` currently returns the same HTML/CSS; renderer support is separate. |
+| `unsupported` | `"warn"` | `"error"` rejects diagnosed unsupported content. |
+| `parameters` | `{}` | Native values keyed by supported original xslTNG parameter names. |
+| `customization` | `{}` | Pure handlers keyed by DocBook local name; each receives `(node, context, next)`. |
+
+Supported parameter groups include TOC controls, component/section numbering,
+generated-ID root/separator, CSS use/resource prefix, verbatim presentation and
+trimming/line numbering, chunk section depth/navigation/note renumbering, and ID-based chunk
+filenames. Boolean parameters take `bool` values. `resource-base-uri` is a
+relative publication directory ending in `/` (or empty). Unknown parameters
+and invalid types fail validation. Syntax highlighting currently accepts only
+`"none"`; this is an explicit difference from upstream's default.
+`verbatim-number-every-nth` and `verbatim-number-minlines` take positive
+integers; `verbatim-number-first-line` is boolean, and
+`verbatim-number-separator` is a string. Upstream's explicit element styles
+take precedence over `verbatim-style-default` for the covered vocabulary.
+
+The current profile covers core article/book structures, common prose and
+inlines, basic/compact/nested/variable lists, ordinary footnotes, admonitions,
+formal objects, HTML tables and CALS row/column spans, generated English
+headings/TOCs/references, text verbatim blocks, captured images and multi-page
+export. Extended vocabulary, full localization, bibliography/glossary/index
+generation, inclusion/transclusion/profiling, advanced CALS/media layout,
+table-specific footnotes, foreign inline SVG/MathML and optional browser scripts
+remain incomplete. Unsupported content and selected unsupported attributes
+are diagnosed. Full xslTNG or DocBook schema coverage is not claimed.
+
+Errors use package codes 7700–7707 for invalid source, options, namespace,
+duplicate ID, strict unsupported content, invalid table, missing resource, and
+invalid path. Underlying input/parse errors retain their original codes.
+Recoverable diagnostics include severity, code, message, source URI and
+occurrence path; line/column are nullable (S7.4.2, S7.4.4).
+
+See the [design](../vibe/Lambda_Pkg_Docbook.md),
+[implementation record](../vibe/impl/Lambda_Impl_Docbook.md), and
+[upstream/support record](../lmd/package/doc/docbook/UPSTREAM.md). The registered
+Lambda tests include the offline single-page and chunked official-body parity
+gate; expected bodies are refreshed separately using the pinned processor.

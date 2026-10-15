@@ -1,0 +1,14 @@
+{
+  "name": "Original DocBook source opens as a styled document",
+  "viewport": {"width": 1100, "height": 900},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "article.book > header h1"}, "equals": "The Riverside Notebook"},
+    {"type": "assert_count", "target": {"selector": ".list-of-titles .toc a"}, "min": 7},
+    {"type": "assert_count", "target": {"selector": "section.chapter"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "#visit-table table"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#visit-table tbody tr:first-child td:first-child"}, "equals": "Footbridge"},
+    {"type": "assert_count", "target": {"selector": "a.xref[href='#second-walk']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "footer .footnote"}, "count": 1},
+    {"type": "assert_style", "target": {"selector": "html"}, "property": "background-color", "equals": "rgb(255, 255, 248)"}
+  ]
+}

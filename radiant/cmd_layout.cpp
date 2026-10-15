@@ -3511,6 +3511,8 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
         release_layout_runtime(owned_runtime);
         return nullptr;
     }
+    // :root selectors and inherited variables need the root before the initial cascade.
+    document->root = lam::up(dom_root);
     if (out_root) *out_root = dom_root;
     return document;
 }
@@ -3929,16 +3931,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    if (!xml_input->xml_stylesheet_href) {
-        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
-        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
-    }
-
-    log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
-    auto t_css_parse = time_now_ns();
-    log_info("[TIMING] load: parse XML: %.1fms",
-             time_elapsed_ms_f(t_parse, t_css_parse));
-
     Element* document_wrapper = (Element*)xml_input->root.item;
     Element* xml_root = nullptr;
 
@@ -3962,6 +3954,27 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
             }
         }
     }
+
+    // DocBook owns its presentation; recognize expanded names before generic XML fallback.
+    const char* docbook_roots[] = {"article", "book", "set", "part", "reference"};
+    for (const char* local_name : docbook_roots) {
+        if (xml_document_element_matches(pool, xml_root, local_name,
+                "http://docbook.org/ns/docbook")) {
+            log_info("[DocBook XML] Rendering through lambda.doc.docbook");
+            return load_input_type_transform_doc("docbook", xml_url, nullptr, 0,
+                viewport_width, viewport_height, pool);
+        }
+    }
+
+    if (!xml_input->xml_stylesheet_href) {
+        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
+        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
+    }
+
+    log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
+    auto t_css_parse = time_now_ns();
+    log_info("[TIMING] load: parse XML: %.1fms",
+             time_elapsed_ms_f(t_parse, t_css_parse));
 
     if (!xml_root) {
         log_error("[Lambda XML] Could not find XML root element");

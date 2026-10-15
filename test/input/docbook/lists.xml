@@ -1,0 +1,6 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="lists">
+  <info><title>Lists</title></info>
+  <itemizedlist spacing="compact"><listitem><para>One</para></listitem><listitem><para>Two</para></listitem></itemizedlist>
+  <orderedlist numeration="loweralpha"><listitem><para>Alpha</para><orderedlist numeration="upperroman"><listitem><para>Nested</para></listitem></orderedlist></listitem></orderedlist>
+  <variablelist><varlistentry><term>First</term><listitem><para>Definition.</para></listitem></varlistentry><varlistentry><term>Second</term><term>Alias</term><listitem><para>Two names.</para></listitem></varlistentry></variablelist>
+</article>

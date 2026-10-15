@@ -10,7 +10,7 @@ Every tree shown below is the real output of `lambda convert <file> -t mark` on 
 
 1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema
 2. [Data-interchange formats](#2-data-interchange-formats) — structured data that maps to Lambda **maps, arrays and elements**
-3. [Other formats](#3-other-formats) — LaTeX, PDF, email, contacts, calendars, diagrams, CSS, MDX and directories
+3. [Other formats](#3-other-formats) — LaTeX, PDF, email, contacts, calendars, diagrams, CSS, MDX, directories and [DocBook](#312-docbook)
 4. [Reading and writing](#4-reading-and-writing) — `input()`, `parse()`, `format()` and `lambda convert`
 5. [Output formats](#5-output-formats)
 
@@ -727,6 +727,57 @@ let files = input("./src")^
 files |: ends_with(~.name, ".cpp") |> ~.name       // all .cpp file names
 ```
 
+### 3.12 DocBook
+
+`lambda.doc.docbook` provides an initial native Lambda port of official
+DocBook xslTNG 2.8.5, whose source stylesheets use XSLT 3.0 (D7.2.4). It
+transforms DocBook 5.x XML into HTML/CSS publications without Java at runtime.
+The usual filename extension is `.xml`; document identity comes from the
+`http://docbook.org/ns/docbook` namespace, including prefixed root names.
+
+Open the original sample directly:
+
+```bash
+./lambda.exe view test/input/docbook/showcase.xml
+```
+
+The viewer recognizes `article`, `book`, `set`, `part`, and `reference` roots
+in that namespace, resolves the bundled CSS and captured local images, and
+displays the document. The file browser also previews it and retains its
+original XML in the Source tab.
+
+| Area | Current support |
+|------|-----------------|
+| Structure and navigation | Core article/book structures, numbered headings, stable IDs, English TOCs and references |
+| Content | Common prose/inlines, lists, admonitions, formal objects, ordinary footnotes and text verbatim blocks |
+| Tables | HTML-style tables and CALS column/row spans, named columns and occupancy validation |
+| Publications | Single-page and chunked HTML, navigation, cross-file links, CSS and captured local media |
+| Diagnostics | Unsupported content produces warnings; `unsupported:"error"` rejects diagnosed content |
+
+Use the package for conversion and export:
+
+```lambda
+import docbook: lambda.doc.docbook
+pn main() {
+    let source = docbook.read("test/input/docbook/showcase.xml")^
+    let publication = docbook.convert(source, {output:"chunked"})^
+    docbook.write(publication, "temp/docbook-publication")^
+}
+```
+
+`convert` and `to_html` are pure; `read` and `write` acquire/export resources
+(S12.1.1v3). Generic `input(path,"xml")` reads an XML tree; generic XML-to-HTML
+serialization does not invoke the DocBook transformation. There is no
+dedicated `docbook` input type or `lambda convert` format flag.
+
+This is a partial HTML profile. DocBook 4 preprocessing, full localization,
+bibliography/index generation, advanced CALS/media layout, table-specific
+footnotes and optional browser scripts remain incomplete. Upstream CSS
+retains external Google Fonts imports; those fonts are not bundled.
+See the [package API](Lambda_Packages.md#16-docbook--docbook-to-htmlcss) and
+[support/provenance record](../lmd/package/doc/docbook/UPSTREAM.md) for the
+parameter profile, deliberate differences and reference checks.
+
 ---
 
 ## 4. Reading and Writing
@@ -785,7 +836,7 @@ Where a target lacks a concept the conversion is predictable rather than silentl
 |----------|---------|
 | **Lightweight markup** | Markdown (GFM/CommonMark), HTML5, reStructuredText, AsciiDoc, Wiki, Org-mode, Textile, troff/man, MDX, LaTeX, Typst, Mark |
 | **Data interchange** | JSON, XML, YAML 1.2, TOML, CSV, INI, Java .properties, SQLite |
-| **Document / rich text** | PDF, LaTeX (.tex); RTF experimental |
+| **Document / rich text** | PDF, LaTeX (.tex), DocBook 5.x (.xml, partial HTML/CSS profile); RTF experimental |
 | **Personal data** | vCard (VCF), iCalendar (ICS), Email (EML / RFC 822) |
 | **Diagrams / graphs** | Graphviz DOT, D2, Mermaid, Structurizr |
 | **Web / code** | CSS (for Radiant), JSX, Math (LaTeX math, ASCII math) |
