@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
+#include "../io/mark_output_builder.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
@@ -1696,6 +1697,14 @@ Item fn_binary(Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_BINARY) {
         return item;
+    }
+    const char* bytes = nullptr;
+    size_t size = 0;
+    if (virtual_output_bytes(item, &bytes, &size)) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, item);
+        Binary* binary = heap_binary_from_bytes(bytes, size);
+        return binary ? Item{.item = x2it(binary)} : ItemError;
     }
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();

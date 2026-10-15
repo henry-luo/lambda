@@ -551,12 +551,35 @@ implement a readable virtual list. Representation details are in Appendix B.
 
 ### 5.5 Producer functions must receive the destination
 
+**USER, 2026-10-15 — functional generation (S2.6.6v3, D2.6.12v3,
+D8.2.6v2).** The PDF pipeline, including source snapshots, private print
+layout, callbacks, resource conversion, measurement and document construction,
+uses `fn`. Loading a source never executes its scripts or mutates a caller's
+live document. `lambda.pdf.output.render(source, options)` and the facade's
+`render_source` accept an HTML element or source path and return the completed
+file. There is no PDF-specific procedural export scope:
+
+```lambda
+import pdf: lambda.pdf.output
+fn make_pdf(source) element^ => pdf.render(source, {})^
+pn main() {
+    let file = make_pdf(<html <body "Hello">>)^;
+    return output(file, "result.pdf", {atomic: true})^
+}
+```
+
+Completed PDF files compose as immutable byte contributions, and
+`binary(file)` returns an owned byte snapshot. Neither operation reconstructs
+retained children. These settle only that part of SO48. General `pn` calls
+still require the preceding-statement form below (S12.1.1v3); PDF generation
+itself needs no such preparation procedure.
+
 The virtual list removes the file's output Item array. It does not remove a
 list already constructed by `pdf_output()` before that call returns. The
 same applies to a large serialized string constructed inside a producer.
 
 Pass the virtual destination explicitly through internal lowering for
-output-demanded evaluation, extending **D8.2.6**. An eligible producer uses
+output-demanded evaluation, under **D8.2.6v2**. An eligible producer uses
 that receiver for result contributions through blocks, branches,
 for-expressions, and nested producer calls. A specialized emission entry may
 take a hidden `List*` destination; ordinary calls retain their value-returning
@@ -565,21 +588,23 @@ without installing it in EvalContext. Calls used to initialize variables or
 compute arguments still construct ordinary values.
 
 The eligible producers here are **pure functions**. A procedure call cannot
-be nested in functional element content (S12.1.1v3; USER, 2026-10-15).
-Procedural preparation runs in a preceding statement, and its completed
-value is then supplied to the file:
+be nested in functional element content (S12.1.1v3; USER, 2026-10-15). PDF
+preparation and construction use functions; the procedural boundary saves
+the completed result:
 
 ```lambda
-pn load_parts() { return "%PDF-1.4\n%%EOF\n" }
+fn load_parts() => "%PDF-1.4\n%%EOF\n"
+fn make_file() => <file format:'pdf', load_parts()>
 pn main() {
-    let parts = load_parts();
-    let file = <file format:'pdf', parts>;
+    let file = make_file();
     return output(file, "result.pdf")^
 }
 ```
 
-Destination forwarding does not move that procedure call into the file,
-change its ordinary return contract, or replay its effects for measurement.
+Destination forwarding preserves ordinary value-returning calls outside
+output demand. General procedural preparation, if needed by an application,
+must execute in a preceding statement; it cannot move inside a file or be
+replayed for measurement.
 
 Current function/block results may use `array_push_spread`, and small or
 single-result forms can bypass `list_push`. MIR's small-element `list_fill`
@@ -590,7 +615,9 @@ ordinary local list/array allocation inside a producer. Completion must be
 represented separately so the caller does not append already-emitted output.
 
 The interpreter and MIR Direct must preserve the same semantics. Arrays
-returned by calls encode one PDF array and must not be flattened. Generic
+returned by calls retain their array meaning and must not be flattened. The
+raw-content profile rejects them; arrays within dictionaries encode as PDF
+arrays. Generic
 calls can encode an already-produced value for correctness; direct emission
 must be demonstrated through the migrated PDF producer call graph. The
 optimization may avoid materialization but must preserve ordinary evaluation,
@@ -618,21 +645,23 @@ append dispatch without changing context state. Future builders can reuse
 the extension and dispatch interface. These remaining contracts are deferred under **SO48/DO32**, as requested on
 2026-10-02; they do not block the raw-fragment/dictionary MVP:
 
-1. **Producer propagation.** Specify the emission entry/demand path that
-   passes this receiver through nested calls and control flow; merely
-   extending the final list does not make those calls stream.
+1. **Producer propagation coverage.** D8.2.6v2 settles explicit demand and
+   completion. Extend eligible call shapes while preserving type boundaries;
+   generic calls may still append already-produced values.
 2. **Completed file value.** Settle indexing, iteration, equality, copying,
    and mutation of retained file content, or constrain destination lowering
    to output consumption as in §5.3. Serialized PDF bytes cannot recover the
-   original values. A nested file is not automatically inlined into its parent.
+   original values. S2.6.6v3 settles completed-file byte composition and
+   `binary(file)` snapshots; general retained-child behavior remains open.
 3. **Ownership and failure.** Define extended allocation, flag layout,
    tracing/destruction, checked append failure, finish-once behavior, and
-   expression rollback. None follows automatically from the extra pointer.
+   native recovery across task/fault boundaries. Checked appends and expression
+   checkpoints/rewind are now ruled in D2.6.12v3.
 4. **PDF encoding boundary and accounting.** The map MVP uses native object
    encoding under D2.6.12v2; choose the full package migration boundary and
    remaining mappings separately. Byte-offset/stream-length rules remain
-   necessary. The counting destination in §6.1 can use the same
-   virtual-list interface; a future single-pass offset API must be explicitly
+   necessary. The shared counting destination is implemented under
+   D2.6.12v3; a future single-pass offset API must be explicitly
    tied to a destination and preserve the pure/procedural boundary.
 
 ## 6. PDF construction in Lambda

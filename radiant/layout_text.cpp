@@ -2987,6 +2987,9 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     const char* text = (const char*)text_node->text_data();
     if (!text) return RDT_LINE_NOT_FILLED;  // null check
+    // an empty text node adds no width; the measuring loop below would read its
+    // terminator as a glyph (the .notdef advance) and step past the string
+    if (!*text) return RDT_NOT_SURE;
     unsigned char* str = (unsigned char*)text;
     unsigned char* text_end = str + strlen(text);
     float text_width = 0.0f;

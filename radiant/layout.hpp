@@ -4463,13 +4463,27 @@ void paged_line_commit(LayoutContext* lycon, float used_line_height);
 // after a post-hoc margin adjustment moved a finished block by delta: the
 // content after the first strut inside it is re-anchored to its page top
 void paged_block_moved(LayoutContext* lycon, ViewBlock* block, float delta);
-// page-control elements carry composition inputs, never flow content
+// page-control elements and running elements (position: running()) carry
+// composition inputs, never flow content
 bool paged_flow_skips_element(LayoutContext* lycon, DomElement* element);
+// after an element's own counter operations: its named strings and, for a
+// target id, its counter values are recorded where the flow meets it; a
+// display:none subtree records its named strings without its counter operations
+void paged_element_enter(LayoutContext* lycon, DomElement* element);
+void paged_element_hidden(LayoutContext* lycon, DomElement* element);
+// generated content of the page flow (a DomContentFunctionHook with the
+// LayoutContext as context): target-counter(), target-counters(), target-text(),
+// content() and the diagnostic for page counters in body content
+bool paged_content_function(void* context, DomElement* element, const CssFunction* function,
+    StrBuf* text, bool* handled);
 // around each layout_html_root pass of a page flow: begin rewinds the pages
 // of a repeated pass; settle returns false when the composition failed, which
 // stops the pass loop (a failed flow keeps no partial pages)
 bool paged_flow_pass_begin(LayoutContext* lycon);
 bool paged_flow_pass_settle(LayoutContext* lycon);
+// after the last pass, while the layout context is live: publication and the
+// page composition, whose margin boxes lay out running elements
+void paged_flow_compose(LayoutContext* lycon);
 void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height);
 void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth = 0);
 bool is_only_whitespace(const char* str);

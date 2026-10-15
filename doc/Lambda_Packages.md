@@ -1059,27 +1059,35 @@ pn main() {
 | `pdf_to_fixed_pages(pdf, opts)` | Returns native `r:fixed-pages` with HTML/SVG image content, source geometry and complete/ranged imports; returns an error for unsupported geometry/resources or exhausted page budgets |
 | `pdf_page_count(pdf)` | The number of pages |
 | `pdf_metadata(pdf)` | The document information dictionary (`Title`, `Author`, `Subject`, `Keywords`, `Creator`, `Producer`, `CreationDate`, `ModDate`) as a map, best effort |
-| `render_source(path, options)` | Lays out a source and constructs a PDF `<file>` using Lambda callbacks over schema-backed views; `options.width`/`height` set the integer CSS viewport (defaults 800×600) |
-| `export_source(path, destination, options)` | Constructs the same PDF and writes it atomically after successful completion; returns the byte count |
+| `render_source(source, options)` | Purely constructs a PDF `<file>` from an HTML element or source path using a private, script-free layout and Lambda callbacks over schema-backed views; `options.width`/`height` set the integer CSS viewport (defaults 800×600) |
+
+Generation uses `fn` throughout (S2.6.6v3). Save the completed value with
+`output(file, destination, {atomic: true})^` in a procedure. The output module
+also exposes `lambda.pdf.output.render(source, options)`; the procedural
+`export` / `export_source` wrappers have been removed. `binary(file)` returns
+owned PDF bytes, and completed PDF files can be composed inside another PDF
+file without retaining their original child values.
 
 The experimental output path is also available directly as
-`lambda.pdf.output.render` / `.export`:
+`lambda.pdf.output.render`:
 
 ```lambda
 import pdf: lambda.pdf.output
 pn main() {
-    return pdf.export("page.html", "page.pdf", {width: 800, height: 600})^
+    let file = pdf.render("page.html", {width: 800, height: 600})^;
+    return output(file, "page.pdf", {atomic: true})^
 }
 ```
 
-This first output profile supports one continuous page, solid rectangular
+This experimental output profile supports continuous and selected paged
+output (`{paged: true, pages: "1,3"}`), solid rectangular
 backgrounds and borders, positioned glyph outlines, image pixels with alpha
 masks, translucent fills/text, transforms and shared native clip geometry.
 The native walker owns traversal; the Lambda schema exposes properties and
 typed nullable references, without sibling/parent links (**S11.5 / D3.5**).
 Lambda writes drawing operators, resources, stream lengths and cross-reference
 offsets. Text outlines preserve appearance but provide no searchable text.
-Paged/secondary views, rounded or decorated boundaries, decorated text,
+Rounded or decorated boundaries, decorated text,
 gradients, inline vector scenes, markers, effects, links and document metadata
 are not yet supported by this route. Unsupported drawing callbacks return
 errors before the destination is written. The production `lambda render`

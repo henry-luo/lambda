@@ -13,6 +13,7 @@
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
 #include "interp.hpp"
+#include "output_demand.hpp"
 #include "doc_context.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -2166,6 +2167,28 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_FUNCTION,
         "fn_call_into");
+}
+
+Item fn_call_emit(Function* fn, List* args, List* destination) {
+    RootFrame roots(2);
+    Rooted<Function*> callable(roots, fn);
+    Rooted<List*> output(roots, destination);
+    Item refused = lambda_fn_colour_guard(callable.get(), args ? args->items : nullptr,
+        args ? (int)args->length : 0, LAMBDA_COLOUR_GUARD_CALLEE);
+    if (get_type_id(refused) == LMD_TYPE_ERROR) return refused;
+    if (callable.get() && callable.get()->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED &&
+            ast_output_function((const AstFuncNode*)callable.get()->def)) {
+        int physical = 0;
+        bool adapter = false;
+        Item checked = lambda_dynamic_check_signature(callable.get(), args ? (int)args->length : 0,
+            LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call_emit", &physical, &adapter);
+        if (get_type_id(checked) == LMD_TYPE_ERROR) return checked;
+        if (!adapter) return interp_call_emit(callable.get(), args ? args->items : nullptr,
+            args ? (int)args->length : 0, output.get());
+    }
+    LAMBDA_SCALAR_HOME(result_home);
+    Item value = fn_call_into(callable.get(), args, &result_home);
+    return output_content_append(output.get(), value);
 }
 
 // S12.3.4 `call(f, args)` — dynamic application. Shared body for both colours;

@@ -104,6 +104,7 @@ typedef struct RenderExportHtmlRequest {
     InputResourcePolicy resource_policy;
     bool paged;
     const RenderPagedOptions* paged_options;
+    bool defer_scripts;
 } RenderExportHtmlRequest;
 
 typedef struct RenderExportTransformRequest {
@@ -143,7 +144,7 @@ static DomDocument* render_export_load_html_document(RenderExportSession* sessio
     if (html_request && html_request->paged) config.paged_media = html_request->paged_options ? html_request->paged_options : &paged_defaults;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
-            layout_width, layout_height, &config, nullptr, false,
+            layout_width, layout_height, &config, nullptr, html_request->defer_scripts,
             session->print_media)
         : nullptr;
 }
@@ -556,13 +557,23 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media, bool paged, float device_scale) {
+                                 bool print_media, bool paged, float device_scale, bool execute_scripts) {
     RenderExportHtmlRequest request = {html_file, INPUT_RESOURCE_ALLOW_NETWORK, paged};
+    request.defer_scripts = !execute_scripts;
     // explicit device environments select assets independently of vector export density (RSC6–RSC7).
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
         output_scale, device_scale, false, print_media, paged,
         render_export_load_html_document, &request);
+}
+
+bool render_export_session_begin_source(RenderExportSession* session, const char* source,
+        int viewport_width, int viewport_height, bool paged) {
+    // source documents use the script-free loader and own their private layout edition.
+    RenderExportSourceRequest request = {source, nullptr, true};
+    return render_export_session_begin_internal(session, viewport_width, viewport_height,
+        viewport_width, viewport_height, 1.0f, 1.0f, false, true, paged,
+        render_export_load_html_source, &request);
 }
 
 bool render_export_session_begin_raster(RenderExportSession* session,

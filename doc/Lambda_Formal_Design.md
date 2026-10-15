@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 32.0.0 (2026-10-15)
+**Spec version:** 33.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -454,7 +454,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   header is public ABI for MIR and the GC; the asserts are the enforcement.
   [OB22]
 
-- **D2.6.12v2*** **Virtual output lists carry their builder.** A PDF file's
+- **D2.6.12v3*** **Virtual output lists carry their builder.** A PDF file's
   content destination extends the existing List prefix (through Element)
   with a builder pointer. Its `is_virtual` representation flag dispatches
   content append to that builder instead of an Item array; it is independent
@@ -463,8 +463,14 @@ language-visible counterparts are the semantics spec's SI ledger.
   or allocator context is installed or changed. Finish and ownership follow
   the extended destination. The PDFBuilder's MVP object encoder reads borrowed
   map/array storage and writes bytes directly, retaining no source Item edges;
-  document construction stays in Lambda. Producer forwarding and the remaining
-  lifecycle and observation contracts are tracked in DO32/SO48.
+  document construction stays in Lambda. Emitting and counting destinations
+  share the same encoder; counting retains byte lengths without output bytes.
+  Pure result-demand lowering passes a rooted destination explicitly through
+  eligible calls and control flow. Checked appends return a separate completion
+  status; handlers checkpoint and rewind their operand's bytes and failure
+  state. Nested file constructors own separate destinations. Completed files
+  compose as bytes and support an owned `binary(file)` snapshot (S2.6.6v3).
+  General retained-child observation/mutation remains DO32/SO48.
   [PDF_Output §5.4–§5.6]
 
 ### D2.7 The scalar-GC invariant
@@ -2051,12 +2057,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   No ID-keyed per-node fact table (D2.4.1, D3.2.3, D3.3.1v2). Profiles answer
   typed semantic questions and extension nodes; they do not own alternate pass
   schedules. [U29, U30v2]
-- **D8.2.6*** Core expression lowering is demand-driven and returns the full
+- **D8.2.6v2*** Core expression lowering is demand-driven and returns the full
   `MirValue` of D2.4.2. `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and
   `BRANCH` may avoid materialization but never change semantics; unsupported
   demand falls back to generic lowering. Carrier conversion remains
   `em_require_rep()` (D2.4.3), semantic coercion remains profile-owned, and
-  root/final-store ownership remains emitter-only (D5.3.4). [U31, U32]
+  root/final-store ownership remains emitter-only (D5.3.4). PDF output demand
+  additionally carries an explicit destination and a checked completion status
+  (D2.6.12v3). Eligible pure result paths may append directly; ordinary calls,
+  argument/local values, explicit arrays and constrained returns retain their
+  materialization and type boundaries. No ambient output context is installed.
+  [U31, U32; PDF_Output §5.5]
 
 ### D8.3 Dual-function compiling
 
@@ -2577,6 +2588,14 @@ construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
 dictionary encoding, and `output` are implemented.
 The builder owns no Item edges and is released by the existing GC external
 payload hook. Producer-return lists and retained-content contracts remain DO32.
+
+**D2.6.12v3 / D8.2.6v2 — pure output demand, 2026-10-15.** Both tiers forward
+eligible pure result paths to an explicit rooted destination with checked
+completion and handler checkpoints/rewind. Counting and emitting share the
+encoder; Lambda freezes stream payloads, measures object lengths and emits
+without a document-sized fragment Item array. Generic/constrained calls can
+materialize; full helper and production-export qualification remains DO32.
+[Phase 2 §13](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#13-functional-generation-and-p3p5-continuation--2026-10-15).
 [Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
 
 ## Appendix B — Open Design Issues (DO#)
@@ -2790,11 +2809,11 @@ Numbered `DO#` (design-open); each links to its record.
   eager tier's time by right.
 - **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
-- **DO32** Virtual PDF output follow-up: producer destination forwarding,
-  retained-file representation (SO48), structured encoder placement, byte
-  accounting, expression rollback, and phase-2 native helpers. The MVP uses
-  builder-owned bytes with precise wrapper lifetime, and does not promise
-  elimination of producer-return lists or migration of Radiant export.
+- **DO32** Virtual PDF output follow-up: extend pure-producer demand coverage,
+  retained-child representation (SO48), remaining object encodings, phase-2
+  native helpers and production Radiant integration. Explicit pure-result
+  demand, shared counting/encoding, byte accounting and expression rollback
+  are ruled in D2.6.12v3/D8.2.6v2; general value calls may still materialize.
   [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
 
 ## Appendix C — Decision-Record Index

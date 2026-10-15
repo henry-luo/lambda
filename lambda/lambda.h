@@ -2743,6 +2743,11 @@ extern "C" {
     Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
     Element* elmt_with_type(struct TypeElmt* elmt_type);
     void elmt_content_begin(Element* element);
+    Item output_content_append(List* destination, Item value);
+    uint64_t output_content_checkpoint(List* destination);
+    void output_content_rewind(List* destination, uint64_t size);
+    Bool output_content_is_virtual(List* destination);
+    Item fn_call_emit(Function* fn, List* args, List* destination);
     Object* object(int64_t type_index);
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);

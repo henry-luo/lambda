@@ -19,18 +19,16 @@ fn inspect(event, node, ctx) string^ {
 }
 
 pn main() {
-    let all_bytes = pdf.export("test/html/paged_view.html", "temp/pdf_lambda_pages.pdf",
-        {paged: true, width: 200, height: 120})^;
+    let all_bytes = output(pdf.render("test/html/paged_view.html", {paged: true, width: 200, height: 120})^, "temp/pdf_lambda_pages.pdf", {atomic: true})^;
     let all_pages = input("temp/pdf_lambda_pages.pdf", 'pdf')^;
-    let selected_bytes = pdf.export("test/html/paged_view.html", "temp/pdf_lambda_selected.pdf",
-        {paged: true, pages: "1,3", width: 200, height: 120})^;
+    let selected_bytes = output(pdf.render("test/html/paged_view.html", {paged: true, pages: "1,3", width: 200, height: 120})^, "temp/pdf_lambda_selected.pdf", {atomic: true})^;
     let selected = input("temp/pdf_lambda_selected.pdf", 'pdf')^;
     let walked = radiant.pdf_walk("test/html/paged_view.html", {paged: true, pages: "2"}, inspect, schema.schemas())^;
     let saved = output("preserve page destination", "temp/pdf_lambda_page_error.pdf")^;
     var rejected = false;
-    pdf.export("test/html/paged_view.html", "temp/pdf_lambda_page_error.pdf", {paged: true, pages: "9"}) ^ {rejected = true};
+    pdf.render("test/html/paged_view.html", {paged: true, pages: "9"}) ^ {rejected = true};
     var unsupported = false;
-    pdf.export("test/html/pdf_lambda_unsupported.html", "temp/pdf_lambda_page_error.pdf", {paged: true}) ^ {unsupported = true};
+    pdf.render("test/html/pdf_lambda_unsupported.html", {paged: true}) ^ {unsupported = true};
     return [all_bytes > 600, len(all_pages.pages) == 3, all_pages.pages[0].media_box == [0, 0, 150, 90],
         selected_bytes > 400 and len(selected.pages) == 2, len(walked.pages) == 1 and walked.pages[0].number == 2,
         len(walked.pages[0].content) > 1, rejected and saved > 0, unsupported,

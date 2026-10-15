@@ -1,6 +1,6 @@
 # PDF output phase 2 — schema-backed Radiant views
 
-> **Status:** implementation in progress, 2026-10-15. The native binding foundation, counted spans, generated contracts and experimental continuous/paged exports are implemented; the complete migration is not qualified. See §10–§12 for verified scope and remaining gates.
+> **Status:** implementation in progress, 2026-10-15. Native schema bindings and experimental continuous/paged exports are implemented. Generation is functional through the final file value; explicit output alone saves it. Pure-result demand, shared counting and expression rollback are implemented. The complete production migration is not qualified. See §10–§13 for verified scope and remaining gates.
 > **Confirmed direction:** retain shared native tree walking; pass schema-backed views and traversal context to Lambda callbacks in rendering order; Lambda reads view properties and emits PDF directly. Native helpers supply glyph outlines, image bytes and effect rasterization as needed (USER, 2026-10-14). Traversal links stay native; schema pointer access serves property/resource references.
 > **Design basis:** [PDF Output](../Lambda_Design_PDF_Output.md), [Binary Schema](../Lambda_Type_Binary_Schema.md), [Virtual Containers](../Lambda_Design_Type_Virtual.md).
 > **Formal linkage:** S11.5.1v2–S11.5.4 / D3.5.1v2–D3.5.2v2 (binary records/native references and counted spans); S2.6.6v2 / D2.6.12v2 (PDF byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v3 (effects). PDF follow-ups remain SO48 / DO32.
@@ -425,11 +425,11 @@ views and output builders are separate mechanisms; improving one does not
 implement the other. Preserve ordinary function/list behavior outside an
 explicit PDF destination, with interpreter/MIR parity.
 
-Forward only eligible **pure function** result paths. Procedural preparation
-remains a preceding `let parts = load_parts();`; functional file construction
-then consumes `parts` under S12.1.1v3 (USER, 2026-10-15). A `pn` call must not
-be nested directly in `<file ...>` content or made eligible through a hidden
-output receiver. Its effects execute once before measurement and emission.
+Forward eligible **pure function** result paths under D8.2.6v2. PDF loading,
+private layout, callbacks, preparation and construction are functional; only
+saving the completed file is procedural (S2.6.6v3; USER, 2026-10-15). A `pn`
+call remains forbidden in functional content (S12.1.1v3). Bound intermediates
+retain their ordinary value semantics.
 
 Include the native-walker-to-Lambda callback edge in that destination-forwarding
 work. A callback's output must append exactly once, in callback order, to the
@@ -440,15 +440,13 @@ Use the existing design's deterministic measurement proposal as the baseline:
 freeze the resource/object plan, measure with the same encoding rules, compute
 byte offsets, then emit. Count encoded bytes, never Unicode character counts.
 Prepare image/font/compressed payloads once, and count their final bytes.
-Run resource discovery and any effectful preparation once; measurement and
-emission may revisit the frozen tree only with deterministic callbacks over
-that frozen resource plan. Cache prepared fallbacks so the later passes do
-not repeat external work or change the callback sequence.
-Effectful work executes once before measurement; do not replay arbitrary
-procedures (S12.1.1v3). Any single-pass destination-position API requires its
-own explicit contract under SO48 / DO32.
+Run pure resource discovery/preparation once against the private snapshot.
+Measurement and emission consume the frozen resource plan; cache prepared
+fallbacks and compressed payloads so later passes retain identical bytes.
+General application procedures cannot be replayed through output demand
+(S12.1.1v3). A single-pass destination-position API remains SO48 / DO32.
 
-Continue to buffer final bytes under S2.6.6v2. The completed file is written
+Continue to buffer final bytes under S2.6.6v3. The completed file is written
 through explicit I/O only after successful construction. A failed pointer
 read, resource conversion or encoder must not publish a partial PDF or
 overwrite an existing output. General native-pointer serialization and
@@ -584,20 +582,20 @@ Until then, report the completed milestones and exact remaining rows.
 
 ## 10. Implementation progress (2026-10-15)
 
-The experimental route is executable through `lambda.pdf.output.render` /
-`.export`, and through `lambda.pdf.pdf.render_source` / `.export_source`. It
-loads a private print-media `RenderExportSession`, keeps the shared native
+The experimental route is executable through pure `lambda.pdf.output.render`
+and `lambda.pdf.pdf.render_source`; only explicit `output(file, path, options)`
+is procedural (S2.6.6v3 / S12.1.1v3). It loads a private script-free print-media `RenderExportSession`, keeps the shared native
 walker, and invokes a rooted pure callback with `(event, record, context)`.
 It does not change the production CLI PDF writer.
 
 | Milestone | Current state | Remaining acceptance work |
 |---|---|---|
-| P0 | Fixed-record/native-reference metadata, counted-span empty/absent rules and lifetime contracts recorded in S11.5 and D3.5. | Complete output-demand contracts. |
+| P0 | Fixed-record/native-reference metadata, counted-span empty/absent rules and lifetime contracts recorded in S11.5 and D3.5; functional generation/output demand in S2.6.6v3, D2.6.12v3 and D8.2.6v2. | Wider retained-content semantics remain SO48. |
 | P1 | Fixed-width byte fields, explicit offsets, nesting, endianness, lazy Velmt access and `binary_decode`. | Counted arrays and full compiler rejection corpus. |
 | P2 | Native references and counted scalar/record/byte spans; shared owner invalidation and precise GC; manifest-generated declarations/bindings with ABI/revision checks; structural invalidation audit (§11). | P2 qualification results are recorded below. Offset pointers, pointer tables and recursive graphs are separate extensions. |
-| P3 | Default element geometry, boundary/font/color/matrix properties, projected text fragments, secondary fragments/state/identity, pages and traversal contexts; no navigation links. | Broader multiple-occurrence and simultaneous-view qualification. |
-| P4 | Shared continuous walker and ordered paged visitor callbacks, checked abort, glyph and clip path helpers, copied image RGB/alpha bytes. | Remaining helper features, handled-subtree effects, full order/lifetime qualification. |
-| P5 | Lambda drawing operators, multiple-page object/resource plan, image soft masks, graphics-state alpha, compressed stream byte lengths, xref/trailer and atomic output. | General pure-producer destination forwarding and measuring destinations. |
+| P3 | Default/secondary geometry and properties, projected text, fragment identities, pages and contexts; no navigation links. Selected pages, nested independent sessions, repeated exports and trees deeper than 64 views have focused coverage. | Broader feature/platform qualification with P6–P7. |
+| P4 | Shared continuous/paged callbacks, checked abort, glyph/clip/image helpers; callback sequence and mixed-scope nesting, escaped-owner invalidation, nested sessions and forced GC are tested. | Raster handled-subtree helpers and full feature/visual qualification with P6. |
+| P5 | Functional drawing/resource/document APIs, checked pure-result demand on both tiers, shared byte-counting encoder, rollback, owned file bytes/composition, compressed stream lengths and xref/trailer. No document-sized fragment Item array. | Broaden optimized call shapes; general calls may materialize. P6–P7 acceptance still blocks production replacement. |
 | P6 | Rectangular fills/borders, positioned glyph outlines, image alpha, transforms, clips, compression and selected physical pages. | Rounded/decorated boundaries, decorated text, gradients, markers, SVG/vector scenes, effects and semantics/metadata. |
 | P7 | Public package entry points and regression qualification started. | Production CLI integration/switch, remaining platform and release measurement gates. |
 
@@ -858,3 +856,104 @@ repeated timeouts; its remaining render phase did not complete. No baseline
 or test was relaxed to conceal a failure. Logs are under `temp/pdf_p3_*` and
 `temp/pdf_p5_*`. Production replacement remains blocked by the unfinished
 implementation and qualification gates above.
+
+## 13. Functional generation and P3–P5 continuation — 2026-10-15
+
+The latest USER scope makes PDF source loading, layout, callbacks, resource
+preparation and document construction functional; only saving the completed
+file uses a procedure. This is recorded in S2.6.6v3, D2.6.12v3 and D8.2.6v2.
+The earlier procedural preparation example in §12 is historical and does not
+describe the PDF API. General `pn` restrictions under S12.1.1v3 remain intact.
+
+`lambda.pdf.output.render(source, options)` and the facade's `render_source`
+are functions accepting an HTML element or source path. The native module's
+`pdf_walk` and `pdf_walk_source` build independent script-free print snapshots.
+The procedural PDF `export` / `export_source` wrappers are removed; call
+`output(file, destination, {atomic: true})^` after generation. Native CLI PDF
+export remains the existing implementation pending P6–P7 qualification.
+
+Both execution tiers carry an explicit rooted output receiver through direct
+pure result calls, list/content blocks, conditionals and simple ordered-in-
+source loops. The interpreter's call adapter and MIR's local-call lowering
+retain ordinary value calls, explicit arrays, argument/local intermediates,
+typed-return contracts and generic fallback. MIR currently forwards fixed
+unconstrained direct local calls with bounded inlining; captured, named/default,
+variadic, imported and constrained calls may materialize. Sorted/grouped or
+windowed loops use the normal value path. No EvalContext sink is installed.
+Checked append returns a separate status, avoiding double append; error
+handlers checkpoint and rewind partial operand bytes and encoder failure.
+
+PDFBuilder has a counting destination sharing the exact object encoder and
+ASCII escaping size calculation with emission. It keeps no encoded byte
+buffer payload. Completed PDF values compose as immutable byte contributions;
+`binary(file)` copies owned bytes with precise source rooting. Readable child
+reconstruction and mutation remain SO48.
+
+The Lambda emitter now plans stable object numbers without an `objects`
+fragment array. It freezes compressed page/image bytes once, measures one
+object at a time, retains numeric lengths/offsets, then emits the object
+producer directly to the file. Measurement's object result is at most a
+bounded list of chunks, not a document-sized fragment Item array. Callbacks
+append one completed contribution immediately in native visit order; glyph
+and clip command loops emit through local byte destinations. Resources and
+compressed page payloads remain legitimate retained plan data.
+
+Focused native checks cover exact shared counting, rollback in both modes,
+sequence IDs and mixed page/clip/transform scope nesting, callback abort,
+expired views and independent offset/Flate/alpha/page validation. New golden
+fixtures exercise module-scope pure generation, nested independent sessions,
+80-deep native traversal, repeated deterministic exports, byte snapshots,
+nested files, zero/one/many producers, array preservation, generic fallback,
+dynamic formats and recovery. Both fixtures are registered in the existing
+interpreter/MIR/auto parity harness.
+
+P6 still owns complex boundaries, decorated text, markers, vector scenes,
+handled effect subtrees and document metadata/semantics. P7 still owns the
+production CLI switch, obsolete-caller audit, platform qualification and
+release measurements. These gates prevent a whole-export replacement claim.
+
+### Verification
+
+`make build-test` passes. The focused PDF/schema checks pass **19/19**, and
+the eight golden fixtures pass on **interp, jit and auto (24/24)** with
+`LAMBDA_GC_FORCE_EVERY=1` and `LAMBDA_GC_POISON_FREED=1`. The native suite
+independently checks every xref address, stream extent, Flate payload, image
+soft mask and selected-page reference on interpreter and MIR.
+
+Poppler `pdfinfo` accepts the continuous, resource and selected-page PDFs;
+the selected file contains two 150×90-point pages. `pdftoppm -r 96` output
+matches six independently sampled solid-fill, border, clip and alpha colors.
+These are focused visual samples, not whole-feature raster qualification.
+Artifacts and numeric samples: `temp/pdf_functional_poppler.json` and
+`temp/pdf_functional_{views,resources}.png`.
+
+The full **Lambda/Input baseline passes 7,426/7,426**, including input
+**2,112/2,112**, runtime **5,314/5,314**, the **1,540-case** script/tier harness
+and the **313-case** MIR forced-GC sweep. The supported 600-second idle timeout
+allows the existing music-layout stress fixture to finish. Radiant dimension
+lint and formal-index generation pass; the pre-existing duplicate DO25 warning
+remains. Correctness logs are under `temp/pdf_functional_*`; no debug timing
+is a performance acceptance measurement.
+
+The Radiant aggregate is **unpassed/incomplete**. `make test-radiant-baseline`
+again reports layout **3,143/3,294**, page snapshots **51/52**, UI automation
+**576/580**, and a secondary-view runner ending in
+`CaptionInheritanceAndGeneratedCountersPreserveSourceOrderWhenReordered`.
+Page-load **109/109**, DOM **156/156**, text-query **113/113**, view-UI **15/15**,
+input-event **32/32** and video **14/14** pass. Scene/view workers repeatedly
+hit their normal 120-second idle limit with `com.apple.hiservices-xpcservice`
+connection errors; the aggregate was stopped at 480 seconds without reaching
+its render phase. No assertion or timeout was relaxed to turn this into a pass.
+
+A separate native export check passes CSS page sizing and fixed imported-page
+geometry **2/3**; `LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilteredPreview`
+fails PNG comparisons in `page_labels_0`. This is not a passed native visual
+qualification gate. Full render/input feature qualification remains P6–P7.
+Logs: `temp/pdf_functional_radiant_baseline.log` and
+`temp/pdf_functional_native_export.log`.
+
+Final review also widens the C `Bool` selector's low byte before MIR branching
+so the output/ordinary-file selection obeys the C ABI on every architecture.
+The final focused rerun includes error-payload reads after allocation under
+forced GC; the aggregate Lambda result above predates this isolated ABI
+widening and final added assertion.
