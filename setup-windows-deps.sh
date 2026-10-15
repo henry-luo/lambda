@@ -156,13 +156,11 @@ install_msys2_package "vim" "Vim editor (provides xxd binary data tool)"
 # Core mathematical and text processing libraries
 install_msys2_package "${TOOLCHAIN_PREFIX}-mpdecimal" "Multi-precision decimal library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-mbedtls" "mbedTLS - SSL/TLS library"
+# image codecs build from lib/image; retain their shared compression dependency explicitly.
+install_msys2_package "${TOOLCHAIN_PREFIX}-zlib" "Compression library"
 
 # Graphics and rendering libraries (for Radiant engine)
 install_msys2_package "${TOOLCHAIN_PREFIX}-glfw" "GLFW window management"
-install_msys2_package "${TOOLCHAIN_PREFIX}-libpng" "PNG image library"
-install_msys2_package "${TOOLCHAIN_PREFIX}-libjpeg-turbo" "JPEG image library"
-install_msys2_package "${TOOLCHAIN_PREFIX}-giflib" "GIF image library"
-install_msys2_package "${TOOLCHAIN_PREFIX}-libwebp" "WebP image library"
 
 # HTTP/networking libraries - minimal setup for libcurl only
 # Note: nghttp2 removed - building minimal libcurl without HTTP/2 support
@@ -1090,7 +1088,8 @@ echo "  ✅ ccache (compiler cache for 5-30x faster rebuilds)"
 echo "  ✅ mpdecimal (multi-precision decimal arithmetic)"
 echo "  ✅ mbedTLS (SSL/TLS library)"
 echo "  ✅ GLFW (window management)"
-echo "  ✅ Image libraries (PNG, JPEG, GIF)"
+echo "  ✅ zlib (shared compression library)"
+echo "  📦 Image codecs (built from lib/image by Lambda)"
 echo "  📦 Tree-sitter library (building from source - see verification below)"
 echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
 echo "  📦 Tree-sitter-javascript (building from source - see verification below)"
@@ -1163,23 +1162,11 @@ else
     echo "⚠️  GLFW library not installed"
 fi
 
-# Check image libraries
-if pacman -Qq "${TOOLCHAIN_PREFIX}-libpng" &>/dev/null; then
-    echo "✅ libpng library installed (from MSYS2)"
+# Check shared compression library
+if pacman -Qq "${TOOLCHAIN_PREFIX}-zlib" &>/dev/null; then
+    echo "✅ zlib library installed (from MSYS2)"
 else
-    echo "⚠️  libpng library not installed"
-fi
-
-if pacman -Qq "${TOOLCHAIN_PREFIX}-libjpeg-turbo" &>/dev/null; then
-    echo "✅ libjpeg-turbo library installed (from MSYS2)"
-else
-    echo "⚠️  libjpeg-turbo library not installed"
-fi
-
-if pacman -Qq "${TOOLCHAIN_PREFIX}-giflib" &>/dev/null; then
-    echo "✅ giflib library installed (from MSYS2)"
-else
-    echo "⚠️  giflib library not installed"
+    echo "⚠️  zlib library not installed"
 fi
 
 # Check compilers

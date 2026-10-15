@@ -25,15 +25,12 @@ ALL_LIBS=(
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: ThorVG is built from source (see build_thorvg_v1_0_pre34_for_linux function)
+# image codecs are built from lib/image by the Lambda build.
 RADIANT_DEPS=(
     "libwebkit2gtk-4.1-dev"  # WebKitGTK headers and GTK/JavaScriptCore development dependencies
     "libglfw3-dev"           # OpenGL window and context management
-    "libpng-dev"             # PNG image format support
     "libbz2-dev"             # Alternative compression library
     "zlib1g-dev"             # Compression library (already included above)
-    "libturbojpeg0-dev"      # TurboJPEG library with turbojpeg.h header
-    "libgif-dev"             # GIF image format support
-    "libwebp-dev"            # shared raster WebP decoder
     "gettext"                # For libintl support
     "libgl1-mesa-dev"        # OpenGL development libraries
     "libglu1-mesa-dev"       # OpenGL utility libraries
@@ -1171,10 +1168,7 @@ echo ""
 echo "Radiant project dependencies:"
 echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libturbojpeg: $(dpkg -l | grep -q libturbojpeg0-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libgif: $(dpkg -l | grep -q libgif-dev && echo "✓ Available" || echo "✗ Missing")"
-
+echo "- Image codecs: built from lib/image by Lambda"
 echo "- zlib: $(dpkg -l | grep -q zlib1g-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- bzip2: $(dpkg -l | grep -q libbz2-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- OpenGL: $(dpkg -l | grep -q libgl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
