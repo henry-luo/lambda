@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+.box{position:absolute;width:80px;height:40px;border-radius:20px}
+.ink{position:absolute;left:-15px;top:-10px;width:140px;height:70px;background:red}
+#h{left:30px;top:60px;overflow:visible clip}
+#v{left:190px;top:60px;overflow:clip visible}
+#rollback{left:30px;top:160px}
+#logical{left:190px;top:160px;writing-mode:vertical-rl;overflow-inline:clip;overflow-block:visible}
+#contained{left:30px;top:260px;contain:paint;overflow:visible clip}
+#nested{left:190px;top:260px;width:50px;height:40px;overflow:hidden}
+#pane{position:relative;width:80px;height:40px;overflow:visible clip}
+@layer low,high;
+@layer low{#rollback{overflow:visible;overscroll-behavior:auto}}
+@layer high{#rollback{overflow:clip;overflow-x:revert-layer;
+overscroll-behavior:none;overscroll-behavior-x:revert-layer}}
+</style>
+<button id="check">Check</button><button id="change">Change</button><button id="restore">Restore</button>
+<output id="report" data-clicks="0"></output>
+<div id="h" class="box"><div id="h-ink" class="ink"></div></div>
+<div id="v" class="box"><div id="v-ink" class="ink"></div></div>
+<div id="rollback" class="box"><div class="ink"></div></div>
+<div id="logical" class="box"><div class="ink"></div></div>
+<div id="contained" class="box"><div class="ink"></div></div>
+<div id="nested" class="box"><div id="pane"><div class="ink"></div></div></div>
+<textarea id="ua" style="position:absolute;left:0;top:320px;width:80px;height:20px"></textarea>
+<script>
+function report(){
+    ['h','v','rollback','logical','contained','pane'].forEach(function(id){
+        var style=getComputedStyle(document.getElementById(id));
+        document.getElementById('report').setAttribute('data-'+id,
+            [style.overflow,style.overflowX,style.overflowY,style.overflowInline,style.overflowBlock].join('|'));
+    });
+    document.getElementById('report').setAttribute('data-overscroll',
+        getComputedStyle(document.getElementById('rollback')).overscrollBehavior);
+    document.getElementById('report').setAttribute('data-ua',
+        getComputedStyle(document.getElementById('ua')).overflow);
+}
+document.getElementById('check').onclick=report;
+document.getElementById('change').onclick=function(){
+    document.getElementById('logical').style.writingMode='horizontal-tb';
+    document.getElementById('ua').style.overflow='hidden';
+    document.getElementById('rollback').style.overflowX='clip';report();
+};
+document.getElementById('restore').onclick=function(){
+    document.getElementById('logical').style.removeProperty('writing-mode');
+    document.getElementById('ua').style.removeProperty('overflow');
+    document.getElementById('rollback').style.removeProperty('overflow-x');report();
+};
+var clicks=0;
+['h-ink','v-ink'].forEach(function(id){document.getElementById(id).onclick=function(){
+    clicks++;document.getElementById('report').setAttribute('data-clicks',String(clicks));
+};});
+</script>

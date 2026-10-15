@@ -1,0 +1,18 @@
+{
+  "name": "HTML direction hints survive implicit inheritance and authored CSS-wide values override them",
+  "html": "test/html/layout_bidi_ltr_neutral_isolate.html",
+  "viewport": {"width":320,"height":240},
+  "events": [
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-direction","equals":"ltr|ltr|rtl|ltr|rtl"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-order","equals":"true|true"},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-direction","equals":"rtl|ltr|rtl|ltr|rtl"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-order","equals":"false|true"},
+    {"type":"click","target":{"selector":"#restore"}},
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-direction","equals":"ltr|ltr|rtl|ltr|rtl"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-order","equals":"true|true"}
+  ]
+}

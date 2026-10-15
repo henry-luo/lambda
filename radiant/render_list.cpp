@@ -113,13 +113,10 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
             // would leave intrinsic images unzoomed after layout scales them.
             Rect rect = marker_image_rect(marker, marker_prop, rdcon->block.x, rdcon->block.y,
                 marker_font_size, scale);
-            // display-list image replay expects decoded dimensions and uint32_t row stride.
-            int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
-            int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
-            // image markers follow the active transform of their originating list item.
-            rc_draw_image(rdcon, (uint32_t*)img->pixels, src_w, src_h,
-                          img->pitch / 4, rect.x, rect.y, rect.width, rect.height, 255,
-                          render_state_current_transform(rdcon), img);
+            // list-style images use the originating item's inherited sampling policy.
+            ScaleMode mode = render_image_scale_mode(elem->parent_element(), false);
+            render_painter_blit_surface_scaled(rdcon, img, nullptr, rdcon->ui_context->surface,
+                &rect, &rdcon->block.clip, mode, rdcon->clip_shapes, rdcon->clip_shape_depth);
             return;
         }
     }

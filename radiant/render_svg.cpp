@@ -807,7 +807,8 @@ static bool svg_cb_begin_clip(RenderContext* vctx, ViewElement* element,
                               float abs_x, float abs_y, RenderClipKind kind) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!ctx || !render_clip_push_vector(svg_active_paint_list(ctx), element,
-            abs_x, abs_y, kind)) return false;
+            abs_x, abs_y, kind, {0.0f, 0.0f, ctx->viewport_width, ctx->viewport_height},
+            ctx->has_overflow_clip_transform ? &ctx->overflow_clip_transform : nullptr)) return false;
     svg_lower_paint_list(ctx);
     return true;
 }
@@ -971,7 +972,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
 // export extents follow the same accumulated transforms and overflow clips as painting.
 static void calculate_visible_content_bounds(View* view, Bound clip,
                                                RdtMatrix transform,
-                                               float* max_x, float* max_y) {
+                                               bool apply_clips, Bound* extent) {
     if (!view) return;
     RdtLogicalPoint origin = view_geometry_node_document_origin(view);
     ViewBlock* block = lam::view_as_block(view);
@@ -990,19 +991,18 @@ static void calculate_visible_content_bounds(View* view, Bound clip,
         {projected.left, projected.top, projected.right - projected.left,
          projected.bottom - projected.top});
     if (visible.right > visible.left && visible.bottom > visible.top) {
-        *max_x = fmaxf(*max_x, visible.right);
-        *max_y = fmaxf(*max_y, visible.bottom);
+        extent->left = fminf(extent->left, visible.left);
+        extent->top = fminf(extent->top, visible.top);
+        extent->right = fmaxf(extent->right, visible.right);
+        extent->bottom = fmaxf(extent->bottom, visible.bottom);
     }
     if (!view->is_element()) return;
     ViewElement* element = lam::view_require_element(view);
     if (block) {
         if (view_contents_are_skipped(block)) return;
-        Bound overflow;
-        if (layout_block_overflow_clip(block, &overflow)) {
-            overflow.left += origin.x;
-            overflow.right += origin.x;
-            overflow.top += origin.y;
-            overflow.bottom += origin.y;
+        Bound overflow; Corner radius;
+        if (apply_clips && render_clip_overflow_bounds(block, origin.x, origin.y,
+                1.0f, clip, &transform, &overflow, &radius)) {
             rdt_matrix_project_rect_bounds(&transform, overflow.left, overflow.top,
                 overflow.right, overflow.bottom, &overflow.left, &overflow.top,
                 &overflow.right, &overflow.bottom);
@@ -1012,15 +1012,17 @@ static void calculate_visible_content_bounds(View* view, Bound clip,
         }
     }
     for (View* child = element->first_child; child; child = child->next())
-        calculate_visible_content_bounds(child, clip, transform, max_x, max_y);
+        calculate_visible_content_bounds(child, clip, transform, apply_clips, extent);
 }
 
 void calculate_content_bounds(View* view, int* max_x, int* max_y) {
-    float right = (float)*max_x, bottom = (float)*max_y;
+    Bound initial = {0.0f, 0.0f, (float)*max_x, (float)*max_y}, uncut = initial, visible = initial;
+    // first bound open axes by actual descendant geometry, then apply the owner-space strips.
     calculate_visible_content_bounds(view,
-        {-INFINITY, -INFINITY, INFINITY, INFINITY}, rdt_matrix_identity(), &right, &bottom);
-    *max_x = (int)ceilf(right); // INT_CAST_OK: the legacy export API uses integral surface extents.
-    *max_y = (int)ceilf(bottom); // INT_CAST_OK: the legacy export API uses integral surface extents.
+        {-INFINITY, -INFINITY, INFINITY, INFINITY}, rdt_matrix_identity(), false, &uncut);
+    calculate_visible_content_bounds(view, uncut, rdt_matrix_identity(), true, &visible);
+    *max_x = (int)ceilf(visible.right); // INT_CAST_OK: the legacy export API uses integral surface extents.
+    *max_y = (int)ceilf(visible.bottom); // INT_CAST_OK: the legacy export API uses integral surface extents.
 }
 
 // Render caret to SVG

@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0}button{height:24px}.box{contain:size;width:max-content;background:red}
+#owner{font-size:10px;contain-intrinsic-size:auto 3em auto 4em}
+#inherited{font-size:30px;contain-intrinsic-size:inherit}
+#logical{font-size:10px;contain-intrinsic-width:80px!important;contain-intrinsic-size:3em 4em;contain-intrinsic-inline-size:60px}
+#none{contain-intrinsic-size:auto none}
+#auto-empty{contain-intrinsic-size:auto none;height:max-content}
+</style>
+<button id="check">Check</button><button id="change">Change and read</button><button id="reset">Reset and read</button><output id="report"></output>
+<div id="owner"><div id="inherited" class="box"></div></div>
+<div id="logical" class="box"></div><div id="none" class="box"></div>
+<div id="auto-empty" class="box"><div style="width:99px;height:88px"></div></div>
+<script>
+(function(){
+    var report=document.getElementById('report');
+    function record(prefix){
+        ['owner','inherited','logical','none'].forEach(function(id){
+            var style=getComputedStyle(document.getElementById(id));
+            report.setAttribute('data-'+prefix+id,[style.containIntrinsicSize,style.containIntrinsicWidth,style.containIntrinsicHeight,style.containIntrinsicInlineSize,style.containIntrinsicBlockSize].join('|'));
+        });
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        document.getElementById('owner').style.fontSize='20px';
+        document.getElementById('logical').style.writingMode='vertical-rl';
+        record('dirty-');
+    };
+    document.getElementById('reset').onclick=function(){
+        document.getElementById('owner').style.containIntrinsicSize='var(--missing)';
+        document.getElementById('logical').style.setProperty('contain-intrinsic-size','initial','important');
+        record('reset-');
+    };
+})();
+</script>

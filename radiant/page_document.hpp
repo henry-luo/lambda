@@ -73,6 +73,22 @@ struct RadiantWhitespaceSpec {
     const char* reason;
 };
 bool radiant_whitespace_trait_name(const char* name);
+// declare an element's native traits in its cascade so the browsing engine renders
+// them (plan P6): author-origin declarations of zero specificity, the CSS model of
+// presentational hints, below the element's own CSS. XSL whitespace traits become
+// white-space, keeps break avoidance, spaces block margins and retained border or
+// padding at breaks box-decoration-break: clone
+void radiant_native_hints_declare(DomElement* element);
+// native traits that act on an element's resolved box: a block with reference inline
+// geometry places its content edges at its start and end indents from the reference
+// area, its border and padding outside them (XSL 1.1 §5.3.2), so its margins become
+// the indents' difference less those edges; a list label's cell keeps the label
+// separation as its end padding
+void radiant_native_resolved(LayoutContext* lycon, DomElement* element);
+// a table that does not repeat its header (or footer) group at breaks (XSL 1.1 §7.28.5)
+bool radiant_table_omits_repeat(DomElement* table, bool footer);
+// the share of a table's remaining width a column takes (XSL proportional-column-width), or 0
+float radiant_table_column_share(DomElement* column);
 bool radiant_whitespace_resolve(ViewTree* tree, ViewCssStyle* style);
 RadiantWhitespaceSpec radiant_whitespace_spec(const ViewCssStyle* style);
 
@@ -270,6 +286,9 @@ bool radiant_page_rounded_count(double value, uint32_t minimum, uint32_t* result
 bool radiant_page_boolean(const char* text, bool inherited, bool* result);
 DomElement* radiant_page_style_parent(DomElement* source);
 bool radiant_page_control_hidden(DomElement* element);
+// the display a page control takes: page programs leave the flow; the document, its
+// sequences, flows, static content, note bodies and fixed pages hold it as blocks
+bool radiant_page_control_display(DomElement* element, DisplayValue* display);
 const RadiantPageSequence* radiant_page_sequence_for(const RadiantPageDocument* document, DomElement* element);
 const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,
     uint32_t ordinal, uint32_t folio, bool blank, bool terminal);

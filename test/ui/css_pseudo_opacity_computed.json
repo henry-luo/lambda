@@ -1,0 +1,310 @@
+{
+  "name": "Calculated pseudo opacity uses declaration fonts",
+  "html": "test/ui/css_pseudo_opacity_computed.html",
+  "viewport": {
+    "width": 480,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "0.5|0.8|0.2"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 50,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 127,
+      "max_g": 129,
+      "min_b": 127,
+      "max_b": 129
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 229,
+      "max_g": 231,
+      "min_b": 229,
+      "max_b": 231
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-dirty-values",
+      "equals": "0.7|0.8|0.3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 70,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 76,
+      "max_g": 78,
+      "min_b": 76,
+      "max_b": 78
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 200,
+      "max_g": 202,
+      "min_b": 200,
+      "max_b": 202
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-values",
+      "equals": "0.3|0.8|0.3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 30,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 178,
+      "max_g": 180,
+      "min_b": 178,
+      "max_b": 180
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 231,
+      "max_g": 233,
+      "min_b": 231,
+      "max_b": 233
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-values",
+      "equals": "1|0.8|0.3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 100,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 1,
+      "min_b": 0,
+      "max_b": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 176,
+      "max_g": 180,
+      "min_b": 176,
+      "max_b": 180
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#percent"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-percent-values",
+      "equals": "0.5|0.8|0.3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 50,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 127,
+      "max_g": 129,
+      "min_b": 127,
+      "max_b": 129
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 216,
+      "max_g": 218,
+      "min_b": 216,
+      "max_b": 218
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-values",
+      "equals": "0.7|0.8|0.3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#patch"
+      },
+      "width": 70,
+      "height": 12
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#patch",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 76,
+      "max_g": 78,
+      "min_b": 76,
+      "max_b": 78
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#owner",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 200,
+      "max_g": 202,
+      "min_b": 200,
+      "max_b": 202
+    }
+  ]
+}

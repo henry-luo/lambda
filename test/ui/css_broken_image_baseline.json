@@ -1,0 +1,17 @@
+{
+  "name":"Broken image alternatives retain text baselines through explicit dimensions",
+  "html":"test/html/layout_broken_image_baseline.html",
+  "viewport":{"width":480,"height":520},
+  "events":[
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-fallback","equals":"3|0|18|24"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-leading","equals":"11|0|18|40"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-loaded","equals":"9|0|18|24"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-sized","equals":"3|0|18|24"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-tall","equals":"3|0|18|60"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-empty","equals":"9|0|18|24"},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-changed-fallback","equals":"6|0|28|40"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-changed-loaded","equals":"9|0|18|24"}
+  ]
+}

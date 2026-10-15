@@ -20,6 +20,8 @@ typedef struct RenderWalkBlockPhase {
     float pa_y;
     FontBox pa_font;
     Color pa_color;
+    RdtMatrix pa_clip_transform;
+    bool pa_has_clip_transform;
     bool opened_transform;
     bool opened_clip;
     bool opened_effect_group;
@@ -126,6 +128,8 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     p->pa_y = state->y;
     p->pa_font = state->font;
     p->pa_color = state->color;
+    p->pa_clip_transform = backend->ctx->overflow_clip_transform;
+    p->pa_has_clip_transform = backend->ctx->has_overflow_clip_transform;
 
     if (block->font) {
         setup_font(state->ui_context, &state->font, block->font);
@@ -145,6 +149,14 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
     if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);
+        RdtMatrix local;
+        if (render_geometry_transform_matrix(block->transform, state->x, state->y,
+                block->width, block->height, &local)) {
+            // the finite end of a visible overflow strip follows the same nested paint transforms.
+            backend->ctx->overflow_clip_transform = p->pa_has_clip_transform
+                ? rdt_matrix_multiply(&p->pa_clip_transform, &local) : local;
+            backend->ctx->has_overflow_clip_transform = true;
+        }
     }
 
     p->opened_clip = backend->begin_clip && backend->end_clip &&
@@ -315,6 +327,8 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
     state->y = p->pa_y;
     state->font = p->pa_font;
     state->color = p->pa_color;
+    backend->ctx->overflow_clip_transform = p->pa_clip_transform;
+    backend->ctx->has_overflow_clip_transform = p->pa_has_clip_transform;
 }
 
 void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {

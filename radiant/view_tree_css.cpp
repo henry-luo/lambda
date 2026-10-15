@@ -1068,13 +1068,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     }
     view_css_bind_properties(tree, style);
     style->display = pseudo_element || !element ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW} : css_default_display_for_element(element, element);
-    if (!pseudo_element && element) {
-        if (radiant_page_control_hidden(element)) style->display = {CSS_VALUE_NONE, CSS_VALUE_FLOW};
-        else if (radiant_page_element(element, "page-document") || radiant_page_element(element, "page-sequence") ||
-            radiant_page_element(element, "flow") || radiant_page_element(element, "static-content") ||
-            radiant_page_element(element, "note-body") || radiant_page_element(element, "fixed-pages") ||
-            radiant_page_element(element, "fixed-page")) style->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-    }
+    if (!pseudo_element && element) radiant_page_control_display(element, &style->display);
     const CssValue* value = view_css_property(tree, style, "display");
     if (value) {
         if (css_value_is_inherit(value) && parent) style->display = parent->display;

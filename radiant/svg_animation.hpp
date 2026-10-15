@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../lambda/dom/dom_svg_context.h"
 
 struct DomDocument;
 struct DomElement;
@@ -36,10 +37,11 @@ const char* svg_animation_attribute(DomElement* element, const char* name);
 const char* svg_animation_source_value(Element* element, const char* name);
 
 // source readers borrow the current document only during a synchronous SVG geometry/paint walk.
+void svg_animation_source_enter(DomDocument* document, DomElement* instance, DomElement* host,
+    DomSvgSourceContext* previous);
+void svg_animation_source_leave(const DomSvgSourceContext* previous);
 struct SvgAnimationSourceScope {
-    DomDocument* previous;
-    DomElement* previous_instance;
-    SvgAnimationRegistry* previous_registry;
+    DomSvgSourceContext previous;
     explicit SvgAnimationSourceScope(DomDocument* document, DomElement* instance = nullptr, DomElement* host = nullptr);
     ~SvgAnimationSourceScope();
 };

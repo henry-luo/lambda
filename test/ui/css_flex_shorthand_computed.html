@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}.stage{display:flex;width:120px;height:20px;flex:3 2 0%}
+.red,.blue{min-width:0;height:20px;font-size:20px}.red{background:red}.blue{background:blue;flex:1 1 0%}.shrink>.blue{flex-basis:120px}
+</style><button id="check">Check</button><button id="change">Change fonts</button><output id="report"></output>
+<div class="stage" id="numberHost"><div class="red" id="number" style="flex:2 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="mathHost"><div class="red" id="math" style="--factor:calc(1em / 10px);flex:var(--factor) 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="basisHost"><div class="red" id="basis" style="flex:30px"></div><div class="blue"></div></div>
+<div class="stage" id="basis_firstHost"><div class="red" id="basis_first" style="flex:calc(1em + 10px) 2 1"></div><div class="blue"></div></div>
+<div class="stage" id="negativeHost"><div class="red" id="negative" style="flex:2 1 0%;flex:-1 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="importantHost"><div class="red" id="important" style="flex-grow:4!important;flex:2 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="beforeHost"><div class="red" id="before" style="flex-grow:4;flex:2 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="afterHost"><div class="red" id="after" style="flex:2 1 0%;flex-grow:4"></div><div class="blue"></div></div>
+<div class="stage" id="invalidHost"><div class="red" id="invalid" style="--bad:garbage;flex:2 1 0%;flex:var(--bad) 1 0%"></div><div class="blue"></div></div>
+<div class="stage" id="inheritHost"><div class="red" id="inherit" style="flex:inherit"></div><div class="blue"></div></div>
+<div class="stage shrink" id="shrink_mathHost"><div class="red" id="shrink_math" style="flex:1 calc(1em / 10px) 120px"></div><div class="blue"></div></div>
+<script>(function(){
+var names=["number","math","basis","basis_first","negative","important","before","after","invalid","inherit","shrink_math"];
+function record(){
+  var values=[];
+  for(var i=0;i<names.length;i++){
+    var s=getComputedStyle(document.getElementById(names[i]));
+    values.push(s.flexGrow+'|'+s.flexShrink+'|'+s.flexBasis);
+  }
+  for(var j=0;j<names.length;j++)document.getElementById('report').setAttribute('data-'+names[j],values[j]);
+}
+document.getElementById('check').onclick=record;
+document.getElementById('change').onclick=function(){
+  document.getElementById('math').style.fontSize='40px';
+  document.getElementById('basis_first').style.fontSize='40px';
+  document.getElementById('shrink_math').style.fontSize='40px';
+  record();
+};
+})();</script>

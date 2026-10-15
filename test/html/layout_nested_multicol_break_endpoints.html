@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- MC1: forced-break cursors retain their line endpoint through nested projection. -->
+<style>
+body { margin: 0; }
+.outer { position: absolute; left: 16px; columns: 2; column-fill: auto; column-gap: 0;
+         width: 100px; height: 100px; orphans: 2; widows: 2; background: red; }
+.ib { display: inline-block; width: 100%; height: 30px; vertical-align: top; background: green; }
+</style>
+<body id="result">
+<div id="case0" class="outer" style="top:0px;font-size:12px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case0-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:0px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case0-ib0" class="ib"></div><br id="case0-br0"><div id="case0-ib1" class="ib"></div><br id="case0-br1"><div id="case0-ib2" class="ib"></div><br id="case0-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>
+<div id="case1" class="outer" style="top:150px;font-size:12px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case1-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:2px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case1-ib0" class="ib"></div><br id="case1-br0"><div id="case1-ib1" class="ib"></div><br id="case1-br1"><div id="case1-ib2" class="ib"></div><br id="case1-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>
+<div id="case2" class="outer" style="top:300px;font-size:16px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case2-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:0px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case2-ib0" class="ib"></div><br id="case2-br0"><div id="case2-ib1" class="ib"></div><br id="case2-br1"><div id="case2-ib2" class="ib"></div><br id="case2-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>
+<div id="case3" class="outer" style="top:450px;font-size:16px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case3-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:2px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case3-ib0" class="ib"></div><br id="case3-br0"><div id="case3-ib1" class="ib"></div><br id="case3-br1"><div id="case3-ib2" class="ib"></div><br id="case3-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>
+<div id="case4" class="outer" style="top:600px;font-size:24px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case4-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:0px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case4-ib0" class="ib"></div><br id="case4-br0"><div id="case4-ib1" class="ib"></div><br id="case4-br1"><div id="case4-ib2" class="ib"></div><br id="case4-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>
+<div id="case5" class="outer" style="top:750px;font-size:24px">
+  <div style="contain:size;height:70px;background:green"></div>
+  <div id="case5-inner" style="break-before:avoid;columns:5;column-fill:auto;column-gap:2px">
+    <div style="break-inside:avoid;height:60px;background:green"></div>
+    <div id="case5-ib0" class="ib"></div><br id="case5-br0"><div id="case5-ib1" class="ib"></div><br id="case5-br1"><div id="case5-ib2" class="ib"></div><br id="case5-br2">
+  </div><div style="height:100px;background:green"></div>
+</div>

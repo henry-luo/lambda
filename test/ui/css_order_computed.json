@@ -1,0 +1,274 @@
+{
+  "name": "Calculated order reaches flex and grid placement",
+  "html": "test/ui/css_order_computed.html",
+  "viewport": {
+    "width": 480,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "2|2"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flexRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#flex",
+      "x": 20,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#flex",
+        "offset_x": 25,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#gridRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#grid",
+      "x": 20,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 25,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-dirty-values",
+      "equals": "4|4"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flexRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#flex",
+      "x": 40,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#flex",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#gridRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#grid",
+      "x": 40,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-values",
+      "equals": "0|0"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flexRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#flex",
+      "x": 0,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#flex",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#gridRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#grid",
+      "x": 0,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-values",
+      "equals": "5|5"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flexRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#flex",
+      "x": 40,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#flex",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#gridRed"
+      },
+      "width": 20,
+      "height": 20,
+      "relative_to": "#grid",
+      "x": 40,
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    }
+  ]
+}

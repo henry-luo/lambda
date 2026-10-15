@@ -1,0 +1,270 @@
+{
+  "name": "Image rendering follows computed inheritance and causal sampling edits",
+  "html": "test/ui/css_image_rendering_computed.html",
+  "viewport": {
+    "width": 640,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "crisp-edges|crisp-edges|crisp-edges|auto|crisp-edges|crisp-edges|crisp-edges|pixelated|crisp-edges|crisp-edges"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#main",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#main",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 20,
+      "max_r": 235,
+      "min_g": 0,
+      "max_g": 100,
+      "min_b": 20,
+      "max_b": 235
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 20,
+      "max_r": 235,
+      "min_g": 0,
+      "max_g": 100,
+      "min_b": 20,
+      "max_b": 235
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "auto|auto|auto|auto|auto|auto|crisp-edges|pixelated|crisp-edges|auto"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#main",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "crisp-edges|crisp-edges|crisp-edges|auto|crisp-edges|crisp-edges|crisp-edges|pixelated|crisp-edges|crisp-edges"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#main",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 20,
+      "max_r": 235,
+      "min_g": 0,
+      "max_g": 100,
+      "min_b": 20,
+      "max_b": 235
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 20,
+      "max_r": 235,
+      "min_g": 0,
+      "max_g": 100,
+      "min_b": 20,
+      "max_b": 235
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "auto|auto|auto|auto|auto|auto|crisp-edges|pixelated|crisp-edges|auto"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#raw"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#main",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 3,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#trans",
+        "offset_x": 4,
+        "offset_y": 2
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#trans"
+      },
+      "relative_to": "#host",
+      "x": 120,
+      "y": 0,
+      "width": 8,
+      "height": 8,
+      "tolerance": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "pixelated|pixelated|pixelated|auto|pixelated|pixelated|crisp-edges|pixelated|crisp-edges|pixelated"
+    }
+  ]
+}

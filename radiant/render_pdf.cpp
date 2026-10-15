@@ -1586,7 +1586,8 @@ static bool pdf_cb_begin_clip(RenderContext* vctx, ViewElement* element,
                               float abs_x, float abs_y, RenderClipKind kind) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !render_clip_push_vector(pdf_active_paint_list(ctx), element,
-            abs_x, abs_y, kind)) return false;
+            abs_x, abs_y, kind, {0.0f, 0.0f, ctx->page_width, ctx->page_height},
+            ctx->has_overflow_clip_transform ? &ctx->overflow_clip_transform : nullptr)) return false;
     pdf_lower_paint_list(ctx);
     return true;
 }

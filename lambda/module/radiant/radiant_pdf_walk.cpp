@@ -253,8 +253,11 @@ bool pdf_walk_begin_clip(RenderContext* base, ViewElement* view, float x, float 
     // The shared geometry helper decides whether this scope has an actual clip.
     PaintList probe;
     paint_list_init(&probe, nullptr);
-    bool clipped = render_clip_push_vector(&probe, view, x, y, kind);
     PdfWalkContext* ctx = (PdfWalkContext*)base;
+    // open overflow axes use the page bounds projected through the shared walk transform.
+    bool clipped = render_clip_push_vector(&probe, view, x, y, kind,
+        {0.0f, 0.0f, ctx->frame.page_width, ctx->frame.page_height},
+        ctx->has_overflow_clip_transform ? &ctx->overflow_clip_transform : nullptr);
     if (clipped && paint_list_count(&probe) == 1 && probe.data()[0].op == PAINT_PUSH_CLIP) {
         const PaintPushClip& clip = probe.data()[0].push_clip;
         ctx->frame.clip_path = clip.clip_path.get();

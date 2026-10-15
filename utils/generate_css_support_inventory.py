@@ -56,8 +56,13 @@ def inventory():
     names = dict(re.findall(r"X\((CSS_PROPERTY_\w+), (MARKUP_NAME_\w+)\)", (ROOT / MAPPING).read_text()))
     accessor_source = (ROOT / ACCESSORS).read_text().split("static const CssPropAccessor CSS_PROP_ROWS[] = {", 1)[1].split("\n};", 1)[0]
     accessors = {}
-    for macro, code, arguments in re.findall(r"(DIRECT_ROW|DERIVED_ROW|DECL_ROW)\((CSS_PROPERTY_\w+)([^\n]*)\)", accessor_source):
-        accessors[code] = (macro, arguments.lstrip(", "))
+    # accessor rows may wrap, and optional item storage has a direct/derived form.
+    for macro, code, arguments in re.findall(
+            r"\b(DIRECT_ROW(?:_DERIVE)?|DERIVED_ROW|DECL_ROW)\(\s*(CSS_PROPERTY_\w+)([^)]*)\)",
+            accessor_source):
+        if code in accessors:
+            raise ValueError(f"duplicate computed accessor: {code}")
+        accessors[code] = (macro, " ".join(arguments.lstrip(", ").split()))
     resolver = references([ROOT / "radiant/resolve_css_style.cpp"], r"case (CSS_PROPERTY_\w+):")
     consumers = references(
         [path for path in (ROOT / "radiant").glob("*.cpp")

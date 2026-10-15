@@ -2168,37 +2168,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                     (*pos)++;
 
-                    // Map pseudo-element name to type
-                    if (strcmp(elem_name, "before") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE;
-                    } else if (strcmp(elem_name, "after") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_AFTER;
-                    } else if (strcmp(elem_name, "first-line") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE;
-                    } else if (strcmp(elem_name, "first-letter") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER;
-                    } else if (strcmp(elem_name, "selection") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION;
-                    } else if (strcmp(elem_name, "backdrop") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP;
-                    } else if (strcmp(elem_name, "placeholder") == 0 ||
-                               strcmp(elem_name, "-webkit-input-placeholder") == 0 ||
-                               strcmp(elem_name, "-moz-placeholder") == 0 ||
-                               strcmp(elem_name, "-ms-input-placeholder") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER;
-                    } else if (strcmp(elem_name, "marker") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_MARKER;
-                    } else if (strcmp(elem_name, "file-selector-button") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
-                    } else if (strcmp(elem_name, "footnote-call") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL;
-                    } else if (strcmp(elem_name, "footnote-marker") == 0) {
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER;
-                    } else {
-                        // Use generic pseudo-element type to preserve vendor-specific elements
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
-                        log_debug(" Generic pseudo-element: '::%s'", elem_name);
-                    }
+                    const CssPseudoElementName* pseudo = css_pseudo_element_lookup(elem_name);
+                    selector->type = pseudo ? css_selector_type_for_pseudo(pseudo->type)
+                        : CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
+                    if (!pseudo) log_debug("CSS selector generic pseudo-element: ::%s", elem_name);
 
                     selector->value = elem_name;
                     selector->argument = NULL;
@@ -2235,38 +2208,12 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++;
 
-                // Handle legacy pseudo-elements with single colon (CSS2.1 backward compatibility)
-                // :before, :after, :first-line, :first-letter should be treated as pseudo-elements
-                if (strcmp(pseudo_name, "before") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE;
+                const CssPseudoElementName* legacy_pseudo = css_pseudo_element_lookup(pseudo_name);
+                if (legacy_pseudo && legacy_pseudo->legacy_colon) {
+                    selector->type = css_selector_type_for_pseudo(legacy_pseudo->type);
                     selector->value = pseudo_name;
                     selector->argument = NULL;
-                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
-                    matched = true;
-                } else if (strcmp(pseudo_name, "after") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_AFTER;
-                    selector->value = pseudo_name;
-                    selector->argument = NULL;
-                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
-                    matched = true;
-                } else if (strcmp(pseudo_name, "first-line") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE;
-                    selector->value = pseudo_name;
-                    selector->argument = NULL;
-                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
-                    matched = true;
-                } else if (strcmp(pseudo_name, "first-letter") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER;
-                    selector->value = pseudo_name;
-                    selector->argument = NULL;
-                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
-                    matched = true;
-                } else if (strcmp(pseudo_name, "-ms-input-placeholder") == 0 ||
-                           strcmp(pseudo_name, "-moz-placeholder") == 0) {
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER;
-                    selector->value = pseudo_name;
-                    selector->argument = NULL;
-                    log_debug(" Legacy placeholder pseudo-element: ':%s'", pseudo_name);
+                    log_debug("CSS selector legacy pseudo-element: :%s", pseudo_name);
                     matched = true;
                 }
 

@@ -283,6 +283,256 @@ static bool host_test_document_animation(void* document, double now, void* dirty
     return host_test_document_tick(document, now) && dirty == &host_test_node;
 }
 
+static unsigned host_svg_paused, host_svg_events;
+static int host_svg_source;
+static double host_svg_time;
+static DomElement* host_svg_element() { return (DomElement*)&host_test_node; }
+static DomElement* host_svg_source_element() { return (DomElement*)&host_svg_source; }
+static void host_test_svg_pause(DomElement* element, bool paused) {
+    if (element == host_svg_element()) __atomic_store_n(&host_svg_paused, paused ? 1u : 0u, __ATOMIC_RELAXED);
+}
+static bool host_test_svg_paused(DomElement* element) {
+    return element == host_svg_element() && __atomic_load_n(&host_svg_paused, __ATOMIC_RELAXED) != 0;
+}
+static void host_test_svg_set_time(DomElement* element, double seconds) {
+    if (element == host_svg_element()) __atomic_store(&host_svg_time, &seconds, __ATOMIC_RELAXED);
+}
+static double host_test_svg_current_time(DomElement* element) {
+    double seconds = 0.0;
+    if (element == host_svg_element()) __atomic_load(&host_svg_time, &seconds, __ATOMIC_RELAXED);
+    return seconds;
+}
+static const char* host_test_svg_value(DomElement* element, const char* name, bool css_only) {
+    return element == host_svg_element() && name && strcmp(name, "x") == 0
+        ? css_only ? "css-value" : "attribute-value" : nullptr;
+}
+static const char* host_test_svg_attribute(DomElement* element, const char* name) {
+    return host_test_svg_value(element, name, false);
+}
+static bool host_test_svg_begin_end(DomElement* element, bool end, double offset) {
+    return element == host_svg_element() && end && offset == -2.5;
+}
+static void host_test_svg_use_event(DomElement* host, DomElement* source, const char* type,
+        bool bubbles, double detail) {
+    if (host == host_svg_element() && source == host_svg_source_element() && type &&
+        strcmp(type, "click") == 0 && bubbles && detail == 2.5)
+        __atomic_add_fetch(&host_svg_events, 1u, __ATOMIC_RELAXED);
+}
+static bool host_test_svg_start_time(DomElement* element, double* seconds) {
+    if (element != host_svg_element() || !seconds) return false;
+    *seconds = host_test_svg_current_time(element);
+    return true;
+}
+template<bool source> static DomElement* host_test_svg_node(DomElement* element) {
+    return element == host_svg_element() ? source ? host_svg_source_element() : element : nullptr;
+}
+static bool host_test_svg_sampling(DomDocument* document) {
+    return document == (DomDocument*)&host_test_document;
+}
+static double host_test_svg_duration(DomElement* element) {
+    return element == host_svg_element() ? 2.5 : NAN;
+}
+
+static unsigned host_touch_calls;
+static bool host_test_touch(UiContext* context, DomNode* target, const char* type,
+        double x, double y, int mods, bool active, double timestamp) {
+    bool valid = context == (UiContext*)&host_test_document && target == (DomNode*)&host_test_node &&
+        type && strcmp(type, "touchmove") == 0 && x == 12.5 && y == 30.25 &&
+        mods == 3 && active && timestamp == 8.25;
+    if (valid) __atomic_add_fetch(&host_touch_calls, 1u, __ATOMIC_RELAXED);
+    return valid;
+}
+
+static thread_local DomSvgSourceContext host_svg_context = {};
+static void host_test_svg_source_enter(DomDocument* document, DomElement* instance, DomElement* host,
+        DomSvgSourceContext* previous) {
+    if (!previous) return;
+    *previous = host_svg_context;
+    host_svg_context = {document, instance, host};
+}
+static void host_test_svg_source_leave(const DomSvgSourceContext* previous) {
+    if (previous) host_svg_context = *previous;
+}
+static bool host_test_svg_source_scope(bool present) {
+    auto matches = [](DomDocument* document, DomElement* instance, void* registry) {
+        return host_svg_context.document == document && host_svg_context.instance == instance &&
+            host_svg_context.registry == registry;
+    };
+    if (!matches(nullptr, nullptr, nullptr)) return false;
+    {
+        DomSvgSourceScope outer((DomDocument*)&host_test_document, host_svg_element(), host_svg_source_element());
+        if (present && !matches((DomDocument*)&host_test_document, host_svg_element(), host_svg_source_element())) return false;
+        {
+            DomSvgSourceScope inner((DomDocument*)&host_svg_source, host_svg_source_element(), host_svg_element());
+            if (present && !matches((DomDocument*)&host_svg_source, host_svg_source_element(), host_svg_element())) return false;
+        }
+        if (present && !matches((DomDocument*)&host_test_document, host_svg_element(), host_svg_source_element())) return false;
+    }
+    return matches(nullptr, nullptr, nullptr);
+}
+
+static void host_test_store_point(DomNode* node, float* x, float* y, float value_x, float value_y) {
+    if (node != (DomNode*)&host_test_node) return;
+    if (x) *x = value_x;
+    if (y) *y = value_y;
+}
+static void host_test_node_origin(DomNode* node, float* x, float* y) {
+    host_test_store_point(node, x, y, 12.5f, 30.25f);
+}
+static void host_test_child_origin(DomNode* node, float parent_x, float parent_y, float* x, float* y) {
+    host_test_store_point(node, x, y, parent_x + 1.25f, parent_y + 2.5f);
+}
+static bool host_test_text_contains(DomNode* node, float x, float y, float parent_x, float parent_y) {
+    return node == (DomNode*)&host_test_node && x == 45.5f && y == 67.25f &&
+        parent_x == 12.5f && parent_y == 30.25f;
+}
+static bool host_test_foreign_matrix(DomNode* node, void* matrix, bool include_self) {
+    return node == (DomNode*)&host_test_node && matrix == &host_svg_source && !include_self;
+}
+static void host_test_visual_bounds(DomNode* node, float* x, float* y, float* width, float* height) {
+    host_test_node_origin(node, x, y);
+    if (node != (DomNode*)&host_test_node) return;
+    if (width) *width = 80.0f;
+    if (height) *height = 40.0f;
+}
+static bool host_test_geometry_dispatch(bool present) {
+    DomNode* node = (DomNode*)&host_test_node;
+    float x = -99.5f, y = -99.5f, width = -99.5f, height = -99.5f;
+    dom_engine_node_document_origin(node, &x, &y);
+    if (x != (present ? 12.5f : -99.5f) || y != (present ? 30.25f : -99.5f)) return false;
+    x = y = -99.5f;
+    dom_engine_child_content_origin(node, 12.5f, 30.25f, &x, &y);
+    if (x != (present ? 13.75f : -99.5f) || y != (present ? 32.75f : -99.5f)) return false;
+    x = y = -99.5f;
+    dom_engine_visual_bounds(node, &x, &y, &width, &height);
+    return x == (present ? 12.5f : -99.5f) && y == (present ? 30.25f : -99.5f) &&
+        width == (present ? 80.0f : -99.5f) && height == (present ? 40.0f : -99.5f) &&
+        dom_engine_text_contains_point(node, 45.5f, 67.25f, 12.5f, 30.25f) == present &&
+        !dom_engine_text_contains_point(node, 0.0f, 67.25f, 12.5f, 30.25f) &&
+        dom_engine_foreign_object_matrix(node, &host_svg_source, false) == present &&
+        !dom_engine_foreign_object_matrix(node, &host_svg_source, true);
+}
+
+static DomNode* host_test_svg_style_parent(DomNode* node, const void* scope) {
+    return node == (DomNode*)&host_test_node && scope == &host_svg_source ?
+        (DomNode*)&host_test_document : nullptr;
+}
+static const char* host_test_svg_property(DomElement* element, const char* name, bool inherits,
+        char* buffer, size_t capacity, bool* from_css, char** owned, DomElement** declaring, const void* scope) {
+    if (element != host_svg_element() || !name || strcmp(name, "fill") != 0 || !inherits ||
+        !buffer || capacity < sizeof("green") || scope != &host_svg_source) return nullptr;
+    memcpy(buffer, "green", sizeof("green"));
+    if (from_css) *from_css = true;
+    if (owned) *owned = nullptr;
+    if (declaring) *declaring = host_svg_source_element();
+    return buffer;
+}
+static bool host_test_svg_append_shape(DomElement* element, RdtPath* path, const void* lengths) {
+    return element == host_svg_element() && path == (RdtPath*)&host_svg_source && lengths == &host_test_document;
+}
+static RdtPath* host_test_svg_text_path(DomElement* element, const void* lengths, void* fonts) {
+    return element == host_svg_element() && lengths == &host_test_document && fonts == &host_svg_source
+        ? (RdtPath*)&host_test_node : nullptr;
+}
+static bool host_test_svg_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule,
+        const RdtLogicalPoint* point) {
+    return path == (RdtPath*)&host_test_node && frame == (RdtMatrix*)&host_test_document &&
+        rule == RDT_FILL_EVEN_ODD && point == (RdtLogicalPoint*)&host_svg_source;
+}
+static bool host_test_svg_clip_contains(DomElement* element, const void* lengths, void* fonts,
+        const RdtMatrix* frame, SvgPathContainsFn contains, const RdtLogicalPoint* point, const void* scope) {
+    return element == host_svg_element() && lengths == &host_test_document && fonts == &host_svg_source &&
+        scope == &host_svg_source && contains && contains((RdtPath*)&host_test_node, frame, RDT_FILL_EVEN_ODD, point);
+}
+static bool host_test_svg_geometry_dispatch(bool present) {
+    DomElement* element = host_svg_element();
+    char buffer[16] = "unchanged";
+    bool from_css = false;
+    char* owned = buffer;
+    DomElement* declaring = nullptr;
+    const char* value = dom_engine_svg_property(element, "fill", true, buffer, sizeof(buffer),
+        &from_css, &owned, &declaring, &host_svg_source);
+    return (present ? value == buffer && strcmp(buffer, "green") == 0 : value == nullptr && strcmp(buffer, "unchanged") == 0) &&
+        from_css == present && owned == (present ? nullptr : buffer) &&
+        declaring == (present ? host_svg_source_element() : nullptr) &&
+        dom_engine_svg_style_parent((DomNode*)element, &host_svg_source) ==
+            (present ? (DomNode*)&host_test_document : nullptr) &&
+        dom_engine_svg_append_shape(element, (RdtPath*)&host_svg_source, &host_test_document) == present &&
+        dom_engine_svg_text_path(element, &host_test_document, &host_svg_source) ==
+            (present ? (RdtPath*)&host_test_node : nullptr) &&
+        dom_engine_svg_clip_contains(element, &host_test_document, &host_svg_source, (RdtMatrix*)&host_test_document,
+            host_test_svg_path_contains, (RdtLogicalPoint*)&host_svg_source, &host_svg_source) == present &&
+        !dom_engine_svg_clip_contains(element, &host_test_document, &host_svg_source, (RdtMatrix*)&host_test_document,
+            nullptr, (RdtLogicalPoint*)&host_svg_source, &host_svg_source);
+}
+
+static void* host_test_web_animation_create(DomElement* element, void* keyframes, double duration,
+        const void* timing, Pool* pool) {
+    return element == host_svg_element() && keyframes == &host_test_node && duration == 45.5 &&
+        timing == &host_test_document && pool == (Pool*)&host_svg_source ? &host_svg_source : nullptr;
+}
+static unsigned host_range_calls[2];
+static void host_test_range_adopt(DocState* source, DocState* destination, DomNode* subtree) {
+    if (source == (DocState*)&host_test_document && destination == (DocState*)&host_test_node &&
+        subtree == (DomNode*)&host_svg_source) __atomic_add_fetch(&host_range_calls[0], 1u, __ATOMIC_RELAXED);
+}
+static void host_test_range_pins(DomDocument* document) {
+    if (document == (DomDocument*)&host_test_document) __atomic_add_fetch(&host_range_calls[1], 1u, __ATOMIC_RELAXED);
+}
+static bool host_test_selection_collapse(DomSelection* selection, DomNode* node, uint32_t offset,
+        const char** exception) {
+    if (selection != (DomSelection*)&host_test_document || node != (DomNode*)&host_test_node) return false;
+    if (offset == 2) return true;
+    if (exception) *exception = "IndexSizeError";
+    return false;
+}
+static DomText* host_test_text_split(DocState* state, DomText* text, uint32_t offset) {
+    return state == (DocState*)&host_test_document && text == (DomText*)&host_test_node && offset == 2
+        ? (DomText*)&host_svg_source : nullptr;
+}
+static bool host_test_model_dispatch(bool present) {
+    dom_engine_range_adopt_subtree((DocState*)&host_test_document, (DocState*)&host_test_node, (DomNode*)&host_svg_source);
+    dom_engine_range_refresh_lifecycle_pins((DomDocument*)&host_test_document);
+    const char* exception = "unchanged";
+    if (dom_engine_selection_collapse((DomSelection*)&host_test_document, (DomNode*)&host_test_node, 2, &exception) != present ||
+        strcmp(exception, "unchanged") != 0) return false;
+    if (dom_engine_selection_collapse((DomSelection*)&host_test_document, (DomNode*)&host_test_node, 99, &exception) ||
+        strcmp(exception, present ? "IndexSizeError" : "unchanged") != 0) return false;
+    return dom_engine_text_split_at((DocState*)&host_test_document, (DomText*)&host_test_node, 2) ==
+            (present ? (DomText*)&host_svg_source : nullptr) &&
+        dom_engine_text_split_at((DocState*)&host_test_document, (DomText*)&host_test_node, 99) == nullptr &&
+        dom_engine_web_animation_create(host_svg_element(), &host_test_node, 45.5, &host_test_document, (Pool*)&host_svg_source) ==
+            (present ? &host_svg_source : nullptr) &&
+        dom_engine_web_animation_create(nullptr, &host_test_node, 45.5, &host_test_document, (Pool*)&host_svg_source) == nullptr;
+}
+
+static bool host_test_svg_dispatch(bool present) {
+    DomElement* element = host_svg_element();
+    dom_engine_svg_animation_pause(element, true);
+    dom_engine_svg_animation_set_time(element, 1.25);
+    dom_engine_svg_animation_use_event(element, host_svg_source_element(), "click", true, 2.5);
+    double seconds = -99.5;
+    bool started = dom_engine_svg_animation_start_time(element, &seconds);
+    const char* css = dom_engine_svg_animation_value(element, "x", true);
+    const char* attribute = dom_engine_svg_animation_attribute(element, "x");
+    return dom_engine_svg_animation_paused(element) == present &&
+        !dom_engine_svg_animation_paused(nullptr) &&
+        dom_engine_svg_animation_current_time(element) == (present ? 1.25 : 0.0) &&
+        started == present && seconds == (present ? 1.25 : -99.5) &&
+        (present ? css && strcmp(css, "css-value") == 0 : css == nullptr) &&
+        (present ? attribute && strcmp(attribute, "attribute-value") == 0 : attribute == nullptr) &&
+        dom_engine_svg_animation_value(element, "missing", false) == nullptr &&
+        dom_engine_svg_animation_begin_end(element, true, -2.5) == present &&
+        !dom_engine_svg_animation_begin_end(element, false, -2.5) &&
+        dom_engine_svg_animation_use_source(element) == (present ? host_svg_source_element() : nullptr) &&
+        dom_engine_svg_animation_target_element(element) == (present ? element : nullptr) &&
+        dom_engine_svg_animation_is_sampling((DomDocument*)&host_test_document) == present &&
+        !dom_engine_svg_animation_is_sampling(nullptr) &&
+        (present ? dom_engine_svg_animation_simple_duration(element) == 2.5
+            : isnan(dom_engine_svg_animation_simple_duration(element))) &&
+        isnan(dom_engine_svg_animation_simple_duration(nullptr));
+}
+
 static const DomHostEngineOps host_test_operations = {
     host_test_operation<1, Item, Item>, host_test_operation<2, Item, Item>,
     host_test_operation<3, Item>, host_test_operation<4, Item, Item, Item>,
@@ -295,10 +545,30 @@ static const DomHostEngineOps host_test_operations = {
     host_test_element_specified_keyword, host_test_prepare_children_mutation,
     host_test_control_disabled, host_test_control_focus, host_test_control_text,
     host_test_control_action<1>, host_test_control_action<2>, host_test_scroll_begin,
-    host_test_control_action<3>, host_test_document_tick, host_test_document_animation
+    host_test_control_action<3>, host_test_document_tick, host_test_document_animation,
+    host_test_svg_pause, host_test_svg_value, host_test_svg_paused, host_test_svg_set_time,
+    host_test_svg_attribute, host_test_svg_begin_end, host_test_svg_use_event, host_test_svg_start_time,
+    host_test_svg_node<true>, host_test_svg_sampling, host_test_svg_current_time,
+    host_test_svg_node<false>, host_test_svg_duration, host_test_touch,
+    host_test_svg_source_enter, host_test_svg_source_leave,
+    host_test_node_origin, host_test_child_origin, host_test_text_contains,
+    host_test_foreign_matrix, host_test_visual_bounds,
+    host_test_svg_style_parent, host_test_svg_property, host_test_svg_append_shape,
+    host_test_svg_text_path, host_test_svg_clip_contains,
+    host_test_web_animation_create, host_test_range_adopt, host_test_range_pins,
+    host_test_selection_collapse, host_test_text_split
 };
 
 static bool host_test_dispatch(bool present) {
+    if (!host_test_svg_dispatch(present)) return false;
+    if (!host_test_svg_source_scope(present)) return false;
+    if (!host_test_geometry_dispatch(present)) return false;
+    if (!host_test_svg_geometry_dispatch(present)) return false;
+    if (!host_test_model_dispatch(present)) return false;
+    if (dom_engine_dispatch_touch((UiContext*)&host_test_document, (DomNode*)&host_test_node,
+            "touchmove", 12.5, 30.25, 3, true, 8.25) != present ||
+        dom_engine_dispatch_touch(nullptr, (DomNode*)&host_test_node,
+            "touchmove", 12.5, 30.25, 3, true, 8.25)) return false;
     dom_engine_document_request_repaint(&host_test_document);
     dom_engine_document_clear_reflow(&host_test_document);
     dom_engine_prepare_children_mutation(&host_test_node);
@@ -352,6 +622,10 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     EXPECT_EQ(host_layout_calls[0], 0u); EXPECT_EQ(host_layout_calls[1], 0u);
     EXPECT_EQ(host_prepare_mutation_calls, 0u);
     for (unsigned calls : host_control_calls) EXPECT_EQ(calls, 0u);
+    EXPECT_EQ(host_svg_paused, 0u); EXPECT_EQ(host_svg_events, 0u);
+    EXPECT_DOUBLE_EQ(host_svg_time, 0.0);
+    EXPECT_EQ(host_touch_calls, 0u);
+    EXPECT_EQ(host_range_calls[0], 0u); EXPECT_EQ(host_range_calls[1], 0u);
     EXPECT_FALSE(dom_host_register_engine(nullptr));
 #define DOM_HOST_REJECT_MISSING(result, name, parameters, arguments, absence) { \
     DomHostEngineOps incomplete = host_test_operations; incomplete.name = nullptr; \
@@ -366,6 +640,9 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     EXPECT_FALSE(dom_host_register_engine(&conflict));
     EXPECT_EQ(dom_host_engine_ops(), &host_test_operations);
     EXPECT_TRUE(host_test_dispatch(true));
+    EXPECT_EQ(host_svg_events, 8001u);
+    EXPECT_EQ(host_touch_calls, 8001u);
+    EXPECT_EQ(host_range_calls[0], 8001u); EXPECT_EQ(host_range_calls[1], 8001u);
     EXPECT_EQ(host_repaint_calls, 8001u); EXPECT_EQ(host_clear_reflow_calls, 8001u);
     EXPECT_EQ(host_layout_calls[0], 8001u); EXPECT_EQ(host_layout_calls[1], 8001u);
     EXPECT_EQ(host_prepare_mutation_calls, 8001u);

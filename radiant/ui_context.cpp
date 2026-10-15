@@ -225,6 +225,8 @@ int ui_context_init(UiContext* uicon, bool headless, float requested_device_scal
 }
 
 int UiContext::init(bool next_headless, float requested_device_scale) {
+    // native-only hosts need the same DOM services as hosts that initialize Jube first.
+    if (!radiant_register_dom_engine_providers()) return EXIT_FAILURE;
     memset(this, 0, sizeof(UiContext));
     last_click_time = -1.0;
     last_click_button = -1;

@@ -917,6 +917,14 @@ inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
 // border-box coordinates and adjusted here to the authored overflow clip edge.
 // Paint, the selection overlay and hit-testing share it so they clip alike. False
 // when the block does not clip its content.
+inline bool layout_block_clips_overflow_axis(const ViewBlock* block, bool horizontal) {
+    if (!block) return false;
+    if (block->blk && block->block()->contain_paint) return true;
+    if (!block->scroller || !block->scroll()->has_clip) return false;
+    return (horizontal ? block->scroll()->overflow_x : block->scroll()->overflow_y)
+        != CSS_VALUE_VISIBLE;
+}
+
 inline bool layout_block_overflow_clip(const ViewBlock* block, Bound* out) {
     if (!block) return false;
     bool paint_containment = block->blk && block->block()->contain_paint;
@@ -1612,10 +1620,16 @@ inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
     return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
 }
 
+inline bool layout_image_uses_alt_text_baseline(const ViewBlock* block) {
+    return block && block->tag() == MARKUP_NAME_IMG && block->embed &&
+        block->embedp()->broken_alt_fallback;
+}
+
 inline bool layout_exports_content_baseline(const ViewBlock* block,
                                             bool overflow_visible) {
     if (!block) return false;
-    if (overflow_visible || layout_uses_explicit_baseline_source(block)) {
+    if (layout_image_uses_alt_text_baseline(block) || overflow_visible ||
+        layout_uses_explicit_baseline_source(block)) {
         return true;
     }
     // CSS Align 3 §9.1 gives a scrolling block container an end-margin
@@ -2216,6 +2230,9 @@ typedef struct BlockContext {
     float max_height;
     float line_height;
     bool  line_height_is_normal;
+    // inline descendants change active leading, not the block strut's leading.
+    float strut_line_height;
+    bool strut_line_height_is_normal;
     float init_ascender;
     float init_descender;
     float lead_y;
@@ -3140,8 +3157,15 @@ inline float flex_line_max_axis_extent(FlexLineInfo* line, LayoutAxis axis) {
     return extent;
 }
 
-inline bool has_flex_item_prop(ViewElement* item) {
+inline bool has_flex_item_prop(const DomElement* item) {
     return item && item->flex_item();
+}
+
+inline int layout_item_order(const DomElement* item) {
+    if (!item) return 0;
+    if (const GridItemProp* grid = item->grid_item()) return grid->order;
+    const FlexItemProp* flex = item->flex_item();
+    return flex ? flex->order : 0;
 }
 
 inline int flex_item_resolved_align_self(ViewElement* item, int align_items) {
@@ -3204,11 +3228,11 @@ inline bool is_main_axis_horizontal(FlexProp* flex) {
     return layout_axis_is_horizontal(flex_main_axis_from_props(flex));
 }
 
-inline float get_item_flex_grow(ViewElement* item) {
+inline float get_item_flex_grow(const DomElement* item) {
     return has_flex_item_prop(item) ? item->fi->flex_grow : 0.0f;
 }
 
-inline float get_item_flex_shrink(ViewElement* item) {
+inline float get_item_flex_shrink(const DomElement* item) {
     return has_flex_item_prop(item) ? item->fi->flex_shrink : 1.0f;
 }
 
@@ -4267,6 +4291,15 @@ void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElemen
 void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element, bool apply_counters = true);
+// a generated box whose `content` the counter scope evaluates: ::before, ::after
+// and the page flow's footnote call and marker; reports its pseudo-element and slot
+bool layout_generated_pseudo(const DomElement* element, uint8_t* pseudo, PseudoStyleKind* kind);
+// the page flow's footnote call (in the note's place among its parent's children,
+// the note staying its parent) or marker (the note's first child), CSS GCPM 3 §2.3
+DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool call);
+// generated text shown inside `owner` (a page document's folio): a synthetic
+// "::generated" first child holding `text`, refreshed in place
+DomElement* layout_generated_text(DomElement* owner, const char* text);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
 DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
@@ -4336,7 +4369,9 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         result.from_medium = true;
-        if (keyword == CSS_VALUE_INHERIT) {
+        // font-size is inherited, so unset inherits (CSS Cascade 4 §7.3.3); generated
+        // pseudo-elements reach this with the keyword still unresolved
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
             result.value = parent_font_size;
             result.from_medium = parent_from_medium;
         } else if (keyword == CSS_VALUE_LARGER || keyword == CSS_VALUE_SMALLER) {
@@ -4587,6 +4622,12 @@ struct LayoutLogicalSides {
     CssBoxSide block_pair_start;
     CssBoxSide block_pair_end;
 };
+
+CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
+    const LayoutLogicalSides& sides);
+bool layout_compute_scroll_keyword_axes(LayoutContext* context, StyleTree* style,
+    bool vertical, bool overscroll, CssEnum inherited_x, CssEnum inherited_y,
+    CssEnum* x, CssEnum* y);
 
 struct LayoutLogicalProperty {
     bool valid;
@@ -4951,6 +4992,8 @@ void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
 float layout_apply_line_height_leading(float line_height,
                                        float* ascender, float* descender);
+float layout_inline_font_metrics(FontHandle* font, float line_height,
+                                bool normal, float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,

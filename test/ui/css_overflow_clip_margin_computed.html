@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0;background:white}button{height:24px}
+#owner{position:absolute;left:40px;top:140px;width:100px;height:40px;padding:10px;
+    border:4px solid black;font-size:20px;overflow:clip;overflow-clip-margin:content-box calc(1em + 2px)}
+#owner::before{content:"A";display:block;font-size:var(--pseudo-font,7px);overflow-clip-margin:border-box 2em}
+#child{position:absolute;left:-20px;top:8px;width:140px;height:15px;background:red;
+    font-size:5px;overflow-clip-margin:inherit}
+#owner.invalid{overflow-clip-margin:var(--bad)}
+#patch{position:absolute;left:240px;top:140px;height:12px;background:red}
+</style>
+<button id="check">Check</button><button id="change">Change font</button>
+<button id="invalid">Invalid variable</button><button id="reset">Reset box</button>
+<output id="report" data-hit="no"></output>
+<div id="owner"><div id="child"></div></div><div id="patch"></div>
+<script>
+(function(){
+    var owner=document.getElementById('owner'),child=document.getElementById('child'),report=document.getElementById('report');
+    function record(prefix){
+        var value=getComputedStyle(owner).overflowClipMargin;
+        report.setAttribute('data-'+prefix+'value',value);
+        report.setAttribute('data-'+prefix+'inherit',getComputedStyle(child).overflowClipMargin);
+        report.setAttribute('data-'+prefix+'pseudo',getComputedStyle(owner,'::before').overflowClipMargin);
+        document.getElementById('patch').style.width=value.split(' ').pop();
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        owner.style.fontSize='30px';owner.style.setProperty('--pseudo-font','9px');record('dirty-');
+    };
+    document.getElementById('invalid').onclick=function(){
+        owner.style.setProperty('--bad','20%');owner.className='invalid';record('invalid-');
+    };
+    document.getElementById('reset').onclick=function(){
+        owner.className='';owner.style.overflowClipMargin='padding-box';record('reset-');
+    };
+    child.onclick=function(){report.setAttribute('data-hit','yes');};
+})();
+</script>

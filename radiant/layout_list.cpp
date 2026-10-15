@@ -387,16 +387,25 @@ static FontHandle* resolve_marker_font_for_layout(LayoutContext* lycon,
 }
 
 static void sync_marker_line_height(LayoutContext* lycon, ViewBlock* block,
-                                    MarkerProp* marker_prop, float marker_font_size) {
+                                    MarkerProp* marker_prop, float marker_font_size,
+                                    FontHandle* marker_font) {
     if (!lycon || !block || !marker_prop) return;
-    float used_line_height = marker_prop->line_height;
-    if (!lycon->block.line_height_is_normal && block->blk && block->block()->line_height) {
+    // retained markers need the current face's split before applying authored leading.
+    float used_line_height = marker_font ? calc_normal_line_height(marker_font) : marker_font_size * 1.2f;
+    font_get_normal_lh_split(marker_font, &marker_prop->ascender, &marker_prop->descender);
+    const CssValue* leading = block->blk ? block->block()->line_height.get() : nullptr;
+    // marker creation can precede its owner's line context; consult the owner's computed leading.
+    if (leading && !css_value_keyword_equals(leading, CSS_VALUE_NORMAL)) {
         float resolved_line_height = layout_resolve_line_height_value(
-            lycon, block->block()->line_height,
+            lycon, leading,
             lam::dom_require<DOM_NODE_ELEMENT>(block), marker_font_size);
-        if (resolved_line_height > 0.0f) used_line_height = resolved_line_height;
+        if (resolved_line_height >= 0.0f) {
+            used_line_height = resolved_line_height;
+            font_get_content_area_split(marker_font, &marker_prop->ascender, &marker_prop->descender);
+            layout_apply_line_height_leading(used_line_height, &marker_prop->ascender, &marker_prop->descender);
+        }
     }
-    if (used_line_height > 0.0f) {
+    if (used_line_height >= 0.0f) {
         // CSS 2.1 §10.8.1: normal remains relative to the marker font; only an
         // inherited non-normal value resolves at the marker's own font size.
         marker_prop->line_height = used_line_height;
@@ -492,12 +501,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_prop->bullet_size = bullet_size;
     marker_prop->is_outside = is_outside;
     marker_prop->has_explicit_content = marker_css_content != nullptr;
-    marker_prop->line_height = font_handle ? calc_normal_line_height(font_handle)
-                                           : font_size * 1.2f;
-    if (font_handle) {
-        font_get_normal_lh_split(font_handle, &marker_prop->ascender,
-                                 &marker_prop->descender);
-    }
     DomElement* list_parent = parent_elem->parent_element();
     bool is_quirks = lycon->doc && lycon->doc->view_tree &&
         is_quirks_mode(lycon->doc->view_tree->html_version);
@@ -735,7 +738,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                 marker_font_size, is_outside_position,
                 marker_prop->reserves_first_line);
         }
-        sync_marker_line_height(lycon, block, marker_prop, marker_font_size);
     }
 
     if (!block->pseudo->marker_generated) {
@@ -760,9 +762,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                 marker_prop->width -= marker_prop->trailing_space_width;
                 marker_prop->trailing_space_trimmed = true;
             }
-            sync_marker_line_height(lycon, block,
-                                    marker_elem->marker_prop(),
-                                    marker_font_size);
         }
     }
     if (current_marker && !current_marker->font) {
@@ -778,6 +777,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     MarkerProp* marker_prop = block->pseudo->marker
         ? block->pseudo->marker->marker_prop() : nullptr;
     if (marker_prop) {
+        sync_marker_line_height(lycon, block, marker_prop, marker_font_size, marker_font_handle);
         marker_prop->has_color = resolve_pseudo_color(lycon,
             list_elem->pseudo_style(PSEUDO_STYLE_MARKER), &marker_prop->color);
     }
@@ -787,17 +787,16 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
                                DomElement* element, DisplayValue display) {
     if (!lycon || !lycon->counter_context) return true;
-    bool before = element && element->tag_name && strcmp(element->tag_name, "::before") == 0;
-    bool after = element && element->tag_name && strcmp(element->tag_name, "::after") == 0;
-    if (!counter_push_scope(lycon->counter_context, before || after)) return false;
+    PseudoStyleKind kind = PSEUDO_STYLE_BEFORE;
+    bool generated = layout_generated_pseudo(element, nullptr, &kind);
+    if (!counter_push_scope(lycon->counter_context, generated)) return false;
     context = lycon->counter_context;
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
     bool list_item = display.outer == CSS_VALUE_LIST_ITEM || display.list_item;
-    if (before || after) {
+    if (generated) {
         DomElement* origin = element->parent && element->parent->is_element()
             ? element->parent->as_element() : nullptr;
-        if (origin) apply_pseudo_counter_ops(lycon,
-            origin->pseudo_style(before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER));
+        if (origin) apply_pseudo_counter_ops(lycon, origin->pseudo_style(kind));
     } else {
         setup_list_container_counters(lycon, block, element);
         if (span->blk) {
@@ -814,7 +813,7 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
     }
     // the element's own operations precede the boundary; generated children follow it.
     if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }
-    if (before || after) layout_update_pseudo_content_with_counters(lycon, element, false);
+    if (generated) layout_update_pseudo_content_with_counters(lycon, element, false);
     else if (list_item) {
         process_list_item(lycon, block, element, element, display);
         if (!span->bound) span->ensure_boundary(lycon);

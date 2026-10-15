@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "page_document.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -30,6 +31,7 @@ double g_style_resolve_time = 0;
 
 bool layout_block_is_replaced_baseline(ViewBlock* block, bool include_select_listbox) {
     if (!block) return false;
+    if (radiant::layout_image_uses_alt_text_baseline(block)) return false;
     NameId tag = block->tag();
     if (tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_IFRAME ||
         tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_EMBED ||
@@ -1000,6 +1002,8 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
         // HTML defaults and the current logical/physical cascade are applied.
         view->scroller->overflow_x = SCROLL_PROP_DEFAULT.overflow_x;
         view->scroller->overflow_y = SCROLL_PROP_DEFAULT.overflow_y;
+        view->scroller->default_overflow_x = SCROLL_PROP_DEFAULT.default_overflow_x;
+        view->scroller->default_overflow_y = SCROLL_PROP_DEFAULT.default_overflow_y;
         view->scroller->overscroll_x = SCROLL_PROP_DEFAULT.overscroll_x;
         view->scroller->overscroll_y = SCROLL_PROP_DEFAULT.overscroll_y;
         view->scroller->scroll_behavior = SCROLL_PROP_DEFAULT.scroll_behavior;
@@ -2205,8 +2209,14 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void layout_setup_block_font_metrics(LayoutContext* lycon) {
-    if (!lycon || !font_box_handle(&lycon->font)) return;
-    if (lycon->block.line_height_is_normal) {
+    if (!lycon) return;
+    lycon->block.strut_line_height = lycon->block.line_height;
+    lycon->block.strut_line_height_is_normal = lycon->block.line_height_is_normal;
+    if (!font_box_handle(&lycon->font)) {
+        if (lycon->font.style && lycon->font.current_font_size == 0.0f) {
+            lycon->block.init_ascender = lycon->block.init_descender = 0.0f;
+        }
+    } else if (lycon->block.line_height_is_normal) {
         font_get_normal_lh_split(font_box_handle(&lycon->font),
             &lycon->block.init_ascender, &lycon->block.init_descender);
     } else {
@@ -2238,6 +2248,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
+        // a native page document declares its elements' r: traits as presentational hints
+        radiant_native_hints_declare(dom_elem);
         if (dom_elem && dom_elem->specified_style) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
@@ -2309,6 +2321,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             resolve_css_styles(dom_elem, lycon);
+            radiant_native_resolved(lycon, dom_elem);
             // HTML Rendering sizes native meter/progress widgets in em units;
             // apply the computed font after the author cascade has resolved.
             layout_refresh_html_em_replaced_size(lycon, dom_elem);
@@ -2395,6 +2408,18 @@ float layout_apply_line_height_leading(float line_height,
     *ascender += ascent_leading;
     *descender += leading - ascent_leading;
     return ascent_leading;
+}
+
+float layout_inline_font_metrics(FontHandle* font, float line_height,
+                                bool normal, float* ascender, float* descender) {
+    *ascender = *descender = 0.0f;
+    if (!font) return 0.0f;
+    if (normal) {
+        font_get_normal_lh_split(font, ascender, descender);
+        return 0.0f;
+    }
+    font_get_content_area_split(font, ascender, descender);
+    return layout_apply_line_height_leading(line_height, ascender, descender);
 }
 
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
@@ -2862,16 +2887,16 @@ bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* bl
 }
 
 float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
-    float line_height = max(lycon->block.line_height,
+    float line_height = max(lycon->block.strut_line_height,
                             lycon->line.max_ascender + lycon->line.max_descender);
     // CSS 2.1 §10.8.1: The strut is an invisible zero-width inline box with the
     float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
-    if (!lycon->block.line_height_is_normal) {
+    if (!lycon->block.strut_line_height_is_normal) {
         float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
         if (strut_content_height > 0.0f) {
             float strut_descender = lycon->block.init_descender;
             strut_baseline = lycon->block.init_ascender;
-            layout_apply_line_height_leading(lycon->block.line_height,
+            layout_apply_line_height_leading(lycon->block.strut_line_height,
                 &strut_baseline, &strut_descender);
         }
     }
@@ -3086,6 +3111,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             baseline_pos, item_baseline, lycon->line.vertical_align_offset);
         view->y = lycon->block.advance_y + vertical_offset;
     }
+    else if (view->view_type == RDT_VIEW_MARKER) {
+        ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
+        MarkerProp* prop = marker->marker_prop();
+        if (!prop || prop->is_outside || (!prop->loaded_image && !prop->is_image_marker)) return;
+        ViewBlock* owner = layout_nearest_block_ancestor(marker->parent_view());
+        if (owner && layout_block_inline_axis_is_vertical(owner)) return;
+        // the anonymous inside image uses its bottom edge as the replaced baseline.
+        marker->y = lycon->block.advance_y + calculate_vertical_align_offset(lycon,
+            CSS_VALUE_BASELINE, marker->height, line_height, replaced_baseline_pos,
+            marker->height, 0.0f);
+    }
     else if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
              view->view_type == RDT_VIEW_TABLE) {
         ViewBlock* block = lam::view_require_block(view);
@@ -3234,6 +3270,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             radiant::layout_uses_explicit_baseline_source(block) &&
             radiant::layout_form_control_baseline_for_source(block) > 0.0f;
         float align_baseline_pos = block->display.inner == RDT_DISPLAY_REPLACED &&
+            !radiant::layout_image_uses_alt_text_baseline(block) &&
             !textarea_uses_content_baseline ?
             replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
@@ -4498,8 +4535,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
 
-        if (lycon->paged && paged_flow_skips_element(lycon, elem)) {
-            // page masters, regions and static content feed the composition, not the flow.
+        PseudoStyleKind generated;
+        bool skipped = lycon->paged ? paged_flow_skips_element(lycon, elem) :
+            // footnote calls and markers a page flow left behind belong to it alone
+            layout_generated_pseudo(elem, nullptr, &generated) &&
+            (generated == PSEUDO_STYLE_FOOTNOTE_CALL || generated == PSEUDO_STYLE_FOOTNOTE_MARKER);
+        if (skipped) {
+            // page masters, regions, static content, running elements, footnotes and
+            // page floats feed the composition, not the flow.
             node->view_type = RDT_VIEW_NONE;
             lycon->depth--;
             return;
@@ -4578,7 +4621,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     bool image_marker_raises_line =
                         (marker_prop->is_image_marker || marker_prop->loaded_image) &&
                         marker_span->height > lycon->block.line_height;
-                    if (image_marker_raises_line) {
+                    if (image_marker_raises_line && marker_prop->is_outside) {
                         // CSS Inline: a default-sized image marker uses its
                         // bottom edge as the baseline, just like a gradient
                         // marker with an explicit used object size.
@@ -4608,33 +4651,18 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                             // strut, so the line-height selection must inspect
                             // its larger normal metrics as a mixed-font line.
                             lycon->line.has_different_inline_font = true;
-                            lycon->line.max_ascender = max(
-                                lycon->line.max_ascender, marker_prop->ascender);
-                            lycon->line.max_descender = max(
-                                lycon->line.max_descender, marker_prop->descender);
                         }
-                        // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
-                        float ascender = 0, descender = 0;
-                        if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
-                            font_get_normal_lh_split(font_box_handle(&lycon->font), &ascender, &descender);
-                        } else {
-                            TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&lycon->font));
-                            if (typo.valid && typo.use_typo_metrics) {
-                                ascender = typo.ascender;
-                                descender = typo.descender;
-                            } else if (font_box_handle(&lycon->font)) {
-                                ascender = font_get_metrics(font_box_handle(&lycon->font))->hhea_ascender;
-                                descender = -(font_get_metrics(font_box_handle(&lycon->font))->hhea_descender);
-                            } else {
-                                ascender = 12.0f; descender = 4.0f;
-                            }
-                            float content_height = ascender + descender;
-                            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-                            ascender += half_leading;
-                            descender += half_leading;
+                        // share the current marker face's normal/content split and leading policy.
+                        lycon->line.max_ascender = max(lycon->line.max_ascender, marker_prop->ascender);
+                        lycon->line.max_descender = max(lycon->line.max_descender, marker_prop->descender);
+
+                        if (marker_content_height > 0.0f) {
+                            // an image's bottom-edge ascent supplements the marker font/space strut.
+                            lycon->line.max_ascender = max(lycon->line.max_ascender, marker_content_height);
+                            lycon->line.max_atomic_inline_height = max(
+                                lycon->line.max_atomic_inline_height, marker_content_height);
+                            lycon->line.has_replaced_content = true;
                         }
-                        if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
-                        if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
 
                         if (!lycon->line.start_view) lycon->line.start_view = lam::up((View*)marker_span);
                         lycon->line.is_line_start = false;
@@ -5001,12 +5029,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    if (font_box_handle(&lycon->font)) {
-        float split_asc = 0, split_desc = 0;
-        font_get_normal_lh_split(font_box_handle(&lycon->font), &split_asc, &split_desc);
-        lycon->block.init_ascender = split_asc;
-        lycon->block.init_descender = split_desc;
-    } else {
+    if (!font_box_handle(&lycon->font)) {
         log_error("No font face available for layout, using fallback metrics");
         lycon->block.init_ascender = 12.0;  // Default ascender
         lycon->block.init_descender = 3.0;  // Default descender
@@ -5014,8 +5037,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // CSS Inline 3: the initial containing block has a root inline strut, so
     // root-level display:contents descendants inherit a real line-height.
     setup_line_height(lycon, html);
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
-        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
+    layout_setup_block_font_metrics(lycon);
 
     if (elmt->is_element() && elmt->tag() == MARKUP_NAME_SVG && dom_element_is_svg(elmt->as_element())) {
         // SVG2 §12.2: only foreignObject descendants establish CSS formatting contexts.
