@@ -10,6 +10,7 @@
 
 import dom
 import sess: lambda.edit.session
+import controller: .controller
 
 // ---------------------------------------------------------------------------
 // Toolbar and window
@@ -32,10 +33,7 @@ pub pn sync_window(node, session, doc) {
 // A closed dialog hands focus back to the document: the button that closed it
 // is gone, and with nothing focused the next key would reach <body>, outside
 // the shell that owns the shortcuts.
-pub pn focus_surface(node) {
-  let surface = dom.get_element_by_id(dom.root_node(node), "edit-surface")
-  if (surface != null) { dom.focus_set(surface, false) }
-}
+pub let focus_surface = controller.focus
 
 // The live text of a dialog field. A click on a label targets its text node;
 // `root_node` answers for any connected node.

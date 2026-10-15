@@ -6,6 +6,7 @@ import document: .mod_document
 import files: lambda.edit.files
 import page: .mod_page
 import review: .mod_review
+import controls: lambda.ui.controls
 
 view <word_button> {
     <button id:~.id, class:"tool " ++ (~.class or ""), title:~.title or ~.label,
@@ -24,9 +25,8 @@ pub fn command(id,label=null,icon=null,params={},pressed=false,disabled=false) =
 fn mark_button(editor,id,label) => command(id,label,null,{},edit_mark_active(editor,model.spec(id).mark))
 fn group(label,items) => <div class:"ribbon-group group-" ++ lower(label), <div class:"group-tools", *items> <div class:"group-label", label>>
 fn selector(id,command,values,current,css="",param="value") =>
-    <select id:id, class:"ribbon-select " ++ css, ["data-command"]:command, ["data-param"]:param,
-        ["aria-label"]:model.spec(command).label,
-        *[for (entry in values) <option value:string(entry.value), *:if (string(entry.value)==string(current)) {selected:""} else {}, entry.label>]>
+    apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
+        options:values,value:current,on_change:{action:command,param:param}>)
 
 pub fn ribbon(editor,tab,nav,read_only) {
     let block = model.current_block(editor)
@@ -117,12 +117,14 @@ pub fn navigation(editor,query,index,match_case=false,replacement="") {
     let hits = model.search(editor.doc,query,match_case);
     <aside id:"navigation", class:"navigation",
         <div class:"pane-heading", "Navigation" <span class:"pane-caption", "OUTLINE & FIND">>
-        <div class:"search-field", <span "⌕"> <input id:"find-query", type:"text", placeholder:"Find in document", value:query, ["aria-label"]:"Find in document">>
+        <div class:"search-field", <span "⌕"> apply(<control.input id:"find-query",placeholder:"Find in document",
+            value:query,label:"Find in document",on_change:"find.query">)>
         <div class:"search-summary", id:"search-summary", if (query=="") "A map for your ideas" else string(len(hits)) ++ " matches">
         if (query != "") <div class:"find-controls",
             button("find-match-case","ui.matchCase","Match case",null,{},match_case); button("find-clear","ui.clearFind","Clear");
             button("find-prev","edit.findPrevious","Previous","↑"); button("find-next","edit.findNext","Next","↓");
-            <input id:"replace-text", type:"text", placeholder:"Replace with", value:replacement, ["aria-label"]:"Replace with">
+            apply(<control.input id:"replace-text",placeholder:"Replace with",value:replacement,
+                label:"Replace with",on_change:"find.replacement">)
             button("replace-one","edit.replace","Replace"); button("replace-all","edit.replaceAll","Replace all")>
         else null;
         <div class:"outline", *[for (i,heading in model.headings(editor.doc))

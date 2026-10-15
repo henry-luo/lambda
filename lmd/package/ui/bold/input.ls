@@ -6,4 +6,5 @@ view bold_controls: <bold.input> | <bold.text_area> | <bold.select> | <bold.chec
 }
 on input(evt) { control.edited(~,evt,"bold") }
 on change(evt) { control.changed(~,evt,"bold") }
+on render(evt) { control.rendered(~,evt) }
 on bold_control_sync(evt) { control.sync(~,evt.target) }

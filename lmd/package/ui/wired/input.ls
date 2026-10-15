@@ -15,4 +15,5 @@ view wired_controls: <wired.input> | <wired.text_area> | <wired.select> | <wired
 }
 on input(evt) { control.edited(~,evt,"wired") }
 on change(evt) { control.changed(~,evt,"wired") }
+on render(evt) { control.rendered(~,evt) }
 on wired_control_sync(evt) { control.sync(~,evt.target) }

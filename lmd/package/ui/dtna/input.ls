@@ -5,4 +5,5 @@ view dtna_controls: <dtna.input> | <dtna.text_area> | <dtna.select> | <dtna.chec
 }
 on input(evt) { control.edited(~,evt,"dtna") }
 on change(evt) { control.changed(~,evt,"dtna") }
+on render(evt) { control.rendered(~,evt) }
 on dtna_control_sync(evt) { control.sync(~,evt.target) }

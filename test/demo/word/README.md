@@ -133,6 +133,14 @@ Form-control positions never replace the document selection. Empty paragraphs
 receive a projected zero-width space so their node-position carets have a line
 box; this placeholder is absent from saved documents.
 
+Surface binding, selection ownership, document replacement, native action routing,
+and selection completion use `lambda.edit.controller`, shared with the general
+editor shell. Ribbon selectors and search fields use `lambda.ui.controls` with
+declarative change actions; Word supplies command IDs and state updates. Live
+control synchronization, typed option values, caret preservation, and IME handling
+belong to the shared control package (**S12.1.3**, **D7.2.5**). See
+[the shared API](../../../doc/dev/Shared_Editing.md).
+
 Reactive subtree replacement now retires detached inline stylesheets and
 publishes their replacements through the existing CSSOM collector. A changed
 sheet invalidates the style epoch and recascades the whole document, since its

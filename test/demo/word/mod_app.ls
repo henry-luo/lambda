@@ -10,44 +10,29 @@ import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
 import page: .mod_page
+import controller: lambda.edit.controller
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
     tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
     zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false}
-pub pn mounted(editor,node) {
-    if (editor.mounted) editor else edit_mount(editor,dom.get_element_by_id(dom.root_node(node),"edit-surface"),"html5_subset")
-}
+pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
-pub pn focus_document(node) { fields.focus_surface(node) }
-pub pn is_control(node) { dom.node_type(node)==1 and dom.matches(node,"input,textarea,select") }
+pub let focus_document = controller.focus
+pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
-// Toolbar clicks carry both the document selection and their hit position.
-// Only use the hit position when the event itself comes from the document.
 pub pn adopt(st,evt,changes_only=false) {
-    let selection = evt.source_selection or null
-    let position = if (dom.closest(evt.target,"#edit-surface")==null) null else evt.source_pos or null
-    if (is_control(evt.target) or (selection==null and position==null)) { return st }
-    // the first pointer selection must bind the surface before projection replaces its DOM.
-    let editor = mounted(st.editor,evt.target)
-    let accepted = edit_accept_dom_selection(editor,{*:evt,source_selection:selection,source_pos:position})
-    // a completion echo can advance the native revision without moving the logical selection.
-    if (changes_only and not accepted.changed and st.editor.mounted==editor.mounted) { return st }
+    let accepted = controller.adopt(st.editor,evt)
+    if (changes_only and not accepted.changed) { return st }
     return {*:st,editor:accepted.editor}
 }
-pn replaced_editor(previous,next) {
-    // Files share one logical surface. Keep its handle and monotone revision
-    // so completion resolves the new DOM rather than retaining the old host.
-    return {*:next,mounted:previous.mounted,preset:previous.preset,surface_handle:previous.surface_handle,
-        model_revision:previous.model_revision+1,native_selection_revision:previous.native_selection_revision}
-}
+let replaced_editor = controller.replace
 pub pn finish(st,node) {
     // Bind only once an editing action owns a selection. View-only changes
     // before the first caret placement have no model selection to publish.
-    if (st.editor.mounted and not st.read_only and st.dialog==null) edit_restore_selection(st.editor)
+    controller.restore(st.editor,not st.read_only and st.dialog==null)
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     dom.set_close_guard(node,dirty)
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
-    dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_controls")
 }
 pn continued(st,id,node) {
     if (id == "file.open") { return {*:st,pending:"",dialog:{kind:"open",path:""}} }
@@ -214,7 +199,7 @@ pub pn command(st,id,params,node) {
         let hits = model.search(st.editor.doc,st.query,st.match_case)
         if (len(hits)==0) { return {*:st,status:"No matching text"} }
         let selected = [for (hit in hits where hit == st.editor.selection) hit][0]
-        return model_command({*:st,editor:edit_set_selection(st.editor,selected or hits[0])},"text.insert",{data:field(node,"replace-text")},node)
+        return model_command({*:st,editor:edit_set_selection(st.editor,selected or hits[0])},"text.insert",{data:st.replace_text},node)
     }
     let payload = if (id == "edit.replaceAll") {find:st.query,replace:st.replace_text,match_case:st.match_case} else params
     return model_command(st,id,payload,node)

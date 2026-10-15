@@ -12,6 +12,7 @@ import surface: .mod_surface
 import app: .mod_app
 import page: .mod_page
 import review: .mod_review
+import controller: lambda.edit.controller
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -65,10 +66,8 @@ edit <word_app> state st:app.initial() {
 }
 on beforeinput() { return 'pass' }
 on editaction(evt) {
-    if (st.read_only) { return edit_result.decline(true,false,"read-only",0) }
-    if (evt.input_type == "copy") { return edit_result.model_applied(false,false,false,"",st.editor.selection,st.editor.model_revision) }
-    let editor = app.mounted(st.editor,evt.target)
-    let run = edit_handle_dom_action(editor,evt)
+    let run = controller.handle(st.editor,evt,st.read_only)
+    if (st.read_only or evt.input_type=="copy") { return run.result }
     st = {*:st,editor:model.clean(run.editor),status:if (run.result.failure != null) "This edit is unavailable here." else "Writing"}
     dom.set_close_guard(evt.target,session.is_dirty(st.file_state,st.editor.doc))
     return run.result
@@ -77,14 +76,8 @@ on selectionchange(evt) {
     let adopted = app.adopt(st,evt,true)
     if (adopted.editor!=st.editor) {
         st = {*:adopted,editor:model.clean(adopted.editor)}
-        edit_restore_selection(st.editor)
-        dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_controls")
+        controller.restore(st.editor)
     }
-}
-on word_controls(evt) {
-    // selected attributes describe defaults; update the live selectedness after projection.
-    for (option in dom.query_selector_all(dom.root_node(evt.target),".ribbon-select option[selected]"))
-        dom.set_state(option,"selected",true)
 }
 on word_command(req) {
     st = app.adopt(st,req.event)
@@ -95,24 +88,12 @@ on edit_dialog(req) {
     st = app.command(st,"dialog." ++ req.action,{},req.node)
     app.finish(st,req.node)
 }
-on change(evt) {
-    if (dom.node_type(evt.target)!=1) { return }
-    let id = dom.get_attribute(evt.target,"data-command")
-    if (id != null) {
-        let key = dom.get_attribute(evt.target,"data-param")
-        let raw = dom.get_state(evt.target,"value")
-        // only numeric formatting commands parse numbers; table alignments are named values.
-        let value = if (contains(["font-size","line-height"],model.spec(id).property)) float(raw) else raw
-        st = app.command(app.adopt(st,evt),id,{[key]:value},evt.target)
-        app.finish(st,evt.target)
-    }
-}
-on input(evt) {
-    if (dom.node_type(evt.target)==1 and dom.get_attribute(evt.target,"id")=="find-query") {
-        st = {*:st,query:string(dom.get_state(evt.target,"value") or ""),match_index:-1}
-    }
-    if (dom.node_type(evt.target)==1 and dom.get_attribute(evt.target,"id")=="replace-text") {
-        st = {*:st,replace_text:string(dom.get_state(evt.target,"value") or "")}
+on control_change(req) {
+    if (req.action=="find.query") { st = {*:st,query:req.value,match_index:-1} }
+    else if (req.action=="find.replacement") { st = {*:st,replace_text:req.value} }
+    else {
+        st = app.command(app.adopt(st,req.event),req.action,req.params,req.node)
+        app.finish(st,req.node)
     }
 }
 on keydown(evt) {

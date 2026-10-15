@@ -61,7 +61,7 @@ def main():
         for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
                          "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
-        for fixture in ("smoke", "editing", "files", "table_caret", "scroll_hit", "tables",
+        for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables",
                         "pictures_links", "paragraph_search", "layout", "review"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
