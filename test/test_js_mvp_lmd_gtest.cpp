@@ -1345,14 +1345,14 @@ TEST_F(JsMvpLmd, FailurePhasesRemainDistinct) {
     MvpLmdFailurePhase expected[] = {MVP_LMD_PARSE_FAILURE, MVP_LMD_SUCCESS,
         MVP_LMD_RUNTIME_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_SUCCESS,
         MVP_LMD_ADMISSION_FAILURE, MVP_LMD_SUCCESS, MVP_LMD_SUCCESS,
-        MVP_LMD_SUCCESS, MVP_LMD_SUCCESS, MVP_LMD_ADMISSION_FAILURE};
+        MVP_LMD_SUCCESS, MVP_LMD_SUCCESS, MVP_LMD_SUCCESS};
     for (size_t i=0;i<sizeof(sources)/sizeof(sources[0]);i++) {
         SCOPED_TRACE(sources[i]);
         mvp_lmd_destroy(execution); execution=mvp_lmd_execute(sources[i], strlen(sources[i]));
         MvpLmdFailurePhase phase; const char* type=nullptr;
         mvp_lmd_diagnostic(execution,&phase,&type);
         EXPECT_EQ(phase,expected[i]);
-        if (i==8 || i==9) {
+        if (i==8 || i==9 || i==10) {
             Item value=mvp_lmd_result(execution);
             ASSERT_TRUE(get_type_id(value)==LMD_TYPE_INT || get_type_id(value)==LMD_TYPE_FLOAT);
             EXPECT_EQ(it2d(value),42);
@@ -1585,6 +1585,7 @@ TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
         const first=performance.now(); const clock=performance.now;
         const fs=require('fs');
         fs.writeFileSync('temp/mvp_host_file.txt','a\u0000b');
+        print('plain',3);
         console.log('host',123,true,null,undefined);
         process.stdout.write(fs.readFileSync('temp/mvp_host_file.txt','utf8'));
         typeof clock==='function' && clock()>=first && first>=0 &&
@@ -1594,7 +1595,7 @@ TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_EQ(fclose(output), 0);
     char* bytes = NULL; size_t size = 0;
     ASSERT_TRUE(file_read_all("temp/mvp_host_output.txt", MEM_CAT_TEMP, &bytes, &size));
-    const char expected[] = "host 123 true null undefined\na\0b";
+    const char expected[] = "plain 3\nhost 123 true null undefined\na\0b";
     EXPECT_EQ(size, sizeof(expected) - 1);
     if (size == sizeof(expected) - 1) EXPECT_EQ(memcmp(bytes, expected, size), 0);
     mem_free(bytes);
@@ -4906,6 +4907,9 @@ TEST_F(JsMvpLmd, PropertyExpansionMapPairOwnership) {
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionProjectionOrdering) {
+    boolean("let o={};for(let k of ['z','4294967295','02','10','2','length'])o[k]=k;Object.values(o).join(',')==='2,10,z,4294967295,02,length'&&Object.keys(o).join(',')===Object.values(o).join(',')");
+    boolean("let s=Symbol('0'),o={a:1,[s]:2,0:3};let keys=Reflect.ownKeys(o);keys[0]==='0'&&keys[1]==='a'&&keys[2]===s&&Object.values(o).join(',')==='3,1'");
+    boolean("let o={};for(let i=0;i<3;i++)o['k'+i]=i;Object.defineProperty(o,'late',{enumerable:true,get(){delete o.k1;o.extra=9;return 7}});Object.values(o).join(',')==='0,1,2,7'&&Object.keys(o).join(',')==='k0,k2,late,extra'");
     boolean("let o={a:1,b:2,c:3};Object.keys(o).join(',')==='a,b,c'&&Object.values(o).join(',')==='1,2,3'&&Object.entries(o)[1].join(',')==='b,2'");
     boolean("let o={z:9,10:10,2:2,a:7,1:1};Object.keys(o).join(',')==='1,2,10,z,a'&&Object.values(o).join(',')==='1,2,10,9,7'");
     boolean("let a=Symbol('a'),b=Symbol('b'),o={};o[a]=1;o.z=2;o[b]=3;o[2]=4;o[1]=5;let k=Reflect.ownKeys(o);k.length===5&&k[0]==='1'&&k[1]==='2'&&k[2]==='z'&&k[3]===a&&k[4]===b");
@@ -10156,4 +10160,127 @@ TEST_F(JsMvpLmd, RawTypedOptionalKeysPreserveNumericPayloads) {
         "a[keys[3]]=7;return x===5e-324&&a[keys[3]]===7}f()");
     boolean("function f(){let a=new Int32Array(2),keys=[0];a[keys[3]]='value';"
         "let x=a[keys[3]];return x==='value'&&a[keys[0]]===0}f()");
+}
+TEST_F(JsMvpLmd, FullParityReplaceAllProtocolsAndUtf16) {
+    boolean(R"JS('\ud83d\ude00'.replaceAll('', '_') === '_\ud83d_\ude00_')JS");
+    boolean("let positions=[];let s='aba'.replaceAll('a',(m,p,source)=>{positions.push(p);return source.length+p});s==='3b5'&&positions.join(',')==='0,2'");
+    boolean("let order='';let pattern={get [Symbol.match](){order+='m';return true},get flags(){order+='f';return 'g'},get [Symbol.replace](){order+='r';return function(s,v){return s===receiver&&v===7}}};let receiver={toString(){throw 9}};String.prototype.replaceAll.call(receiver,pattern,7)&&order==='mfr'");
+    boolean("Object.defineProperty(Number.prototype,Symbol.replace,{get(){throw 7}});'a1b1'.replaceAll(1,'x')==='axbx'");
+    error("'a'.replaceAll(/a/,'x')", "TypeError");
+}
+TEST_F(JsMvpLmd, FullParityNumericFormattingAndBigIntWidths) {
+    boolean("let number=new Number(1.25),digits={valueOf(){number.valueOf=()=>7;return 2}};number.toPrecision(digits)==='1.3'&&(1.25).toExponential(2)==='1.25e+0'&&Infinity.toPrecision(Infinity)==='Infinity'");
+    boolean("let order='';let bits={valueOf(){order+='b';return 8}},value={valueOf(){order+='v';return 255n}};BigInt.asIntN(bits,value)===-1n&&order==='bv'&&BigInt.asUintN(8,-1n)===255n");
+    boolean("let ran=false;try{BigInt.asIntN(-1,{valueOf(){ran=true;return 0n}})}catch(e){if(!(e instanceof RangeError))throw e}!ran");
+    error("(1).toPrecision(0)", "RangeError");
+    error("BigInt.asUintN(8,1)", "TypeError");
+    boolean(R"JS(escape('a \ud83d\ude00')==='a%20%uD83D%uDE00'&&unescape('%uD83D%uDE00')==='\ud83d\ude00')JS");
+}
+TEST_F(JsMvpLmd, FullParityLegacyAccessorDescriptors) {
+    boolean("let key=Symbol(),o={},getter=()=>7,setter=function(v){this.value=v};o.__defineGetter__(key,getter);o.__defineSetter__(key,setter);let d=Object.getOwnPropertyDescriptor(o,key);o[key]=9;d.get===getter&&d.set===setter&&d.enumerable&&d.configurable&&o[key]===7&&o.value===9&&o.__lookupGetter__(key)===getter&&Object.create(o).__lookupSetter__(key)===setter");
+    boolean("let p={get x(){return 1}},o=Object.create(p);Object.defineProperty(o,'x',{value:3});o.__lookupGetter__('x')===undefined");
+    boolean("let seen=0;let key={toString(){seen++;throw 7}};try{Object.prototype.__defineGetter__.call({},key,0)}catch(e){if(!(e instanceof TypeError))throw e}seen===0");
+    error("Object.prototype.__defineGetter__.call(null,'x',()=>1)", "TypeError");
+    boolean("Object.prototype.get=()=>7;let o={x:3};o.__lookupGetter__('x')===undefined");
+}
+
+TEST_F(JsMvpLmd, FullParityReflectMethodNames) {
+    boolean("let ok=true;for(let key of ['apply','construct','defineProperty','deleteProperty','get','getOwnPropertyDescriptor','getPrototypeOf','has','isExtensible','ownKeys','preventExtensions','set','setPrototypeOf']){let f=Reflect[key],d=Object.getOwnPropertyDescriptor(f,'name'),p=Object.getOwnPropertyDescriptor(Reflect,key);ok=ok&&f.name===key&&!d.writable&&!d.enumerable&&d.configurable&&p.writable&&!p.enumerable&&p.configurable}ok");
+}
+
+TEST_F(JsMvpLmd, FullParityRegExpUnicodeSetsAndProperties) {
+    boolean(R"JS(/^\d+$/v.test('0123') && !/^\d+$/v.test('abc'))JS");
+    boolean(R"JS(/[[a-z]--[aeiou]]/v.test('b') && !/[[a-z]--[aeiou]]/v.test('a') && /[[a-z]&&[bcd]]/v.test('c'))JS");
+    boolean(R"JS(/[\q{ab|cd}]/v.exec('zcd')[0]==='cd')JS");
+    boolean(R"JS(let r=/./v;r.unicode===false&&r.unicodeSets===true&&r.flags==='v'&&r.exec('\uD83D\uDE00')[0].length===2)JS");
+    boolean(R"JS('\uD83D\uDE00'.match(/(?:)/gv).length===2&&'\uD83D\uDE00'.replace(/(?:)/gv,'-')==='-\uD83D\uDE00-')JS");
+    boolean(R"JS(/[\p{ASCII}]/u.test('7')&&!/[\p{ASCII}]/u.test('\uD83D\uDE00')&&/[\P{ASCII}]/u.test('\uD83D\uDE00')&&!/[\P{ASCII}]/u.test('A'))JS");
+    boolean(R"JS(/[\p{ASCII}\p{Script=Greek}]/u.test('\u03A9')&&/\p{ASCII}/.test('p{ASCII}'))JS");
+    boolean(R"JS(/k/iu.test('\u212A')&&/[a-z]/iu.test('\u017F')&&/[\u03c2]/iu.test('\u03a3')&&!/k/i.test('\u212A')&&!/i/iu.test('\u0130'))JS");
+    boolean(R"JS(/[\u0390]/iu.test('\u1fd3')&&/[\u1fd3]/iu.test('\u0390')&&/[\u03b0]/iu.test('\u1fe3')&&/[\u1fe3]/iu.test('\u03b0')&&/[\ufb05]/iu.test('\ufb06')&&/[\ufb06]/iu.test('\ufb05'))JS");
+    boolean(R"JS(/^(\u0390)\1$/iu.test('\u1fd3\u0390')&&!/^\u0390$/iu.test('\u03b9\u0308\u0301')&&!/^\ufb05$/iu.test('st'))JS");
+    boolean(R"JS(/(?<=\1(\u0390))$/iu.test('\u0390\u1fd3')&&/(?<=\1(\u0390))$/iu.test('\u1fd3\u0390')&&/^(k)\1$/iu.test('\u212Ak')&&/(?<=\1(k))$/iu.test('k\u212A'))JS");
+    boolean(R"JS(/\b\w\b/iu.test('\u017F')&&!/\b\w\b/i.test('\u017F')&&/[\-\p{ASCII}]/u.test('7')&&/[-\p{ASCII}]/u.test('-')&&/[\p{ASCII}-]/u.test('-'))JS");
+    boolean(R"JS(let bad=['(',')','{','}','/','-','|','&&','!!','##','$$','%%','**','++',',,','..','::',';;','<<','==','>>','??','@@','^^^','``','~~'];let ok=true;for(let text of bad){try{new RegExp('['+text+']','v');ok=false}catch(e){ok=ok&&e instanceof SyntaxError}}ok&&/[\!\-\&]/v.test('!')&&/[a-z]/v.test('m')&&/[^^]/v.test('a'))JS");
+    boolean(R"JS(let r=new RegExp('\\c\u0410');r.test('\\c\u0410')&&!r.test('c\u0410')&&/[\c!]/.test('\\')&&/[\c!]/.test('c')&&/[\c!]/.test('!')&&/[\c1]/.test('\x11')&&/[\c_]/.test('\x1f'))JS");
+    error(R"JS(new RegExp('[\\B]', 'u'))JS", "SyntaxError");
+    error(R"JS(new RegExp('[^\\p{Basic_Emoji}]', 'v'))JS", "SyntaxError");
+    error(R"JS(new RegExp('[^[\\q{ab}]--[\\q{ab}]]', 'v'))JS", "SyntaxError");
+    boolean(R"JS(/[^\q{a}]/v.test('b')&&/[^[[\q{ab}]&&[a]]]/v.test('c'))JS");
+    error(R"JS(new RegExp('\\p{ASCII=F}', 'u'))JS", "SyntaxError");
+    error(R"JS(new RegExp('[\\p{ASCII=F}]', 'u'))JS", "SyntaxError");
+}
+TEST_F(JsMvpLmd, FullParityFromEntriesClosingAndScalarOwnership) {
+    boolean("let key=Symbol(),o=Object.fromEntries([['__proto__',7],[key,5e-324],['a',1],['a',2]]);Object.getPrototypeOf(o)===Object.prototype&&o.__proto__===7&&o[key]===5e-324&&o.a===2");
+    boolean("let closed=0,thrown={};function* entries(){try{yield {get 0(){throw thrown}}}finally{closed++}}let same=false;try{Object.fromEntries(entries())}catch(e){same=e===thrown}same&&closed===1");
+    boolean("let order='';let entry={get 0(){order+='k';return {toString(){order+='c';return 'x'}}},get 1(){order+='v';return 5e-324}};let o=Object.fromEntries([entry]);o.x===5e-324&&order==='kvc'");
+}
+TEST_F(JsMvpLmd, FullParityInterpretedRegExpOwnership) {
+    boolean(R"JS(let r=eval('/a+/g');r instanceof RegExp&&r.exec('baa')[0]==='aa'&&r.lastIndex===3)JS");
+    boolean(R"JS(let r=(0,eval)('/[a-z]/v');r instanceof RegExp&&r.unicodeSets&&r.test('q'))JS");
+    boolean(R"JS(let r=Function('return /(?<letter>a)/d')();let m=r.exec('ba');m.groups.letter==='a'&&m.indices.groups.letter[0]===1&&m.indices.groups.letter[1]===2)JS");
+    boolean(R"JS(let Original=RegExp;RegExp=function(){throw 7};let r=eval('/a/');r instanceof Original&&r.test('a'))JS");
+    boolean(R"JS(let ok=false;try{eval('/[!!]/v')}catch(e){ok=e instanceof SyntaxError}ok)JS");
+}
+TEST_F(JsMvpLmd, FullParityStatementPositionsRejectBeforeExecution) {
+    const char* sources[] = {
+        "'use strict';if(true) function f(){}",
+        "if(true) async function f(){}",
+        "if(true) function* f(){}",
+        "if(true) label:function f(){}",
+        "while(false) function f(){}",
+        "for(;;) let x=1;",
+        "do class C{} while(false);",
+        "'use strict';label:function f(){}",
+        "if(true)const x=1;else 0",
+        "{async function f(){} function f(){}}",
+        "{function* f(){} function f(){}}",
+        "{let x;var x;}",
+        "{var x;class x{}}",
+        "{let x;{var x;}}",
+        "let x;var x;",
+        "if({1}){}",
+        "({'x'})",
+        "let x=1;({[x]})",
+        R"JS(throw 7; /\p{ASCII=F}/u)JS",
+        R"JS(if(false){ /[\uFFFF-\p{Hex}]/u })JS",
+        R"JS(function f(){ /a/uv })JS",
+        R"JS(throw 7; /[!!]/v)JS",
+        R"JS(throw 7; /[^\p{Basic_Emoji}]/v)JS",
+        R"JS(function f(){ /[^[\q{ab}]--[\q{ab}]]/v })JS"
+    };
+    for (const char* source : sources) {
+        mvp_lmd_destroy(execution);
+        execution = mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS;
+        const char* type = NULL;
+        ASSERT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr) << source;
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE) << source;
+        ASSERT_NE(type, nullptr);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+    numeric("var n=0;if(true)function f(){return 7} f()", 7);
+    numeric("label:function f(){return 9} f()", 9);
+    numeric("if(true){let x=1;}7", 7);
+    numeric("{function f(){return 1}function f(){return 2}}f()", 2);
+    numeric("var x=7;{let x=1;}x", 7);
+}
+TEST_F(JsMvpLmd, FullParityJsonReviverOrderAndOwnership) {
+    boolean(R"JS(let order=[];let o=JSON.parse('{"a":[1,2],"b":3}',function(k,v){order.push(k);if(k==='0')return 5e-324;if(k==='1')return undefined;return v});order.join(',')==='0,1,a,b,'&&o.a[0]===5e-324&&!(1 in o.a)&&o.a.length===2&&o.b===3)JS");
+    boolean(R"JS(let calls=0;JSON.parse('null',function(k,v){calls++;return k===''&&v===null?7:0})===7&&calls===1&&JSON.parse('3',{})===3)JS");
+    boolean(R"JS(let o=JSON.parse('{"a":1,"b":2}',function(k,v){if(k==='a'){Object.defineProperty(this,'b',{value:9,configurable:false});return v}if(k==='b')return undefined;return v});o.a===1&&o.b===9)JS");
+    boolean(R"JS(let error={};let same=false;try{JSON.parse('[0,0]',function(k,v){if(k==='0')this[1]=new Proxy([],{get(t,k){if(k==='length')throw error;return t[k]}});return v})}catch(e){same=e===error}same)JS");
+    boolean(R"JS(let error={};let same=false;try{JSON.parse('{"a":1}',function(k,v){if(k==='a')throw error;return v})}catch(e){same=e===error}same)JS");
+}
+TEST_F(JsMvpLmd, FullParityJsonReplacerSpacingAndOwnership) {
+    boolean("let d=Object.getOwnPropertyDescriptor(JSON,Symbol.toStringTag);d.value==='JSON'&&!d.writable&&!d.enumerable&&d.configurable&&Object.prototype.toString.call(JSON)==='[object JSON]'");
+    boolean(R"JS(let seen=[];let text=JSON.stringify({a:1,b:[2,undefined]},function(k,v){seen.push(k);return k==='a'?5e-324:v},2);text==='{\n  "a": 5e-324,\n  "b": [\n    2,\n    null\n  ]\n}'&&seen.join(',')===',a,b,0,1')JS");
+    boolean(R"JS(let order='';let list=new Proxy(['b','a','b',new String('a')],{get(t,k){order+=k+';';return t[k]}});let gap={};let space=new Number(1);space.valueOf=()=>{order+='space';return 1};let text=JSON.stringify({a:1,b:2,c:3},list,space);text==='{\n "b": 2,\n "a": 1\n}'&&order==='length;0;1;2;3;space')JS");
+    boolean(R"JS(let text=JSON.stringify({a:1},null,'\0');text==='{\n\0"a": 1\n}'&&JSON.stringify([1],null,Infinity)==='[\n          1\n]'&&JSON.stringify([1],null,NaN)==='[1]')JS");
+    boolean(R"JS(let gap='\ud83d\ude00'.repeat(6);let text=JSON.stringify({a:1},null,gap);text==='{\n'+'\ud83d\ude00'.repeat(5)+'"a": 1\n}')JS");
+    boolean(R"JS(let held={a:5e-324,b:-0};let text=JSON.stringify(held,function(k,v){if(k==='a'){this.a=7;JSON.stringify({x:3.25});}return v},0);text==='{"a":5e-324,"b":0}'&&held.a===7)JS");
+    boolean(R"JS(let seen='';let o={a:{toJSON(k){seen+='j'+k;return 3}}};JSON.stringify(o,function(k,v){seen+='r'+k;return v},0)==='{"a":3}'&&seen==='rjara')JS");
+    boolean(R"JS(BigInt.prototype.toJSON=function(k){return k+':'+this.toString()};JSON.stringify([2n],null,0)==='["0:2"]'&&JSON.stringify(3n)==='":3"')JS");
+    error("let a={};a.self=a;JSON.stringify(a,null,1)", "TypeError");
+    boolean("let p=Proxy.revocable([],{});p.revoke();let caught=false;try{JSON.stringify({},p.proxy)}catch(e){caught=e instanceof TypeError}caught");
 }

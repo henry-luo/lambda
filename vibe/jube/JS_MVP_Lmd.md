@@ -1,6 +1,6 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-13
+**Date:** 2026-10-16
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
@@ -16,8 +16,9 @@ recorded there. Prototype, accessor, proxy and sparse-array expansion is impleme
 in source in §31; performance acceptance remains pending.
 Test262 parity with full LambdaJS is planned in §32, including interpreter-only
 dynamic source; it is not a current conformance claim.
-The §33 build establishes 21,747 audited Test262 passes; §34 plans the next
-milestone of 90% of the frozen LJS passing baseline, with a performance gate.
+The latest completed whole audit in §34 records 37,445/40,261 Test262 passes
+(93.0%). §35 tracks implementation toward full LJS parity; later selected gains
+remain separate from that archived whole-population score.
 
 **Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -41,7 +42,7 @@ The four governing goals remain fixed (USER, 2026-10-07):
    preserving its default Lambda behavior. Count internal utilities, adapters,
    and shared additions too; notify the user before adding any new helper.
 3. **Implement exactly the admitted scope.** Section 3 records the initial
-   subset; §§10–34 record subsequent extensions and planned scope. Excluded
+   subset; §§10–35 record subsequent extensions and planned scope. Excluded
    capabilities receive diagnostics, without reserved machinery for later features.
 4. **Keep the MVP as efficient as possible.** Preserve native computations and
    direct storage/calls where proven; measure release performance with fixed
@@ -1833,3 +1834,45 @@ check fail on both pins; PDF replays cover interpreter/JIT/auto and chart output
 is byte-identical. No expected output, harness or deadline changed.
 Evidence, controls and remaining gaps are recorded in
 `temp/mvp_perf_remaining2_20261015/REPORT.md` and the implementation plan.
+
+## 35. Complete LJS Test262 parity
+
+**Target:** every case in the frozen 40,261-case LJS baseline, including every
+required mode, with no new benchmark regression. Complete remaining syntax,
+RegExp, library/JSON, Atomics/agent, weak-reference and host/environment gaps.
+Existing classes, async/modules, SharedArrayBuffer, proxies and sparse arrays
+receive targeted semantic repairs. The archived 37,445-pass whole score stays
+separate from later selected gains until a complete current-build recount.
+
+Reuse untyped Lambda and shared JS algorithms first (**D1.3v3**), preserving
+shared shapes and precise ownership (**D3.4.3v5–D3.4.8**, **D5.2–D5.3**).
+Eval and Function-family bodies remain interpreted (**D8.1.3v24**).
+Retain ordinary fast paths, with no `is_normal` flag or inline caches
+(**D8.4.1v2**). Existing historical performance gaps remain acceptance work.
+Implementation and gates: [full-parity plan](../impl/JS_MVP_Lmd_Test262_Full_Parity.md).
+
+The implemented increment covers shared library/JSON algorithms, declaration
+validation, Reflect metadata, `/v` lowering, class property escapes and early
+RegExp validation. Interpreted regex literals use MVP's native constructor.
+Unicode simple folding reuses the repository's UCD data through a shared core
+helper; forward/lookbehind backreferences handle differing UTF-8 widths.
+
+Latest pinned validation: **677/677** MVP units, ten focused forced-GC checks,
+**786/786** library canonical cases and **772/772** additional strict variants.
+RegExp reaches **1,649/1,721** canonical cases and **1,647/1,719** additional
+strict variants (**339 recovered, zero lost**); canonical LJS passes 1,650.
+These selected results do not replace the archived whole-population score.
+The standard stored-body LJS baseline remains **40,261/40,261**.
+The integrated Lambda baseline is **7,453/7,457**: its four PDF/chart failures
+also reproduce on phase entry; all **313** GC stress checks pass.
+
+All **84** non-jq benchmark output/backend contracts pass. The initial sweep is
+**0.47% faster** by geometric mean than phase entry. An independent 31-pair
+repeat confirms `object_delete` at **+3.7%** (0.867 vs 0.836 ms); its cause
+remains under investigation. All 53 measurements are retained in the report.
+Performance acceptance, historical gaps and remaining feature packages stay
+open in the implementation plan.
+
+Corpus audit found that the standard LJS baseline uses stored Unicode 16 tests,
+while canonical sources require Unicode 17. Keep these source contracts and
+their results separate; shared Unicode-data gaps are recorded in the plan.

@@ -324,14 +324,16 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
     }
 
     // Check for redeclaration in strict mode or with let/const
-    if (target_scope->strict || kind != JS_VAR_VAR) {
+    if (target_scope->strict || kind != JS_VAR_VAR || (existing && existing->is_lexical)) {
         if (existing) {
             bool annex_b_duplicate_block_function = !target_scope->strict &&
                 target_scope->kind == SCOPE_KIND_BLOCK &&
                 !target_scope->is_function_body && kind == JS_VAR_LET &&
                 existing->is_lexical &&
                 existing->node->node_type == AST_NODE_FUNC &&
-                node->node_type == AST_NODE_FUNC;
+                node->node_type == AST_NODE_FUNC &&
+                !((JsFunctionNode*)existing->node)->is_async && !((JsFunctionNode*)existing->node)->is_generator &&
+                !((JsFunctionNode*)node)->is_async && !((JsFunctionNode*)node)->is_generator;
             if (annex_b_duplicate_block_function) {
                 // Annex B.3.3.4 permits sloppy block-only function duplicates.
                 existing->node = (AstNode*)node;
@@ -394,10 +396,13 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
         // in the handler environment. Walk only the current var-declaration
         // region, so a nested function still starts a new var scope.
         for (JsScope* scope = target_scope; scope; scope = scope->parent) {
+            NameEntry* entry = js_scope_find_entry(scope, name);
             if (scope->allows_legacy_var_redeclaration) {
-                NameEntry* entry = js_scope_find_entry(scope, name);
                 if (entry && entry->is_lexical) return entry;
             }
+            // hoisting a var cannot cross a lexical declaration in its enclosing block.
+            if (entry && entry->is_lexical && scope->kind == SCOPE_KIND_BLOCK)
+                return js_scope_define_in_scope(tp, scope, name, node, kind);
             if (scope->kind != SCOPE_KIND_BLOCK) break;
         }
 

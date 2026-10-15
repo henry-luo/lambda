@@ -16,7 +16,7 @@ struct JsTemplateLiteralNode;
 struct JsTemplateObjectOps;
 struct MvpLmdHost;
 enum MvpLmdHostBinding { LMD_HOST_PERFORMANCE, LMD_HOST_CONSOLE, LMD_HOST_PROCESS,
-    LMD_HOST_REQUIRE, LMD_HOST_FS, LMD_HOST_COUNT };
+    LMD_HOST_REQUIRE, LMD_HOST_FS, LMD_HOST_PRINT, LMD_HOST_COUNT };
 enum MvpLmdTimerBinding { LMD_TIMER_TIMEOUT, LMD_TIMER_CLEAR_TIMEOUT, LMD_TIMER_INTERVAL,
     LMD_TIMER_CLEAR_INTERVAL, LMD_TIMER_MICROTASK, LMD_TIMER_COUNT };
 struct MvpLmdHostState {
@@ -83,6 +83,7 @@ struct MvpLmdNativeCallable : MvpLmdCallable { void* state; };
 Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
     const char* name = NULL);
 Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags = -1);
+Item mvp_lmd_named_set(Item owner, Item key, Item value, int descriptor_flags);
 Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item);
 Item mvp_lmd_object_string(Item receiver);
 Item mvp_lmd_receiver_identity(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item);
@@ -101,7 +102,8 @@ enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE
     LMD_LIBRARY_REFLECT, LMD_LIBRARY_PROXY, LMD_LIBRARY_FUNCTION,
     LMD_LIBRARY_THROW_TYPE, LMD_LIBRARY_FUNCTION_STRING, LMD_LIBRARY_GLOBAL_NAN,
     LMD_LIBRARY_GLOBAL_FINITE, LMD_LIBRARY_DECODE_URI, LMD_LIBRARY_ENCODE_URI,
-    LMD_LIBRARY_DECODE_COMPONENT, LMD_LIBRARY_ENCODE_COMPONENT, LMD_LIBRARY_REGEXP_EXEC, LMD_LIBRARY_COUNT };
+    LMD_LIBRARY_DECODE_COMPONENT, LMD_LIBRARY_ENCODE_COMPONENT, LMD_LIBRARY_REGEXP_EXEC,
+    LMD_LIBRARY_ESCAPE, LMD_LIBRARY_UNESCAPE, LMD_LIBRARY_COUNT };
 enum MvpLmdErrorKind { LMD_ERROR_BASE, LMD_ERROR_EVAL, LMD_ERROR_RANGE,
     LMD_ERROR_REFERENCE, LMD_ERROR_SYNTAX, LMD_ERROR_TYPE, LMD_ERROR_URI,
     LMD_ERROR_AGGREGATE, LMD_ERROR_COUNT };
@@ -305,7 +307,7 @@ enum MvpLmdMethod { LMD_METHOD_FILL = 9, LMD_METHOD_PUSH, LMD_METHOD_POP,
     LMD_METHOD_STRING_ANCHOR, LMD_METHOD_STRING_BIG, LMD_METHOD_STRING_BLINK, LMD_METHOD_STRING_BOLD,
     LMD_METHOD_STRING_FIXED, LMD_METHOD_STRING_FONTCOLOR, LMD_METHOD_STRING_FONTSIZE, LMD_METHOD_STRING_ITALICS,
     LMD_METHOD_STRING_LINK, LMD_METHOD_STRING_SMALL, LMD_METHOD_STRING_STRIKE, LMD_METHOD_STRING_SUB,
-    LMD_METHOD_STRING_SUP, LMD_METHOD_STRING_SUBSTR, LMD_METHOD_COUNT };
+    LMD_METHOD_STRING_SUP, LMD_METHOD_STRING_SUBSTR, LMD_METHOD_REPLACE_ALL, LMD_METHOD_COUNT };
 static inline bool mvp_lmd_array_visit_method(int method) {
     return method == LMD_METHOD_FOREACH || method == LMD_METHOD_ARRAY_MAP || method == LMD_METHOD_FILTER ||
         method == LMD_METHOD_REDUCE || method == LMD_METHOD_SOME || method == LMD_METHOD_EVERY ||

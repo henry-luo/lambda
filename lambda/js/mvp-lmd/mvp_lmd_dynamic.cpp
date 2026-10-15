@@ -451,7 +451,11 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
         dynamic_class_method, dynamic_class_field, mvp_lmd_class_initialize_instance,
         dynamic_private_element, mvp_lmd_get_prototype, mvp_lmd_constructor_result, dynamic_is_derived_constructor,
         dynamic_object_property,
-        mvp_lmd_for_in_keys, dynamic_for_in_key_is_live};
+        mvp_lmd_for_in_keys, dynamic_for_in_key_is_live,
+        [](void* opaque, Item pattern, Item flags) {
+            MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
+            return mvp_lmd_regexp_new(mvp_lmd_program_library(owner), pattern, flags);
+        }};
     static const ContextCapsuleOps capsule = {"js-mvp-dynamic", CONTEXT_CAPSULE_LIFETIME_REALM,
         sizeof(MvpLmdDynamic), NULL, dynamic_release, dynamic_destroy};
     if (!context_capsule_extension_install(context, MVP_LMD_DYNAMIC_OWNER, 0, state, &capsule)) {

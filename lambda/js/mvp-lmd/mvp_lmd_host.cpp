@@ -124,13 +124,13 @@ Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEn
     Item defined = mvp_lmd_named_set(held.get(), "name", Item{.item = s2it(spelling)}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
     return item_is_error(defined) ? defined : held.get();
 }
-Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags) {
+Item mvp_lmd_named_set(Item owner, Item key, Item value, int descriptor_flags) {
     if (item_is_error(value)) return value;
-    RootFrame roots(2);
+    RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, owner), held(roots, value);
-    String* name = heap_create_name(key, strlen(key));
-    if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    uint64_t home = 0;
+    Rooted<Item> object(roots, owner), held(roots, lambda_item_adopt_scalar_home(value, &home)), property(roots, key);
+    Item result;
     if (descriptor_flags >= 0) {
         // intrinsic and error fields need DefineProperty attributes, independent
         // of inherited setters; ordinary callers retain the existing Set path.
@@ -140,10 +140,18 @@ Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_f
         if (!(descriptor_flags & JSPD_NON_ENUMERABLE)) descriptor.flags |= JS_PD_ENUMERABLE;
         js_pd_set_configurable(&descriptor, !(descriptor_flags & JSPD_NON_CONFIGURABLE));
         descriptor.value = held.get();
-        Item result = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(name)}, &descriptor);
-        return item_is_error(result) ? result : result.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : held.get();
-    }
-    return mvp_lmd_property_set(object.get(), Item{.item = s2it(name)}, held.get());
+        result = mvp_lmd_define_own_property(object.get(), property.get(), &descriptor);
+        if (item_is_error(result)) return result;
+        if (result.item == ITEM_FALSE) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        result = held.get();
+    } else result = mvp_lmd_property_set(object.get(), property.get(), held.get());
+    // the return value must not retain this function's stack scalar home.
+    return lambda_item_uses_scalar_home(result) ? push_d(it2d(result)) : result;
+}
+Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags) {
+    // name-pool interning does not collect; the keyed entry roots all operands before property dispatch.
+    String* name = heap_create_name(key, strlen(key));
+    return name ? mvp_lmd_named_set(owner, Item{.item = s2it(name)}, value, descriptor_flags) : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 static Item host_task_call(Item environment) {
     Item* captured = (Item*)(uintptr_t)environment.item;
@@ -223,6 +231,7 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
         Rooted<Item> temporary(roots, ItemNull), arguments(roots, ItemNull);
         for (int i = 0; i < LMD_HOST_COUNT; i++) {
             state->values[i] = i == LMD_HOST_REQUIRE ? mvp_lmd_native_function(program, state, host_require, 1)
+                : i == LMD_HOST_PRINT ? mvp_lmd_native_function(program, state, host_console_log, 1, "print")
                 : mvp_lmd_object_new(shape, 0);
             if (item_is_error(state->values[i])) return state->values[i];
         }

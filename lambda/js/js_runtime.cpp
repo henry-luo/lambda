@@ -11991,32 +11991,62 @@ Item js_intrinsic_object_to_locale_string_body(Item callee, Item this_value,
     return js_object_to_locale_string_with_ops(this_value, result_home, NULL);
 }
 
+Item js_object_legacy_accessor_with_ops(Item receiver, Item property, Item callback,
+        bool define, bool getter, const JsObjectAccessorOps* supplied) {
+    static const JsObjectAccessorOps defaults = {
+        &js_collection_default_ops, js_to_object, js_to_property_key,
+        [](Item object, Item key, Item callback, bool getter) {
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> descriptor(roots, js_object_create(ItemNull));
+            if (item_is_error(descriptor.get())) return descriptor.get();
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), "configurable", Item{.item = ITEM_TRUE}));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), "enumerable", Item{.item = ITEM_TRUE}));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), getter ? "get" : "set", callback));
+            return js_object_define_property(object, key, descriptor.get());
+        },
+        [](Item object, Item key, bool getter, bool* found) {
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> descriptor(roots, js_object_get_own_property_descriptor(object, key));
+            if (item_is_error(descriptor.get())) return descriptor.get();
+            *found = descriptor.get().item != ITEM_NULL && descriptor.get().item != ITEM_JS_UNDEFINED;
+            // descriptor fields are own data: inherited get/set properties cannot turn data into an accessor.
+            return *found ? js_map_own_or(descriptor.get().map, getter ? "get" : "set", 3, make_js_undefined()) : make_js_undefined();
+        }, js_get_prototype_of
+    };
+    const JsObjectAccessorOps* ops = supplied ? supplied : &defaults;
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    uint64_t key_home = 0;
+    Rooted<Item> object(roots, receiver), key(roots, lambda_item_adopt_scalar_home(property, &key_home)),
+        function(roots, callback), descriptor(roots, ItemNull);
+    // js_to_object also serves Object(), whose nullish constructor behavior is different from ToObject.
+    if (js_is_nullish(object.get())) return ops->values->error(false, "Cannot convert undefined or null to object");
+    object.set(ops->to_object(object.get()));
+    if (item_is_error(object.get())) return object.get();
+    if (define && !ops->values->is_callable(function.get()))
+        return ops->values->error(false, "getter/setter must be a function");
+    key.set(ops->key(key.get()));
+    if (item_is_error(key.get())) return key.get();
+    if (define) {
+        Item status = ops->define(object.get(), key.get(), function.get(), getter);
+        return item_is_error(status) ? status : make_js_undefined();
+    }
+    while (object.get().item != ITEM_NULL) {
+        bool found = false;
+        descriptor.set(ops->lookup(object.get(), key.get(), getter, &found));
+        if (item_is_error(descriptor.get())) return descriptor.get();
+        if (found) return descriptor.get();
+        object.set(ops->prototype(object.get()));
+        if (item_is_error(object.get())) return object.get();
+    }
+    return make_js_undefined();
+}
 static Item js_intrinsic_object_define_accessor(Item this_value, Item* args,
         int argc, bool getter) {
-    if (js_is_nullish(this_value)) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    Item property = js_intrinsic_arg(args, argc, 0);
-    Item callback = js_intrinsic_arg(args, argc, 1);
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("getter/setter must be a function");
-    }
-    JS_ASSIGN_OR_RETURN(object, js_to_object(this_value));
-    JS_ASSIGN_OR_RETURN(key, js_to_string(property));
-    JS_ASSIGN_OR_RETURN(desc, js_object_create(ItemNull));
-    Item configurable = js_name_item("configurable", 12);
-    Item enumerable = js_name_item("enumerable", 10);
-    JS_ASSIGN_OR_RETURN(status,
-        js_set_key_default(desc, configurable, (Item){.item = ITEM_TRUE}));
-    status = js_set_key_default(desc, enumerable, (Item){.item = ITEM_TRUE});
-    if (item_is_error(status)) return status;
-    Item accessor_key = js_name_item(
-        getter ? "get" : "set", 3);
-    status = js_set_key_default(desc, accessor_key, callback);
-    if (item_is_error(status)) return status;
-    JS_ASSIGN_OR_RETURN(define_status,
-        js_object_define_property(object, key, desc));
-    return make_js_undefined();
+    return js_object_legacy_accessor_with_ops(this_value, js_intrinsic_arg(args, argc, 0),
+        js_intrinsic_arg(args, argc, 1), true, getter, NULL);
 }
 
 #define JS_OBJECT_ACCESSOR_BODY(body_name, getter) \
@@ -12028,30 +12058,8 @@ JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_setter_body, false)
 
 static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
         int argc, bool getter) {
-    if (js_is_nullish(this_value)) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    JS_ASSIGN_OR_RETURN(key,
-        js_to_string(js_intrinsic_arg(args, argc, 0)));
-    JS_ASSIGN_OR_RETURN(object, js_to_object(this_value));
-    const char* field = getter ? "get" : "set";
-    for (int depth = 0; depth < 64; depth++) {
-        if (object.item == ItemNull.item ||
-            get_type_id(object) == LMD_TYPE_UNDEFINED) break;
-        JS_ASSIGN_OR_RETURN(desc,
-            js_object_get_own_property_descriptor(object, key));
-        if (desc.item != ItemNull.item &&
-            get_type_id(desc) != LMD_TYPE_UNDEFINED) {
-            if (get_type_id(desc) == LMD_TYPE_MAP) {
-                Item value = js_map_own_or(desc.map, field, 3, ItemNull);
-                if (value.item != ItemNull.item) return value;
-            }
-            return make_js_undefined();
-        }
-        JS_ASSIGN_OR_RETURN(next, js_get_prototype_of(object));
-        object = next;
-    }
-    return make_js_undefined();
+    return js_object_legacy_accessor_with_ops(this_value, js_intrinsic_arg(args, argc, 0),
+        make_js_undefined(), false, getter, NULL);
 }
 
 #define JS_OBJECT_LOOKUP_ACCESSOR_BODY(body_name, getter) \

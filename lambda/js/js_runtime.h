@@ -893,6 +893,16 @@ typedef struct JsCollectionOps {
     bool (*truthy)(Item);
     Item (*iterator_from_method)(Item, Item);
 } JsCollectionOps;
+typedef struct JsObjectAccessorOps {
+    const JsCollectionOps* values;
+    Item (*to_object)(Item);
+    Item (*key)(Item);
+    Item (*define)(Item, Item, Item, bool getter);
+    Item (*lookup)(Item, Item, bool getter, bool* found);
+    Item (*prototype)(Item);
+} JsObjectAccessorOps;
+Item js_object_legacy_accessor_with_ops(Item receiver, Item property, Item callback,
+    bool define, bool getter, const JsObjectAccessorOps* ops);
 Item js_collection_create_with_storage(struct TypeMap* shape, Pool* pool, int kind, bool weak);
 bool js_collection_has_brand(Item object, int kind, bool weak);
 bool js_can_be_held_weakly(Item key);
@@ -1071,8 +1081,31 @@ Item js_array_from(Item iterable);
 Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
+typedef struct JsJsonReviveOps {
+    const JsCollectionOps* values;
+    Item (*get)(Item, Item);
+    Item (*is_array)(Item);
+    Item (*keys)(Item);
+    Item (*write)(Item, Item, Item);
+    Item (*context)(void*, Item, Item, Item);
+} JsJsonReviveOps;
+Item js_json_revive_with_ops(Item holder, Item key, Item reviver, void* state,
+    const JsJsonReviveOps* ops);
 LAMBDA_RT_API Item js_json_stringify(Item value);
 Item js_json_stringify_full(Item value, Item replacer, Item space);
+typedef struct JsJsonStringifyOps {
+    const JsCollectionOps* values;
+    Item (*get)(Item, Item);
+    Item (*is_array)(Item);
+    Item (*keys)(Item);
+    Item (*string)(Item);
+    Item (*unbox)(Item); // nonallocating internal payload, or undefined for non-wrappers
+    Item (*object)(void);
+    Item (*create)(Item, Item, Item);
+    Item (*raw)(Item); // optional raw-JSON extension; undefined means an ordinary value
+} JsJsonStringifyOps;
+Item js_json_stringify_with_ops(Item value, Item replacer, Item space,
+    const JsJsonStringifyOps* ops);
 Item js_delete_property(Item obj, Item key);
 
 // v15: fetch() API
@@ -1796,6 +1829,8 @@ typedef struct JsGroupByOps {
     Item (*append)(Item array, Item value);
 } JsGroupByOps;
 Item js_group_by_with_ops(Item items, Item callback, const JsGroupByOps* groups,
+    const JsCollectionOps* semantics);
+Item js_object_from_entries_with_ops(Item iterable, const JsGroupByOps* properties,
     const JsCollectionOps* semantics);
 
 Item js_object_set_prototype_of(Item obj, Item proto);

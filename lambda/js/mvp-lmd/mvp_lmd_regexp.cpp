@@ -18,6 +18,7 @@
 struct MvpLmdRegExp : Map {
     JsBtRegex* compiled;         // immutable AST in the execution pool; contains no Items
     JsRegExpCompileInfo flags;
+    bool unicode_matching;      // /u and /v match code points; their public flag getters stay distinct
     // pool-owned original spellings are independent of public metadata and the compiled AST.
     const char* original_source;
     const char* original_flags;
@@ -346,11 +347,21 @@ extern "C" Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item
     String* compiled_source = text.get().get_string(), *option = options.get().get_string();
     if (!js_regexp_compile_frontend(compiled_source->chars, compiled_source->len, option->chars, option->len, &info))
         return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
-    if (info.unicode_sets) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    StrBuf* input = regexp_buffer(compiled_source, info.unicode);
+    bool unicode_matching = info.unicode || info.unicode_sets;
+    StrBuf* input = regexp_buffer(compiled_source, unicode_matching);
     if (!input) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    JsBtFlags matching = {info.ignore_case, info.multiline, info.dot_all, info.unicode, info.sticky};
-    JsBtRegex* compiled = js_bt_compile(input->str, input->length, matching, context->pool);
+    char* rewritten = NULL;
+    int rewritten_length = 0;
+    if (info.unicode_sets && !js_regex_wrapper_rewrite_v_flag_classes_c(
+            input->str, input->length, &rewritten, &rewritten_length)) {
+        strbuf_free(input);
+        return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
+    }
+    // the shared /v lowering expands set operations and string properties before matching.
+    JsBtFlags matching = {info.ignore_case, info.multiline, info.dot_all, unicode_matching, info.sticky};
+    JsBtRegex* compiled = js_bt_compile(rewritten ? rewritten : input->str,
+        rewritten ? rewritten_length : input->length, matching, context->pool);
+    if (rewritten) mem_free(rewritten);
     strbuf_free(input);
     if (!compiled) return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
     // exact original bytes survive moving strings, public overrides, and custom prototypes.
@@ -365,6 +376,7 @@ extern "C" Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item
     if (!object) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     object->type_id = LMD_TYPE_MAP; object->type = &state->regexp.shape;
     object->compiled = compiled; object->flags = info;
+    object->unicode_matching = unicode_matching;
     object->original_source = originals; object->original_source_len = source_len;
     object->original_flags = originals + source_len + 1; object->original_flags_len = flags_len;
     owner.set(Item{.map = object});
@@ -483,7 +495,7 @@ static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool
     double start = it2d(number);
     bool stateful = object->flags.global || object->flags.sticky;
     start = !stateful || isnan(start) || start < 0 ? 0 : floor(start);
-    MvpLmdRegExpInput local(prepared ? NULL : source.get().get_string(), object->flags.unicode);
+    MvpLmdRegExpInput local(prepared ? NULL : source.get().get_string(), object->unicode_matching);
     const MvpLmdRegExpInput* input = prepared ? prepared : &local;
     if (!input->view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     int count = js_bt_group_count(object->compiled) + 1;
@@ -639,10 +651,11 @@ static Item regexp_string_native(MvpLmdLibraryState* state, Item source, Item pa
     records.set(mvp_lmd_array_new(0));
     if (item_is_error(records.get())) return records.get();
     MvpLmdRegExp* compiled = regexp_record(regex.get(), state);
-    bool global = compiled && compiled->flags.global;
-    MvpLmdRegExpInput input(original.get().get_string(), compiled && compiled->flags.unicode);
+    bool global = compiled ? compiled->flags.global : replace == 2;
+    int64_t search_from = 0;
+    MvpLmdRegExpInput input(original.get().get_string(), compiled && compiled->unicode_matching);
     if (!input.view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    if (global) {
+    if (global && compiled) {
         result.set(regexp_ops.set_last_index(regex.get(), Item{.item = i2it(0)}));
         if (item_is_error(result.get())) return result.get();
     }
@@ -652,21 +665,25 @@ static Item regexp_string_native(MvpLmdLibraryState* state, Item source, Item pa
             piece.set(mvp_lmd_primitive_to_string(regex.get()));
             if (item_is_error(piece.get())) return piece.get();
             String* haystack = original.get().get_string(), *needle = piece.get().get_string();
-            int64_t start = utf16_find(haystack->chars, haystack->len, needle->chars, needle->len, 0);
+            if (replace == 2 && search_from > utf8_to_utf16_length(haystack->chars, haystack->len)) break;
+            int64_t start = utf16_find(haystack->chars, haystack->len, needle->chars, needle->len, search_from);
             if (start < 0) break;
+            int64_t width = utf8_to_utf16_length(needle->chars, needle->len);
             int a = input.byte_offset(start);
-            int b = input.byte_offset(start + utf8_to_utf16_length(needle->chars, needle->len));
+            int b = input.byte_offset(start + width);
             match.set(regexp_result(state, original.get(), &input, NULL, &a, &b, 1));
+            // empty string searches advance one UTF-16 unit, including inside surrogate pairs.
+            search_from = start + (width ? width : 1);
         }
         if (item_is_error(match.get())) return match.get();
         if (match.get().item == ITEM_NULL) break;
         if (!replace && !global) return match.get();
         result.set(mvp_lmd_array_store(records.get(), records.get().array->length, match.get()));
         if (item_is_error(result.get())) return result.get();
-        if (global && !match.get().array->items[0].get_string()->len) {
+        if (global && compiled && !match.get().array->items[0].get_string()->len) {
             int64_t cursor = it2d(regexp_property(regex.get(), "lastIndex"));
             String* string = original.get().get_string();
-            int64_t next = js_regex_advance_string_index_units(string, cursor, compiled->flags.unicode);
+            int64_t next = js_regex_advance_string_index_units(string, cursor, compiled->unicode_matching);
             result.set(regexp_ops.set_last_index(regex.get(), push_d((double)next)));
             if (item_is_error(result.get())) return result.get();
         }
@@ -711,11 +728,18 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
         Item replacement, int64_t operation) {
     if (source.item == ITEM_NULL || source.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (operation == 4) return js_regexp_string_match_all_with_ops(source, pattern, &regexp_ops);
+    // primitive string separators have no protocol hook or observable coercion;
+    // the shared split kernel roots both strings before allocating its result.
+    if (operation == 3 && get_type_id(source) == LMD_TYPE_STRING &&
+            get_type_id(pattern) == LMD_TYPE_STRING && replacement.item == ITEM_JS_UNDEFINED)
+        return mvp_lmd_string_split(source, pattern, UINT32_MAX);
+    bool replace_all = operation == 5;
+    if (replace_all) operation = 1;
     const int protocols[] = {JS_BUILTIN_REGEXP_SYMBOL_MATCH, JS_BUILTIN_REGEXP_SYMBOL_REPLACE,
         JS_BUILTIN_REGEXP_SYMBOL_SEARCH, JS_BUILTIN_REGEXP_SYMBOL_SPLIT};
     if (operation < 0 || operation >= 4) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // already-converted ordinary inputs keep the original bulk loop without observable coercions.
-    if ((operation == 0 || (operation == 1 && get_type_id(replacement) == LMD_TYPE_STRING)) &&
+    if (!replace_all && (operation == 0 || (operation == 1 && get_type_id(replacement) == LMD_TYPE_STRING)) &&
             get_type_id(source) == LMD_TYPE_STRING && regexp_ordinary(state, pattern, protocols[operation]))
         return regexp_string_native(state, source, pattern, replacement, operation);
     RootFrame roots(4);
@@ -724,6 +748,21 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
     Rooted<Item> string(roots, lambda_item_adopt_scalar_home(source, &source_home));
     Rooted<Item> regex(roots, lambda_item_adopt_scalar_home(pattern, &pattern_home));
     Rooted<Item> replace(roots, lambda_item_adopt_scalar_home(replacement, &replacement_home)), method(roots, ItemNull);
+    if (replace_all && mvp_lmd_is_object(regex.get())) {
+        // IsRegExp and the global flag check precede GetMethod and receiver conversion.
+        bool is_regexp = false;
+        Item status = js_regexp_is_regexp_with_ops(regex.get(), &is_regexp, &regexp_ops);
+        if (item_is_error(status)) return status;
+        if (is_regexp) {
+            method.set(regexp_ops.get(regex.get(), "flags"));
+            if (item_is_error(method.get())) return method.get();
+            if (method.get().item == ITEM_NULL || method.get().item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            method.set(mvp_lmd_primitive_to_string(method.get()));
+            if (item_is_error(method.get())) return method.get();
+            String* flags = method.get().get_string();
+            if (!memchr(flags->chars, 'g', flags->len)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+    }
     NameRef key = well_known_name_ref(regexp_symbol_id(protocols[operation]));
     // String protocol handoff applies only to object patterns, including when primitive prototypes change.
     if (mvp_lmd_is_object(regex.get())) {
@@ -741,7 +780,7 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
     if (item_is_error(string.get())) return string.get();
     if (operation == 1) {
         regex.set(mvp_lmd_primitive_to_string(regex.get()));
-        return item_is_error(regex.get()) ? regex.get() : regexp_string_native(state, string.get(), regex.get(), replace.get(), 1);
+        return item_is_error(regex.get()) ? regex.get() : regexp_string_native(state, string.get(), regex.get(), replace.get(), replace_all ? 2 : 1);
     }
     if (operation == 3) {
         method.set(replace.get().item == ITEM_JS_UNDEFINED ? Item{.item = i2it(UINT32_MAX)} :

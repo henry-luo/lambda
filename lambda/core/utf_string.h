@@ -37,6 +37,10 @@ void free_utf8proc_result(char* str);
 // any code point changed; bytes that are not a scalar value are kept as is.
 bool utf8_case_map(const char* chars, size_t len, bool to_upper, StrBuf* out);
 
+// next member of a Unicode simple-fold equivalence cycle, or the input itself.
+// this performs no normalization or multi-code-point expansion.
+uint32_t utf8_simple_fold_next(uint32_t codepoint);
+
 #ifdef __cplusplus
 }
 #endif

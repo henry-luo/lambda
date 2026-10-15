@@ -245,7 +245,8 @@ const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
         {"sub", LMD_TYPE_STRING, LMD_METHOD_STRING_SUB, 0},
         {"sup", LMD_TYPE_STRING, LMD_METHOD_STRING_SUP, 0},
         {"toLocaleUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER, 0},
-        {"substr", LMD_TYPE_STRING, LMD_METHOD_STRING_SUBSTR, 2}};
+        {"substr", LMD_TYPE_STRING, LMD_METHOD_STRING_SUBSTR, 2},
+        {"replaceAll", LMD_TYPE_STRING, LMD_METHOD_REPLACE_ALL, 2}};
 const int mvp_lmd_builtin_method_count = sizeof(mvp_lmd_builtin_methods) / sizeof(mvp_lmd_builtin_methods[0]);
 TypeId mvp_lmd_method_owner(int id) {
     for (const auto& method : mvp_lmd_builtin_methods) if (method.id == id) return method.owner;
@@ -1445,12 +1446,18 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
             if (field->key_kind == NAME_KEY_PRIVATE || (field->key_kind != NAME_KEY_STRING && projection != 4 && projection != 5) ||
                     ((projection == 0 || projection == 4) && (field->flags & JSPD_NON_ENUMERABLE))) continue;
             callbacks |= reads_values && (field->flags & JSPD_IS_ACCESSOR) != 0;
-            NameRef name = field->name_id ? name_pool_resolve_id(context->name_pool, field->name_id) :
-                heap_create_name(field->name->str, field->name->length);
-            if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            int64_t index = mvp_lmd_string_key(name);
-            if (indexed && index == -1) continue;
-            fields[count] = {field, index >= 0 ? (uint32_t)index : UINT32_MAX,
+            NameRef name = field->name_id ? name_pool_resolve_id(context->name_pool, field->name_id) : NULL;
+            if (field->name_id && !name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            uint32_t index = NAME_ARRAY_INDEX_NONE;
+            if (field->key_kind == NAME_KEY_STRING) {
+                if (name) index = property_key_array_index(name);
+                else js_property_name_to_array_index(field->name->str, field->name->length, &index);
+            }
+            if (indexed && field->key_kind == NAME_KEY_STRING && field->name->length == 6 &&
+                    memcmp(field->name->str, "length", 6) == 0) continue;
+            // values without callbacks only need field order; retain the shape-owned spelling
+            // and materialize a canonical key below only when the projection consumes it.
+            fields[count] = {field, index,
                 count + (field->key_kind != NAME_KEY_STRING ? capacity : 0), name}; count++;
         }
     }
@@ -1471,6 +1478,10 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
         if (fields[i].index != UINT32_MAX && i + 1 < count && fields[i + 1].index == fields[i].index) continue;
         ShapeEntry* field = fields[i].field;
         if (projection != 1 || callbacks) {
+            if (field && !fields[i].key) {
+                fields[i].key = heap_create_name(field->name->str, field->name->length);
+                if (!fields[i].key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            }
             key.set(element ? mvp_lmd_number_to_string((double)fields[i].index) : length_key ?
                 Item{.item = s2it(heap_create_name("length", 6))} :
                 Item{.item = s2it(fields[i].key)});

@@ -4427,7 +4427,10 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             regex->pattern ? regex->pattern : "", regex->pattern ? regex->pattern_len : 0));
         Rooted<Item> flags_root(roots, js_make_string_len(
             regex->flags ? regex->flags : "", regex->flags ? regex->flags_len : 0));
-        Item result = js_create_regex_literal_items(pattern_root.get(), flags_root.get());
+        // interpreted dynamic source creates exotics in the owning host's value model.
+        Item result = js_interp_host
+            ? js_interp_host->regexp_literal(js_interp_host->state, pattern_root.get(), flags_root.get())
+            : js_create_regex_literal_items(pattern_root.get(), flags_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
     case AST_NODE_AWAIT: {
@@ -7301,8 +7304,10 @@ static void js_interp_host_check_node(JsAstNode* node, void* opaque) {
     case AST_NODE_IMPORT: case AST_NODE_EXPORT:
     case AST_NODE_IMPORT_SPECIFIER: case AST_NODE_EXPORT_SPECIFIER:
     case JS_AST_NODE_WITH_STATEMENT:
-    case JS_AST_NODE_REGEX:
         *supported = false; return;
+    case JS_AST_NODE_REGEX:
+        if (!js_interp_host || !js_interp_host->regexp_literal) *supported = false;
+        return;
     case AST_NODE_CALL_EXPR: {
         JsCallNode* call = (JsCallNode*)node;
         if (js_interp_identifier_is(call->function, "require") ||

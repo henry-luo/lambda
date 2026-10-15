@@ -36,12 +36,12 @@ enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
     I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
     I_BOOLEAN, I_BIGINT, I_FUNCTION, I_ARRAYBUFFER, I_DATAVIEW, I_TEST262, I_INT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
-    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_PROMISE, I_EVAL, I_DECODE_URI, I_ENCODE_URI, I_DECODE_COMPONENT, I_ENCODE_COMPONENT, I_SET_TIMEOUT, I_CLEAR_TIMEOUT, I_SET_INTERVAL, I_CLEAR_INTERVAL, I_QUEUE_MICROTASK, I_WEAK_MAP, I_WEAK_SET, I_SHARED_ARRAYBUFFER, I_COUNT };
+    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_PROMISE, I_EVAL, I_DECODE_URI, I_ENCODE_URI, I_DECODE_COMPONENT, I_ENCODE_COMPONENT, I_SET_TIMEOUT, I_CLEAR_TIMEOUT, I_SET_INTERVAL, I_CLEAR_INTERVAL, I_QUEUE_MICROTASK, I_WEAK_MAP, I_WEAK_SET, I_SHARED_ARRAYBUFFER, I_ESCAPE, I_UNESCAPE, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
     "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
     "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function", "ArrayBuffer", "DataView", "$262", "Int8Array", "Int16Array", "Uint16Array",
-    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array", "Promise", "eval", "decodeURI", "encodeURI", "decodeURIComponent", "encodeURIComponent", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "WeakMap", "WeakSet", "SharedArrayBuffer"};
+    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array", "Promise", "eval", "decodeURI", "encodeURI", "decodeURIComponent", "encodeURIComponent", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "WeakMap", "WeakSet", "SharedArrayBuffer", "escape", "unescape"};
 // MIR needs ABI offsets for inherited callable and nominal class records, as in the Lambda emitter.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -1048,7 +1048,8 @@ static void walk(AstNode* n, LmdWalk* state) {
         if (named(id->name, "this") && !state->owner->ast) {
             p->global_receiver = p->global_reflection = true; p->receiver_abi = true;
         }
-        if (!id->entry && (named(id->name, "parseFloat") || named(id->name, "isFinite")))
+        if (!id->entry && (named(id->name, "parseFloat") || named(id->name, "isFinite") ||
+                (p->host_enabled && named(id->name, "print"))))
             p->global_receiver = p->global_reflection = p->receiver_abi = true;
         if (named(id->name, "super")) {
             LmdFunction* method = state->owner;
@@ -1134,6 +1135,10 @@ static void walk(AstNode* n, LmdWalk* state) {
                     activate_library(p, n); p->errors = true;
                     p->intrinsics[i].kinds = K_FUNCTION;
                     p->intrinsics[i].slot = p->library_slot + LMD_LIBRARY_DECODE_URI + i + 1 - I_DECODE_URI;
+                } else if (i + 1 == I_ESCAPE || i + 1 == I_UNESCAPE) {
+                    activate_library(p, n); p->errors = true;
+                    p->intrinsics[i].kinds = K_FUNCTION;
+                    p->intrinsics[i].slot = p->library_slot + LMD_LIBRARY_ESCAPE + i + 1 - I_ESCAPE;
                 } else if (i + 1 == I_WEAK_MAP || i + 1 == I_WEAK_SET) {
                     activate_library(p, n);
                     p->weak_collections = p->property_callbacks = p->iterators = p->errors = true;
@@ -1233,12 +1238,13 @@ static void walk(AstNode* n, LmdWalk* state) {
             ((AstCallNode*)state->parent)->callee == n;
         if (!method_call && indexed_method >= LMD_METHOD_COPY_WITHIN && indexed_method <= LMD_METHOD_WITH)
             activate_library(p, n);
-        if (named(spelling, "groupBy")) { activate_library(p, n); p->iterators = true; }
+        if (named(spelling, "groupBy") || named(spelling, "fromEntries")) { activate_library(p, n); p->iterators = true; }
         if (named(spelling, "matchAll")) {
             activate_library(p, n); p->iterators = true;
             if (!method_call) p->primitives = true;
         }
-        if (named(spelling, "toLocaleString")) {
+        if (named(spelling, "toLocaleString") || named(spelling, "toPrecision") ||
+                named(spelling, "toExponential") || named(spelling, "replaceAll")) {
             activate_library(p, n); p->primitives = true; p->property_callbacks = true;
         }
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
@@ -1264,7 +1270,9 @@ static void walk(AstNode* n, LmdWalk* state) {
                 named(spelling, "propertyIsEnumerable") || named(spelling, "isPrototypeOf") ||
                 named(spelling, "getOwnPropertyNames") || named(spelling, "getOwnPropertySymbols") || named(spelling, "preventExtensions") || named(spelling, "seal") ||
                 named(spelling, "freeze") || named(spelling, "isExtensible") || named(spelling, "isSealed") || named(spelling, "isFrozen") ||
-                named(spelling, "defineProperty") || named(spelling, "setPrototypeOf") || named(spelling, "__proto__")) {
+                named(spelling, "defineProperty") || named(spelling, "setPrototypeOf") || named(spelling, "__proto__") ||
+                named(spelling, "__defineGetter__") || named(spelling, "__defineSetter__") ||
+                named(spelling, "__lookupGetter__") || named(spelling, "__lookupSetter__")) {
             activate_library(p, n); p->property_callbacks = true; p->immutable_objects = false;
             p->array_method_overrides = p->map_method_overrides = p->primitive_method_overrides = true;
         }
@@ -6596,7 +6604,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         }
         for (int operation = LMD_METHOD_FILL; operation < LMD_METHOD_COUNT; operation++) {
             // planned text methods resolve live prototype functions, never the compiler's callee-only token.
-            if (c->program->primitives && operation >= LMD_METHOD_STRING_NORMALIZE && operation <= LMD_METHOD_STRING_SUBSTR) continue;
+            if (c->program->primitives && operation >= LMD_METHOD_STRING_NORMALIZE && operation <= LMD_METHOD_REPLACE_ALL) continue;
             TypeId owner_type = mvp_lmd_method_owner(operation);
             unsigned owner_kind = owner_type == LMD_TYPE_FLOAT ? K_NUMBER : owner_type == LMD_TYPE_STRING ? K_STRING :
                 owner_type == LMD_TYPE_DECIMAL ? K_BIGINT : K_ARRAY;
@@ -8747,7 +8755,7 @@ static const LmdImport imports[] = {
     {"mvp_lmd_object_project", (void*)mvp_lmd_object_project, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"mvp_lmd_object_project_fixed", (void*)mvp_lmd_object_project, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"mvp_lmd_object_copy", (void*)mvp_lmd_object_copy, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR)|ARG(3,ITEM))},
-    {"mvp_lmd_named_set", (void*)mvp_lmd_named_set, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,ITEM)|ARG(3,SCALAR))},
+    {"mvp_lmd_named_set", (void*)static_cast<Item (*)(Item, const char*, Item, int)>(mvp_lmd_named_set), AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_map_call", (void*)mvp_lmd_map_call, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM))},
     {"mvp_lmd_same_value_zero", (void*)mvp_lmd_same_value_zero, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM))},
     {"mvp_lmd_map_next", (void*)mvp_lmd_map_next, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,SCALAR))},
@@ -9774,6 +9782,7 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
             i == I_SET ? LMD_LIBRARY_SET : i == I_REFLECT ? LMD_LIBRARY_REFLECT :
             i == I_PROXY ? LMD_LIBRARY_PROXY : i == I_FUNCTION ? LMD_LIBRARY_FUNCTION :
             i == I_IS_NAN ? LMD_LIBRARY_GLOBAL_NAN :
+            i == I_ESCAPE || i == I_UNESCAPE ? LMD_LIBRARY_ESCAPE + i - I_ESCAPE :
             i >= I_DECODE_URI && i <= I_ENCODE_COMPONENT ? LMD_LIBRARY_DECODE_URI + i - I_DECODE_URI : -1;
         value.set(i == I_UNDEFINED ? Item{.item = ITEM_JS_UNDEFINED} : i == I_NAN ? push_d(NAN) :
             i == I_INFINITY ? push_d(INFINITY) : i == I_GLOBAL_THIS ? global :
@@ -9792,6 +9801,11 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
     if (item_is_error(result)) return result;
     result = mvp_lmd_named_set(global, "isFinite", p->library->values[LMD_LIBRARY_GLOBAL_FINITE], JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
+    if (p->host_active) {
+        // shell output uses the same rooted conversion/write path as console.log.
+        result = mvp_lmd_named_set(global, "print", p->host.values[LMD_HOST_PRINT], JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
         if (!b->reflected_global || !b->entry->scope) continue;
@@ -12182,12 +12196,9 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
                 JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
         }
         if (!item_is_error(result)) {
-            JsPropertyDescriptor descriptor = {};
-            descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-            descriptor.value = Item{.item = s2it(heap_create_name("Math", 4))};
-            js_pd_set_configurable(&descriptor, true);
-            result = mvp_lmd_define_own_property(math,
-                Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))}, &descriptor);
+            result = mvp_lmd_named_set(math,
+                Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+                Item{.item = s2it(heap_create_name("Math", 4))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
         }
         if (item_is_error(result)) return result;
     }
