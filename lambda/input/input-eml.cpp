@@ -489,7 +489,8 @@ void parse_eml(Input* input, const char* eml_string) {
 
     // Initialize headers map
     Map* headers_map = map_pooled(input->pool);
-    if (!headers_map) {
+    List* header_entries = rfc_new_entry_list(input);
+    if (!headers_map || !header_entries) {
         ctx.addError("Failed to allocate memory for headers map");
         return;
     }
@@ -537,6 +538,7 @@ void parse_eml(Input* input, const char* eml_string) {
         // Store header in headers map
         Item value = {.item = s2it(header_value)};
         ctx.builder.putToMap(lam::gc_borrow(headers_map), header_name, value);
+        rfc_append_entry(ctx, header_entries, header_name, value);
 
         if (strcmp(header_name->chars, "content-type") == 0) {
             eml_parse_content_type(ctx, header_value->chars, header_value->len, &mime_info);
@@ -591,10 +593,15 @@ void parse_eml(Input* input, const char* eml_string) {
     String* headers_key = ctx.builder.createString("headers");
     Item headers_value = {.item = (uint64_t)headers_map};
     ctx.builder.putToMap(lam::gc_borrow(email_map), headers_key, headers_value);
+    ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("header_entries"),
+        {.item = (uint64_t)header_entries});
 
     // MIME HTML parts become parsed Mark documents; other messages retain the
     // raw body string for compatibility with the existing EML representation.
     size_t body_len = strlen(eml);
+    // Keep MIME wire content as well as the display body so attachments survive export.
+    ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("raw_body"),
+        ctx.builder.createStringItem(eml, body_len));
     Element* html_body =
         eml_parse_html_entity(ctx, eml, body_len, mime_info, 0);
     if (html_body) {

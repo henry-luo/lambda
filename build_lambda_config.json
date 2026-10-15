@@ -6282,6 +6282,15 @@
     ],
     "script_tests": [
       {
+        "runner_name": "test_script_format_roundtrip",
+        "name": "Lambda Script Format Round Trips",
+        "suite": "input",
+        "category": "baseline",
+        "script": "test/run_script_format_roundtrip.js",
+        "args": [],
+        "parallel": false
+      },
+      {
         "runner_name": "test_test_run",
         "name": "Test Runner Contracts",
         "suite": "library",

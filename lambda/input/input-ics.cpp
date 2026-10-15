@@ -25,10 +25,9 @@ static void parse_property_parameters(InputContext& ctx, const char **ics, Map* 
 
 // Helper function to parse property value (after the colon, handling folded lines)
 static String* parse_property_value(InputContext& ctx, const char **ics) {
-    if (parse_rfc_property_value(ctx.sb, ics) > 0) {
-        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
-    }
-    return NULL;
+    if (**ics != ':') return NULL;
+    size_t length = parse_rfc_property_value(ctx.sb, ics);
+    return ctx.builder.createString(length ? ctx.sb->str->chars : "", length);
 }
 
 // Helper function to normalize property name to uppercase
@@ -225,6 +224,8 @@ void parse_ics(Input* input, const char* ics_string) {
     }
 
     // create error tracking context with source tracking
+    ics_string = rfc_unfold_content_lines(input, ics_string);
+    if (!ics_string) return;
     InputContext ctx(input, ics_string, strlen(ics_string));
     MarkBuilder& builder = ctx.builder;
 
@@ -287,10 +288,13 @@ void parse_ics(Input* input, const char* ics_string) {
 
         // Parse property parameters
         bool has_parameters = *ics == ';';
+        const char* parameter_start = ics;
         Map* params_map = map_pooled(input->pool);
         if (params_map) {
             parse_property_parameters(ctx, &ics, params_map);
         }
+        String* parameter_source = has_parameters
+            ? ctx.builder.createString(parameter_start, ics - parameter_start) : NULL;
 
         // Parse property value
         String* property_value = parse_property_value(ctx, &ics);
@@ -357,14 +361,14 @@ void parse_ics(Input* input, const char* ics_string) {
             // We're inside a component, store in component properties
             ctx.builder.putToMap(lam::gc_borrow(active->properties), property_name, prop_value);
             rfc_append_entry(ctx, active->entries, property_name, prop_value,
-                             has_parameters ? params_map : NULL);
+                             has_parameters ? params_map : NULL, parameter_source);
             store_component_special_property(ctx, builder, active->component,
                                              property_name->chars, property_value->chars, prop_value);
         } else {
             // Calendar-level property
             ctx.builder.putToMap(lam::gc_borrow(properties_map), property_name, prop_value);
             rfc_append_entry(ctx, calendar_entries, property_name, prop_value,
-                             has_parameters ? params_map : NULL);
+                             has_parameters ? params_map : NULL, parameter_source);
             store_calendar_special_property(ctx, builder, calendar_map,
                                             property_name->chars, prop_value);
         }

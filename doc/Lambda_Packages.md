@@ -31,6 +31,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 15. [docx — Word DOCX Import](#15-docx--word-docx-import)
 16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
 17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
+18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
 
 ---
 
@@ -39,6 +40,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
+| `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -1756,3 +1758,44 @@ has been retired. These are initial static profiles; builds and package/schema
 compilation passed, while conformance and regression suites remain pending.
 See [dialect coverage and limits](Markup_Formats_Support.md#15-wiki-dialect-coverage)
 and the [working design](../vibe/input/Input_Wiki.md).
+
+## 18. doc.misc — Source format writers
+
+`lambda.doc.misc` writes Mark Doc as **AsciiDoc**, **troff/man**, or **Typst**,
+and serializes email/contact/calendar maps as **EML**, **vCard**, or
+**iCalendar**. All six writers are Lambda Script source modules (D7.2.4).
+
+```lambda
+import writers: lambda.doc.misc
+let document = parse("# Title\n\nSome **text**.", "markdown")^
+writers.format_report(document, {type:"asciidoc"})^
+writers.man(document, {title:"LAMBDA", section:"1"})^
+writers.typst(document)^
+```
+
+| Export | Result |
+|---|---|
+| `format_report(value, options = null)` | `{text, diagnostics}`, including reported losses |
+| `format(value, options = null)` | Source string; rejects losses by default |
+| `format_file(path, options = null)` | Reads with `input_type` / `input_flavor`, then formats |
+| `asciidoc`, `man`, `typst`, `eml`, `vcf`, `ics` | Convenience functions accepting `(value, options = null)` |
+
+Options are `type` (default `asciidoc`) and `loss` (`error`, default, or
+`allow`). Man additionally accepts `title`, `section`, `date`, `source`, and
+`manual`. File conversion adds `input_type` and `input_flavor`. Diagnostics
+have `code`, `severity`, `element`, and `message`. Invalid data and unsupported
+encodings remain errors even with `loss:"allow"`.
+
+The same writers handle built-in `format(value, "asciidoc")`, formatted file
+`output`, and CLI conversion. `--loss error|allow` applies to these six targets
+as well as wiki output. Default file output is strict; to permit losses,
+format with package options first, then write the resulting text.
+
+For VCF/ICS, retained `entries` take precedence over `properties`, which take
+precedence over convenience fields. Edit entries to retain parameters and
+repeated values. EML retains ordered `header_entries` and authoritative
+`raw_body`; remove `raw_body` to rebuild MIME content. See
+[source format support and examples](Script_Formats_Support.md) for record
+shapes, MIME authoring, limits, and verification results. EML/VCF/ICS round
+trips pass; structural readback tests expose gaps in the three prose readers.
+Native tool conformance remains unverified.

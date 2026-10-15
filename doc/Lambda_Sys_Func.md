@@ -1375,6 +1375,13 @@ let document = parse("= Title =\n\n**Text**", "wiki:creole")^
 format(document, {type:"wiki", flavor:"jira"})^
 ```
 
+`asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, and
+`ics`/`ical`/`icalendar` use the shipped `lambda.doc.misc` package (D7.2.4).
+They accept `{type, loss}` options with strict `loss:"error"` defaults.
+`format_report` in that package exposes losses before serialization is
+accepted. See [source formatters](Script_Formats_Support.md) for record
+precedence, man title options, and MIME support.
+
 ### Procedural I/O Functions
 
 Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
@@ -1467,6 +1474,8 @@ for defaults and constructed-tree examples.
 | `html` | `.html`, `.htm` | HTML format |
 | `markdown` | `.md` | Markdown format |
 | `wiki` / `wiki:<flavor>` | `.wiki`, `.mediawiki` default to MediaWiki | Lambda Script wiki writers; explicit selector for other dialects |
+| `asciidoc`, `man`, `typst` | `.adoc`, `.asciidoc`, `.asc`; `.man`, `.1`–`.9`; `.typ`, `.typst` | Mark Doc source writers in `lambda.doc.misc` |
+| `eml`, `vcf`, `ics` | `.eml`; `.vcf`, `.vcard`; `.ics`, `.ical` | Email, vCard, and iCalendar source writers |
 | `mark` | `.mark` | Mark Notation (D2.9.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |

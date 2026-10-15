@@ -1,5 +1,5 @@
 #include "format.h"
-#include "../io/wiki_format.hpp"
+#include "../io/script_format.hpp"
 #include "../core/print.h"
 #include "../../lib/base64.h"
 #include "../../lib/mem.h"
@@ -168,8 +168,8 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
     const char* t = type ? type->chars : "text";
     const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
 
-    if (wiki_format_flavor(t, f)) {
-        log_error("format_data: wiki output requires the runtime format API or lambda.doc.wiki");
+    if (ScriptFormatRoute route = script_format_route(t, f); route.target) {
+        log_error("format_data: %s output requires the runtime format API or %s", route.target, route.package);
         return nullptr;
     }
 

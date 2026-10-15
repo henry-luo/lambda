@@ -672,7 +672,9 @@ lambda convert data.csv  -t yaml -o data.yaml
 lambda convert page.md   -t html -o page.html
 ```
 
-Not every direction exists: there is no CSV writer, so a CSV can be read and converted to any other format but nothing converts *to* CSV, and the prose formats AsciiDoc, man and Typst are read-only as well.
+Not every direction exists: CSV and TSV have readers but no writers.
+AsciiDoc, man, Typst, EML, vCard, and iCalendar now have Lambda Script writers
+in [lambda.doc.misc](Script_Formats_Support.md).
 
 ---
 
@@ -714,6 +716,11 @@ The RTF parser is **experimental**: it currently yields the document's control g
 ### 3.4 Email (EML / RFC 822)
 
 E-mail files parse into a map of the well-known headers plus a `headers` map with every header as written; `date` is kept as the header string. A plain message keeps its source text in `body`. For a `text/html` MIME body, including an HTML part nested in a multipart message, `body` is the document element tree produced by Lambda's HTML parser. Standard `base64` and `quoted-printable` transfer encodings are decoded before HTML parsing; `7bit`, `8bit`, and `binary` pass through unchanged. HTML attachments are not selected as the message body. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
+
+The reader also retains ordered `header_entries` and authoritative `raw_body`
+for [EML export](Script_Formats_Support.md#eml-and-mime), preserving repeated
+headers and MIME attachments. Those additional source views are omitted from
+the short example below.
 
 <table>
 <thead>
@@ -766,6 +773,10 @@ mail.subject
 ### 3.5 vCard (VCF)
 
 One card parses into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, and `note`. Its `entries` array preserves every property in source order, including repeated fields, with `name`, `value`, and optional `parameters` fields. Use `entries` to inspect repeated values and parameter types; the `properties` map remains a convenience view. A file with several cards returns `{contacts: [...]}`, with one map per card. The ordered entry and contact arrays use the sequence append of **D2.6.5v3**.
+
+Parameterized VCF/ICS entries also retain `parameter_source`, preserving
+quoted commas and repeated parameter names for serialization. Both formats
+have [Lambda Script writers](Script_Formats_Support.md#vcard).
 
 ```lambda
 let contact = input("alice.vcf", 'vcf')^
@@ -944,7 +955,8 @@ lambda convert arch.mmd    -f graph:mermaid -t mark -o arch.mark
 | Category | Output formats |
 |----------|----------------|
 | **Data** | `mark` (lossless), `json`, `yaml`, `toml`, `ini`, `properties`, `xml` |
-| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `textile`, `latex`, `jsx`, `mdx`, `text` |
+| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `textile`, `latex`, `jsx`, `mdx`, `text` |
+| **Personal data** | `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar` |
 | **Styles** | `css` |
 | **Math** | `math-latex`, `math-ascii` (`math-typst` and `math-mathml` are stubs) |
 | **Diagrams** | graph as `dot`, `mermaid` or `d2` |
@@ -980,9 +992,36 @@ for file conversion and options.
 ./lambda.exe convert notes.mark -f mark -t wiki:creole --loss allow -o notes.creole
 ```
 
-`--loss error|allow` applies only to wiki output and defaults to `error`.
+`--loss error|allow` applies to wiki output and the six `lambda.doc.misc`
+targets below, and defaults to `error`.
 Native hosts must use the runtime format API or package export; the
 runtime-free `format_data` API refuses wiki output.
+
+### 5.2 AsciiDoc, Man, Typst, and Personal Data Output
+
+The shipped **`lambda.doc.misc`** source package (D7.2.4) implements
+`asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`. The prose writers consume
+normalized Mark Doc; record writers consume their existing parser maps.
+Runtime `format`, file `output`, and CLI conversion invoke the same package
+above the IO boundary (D7.1.1).
+
+```bash
+./lambda.exe convert guide.md -t asciidoc -o guide.adoc
+./lambda.exe convert guide.md -t man -o guide.1
+./lambda.exe convert guide.md -t typst -o guide.typ
+./lambda.exe convert contacts.vcf -f vcf -t vcf -o contacts-export.vcf
+./lambda.exe convert calendar.ics -f ics -t ics -o calendar-export.ics
+./lambda.exe convert message.eml -f eml -t eml -o message-export.eml
+```
+
+Writers default to rejecting diagnosed losses. Use `format_report` to inspect
+them, or CLI `--loss allow` to permit degraded output. VCF/ICS retain ordered
+entries, repeats, parameters, and nested calendar components. EML retains
+ordered headers and raw MIME source, and can author new multipart messages.
+These are initial profiles: builds and package compilation pass. Dedicated
+round-trip tests pass for EML/VCF/ICS and expose structural readback gaps in
+the prose readers. Native tool conformance remains unverified. See
+[APIs, record precedence, limits, and verification](Script_Formats_Support.md).
 
 ---
 

@@ -1,6 +1,7 @@
 // CALS row occupancy is computed before HTML emission; row spans reserve their columns.
 import c: .common
 import h: .html
+import grid: lambda.doc.misc.grid
 
 fn nonnegative_int(value,fallback,description) int^ {
     if (value == null) fallback else {
@@ -22,8 +23,6 @@ fn column_specs(nodes,index,next,result,total) map^ {
             if (key == null) result else {*:result,[key]:col-1},total)^
     }
 }
-fn free_column(blocked,begin_col) => if (begin_col >= len(blocked) or blocked[begin_col] == 0) begin_col
-    else free_column(blocked,begin_col+1)
 fn empty_cells(blocked,begin_col,end,header) array^ => [for (i in begin_col to (end-1) where blocked[i] == 0)
     h.make(if (header) "th" else "td",{},[])^]
 
@@ -35,14 +34,14 @@ fn cells(entries,index,cursor,blocked,specs,spans,header,context,renderer) map^ 
         let span = if (span_name == null) null else spans[span_name]
         let first_name = c.get(span,"begin_col",c.get(entry.attrs,"#namest",c.attr(entry,"colname")))
         let last_name = c.get(span,"end",c.attr(entry,"nameend"))
-        let first = if (first_name == null) free_column(blocked,cursor) else specs[first_name]
+        let first = if (first_name == null) grid.free_column(blocked,cursor) else specs[first_name]
         let end_col = if (last_name == null) first else specs[last_name]
         let height = nonnegative_int(c.attr(entry,"morerows"),0,"morerows")^+1;
         if ((span_name != null and span == null) or first == null or end_col == null or first < cursor or
             end_col < first or end_col >= len(blocked) or any([for (i in first to end_col) blocked[i] > 0]))
             raise c.fail("invalid-table","Unknown column/span, overlapping cell or excessive CALS cell count")
         else {
-            let occupied = [for (i,value in blocked) if (i >= first and i <= end_col) height else value]
+            let occupied = grid.reserve(blocked,first,end_col,height)
             let attrs = {*:h.attributes(entry),*:if (end_col > first) {colspan:string(end_col-first+1)} else {},
                 *:if (height > 1) {rowspan:string(height)} else {},
                 *:if (c.attr(entry,"align") == null) {} else {style:"text-align:" ++ c.attr(entry,"align") ++ ";"}}
@@ -59,7 +58,7 @@ fn rows(entries,index,blocked,specs,spans,header,context,renderer) array^ {
     } else {
         let row = entries[index]
         let rendered = cells(c.children(row,"entry"),0,0,blocked,specs,spans,header,context,renderer)^
-        let rest = rows(entries,index+1,[for (value in rendered.occupied) max(0,value-1)],
+        let rest = rows(entries,index+1,grid.advance(rendered.occupied),
             specs,spans,header,context,renderer)^;
         [<tr *:h.attributes(row),*rendered.nodes>,*rest]
     }

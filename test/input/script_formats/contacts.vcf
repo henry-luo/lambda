@@ -1,0 +1,18 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Ada Example
+N:Example;Ada;;;PhD
+EMAIL;TYPE=WORK:ada@example.com
+EMAIL;TYPE=HOME:ada@home.example
+NOTE:Line one\nLine two\, semicolon\; and slash\\.
+X-EMPTY:
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+FN:李 Café 😀
+item1.EMAIL;TYPE="work,voice";X-REPEAT=one;X-REPEAT=two:li@example.com
+X-PARAM;X-LABEL="first,
+ second; third: fourth":quoted delimiters
+NOTE:café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 café 中文 😀 end.
+URL:https://example.com/a:b
+END:VCARD

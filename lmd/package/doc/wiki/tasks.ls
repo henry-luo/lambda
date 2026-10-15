@@ -1,6 +1,6 @@
 // Source markers may be reused only when they still describe the current task.
 pub let states = ["todo","in-progress","done","waiting","blocked","cancelled","rejected","migrated","custom"]
-fn attr(node,key,fallback = null) => if (node[key] == null) fallback else node[key]
+import c: lambda.doc.misc.common
 fn decoded(marker,flavor) => if (marker == "[ ]") {state:"todo",lo:0,hi:0,label:null}
     else if ((flavor == "vimwiki" and marker == "[X]") or (flavor == "zimwiki" and marker == "[*]")) {state:"done",lo:100,hi:100,label:null}
     else if (flavor == "vimwiki" and marker in ["[.]","[o]","[O]"]) {
@@ -14,7 +14,7 @@ fn decoded(marker,flavor) => if (marker == "[ ]") {state:"todo",lo:0,hi:0,label:
     else null
 fn percentage(value) => value is string and value in [for (i in 0 to 100) string(i)]
 pub fn model(node) {
-    let status = attr(node,"data-task-state",if (node["data-checked"] == null) null else if (node["data-checked"] == "true") "done" else "todo")
+    let status = c.get(node,"data-task-state",if (node["data-checked"] == null) null else if (node["data-checked"] == "true") "done" else "todo")
     let lo = node["data-task-progress-min"]
     let hi = node["data-task-progress-max"]
     let status_label = node["data-task-label"]

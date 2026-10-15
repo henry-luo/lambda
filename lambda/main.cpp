@@ -3,7 +3,7 @@
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
 #include "format/format.h"
-#include "io/wiki_format.hpp"
+#include "io/script_format.hpp"
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
@@ -1544,7 +1544,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
-        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--loss error|allow] [--view-key <key>] [--full-document] [--font-option default|katex]\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
@@ -1558,7 +1558,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
     const char* font_option = NULL;  // LaTeX math fonts: default or katex
     const char* graph_view_key = NULL; // Structurizr view key for graph-to-HTML conversion
-    const char* wiki_loss = nullptr; // Explicit permission to serialize diagnosed wiki losses
+    const char* format_loss = nullptr; // shared policy for shipped source writers
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -1585,8 +1585,8 @@ int exec_convert(int argc, char* argv[]) {
             }
         } else if (strcmp(argv[i], "--loss") == 0) {
             if (i + 1 >= argc) { fputs("Error: --loss requires error or allow\n", stderr); return 1; }
-            wiki_loss = argv[++i];
-            if (strcmp(wiki_loss, "error") && strcmp(wiki_loss, "allow")) {
+            format_loss = argv[++i];
+            if (strcmp(format_loss, "error") && strcmp(format_loss, "allow")) {
                 fputs("Error: --loss requires error or allow\n", stderr); return 1;
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
@@ -1666,8 +1666,8 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-    if (wiki_loss && !wiki_format_flavor(to_format)) {
-        fputs("Error: --loss is supported for wiki output formats\n", stderr); return 1;
+    if (format_loss && !script_format_route(to_format).target) {
+        fputs("Error: --loss is supported for script document output formats\n", stderr); return 1;
     }
 
     // Check if input file exists (skip check for HTTP/HTTPS URLs)
@@ -1881,16 +1881,16 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_markup_string(input->pool, input->root, &RST_RULES);
         } else if (strcmp(to_format, "org") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &ORG_RULES);
-        } else if (const char* wiki_flavor = wiki_format_flavor(to_format)) {
+        } else if (ScriptFormatRoute route = script_format_route(to_format); route.target) {
             const LambdaDocumentTransformConfig transform = {
-                "wiki", "lambda.doc.wiki", "format_file",
+                route.target, route.package, "format_file",
                 LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
             LambdaDocumentTransformOption options[] = {
                 {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
                 {"input_flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
                     flavor_string ? flavor_string->chars : "", false},
-                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, wiki_flavor, false},
-                {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, wiki_loss ? wiki_loss : "error", false},
+                {route.option, LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, route.target, false},
+                {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, format_loss ? format_loss : "error", false},
             };
             full_doc_output = run_document_transform_markup(input_file, &transform, options, 4);
             if (!full_doc_output) {
@@ -1932,7 +1932,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
+            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, asciidoc, man, typst, eml, vcf, ics, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
             mem_pool_destroy(temp_pool);
             return 1;
         }
@@ -3544,7 +3544,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Format Converter v1.0\n\n");
-            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n", argv[0]);
+            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--loss error|allow] [--view-key <key>] [--full-document] [--font-option default|katex]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -f <from>            Input format (auto-detect if omitted)\n");
             printf("  -t <to>              Output format (required)\n");
@@ -3552,12 +3552,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  --full-document      For LaTeX to HTML, generate complete HTML with CSS\n");
             printf("  --view-key <key>     Structurizr view key (default: first declared view)\n");
             printf("  --font-option <opt>  LaTeX math fonts: default or katex\n");
+            printf("  --loss error|allow  Script document writers: reject or allow diagnosed losses\n");
             printf("  -h, --help           Show this help message\n");
             printf("Supported Formats:\n");
             printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
             printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml\n");
             printf("  Document formats: pdf, rtf\n");
-            printf("  Markup formats:  asciidoc, textile, wiki, man, mark\n");
+            printf("  Markup formats:  asciidoc, textile, wiki[:flavor], man, typst, mark\n");
+            printf("  Record formats:  eml, vcf, ics\n");
             printf("  Data formats:    json, xml, yaml, csv, ini, properties, toml\n");
             printf("\nCommon Conversions:\n");
             printf("  markdown → html:   %s convert doc.md -t html -o doc.html\n", argv[0]);

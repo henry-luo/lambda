@@ -11,7 +11,7 @@
 #include "../../lib/time_util.h"
 #include "../core/utf_string.h"
 #include "../format/format.h"
-#include "../io/wiki_format.hpp"
+#include "../io/script_format.hpp"
 #include "radiant_event_hook.h"
 
 #include <stdarg.h>
@@ -272,6 +272,10 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             else if (strcmp(ext, "md") == 0) effective_format = "markdown";
             else if (strcmp(ext, "csv") == 0) effective_format = "csv";
             else if (strcmp(ext, "wiki") == 0 || strcmp(ext, "mediawiki") == 0) effective_format = "wiki";
+            else if (const char* script_target = script_format_target(ext)) effective_format = script_target;
+            else if (strcmp(ext, "typ") == 0) effective_format = "typst";
+            else if (strcmp(ext, "asc") == 0) effective_format = "asciidoc";
+            else if (ext[0] >= '1' && ext[0] <= '9' && !ext[1]) effective_format = "man";
             else if (strcmp(ext, "txt") == 0) effective_format = "text";
             else if (strcmp(ext, "toml") == 0) effective_format = "toml";
             else if (strcmp(ext, "ini") == 0) effective_format = "ini";
@@ -306,7 +310,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     format->len = format_length; format->is_ascii = 1;
     memcpy(format->chars, effective_format, format_length);
     String* formatted = nullptr;
-    if (wiki_format_flavor(effective_format)) {
+    if (script_format_route(effective_format).target) {
         script_result.set(fn_format2(source_root.get(), Item{.item = s2it(format)}));
         if (item_is_error(script_result.get())) {
             mem_pool_destroy(temp_pool); strbuf_free(path_buf); return script_result.get();

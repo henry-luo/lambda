@@ -1,0 +1,7 @@
+{
+  vcf: [true, true, true, true, true],
+  ics: [true, true, true, true, true, true, true],
+  eml: [true, true, true, true, true],
+  routes: [true, true, true, true, true, true],
+  validation: [true, true, true, true, true, true, true, true]
+}
