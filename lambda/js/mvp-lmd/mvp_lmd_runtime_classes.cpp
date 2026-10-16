@@ -188,6 +188,7 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(receiver, field, ItemNull, LMD_PROP_GET)
             : map_shape_field_to_item(properties->data, field);
     };
+    Item cursor = ItemNull;
     if (!library || !library->mutable_prototypes) {
         // closed units without reflective writers retain the declared-chain proof.
         bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == mvp_lmd_class_values(cls)[2].map;
@@ -202,11 +203,15 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
             Item result = resolve(prototype.map);
             if (*found || item_is_error(result)) return result;
         }
-        return Item{.item = ITEM_JS_UNDEFINED};
-    }
+        // Declared class ancestry ends at the realm's ordinary intrinsic
+        // prototypes; its fast-path proof does not make those methods absent.
+        // closed callable methods retain their existing receiver-bound adapter.
+        if (!library || statics) return Item{.item = ITEM_JS_UNDEFINED};
+        cursor = library->values[LMD_LIBRARY_OBJECT_PROTOTYPE];
+        if (!cursor.item || cursor.item == owner.item) return Item{.item = ITEM_JS_UNDEFINED};
+    } else cursor = mvp_lmd_get_prototype_with_library(owner, library);
     // ordinary chain traversal cannot reenter; preserve the active library across its links.
     MvpLmdLibraryState* traversal_library = mvp_lmd_program_library();
-    Item cursor = mvp_lmd_get_prototype_with_library(owner, traversal_library);
     while (cursor.item != ITEM_NULL) {
         if (item_is_error(cursor)) return cursor;
         if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor) ||

@@ -587,6 +587,9 @@ Item vmap_get_by_str(VMap* vm, const char* key) {
     if (vmap_host_get_by_item(vm, host_key, &host_result)) return host_result;
     if (!vm->data) return ItemNull;
 
+    // namespace and other virtual backends do not carry HashMapData storage.
+    if (vm->vtable != &hashmap_vtable) return vmap_get_by_item(vm, host_key);
+
     HashMapData* hd = (HashMapData*)vm->data;
 
     // check for synthetic key format "__v<N>"

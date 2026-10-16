@@ -770,7 +770,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
 | `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
-| `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`) | `JS_EXECUTION_BACKEND` |
+| `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`mir`) | `JS_EXECUTION_BACKEND` |
 | `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |
 | `JS_LOOP_JIT_THRESHOLD` | (10000) | `JS_JIT_BACKEDGE` |
 

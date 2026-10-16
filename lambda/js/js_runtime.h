@@ -17,6 +17,7 @@ extern "C" {
 
 typedef struct Runtime Runtime;
 typedef struct EvalContext EvalContext;
+struct ModuleDescriptor;
 
 typedef Item (*JsNativeP0)(void);
 typedef Item (*JsNativeP1)(Item);
@@ -637,6 +638,11 @@ int js_function_get_arity(Item fn_item);
 // =============================================================================
 
 Item js_console_log(Item value);
+Item js_console_count_fn(Item label);
+Item js_console_countReset_fn(Item label);
+Item js_console_time_fn(Item label);
+Item js_console_timeEnd_fn(Item label);
+Item js_console_timeLog_fn(Item label);
 
 // =============================================================================
 // Math Object Methods & Properties
@@ -656,6 +662,7 @@ Item js_get_css_object_value(void);
 
 Item js_process_stdout_write(Item str_item);
 void js_store_process_argv(int argc, const char** argv);
+const char* const* js_process_bootstrap_arguments(int* argc);
 void js_set_process_argv(int argc, const char** argv);
 void js_store_process_exec_argv(int argc, const char** argv);
 void js_set_process_exec_argv(int argc, const char** argv);
@@ -1324,6 +1331,7 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
 Item js_get_global_this(void);
+Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
@@ -1611,7 +1619,8 @@ Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
 Item js_async_context_create_module(struct JsScript* script, void* mir_main,
     uint32_t module_state_id, Item specifier);
 Item js_async_context_create_module_body(Item (*body)(struct Activation*, Item),
-    void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier);
+    void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier,
+    struct ModuleDescriptor* descriptor);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1700,6 +1709,16 @@ void js_clearImmediate(Item id);
 Item js_requestAnimationFrame(Item callback);          // schedule for next frame
 void js_cancelAnimationFrame(Item request_id);
 Item js_structuredClone(Item value);                   // deep clone
+struct JsTypedArrayOps;
+typedef struct JsStructuredCloneOps {
+    const JsArrayOps* arrays;
+    const struct JsTypedArrayOps* typed_arrays;
+    Item (*object)(void);
+    Item (*keys)(Item);
+    Item (*get)(Item, Item);
+    Item (*create)(Item, Item, Item);
+} JsStructuredCloneOps;
+Item js_structured_clone_with_ops(Item value, const JsStructuredCloneOps* ops);
 
 /**
  * Drain the event loop: process all microtasks, then fire due timers.
@@ -1747,6 +1766,7 @@ Item js_get_live_binding_default(Item specifier);
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
 void js_tla_flush_for_dynamic_import(void);
+void js_tla_flush_for_runtime(struct Runtime* runtime);
 int js_tla_module_depth_get(void);
 
 /**
@@ -1945,7 +1965,8 @@ Item js_new_native_body_constructor(JsNativeCallBody call_body,
 Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,
     JsNativeConstructBody construct_body, int formal_length, Item* env, int env_size);
 Item js_new_native_payload_function(JsNativeCallBody call_body,
-                                    uint64_t payload, int formal_length);
+                                    uint64_t payload, int formal_length,
+                                    Item* env = NULL, int env_size = 0);
 #define JS_DECLARE_NATIVE_CLOSURE(arity) \
     LAMBDA_RT_API Item js_new_native_closure(JsNativeP##arity target, int adapter_arity, \
                                Item* env, int env_size);

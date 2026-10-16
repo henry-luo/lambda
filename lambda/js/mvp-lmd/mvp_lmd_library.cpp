@@ -461,9 +461,10 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     Rooted<Item> held(roots, carrier), object(roots, ItemNull), text(roots, ItemNull);
     int kind = error->code == ERR_TYPE_MISMATCH ? LMD_ERROR_TYPE :
         error->code == ERR_UNDEFINED_VARIABLE ? LMD_ERROR_REFERENCE :
-        error->code == ERR_INDEX_OUT_OF_BOUNDS ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
+        (error->code == ERR_INDEX_OUT_OF_BOUNDS || error->code == ERR_STACK_OVERFLOW) ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
     if (!state->errors) return carrier;
-    const char* message = error->message ? error->message : "";
+    const char* message = error->code == ERR_STACK_OVERFLOW
+        ? "Maximum call stack size exceeded" : error->message ? error->message : "";
     String* copied = heap_strcpy(message, strlen(message));
     if (!copied) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     text.set(Item{.item = s2it(copied)});
@@ -473,7 +474,7 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
         mvp_lmd_class_values(cls)[0], ItemNull, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(object.get())) return object.get();
     // Preserve Error identity if the same carrier crosses another catch boundary.
-    error->thrown_value_item = object.get().item;
+    if (!error->is_static) error->thrown_value_item = object.get().item;
     return object.get();
 }
 
@@ -904,6 +905,7 @@ Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState
     if (item_is_error(result)) return result;
     String* spelling = heap_create_name(name, strlen(name));
     if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    ((MvpLmdNativeCallable*)cls->values[0].function)->source_name = spelling;
     int flags = immutable_metadata ? JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE : -1;
     result = mvp_lmd_named_set(cls->values[2], "name", Item{.item = s2it(spelling)}, flags);
     return item_is_error(result) ? result : mvp_lmd_named_set(cls->values[2], "length", Item{.item = i2it(arity)}, flags);
@@ -1468,6 +1470,21 @@ static const JsTypedArrayOps typed_array_ops = {
     mvp_lmd_is_constructor,
     [](Item value) { return mvp_lmd_primitive_to_string(value); }
 };
+Item mvp_lmd_structured_clone(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item, Item) {
+    // reuse the shared clone traversal; only allocation and property semantics belong to the realm.
+    static const JsStructuredCloneOps ops = {
+        &mvp_lmd_array_ops, &typed_array_ops,
+        []() { return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0); },
+        [](Item object) { return mvp_lmd_object_project(object, 0); },
+        [](Item object, Item key) {
+            return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_GET, object);
+        },
+        [](Item object, Item key, Item value) {
+            return mvp_lmd_property_with_receiver(object, key, value, LMD_PROP_CREATE_DATA, object);
+        }
+    };
+    return js_structured_clone_with_ops(count ? args[0] : make_js_undefined(), &ops);
+}
 static Item object_locale(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
     return js_object_to_locale_string_with_ops(receiver, NULL, &typed_array_ops);
 }
@@ -1901,7 +1918,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         {"species", JS_SYMBOL_SPECIES}, {"isConcatSpreadable", JS_SYMBOL_IS_CONCAT_SPREADABLE},
         {"match", JS_SYMBOL_MATCH}, {"replace", JS_SYMBOL_REPLACE}, {"search", JS_SYMBOL_SEARCH},
         {"split", JS_SYMBOL_SPLIT}, {"matchAll", JS_SYMBOL_MATCH_ALL},
-        {"unscopables", JS_SYMBOL_UNSCOPABLES}, {"asyncIterator", JS_SYMBOL_ASYNC_ITERATOR}};
+        {"unscopables", JS_SYMBOL_UNSCOPABLES}, {"asyncIterator", JS_SYMBOL_ASYNC_ITERATOR},
+        {"dispose", JS_SYMBOL_DISPOSE}, {"asyncDispose", JS_SYMBOL_ASYNC_DISPOSE}};
     for (int i = 0; i < (state->mutable_prototypes ? (int)(sizeof(symbols) / sizeof(symbols[0])) : 1); i++) {
         Item id = {.item = i2it(symbols[i].id)};
         Item value = symbol_create(context, program, &id, 1, Item{.item = ITEM_JS_UNDEFINED}, ItemNull, Item{.item = ITEM_JS_UNDEFINED});

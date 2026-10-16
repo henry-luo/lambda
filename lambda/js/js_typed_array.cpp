@@ -2069,33 +2069,46 @@ extern "C" Item js_buffer_from_bytes(const char* data, int len) {
     return buffer_root.get();
 }
 
-extern "C" Item js_typed_array_from_binary(Binary* bin) {
-    if (!bin) return js_typed_array_new(JS_TYPED_UINT8, 0);
+static Item js_typed_array_from_buffer_with_ops(int type_id, Item buffer_item,
+    int byte_offset, int length, const JsTypedArrayOps* ops, Item target);
+
+static Item js_typed_array_from_binary_with_ops(Binary* bin, int type_id,
+        const JsTypedArrayOps* ops, Item target) {
+    if (!bin) return js_typed_array_new_with_ops(type_id, 0, ops, target);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, Item{.item = x2it(bin)}), constructor(roots, target), result(roots, ItemNull);
     uint32_t length = binary_length(bin);
+    if (length > INT_MAX) return ops->buffer->error(true, "Invalid typed array length");
     ByteSpan span = binary_span(bin);
     if (length > 0 && span.storage &&
             (span.storage->flags & BYTE_STORAGE_FLAG_SHARED_MUTABLE) == 0) {
         JsArrayBuffer* ab = js_arraybuffer_alloc_storage(
             span.storage, span.offset, span.length);
         if (!ab) return ItemError;
-        Item buffer_item = js_arraybuffer_wrap(ab);
-        if (!js_is_arraybuffer(buffer_item)) {
+        result.set(js_arraybuffer_wrap_item_with_prototype(ab, ItemNull, false, ops->buffer));
+        if (!js_is_arraybuffer(result.get())) {
             js_arraybuffer_destroy(ab);
             return ItemError;
         }
         // Binary retains the allocation while the stable handle is the sole
         // mutable coherence point for every JS view over this ArrayBuffer.
-        return js_typed_array_new_from_buffer(
-            JS_TYPED_UINT8, buffer_item, 0, (int)length);
+        return js_typed_array_from_buffer_with_ops(
+            type_id, result.get(), 0, (int)length, ops, constructor.get());
     }
 
-    Item result = js_typed_array_new(JS_TYPED_UINT8, (int)length);
-    void* data = js_typed_array_prepare_write_ptr(result);
+    result.set(js_typed_array_new_with_ops(type_id, (int)length, ops, constructor.get()));
+    if (item_is_error(result.get())) return result.get();
+    void* data = js_typed_array_prepare_write_ptr(result.get());
     if (data && length > 0) {
-        memcpy(data, binary_data(bin), length);
+        memcpy(data, binary_data(source.get().get_safe_binary()), length);
         binary_record_payload_copy();
     }
-    return result;
+    return result.get();
+}
+
+extern "C" Item js_typed_array_from_binary(Binary* bin) {
+    return js_typed_array_from_binary_with_ops(bin, JS_TYPED_UINT8, &js_typed_array_default_ops, ItemNull);
 }
 
 extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
@@ -2276,13 +2289,17 @@ extern "C" Item js_typed_array_construct_with_ops(int type_id, Item source, Item
         constructor(roots, target), prototype(roots, ItemNull), result(roots, ItemNull);
     // primitive ToIndex precedes AllocateTypedArray; object inputs observe the prototype first.
     bool object_input = ops->buffer->object(input.get());
+    bool binary_input = get_type_id(input.get()) == LMD_TYPE_BINARY &&
+        (type_id == JS_TYPED_UINT8 || type_id == JS_TYPED_UINT8_CLAMPED);
     int64_t primitive_length = 0;
-    if (!object_input) {
+    if (!object_input && !binary_input) {
         JS_ASSIGN_OR_RETURN(status, js_to_index_i64(input.get(), &primitive_length, "Invalid typed array length", ops->buffer));
     }
     prototype.set(ops->prototype((JsTypedArrayType)type_id, constructor.get()));
     if (item_is_error(prototype.get())) return prototype.get();
-    if (js_is_arraybuffer(input.get())) {
+    if (binary_input) {
+        result.set(js_typed_array_from_binary_with_ops(input.get().get_safe_binary(), type_id, ops, constructor.get()));
+    } else if (js_is_arraybuffer(input.get())) {
         int64_t first = 0, count = -1;
         JS_ASSIGN_OR_RETURN(status, js_to_index_i64(start.get(), &first, "Invalid typed array byteOffset", ops->buffer));
         int width = js_typed_array_element_size((JsTypedArrayType)type_id);
@@ -2335,14 +2352,8 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
 
     if (get_type_id(arg) == LMD_TYPE_BINARY &&
         (type_id == JS_TYPED_UINT8 || type_id == JS_TYPED_UINT8_CLAMPED)) {
-        Binary* bin = arg.get_safe_binary();
-        if (type_id == JS_TYPED_UINT8) return js_typed_array_from_binary(bin);
-        Item result = js_typed_array_new(type_id, bin ? (int)binary_length(bin) : 0);
-        void* data = js_typed_array_current_data_ptr(result);
-        if (data && bin && binary_length(bin) > 0) {
-            memcpy(data, binary_data(bin), binary_length(bin));
-        }
-        return result;
+        return js_typed_array_from_binary_with_ops(arg.get_safe_binary(), type_id,
+            &js_typed_array_default_ops, ItemNull);
     }
 
     // Check if arg is an ArrayBuffer
@@ -3084,11 +3095,10 @@ extern "C" Item js_typed_array_subarray(Item ta_item, Item begin, Item end,
 // ============================================================================
 
 extern "C" bool js_is_dataview(Item val) {
-    if (get_type_id(val) != LMD_TYPE_MAP || !val.map ||
-            val.map->map_kind != MAP_KIND_DATAVIEW) return false;
-    // DataView.prototype is metadata-branded so its methods are discoverable,
-    // but it has no [[DataView]] carrier and must fail the accessor brand check.
-    return js_object_has_class(val, JS_CLASS_DATA_VIEW);
+    // the physical carrier owns [[DataView]] across frontend nominal shapes;
+    // DataView.prototype has ordinary map storage and fails this check.
+    return get_type_id(val) == LMD_TYPE_MAP && val.map &&
+        val.map->map_kind == MAP_KIND_DATAVIEW;
 }
 
 extern "C" JsDataView* js_get_dataview_ptr(Item val) {

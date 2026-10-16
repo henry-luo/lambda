@@ -29,7 +29,6 @@ struct MvpLmdDynamic {
     JsInterpHostOps ops;
     JsInterpEnv* script_environment;
 };
-static constexpr uint32_t MVP_LMD_DYNAMIC_OWNER = 0x4d564459;
 static Item dynamic_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 static Item dynamic_string(Item);
 
@@ -461,10 +460,8 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
             return mvp_lmd_regexp_new(mvp_lmd_program_library(owner), pattern, flags);
         },
         [](void* opaque, Item specifier, const char* reference) {
-            // a hosted realm must not acquire the parent realm's module namespace.
             MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
-            return mvp_lmd_program_realm_key(owner) ? dynamic_fail(LMD_MVP_CAPABILITY)
-                : js_dynamic_import_at(specifier, reference);
+            return mvp_lmd_dynamic_import(owner, specifier, reference);
         }};
     static const ContextCapsuleOps capsule = {"js-mvp-dynamic", CONTEXT_CAPSULE_LIFETIME_REALM,
         sizeof(MvpLmdDynamic), NULL, dynamic_release, dynamic_destroy};

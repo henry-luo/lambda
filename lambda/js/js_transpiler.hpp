@@ -192,6 +192,7 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
 
+bool js_c_source_is_module(const char* source, size_t length);
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                            JsParseMode mode);
 
@@ -415,7 +416,6 @@ Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
 
 // Type conversion functions
-Item js_to_primitive(Item value, const char* hint);
 Item js_to_number(Item value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);

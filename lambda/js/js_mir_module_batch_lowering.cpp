@@ -1,3 +1,4 @@
+#include "mvp-lmd/mvp_lmd.h"
 #include "js_mir_internal.hpp"
 #include "js_interp.hpp"
 #include "../../lib/hashmap_helpers.h"
@@ -4120,6 +4121,9 @@ static Item jm_execute_cached_module_mir(Runtime* runtime,
 }
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+    if (!js_ast_interpreter_requested() && !js_execution_auto_requested()) {
+        return mvp_lmd_execute_in_runtime(runtime, js_source, strlen(js_source), filename, NULL, true);
+    }
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
     // binds the Context-owned JS state. Test262's hot batch path calls this
@@ -4162,22 +4166,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             }
             return js_interp_execute_es_module_script(runtime, cached_ast, NULL);
         }
-    }
-    // Closed modules have no dependency or await execution state to retain.
-    // A cache hit therefore reconstructs only this Runtime's namespace and
-    // slab before entering the immutable image (D8.5.1v2).
-    InputCacheScope* cached_scope = NULL;
-    const JsModuleMirArtifact* cached = js_module_mir_cache_lookup(js_source,
-        source_length, filename, &cached_scope);
-    if (cached) {
-        if (!runtime_hold_js_module_mir_scope(runtime, cached_scope)) {
-            input_script_cache_close_scope(cached_scope);
-            return ItemError;
-        }
-        Item result = jm_execute_cached_module_mir(runtime, cached, filename);
-        input_script_cache_mark_module_hit(input_manager_global_script_cache());
-        log_info("js-mir-module-cache: hit module=%s", filename ? filename : "<module>");
-        return result;
     }
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
@@ -4246,6 +4234,15 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             tp->ast_index.count, reason);
         js_tla_exit_module();
         return js_mir_execute_ast_module(runtime, tp, filename);
+    }
+
+    if (js_execution_auto_requested() || js_ast_interpreter_requested()) {
+        // An AST capability miss crosses to the same formal MIR engine. A
+        // legacy cached image has a different callable ABI and cannot be reused.
+        js_tla_exit_module();
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        return mvp_lmd_execute_in_runtime(runtime, js_source, source_length, filename, NULL, true);
     }
 
     // The module graph is one execution. Its imports evaluate inside this

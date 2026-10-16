@@ -52,9 +52,18 @@ struct RxSeq {
     int count;
 };
 
+struct RxLiteralChoice {
+    uint32_t cp;
+    int alternative;
+};
+
 struct RxDisj {
     RxSeq** alts;
     int count;
+    RxLiteralChoice* literal_starts;
+    int literal_count;
+    int* other_starts;
+    int other_count;
 };
 
 struct RxNode {
@@ -815,6 +824,35 @@ static RxSeq* parse_alternative(Parser* ps) {
     return seq;
 }
 
+static void bt_index_literal_alternatives(Parser* ps, RxDisj* disj) {
+    // Large string sets must not retry every literal at every input position.
+    // Keep original ordinals so indexed and unindexed alternatives retain priority.
+    if (ps->flags.ignore_case || disj->count < 8) return;
+    int literals = 0;
+    for (int i = 0; i < disj->count; i++) {
+        RxSeq* seq = disj->alts[i];
+        if (seq->count && seq->items[0]->type == RX_CHAR) literals++;
+    }
+    if (literals < disj->count / 2) return;
+    auto* starts = (RxLiteralChoice*)bt_alloc(ps, sizeof(RxLiteralChoice) * literals);
+    auto* others = (int*)bt_alloc(ps, sizeof(int) * (disj->count - literals + 1));
+    if (!starts || !others) { ps->error = true; return; }
+    for (int i = 0; i < disj->count; i++) {
+        RxSeq* seq = disj->alts[i];
+        if (seq->count && seq->items[0]->type == RX_CHAR)
+            starts[disj->literal_count++] = {seq->items[0]->cp, i};
+        else others[disj->other_count++] = i;
+    }
+    qsort(starts, literals, sizeof(RxLiteralChoice), [](const void* a, const void* b) {
+        auto* x = (const RxLiteralChoice*)a;
+        auto* y = (const RxLiteralChoice*)b;
+        return x->cp != y->cp ? (x->cp < y->cp ? -1 : 1)
+            : (x->alternative < y->alternative ? -1 : x->alternative > y->alternative);
+    });
+    disj->literal_starts = starts;
+    disj->other_starts = others;
+}
+
 static RxDisj* parse_disjunction(Parser* ps) {
     ArrayList* alts = bt_parser_list_new(ps);
     if (!alts) return NULL;
@@ -834,6 +872,7 @@ static RxDisj* parse_disjunction(Parser* ps) {
     d->alts = (RxSeq**)bt_alloc(ps, sizeof(RxSeq*) * d->count);
     for (int i = 0; i < d->count; i++) d->alts[i] = (RxSeq*)arraylist_get(alts, i);
     arraylist_free(alts);
+    bt_index_literal_alternatives(ps, d);
     return d;
 }
 
@@ -1089,7 +1128,29 @@ static int bt_repeat(MatchCtx& ctx, const RxNode* node, int min, int max, int po
 }
 
 static int bt_match_disj(MatchCtx& ctx, const RxDisj* d, int pos, const Cont* k, int dir) {
-    for (int i = 0; i < d->count; i++) {
+    bool indexed = d->literal_starts && dir >= 0 && !ctx.icase;
+    int literal = 0, other = 0;
+    uint32_t cp = UINT32_MAX;
+    if (indexed) {
+        bt_decode_fwd(ctx.input, ctx.input_len, pos, &cp, ctx.unicode);
+        int hi = d->literal_count;
+        while (literal < hi) {
+            if (++ctx.steps > ctx.budget) { ctx.overflow = true; return -1; }
+            int mid = literal + (hi - literal) / 2;
+            if (d->literal_starts[mid].cp < cp) literal = mid + 1;
+            else hi = mid;
+        }
+    }
+    for (int next = 0; next < d->count;) {
+        int i = next++;
+        if (indexed) {
+            int a = literal < d->literal_count && d->literal_starts[literal].cp == cp
+                ? d->literal_starts[literal].alternative : d->count;
+            int b = other < d->other_count ? d->other_starts[other] : d->count;
+            i = a < b ? a : b;
+            if (i == d->count) break;
+            if (a < b) literal++; else other++;
+        }
         Cont seqk; seqk.kind = Cont::C_SEQ; seqk.up = k; seqk.seq = d->alts[i]; seqk.idx = 0;
         int r = bt_run(ctx, &seqk, pos, dir);
         if (r >= 0) return r;
@@ -1298,7 +1359,8 @@ extern "C" int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int s
             return JS_BT_EXEC_MATCH;
         }
         if (ctx.overflow) {
-            log_debug("js bt regex: step budget exhausted");
+            log_error("js-bt-regex: resource limit reached, steps=%ld/%ld, input=%d bytes",
+                ctx.steps, ctx.budget, input_len);
             return JS_BT_EXEC_RESOURCE_EXHAUSTED;
         }
         if (only_at_start) break;

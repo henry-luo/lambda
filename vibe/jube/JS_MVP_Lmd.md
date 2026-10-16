@@ -1923,3 +1923,29 @@ and remain marked unstable. This audit predates realms and waiters; selected
 later gains must not be added to it. Its readonly-global assignment crashes
 are fixed in compiler analysis. Detailed provenance and current verification
 are in the implementation plan. No current performance claim is made.
+
+
+## 36. Formal JavaScript MIR engine
+
+**Decision (2026-10-16, USER), D8.1.3v25:** promote MVP-Lmd to the formal
+JavaScript MIR engine. Normal MIR execution must reach MVP through the public
+runtime API, including module and host entry points. Retain the AST tier for
+`eval`, Function-family constructors and other dynamic source. Legacy LJS MIR
+must not silently execute rejected programs. Reuse Lambda's Runtime,
+EvalContext, Script lifetime and shared kernels (**D1.3v3, D5.3**).
+
+Fix remaining failures through this activated path while keeping Test262's
+population, harness, expectations and deadlines intact. Preserve pinned MIR
+benchmark comparisons; activation alone does not establish conformance or
+performance acceptance. Details and progress:
+[formal MIR implementation plan](../impl/JS_MVP_Lmd_Formal_MIR.md).
+
+**Implementation checkpoint:** ordinary public Script/Module execution and
+formal MIR Test262 batches now select MVP. Repeated public Scripts share their
+global object, lexical bindings, intrinsic identities and escaping closures;
+host global access uses that same realm. Heap replacement retires the old
+Promise/module policies. Document/preamble artifacts, host API coverage and
+AUTO per-function publication remain incomplete. The implementation plan
+records failing integrated gates separately from passing focused tests.
+Performance acceptance remains open, including the cost of complete public
+realm semantics versus standalone closed-unit analysis.

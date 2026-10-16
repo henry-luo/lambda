@@ -41,7 +41,8 @@ function countdown(n) {
     return countdown(n - 1);
 }
 try {
-    countdown(2000000);
+    // S7.11.4 permits different native frame sizes; force unbounded recursion.
+    countdown(Infinity);
 } catch (error) {
     console.log("countdown stack guard = " + error.name);
 }

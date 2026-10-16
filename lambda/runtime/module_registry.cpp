@@ -498,10 +498,17 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
     Runtime* runtime = (Runtime*)runtime_ptr;
     ModuleDescriptor* module = module_get_for_runtime(runtime, resolved_path);
     TypeId ns_type = get_type_id(namespace_obj);
-    if (ns_type != LMD_TYPE_MAP) {
-        log_error("module_registry: hosted namespace is not a map (type=%d)", ns_type);
+    if (ns_type != LMD_TYPE_MAP && ns_type != LMD_TYPE_VMAP) {
+        log_error("module_registry: hosted namespace is not map-like (type=%d)", ns_type);
         return NULL;
     }
+
+    RootFrame roots(1);
+    if (!roots.valid()) return NULL;
+    Rooted<Item> namespace_root(roots, namespace_obj);
+    // D3.4: enumerate through Lambda's common map/virtual-map key interface.
+    SymbolKeyList* keys = item_keys(namespace_root.get());
+    if (!keys) return NULL;
 
     // Create a Script with its own pool
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_AST, "module_registry");
@@ -526,35 +533,24 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
     ast->child = NULL;
     script->ast_root = (AstNode*)ast;
 
-    // Walk namespace map shape to discover exports
-    Map* map = namespace_obj.map;
-    TypeMap* type_map = (TypeMap*)map->type;
-    if (!type_map || !type_map->shape) {
-        log_debug("module_registry: hosted namespace has no shape entries");
-        return script;
-    }
-
     AstNode* tail = NULL;
     uint32_t synthetic_offset = 1000000U;  // use high offsets to avoid collisions
 
-    ShapeEntry* shape = type_map->shape;
-    while (shape) {
-        if (!shape->name || !shape->name->str) {
-            shape = typemap_next_field(type_map, shape);
-            continue;
-        }
+    for (int64_t index = 0; index < symbol_key_list_len(keys); index++) {
+        Symbol* name = symbol_key_list_at(keys, index);
+        if (!name) continue;
 
         // Read the export value from the namespace
-        Item value = module_namespace_get(module, shape->name->str);
+        Item value = module_namespace_get(module, name->chars);
         TypeId val_type = get_type_id(value);
 
         if (val_type == LMD_TYPE_FUNC) {
             // Function export — create synthetic AstFuncNode
             int arity = module_namespace_function_arity(module, value);
 
-            if (module_name_collides_with_sys(shape->name->str, (int)shape->name->length)) {
+            if (module_name_collides_with_sys(name->chars, (int)name->len)) {
                 log_error("module_registry: JS export '%.*s' shadows system function",
-                    (int)shape->name->length, shape->name->str);
+                    (int)name->len, name->chars);
             }
 
             AstFuncNode* fn_node = (AstFuncNode*)pool_calloc(pool, sizeof(AstFuncNode));
@@ -572,7 +568,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
 
             // Copy the external shape name into the AST pool.
             fn_node->name = string_from_strview(
-                strview_init(shape->name->str, shape->name->length), pool);
+                strview_init(name->chars, name->len), pool);
 
             // Create TypeFunc — all params as Item (boxed), public
             TypeFunc* fn_type = (TypeFunc*)pool_calloc(pool, sizeof(TypeFunc));
@@ -600,7 +596,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             tail = (AstNode*)fn_node;
 
             log_debug("module_registry: hosted export fn '%.*s' arity=%d offset=%d",
-                (int)shape->name->length, shape->name->str, arity,
+                (int)name->len, name->chars, arity,
                 fn_node->source_span.start_byte);
         } else if (val_type != LMD_TYPE_NULL) {
             // Variable export — create synthetic pub var node
@@ -618,7 +614,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
 
             // Copy the external shape name into the AST pool.
             named->name = string_from_strview(
-                strview_init(shape->name->str, shape->name->length), pool);
+                strview_init(name->chars, name->len), pool);
 
             AstIdentNode* id = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
             id->node_type = AST_NODE_IDENT;
@@ -635,12 +631,12 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             tail = (AstNode*)pub_node;
 
             log_debug("module_registry: hosted export var '%.*s' type=%d",
-                (int)shape->name->length, shape->name->str, val_type);
+                (int)name->len, name->chars, val_type);
         }
 
-        shape = typemap_next_field(type_map, shape);
     }
 
+    symbol_key_list_free(keys);
     return script;
 }
 

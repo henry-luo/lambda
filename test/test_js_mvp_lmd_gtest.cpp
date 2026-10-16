@@ -1,6 +1,8 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
 #include "lambda/js/js_interp.hpp"
+#include "lambda/js/js_transpiler.hpp"
+#include "lambda/js/js_mir_internal.hpp"
 #include "lambda/js/js_event_loop.h"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
@@ -14,12 +16,297 @@
 #include "lambda/runtime/heap_api.h"
 #include "lambda/runtime/transpiler.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
+#include "lambda/runtime/lambda-root-frame.hpp"
 #include "lib/file.h"
 #include "lib/mem.h"
 #include "lib/hashmap.h"
 #include "lib/strbuf.h"
 #include <math.h>
 #include <string.h>
+
+class JsFormalMir : public ::testing::Test {
+protected:
+    Runtime runtime = {};
+    uint64_t result_home = 0;
+    char* previous_backend = NULL;
+    void SetUp() override {
+        const char* previous = getenv("JS_EXEC_BACKEND");
+        previous_backend = previous ? mem_dup_n(previous, strlen(previous), MEM_CAT_TEMP) : NULL;
+        setenv("JS_EXEC_BACKEND", "mir", 1);
+        runtime_init(&runtime);
+    }
+    void TearDown() override {
+        runtime_cleanup(&runtime);
+        if (previous_backend) setenv("JS_EXEC_BACKEND", previous_backend, 1);
+        else unsetenv("JS_EXEC_BACKEND");
+        mem_free(previous_backend);
+    }
+    Item run(const char* source) {
+        return transpile_js_to_mir_len(&runtime, source, strlen(source), "<formal-mir>", &result_home);
+    }
+};
+
+TEST_F(JsFormalMir, PublicEntryRetainsMvpClosureAndCallerHeap) {
+    Item value = run("let x={n:40}; function next(){return ++x.n} next");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    EXPECT_TRUE(function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD));
+    EXPECT_EQ(context, runtime.eval_context);
+    RootFrame roots(1);
+    Rooted<Item> function(roots, value);
+    heap_gc_collect();
+    Item result = js_call_function_into(function.get(), make_js_undefined(), NULL, 0, &result_home);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 41);
+}
+
+TEST_F(JsFormalMir, PublicScriptsShareLexicalsIntrinsicsAndEscapingClosures) {
+    Item value = run("let total=40;var firstArray=Array;function next(){return ++total}next");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    RootFrame roots(1);
+    Rooted<Item> function(roots, value);
+    Item result = run("const step=2;total+=step;gc();firstArray===Array&&next()===43");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    result = js_call_function_into(function.get(), make_js_undefined(), NULL, 0, &result_home);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 44);
+    result = run("Function('return total+step')()");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 46);
+}
+
+TEST_F(JsFormalMir, PublicRedeclarationFailsBeforeExecutingAndKeepsRealm) {
+    ASSERT_FALSE(item_is_error(run("let kept=7;globalThis.effects=0")));
+    Item result = run("effects++;let kept=9");
+    ASSERT_TRUE(item_is_error(result));
+    char message[128];
+    js_error_lane_format(result, message, sizeof(message));
+    EXPECT_NE(strstr(message, "SyntaxError"), nullptr);
+    result = run("kept===7&&effects===0");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
+    ASSERT_FALSE(item_is_error(run("let oldValue=42;Array.prototype.oldMarker=1")));
+    runtime_reset_heap(&runtime);
+    Item result = run("typeof oldValue==='undefined'&&Array.prototype.oldMarker===undefined");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, PublicHostPublishesNativeCallbackIntoActiveRealm) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    RootFrame roots(2);
+    Rooted<Item> function(roots, js_new_native_function([]() -> Item {
+        heap_gc_collect(); return Item{.item = i2it(42)};
+    })), key(roots, js_name_item("collectHost"));
+    ASSERT_FALSE(item_is_error(js_set_global_property(key.get(), function.get(), 0)));
+    Item result = run("collectHost()");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 42);
+}
+
+TEST_F(JsFormalMir, PublicHostReadsTheActiveGlobalAndLexicalEnvironment) {
+    Item value = run("let lexical=41;globalThis.visible=42;globalThis");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, js_get_global_this().item);
+    EXPECT_EQ(it2d(js_get_key_cstr(js_get_global_this(), "visible")), 42);
+    Item key = js_name_item("lexical");
+    EXPECT_EQ(it2d(js_get_global_property(key)), 41);
+    EXPECT_EQ(js_global_binding_exists_after_with_lookup(key), 1);
+    EXPECT_EQ(js_get_key_default(js_get_global_this(), key).item, ITEM_JS_UNDEFINED);
+    EXPECT_EQ(js_get_global_property(js_name_item("absentHostName")).item, ITEM_JS_UNDEFINED);
+}
+
+TEST_F(JsFormalMir, PublicStructuredCloneUsesSharedKernelAndRealmCarriers) {
+    Item result = run(
+        "let original={list:[{value:40}],bytes:new Uint8Array([1,2]),"
+        "empty:new Uint8Array(0),buffer:new ArrayBuffer(2),"
+        "get extra(){gc();return {value:2}}};"
+        "let copy=structuredClone(original);copy.bytes[0]=9;gc();"
+        "copy!==original&&Object.getPrototypeOf(copy)===Object.prototype&&"
+        "Object.getPrototypeOf(copy.list)===Array.prototype&&"
+        "copy.list!==original.list&&copy.list[0]!==original.list[0]&&"
+        "copy.list[0].value+copy.extra.value===42&&"
+        "copy.bytes instanceof Uint8Array&&copy.bytes[0]===9&&original.bytes[0]===1&&"
+        "copy.empty!==original.empty&&copy.empty.length===0&&"
+        "copy.buffer!==original.buffer&&copy.buffer instanceof ArrayBuffer&&copy.buffer.byteLength===2");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, PublicEntryUsesRetainedInterpreterForDynamicSource) {
+    Item result = run("let x=7;function f(){eval('x+=2');return Function('return x')()}f()");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 9);
+}
+
+TEST_F(JsFormalMir, PublicEntryReportsSyntaxAndThrownError) {
+    Item result = run("throw new TypeError('formal message')");
+    ASSERT_TRUE(item_is_error(result));
+    char message[128];
+    js_error_lane_format(result, message, sizeof(message));
+    EXPECT_STREQ(message, "TypeError: formal message");
+}
+
+TEST_F(JsFormalMir, PublicEntryRetainsParseError) {
+    Item result = run("let = ;");
+    ASSERT_TRUE(item_is_error(result));
+    char message[128];
+    js_error_lane_format(result, message, sizeof(message));
+    EXPECT_NE(strstr(message, "SyntaxError"), nullptr);
+}
+
+TEST_F(JsFormalMir, PublicEntryDetectsModuleGoal) {
+    Item result = run("export const answer=42; if(this!==undefined)throw Error('module receiver');");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_JS_UNDEFINED);
+}
+
+TEST_F(JsFormalMir, PublicModuleEntryReturnsLiveNamespace) {
+    Item value = transpile_js_module_to_mir(&runtime,
+        "export let answer=41;export function next(){return ++answer}", "formal-namespace.mjs");
+    ASSERT_FALSE(item_is_error(value));
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_VMAP);
+    RootFrame roots(2);
+    Rooted<Item> ns(roots, value), function(roots, js_get_key_cstr(ns.get(), "next"));
+    ASSERT_EQ(get_type_id(function.get()), LMD_TYPE_FUNC);
+    EXPECT_TRUE(function_has_abi(function.get().function, FN_ENTRY_ABI_MVP_LMD));
+    heap_gc_collect();
+    Item result = js_call_function_into(function.get(), make_js_undefined(), NULL, 0, &result_home);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 42);
+    EXPECT_EQ(it2d(js_get_key_cstr(ns.get(), "answer")), 42);
+    EXPECT_EQ(it2d(vmap_get_by_str(ns.get().vmap, "answer")), 42);
+    Item repeated = transpile_js_module_to_mir(&runtime,
+        "export let answer=41;export function next(){return ++answer}", "formal-namespace.mjs");
+    ASSERT_FALSE(item_is_error(repeated));
+    EXPECT_EQ(repeated.item, ns.get().item);
+    EXPECT_EQ(it2d(vmap_get_by_str(repeated.vmap, "answer")), 42);
+}
+
+TEST_F(JsFormalMir, ChildRealmModulesRetainRegistryAndQueuedPolicy) {
+    create_dir("temp/mvp_modules");
+    write_text_file("temp/mvp_modules/child-identity.js",
+        "export const ctor=Array;export const label=await Promise.resolve(globalThis.realmLabel);"
+        "export async function again(){return import('./child-identity.js')}"
+        "export function fail(){throw new TypeError('child')} ");
+    Item result = run(R"JS(
+globalThis.realmLabel='parent';
+let first=$262.createRealm(),second=$262.createRealm();
+first.global.realmLabel='first';second.global.realmLabel='second';
+let a=first.evalScript("import('./temp/mvp_modules/child-identity.js')");
+let b=second.evalScript("import('./temp/mvp_modules/child-identity.js')");
+let p=import('./temp/mvp_modules/child-identity.js');
+gc();
+Promise.all([a,b,p]).then(async values=>{
+    let x=values[0],y=values[1],z=values[2];
+    let again=await x.again();
+    let correctError=false;try{x.fail()}catch(e){correctError=e instanceof first.global.TypeError&&!(e instanceof TypeError)}
+    return x!==y&&y!==z&&again===x&&x.ctor===first.global.Array&&y.ctor===second.global.Array&&z.ctor===Array
+        &&x.label==='first'&&y.label==='second'&&z.label==='parent'&&correctError;
+})
+)JS");
+    ASSERT_FALSE(item_is_error(result));
+    ASSERT_TRUE(js_promise_is(result));
+    auto* promise = (JsPromise*)result.vmap;
+    ASSERT_EQ(promise->state, JS_PROMISE_FULFILLED);
+    EXPECT_EQ(promise->result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, UnsetBackendSelectsMvpMir) {
+    unsetenv("JS_EXEC_BACKEND");
+    Item value = run("function answer(){return 42} answer");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    EXPECT_TRUE(function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD));
+}
+
+TEST_F(JsFormalMir, ReceiverOnlyEntryDoesNotRequireBuiltinLibrary) {
+    Item value = run("this");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(get_type_id(value), LMD_TYPE_MAP);
+}
+
+TEST_F(JsFormalMir, PublicTypedArraysAcceptLambdaBinary) {
+    Item value = run("function check(b){let a=new Uint8Array(b),c=new Uint8ClampedArray(b),d=Uint8Array.from(b);"
+        "a[0]=17;gc();return a instanceof Uint8Array&&a.buffer instanceof ArrayBuffer&&"
+        "c instanceof Uint8ClampedArray&&a[0]===17&&c[0]===222&&d[3]===239}check");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    RootFrame roots(2);
+    Rooted<Item> function(roots, value), source(roots, ItemNull);
+    const char bytes[] = {(char)0xde, (char)0xad, (char)0xbe, (char)0xef};
+    source.set(Item{.item = x2it(heap_binary_from_bytes(bytes, sizeof(bytes)))});
+    Item argument = source.get();
+    Item result = js_call_function_into(function.get(), make_js_undefined(), &argument, 1, &result_home);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    EXPECT_EQ(binary_data(source.get().get_safe_binary())[0], 0xde);
+}
+
+TEST_F(JsFormalMir, PublicDataViewUsesPhysicalCarrierBrand) {
+    Item value = run("new DataView(new Uint8Array([222,173,190,239]).buffer,1,2)");
+    ASSERT_FALSE(item_is_error(value));
+    RootFrame roots(2);
+    Rooted<Item> view(roots, value), binary(roots, ItemNull);
+    ASSERT_TRUE(js_is_dataview(view.get()));
+    binary.set(fn_binary(view.get()));
+    ASSERT_EQ(get_type_id(binary.get()), LMD_TYPE_BINARY);
+    ASSERT_EQ(binary_length(binary.get().get_safe_binary()), 2);
+    EXPECT_EQ(binary_data(binary.get().get_safe_binary())[0], 0xad);
+    EXPECT_EQ(binary_data(binary.get().get_safe_binary())[1], 0xbe);
+}
+
+TEST_F(JsFormalMir, PublicHostRetainsBufferAndChildRealmFacilities) {
+    Item result = run("let b=new ArrayBuffer(8);$262.detachArrayBuffer(b);"
+        "let r=$262.createRealm();b.byteLength===0&&r.global.Array!==Array");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostedWithClosuresKeepCapturedObjectsAndUnscopables) {
+    Item result = run("let x=3;let f=Function('o', 'with(o){return ()=>x}');"
+        "let o={x:7};let g=f(o);gc();let a=g();"
+        "o[Symbol.unscopables]={x:true};let b=g();"
+        "delete o[Symbol.unscopables];o.x=9;a===7&&b===3&&g()===9");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, UnicodeStringSetsPreferLongestElement) {
+    Item result = run("let a=/[\\q{a|ab}]/v.exec('ab')[0];"
+        "let b=/[\\q{|a}]b/v.exec('ab')[0];"
+        "let c=/[\\q{a|ab}]b/v.exec('ab')[0];a==='ab'&&b==='ab'&&c==='ab'");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, ClosedClassAncestryReachesObjectPrototype) {
+    Item result = run("class A{constructor(){this.x=1}}class B extends A{}"
+        "class C extends B{hasOwnProperty(k){return k==='override'}}"
+        "let b=new B;let c=new C;b.hasOwnProperty('x')&&!b.hasOwnProperty('y')"
+        "&&c.hasOwnProperty('override')&&!c.hasOwnProperty('x')");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeFunctionSourceKeepsOriginalName) {
+    Item result = run("const show=Function.prototype.toString;"
+        "const a=show.call(Object);const b=show.call(DataView);"
+        "Object.defineProperty(Object,'name',{get(){throw Error('observable name')}});"
+        "a==='function Object() { [native code] }'&&"
+        "b==='function DataView() { [native code] }'&&show.call(Object)===a&&"
+        "show.call(DataView.bind(null))==='function () { [native code] }'");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, TemporalDeadZoneReportsBindingName) {
+    Item result = run("function f(){try{return later}catch(e){"
+        "return e instanceof ReferenceError&&e.message.includes('later')}let later=1}f()");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
 
 class JsMvpLmd : public ::testing::Test {
 protected:
@@ -1107,21 +1394,13 @@ TEST_F(JsMvpLmd, PrivateClassFieldsAndBrands) {
     error("class C{#x;has(o){return #x in o}}new C().has(1)", "TypeError");
     error("class C{#x;get(){return this.#x}}C.prototype.get()", "TypeError");
     for (int private_fields = 0; private_fields < 2; private_fields++) {
-        for (int count = 126; count <= 127; count++) {
+        const int counts[] = {126, 127, 257};
+        for (int count : counts) {
             StrBuf* source = strbuf_new();
             strbuf_append_str(source, "class C{");
-            for (int i = 0; i < count; i++) strbuf_append_format(source, "%sf%d;", private_fields ? "#" : "", i);
-            strbuf_append_str(source, "}typeof C==='function'");
-            if (count == 126) boolean(source->str);
-            else {
-                mvp_lmd_destroy(execution);
-                execution = mvp_lmd_execute(source->str, source->length);
-                MvpLmdFailurePhase phase;
-                const char* reason = mvp_lmd_diagnostic(execution, &phase);
-                EXPECT_EQ(phase, MVP_LMD_ADMISSION_FAILURE);
-                ASSERT_NE(reason, nullptr);
-                EXPECT_NE(strstr(reason, "class environment exceeds closure layout"), nullptr);
-            }
+            for (int i = 0; i < count; i++) strbuf_append_format(source, "%sf%d=%d;", private_fields ? "#" : "", i, i);
+            strbuf_append_format(source, "get(){return this.%sf%d}}new C().get()", private_fields ? "#" : "", count - 1);
+            numeric(source->str, count - 1);
             strbuf_free(source);
         }
     }
@@ -3274,16 +3553,19 @@ TEST_F(JsMvpLmd, RecursiveReturnKindsAndNativeBoundaries) {
     EXPECT_EQ(strstr(source, "\timport\tlambda_item_adopt_scalar_home"), nullptr);
     mem_free(source);
 }
-TEST_F(JsMvpLmd, SelfTailCallsPreserveActivationAndArguments) {
-    numeric("function sum(n,a){if(n===0)return a;return sum(n-1,a+n)} sum(100000,0)", 5000050000.0);
-    numeric("function swap(n,a,b){if(n===0)return a*10+b;return swap(n-1,b,a)} swap(100001,1,2)", 21);
-    numeric("var count=0;function f(n,a){if(n===0)return a;return f(n-1,a+1,count++)} f(10000,0)+count", 20000);
-    numeric("function f(n){var previous=x;var x=n;if(n===0)return previous===undefined?1:0;return f(n-1)} f(10000)", 1);
+TEST_F(JsMvpLmd, RecursiveCallsPreserveActivationAndArguments) {
+    // JC24 forbids tail-call elimination, including otherwise numeric bodies.
+    boolean("function f(n){if(n<=0)return 0;return f(n-1)}let caught=false;try{f(Infinity)}catch(e){caught=e instanceof RangeError}caught");
+
+    numeric("function sum(n,a){if(n===0)return a;return sum(n-1,a+n)} sum(100,0)", 5050.0);
+    numeric("function swap(n,a,b){if(n===0)return a*10+b;return swap(n-1,b,a)} swap(101,1,2)", 21);
+    numeric("var count=0;function f(n,a){if(n===0)return a;return f(n-1,a+1,count++)} f(100,0)+count", 200);
+    numeric("function f(n){var previous=x;var x=n;if(n===0)return previous===undefined?1:0;return f(n-1)} f(100)", 1);
     numeric("var a=[];function f(n){let row=['x'+n];a[0]=row;if(n===0)return row.length;return f(n-1)} f(200)", 1);
     numeric("function f(n){if(n===0)return 1;return f(n-1)+1} f(20)", 21);
     error("function f(n){if(n===0){const x=1;x=2}return f(n-1)} f(10)", "TypeError");
     // exhaustion must be checked independently of the host's available recursion depth.
-    error("function f(n){if(n===0)return 0;return f(n+1)+1} f(1)", "execution failed");
+    error("function f(n){if(n===0)return 0;return f(n+1)+1} f(1)", "Stack overflow");
 }
 TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
     boolean("if(false){({get a(){return 1}})}true");

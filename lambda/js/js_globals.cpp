@@ -28,6 +28,8 @@
 #include "../dom/dom_canvas.h"
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
+#include "js_interp.hpp"
+#include "mvp-lmd/mvp_lmd_dynamic.h"
 
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
@@ -2448,6 +2450,11 @@ extern "C" void js_store_process_argv(int argc, const char** argv) {
     js_process_argv_raw = argv;
 }
 
+extern "C" const char* const* js_process_bootstrap_arguments(int* argc) {
+    if (argc) *argc = js_process_argc_raw;
+    return js_process_argv_raw;
+}
+
 extern "C" void js_store_process_exec_argv(int argc, const char** argv) {
     js_process_exec_argc_raw = argc;
     js_process_exec_argv_raw = argv;
@@ -3197,7 +3204,8 @@ static bool js_message_port_transfer_list_has_marked(Item transfer_list);
 static Item js_message_port_clone_for_transfer(Item port);
 extern "C" Item js_message_port_new(void);
 
-static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth) {
+static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth,
+        const JsStructuredCloneOps* ops = NULL) {
     if (depth > 100) return value; // prevent infinite recursion
     TypeId tid = get_type_id(value);
 
@@ -3215,14 +3223,18 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     if (js_is_js_array(value_root.get())) {
         int64_t len = js_array_length(value_root.get());
         // append into an empty array; js_array_new(len) would prepend len holes.
-        result_root.set(js_array_new(0));
+        result_root.set(ops ? ops->arrays->create(0) : js_array_new(0));
+        JS_RETURN_IF_ERROR(result_root.get());
         for (int64_t i = 0; i < len; i++) {
-            element_root.set(js_elements_get_int(value_root.get(), i));
+            element_root.set(ops ? ops->arrays->index(value_root.get(), i, ItemNull, JS_ARRAY_INDEX_GET)
+                : js_elements_get_int(value_root.get(), i));
             JS_RETURN_IF_ERROR(element_root.get());
             element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1));
+                transfer_root.get(), depth + 1, ops));
             JS_RETURN_IF_ERROR(element_root.get());
-            JS_RETURN_IF_ERROR(js_array_push(result_root.get(), element_root.get()));
+            JS_RETURN_IF_ERROR(ops ? ops->arrays->index(result_root.get(), i,
+                element_root.get(), JS_ARRAY_INDEX_CREATE)
+                : js_array_push(result_root.get(), element_root.get()));
         }
         return result_root.get();
     }
@@ -3232,7 +3244,9 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value_root.get());
         if (!ab || js_arraybuffer_detached(ab)) return value_root.get();
         int byte_length = js_arraybuffer_length(ab);
-        result_root.set(js_arraybuffer_new(byte_length));
+        result_root.set(ops ? ops->typed_arrays->buffer->construct(make_js_undefined(), byte_length, false)
+            : js_arraybuffer_new(byte_length));
+        JS_RETURN_IF_ERROR(result_root.get());
         ab = js_get_arraybuffer_ptr_item(value_root.get());
         JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(result_root.get());
         const uint8_t* source = js_arraybuffer_data_const(ab);
@@ -3259,11 +3273,14 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         int len = js_typed_array_length(value_root.get());
         int byte_length = js_typed_array_byte_length(value_root.get());
         const void* src_data = js_typed_array_current_data_ptr(value_root.get());
-        if (ta && src_data && byte_length > 0) {
-            result_root.set(js_typed_array_new(ta->element_type, len));
+        if (ta && (src_data || byte_length == 0)) {
+            Item length = {.item = i2it(len)};
+            result_root.set(ops ? ops->typed_arrays->construct(ta->element_type,
+                make_js_undefined(), &length, 1) : js_typed_array_new(ta->element_type, len));
+            JS_RETURN_IF_ERROR(result_root.get());
             src_data = js_typed_array_current_data_ptr(value_root.get());
             void* dst_data = js_typed_array_prepare_write_ptr(result_root.get());
-            if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
+            if (dst_data && src_data && byte_length > 0) memcpy(dst_data, src_data, (size_t)byte_length);
             return result_root.get();
         }
         return value_root.get();
@@ -3273,19 +3290,21 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
         // key enumeration, getters and recursive child clones can collect;
         // unpublished destinations need exact roots until stored (D5.4.1).
-        result_root.set(js_new_object());
-        keys_root.set(js_object_keys(value_root.get()));
+        result_root.set(ops ? ops->object() : js_new_object());
+        JS_RETURN_IF_ERROR(result_root.get());
+        keys_root.set(ops ? ops->keys(value_root.get()) : js_object_keys(value_root.get()));
         JS_RETURN_IF_ERROR(keys_root.get());
         int64_t count = js_array_length(keys_root.get());
         for (int64_t index = 0; index < count; index++) {
             key_root.set(js_elements_get_int(keys_root.get(), index));
-            element_root.set(js_get_key_default(value_root.get(), key_root.get()));
+            element_root.set(ops ? ops->get(value_root.get(), key_root.get())
+                : js_get_key_default(value_root.get(), key_root.get()));
             JS_RETURN_IF_ERROR(element_root.get());
             element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1));
+                transfer_root.get(), depth + 1, ops));
             JS_RETURN_IF_ERROR(element_root.get());
-            JS_RETURN_IF_ERROR(js_set_key_default(result_root.get(),
-                key_root.get(), element_root.get()));
+            JS_RETURN_IF_ERROR(ops ? ops->create(result_root.get(), key_root.get(), element_root.get())
+                : js_set_key_default(result_root.get(), key_root.get(), element_root.get()));
         }
         return result_root.get();
     }
@@ -3301,6 +3320,9 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
 }
 JS_FORWARD_STATIC_ITEM(structured_clone_impl, (Item value, int depth), structured_clone_transfer_impl, (value, ItemNull, depth))
 JS_FORWARD_ITEM(js_structuredClone, (Item value), structured_clone_impl, (value, 0))
+extern "C" Item js_structured_clone_with_ops(Item value, const JsStructuredCloneOps* ops) {
+    return structured_clone_transfer_impl(value, ItemNull, 0, ops);
+}
 
 // =============================================================================
 // Global Functions
@@ -13560,6 +13582,9 @@ extern "C" uint64_t js_realm_init_time_us(void) {
 }
 
 extern "C" Item js_get_global_this() {
+    // public host reads must observe the same global as compiled Scripts.
+    if (js_runtime_state.formal_mir_owner)
+        return mvp_lmd_dynamic_global_this(NULL);
     if (js_global_this_obj.item == 0) {
         uint64_t realm_start = time_now_us();
         if (!js_global_bindings_ensure_roots()) return ItemNull;
@@ -13921,6 +13946,19 @@ static bool js_with_scope_is_object(Item value) {
            is_virtual_container_type_id(type);
 }
 
+// hosted eval shares the scope chain; its object operations retain its realm.
+static Item js_with_property(Item object, Item key, Item value, int operation, bool strict = false) {
+    if (js_interp_host) return js_interp_host->property(js_interp_host->state,
+        object, key, value, operation, strict, object);
+    switch (operation) {
+    case JS_INTERP_HOST_HAS: return js_in(key, object);
+    case JS_INTERP_HOST_GET: return js_get_key_default(object, key);
+    case JS_INTERP_HOST_SET: return js_set_key_policy(object, key, value, strict);
+    case JS_INTERP_HOST_DELETE: return js_delete_property(object, key);
+    default: return ItemError;
+    }
+}
+
 // Unlink without touching the pushers' storage. This runs at a script boundary
 // where the chain should already be empty, and at a fault landing where the
 // recovery checkpoint has rewound past those frames entirely.
@@ -13944,10 +13982,12 @@ extern "C" Item js_with_push_at(Item* slot, Item obj) {
     if (!slot) return js_status_ok();
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
+        return js_interp_host ? js_interp_host->fail(JS_INTERP_HOST_TYPE)
+            : js_throw_type_error("Cannot convert undefined or null to object");
     }
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
+        JS_ASSIGN_OR_RETURN_INTO(obj, js_interp_host
+            ? js_interp_host->bind_this(js_interp_host->state, obj, false) : js_to_object(obj));
     }
     JsWithFrame* frame = (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame),
         MEM_CAT_JS_RUNTIME);
@@ -14033,7 +14073,8 @@ extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
 JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)
 
 static Item js_with_unscopables_symbol(void) {
-    return js_symbol_well_known(js_name_item("unscopables", 11));
+    return js_interp_host ? Item{.item = s2it(well_known_name_ref(JS_SYMBOL_UNSCOPABLES))}
+        : js_symbol_well_known(js_name_item("unscopables", 11));
 }
 
 extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
@@ -14054,8 +14095,9 @@ extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
 }
 static Item js_with_binding_is_visible(Item key, Item scope_obj) {
     static const JsWithBindingOps ops = {
-        [](Item object, Item key) { return js_in(key, object); },
-        js_get_key_default, js_with_scope_is_object,
+        [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_HAS); },
+        [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_GET); },
+        js_with_scope_is_object,
         [](Item value) -> int64_t { return js_is_truthy(value); }
     };
     return js_with_binding_is_visible_with_ops(key, scope_obj, js_with_unscopables_symbol(), &ops);
@@ -14078,13 +14120,13 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
                 // Record operations. Re-run HasProperty after @@unscopables:
                 // its getter may have deleted the binding, and Proxy `has` traps
                 // must observe both abstract operations.
-                JS_ASSIGN_OR_RETURN(value_present, js_in(key, scope_obj));
+                JS_ASSIGN_OR_RETURN(value_present, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_HAS));
                 if (!it2b(value_present)) {
                     return strict_get
                         ? js_throw_binding_reference_error(key)
                         : make_js_undefined();
                 }
-                JS_ASSIGN_OR_RETURN(value, js_get_key_default(scope_obj, key));
+                JS_ASSIGN_OR_RETURN(value, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_GET));
                 if (js_with_memo_ready()) {
                     js_last_with_binding_scope = scope_obj;
                     js_last_with_binding_key = key;
@@ -14163,11 +14205,11 @@ static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
                                          int64_t strict) {
     // SetMutableBinding rechecks HasProperty: an earlier @@unscopables getter
     // or compound-read accessor may have removed the resolved binding.
-    JS_ASSIGN_OR_RETURN(still_exists, js_in(key, scope_obj));
+    JS_ASSIGN_OR_RETURN(still_exists, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_HAS));
     if (!it2b(still_exists)) {
         if (strict) return js_throw_binding_reference_error(key);
     }
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_policy(scope_obj, key, value, strict));
+    JS_ASSIGN_OR_RETURN(set_result, js_with_property(scope_obj, key, value, JS_INTERP_HOST_SET, strict != 0));
     return (Item){.item = b2it(true)};
 }
 
@@ -14195,7 +14237,7 @@ extern "C" Item js_set_with_binding_base(Item scope_obj, Item key, Item value, i
 
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     JS_ASSIGN_OR_RETURN(with_scope, js_with_resolve_scope(key, 0));
-    if (with_scope.item != ItemNull.item) return js_delete_property(with_scope, key);
+    if (with_scope.item != ItemNull.item) return js_with_property(with_scope, key, ItemNull, JS_INTERP_HOST_DELETE);
     if (declared_binding) return (Item){.item = b2it(false)};
     if (js_global_lexical_binding_exists(key)) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
@@ -14316,6 +14358,12 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    if (js_runtime_state.formal_mir_owner) {
+        Item present = mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_HAS, false);
+        return item_is_error(present) || present.item == ITEM_FALSE
+            ? (item_is_error(present) ? present : make_js_undefined())
+            : mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_GET, false);
+    }
     // A direct eval's projected caller binding is nearer than any global
     // lexical binding of the same name.
     if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
@@ -14329,6 +14377,8 @@ extern "C" Item js_get_global_property(Item key) {
 }
 
 extern "C" Item js_get_global_property_after_with_lookup(Item key) {
+    if (js_runtime_state.formal_mir_owner)
+        return mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_GET, false);
     if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
     Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
@@ -14381,6 +14431,10 @@ extern "C" Item js_get_global_property_reference(Item key, int64_t strict_refere
 }
 
 extern "C" int64_t js_global_binding_exists_after_with_lookup(Item key) {
+    if (js_runtime_state.formal_mir_owner) {
+        Item present = mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_HAS, false);
+        return present.item == ITEM_TRUE;
+    }
     // Script global lexical declarations are bindings in the realm record,
     // not properties on globalThis. Later classic Scripts (including a
     // Test262 test after its harness) must find them before probing the
@@ -14404,6 +14458,7 @@ extern "C" int64_t js_global_binding_exists(Item key) {
 }
 
 static Item js_throw_binding_reference_error(Item key) {
+    if (js_interp_host) return js_interp_host->fail(JS_INTERP_HOST_REFERENCE);
     String* sk = it2s(key);
     char msg[256];
     if (sk) {
@@ -14430,6 +14485,10 @@ static Item js_set_global_target_property(Item target, Item key, Item value,
 static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
         bool strict) {
     js_last_with_binding_valid = false;
+    if (js_runtime_state.formal_mir_owner) {
+        Item result = mvp_lmd_dynamic_global(NULL, key, value, JS_INTERP_HOST_SET, strict);
+        return item_is_error(result) ? result : js_status_ok();
+    }
     if (js_eval_env_has_binding(key)) {
         return js_set_global_target_property(js_get_global_this(), key, value, strict);
     }

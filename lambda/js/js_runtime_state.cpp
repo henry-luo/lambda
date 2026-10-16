@@ -2,6 +2,7 @@
 #include "js_object_meta.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
+#include "mvp-lmd/mvp_lmd.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/runtime-state.h"
@@ -1513,6 +1514,7 @@ extern "C" void js_batch_reset() {
     // clear CommonJS metadata (filenames/modules are heap Items from the prior script)
     js_cjs_metadata_reset();
     js_batch_reset_runtime_caches("js_batch_reset pre-cleanup", true);
+    mvp_lmd_runtime_reset();
 }
 
 // Partial batch reset: restore module vars to a checkpoint and clear test state,

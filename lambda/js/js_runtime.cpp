@@ -14,6 +14,7 @@
 #include "js_state_guards.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../core/well_known_lambda_names.h"
 #include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
@@ -757,7 +758,7 @@ static inline Item js_native_function_source_item() {
     return js_name_item(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN);
 }
 
-static Item js_named_native_function_source_item(const String* name) {
+Item js_named_native_function_source_item(const String* name) {
     if (!name || name->len == 0) return js_native_function_source_item();
     // Native constructor source must retain its callable identity: libraries
     // compare this text to distinguish Object, DataView, and other builtins.
@@ -12777,7 +12778,8 @@ extern "C" Item js_typed_array_static_with_ops(Item constructor, Item* args, int
         return buffer->error(false, "TypedArray.from mapper is not callable");
     if (source.get().item == ITEM_JS_UNDEFINED || get_type_id(source.get()) == LMD_TYPE_NULL)
         return buffer->error(false, "Cannot convert undefined or null to object");
-    bool binary = !ops && get_type_id(source.get()) == LMD_TYPE_BINARY;
+    // Lambda binary ingress is independent of the frontend's object policy.
+    bool binary = get_type_id(source.get()) == LMD_TYPE_BINARY;
     if (!binary) {
         if (ops) {
             collected.set(ops->collect(source.get()));
@@ -14122,27 +14124,6 @@ extern "C" void js_set_class_constructor_parent(Item class_function, Item superc
 
 
 
-// JSCU44: a `with` scope must not leak into a called function. The callee's
-// chain is its own captured env, so entering a call relinks one borrowed frame
-// and leaving restores the caller's head -- no copy, no dynamic root range.
-// The callee releases its own frames at every completion, so leaving frees none.
-struct JsWithActivation {
-    JsWithActivation() = default;
-    JsWithFrame frame = {};
-    JsWithFrame* saved_head = NULL;
-    bool entered = false;
-
-    void enter(Item* captured, int depth) {
-        saved_head = js_with_activation_enter(captured, depth, &frame);
-        entered = true;
-    }
-
-    ~JsWithActivation() { if (entered) js_with_activation_leave(saved_head); }
-
-    JsWithActivation(const JsWithActivation&) = delete;
-    JsWithActivation& operator=(const JsWithActivation&) = delete;
-};
-
 // super() for class-expression superclasses: the class carrier is a function.
 static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
         int argc, uint64_t* result_home) {
@@ -14986,6 +14967,19 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         // values. Do not reinterpret their compact layout as JsFunction; their
         // boxed ABI performs the required signature and result-home handling.
         Function* lambda_fn = func_item.function;
+        if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD)) {
+            // D6.2.2v2: host callbacks retain the MVP layout and caller-owned
+            // arguments/result; never read the larger JsFunction invoke slot.
+            RootFrame roots(2);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> callee(roots, func_item), receiver(roots, this_val);
+            RootSpan owned_args((!args_prerooted && arg_count > 0) ? (size_t)arg_count : 0);
+            if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+                    owned_args, "js-call-mvp")) return ItemError;
+            Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
+                callee.get(), receiver.get(), args, arg_count, make_js_undefined()));
+            return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
+        }
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
@@ -15050,10 +15044,29 @@ static Item js_call_export_into(Function* function, Item* args, int arg_count,
     if (!runtime || !function || !result_home) return ItemError;
     if (!js_mir_owner_is_current(runtime, "js-export-bridge")) return ItemError;
     Item callable = {.function = function};
-    Item result = js_call_function_into(callable, make_js_undefined(), args,
+    bool native_bigint = false;
+    if (function_has_abi(function, FN_ENTRY_ABI_MVP_LMD))
+        for (int i = 0; i < arg_count; i++) native_bigint |= js_is_native_bigint_egress(args[i]);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> callee(roots, callable);
+    RootSpan converted(native_bigint ? (size_t)arg_count : 0);
+    if (native_bigint) {
+        // S4.9.1: wide Lambda integers enter JavaScript as exact BigInts.
+        // retain all inputs before a conversion allocates on the shared heap.
+        bool prerooted = false;
+        if (!js_prepare_owned_argument_span(args, arg_count, prerooted, converted, "js-export-bigint")) return ItemError;
+        for (int i = 0; i < arg_count; i++) {
+            args[i] = js_native_bigint_to_bigint(args[i]);
+            if (item_is_error(args[i])) return args[i];
+        }
+    }
+    Item result = js_call_function_into(callee.get(), make_js_undefined(), args,
         arg_count, result_home);
     if (item_is_error(result)) {
-        log_error("js-export-bridge: uncaught error lane");
+        char message[256];
+        js_error_lane_format(result, message, sizeof(message));
+        log_error("js-export-bridge: %s", message);
     }
     return result;
 }
@@ -31617,11 +31630,10 @@ static void js_async_drive(Item frame_item, Item input) {
         }
         return;
     }
-    if (get_type_id(ctx->module_specifier) == LMD_TYPE_STRING) {
-        // A parked module body is a pending async evaluation edge for its
-        // async import parents.
-        js_module_mark_has_tla(ctx->module_specifier);
-        js_module_mark_post_await_pending(ctx->module_specifier);
+    if (ctx->module_descriptor) {
+        // a child realm's same-spelled module belongs to its retained descriptor.
+        ctx->module_descriptor->has_tla = true;
+        ctx->module_descriptor->post_await_pending = true;
     }
     // Bind resume/reject to the frame Item itself (JSCU10): the awaited
     // promise's reaction list then retains the activation until it settles.
@@ -31729,7 +31741,8 @@ extern "C" Item js_async_context_create_ast(Item function, Item arguments,
 static ModuleDescriptor* js_module_find(Item specifier);
 
 extern "C" Item js_async_context_create_module_body(ActivationEntry body,
-        void* payload, JsScript* script, uint32_t module_state_id, Item specifier) {
+        void* payload, JsScript* script, uint32_t module_state_id, Item specifier,
+        ModuleDescriptor* descriptor) {
     JS_ROOTS(roots, specifier_root, specifier, frame_root, ItemNull);
     frame_root.set(js_async_context_create_body(body, payload,
         NULL, 0, make_js_undefined(), ItemNull, ItemNull));
@@ -31738,7 +31751,8 @@ extern "C" Item js_async_context_create_module_body(ActivationEntry body,
     ctx->ast_module_script = script;
     ctx->module_specifier = specifier_root.get();
     // Every frontend registers the canonical descriptor before creating its carrier.
-    ModuleDescriptor* module = js_module_find(specifier_root.get());
+    ModuleDescriptor* module = descriptor ? descriptor : js_module_find(specifier_root.get());
+    ctx->module_descriptor = module;
     ctx->module_path = module ? module->path : NULL;
     // A nested import captures the target slab, never the caller's active module.
     ctx->module_state_id = module_state_id;
@@ -31749,7 +31763,7 @@ extern "C" Item js_async_context_create_module(JsScript* script, void* mir_main,
         uint32_t module_state_id, Item specifier) {
     return js_async_context_create_module_body(
         script ? js_interp_module_async_body : js_mir_module_async_body,
-        mir_main, script, module_state_id, specifier);
+        mir_main, script, module_state_id, specifier, NULL);
 }
 
 // Start execution of an async state machine (initial call at state 0)
@@ -32220,10 +32234,10 @@ extern "C" void js_tla_enter_module(void) {
 // A module body waiting on static async dependencies keeps its carrier in its
 // descriptor, in both tiers. Start each only after every such dependency has
 // completed; otherwise a live imported binding is observed in its TDZ.
-static void js_tla_drain_ready_modules(void) {
+static void js_tla_drain_ready_modules(Runtime* runtime = NULL) {
+    if (!runtime) runtime = context ? context->runtime : NULL;
     while (1) {
         ModuleDescriptor* best = NULL;
-        Runtime* runtime = context ? context->runtime : NULL;
         for (ModuleDescriptor* m = module_registry_first_for_runtime(runtime);
                 m; m = module_registry_next(m)) {
             auto* source = (JsSourceModuleRecord*)m->source_record;
@@ -32254,11 +32268,12 @@ static void js_tla_drain_ready_modules(void) {
 
 static __thread bool js_tla_ready_drain_scheduled = false;
 
-static Item js_tla_ready_drain_microtask(void) {
-    js_tla_ready_drain_scheduled = false;
+static Item js_tla_ready_drain_microtask(Item callee, Item, Item*, int, uint64_t*) {
+    auto* runtime = (Runtime*)(uintptr_t)js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (!runtime) js_tla_ready_drain_scheduled = false;
     if (g_tla_draining_depth > 0) return make_js_undefined();
     g_tla_draining_depth++;
-    js_tla_drain_ready_modules();
+    js_tla_drain_ready_modules(runtime);
     g_tla_draining_depth--;
     return make_js_undefined();
 }
@@ -32266,24 +32281,32 @@ static Item js_tla_ready_drain_microtask(void) {
 // The completing async frame settles its carrier after it notifies parents.
 // Queue parent execution behind that settlement so dynamic-import reactions
 // preserve the dependency's observable fulfillment order.
-static void js_tla_schedule_ready_drain(void) {
-    if (js_tla_ready_drain_scheduled) return;
+static void js_tla_schedule_ready_drain(Runtime* runtime = NULL) {
+    if (!runtime && js_tla_ready_drain_scheduled) return;
     RootFrame roots(1);
     Rooted<Item> callback_root(roots,
-        js_new_native_function(js_tla_ready_drain_microtask));
+        js_new_native_payload_function(js_tla_ready_drain_microtask, (uint64_t)(uintptr_t)runtime, 0));
     if (item_is_error(callback_root.get())) return;
-    js_tla_ready_drain_scheduled = true;
+    if (!runtime) js_tla_ready_drain_scheduled = true;
     js_microtask_enqueue(callback_root.get());
 }
 
-extern "C" void js_tla_flush_for_dynamic_import(void) {
-    if (g_tla_draining_depth > 0) return;
+extern "C" void js_tla_flush_for_runtime(Runtime* runtime) {
+    if (g_tla_draining_depth > 0) {
+        // another realm's ready work must survive a reentrant completion.
+        if (runtime) js_tla_schedule_ready_drain(runtime);
+        return;
+    }
     // Dynamic import is currently a synchronous loader; finish the imported
     // module's deferred TLA body before resolving its namespace, otherwise an
     // already-settled `await` still exposes an empty export object (D7.2.2).
     g_tla_draining_depth++;
-    js_tla_drain_ready_modules();
+    js_tla_drain_ready_modules(runtime);
     g_tla_draining_depth--;
+}
+
+extern "C" void js_tla_flush_for_dynamic_import(void) {
+    js_tla_flush_for_runtime(NULL);
 }
 
 static void js_tla_drain_post_await_modules(void) {

@@ -2,6 +2,7 @@
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_source_module.hpp"
+#include "mvp-lmd/mvp_lmd.h"
 #include "../jube/jube_registry.h"
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_trace_events.hpp"
@@ -874,6 +875,10 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
                                                  uint64_t* result_home,
                                                  bool typescript_profile,
                                                  bool test262_native_harness) {
+    if (!typescript_profile && !js_ast_interpreter_requested() &&
+            !js_execution_auto_requested() && !g_jm_preamble_mode && !g_jm_preamble_in) {
+        return mvp_lmd_execute_in_runtime(runtime, js_source, js_source_len, filename, result_home);
+    }
     // Recovery ownership begins before parsing. The first entry may initialize
     // an idle eval thread, but compilation cannot borrow and restore another
     // live context.
@@ -1090,6 +1095,15 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // the MIR tier. Release that claim now; leaving its scope live retains the
     // cache lease until process exit even though no AST artifact was published.
     js_common_ast_cache_complete_build(&ast_cache_build, false, false);
+    if (!typescript_profile && !g_jm_preamble_mode && !g_jm_preamble_in) {
+        bool module = tp->is_module || js_ast_is_es_module(js_ast);
+        jm_clear_active_js_transpile(tp, NULL, owned_source);
+        js_transpiler_destroy(tp);
+        Item result = mvp_lmd_execute_in_runtime(runtime, owned_source, js_source_len,
+            filename, result_home, module);
+        mem_free(owned_source);
+        return result;
+    }
 
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
@@ -2474,13 +2488,19 @@ static Item js_execute_dynamic_import_module(Runtime* runtime,
     return transpile_js_module_to_mir(runtime, source, filename);
 }
 
-static Item js_source_dynamic_import_job(Item environment) {
-    Item* slots = (Item*)(uintptr_t)environment.item;
+struct JsSourceImportPolicy {
+    const JsSourceModuleOps* source_ops;
+    void* source_owner;
+};
+static Item js_source_dynamic_import_job(Item callee, Item, Item*, int, uint64_t*) {
+    auto* function = (JsFunction*)callee.function;
+    Item* slots = function->env;
     if (!slots) return ItemError;
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     Rooted<Item> request(roots, slots[0]), path(roots, slots[1]), status(roots, ItemNull), ns(roots, ItemNull);
-    JsModuleRuntimeState* policy = &js_runtime_state.modules;
+    // queued imports retain their originating policy across reentrant realm changes.
+    const auto* policy = (const JsSourceImportPolicy*)(uintptr_t)js_fn_native(function)->target.bits;
     Runtime* runtime = policy->source_ops->ensure_runtime(policy->source_owner);
     if (!runtime) status.set(policy->source_ops->error(policy->source_owner,
         JS_SOURCE_MODULE_TYPE, "import(): module runtime unavailable"));
@@ -2503,14 +2523,16 @@ static Item js_source_dynamic_import_job(Item environment) {
     return make_js_undefined();
 }
 
-static Item js_source_dynamic_import(Item specifier, const char* reference) {
+Item js_source_dynamic_import(Item specifier, const char* reference,
+        const JsSourceModuleOps* ops, void* owner) {
     RootFrame roots(5);
     if (!roots.valid()) return ItemError;
     Rooted<Item> value(roots, js_retain_scalar(specifier)), request(roots, js_promise_create_pending()),
         path(roots, ItemNull), callback(roots, ItemNull), failure(roots, ItemNull);
     if (item_is_error(request.get())) return request.get();
-    JsModuleRuntimeState* policy = &js_runtime_state.modules;
-    value.set(policy->source_ops->to_string(policy->source_owner, value.get()));
+    const JsSourceImportPolicy policy_value = {ops, owner};
+    const JsSourceImportPolicy* policy = &policy_value;
+    value.set(ops->to_string(owner, value.get()));
     if (item_is_error(value.get())) failure.set(value.get());
     else {
         Runtime* runtime = policy->source_ops->ensure_runtime(policy->source_owner);
@@ -2522,16 +2544,27 @@ static Item js_source_dynamic_import(Item specifier, const char* reference) {
             char resolved[4096];
             js_resolve_script_module_path(runtime, reference, text->chars, (int)text->len,
                 resolved, sizeof(resolved));
-            path.set(js_make_string(resolved));
-            if (item_is_error(path.get())) failure.set(path.get());
+            if (!input_resource_policy_admits(runtime->resource_policy, resolved)) {
+                failure.set(ops->error(owner, JS_SOURCE_MODULE_TYPE,
+                    "import(): module blocked by document resource policy"));
+            } else {
+                path.set(js_make_string(resolved));
+                if (item_is_error(path.get())) failure.set(path.get());
+            }
         }
     }
     if (!item_is_error(failure.get())) {
-        Item* environment = js_alloc_env(2);
-        if (!environment) failure.set(ItemError);
+        auto* retained = (JsSourceImportPolicy*)pool_alloc(context->pool, sizeof(JsSourceImportPolicy));
+        if (!retained) failure.set(ItemError);
         else {
-            environment[0] = request.get(); environment[1] = path.get();
-            callback.set(js_new_native_closure(js_source_dynamic_import_job, 0, environment, 2));
+            *retained = policy_value;
+            Item* environment = js_alloc_env2(request.get(), path.get());
+            callback.set(environment ? js_new_native_payload_function(js_source_dynamic_import_job,
+                (uint64_t)(uintptr_t)retained, 0, environment, 2) : ItemError);
+            const JsPromiseHostOps* host = js_runtime_state.promises.host_ops;
+            if (!item_is_error(callback.get()) && host && host->wrap_job)
+                callback.set(host->wrap_job(js_runtime_state.promises.host_context,
+                    callback.get(), make_js_undefined()));
             if (item_is_error(callback.get())) failure.set(callback.get());
             else js_microtask_enqueue(callback.get());
         }
@@ -2550,7 +2583,8 @@ extern "C" Item js_dynamic_import(Item specifier) {
 // source policies queue their frontend's loader; the default LJS path stays unchanged.
 extern "C" Item js_dynamic_import_at(Item specifier, const char* reference) {
     if (js_active_runtime_state && js_runtime_state.modules.source_ops)
-        return js_source_dynamic_import(specifier, reference);
+        return js_source_dynamic_import(specifier, reference, js_runtime_state.modules.source_ops,
+            js_runtime_state.modules.source_owner);
     RootFrame roots(5);
     Rooted<Item> specifier_string_root(roots, js_to_string(specifier));
     if (item_is_error(specifier_string_root.get()) ||

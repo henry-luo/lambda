@@ -1,4 +1,7 @@
 #pragma once
+
+enum { MVP_LMD_CAPSULE_OWNER = 0x4d56504c, MVP_LMD_DYNAMIC_OWNER = 0x4d564459,
+    MVP_LMD_MODULE_OWNER = 0x4d564d4f };
 #include "../../lambda-data.hpp"
 
 struct MvpLmdProgram;
@@ -53,6 +56,7 @@ struct MvpLmdClass {
     bool has_instance_elements; // one admission fact for fields or private methods, in existing padding
     bool has_private_names;
     bool eval_environment;      // admission-only: retain lexical private records for direct eval
+    bool indirect_values;       // large metadata uses one precisely traced Array closure slot
     uint32_t initializer_slot;
     uint32_t initializer_count;
     uint32_t field_count;
@@ -64,7 +68,8 @@ static inline bool mvp_lmd_class_has_constructor(const MvpLmdClass* cls) {
     return cls->constructor_id >= 0 || (cls->dynamic && cls->owner && cls->owner->def);
 }
 static inline Item* mvp_lmd_class_values(MvpLmdClass* cls) {
-    return cls->owner ? (Item*)cls->owner->closure_env + cls->property_slot : cls->values;
+    return cls->owner && !cls->indirect_values
+        ? (Item*)cls->owner->closure_env + cls->property_slot : cls->values;
 }
 // extended only for receiver-aware units; existing MVP function allocation stays unchanged.
 struct MvpLmdCallable : Function {
@@ -76,12 +81,13 @@ struct MvpLmdCallable : Function {
     bool non_constructible;
     bool custom_new_target;    // native constructor implements GetPrototypeFromConstructor
     uint8_t home_slot;          // one-based traced closure slot: literal home Map or enclosing method Function
+    bool native_source;        // native extension retains its original name independently of own properties
     MvpLmdClass* properties;     // lazy ordinary-function own/prototype storage
 };
 static_assert(sizeof(MvpLmdCallable) == sizeof(Function) + 4 * sizeof(void*),
     "the optional home slot must fit the existing callable padding");
 typedef Item (*MvpLmdNativeEntry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
-struct MvpLmdNativeCallable : MvpLmdCallable { void* state; };
+struct MvpLmdNativeCallable : MvpLmdCallable { void* state; NameRef source_name; };
 Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
     const char* name = NULL);
 Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags = -1);
@@ -214,6 +220,7 @@ public:
     Item complete(Item result);
 };
 Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_structured_clone(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
     MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity,
     bool immutable_metadata = true);
@@ -241,6 +248,7 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
     Item target = Item{.item = ITEM_JS_UNDEFINED});
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program);
 uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program);
+Item mvp_lmd_dynamic_import(MvpLmdProgram* program, Item specifier, const char* reference);
 Item mvp_lmd_create_realm(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program);
 Item mvp_lmd_constructor_prototype(Item target, Item intrinsic);
@@ -360,7 +368,7 @@ Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t operation);
 Item mvp_lmd_template_object(MvpLmdProgram* program, JsTemplateLiteralNode* literal, int64_t slot);
 const JsTemplateObjectOps* mvp_lmd_template_object_ops();
 Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix);
-Item mvp_lmd_fail(int64_t kind, int64_t site);
+Item mvp_lmd_fail(int64_t kind, int64_t site, const char* detail = NULL);
 double mvp_lmd_string_to_number(String* string);
 double mvp_lmd_parse_number(String* string, int64_t prefix);
 Item mvp_lmd_number_to_string(double value);

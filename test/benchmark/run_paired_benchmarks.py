@@ -68,12 +68,12 @@ def median(values):
 
 
 def run_once(binary, script, timeout_s, language="lambda", tier="jit",
-             expected_stdout_text=None, js_runtime="legacy", command=None,
+             expected_stdout_text=None, js_runtime="formal", command=None,
              environment=None, strict_timing=False, exact_stdout=False, capture_output=False):
     """Run one script and return a serializable timing/observable record."""
     if command is None:
         command = [binary, "js" if language == "js" else "run", script]
-        if language == "js" and js_runtime != "legacy":
+        if language == "js" and js_runtime in ("mvp", "mvp-lmd"):
             command.insert(2, "--runtime=" + js_runtime)
     environment = os.environ.copy() if environment is None else environment.copy()
     if language == "lambda":
@@ -209,7 +209,7 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
                 language="lambda", tier="jit", expected_stdout_text=None,
                 bootstrap_resamples=DEFAULT_BOOTSTRAP_RESAMPLES,
                 bootstrap_seed=DEFAULT_BOOTSTRAP_SEED,
-                control_js_runtime="legacy", candidate_js_runtime="legacy"):
+                control_js_runtime="formal", candidate_js_runtime="formal"):
     control_samples = []
     candidate_samples = []
     pair_records = []
@@ -439,10 +439,10 @@ def main():
     parser.add_argument("--candidate", required=True, help="candidate release binary")
     parser.add_argument("--language", choices=["lambda", "js"], default="lambda",
                         help="source language (default: lambda)")
-    parser.add_argument("--control-js-runtime", choices=["legacy", "mvp"], default="legacy",
-                        help="control JavaScript backend (default: full LambdaJS)")
-    parser.add_argument("--candidate-js-runtime", choices=["legacy", "mvp"], default="legacy",
-                        help="candidate JavaScript backend (default: full LambdaJS)")
+    parser.add_argument("--control-js-runtime", choices=["formal", "legacy", "mvp", "mvp-lmd"], default="formal",
+                        help="control JS entry (formal default; legacy labels archived LJS binaries)")
+    parser.add_argument("--candidate-js-runtime", choices=["formal", "legacy", "mvp", "mvp-lmd"], default="formal",
+                        help="candidate JS entry (formal default; legacy labels archived LJS binaries)")
     parser.add_argument("-s", "--suite", default=None, help="comma-separated suite filter")
     parser.add_argument("-b", "--bench", default=None, help="comma-separated benchmark filter")
     parser.add_argument(
@@ -475,8 +475,8 @@ def main():
         parser.error("--pairs must be positive")
     if args.bootstrap_resamples < 1:
         parser.error("--bootstrap-resamples must be positive")
-    if args.language != "js" and (args.control_js_runtime != "legacy" or
-                                  args.candidate_js_runtime != "legacy"):
+    if args.language != "js" and (args.control_js_runtime not in ("formal", "legacy") or
+                                  args.candidate_js_runtime not in ("formal", "legacy")):
         parser.error("JavaScript runtime selection requires --language js")
 
     control = os.path.abspath(args.control)

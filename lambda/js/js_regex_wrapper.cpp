@@ -18,6 +18,8 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -677,6 +679,50 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
     return true;
 }
 
+struct JsVStringChoice {
+    const char* bytes;
+    size_t length;
+    size_t characters;
+    int ordinal;
+};
+
+static void v_append_ordered_string_set(StrBuf* output, JsVStringChoice* choices,
+        int count, const char* class_body) {
+    // ECMA-262 CompileAtom: string sets try longer code-point sequences first.
+    // Prefix-first expansion can also make a linear property repeat backtrack exponentially.
+    for (int i = 0; i < count; i++) {
+        choices[i].characters = utf8_count(choices[i].bytes, choices[i].length);
+        choices[i].ordinal = i;
+    }
+    qsort(choices, count, sizeof(JsVStringChoice), [](const void* a, const void* b) {
+        auto* x = (const JsVStringChoice*)a;
+        auto* y = (const JsVStringChoice*)b;
+        return x->characters != y->characters ? (x->characters > y->characters ? -1 : 1)
+            : (x->ordinal < y->ordinal ? -1 : x->ordinal > y->ordinal);
+    });
+    strbuf_append_str(output, "(?:");
+    bool wrote = false, empty = false;
+    for (int i = 0; i < count; i++) {
+        const auto& choice = choices[i];
+        if (!choice.length) { empty = true; continue; }
+        if (wrote) strbuf_append_char(output, '|');
+        for (size_t j = 0; j < choice.length; j++) {
+            unsigned char c = (unsigned char)choice.bytes[j];
+            if (c && c < 0x80 && strchr("\\()[]{}.*+?|^$/#", c))
+                strbuf_append_char(output, '\\');
+            strbuf_append_char(output, (char)c);
+        }
+        wrote = true;
+    }
+    if (class_body && strcmp(class_body, "(?!)")) {
+        if (wrote) strbuf_append_char(output, '|');
+        strbuf_append_str(output, class_body);
+        wrote = true;
+    }
+    if (empty && wrote) strbuf_append_char(output, '|');
+    strbuf_append_char(output, ')');
+}
+
 // Top-level entry: rewrite all /v-classes in `in` into RE2-friendly form.
 // Returns false if any class is malformed (the caller falls back to the JS
 // validator error path).
@@ -703,29 +749,15 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                     }
                 }
                 if (found && in[i + 1] == 'p') {
-                    // Emit alternation. The strings table holds raw UTF-8
-                    // bytes; RE2 in UTF-8 mode matches them byte-for-byte
-                    // against the input. ASCII characters that have regex
-                    // meta-semantics (e.g. `*`, `#`, `+`) must be escaped;
-                    // continuation bytes (>= 0x80) pass through unescaped.
-                    out_str.append("(?:");
-                    for (int k = 0; k < found->count; k++) {
-                        if (k > 0) out_str.push_back('|');
-                        for (int b = 0; b < found->string_lens[k]; b++) {
-                            unsigned char ub = (unsigned char)found->strings[k][b];
-                            if (ub < 0x80 &&
-                                (ub == '\\' || ub == '(' || ub == ')' ||
-                                 ub == '[' || ub == ']' || ub == '{' ||
-                                 ub == '}' || ub == '.' || ub == '*' ||
-                                 ub == '+' || ub == '?' || ub == '|' ||
-                                 ub == '^' || ub == '$' || ub == '/' ||
-                                 ub == '#')) {
-                                out_str.push_back('\\');
-                            }
-                            out_str.push_back((char)ub);
-                        }
-                    }
-                    out_str.push_back(')');
+                    JsRegexScratch<JsVStringChoice> choices(found->count);
+                    if (choices.count < found->count) return false;
+                    for (int k = 0; k < found->count; k++)
+                        choices.slots[k] = {found->strings[k], (size_t)found->string_lens[k], 0, 0};
+                    StrBuf* rendered = strbuf_new();
+                    if (!rendered) return false;
+                    v_append_ordered_string_set(rendered, choices.slots, found->count, NULL);
+                    out_str.append(rendered->str, rendered->length);
+                    strbuf_free(rendered);
                     i = name_end + 1;
                     continue;
                 }
@@ -832,38 +864,16 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
             if (real_strs.empty()) {
                 out_str.append(class_body);
             } else {
-                out_str.append("(?:");
-                bool wrote_alt = false;
-                for (auto& st : real_strs) {
-                    if (st.empty()) continue;
-                    if (wrote_alt) out_str.push_back('|');
-                    // Emit raw UTF-8 bytes. Escape only ASCII regex meta-
-                    // characters; high bytes (>=0x80) pass through so RE2's
-                    // UTF-8 matcher consumes them as the intended codepoints.
-                    for (size_t k = 0; k < st.size(); k++) {
-                        unsigned char ub = (unsigned char)st[k];
-                        if (ub < 0x80 &&
-                            (ub == '\\' || ub == '(' || ub == ')' ||
-                             ub == '[' || ub == ']' || ub == '{' ||
-                             ub == '}' || ub == '.' || ub == '*' ||
-                             ub == '+' || ub == '?' || ub == '|' ||
-                             ub == '^' || ub == '$' || ub == '/' ||
-                             ub == '#')) {
-                            out_str.push_back('\\');
-                        }
-                        out_str.push_back((char)ub);
-                    }
-                    wrote_alt = true;
-                }
-                // Only include the codepoint-class alternative if it actually
-                // matches something. `(?!)` is "never matches" — appending it
-                // would still be sound but RE2 may interpret the whole alt as
-                // a guaranteed mismatch in some configurations, so omit it.
-                if (class_body != "(?!)") {
-                    if (wrote_alt) out_str.push_back('|');
-                    out_str.append(class_body);
-                }
-                out_str.push_back(')');
+                int string_count = (int)real_strs.size();
+                JsRegexScratch<JsVStringChoice> choices(string_count);
+                if (choices.count < string_count) return false;
+                for (int k = 0; k < string_count; k++)
+                    choices.slots[k] = {real_strs[k].data(), real_strs[k].size(), 0, 0};
+                StrBuf* rendered = strbuf_new();
+                if (!rendered) return false;
+                v_append_ordered_string_set(rendered, choices.slots, string_count, class_body.c_str());
+                out_str.append(rendered->str, rendered->length);
+                strbuf_free(rendered);
             }
             i = parse_i;
             continue;

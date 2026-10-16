@@ -34,8 +34,9 @@ static Item host_clock(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Ite
     return push_d((pn_clock() - state->origin) * 1000.0);
 }
 
-static Item host_output(Item self, Item* arguments, uint64_t count, bool line) {
+static Item host_output(Item self, Item* arguments, uint64_t count, bool line, FILE* stream = NULL) {
     MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
+    if (!stream) stream = state->output;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> text(roots, ItemNull);
@@ -45,18 +46,30 @@ static Item host_output(Item self, Item* arguments, uint64_t count, bool line) {
         size_t size; char* owned;
         const char* bytes = host_utf8_bytes(text.get().get_string(), &size, &owned);
         if (!bytes) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        bool failed = (line && i && fputc(' ', state->output) == EOF) ||
-            fwrite(bytes, 1, size, state->output) != size;
+        bool failed = (line && i && fputc(' ', stream) == EOF) ||
+            fwrite(bytes, 1, size, stream) != size;
         mem_free(owned);
         if (failed)
             return err2it(err_create_heap(ERR_FILE_WRITE_ERROR, "MVP stdout write failed", NULL));
     }
-    if (line && fputc('\n', state->output) == EOF)
+    if (line && fputc('\n', stream) == EOF)
         return err2it(err_create_heap(ERR_FILE_WRITE_ERROR, "MVP stdout write failed", NULL));
     return Item{.item = line ? ITEM_JS_UNDEFINED : ITEM_TRUE};
 }
+template<bool error_stream = false>
 static Item host_console_log(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
-    return host_output(self, arguments, count, true);
+    return host_output(self, arguments, count, true, error_stream ? stderr : NULL);
+}
+struct MvpLmdConsoleLabelBinding { const char* name; Item (*call)(Item); };
+static Item host_console_label(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
+    const auto* binding = (const MvpLmdConsoleLabelBinding*)((MvpLmdNativeCallable*)self.function)->state;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> label(roots, count ? arguments[0] : make_js_undefined());
+    // shared console records consume primitives; object coercion belongs to MVP.
+    if (get_type_id(label.get()) != LMD_TYPE_UNDEFINED)
+        label.set(mvp_lmd_primitive_to_string(label.get()));
+    return item_is_error(label.get()) ? label.get() : binding->call(label.get());
 }
 static Item host_stdout_write(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
     if (!count || get_type_id(arguments[0]) != LMD_TYPE_STRING) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -114,12 +127,14 @@ Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEn
     function->requires_runtime_context = true; function->runtime_context = context;
     function->ptr = (fn_ptr)entry; function->program = program;
     function->state = state; function->arity = arity;
+    function->native_source = true;
     Item result = {.function = function};
     if (!name) return result;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, result);
     String* spelling = heap_create_name(name, strlen(name));
+    function->source_name = spelling;
     if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     Item defined = mvp_lmd_named_set(held.get(), "name", Item{.item = s2it(spelling)}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
     return item_is_error(defined) ? defined : held.get();
@@ -236,20 +251,34 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
         Rooted<Item> temporary(roots, ItemNull), arguments(roots, ItemNull);
         for (int i = 0; i < LMD_HOST_COUNT; i++) {
             state->values[i] = i == LMD_HOST_REQUIRE ? mvp_lmd_native_function(program, state, host_require, 1)
-                : i == LMD_HOST_PRINT ? mvp_lmd_native_function(program, state, host_console_log, 1, "print")
+                : i == LMD_HOST_PRINT ? mvp_lmd_native_function(program, state, host_console_log<>, 1, "print")
                 : mvp_lmd_object_new(shape, 0);
             if (item_is_error(state->values[i])) return state->values[i];
         }
         struct Binding { int owner; const char* key; MvpLmdNativeEntry entry; uint8_t arity; };
         const Binding functions[] = {
             {LMD_HOST_PERFORMANCE, "now", host_clock, 0},
-            {LMD_HOST_CONSOLE, "log", host_console_log, 0},
+            {LMD_HOST_CONSOLE, "log", host_console_log<>, 0},
+            {LMD_HOST_CONSOLE, "info", host_console_log<>, 0},
+            {LMD_HOST_CONSOLE, "debug", host_console_log<>, 0},
+            {LMD_HOST_CONSOLE, "error", host_console_log<true>, 0},
+            {LMD_HOST_CONSOLE, "warn", host_console_log<true>, 0},
             {LMD_HOST_FS, "readFileSync", host_read_file, 2},
             {LMD_HOST_FS, "writeFileSync", host_write_file, 2}
         };
         for (const Binding& binding : functions) {
             result = mvp_lmd_named_set(state->values[binding.owner], binding.key,
-                mvp_lmd_native_function(program, state, binding.entry, binding.arity));
+                mvp_lmd_native_function(program, state, binding.entry, binding.arity, binding.key));
+            if (item_is_error(result)) return result;
+        }
+        static const MvpLmdConsoleLabelBinding labels[] = {
+            {"count", js_console_count_fn}, {"countReset", js_console_countReset_fn},
+            {"time", js_console_time_fn}, {"timeEnd", js_console_timeEnd_fn},
+            {"timeLog", js_console_timeLog_fn}
+        };
+        for (const auto& binding : labels) {
+            result = mvp_lmd_named_set(state->values[LMD_HOST_CONSOLE], binding.name,
+                mvp_lmd_native_function(program, (void*)&binding, host_console_label, 0, binding.name));
             if (item_is_error(result)) return result;
         }
         temporary.set(mvp_lmd_object_new(shape, 0));

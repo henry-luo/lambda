@@ -6,6 +6,7 @@
 #include <limits.h>
 
 #include "js_interp_env.h"
+#include "js_state_guards.h"
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
 #include "../dom/dom.h"
@@ -37,6 +38,10 @@ static Item js_interp_host_global(Item key, Item value, int operation, bool stri
 }
 static bool js_interp_global_exists(Item key, bool after_with) {
     if (js_interp_host) {
+        if (!after_with && js_with_depth_active()) {
+            Item visible = js_probe_with_binding(key);
+            if (item_is_error(visible) || js_is_truthy(visible)) return true;
+        }
         Item exists = js_interp_host_global(key, ItemNull, JS_INTERP_HOST_HAS);
         return !item_is_error(exists) && js_is_truthy(exists);
     }
@@ -138,7 +143,6 @@ static JsFunction* js_interp_function_record(Item function) {
     return js_interp_host ? js_interp_host->unwrap_function(function) : (JsFunction*)function.function;
 }
 
-#define js_with_depth_active() (js_interp_host ? 0 : js_with_depth_active())
 #define js_global_binding_exists(key) js_interp_global_exists((key), false)
 #define js_global_binding_exists_after_with_lookup(key) js_interp_global_exists((key), true)
 #define js_get_global_property(key) js_interp_global_read((key), false)
@@ -1471,6 +1475,17 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
         }
         eval_env = js_interp_find_eval_binding_env(frame->env, entry, key, NULL);
     }
+    if (js_with_depth_active()) {
+        Item captured = js_capture_with_binding_from(key, by_name
+            ? js_interp_lookup_with_minimum_depth(frame, &lookup)
+            : js_interp_with_minimum_depth(frame, identifier->entry));
+        if (item_is_error(captured)) return captured;
+        if (js_is_truthy(captured)) {
+            Item base = js_get_last_with_binding_base_or_undefined(key);
+            return js_interp_host ? js_interp_host_property(base, key, ItemNull, JS_INTERP_HOST_DELETE, frame->strict)
+                : js_delete_property(base, key);
+        }
+    }
     if (!eval_env && (!by_name || lookup.kind == JS_INTERP_LOOKUP_OUTER)) {
         if (js_interp_host) {
             bool global = by_name || !entry || (entry->scope == frame->script->global_scope &&
@@ -1479,15 +1494,6 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
                 : (Item){.item = b2it(false)};
         }
         return js_delete_identifier_with_binding(key, declared ? 1 : 0);
-    }
-    if (js_with_depth_active()) {
-        Item captured = js_capture_with_binding_from(key, by_name
-            ? js_interp_lookup_with_minimum_depth(frame, &lookup)
-            : js_interp_with_minimum_depth(frame, identifier->entry));
-        if (item_is_error(captured)) return captured;
-        if (js_is_truthy(captured)) {
-            return js_delete_property(js_get_last_with_binding_base_or_undefined(key), key);
-        }
     }
     return eval_env ? js_interp_env_delete_eval_binding(eval_env, key)
         : (Item){.item = b2it(false)};
@@ -1532,7 +1538,8 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         with_lookup_completed = true;
         if (js_is_truthy(captured)) {
             Item base = js_get_last_with_binding_base_or_undefined(key);
-            Item present = js_in(key, base);
+            Item present = js_interp_host ? js_interp_host_property(base, key, ItemNull, JS_INTERP_HOST_HAS)
+                : js_in(key, base);
             if (item_is_error(present)) return present;
             if (!js_is_truthy(present)) {
                 return frame->strict ? js_interp_tdz_error(unresolved_name)
@@ -2517,7 +2524,8 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
         Item base = reference->object_home
             ? (Item){.item = *reference->object_home} : make_js_undefined();
         if (!js_interp_is_undefined(base)) {
-            Item present = js_in(js_interp_reference_key(reference), base);
+            Item present = js_interp_host ? js_interp_host_property(base, js_interp_reference_key(reference), ItemNull, JS_INTERP_HOST_HAS)
+                : js_in(js_interp_reference_key(reference), base);
             if (item_is_error(present)) return present;
             if (!js_is_truthy(present)) {
                 return frame->strict ? js_throw_reference_error(
@@ -6028,7 +6036,9 @@ static uint32_t js_interp_policy_threshold(const char* name, uint32_t fallback) 
 static Runtime* js_interp_promotion_policy(void) {
     Runtime* runtime = context ? context->runtime : NULL;
     if (!runtime || runtime->js_promotion_policy_resolved) return runtime;
-    runtime->js_promotion_auto = js_execution_auto_requested();
+    // D8.1.3v25: the legacy satellite ABI cannot publish MVP entries. Keep
+    // AUTO definitions interpreted until the MVP promotion adapter is admitted.
+    runtime->js_promotion_auto = false;
     runtime->js_promotion_call_threshold = js_interp_policy_threshold(
         "JS_FUNC_JIT_THRESHOLD", JS_FUNC_JIT_THRESHOLD);
     runtime->js_promotion_backedge_threshold = js_interp_policy_threshold(
@@ -6711,6 +6721,9 @@ Item js_interp_call_host_function(const JsInterpHostOps* ops, Item wrapper,
     if (lambda_stack_is_exhausted(context ? context->stack_limit : 0))
         return ops->fail(JS_INTERP_HOST_RANGE);
     JsInterpHostScope profile(ops);
+    JsWithActivation with_scope;
+    const JsWithData* captured = js_fn_with(function);
+    with_scope.enter(captured->env, captured->depth);
     RootFrame roots(3);
     Rooted<Item> callee(roots, wrapper), target(roots, new_target), self(roots, receiver);
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
@@ -6889,27 +6902,12 @@ Item js_interp_create_generator(JsFunction* function, Item* args, int count) {
     return js_interp_create_generator_impl(function, args, count, NULL, NULL);
 }
 
-// A body sees the `with` chain captured where its function was created
-// (JSCU44). It is entered once on the activation's own stack and stays open
-// for the body's lifetime; the resumer's chain is swapped out around it.
-class JsInterpCapturedWithScope {
-    JsWithFrame storage_;
-    JsWithFrame* saved_head_;
-
-public:
-    explicit JsInterpCapturedWithScope(const JsSuspendedActivation* state)
-        : storage_{}, saved_head_(js_with_activation_enter(state->with_env,
-            state->with_depth, &storage_)) {}
-    ~JsInterpCapturedWithScope() { js_with_activation_leave(saved_head_); }
-    JsInterpCapturedWithScope(const JsInterpCapturedWithScope&) = delete;
-    JsInterpCapturedWithScope& operator=(const JsInterpCapturedWithScope&) = delete;
-};
-
 extern "C" Item js_interp_generator_body(Activation* self, Item generator) {
     JsGeneratorStateRecord* state = (JsGeneratorStateRecord*)activation_user(self);
     JsOwnedCallActivation call_facts;
     JsInterpHostScope profile(state->ast_host);
-    JsInterpCapturedWithScope with_scope(state);
+    JsWithActivation with_scope;
+    with_scope.enter(state->with_env, state->with_depth);
     RootFrame roots(5);
     Rooted<Item> generator_root(roots, generator);
     Rooted<Item> function_root(roots, state->ast_function);
@@ -6965,7 +6963,8 @@ extern "C" Item js_interp_async_body(Activation* self, Item unused) {
         (JsAsyncContextStateRecord*)activation_user(self);
     JsOwnedCallActivation call_facts;
     JsInterpHostScope profile(state->ast_host);
-    JsInterpCapturedWithScope with_scope(state);
+    JsWithActivation with_scope;
+    with_scope.enter(state->with_env, state->with_depth);
     RootFrame roots(4);
     Rooted<Item> function_root(roots, state->ast_function);
     Rooted<Item> arguments_root(roots, state->ast_arguments);
@@ -7324,7 +7323,6 @@ static void js_interp_host_check_node(JsAstNode* node, void* opaque) {
     switch (node->node_type) {
     case AST_NODE_IMPORT: case AST_NODE_EXPORT:
     case AST_NODE_IMPORT_SPECIFIER: case AST_NODE_EXPORT_SPECIFIER:
-    case JS_AST_NODE_WITH_STATEMENT:
         *supported = false; return;
     case JS_AST_NODE_REGEX:
         if (!js_interp_host || !js_interp_host->regexp_literal) *supported = false;
