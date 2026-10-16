@@ -14,6 +14,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
 | `word` | `word/word.ls` | [Word](word/README.md) |
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
+| `note` | `note/note.ls` | [Notes](note/README.md) |
 | `cellscope` | `cellscope/cellscope.ls` | [CellScope](cellscope/README.md) |
 | `scene3d`, `ringworld` | `scene3d/ringworld.ls` | [Native 3D](scene3d/README.md) |
 | `observatory` | `scene3d/observatory.html` | [Native 3D](scene3d/README.md) |

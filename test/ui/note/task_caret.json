@@ -1,0 +1,32 @@
+{
+  "name":"Notes checkbox activation preserves the text caret and selection",
+  "html":"test/demo/note/note.ls",
+  "viewport":{"width":700,"height":650},
+  "events":[
+    {"type":"click","target":{"selector":"#row-kyoto"}},
+    {"type":"click","target":{"selector":"#edit-surface li.edit-task:nth-child(2) p","offset_x":2,"offset_y":10}},
+    {"type":"assert_caret","visible":true,"target":{"selector":"#edit-surface li.edit-task:nth-child(2) p"}},
+    {"type":"click","target":{"selector":"#edit-surface li.edit-task:nth-child(1)","offset_x":8,"offset_y":10}},
+    {"type":"assert_count","target":{"selector":"#edit-surface .edit-task-done"},"count":1},
+    {"type":"advance_time","ms":250},
+    {"type":"assert_caret","target":{"selector":"#edit-surface li.edit-task:nth-child(2) p"}},
+    {"type":"type_physical","text":"X"},
+    {"type":"assert_text","target":{"selector":"#edit-surface li.edit-task:nth-child(2) p"},"contains":"X"},
+    {"type":"assert_text","target":{"selector":"#edit-surface li.edit-task:nth-child(1) p"},"equals":"A pocket notebook"},
+    {"type":"key_combo","key":"z","mods_str":"ctrl"},
+    {"type":"key_combo","key":"z","mods_str":"ctrl"},
+    {"type":"assert_count","target":{"selector":"#edit-surface .edit-task-done"},"count":0},
+    {"type":"click","target":{"selector":"#edit-surface li.edit-task:nth-child(1) p","offset_x":20,"offset_y":10}},
+    {"type":"assert_caret","target":{"selector":"#edit-surface li.edit-task:nth-child(1) p"}},
+    {"type":"assert_count","target":{"selector":"#edit-surface .edit-task-done"},"count":0},
+    {"type":"click","target":{"selector":"#edit-surface li.edit-task:nth-child(1)","offset_x":8,"offset_y":10}},
+    {"type":"assert_caret","target":{"selector":"#edit-surface li.edit-task:nth-child(1) p"}},
+    {"type":"assert_count","target":{"selector":"#edit-surface .edit-task-done"},"count":1},
+    {"type":"mouse_drag","target":{"selector":"#edit-surface li.edit-task:nth-child(1) p","offset_x":2,"offset_y":10},"dx":50,"dy":0},
+    {"type":"assert_selection","is_collapsed":false,"check_dom":true},
+    {"type":"click","target":{"selector":"#edit-surface li.edit-task:nth-child(2)","offset_x":8,"offset_y":10}},
+    {"type":"assert_count","target":{"selector":"#edit-surface .edit-task-done"},"count":2},
+    {"type":"assert_selection","is_collapsed":false,"check_dom":true},
+    {"type":"capture_surface","source":"page","file":"temp/note/task-caret.png"}
+  ]
+}
