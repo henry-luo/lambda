@@ -14300,7 +14300,7 @@ extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
     }
     return Item{.item = ITEM_TRUE};
 }
-static Item js_with_binding_is_visible(Item key, Item scope_obj) {
+extern "C" Item js_with_binding_is_visible(Item key, Item scope_obj) {
     static const JsWithBindingOps ops = {
         [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_HAS); },
         [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_GET); },
@@ -14308,6 +14308,18 @@ static Item js_with_binding_is_visible(Item key, Item scope_obj) {
         [](Item value) -> int64_t { return js_is_truthy(value); }
     };
     return js_with_binding_is_visible_with_ops(key, scope_obj, js_with_unscopables_symbol(), &ops);
+}
+
+extern "C" Item js_with_get_binding_value(Item object, Item key, bool strict) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, object), name(roots, key);
+    // recheck HasProperty after HasBinding's observable unscopables getter.
+    JS_ASSIGN_OR_RETURN(present, js_with_property(owner.get(), name.get(), ItemNull, JS_INTERP_HOST_HAS));
+    if (!js_is_truthy(present)) return strict
+        ? (js_interp_host ? js_interp_host->fail(JS_INTERP_HOST_REFERENCE)
+            : js_throw_binding_reference_error(name.get())) : make_js_undefined();
+    return js_with_property(owner.get(), name.get(), ItemNull, JS_INTERP_HOST_GET);
 }
 
 // Check with-scope stack for a property (most recent scope first)
@@ -14327,13 +14339,7 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
                 // Record operations. Re-run HasProperty after @@unscopables:
                 // its getter may have deleted the binding, and Proxy `has` traps
                 // must observe both abstract operations.
-                JS_ASSIGN_OR_RETURN(value_present, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_HAS));
-                if (!it2b(value_present)) {
-                    return strict_get
-                        ? js_throw_binding_reference_error(key)
-                        : make_js_undefined();
-                }
-                JS_ASSIGN_OR_RETURN(value, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_GET));
+                JS_ASSIGN_OR_RETURN(value, js_with_get_binding_value(scope_obj, key, strict_get));
                 if (js_with_memo_ready()) {
                     js_last_with_binding_scope = scope_obj;
                     js_last_with_binding_key = key;

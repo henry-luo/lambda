@@ -961,6 +961,96 @@ TEST_F(JsFormalMir, HostedWithClosuresKeepCapturedObjectsAndUnscopables) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, DirectEvalWithKeepsLexicalRecordOrder) {
+    Item result = run(R"JS(
+let x=1;let o={x:7,a:'object'};let f;
+with(o){if(eval('x')!==7)throw 1;{let x=9;if(eval('x')!==9)throw 2;}
+f=function(a){return eval('a')};}
+f('parameter')==='parameter'&&x===1;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DirectEvalWithRetainsClosuresAndVariableEnvironment) {
+    Item result = run(R"JS(
+function make(){let o={x:4};let f;with(o){eval('var made=8;x=5');f=eval('(v)=>{x=v;return x+made}');}
+return [o,f,()=>made]}
+let a=make();gc();a[1](11)===19&&a[0].x===11&&a[2]()===8;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DirectEvalWithVarInitializersResolveObjectBeforeCallerVar) {
+    Item result = run(R"JS(
+var x=0;var o={x:2};var before=function(){return x};var during;
+with(eval('var x=1'),o)var x=3,unused=during=function(){return x};
+function nested(){var o={x:7};var r=eval('var x=2;with(o){x=9;x}');
+return r===9&&o.x===9&&x===2}
+before()===1&&during()===3&&o.x===3&&nested();
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DirectEvalWithReusesUnscopablesAndStableReferences) {
+    Item result = run(R"JS(
+let x=3;let o={x:7};let trace='';let p=new Proxy(o,{
+has(t,k){if(k==='x')trace+='H';return Reflect.has(t,k)},
+get(t,k,r){if(k===Symbol.unscopables)trace+='U';if(k==='x')trace+='G';return Reflect.get(t,k,r)}});
+with(p){trace='';if(eval('x')!==7||trace!=='HUHG')throw 1;}
+o[Symbol.unscopables]={x:true};with(o){if(eval('x')!==3)throw 2;}
+delete o[Symbol.unscopables];with(o){eval('x=(delete o.x,12)');}
+o.x===12&&x===3;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DirectEvalWithCallsKeepObjectReceiver) {
+    Item result = run(R"JS(
+let o={v:7,f(){return this.v},tag(s){return this.v+s[0].length}};
+function mir(){with(o){eval('');return f()+tag`a`}}
+function interpreted(){with(o){return eval('f()+tag`a`')}}
+mir()===15&&interpreted()===15;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DirectEvalWithAbruptExitAndTypeofDoNotReprobe) {
+    Item result = run(R"JS(
+let x=2;let hits=0;let bad={x:7,get [Symbol.unscopables](){throw 19}};let caught=0;
+try{with(bad){eval('x')}}catch(e){caught=e}finally{if(eval('x')!==2)throw 1;}
+let p=new Proxy({x:7},{has(t,k){if(k==='x')hits++;return Reflect.has(t,k)}});
+with(p){if(eval('typeof x')!=='number')throw 2;}
+caught===19&&hits===2&&eval('typeof missingWithName')==='undefined';
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostedWithKeepsNestedLexicalsAndEscapedObjectRecord) {
+    Item result = run(R"JS(
+let f=Function('o','with(o){{let x=9;if(eval("x")!==9)throw 1;}return [function(x){return eval("x")},()=>eval("x"),()=>delete x]}');
+let o={x:7};let a=f(o);gc();let first=a[1]();let removed=a[2]();
+a[0](13)===13&&first===7&&removed&&!Object.hasOwn(o,'x');
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostedWithAnnexBPublishesToVariableRecord) {
+    Item result = run(R"JS(
+let o={g:1};let f=Function('o','let saved;with(o){{function g(){return 7}}saved=g;}return [saved,g]');
+let a=f(o);let after;function caller(g){eval('{function g(){return 9}}after=g')}
+caller(1);a[0]===1&&a[1]()===7&&o.g===1&&after()===9;
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, UnicodeStringSetsPreferLongestElement) {
     Item result = run("let a=/[\\q{a|ab}]/v.exec('ab')[0];"
         "let b=/[\\q{|a}]b/v.exec('ab')[0];"
@@ -2639,7 +2729,7 @@ TEST_F(JsMvpLmd, FailurePhasesRemainDistinct) {
         "function f(){try{new RegExp('a','v')}finally{return 42}}f()"};
     MvpLmdFailurePhase expected[] = {MVP_LMD_PARSE_FAILURE, MVP_LMD_SUCCESS,
         MVP_LMD_RUNTIME_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_SUCCESS,
-        MVP_LMD_ADMISSION_FAILURE, MVP_LMD_SUCCESS, MVP_LMD_SUCCESS,
+        MVP_LMD_RUNTIME_FAILURE, MVP_LMD_SUCCESS, MVP_LMD_SUCCESS,
         MVP_LMD_SUCCESS, MVP_LMD_SUCCESS, MVP_LMD_SUCCESS};
     for (size_t i=0;i<sizeof(sources)/sizeof(sources[0]);i++) {
         SCOPED_TRACE(sources[i]);
@@ -2654,6 +2744,7 @@ TEST_F(JsMvpLmd, FailurePhasesRemainDistinct) {
         }
         if(i==0) EXPECT_STREQ(type,"SyntaxError");
         else if(i==2 || i==3) EXPECT_STREQ(type,"TypeError");
+        else if(i==5) EXPECT_STREQ(type,"ReferenceError");
         else EXPECT_EQ(type,nullptr);
     }
 }
@@ -8456,16 +8547,7 @@ return seen===3&&added===3&&typeof companion==='function'}check(blocks());true;
 }
 
 TEST_F(JsMvpLmd, MirDirectEvalRemainingCallerCapabilities) {
-    const char* sources[] = {
-        "function f(){with({}){eval('1')}}f()"
-    };
-    for (const char* source : sources) {
-        mvp_lmd_destroy(execution);
-        execution = mvp_lmd_execute(source, strlen(source));
-        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS;
-        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase), nullptr);
-        EXPECT_EQ(phase, MVP_LMD_ADMISSION_FAILURE) << source;
-    }
+    boolean("function f(){with({}){return eval('1')===1}}f()");
     MvpLmdFailurePhase phase = MVP_LMD_SUCCESS;
     module("eval('1');export const value=1", "temp/mvp_eval_boundary.mjs", &phase);
     EXPECT_EQ(phase, MVP_LMD_ADMISSION_FAILURE);

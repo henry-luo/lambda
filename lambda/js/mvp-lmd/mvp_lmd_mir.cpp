@@ -1750,9 +1750,6 @@ static void plan_eval_environments(MvpLmdProgram* p) {
         LmdFunction* f = owner == AST_FUNCTION_ID_INVALID ? NULL :
             function(p, p->frontend->ast_index.functions[owner].node);
         if (!f) f = (LmdFunction*)p->functions->data[0];
-        if (f->eval_environment && node->node_type == JS_AST_NODE_WITH_STATEMENT) {
-            diagnostic(p, node, "direct eval with object environment requires its lexical bridge"); return;
-        }
         if (node->node_type == AST_NODE_CALL_EXPR && !((AstCallNode*)node)->optional &&
                 ((AstCallNode*)node)->callee->node_type == AST_NODE_IDENT &&
                 named(((AstIdentNode*)((AstCallNode*)node)->callee)->name, "eval")) {
@@ -3889,7 +3886,8 @@ static LmdReference with_reference(LmdCompiler* c, LmdBinding* binding, AstNode*
     move(c, ref.with_object, integer(c, ITEM_JS_UNDEFINED)); boxed(c, ref.with_object);
     MIR_label_t done = label(c);
     for (LmdWithLookup* lookup = binding->with_lookup; lookup; lookup = lookup->outer) {
-        LmdValue object = read_binding(c, lookup->object, site);
+        // the saved object is internal; an eval-aware identifier site would resolve the guest name instead.
+        LmdValue object = read_binding(c, lookup->object, lookup->object->entry->node);
         MIR_reg_t found = em_call_4(&c->em, "mvp_lmd_with_binding", MIR_T_I64,
             MIR_T_I64, reg(c, object.reg), MIR_T_I64, reg(c, ref.name),
             MIR_T_I64, integer(c, ITEM_NULL), MIR_T_I64, integer(c, LMD_PROP_HAS), true);
@@ -6294,7 +6292,9 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         return stable_item(c, result);
     }
     if (!captured && n->callee->node_type == AST_NODE_IDENT && eval_reference_site(c->program, n->callee)) {
-        LmdValue callee = box(c, expression(c, n->callee));
+        LmdReference reference = eval_reference(c, (AstIdentNode*)n->callee);
+        LmdValue callee = eval_reference_operation(c, reference.eval_reference, JS_INTERP_REFERENCE_GET);
+        LmdValue receiver = eval_reference_operation(c, reference.eval_reference, JS_INTERP_REFERENCE_RECEIVER);
         if (n->optional) {
             branch(c, MIR_BEQ, c->optional_exit, reg(c, callee.reg), integer(c, ITEM_NULL));
             branch(c, MIR_BEQ, c->optional_exit, reg(c, callee.reg), integer(c, ITEM_JS_UNDEFINED));
@@ -6317,7 +6317,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             put_label(c, ordinary);
         }
         MIR_reg_t called = em_call_4(&c->em, "mvp_lmd_call_array", MIR_T_I64,
-            MIR_T_I64, reg(c, callee.reg), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED),
+            MIR_T_I64, reg(c, callee.reg), MIR_T_I64, reg(c, receiver.reg),
             MIR_T_I64, reg(c, values.reg), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), true);
         check_error(c, called); move(c, result, reg(c, called));
         if (direct) put_label(c, done);
@@ -7226,8 +7226,11 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         bool member = tagged->tag->node_type == AST_NODE_MEMBER_EXPR || tagged->tag->node_type == AST_NODE_INDEX_EXPR;
         LmdReference ref = {};
         LmdBinding* binding = tagged->tag->node_type == AST_NODE_IDENT ? identifier_binding(c->program, (AstIdentNode*)tagged->tag) : NULL;
-        bool dynamic = binding && binding->with_lookup;
-        if (dynamic) ref = with_reference(c, binding, tagged->tag);
+        bool eval = tagged->tag->node_type == AST_NODE_IDENT && eval_reference_site(c->program, tagged->tag);
+        bool dynamic = eval || (binding && binding->with_lookup);
+        if (eval) ref = eval_reference(c, (AstIdentNode*)tagged->tag);
+        else if (dynamic) ref = with_reference(c, binding, tagged->tag);
+        if (eval) ref.with_object = eval_reference_operation(c, ref.eval_reference, JS_INTERP_REFERENCE_RECEIVER).reg;
         LmdValue callee = dynamic ? box(c, read_reference(c, ref, tagged->tag)) :
             member ? capture_member_callee(c, tagged->tag, n, &ref, false) : box(c, expression(c, tagged->tag));
         uint32_t slot = c->program->template_slots[ast_index_find(&c->program->frontend->ast_index, n)] - 1;
@@ -7868,7 +7871,7 @@ static void initialize_capture(LmdCompiler* c, LmdBinding* b, bool copy) {
 }
 static void eval_scope_enter(LmdCompiler* c, NameScope* scope, bool clone = false,
         int role = JS_INTERP_ENV_ORDINARY, bool private_record = false) {
-    if (!c->function->eval_environment || (!scope && !private_record) ||
+    if (!c->function->eval_environment || (!scope && !private_record && role != JS_INTERP_ENV_WITH_OBJECT) ||
             (!clone && !private_record && role == JS_INTERP_ENV_ORDINARY && scope == c->eval_scope)) return;
     MIR_reg_t outer = clone ? em_load_at(&c->em, c->eval_env, offsetof(JsInterpEnv, outer), MIR_T_I64, "eval_outer")
         : c->eval_env ? c->eval_env : constant(c, 0);
@@ -8689,6 +8692,10 @@ static void statement(LmdCompiler* c, AstNode* n) {
         LmdBinding* binding = c->program->with_objects[ast_index_find(&c->program->frontend->ast_index, n)];
         initialize_capture(c, binding, false);
         write_binding(c, binding, boxed(c, object), n, true);
+        if (c->function->eval_environment) {
+            eval_scope_enter(c, NULL, false, JS_INTERP_ENV_WITH_OBJECT);
+            em_store_at(&c->em, c->eval_env, offsetof(JsInterpEnv, with_object), MIR_T_I64, object);
+        }
         control_completion(c); statement(c, statement_node->body); break;
     }
     case AST_NODE_NULL: break;

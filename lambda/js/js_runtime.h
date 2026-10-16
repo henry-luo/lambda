@@ -1424,6 +1424,8 @@ typedef struct JsWithBindingOps {
 } JsWithBindingOps;
 Item js_with_binding_is_visible_with_ops(Item key, Item object, Item unscopables_symbol,
     const JsWithBindingOps* ops);
+Item js_with_binding_is_visible(Item key, Item object);
+Item js_with_get_binding_value(Item object, Item key, bool strict);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
 Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);

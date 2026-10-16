@@ -1995,13 +1995,21 @@ Lambda VMaps/native errors reuse their existing carrier reads. Custom-element
 constructors use ABI-aware private associations; shared call/construct entry
 points recognize default MVP classes (**D3.4.7, D6.2.2v2**).
 
-**Latest verification:** `host56` passes 759/759 MVP units and 92/92 focused
+Direct eval within `with` now shares interleaved object and lexical environment
+records with the retained interpreter. Parameters and blocks shadow captured
+objects; escaped closures retain their object, unscopables and call receiver.
+Eval vars and Annex B publication target the existing variable record
+(**D5.3, D8.1.3v21, D8.1.3v25**). Units without the eval bridge keep their
+existing MIR path.
+
+**Latest verification:** `host60` passes 767/767 MVP units and 100/100 focused
 checks normally and with forced/poisoned GC. Its CLI is byte-identical to
-`host55`, which passes all 49 selected host fixtures and four import/custom-
-element fixtures with forced/poisoned GC. Script integration remains 198/205,
-with seven known AUTO publication failures; the separate replay of previously
-failing small fixtures improves to 27/32. The final `host56` pin passes all
-3,114 selected canonical property/Function/Date/Array iterator/module cases.
+`host59`, which passes all 51 selected host fixtures and both original eval/
+with fixtures with forced/poisoned GC and explicit AST. Script integration
+remains 198/205, with seven known AUTO publication failures; the separate
+small-fixture replay improves to 28/32. The final pin passes all 3,764 selected
+canonical cases on formal MIR, including 650 eval/with cases; those 650 also
+pass explicit AST. There are no unresolved records in either canonical run.
 This is not a whole-suite recount.
 The implementation plan records exact pins and remaining work. The earlier
 complete isolated fixture diagnostic remains 461/507 passes, 41 failures and

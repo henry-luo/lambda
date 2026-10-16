@@ -724,6 +724,7 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     copy->private_bindings = source->private_bindings;
     copy->eval_bindings = source->eval_bindings;
     copy->lexical_this = source->lexical_this;
+    copy->with_object = source->with_object;
     copy->function_node = source->function_node;
     copy->eval_script = source->eval_script;
     copy->arguments_are_mapped = source->arguments_are_mapped;
@@ -1209,10 +1210,16 @@ static NameEntry* js_interp_boundary_binding(const JsInterpEnv* boundary,
 // the vars direct eval added to it; crossing a linked eval's boundary continues
 // into its caller's records and code.
 static JsInterpLookup js_interp_lookup_name_from(JsInterpEnv* env, JsScript* script,
-        const String* name) {
+        const String* name, Item* failure, JsInterpEnv* boundary = NULL) {
     bool arguments_name = js_interp_name_equals(name, "arguments");
     Item key = js_interp_name_key(name);
-    for (; env; env = env->outer) {
+    for (; env && env != boundary; env = env->outer) {
+        if (env->binding_role == JS_INTERP_ENV_WITH_OBJECT) {
+            Item visible = js_with_binding_is_visible(key, (Item){.item = env->with_object});
+            if (item_is_error(visible)) { *failure = visible; return {}; }
+            if (js_is_truthy(visible)) return {JS_INTERP_LOOKUP_OBJECT, NULL, env, NULL};
+            continue;
+        }
         if (env->eval_script) {
             NameEntry* entry = js_interp_boundary_binding(env, name);
             if (entry) return {JS_INTERP_LOOKUP_SLOT, entry, env, NULL};
@@ -1242,7 +1249,11 @@ static JsInterpLookup js_interp_lookup_name_from(JsInterpEnv* env, JsScript* scr
 // (bound in the caller's variable environment), by name.
 static bool js_interp_resolves_by_name(const JsInterpFrame* frame,
         const NameEntry* entry) {
-    if (!frame || !js_interp_script_is_linked_eval(frame->script)) return false;
+    if (!frame) return false;
+    // hosted with records are interleaved, so inner declarations stop lookup before the object.
+    if (js_interp_host) for (JsInterpEnv* env = frame->env; env; env = env->outer)
+        if (env->binding_role == JS_INTERP_ENV_WITH_OBJECT) return true;
+    if (!js_interp_script_is_linked_eval(frame->script)) return false;
     return !entry || (entry->scope == frame->script->global_scope &&
         !entry->is_lexical && !frame->script->strict_mode);
 }
@@ -1251,17 +1262,16 @@ static bool js_interp_resolves_by_name(const JsInterpFrame* frame,
 // that a nested direct eval added between the reference and the eval's boundary
 // record, then continues in the caller's environments.
 static JsInterpLookup js_interp_lookup_name(const JsInterpFrame* frame,
-        const NameEntry* entry, const String* name) {
-    if (!entry) return js_interp_lookup_name_from(frame->env, frame->script, name);
+        const NameEntry* entry, const String* name, Item* failure) {
+    if (!entry || !js_interp_script_is_linked_eval(frame->script) || entry->is_lexical ||
+            entry->scope != frame->script->global_scope || frame->script->strict_mode)
+        return js_interp_lookup_name_from(frame->env, frame->script, name, failure);
     JsInterpEnv* boundary = js_interp_find_binding_env(frame->env, entry);
-    Item key = js_interp_name_key(name);
-    for (JsInterpEnv* env = frame->env; env && env != boundary; env = env->outer) {
-        if (js_interp_env_get_eval_binding(env, key, NULL)) {
-            return {JS_INTERP_LOOKUP_EVAL, NULL, env, NULL};
-        }
-    }
+    // nested lexical/object records precede the caller variable environment even for eval vars.
+    JsInterpLookup inner = js_interp_lookup_name_from(frame->env, frame->script, name, failure, boundary);
+    if (item_is_error(*failure) || inner.kind != JS_INTERP_LOOKUP_OUTER) return inner;
     JsScript* caller_script = frame->script->eval_caller_script;
-    return boundary ? js_interp_lookup_name_from(boundary->outer, caller_script, name)
+    return boundary ? js_interp_lookup_name_from(boundary->outer, caller_script, name, failure)
         : JsInterpLookup{JS_INTERP_LOOKUP_OUTER, NULL, NULL, caller_script};
 }
 
@@ -1369,6 +1379,9 @@ static Item js_interp_read_lookup(JsInterpFrame* frame, const JsInterpLookup* lo
     }
     case JS_INTERP_LOOKUP_ARGUMENTS:
         return js_interp_arguments_read(lookup->env);
+    case JS_INTERP_LOOKUP_OBJECT:
+        return js_with_get_binding_value((Item){.item = lookup->env->with_object},
+            js_interp_name_key(name), frame->strict);
     case JS_INTERP_LOOKUP_OUTER:
         break;
     }
@@ -1401,6 +1414,11 @@ static Item js_interp_write_lookup(JsInterpFrame* frame, const JsInterpLookup* l
     case JS_INTERP_LOOKUP_ARGUMENTS:
         lookup->env->arguments_are_mapped = 0;
         return js_interp_arguments_write(lookup->env, value);
+    case JS_INTERP_LOOKUP_OBJECT: {
+        Item written = js_set_with_binding_base((Item){.item = lookup->env->with_object},
+            js_interp_name_key(name), value, frame->strict);
+        return item_is_error(written) ? written : value;
+    }
     case JS_INTERP_LOOKUP_OUTER:
         break;
     }
@@ -1464,7 +1482,11 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
         : js_interp_host ? js_interp_find_binding(frame, name) : NULL;
     bool declared = entry != NULL;
     if (by_name) {
-        lookup = js_interp_lookup_name(frame, identifier->entry, name);
+        Item failure = ItemNull;
+        lookup = js_interp_lookup_name(frame, identifier->entry, name, &failure);
+        if (item_is_error(failure)) return failure;
+        if (lookup.kind == JS_INTERP_LOOKUP_OBJECT) return js_interp_host_property(
+            (Item){.item = lookup.env->with_object}, key, ItemNull, JS_INTERP_HOST_DELETE, frame->strict);
         if (lookup.kind == JS_INTERP_LOOKUP_EVAL) eval_env = lookup.env;
         declared = lookup.kind != JS_INTERP_LOOKUP_OUTER ||
             js_interp_scope_find_name(lookup.outer_script->global_scope, name);
@@ -1524,7 +1546,11 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
     // environments. The record that answers also bounds the `with` probe.
     bool by_name = unresolved_name && js_interp_resolves_by_name(frame, entry);
     JsInterpLookup lookup = {};
-    if (by_name) lookup = js_interp_lookup_name(frame, entry, unresolved_name);
+    if (by_name) {
+        Item failure = ItemNull;
+        lookup = js_interp_lookup_name(frame, entry, unresolved_name, &failure);
+        if (item_is_error(failure)) return failure;
+    }
     // Object Environment Records sit in front of lexical bindings. Probe
     // before reading the static NameEntry so an outer TDZ does not mask a
     // visible `with` property.
@@ -1538,14 +1564,7 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         with_lookup_completed = true;
         if (js_is_truthy(captured)) {
             Item base = js_get_last_with_binding_base_or_undefined(key);
-            Item present = js_interp_host ? js_interp_host_property(base, key, ItemNull, JS_INTERP_HOST_HAS)
-                : js_in(key, base);
-            if (item_is_error(present)) return present;
-            if (!js_is_truthy(present)) {
-                return frame->strict ? js_interp_tdz_error(unresolved_name)
-                    : make_js_undefined();
-            }
-            return js_get_key_default(base, key);
+            return js_with_get_binding_value(base, key, frame->strict);
         }
     }
     if (by_name) {
@@ -1637,7 +1656,9 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     Item key = js_interp_name_key(name);
     // D8.1.3v21: linked eval code writes the caller binding its name finds.
     if (name && js_interp_resolves_by_name(frame, entry)) {
-        JsInterpLookup lookup = js_interp_lookup_name(frame, entry, name);
+        Item failure = ItemNull;
+        JsInterpLookup lookup = js_interp_lookup_name(frame, entry, name, &failure);
+        if (item_is_error(failure)) return failure;
         return js_interp_write_lookup(frame, &lookup, name, value, initialize,
             with_lookup_completed);
     }
@@ -2432,8 +2453,10 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
             js_interp_resolves_by_name(frame, identifier->entry);
         if (out_reference->by_name) {
             out_reference->entry = identifier->entry;
+            Item failure = ItemNull;
             out_reference->lookup = js_interp_lookup_name(frame, identifier->entry,
-                identifier->name);
+                identifier->name, &failure);
+            if (item_is_error(failure)) return js_interp_throw(failure);
         } else {
             out_reference->entry = identifier->entry ? identifier->entry
                 : js_interp_find_binding(frame, identifier->name);
@@ -2524,14 +2547,7 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
         Item base = reference->object_home
             ? (Item){.item = *reference->object_home} : make_js_undefined();
         if (!js_interp_is_undefined(base)) {
-            Item present = js_interp_host ? js_interp_host_property(base, js_interp_reference_key(reference), ItemNull, JS_INTERP_HOST_HAS)
-                : js_in(js_interp_reference_key(reference), base);
-            if (item_is_error(present)) return present;
-            if (!js_is_truthy(present)) {
-                return frame->strict ? js_throw_reference_error(
-                    js_interp_reference_key(reference)) : make_js_undefined();
-            }
-            return js_get_key_default(base, js_interp_reference_key(reference));
+            return js_with_get_binding_value(base, js_interp_reference_key(reference), frame->strict);
         }
         return js_get_with_binding_or_fallback(js_interp_reference_key(reference),
             make_js_undefined());
@@ -3328,7 +3344,9 @@ Item js_interp_host_reference(const JsInterpHostOps* ops,
     String* spelling = name.get().get_string();
     if (operation == JS_INTERP_REFERENCE_RESOLVE) {
         reference->key = name.get();
-        reference->lookup = js_interp_lookup_name_from(caller->env, caller->script, spelling);
+        Item failure = ItemNull;
+        reference->lookup = js_interp_lookup_name_from(caller->env, caller->script, spelling, &failure);
+        if (item_is_error(failure)) return failure;
         reference->unresolvable = false;
         if (reference->lookup.kind == JS_INTERP_LOOKUP_OUTER) {
             Item exists = ops->global(ops->state, name.get(), ItemNull, JS_INTERP_HOST_HAS, frame.strict);
@@ -3349,12 +3367,17 @@ Item js_interp_host_reference(const JsInterpHostOps* ops,
         return item_is_error(written) ? written : js_retain_scalar(written);
     }
     if (operation == JS_INTERP_REFERENCE_DELETE) {
+        if (reference->lookup.kind == JS_INTERP_LOOKUP_OBJECT)
+            return js_interp_host_property((Item){.item = reference->lookup.env->with_object},
+                name.get(), ItemNull, JS_INTERP_HOST_DELETE, frame.strict);
         if (reference->lookup.kind == JS_INTERP_LOOKUP_EVAL)
             return js_interp_env_delete_eval_binding(reference->lookup.env, name.get());
         return reference->lookup.kind == JS_INTERP_LOOKUP_OUTER
             ? ops->global(ops->state, name.get(), ItemNull, JS_INTERP_HOST_DELETE, frame.strict)
             : (Item){.item = ITEM_FALSE};
     }
+    if (operation == JS_INTERP_REFERENCE_RECEIVER) return reference->lookup.kind == JS_INTERP_LOOKUP_OBJECT
+        ? (Item){.item = reference->lookup.env->with_object} : make_js_undefined();
     return ops->fail(JS_INTERP_HOST_CAPABILITY);
 }
 
@@ -3496,6 +3519,16 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
             ? js_interp_super_property(this_root.get(), super_base_root.get(),
                 key_root.get())
             : js_get_key_default(this_root.get(), key_root.get()));
+    } else if (!intrinsic_require && !intrinsic_dynamic_import && call->function &&
+            call->function->node_type == AST_NODE_IDENT && js_interp_resolves_by_name(frame,
+                ((JsIdentifierNode*)call->function)->entry)) {
+        JsInterpReference reference;
+        JsInterpCompletion resolved = js_interp_eval_reference(frame, call->function,
+            &reference, this_root.home(), key_root.home());
+        if (resolved.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(resolved);
+        callee_root.set(js_interp_reference_read(frame, &reference));
+        if (reference.lookup.kind == JS_INTERP_LOOKUP_OBJECT)
+            this_root.set((Item){.item = reference.lookup.env->with_object});
     } else if (!intrinsic_require && !intrinsic_dynamic_import) {
         JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
         if (callee.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(callee);
@@ -3745,6 +3778,15 @@ static JsInterpCompletion js_interp_eval_tagged_template(JsInterpFrame* frame,
         tag_root.set(super_property
             ? js_interp_super_property(this_root.get(), super_base_root.get(), key_root.get())
             : js_get_key_default(this_root.get(), key_root.get()));
+    } else if (tagged->tag->node_type == AST_NODE_IDENT && js_interp_resolves_by_name(frame,
+            ((JsIdentifierNode*)tagged->tag)->entry)) {
+        JsInterpReference reference;
+        JsInterpCompletion resolved = js_interp_eval_reference(frame, tagged->tag,
+            &reference, this_root.home(), key_root.home());
+        if (resolved.kind != JS_INTERP_NORMAL) return resolved;
+        tag_root.set(js_interp_reference_read(frame, &reference));
+        if (reference.lookup.kind == JS_INTERP_LOOKUP_OBJECT)
+            this_root.set((Item){.item = reference.lookup.env->with_object});
     } else {
         JsInterpCompletion tag = js_interp_eval(frame, tagged->tag);
         if (tag.kind != JS_INTERP_NORMAL) return tag;
@@ -4235,8 +4277,22 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             bool unresolvable = false;
             if (has_special_binding) {
             } else if (js_interp_resolves_by_name(frame, identifier->entry)) {
+                if (js_interp_host) {
+                    RootFrame roots(2);
+                    Rooted<Item> object(roots, ItemNull), key(roots, ItemNull);
+                    JsInterpReference reference;
+                    JsInterpCompletion resolved = js_interp_eval_reference(frame, unary->operand,
+                        &reference, object.home(), key.home());
+                    if (resolved.kind != JS_INTERP_NORMAL) return resolved;
+                    if (reference.unresolvable_binding) return js_interp_normal(js_make_string("undefined"));
+                    object.set(js_interp_reference_read(frame, &reference));
+                    return item_is_error(object.get()) ? js_interp_throw(object.get())
+                        : js_interp_normal(js_typeof(object.get()));
+                }
+                Item failure = ItemNull;
                 JsInterpLookup lookup = js_interp_lookup_name(frame, identifier->entry,
-                    identifier->name);
+                    identifier->name, &failure);
+                if (item_is_error(failure)) return js_interp_throw(failure);
                 unresolvable = lookup.kind == JS_INTERP_LOOKUP_OUTER &&
                     !js_interp_outer_name_exists(lookup.outer_script, identifier->name,
                         false);
@@ -4799,7 +4855,11 @@ static JsInterpCompletion js_interp_publish_annex_b_functions(JsInterpFrame* fra
         if (!outer || js_interp_annex_b_publish_skipped(frame, outer)) continue;
         Item value = js_interp_binding_raw_value(frame, lexical);
         if (item_is_error(value)) return js_interp_throw(value);
-        Item stored = js_interp_write_binding(frame, outer, NULL, value, false);
+        // publish Annex B functions to the predeclared var, bypassing the block and any inner with.
+        JsInterpFrame target = *frame;
+        JsInterpEnv* owner = js_interp_find_binding_env(frame->env, outer);
+        if (owner) target.env = owner;
+        Item stored = js_interp_write_binding(&target, outer, NULL, value, false);
         if (item_is_error(stored)) return js_interp_throw(stored);
     }
     return js_interp_normal(make_js_undefined());
@@ -5362,6 +5422,19 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         JsInterpCompletion object = js_interp_eval(frame, with->object);
         if (object.kind != JS_INTERP_NORMAL) return object;
         object_root.set(object.value);
+        if (js_interp_host) {
+            if (js_interp_is_nullish(object_root.get()))
+                return js_interp_throw(js_interp_host->fail(JS_INTERP_HOST_TYPE));
+            object_root.set(js_interp_host->bind_this(js_interp_host->state, object_root.get(), false));
+            if (item_is_error(object_root.get())) return js_interp_throw(object_root.get());
+            JsInterpEnvRoot environment(js_interp_env_create(NULL, frame->env));
+            if (!environment.env || !environment.registered) return js_interp_throw(ItemError);
+            environment.env->binding_role = JS_INTERP_ENV_WITH_OBJECT;
+            environment.env->with_object = object_root.get().item;
+            JsInterpFrame child = *frame; child.env = environment.env;
+            return with->body ? js_interp_exec(&child, with->body)
+                : js_interp_normal(make_js_undefined());
+        }
         Item pushed = js_with_push_at(scope_slot.items(), object_root.get());
         if (item_is_error(pushed)) return js_interp_throw(pushed);
         JsInterpCompletion completion = with->body

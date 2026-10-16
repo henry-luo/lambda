@@ -75,6 +75,14 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `host60`, release MVP units | 767/767 pass | Interleaved eval/with records, declaration order, escaped closures, saved receivers, unscopables and Annex B publication |
+| `host60`, focused normal and forced/poisoned GC | 100/100 each | Existing formal-entry/full-parity checks plus eight new environment checks |
+| `host59`, selected host fixtures | 51/51 pass | CLI is byte-identical to `host60`; previous 49 plus original eval/with and closure fixtures, unchanged goldens |
+| `host59`, eval/with fixtures with forced/poisoned GC and explicit AST | 2/2 each | Both original fixtures pass in each configuration |
+| `host59`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Same seven AUTO publication failures |
+| `host59`, replay of previously failing small fixtures | 28/32 pass; 4 fail | Eval/with repaired; agent-state and CSS/JSON contract cases remain |
+| `host60`, canonical eval/with slice on explicit AST | 650/650 pass | Original sources, metadata and runner; checks the shared interpreter lookup and publisher |
+| `host60`, canonical integrated slice on formal MIR | 3,764/3,764 pass | Prior 3,114 property/Function/Date/Array iterator/module cases plus 650 eval/with cases; no unresolved records |
 | `host56`, release MVP units | 759/759 pass | Lambda fn/pn imports, rooted export cells, foreign map reads and native construction of MVP classes |
 | `host56`, focused normal and forced/poisoned GC | 92/92 each | Includes warm Lambda namespace admission and default class callable/construct capabilities |
 | `host55`, selected host fixtures | 49/49 pass | CLI is byte-identical to `host56`; includes both original Lambda import cases and two custom-element fixtures |
@@ -176,8 +184,9 @@ This does not clear the aggregate gate or the real host/promotion gaps.
    now use the shared event loop, as described below. The full
    fixture failures are retained; no legacy retry or test-harness exclusion
    hides these gaps.
-4. **Language/environment gaps.** Direct eval inside MIR `with` and independent
-   agents remain open. RegExp legacy match reads and the wide-subject replacement
+4. **Language/environment gaps.** Independent agents and the module direct-eval
+   import-cell bridge remain open. MIR `with`/eval now shares interleaved records,
+   as described below. RegExp legacy match reads and the wide-subject replacement
    integration failure are repaired in `regexp2` below; broader conformance is
    recorded separately.
    The `v9_number_json` fixture also expects the legacy JSON parser's i64-to-
@@ -783,8 +792,54 @@ checking the shared loader and the retained constructor-association path.
 The exception catalog reports zero violations; the callable census still
 fails its existing 38-case ratchet, unchanged from HEAD.
 
-The five remaining small replay failures are the two agent-state entries,
+At `host56`, the five remaining small replay failures were the two agent-state entries,
 direct eval with an object environment, and the CSS/large-JSON legacy contract
 cases. Large-library compilation/execution, AUTO publication, frontend
 overlays, the Unicode version decision, full baseline closure and performance
 acceptance remain open. Benchmark timing remains deferred.
+
+### Direct eval and interleaved object environments
+
+The formal MIR eval bridge now retains Object Environment Records in the same
+`JsInterpEnv` chain as parameter, block and variable records (D5.3, D8.1.3v25).
+MIR allocates a record at a `with` statement only when its function needs the
+eval environment bridge. Its object is a sixth contiguous traced metadata
+Item; escaped eval closures and suspended MIR activations retain it through
+the existing precise environment roots. Ordinary MIR functions without eval
+keep their existing representation and code path.
+
+Hosted interpreter `with` statements use the same interleaved records. Name
+lookup stops at an inner parameter or lexical binding, checks objects in
+order, and propagates throwing Has/unscopables operations. A resolved
+reference keeps its original object through RHS evaluation and supplies that
+object as the receiver of a call or tagged template. `typeof` uses the same
+resolved reference without repeating HasBinding. Eval-created vars continue
+to bind in the existing caller VariableEnvironment; object records do not
+become declaration targets (D8.1.3v21, D8.1.3v25).
+
+Helpers announced before coding: promote the shared
+`js_with_binding_is_visible` helper and add `js_with_get_binding_value`, which
+shares the existing property/Has kernel with interpreter reference reads and
+the retained with-stack path. SetBinding reuses `js_set_with_binding_base`.
+The shared Annex B publisher targets the predeclared variable record rather
+than resolving through its inner block/object records. MIR's internal saved
+object read uses its own statement site, avoiding redirection through the
+guest declaration identifier. No Test262 runner, metadata, fixture source or
+golden was changed. Unit expectations for the former admission rejection now
+require successful eval or the actual runtime ReferenceError.
+
+The final-source release pin `host60` has SHA-256
+`39a35c0d3786b91b699d0ed595f372fa0ea6728031d8cc0b05c120a0177417a6`.
+It is byte-identical to `host59`; the last source adjustment only lowercases
+comments. All 767 units and both 100-case focused runs pass on `host60`.
+The original eval/with fixture passes unchanged, normally, under forced GC,
+and on explicit AST. The 650-case canonical AST slice passes completely.
+The final MIR slice passes all 3,764 cases with no unresolved records: the
+previous 3,114 cases plus all 650 eval/with cases. The 2,941 production inputs
+and 9,246 verification inputs remain unchanged. Exact commands, corpus and
+metadata hashes, binary identity and outcomes are retained under the pin.
+The exception catalog has zero violations; the callable census still reports
+the same 38 pre-existing cases as HEAD. The selected host, Script and small-
+fixture results are recorded above. Full baseline closure, AUTO publication,
+independent agents, module eval import cells, library coverage, the Unicode
+version decision and performance acceptance remain open. Timing stays deferred.
