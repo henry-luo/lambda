@@ -1944,8 +1944,10 @@ performance acceptance. Details and progress:
 formal MIR Test262 batches now select MVP. Repeated public Scripts share their
 global object, lexical bindings, intrinsic identities and escaping closures;
 host global access uses that same realm. Heap replacement retires the old
-Promise/module policies. Document/preamble artifacts, host API coverage and
-AUTO per-function publication remain incomplete. The implementation plan
+Promise/module policies. Document/preamble and module caches now retain MVP
+machine-code images with per-realm relocation tables; hits still rebuild frontend
+metadata before checking exact MIR equality (D8.5.1v2). Host API coverage,
+frontend-image reuse and AUTO per-function publication remain incomplete. The implementation plan
 records failing integrated gates separately from passing focused tests.
 Performance acceptance remains open, including the cost of complete public
 realm semantics versus standalone closed-unit analysis.

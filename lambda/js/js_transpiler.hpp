@@ -251,8 +251,11 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
 
 // Batch mode preamble support (two-module MIR split)
 struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
+struct MvpLmdCode;
 
 struct JsPreambleState {
+    MvpLmdCode* mvp_code;       // immutable code image; realm metadata is never cached
+    bool mvp_realm;             // declarations belong to the persistent public MVP realm
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
     char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext

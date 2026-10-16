@@ -28,6 +28,8 @@
 #include "../../../lib/utf.h"
 #include "../../../lib/time_util.h"
 #include "../../../lib/math_utils.h"
+#include "../../../lib/strbuf.h"
+#include "../../../lib/atomic.h"
 #include <math.h>
 
 enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
@@ -189,7 +191,35 @@ struct LmdAllocationSite { TypeMap* shape; uint64_t epoch; };
 struct LmdAllocationVariant { LmdAllocationSite site; uint64_t key; };
 struct LmdAllocationVariants { LmdAllocationVariant entries[4]; uint64_t next; };
 struct MvpLmdRealm;
+struct MvpLmdCode {
+    atomic_int32 references;
+    MIR_context_t mir;
+    StrBuf* image;
+    ArrayList* addresses;
+    size_t relocation_count;
+    char* source;
+    size_t source_length;
+    char* reference;
+};
+void mvp_lmd_code_retain(MvpLmdCode* code) {
+    if (code) atomic_inc32(&code->references);
+}
+void mvp_lmd_code_release(MvpLmdCode* code) {
+    if (!code || atomic_dec32(&code->references)) return;
+    if (code->mir) { MIR_gen_finish(code->mir); MIR_finish(code->mir); }
+    strbuf_free(code->image); arraylist_free(code->addresses);
+    mem_free(code->source); mem_free(code->reference); mem_free(code);
+}
+size_t mvp_lmd_code_bytes(const MvpLmdCode* code) {
+    return code ? sizeof(*code) + code->image->length +
+        code->addresses->length * sizeof(void*) + code->source_length +
+        (code->reference ? strlen(code->reference) + 1 : 0) : 0;
+}
 struct MvpLmdProgram {
+    bool relocatable;
+    ArrayList* relocations;
+    MvpLmdCode* code;
+    const MvpLmdCode* cached_code;
     MvpLmdRealm* module_controller;
     JsTranspiler* frontend;
     MvpLmdProgram* realm_program;
@@ -2662,6 +2692,22 @@ static void move(LmdCompiler* c, MIR_reg_t dst, MIR_op_t value, bool number = fa
 static MIR_reg_t constant(LmdCompiler* c, uint64_t value) {
     MIR_reg_t r = em_new_reg(&c->em, "constant", MIR_T_I64); move(c, r, integer(c, value)); return r;
 }
+static MIR_reg_t relocated_constant(LmdCompiler* c, uint64_t value) {
+    if (!c->program->relocatable) return constant(c, value);
+    ArrayList* sites = c->program->relocations;
+    int index = sites->length;
+    // one slot per emitted operand keeps the layout independent of pointer
+    // identity, interning, and allocator reuse in another realm (D8.5.1v2).
+    if (!arraylist_append(sites, (void*)value)) {
+        diagnostic(c->program, NULL, "relocation allocation failed"); return constant(c, 0);
+    }
+    MIR_reg_t table = em_load_at(&c->em, c->unit, offsetof(MvpLmdProgram, relocations), MIR_T_I64, "relocations");
+    MIR_reg_t data = em_load_at(&c->em, table, offsetof(ArrayList, data), MIR_T_I64, "relocation_data");
+    return em_load_at(&c->em, data, index * sizeof(void*), MIR_T_I64, "relocated_constant");
+}
+static MIR_op_t relocated(LmdCompiler* c, uint64_t value) {
+    return c->program->relocatable ? reg(c, relocated_constant(c, value)) : integer(c, value);
+}
 static bool finite_integer(double value) {
     return isfinite(value) && value >= INT53_MIN && value <= INT53_MAX &&
         value == trunc(value) && !(value == 0 && signbit(value));
@@ -2866,7 +2912,7 @@ static void return_value(LmdCompiler* c, LmdValue value) {
 static void fail(LmdCompiler* c, int kind, AstNode* n, const char* detail = NULL) {
     MIR_reg_t error = em_call_3(&c->em, "mvp_lmd_fail", MIR_T_I64, MIR_T_I64,
         integer(c, kind), MIR_T_I64, integer(c, n ? n->source_span.start_byte : 0),
-        MIR_T_P, integer(c, (uint64_t)detail), true);
+        MIR_T_P, relocated(c, (uint64_t)detail), true);
     return_error(c, error);
 }
 static void check_error(LmdCompiler* c, MIR_reg_t result) {
@@ -2948,7 +2994,7 @@ static LmdValue box(LmdCompiler* c, LmdValue value) {
     if (value.kind == K_NUMBER && value.literal) {
         double* literal = (double*)pool_alloc(c->program->frontend->pool, sizeof(double));
         *literal = value.number;
-        return boxed(c, constant(c, lambda_float_ptr_to_item(literal).item), K_NUMBER);
+        return boxed(c, relocated_constant(c, lambda_float_ptr_to_item(literal).item), K_NUMBER);
     }
     if (value.kind == K_NUMBER)
         return boxed(c, em_box_f64_to_item(&c->em, c, cold_box, value.reg), K_NUMBER);
@@ -3110,7 +3156,7 @@ static void branch_condition(LmdCompiler* c, AstNode* node, MIR_label_t target, 
 }
 static LmdValue text(LmdCompiler* c, const char* bytes) {
     String* s = name_pool_create_len(c->program->frontend->name_pool, bytes, strlen(bytes));
-    return boxed(c, constant(c, s2it(s)), K_STRING);
+    return boxed(c, relocated_constant(c, s2it(s)), K_STRING);
 }
 static LmdValue to_string(LmdCompiler* c, LmdValue v, bool explicit_string = false) {
     unsigned k = semantic(v);
@@ -3515,7 +3561,7 @@ static MIR_reg_t binding_cell(LmdCompiler* c, LmdBinding* b) {
 static MIR_reg_t binding_item(LmdCompiler* c, LmdBinding* b) {
     if (b->module_import) {
         MIR_reg_t value = em_call_1(&c->em, "js_module_binding_get", MIR_T_I64,
-            MIR_T_P, integer(c, (uint64_t)b->module_import), true);
+            MIR_T_P, relocated(c, (uint64_t)b->module_import), true);
         check_error(c, value); return value;
     }
     if (b->module_cell) {
@@ -3562,7 +3608,7 @@ static MIR_reg_t eval_caller(LmdCompiler* c) {
     MIR_reg_t target = c->receiver_cell ? em_load_at(&c->em,
         em_array_element_address(&c->em, c->receiver_cell, constant(c, 1), 8), 0, MIR_T_I64, "eval_new_target") :
         c->function->id ? c->new_target : constant(c, ITEM_JS_UNDEFINED);
-    em_store_at(&c->em, caller, offsetof(JsInterpHostCaller, script), MIR_T_I64, constant(c, (uint64_t)c->program->frontend));
+    em_store_at(&c->em, caller, offsetof(JsInterpHostCaller, script), MIR_T_I64, relocated_constant(c, (uint64_t)c->program->frontend));
     em_store_at(&c->em, caller, offsetof(JsInterpHostCaller, env), MIR_T_I64, c->eval_env);
     em_store_at(&c->em, caller, offsetof(JsInterpHostCaller, receiver), MIR_T_I64, receiver);
     em_store_at(&c->em, caller, offsetof(JsInterpHostCaller, new_target), MIR_T_I64, target);
@@ -3586,7 +3632,7 @@ static LmdValue eval_reference_operation(LmdCompiler* c, MIR_reg_t reference,
 static LmdReference eval_reference(LmdCompiler* c, AstIdentNode* id) {
     LmdReference result = {};
     result.eval_reference = eval_scratch(c, sizeof(JsInterpHostReference));
-    eval_reference_operation(c, result.eval_reference, JS_INTERP_REFERENCE_RESOLVE, constant(c, s2it(id->name)));
+    eval_reference_operation(c, result.eval_reference, JS_INTERP_REFERENCE_RESOLVE, relocated_constant(c, s2it(id->name)));
     return result;
 }
 static void check_tdz(LmdCompiler* c, LmdBinding* b, MIR_reg_t value, AstNode* site) {
@@ -3636,7 +3682,7 @@ static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write
     }
     MIR_reg_t owner = em_load_at(&c->em, module_slots(c),
         c->program->global_slot * sizeof(Item), MIR_T_I64, "global_binding_object");
-    MIR_reg_t name = constant(c, s2it(spelling ? spelling : ((AstIdentNode*)target)->name));
+    MIR_reg_t name = relocated_constant(c, s2it(spelling ? spelling : ((AstIdentNode*)target)->name));
     if (c->program->test262_host && c->program->dynamic_source) {
         // host Script entries can add global lexicals after this MIR body was compiled.
         auto access = [&](int operation) {
@@ -3682,7 +3728,7 @@ static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write
         MIR_T_I64, write ? reg(c, value) : integer(c, ITEM_NULL),
         MIR_T_I64, integer(c, write ? LMD_PROP_SET | (c->strict ? LMD_PROP_STRICT : 0) :
             allow_missing ? LMD_PROP_GET : LMD_PROP_GET_BINDING),
-        MIR_T_P, integer(c, (uint64_t)cache), true);
+        MIR_T_P, relocated(c, (uint64_t)cache), true);
     check_error(c, result);
     if (!done) return result;
     move(c, joined, reg(c, result)); put_label(c, done); return joined;
@@ -3807,7 +3853,7 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
 }
 static LmdReference with_reference(LmdCompiler* c, LmdBinding* binding, AstNode* site) {
     LmdReference ref = {binding->fallback};
-    ref.name = constant(c, s2it(binding->entry->name));
+    ref.name = relocated_constant(c, s2it(binding->entry->name));
     ref.with_object = em_new_reg(&c->em, "with_reference_base", MIR_T_I64);
     move(c, ref.with_object, integer(c, ITEM_JS_UNDEFINED)); boxed(c, ref.with_object);
     MIR_label_t done = label(c);
@@ -4033,7 +4079,7 @@ static LmdObjectPlan* value_plan(LmdCompiler* c, AstNode* node) {
     return object_plan(c->program, node);
 }
 static MIR_reg_t planned_shape(LmdCompiler* c, LmdObjectPlan* plan) {
-    return em_load_at(&c->em, constant(c, (uint64_t)plan), offsetof(LmdObjectPlan, shape), MIR_T_I64, "literal_shape");
+    return em_load_at(&c->em, relocated_constant(c, (uint64_t)plan), offsetof(LmdObjectPlan, shape), MIR_T_I64, "literal_shape");
 }
 static LmdValue field_read(LmdCompiler* c, LmdReference ref) {
     ShapeEntry* field = ref.field;
@@ -4044,7 +4090,7 @@ static LmdValue field_read(LmdCompiler* c, LmdReference ref) {
     // Packed bool predecessors can leave a word lane unaligned for MIR's target matcher.
     if (type != LMD_TYPE_BOOL && field->byte_offset % sizeof(uint64_t))
         return boxed(c, em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
-            MIR_T_P, reg(c, data), MIR_T_P, integer(c, (uint64_t)field), true));
+            MIR_T_P, reg(c, data), MIR_T_P, relocated(c, (uint64_t)field), true));
     MIR_reg_t value = em_load_at(&c->em, data, field->byte_offset,
         type == LMD_TYPE_FLOAT ? MIR_T_D : type == LMD_TYPE_BOOL ? MIR_T_U8 : MIR_T_I64, "field_value");
     if (type == LMD_TYPE_INT) return {value, K_NUMBER, false, 0, true};
@@ -4096,7 +4142,7 @@ static MIR_reg_t guard_property_cache(LmdCompiler* c, MIR_reg_t owner,
     MIR_reg_t address = em_new_reg(&c->em, "cache_entry", MIR_T_I64);
     MIR_label_t matched = label(c);
     for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++) {
-        move(c, address, integer(c, (uint64_t)&cache->entries[i]));
+        move(c, address, relocated(c, (uint64_t)&cache->entries[i]));
         MIR_reg_t expected = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, shape), MIR_T_I64, "cached_shape");
         if (i + 1 == MVP_LMD_PROPERTY_CACHE_SIZE) branch(c, MIR_BNE, miss, reg(c, shape), reg(c, expected));
         else branch(c, MIR_BEQ, matched, reg(c, shape), reg(c, expected));
@@ -4260,7 +4306,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, integer(c, initializing ? LMD_PROP_INITIALIZE : operation |
                 (c->strict && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE) ? LMD_PROP_STRICT : 0)),
-            MIR_T_P, integer(c, (uint64_t)cache), true);
+            MIR_T_P, relocated(c, (uint64_t)cache), true);
         if (numeric) { check_error(c, result); result = to_number(c, boxed(c, result)); }
         if (!done) return result;
         move(c, joined, reg(c, result), numeric); put_label(c, done); return joined;
@@ -4349,7 +4395,7 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         }
     }
     // lexical property names are canonical pooled names; only computed keys need runtime conversion.
-    LmdValue key = field->computed ? expression(c, field->property) : boxed(c, constant(c, s2it(
+    LmdValue key = field->computed ? expression(c, field->property) : boxed(c, relocated_constant(c, s2it(
         name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)field->property)->name))), K_STRING);
     if (field->object->node_type == AST_NODE_IDENT && named(((AstIdentNode*)field->object)->name, "super")) {
         LmdReference ref = {NULL, owner};
@@ -4597,7 +4643,7 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
     MIR_label_t slow = ascii_literal ? NULL : label(c);
     MIR_reg_t result = em_new_reg(&c->em, "string_property", MIR_T_I64);
     if (length) branch(c, MIR_BEQ, length, reg(c, ref.key), MIR_new_int_op(c->em.ctx, -1));
-    MIR_reg_t string = ascii_literal ? constant(c, (uint64_t)ref.string_literal) : payload(c, ref.owner.reg);
+    MIR_reg_t string = ascii_literal ? relocated_constant(c, (uint64_t)ref.string_literal) : payload(c, ref.owner.reg);
     if (slow) {
         MIR_reg_t flags = em_load_at(&c->em, string, offsetof(String, flags), MIR_T_U8, "string_flags");
         branch_truth(c, slow, op(c, MIR_AND, reg(c, flags), integer(c, 1)), false);
@@ -4608,7 +4654,7 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
     branch(c, MIR_UBGE, done, reg(c, ref.key), reg(c, size));
     MIR_reg_t address = op(c, MIR_ADD, reg(c, string), reg(c, ref.key));
     MIR_reg_t unit = em_load_at(&c->em, address, offsetof(String, chars), MIR_T_U8, "ascii_unit");
-    MIR_reg_t entry = op(c, MIR_ADD, integer(c, (uint64_t)characters),
+    MIR_reg_t entry = op(c, MIR_ADD, relocated(c, (uint64_t)characters),
         reg(c, op(c, MIR_LSH, reg(c, unit), integer(c, 3))));
     move(c, result, reg(c, em_load_at(&c->em, entry, 0, MIR_T_I64, "ascii_character")));
     if (slow) {
@@ -4933,7 +4979,7 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         MIR_label_t miss = label(c);
         // capture the builtin before arguments run; the empty attribute shape excludes own overrides.
         TypeMap* shape = c->program->iterators ? &c->program->library->map.shape : c->program->roots[1];
-        em_guard_map_shape(&c->em, ref.owner.reg, constant(c, (uint64_t)shape), miss,
+        em_guard_map_shape(&c->em, ref.owner.reg, relocated_constant(c, (uint64_t)shape), miss,
             k == K_OBJECT || k == K_MAP);
         move(c, result, integer(c, mvp_lmd_method_token(ref.method))); jump(c, done);
         put_label(c, miss);
@@ -5194,8 +5240,8 @@ static void bind_pattern(LmdCompiler* c, AstNode* pattern, LmdValue value, bool 
                 !((AstFuncNode*)assignment->right)->name) {
             // NamedEvaluation applies only to a directly anonymous definition, not a sequence/call result.
             MIR_reg_t named = em_call_4(&c->em, "mvp_lmd_named_set", MIR_T_I64,
-                MIR_T_I64, reg(c, selected), MIR_T_P, integer(c, (uint64_t)"name"),
-                MIR_T_I64, integer(c, s2it(((AstIdentNode*)assignment->left)->name)),
+                MIR_T_I64, reg(c, selected), MIR_T_P, relocated(c, (uint64_t)"name"),
+                MIR_T_I64, relocated(c, s2it(((AstIdentNode*)assignment->left)->name)),
                 MIR_T_I64, integer(c, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE), true);
             check_error(c, named);
         }
@@ -5261,7 +5307,7 @@ static void bind_pattern(LmdCompiler* c, AstNode* pattern, LmdValue value, bool 
             if (node->node_type != AST_NODE_PROPERTY) { diagnostic(c->program, node, "object binding member"); continue; }
             AstPropertyNode* property = (AstPropertyNode*)node;
             String* spelling = !property->computed && property->key->node_type == AST_NODE_IDENT ? ((AstIdentNode*)property->key)->name : NULL;
-            LmdValue key = spelling ? boxed(c, constant(c, s2it(spelling)), K_STRING) : canonical_key(c, expression(c, property->key));
+            LmdValue key = spelling ? boxed(c, relocated_constant(c, s2it(spelling)), K_STRING) : canonical_key(c, expression(c, property->key));
             if (rest) array_index_write(c, {NULL, excluded, constant(c, index++)}, key, true);
             LmdReference target = {};
             bool prepared = pattern_reference(c, property->value, initialize, &target);
@@ -5274,7 +5320,7 @@ static void bind_pattern(LmdCompiler* c, AstNode* pattern, LmdValue value, bool 
             LmdReference ref = {};
             bool prepared = pattern_reference(c, argument, initialize, &ref);
             MIR_reg_t object = em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
-                MIR_T_P, integer(c, (uint64_t)c->program->library->object_shape), MIR_T_I64, integer(c, 0), true);
+                MIR_T_P, relocated(c, (uint64_t)c->program->library->object_shape), MIR_T_I64, integer(c, 0), true);
             check_error(c, object); LmdValue output = boxed(c, object, K_OBJECT);
             MIR_reg_t copied = em_call_4(&c->em, "mvp_lmd_object_copy", MIR_T_I64,
                 MIR_T_I64, reg(c, object), MIR_T_I64, reg(c, owner.reg), MIR_T_I64, integer(c, 0),
@@ -5299,7 +5345,7 @@ static MIR_reg_t named_evaluation_key(LmdCompiler* c, AstNode* value) {
         return text(c, "default").reg;
     AstNode* target = parent && parent->node_type == AST_NODE_VARIABLE_DECLARATOR ? ((AstDeclaratorNode*)parent)->id :
         parent && (parent->node_type == AST_NODE_ASSIGN || parent->node_type == AST_NODE_ASSIGN_PATTERN) ? ((AstAssignNode*)parent)->left : NULL;
-    return target && target->node_type == AST_NODE_IDENT ? constant(c, s2it(((AstIdentNode*)target)->name)) : 0;
+    return target && target->node_type == AST_NODE_IDENT ? relocated_constant(c, s2it(((AstIdentNode*)target)->name)) : 0;
 }
 static int function_capture_count(LmdFunction* f, bool home = false) {
     return (f->captures ? f->captures->length : 0) + f->lexical_receiver + home;
@@ -5420,7 +5466,7 @@ static LmdValue object_construct(LmdCompiler* c, AstCallNode* n) {
     }
     put_label(c, allocate);
     move(c, result, reg(c, em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
-        MIR_T_P, integer(c, (uint64_t)c->program->roots[0]), MIR_T_I64, integer(c, 0), true)));
+        MIR_T_P, relocated(c, (uint64_t)c->program->roots[0]), MIR_T_I64, integer(c, 0), true)));
     check_error(c, result); put_label(c, done);
     mem_free(values); return boxed(c, result, count ? K_ANY : K_OBJECT);
 }
@@ -5482,7 +5528,7 @@ static LmdValue sequence_method_dense(LmdCompiler* c, LmdValue owner, int method
             (!semantic(values[0]) || (semantic(values[0]) & ~(K_STRING | K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED)))));
     if (method == LMD_METHOD_MATCH || method == LMD_METHOD_SEARCH || method == LMD_METHOD_REPLACE || method == LMD_METHOD_MATCH_ALL || split_protocol) {
         MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_regexp_string_method", MIR_T_I64,
-            MIR_T_P, integer(c, (uint64_t)c->program->library), MIR_T_I64, reg(c, owner.reg),
+            MIR_T_P, relocated(c, (uint64_t)c->program->library), MIR_T_I64, reg(c, owner.reg),
             MIR_T_I64, reg(c, count ? box(c, values[0]).reg : absent.reg),
             MIR_T_I64, reg(c, count > 1 ? box(c, values[1]).reg : absent.reg),
             MIR_T_I64, integer(c, method == LMD_METHOD_MATCH_ALL ? 4 : split_protocol ? 3 : method == LMD_METHOD_SEARCH ? 2 : method == LMD_METHOD_REPLACE), true);
@@ -6204,7 +6250,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         LmdValue specifier = box(c, expression(c, n->arguments));
         MIR_reg_t result = em_call_3(&c->em, "mvp_lmd_dynamic_import", MIR_T_I64,
             MIR_T_P, reg(c, c->unit), MIR_T_I64, reg(c, specifier.reg), MIR_T_P,
-            integer(c, (uint64_t)c->program->frontend->reference), true);
+            relocated(c, (uint64_t)c->program->frontend->reference), true);
         check_error(c, result);
         return stable_item(c, result);
     }
@@ -7031,7 +7077,7 @@ static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result)
     }
     MIR_label_t valid = label(c), invalid = label(c);
     branch_truth(c, invalid, joined, false);
-    branch(c, MIR_BNE, valid, reg(c, joined), integer(c, (uint64_t)&STR_ERROR));
+    branch(c, MIR_BNE, valid, reg(c, joined), relocated(c, (uint64_t)&STR_ERROR));
     put_label(c, invalid); fail(c, LMD_MVP_MEMORY, (AstNode*)node); put_label(c, valid);
     joined = em_call_1(&c->em, "fn_string_freeze", MIR_T_P, MIR_T_P, reg(c, joined), true);
     *result = boxed(c, op(c, MIR_OR, reg(c, joined), integer(c, (uint64_t)LMD_TYPE_STRING << 56)), K_STRING);
@@ -7090,20 +7136,20 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         String* pattern = name_pool_create_len(c->program->frontend->name_pool, literal->pattern, literal->pattern_len);
         String* flags = name_pool_create_len(c->program->frontend->name_pool, literal->flags, literal->flags_len);
         MIR_reg_t result = em_call_3(&c->em, "mvp_lmd_regexp_new", MIR_T_I64,
-            MIR_T_P, integer(c, (uint64_t)c->program->library), MIR_T_I64, integer(c, s2it(pattern)),
-            MIR_T_I64, integer(c, s2it(flags)), true);
+            MIR_T_P, relocated(c, (uint64_t)c->program->library), MIR_T_I64, relocated(c, s2it(pattern)),
+            MIR_T_I64, relocated(c, s2it(flags)), true);
         check_error(c, result); return boxed(c, result, K_OBJECT);
     }
     case AST_NODE_LITERAL: {
         AstLiteralNode* l = (AstLiteralNode*)n;
         if (l->is_bigint) {
             MIR_reg_t result = em_call_2(&c->em, "bigint_from_string", MIR_T_I64,
-                MIR_T_P, integer(c, (uint64_t)l->bigint_str->chars), MIR_T_I64, integer(c, l->bigint_str->len), true);
+                MIR_T_P, relocated(c, (uint64_t)l->bigint_str->chars), MIR_T_I64, integer(c, l->bigint_str->len), true);
             check_error(c, result); return boxed(c, result, K_BIGINT);
         }
         if (l->literal_type == AST_LITERAL_NUMBER) return number(c, l->value.number_value);
         if (l->literal_type == AST_LITERAL_STRING)
-            return boxed(c, constant(c, s2it(l->value.string_value)), K_STRING);
+            return boxed(c, relocated_constant(c, s2it(l->value.string_value)), K_STRING);
         if (l->literal_type == AST_LITERAL_BOOLEAN) return {constant(c, l->value.boolean_value), K_BOOL};
         return boxed(c, constant(c, l->literal_type == AST_LITERAL_NULL ? ITEM_NULL : ITEM_JS_UNDEFINED),
             l->literal_type == AST_LITERAL_NULL ? K_NULL : K_UNDEFINED);
@@ -7114,7 +7160,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         LmdValue result = text(c, "");
         for (AstNode* quasi = literal->quasis; quasi; quasi = quasi->next) {
             String* cooked = ((JsTemplateElementNode*)quasi)->cooked;
-            LmdValue part = boxed(c, constant(c, s2it(cooked)), K_STRING);
+            LmdValue part = boxed(c, relocated_constant(c, s2it(cooked)), K_STRING);
             if (quasi == literal->quasis) result = part;
             else result = binary_value(c, OPERATOR_ADD, result, part);
             if (next) {
@@ -7135,7 +7181,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             member ? capture_member_callee(c, tagged->tag, n, &ref, false) : box(c, expression(c, tagged->tag));
         uint32_t slot = c->program->template_slots[ast_index_find(&c->program->frontend->ast_index, n)] - 1;
         MIR_reg_t object = em_call_3(&c->em, "mvp_lmd_template_object", MIR_T_I64,
-            MIR_T_P, reg(c, c->unit), MIR_T_P, integer(c, (uint64_t)tagged->quasi), MIR_T_I64, integer(c, slot), true);
+            MIR_T_P, reg(c, c->unit), MIR_T_P, relocated(c, (uint64_t)tagged->quasi), MIR_T_I64, integer(c, slot), true);
         check_error(c, object);
         int count = ast_linked_node_count(tagged->quasi->expressions) + 1;
         LmdValue* values = (LmdValue*)mem_calloc(count, sizeof(LmdValue), MEM_CAT_TEMP);
@@ -7156,7 +7202,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         AstIdentNode* id = (AstIdentNode*)n;
         if (!id->entry && named(id->name, "import.meta")) {
             MIR_reg_t value = em_call_1(&c->em, "js_module_import_meta", MIR_T_I64,
-                MIR_T_P, integer(c, (uint64_t)c->program->source_module), true);
+                MIR_T_P, relocated(c, (uint64_t)c->program->source_module), true);
             check_error(c, value); return boxed(c, value, K_OBJECT);
         }
         // inlined bodies retain their own receiver even inside script/static initialization.
@@ -7289,7 +7335,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 if (c->program->test262_host && c->program->dynamic_source)
                     return boxed(c, global_binding_access(c, u->operand, false, 0, false, id->name, true), K_BOOL);
                 MIR_reg_t owner = em_load_at(&c->em, module_slots(c), c->program->global_slot * sizeof(Item), MIR_T_I64, "delete_global");
-                return boxed(c, property_access(c, LMD_PROP_DELETE, owner, constant(c, s2it(id->name))), K_BOOL);
+                return boxed(c, property_access(c, LMD_PROP_DELETE, owner, relocated_constant(c, s2it(id->name))), K_BOOL);
             }
             if (u->operand->node_type != AST_NODE_MEMBER_EXPR && u->operand->node_type != AST_NODE_INDEX_EXPR) {
                 expression(c, u->operand); return {constant(c, 1), K_BOOL};
@@ -7507,7 +7553,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                     arraylist_append(c->program->objects, native_plan);
                     MIR_label_t slow = label(c), done = label(c);
                     MIR_reg_t joined = em_new_reg(&c->em, "native_constructed", MIR_T_I64);
-                    MIR_reg_t class_values = em_load_at(&c->em, constant(c, (uint64_t)&cls->values),
+                    MIR_reg_t class_values = em_load_at(&c->em, relocated_constant(c, (uint64_t)&cls->values),
                         0, MIR_T_I64, "class_values");
                     branch(c, MIR_BNE, slow, reg(c, constructor.reg), reg(c, em_load_at(&c->em,
                         class_values, 0, MIR_T_I64, "class_constructor")));
@@ -7540,10 +7586,10 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 if (!site) { mem_free(values); diagnostic(c->program, n, "allocation site cache"); return expression(c, NULL); }
                 MIR_label_t slow = label(c), done = label(c), unchanged = label(c);
                 MIR_reg_t joined = em_new_reg(&c->em, "constructed", MIR_T_I64);
-                MIR_reg_t shape_slot = constant(c, (uint64_t)&cls->allocation_shape);
+                MIR_reg_t shape_slot = relocated_constant(c, (uint64_t)&cls->allocation_shape);
                 MIR_reg_t shape = em_load_at(&c->em, shape_slot, 0, MIR_T_I64, "allocation_shape");
-                MIR_reg_t epoch = em_load_at(&c->em, constant(c, (uint64_t)&cls->allocation_epoch), 0, MIR_T_I64, "allocation_epoch");
-                MIR_reg_t site_address = constant(c, (uint64_t)site);
+                MIR_reg_t epoch = em_load_at(&c->em, relocated_constant(c, (uint64_t)&cls->allocation_epoch), 0, MIR_T_I64, "allocation_epoch");
+                MIR_reg_t site_address = relocated_constant(c, (uint64_t)site);
                 MIR_reg_t variant_key = 0;
                 if (variants) {
                     variant_key = constant(c, 0);
@@ -7554,11 +7600,11 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                     }
                     MIR_label_t found = label(c);
                     for (int i = 0; i < 4; i++) {
-                        move(c, site_address, integer(c, (uint64_t)&((LmdAllocationVariants*)site)->entries[i]));
+                        move(c, site_address, relocated(c, (uint64_t)&((LmdAllocationVariants*)site)->entries[i]));
                         branch(c, MIR_BEQ, found, reg(c, variant_key), reg(c, em_load_at(&c->em,
                             site_address, offsetof(LmdAllocationVariant, key), MIR_T_I64, "allocation_key")));
                     }
-                    MIR_reg_t table = constant(c, (uint64_t)site);
+                    MIR_reg_t table = relocated_constant(c, (uint64_t)site);
                     MIR_reg_t next = em_load_at(&c->em, table, offsetof(LmdAllocationVariants, next), MIR_T_I64, "allocation_next");
                     move(c, site_address, reg(c, op(c, MIR_ADD, reg(c, table), reg(c,
                         op(c, MIR_MUL, reg(c, op(c, MIR_AND, reg(c, next), integer(c, 3))),
@@ -7578,7 +7624,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 // the first ordinary construction supplies a completed, shared layout.
                 branch(c, MIR_BEQ, slow, reg(c, shape), integer(c, 0));
                 // program slots are installed at execution entry, after MIR generation.
-                MIR_reg_t class_values = em_load_at(&c->em, constant(c, (uint64_t)&cls->values),
+                MIR_reg_t class_values = em_load_at(&c->em, relocated_constant(c, (uint64_t)&cls->values),
                     0, MIR_T_I64, "class_values");
                 branch(c, MIR_BNE, slow, reg(c, constructor.reg), reg(c, em_load_at(&c->em,
                     class_values, 0, MIR_T_I64, "class_constructor")));
@@ -7637,7 +7683,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         mem_free(args);
         if (!b || b->intrinsic != 4 || call->arguments) { fail(c, LMD_MVP_CAPABILITY, n); return boxed(c, constant(c, ITEM_JS_UNDEFINED)); }
         MIR_reg_t map = em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
-            MIR_T_P, integer(c, (uint64_t)c->program->roots[1]), MIR_T_I64, integer(c, 1), true);
+            MIR_T_P, relocated(c, (uint64_t)c->program->roots[1]), MIR_T_I64, integer(c, 1), true);
         check_error(c, map); return boxed(c, map, K_MAP);
     }
     case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: {
@@ -7656,7 +7702,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         LmdValue* values = count ? (LmdValue*)mem_calloc(count, sizeof(LmdValue), MEM_CAT_TEMP) : NULL;
         if (values) for (AstNode* e = ((AstMapNode*)n)->properties; e; e = e->next)
             values[index++] = expression(c, ((AstPropertyNode*)e)->value);
-        MIR_reg_t shape = plan ? planned_shape(c, plan) : constant(c, (uint64_t)c->program->roots[0]);
+        MIR_reg_t shape = plan ? planned_shape(c, plan) : relocated_constant(c, (uint64_t)c->program->roots[0]);
         MIR_reg_t object = em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
             MIR_T_P, reg(c, shape), MIR_T_I64, integer(c, 0), true);
         check_error(c, object); LmdValue owner = boxed(c, object, K_OBJECT);
@@ -7673,7 +7719,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             AstPropertyNode* prop = (AstPropertyNode*)e;
             String* spelling = !prop->computed && prop->key->node_type == AST_NODE_IDENT
                 ? name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)prop->key)->name) : NULL;
-            LmdValue name = spelling ? boxed(c, constant(c, s2it(spelling)), K_STRING)
+            LmdValue name = spelling ? boxed(c, relocated_constant(c, s2it(spelling)), K_STRING)
                 : canonical_key(c, expression(c, prop->key));
             LmdValue value = values ? values[index++] : expression(c, prop->value);
             LmdFunction* method = prop->method || prop->is_getter || prop->is_setter ? function(c->program, prop->value) : NULL;
@@ -7782,7 +7828,7 @@ static void eval_scope_enter(LmdCompiler* c, NameScope* scope, bool clone = fals
     if (activation && c->function->arguments_binding) flags |= JS_INTERP_CELL_ARGUMENTS;
     if (activation && c->function->ast->node_type != AST_NODE_ARROW_FUNC) flags |= JS_INTERP_CELL_THIS;
     MIR_reg_t env = em_call_4(&c->em, "mvp_lmd_dynamic_environment", MIR_T_P,
-        MIR_T_P, reg(c, c->unit), MIR_T_P, integer(c, (uint64_t)scope),
+        MIR_T_P, reg(c, c->unit), MIR_T_P, relocated(c, (uint64_t)scope),
         MIR_T_P, reg(c, outer), MIR_T_I64, integer(c, flags | (role << 8)), true);
     root_value(c, env, JIT_VALUE_RAW_GC_POINTER);
     MIR_label_t allocated = label(c); branch_truth(c, allocated, env);
@@ -7796,7 +7842,7 @@ static void eval_scope_enter(LmdCompiler* c, NameScope* scope, bool clone = fals
             MIR_T_I64, binding_cell(c, b));
     }
     if (activation) {
-        em_store_at(&c->em, env, offsetof(JsInterpEnv, function_node), MIR_T_I64, constant(c, (uint64_t)c->function->ast));
+        em_store_at(&c->em, env, offsetof(JsInterpEnv, function_node), MIR_T_I64, relocated_constant(c, (uint64_t)c->function->ast));
         if (flags & JS_INTERP_CELL_THIS) {
             em_store_at(&c->em, env, offsetof(JsInterpEnv, has_lexical_this), MIR_T_U8, constant(c, 1));
             em_store_at(&c->em, env, offsetof(JsInterpEnv, lexical_this), MIR_T_I64, c->receiver_cell);
@@ -7869,7 +7915,7 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
         // each class evaluation creates new cells; escaping closures keep the earlier identities.
         initialize_capture(c, binding, false);
         MIR_reg_t key = em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
-            MIR_T_I64, integer(c, ITEM_NULL), MIR_T_I64, integer(c, s2it(binding->entry->name)),
+            MIR_T_I64, integer(c, ITEM_NULL), MIR_T_I64, relocated(c, s2it(binding->entry->name)),
             MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), MIR_T_I64, integer(c, LMD_PRIVATE_NAME), true);
         check_error(c, key); write_binding(c, binding, boxed(c, key, K_STRING), site, true);
     }
@@ -7884,7 +7930,7 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
             LmdBinding* binding = (LmdBinding*)c->program->bindings->data[i];
             if (!binding->private_name || binding->entry->node != site) continue;
             array_index_write(c, {NULL, bindings, constant(c, index++)},
-                boxed(c, constant(c, s2it(binding->entry->name)), K_STRING), true);
+                boxed(c, relocated_constant(c, s2it(binding->entry->name)), K_STRING), true);
             array_index_write(c, {NULL, bindings, constant(c, index++)},
                 boxed(c, binding_item(c, binding), K_STRING), true);
         }
@@ -7892,7 +7938,7 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
     LmdValue constructor = cls->dynamic && cls->constructor_id >= 0 ?
         new_function(c, (LmdFunction*)c->program->functions->data[cls->constructor_id]) : boxed(c, constant(c, ITEM_NULL));
     MIR_reg_t created = em_call_3(&c->em, "mvp_lmd_class_new", MIR_T_I64,
-        MIR_T_P, integer(c, (uint64_t)cls), MIR_T_I64, reg(c, base.reg), MIR_T_I64, reg(c, constructor.reg), true);
+        MIR_T_P, relocated(c, (uint64_t)cls), MIR_T_I64, reg(c, base.reg), MIR_T_I64, reg(c, constructor.reg), true);
     check_error(c, created); LmdValue result = boxed(c, created, K_FUNCTION);
     if (cls->eval_environment)
         em_store_at(&c->em, c->eval_env, offsetof(JsInterpEnv, private_home_class), MIR_T_I64, created);
@@ -7917,7 +7963,7 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
         LmdBinding* private_name = !computed && key_node->node_type == AST_NODE_IDENT ?
             private_binding(c->program, site, ((AstIdentNode*)key_node)->name) : NULL;
         LmdValue key = !computed && key_node->node_type == AST_NODE_IDENT ?
-            boxed(c, constant(c, s2it(((AstIdentNode*)key_node)->name)), K_STRING) : canonical_key(c, expression(c, key_node));
+            boxed(c, relocated_constant(c, s2it(((AstIdentNode*)key_node)->name)), K_STRING) : canonical_key(c, expression(c, key_node));
         if (private_name) key = boxed(c, binding_item(c, private_name), K_STRING);
         if (field) {
             em_store_at(&c->em, keys, field_index++ * sizeof(Item), MIR_T_I64, key.reg);
@@ -8608,7 +8654,7 @@ static void statement(LmdCompiler* c, AstNode* n) {
             JsCatchNode* handler = (JsCatchNode*)node->handler;
             scope_initialize(c, handler->vars);
             MIR_reg_t value = em_call_2(&c->em, "mvp_lmd_caught_value", MIR_T_I64,
-                MIR_T_P, integer(c, (uint64_t)c->program->library), MIR_T_I64, reg(c, error), true);
+                MIR_T_P, relocated(c, (uint64_t)c->program->library), MIR_T_I64, reg(c, error), true);
             check_error(c, value);
             if (handler->param) bind_pattern(c, handler->param, boxed(c, value), true);
             statement(c, handler->body); jump(c, normal);
@@ -9058,7 +9104,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
         // escaped module callbacks create dynamic code in their defining source.
         c.caller_file = em_load_at(&c.em, frame->runtime, c.caller_file_offset, MIR_T_I64, "caller_file");
         em_store_at(&c.em, frame->runtime, c.caller_file_offset, MIR_T_I64,
-            constant(&c, (uint64_t)p->frontend->reference));
+            relocated_constant(&c, (uint64_t)p->frontend->reference));
     }
     if (!f->native) move(&c, frame->return_reg, integer(&c, ITEM_JS_UNDEFINED));
     for (int i = 0; i < p->bindings->length; i++) {
@@ -12086,6 +12132,27 @@ static void plan_fixed_global_bindings(MvpLmdProgram* p) {
     }
     if (changed) { reset_representation_facts(p); representation_pass(p); }
 }
+static thread_local StrBuf* mvp_lmd_code_writer;
+static thread_local bool mvp_lmd_code_write_failed;
+static StrBuf* mvp_lmd_code_image(MIR_context_t mir) {
+    StrBuf* image = strbuf_new();
+    if (!image) return NULL;
+    StrBuf* previous = mvp_lmd_code_writer;
+    bool previous_failed = mvp_lmd_code_write_failed;
+    mvp_lmd_code_writer = image;
+    mvp_lmd_code_write_failed = false;
+    MIR_write_with_func(mir, [](MIR_context_t, uint8_t byte) -> int {
+        size_t before = mvp_lmd_code_writer->length;
+        strbuf_append_char(mvp_lmd_code_writer, (char)byte);
+        if (mvp_lmd_code_writer->length == before + 1) return byte;
+        mvp_lmd_code_write_failed = true;
+        return EOF;
+    });
+    mvp_lmd_code_writer = previous;
+    if (mvp_lmd_code_write_failed) { strbuf_free(image); image = NULL; }
+    mvp_lmd_code_write_failed = previous_failed;
+    return image;
+}
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     p->global_bindings_exposed = global_bindings_are_exposed(p);
@@ -12319,15 +12386,50 @@ static int lower_pass(void* opaque) {
     for (int i = 0; i < p->functions->length && ok; i++) ok = compile_function(p, (LmdFunction*)p->functions->data[i]);
     MIR_finish_module(p->mir); mir_dump_finalized(p->mir, NULL, false);
     if (!ok) return false;
+    StrBuf* image = p->relocatable ? mvp_lmd_code_image(p->mir) : NULL;
+    if (p->relocatable && !image) return false;
+    const MvpLmdCode* cached = p->cached_code;
+    if (cached && image && cached->relocation_count == (size_t)p->relocations->length &&
+            cached->addresses->length == p->functions->length &&
+            cached->image->length == image->length &&
+            !memcmp(cached->image->str, image->str, image->length)) {
+        // only machine code is shared. The unit's slots, literal storage,
+        // shapes, classes, AST and relocation table remain realm-owned.
+        strbuf_free(image);
+        MIR_finish(p->mir);
+        p->code = const_cast<MvpLmdCode*>(cached);
+        mvp_lmd_code_retain(p->code);
+        p->mir = p->code->mir;
+        for (int i = 0; i < p->functions->length; i++)
+            ((LmdFunction*)p->functions->data[i])->address = p->code->addresses->data[i];
+        log_debug("js-mvp-code-cache: reused %d functions", p->functions->length);
+        return true;
+    }
+    if (cached) log_debug("js-mvp-code-cache: realm metadata changed emitted MIR; compile fresh code");
     MIR_load_module(p->mir, p->module); MIR_gen_init(p->mir); p->linked = true;
     MIR_gen_set_optimize_level(p->mir, 2); MIR_link(p->mir, MIR_set_gen_interface, import_resolver);
     for (int i = 0; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i]; f->address = MIR_gen(p->mir, f->item);
     }
     jit_log_code_addresses(p->mir);
+    if (image) {
+        auto* code = (MvpLmdCode*)mem_calloc(1, sizeof(MvpLmdCode), MEM_CAT_EVAL);
+        ArrayList* addresses = arraylist_new(p->functions->length);
+        if (!code || !addresses) {
+            mem_free(code); arraylist_free(addresses); strbuf_free(image); return false;
+        }
+        for (int i = 0; i < p->functions->length; i++) {
+            if (!arraylist_append(addresses, ((LmdFunction*)p->functions->data[i])->address)) {
+                mem_free(code); arraylist_free(addresses); strbuf_free(image); return false;
+            }
+        }
+        *code = {{1}, p->mir, image, addresses, (size_t)p->relocations->length};
+        p->code = code;
+    }
     return true;
 }
-static bool mvp_lmd_compile_unit(MvpLmdProgram* p, const char* source, size_t length, int stage = 2) {
+static bool mvp_lmd_compile_unit(MvpLmdProgram* p, const char* source, size_t length, int stage = 2,
+        const char* reference = NULL) {
     if (!p->frontend) {
     p->failure_phase = MVP_LMD_INTERNAL_FAILURE;
     p->frontend = js_transpiler_create(NULL);
@@ -12344,6 +12446,13 @@ static bool mvp_lmd_compile_unit(MvpLmdProgram* p, const char* source, size_t le
         diagnostic(p, NULL, "JS parsing or validation failed"); return false;
     }
     if (p->source_module) p->frontend->reference = p->source_module->descriptor->path;
+    else if (reference) {
+        size_t size = strlen(reference) + 1;
+        char* retained_reference = (char*)pool_alloc(p->frontend->pool, size);
+        if (!retained_reference) return false;
+        memcpy(retained_reference, reference, size);
+        p->frontend->reference = retained_reference;
+    }
     }
     p->failure_phase = MVP_LMD_ADMISSION_FAILURE;
     // continue the retained frontend schedule; lowering consumes its bound, validated index.
@@ -12610,7 +12719,56 @@ static Item mvp_module_link(void* owner, JsSourceModuleRecord* record) {
         if (!local) return mvp_module_error(owner, JS_SOURCE_MODULE_SYNTAX, "Imported binding has no local cell");
         local->module_import = &imported->resolved;
     }
-    if (!mvp_lmd_compile_unit(program, NULL, 0, 2)) return mvp_module_compile_failure(realm, program);
+    const char* source = program->frontend->source;
+    size_t length = program->frontend->source_length;
+    const char* filename = program->frontend->reference;
+    InputCacheScope* cache_scope = NULL;
+    const JsModuleMirArtifact* artifact = js_module_mir_cache_lookup(source, length, filename, &cache_scope);
+    InputScriptBuildScope build = {};
+    if (!artifact && js_module_mir_cache_begin_build(source, length, filename, &build) == INPUT_SCRIPT_BUILD_READY)
+        artifact = js_module_mir_cache_lookup(source, length, filename, &cache_scope);
+    bool eligible = input_script_cache_mir_enabled(input_manager_global_script_cache());
+    if (eligible) {
+        program->relocations = arraylist_new(32);
+        if (!program->relocations) {
+            js_module_mir_cache_complete_build(&build, false, false);
+            if (cache_scope) input_script_cache_close_scope(cache_scope);
+            return ItemError;
+        }
+        program->relocatable = true;
+        program->cached_code = artifact ? artifact->image.mvp_code : NULL;
+    }
+    bool compiled = mvp_lmd_compile_unit(program, NULL, 0, 2);
+    bool reused = compiled && program->code && program->code == program->cached_code;
+    program->cached_code = NULL;
+    if (cache_scope) input_script_cache_close_scope(cache_scope);
+    cache_scope = NULL;
+    // linking the live graph is still mandatory on a code hit. Record exact
+    // source generations through the common dependency invalidation service.
+    bool dependencies = true;
+    for (int i = 0; compiled && i < record->requests->length; i++) {
+        auto* request = (JsSourceModuleRequest*)record->requests->data[i];
+        JsScript* dependency = request->module->script;
+        dependencies &= dependency && js_module_mir_cache_record_dependency(source, length, filename,
+            dependency->source, dependency->source_length, request->module->descriptor->path);
+    }
+    bool published = false;
+    if (compiled && program->code && !artifact && dependencies && build.state == INPUT_SCRIPT_BUILD_OWNER) {
+        auto* retained = (JsModuleMirArtifact*)mem_calloc(1, sizeof(JsModuleMirArtifact), MEM_CAT_EVAL);
+        if (retained) {
+            retained->image.mvp_code = program->code;
+            mvp_lmd_code_retain(program->code);
+            retained->image.mir_ctx = program->code->mir;
+            retained->image.entry_func = program->code->addresses->data[0];
+            retained->image.owns_compiled_state = true;
+            published = js_module_mir_cache_adopt_build(&build, retained, &cache_scope) != NULL;
+            if (!published) js_module_mir_artifact_destroy(retained);
+        }
+    }
+    js_module_mir_cache_complete_build(&build, published, false);
+    if (cache_scope) input_script_cache_close_scope(cache_scope);
+    if (reused) input_script_cache_mark_module_hit(input_manager_global_script_cache());
+    if (!compiled) return mvp_module_compile_failure(realm, program);
     return mvp_lmd_instantiate_unit(realm->execution, program, realm->host);
 }
 static Item mvp_module_instantiate(void*, JsSourceModuleRecord* record) {
@@ -12733,15 +12891,15 @@ static MvpLmdExecution* mvp_lmd_execute_owned(const char* source, size_t length,
     // intrinsics. Standalone execution retains closed-unit analysis.
     p->module_realm = runtime || module_source || (options && options->preamble);
     if (!source || !mvp_lmd_compile_unit(p, module_source ? "" : source,
-            module_source ? 0 : length, 1)) return e;
-    if (p->dynamic_source && options && options->filename) {
-        size_t count = strlen(options->filename) + 1;
-        char* reference = (char*)pool_alloc(p->frontend->pool, count);
-        if (!reference) return e;
-        memcpy(reference, options->filename, count);
-        p->frontend->reference = reference;
+            module_source ? 0 : length, 1, options ? options->filename : NULL)) return e;
+    if (options && options->cached_code) {
+        p->relocations = arraylist_new(32);
+        if (!p->relocations) return e;
+        p->relocatable = true;
+        p->cached_code = options->cached_code;
     }
     if (!mvp_lmd_compile_unit(p, NULL, 0, 2)) return e;
+    p->cached_code = NULL;
     p->failure_phase = MVP_LMD_INTERNAL_FAILURE;
     if (context && context != e->owner_context) {
         diagnostic(p, NULL, "execution belongs to another evaluator thread"); return e;
@@ -12860,7 +13018,7 @@ struct MvpLmdRetainedScript : Script {
     MvpLmdExecution* execution;
 };
 Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t length,
-        const char* filename, uint64_t* result_home, bool module) {
+        const char* filename, uint64_t* result_home, bool module, const MvpLmdCode* cached_code) {
     if (!runtime) return ItemError;
     EvalContext* owner = runtime_get_eval_context(runtime);
     if (!owner || (context && context != owner)) return ItemError;
@@ -12894,6 +13052,7 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     // use the parser's existing lexical goal selection before creating a realm.
     MvpLmdOptions options = {filename, module || js_c_source_is_module(source, length)};
     options.namespace_result = module;
+    options.cached_code = cached_code;
     MvpLmdExecution* execution = mvp_lmd_execute_owned(source, length, NULL, &host, &options, runtime);
     if (retained) retained->execution = execution;
     MvpLmdFailurePhase phase;
@@ -12972,7 +13131,9 @@ void mvp_lmd_dump(const MvpLmdExecution* e, FILE* output) {
 }
 static void mvp_lmd_release_unit(MvpLmdProgram* p) {
     mem_free(p->slots); mem_free(p->intrinsic_uses);
-    if (p->mir) { if (p->linked) MIR_gen_finish(p->mir); MIR_finish(p->mir); }
+    if (p->code) mvp_lmd_code_release(p->code);
+    else if (p->mir) { if (p->linked) MIR_gen_finish(p->mir); MIR_finish(p->mir); }
+    if (p->relocations) arraylist_free(p->relocations);
     if (p->functions) {
         for (int i = 0; i < p->functions->length; i++) {
             LmdFunction* f = (LmdFunction*)p->functions->data[i];
@@ -12994,6 +13155,56 @@ static void mvp_lmd_release_unit(MvpLmdProgram* p) {
         arraylist_free(p->dynamic_scripts);
     }
     if (p->frontend) js_transpiler_destroy(p->frontend);
+}
+Item mvp_lmd_compile_script_image(const char* source, size_t length,
+        const char* filename, JsPreambleState* output) {
+    if (!source || !output) return ItemError;
+    // compile against a complete, uninstantiated realm. No guest values or
+    // execution-owned metadata become part of the shared code image.
+    MvpLmdProgram realm = {}, unit = {};
+    realm.module_realm = realm.host_enabled = realm.test262_host = true;
+    bool compiled = mvp_lmd_compile_unit(&realm, "", 0);
+    if (compiled) {
+        unit.realm_program = &realm;
+        unit.library = realm.library;
+        unit.module_realm = unit.host_enabled = unit.test262_host = unit.receiver_abi = true;
+        unit.relocations = arraylist_new(32);
+        unit.relocatable = true;
+        compiled = unit.relocations && mvp_lmd_compile_unit(&unit, source, length, 2, filename);
+    }
+    if (compiled) {
+        unit.code->source = mem_dup_n(source, length, MEM_CAT_EVAL);
+        unit.code->source_length = length;
+        unit.code->reference = mem_strdup(filename ? filename : "<script>", MEM_CAT_EVAL);
+        compiled = unit.code->source && unit.code->reference;
+    }
+    if (compiled) {
+        memset(output, 0, sizeof(*output));
+        output->mvp_code = unit.code;
+        mvp_lmd_code_retain(unit.code);
+        output->mvp_realm = output->owns_compiled_state = true;
+        output->mir_ctx = unit.code->mir;
+        output->entry_func = unit.code->addresses->data[0];
+        output->module_state_id = UINT32_MAX;
+    } else {
+        log_error("js-mvp-code-cache: compilation failed: %s", unit.diagnostic[0] ? unit.diagnostic : realm.diagnostic);
+    }
+    mvp_lmd_release_unit(&unit);
+    mvp_lmd_release_unit(&realm);
+    return compiled ? ItemNull : ItemError;
+}
+Item mvp_lmd_execute_script_image(Runtime* runtime, const MvpLmdCode* code) {
+    if (!runtime || !code || !code->source) return ItemError;
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    JsRuntimeState* state = owner ? js_runtime_state_for(owner) : NULL;
+    if (!state || !state->formal_mir_owner) {
+        // cached Scripts are children of a complete realm, including the
+        // first preamble. Later entries share that same global environment.
+        Item initialized = mvp_lmd_execute_in_runtime(runtime, "", 0, "<realm>", NULL);
+        if (item_is_error(initialized)) return initialized;
+    }
+    return mvp_lmd_execute_in_runtime(runtime, code->source, code->source_length,
+        code->reference, NULL, false, code);
 }
 void mvp_lmd_destroy(MvpLmdExecution* e) {
     if (!e) return;

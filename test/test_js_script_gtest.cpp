@@ -1689,16 +1689,14 @@ TEST(JsInterpreter, ReusesClosedModuleMirArtifactAcrossFreshRuntimes) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, filename);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     Runtime second = {};
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, filename);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};
@@ -1720,16 +1718,14 @@ TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, filename);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     Runtime second = {};
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, filename);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};
@@ -1771,8 +1767,7 @@ TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, root_path);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     // A different source generation must retire the cached importer before
@@ -1784,8 +1779,7 @@ TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, root_path);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(53.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(53.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};

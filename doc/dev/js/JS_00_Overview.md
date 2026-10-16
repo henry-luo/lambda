@@ -4,8 +4,9 @@
 
 > **Activation update, 2026-10-16 — D8.1.3v25:** ordinary JavaScript
 > Script/Module MIR execution now selects `lambda/js/mvp-lmd/`; dynamic source
-> remains in the retained AST interpreter. Document/preamble migration and
-> AUTO promotion are incomplete. This older detailed-design set still describes
+> remains in the retained AST interpreter. Document/preamble code images now
+> use MVP with per-realm metadata (D8.5.1v2); host coverage and AUTO promotion
+> remain incomplete. This older detailed-design set still describes
 > legacy lowering in several sections; use the
 > [formal MIR implementation record](../../../vibe/impl/JS_MVP_Lmd_Formal_MIR.md)
 > for current routing, verification and remaining work.

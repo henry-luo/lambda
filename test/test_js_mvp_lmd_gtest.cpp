@@ -95,6 +95,86 @@ TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, ModuleCodeReuseKeepsClosuresClassesAndCachesRealmLocal) {
+    const char* path = "temp/js-formal-mir-code-cache.mjs";
+    const char* source = "let count=0;export function check(){"
+        "class C{#x=40;value(){return this.#x+(++count)}}"
+        "let o={text:'abc'};if(!/b/.test(o.text))throw Error('regexp');"
+        "gc();return new C().value()}";
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    ASSERT_EQ(write_binary_file(path, source, strlen(source)), 0);
+    void* entry = NULL;
+    for (int pass = 0; pass < 3; pass++) {
+        Item ns = load_js_module(&runtime, path);
+        ASSERT_FALSE(item_is_error(ns));
+        {
+            RootFrame roots(2);
+            Rooted<Item> module(roots, ns);
+            Rooted<Item> callable(roots, js_get_key_default(module.get(), js_make_string("check")));
+            ASSERT_EQ(get_type_id(callable.get()), LMD_TYPE_FUNC);
+            EXPECT_TRUE(function_has_abi(callable.get().function, FN_ENTRY_ABI_MVP_LMD));
+            if (!pass) entry = (void*)callable.get().function->ptr;
+            else EXPECT_EQ((void*)callable.get().function->ptr, entry);
+            for (int call = 1; call <= 2; call++) {
+                Item value = js_call_function_into(callable.get(), make_js_undefined(), NULL, 0, &result_home);
+                ASSERT_FALSE(item_is_error(value));
+                EXPECT_EQ(it2d(value), 40 + call);
+            }
+        }
+        runtime_cleanup(&runtime);
+        runtime = {};
+        runtime_init(&runtime);
+    }
+}
+
+TEST_F(JsFormalMir, CachedPreambleAndClassicsUseMvpAcrossFreshRealms) {
+    struct Images {
+        JsPreambleState preamble = {}, classic = {}, consumer = {};
+        ~Images() {
+            preamble_state_destroy(&consumer);
+            preamble_state_destroy(&classic);
+            preamble_state_destroy(&preamble);
+        }
+    } images;
+    const char* preamble = "var window=globalThis;let total=40;function next(){return ++total}";
+    const char* classic = "function later(){return next()+2} later";
+    ASSERT_FALSE(item_is_error(compile_js_mir_preamble_len(&runtime, preamble,
+        strlen(preamble), "<cached-preamble>", &images.preamble)));
+    ASSERT_NE(images.preamble.mvp_code, nullptr);
+    ASSERT_FALSE(item_is_error(compile_js_mir_with_preamble_len(&runtime, classic,
+        strlen(classic), "<cached-classic>", &images.preamble, &images.classic)));
+    void* entry = NULL;
+    for (int pass = 0; pass < 3; pass++) {
+        ASSERT_FALSE(item_is_error(instantiate_js_preamble(&runtime, &images.preamble, &images.consumer)));
+        Item value = execute_compiled_js_in_current_realm(&runtime, &images.consumer, &images.classic, true);
+        ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+        EXPECT_TRUE(function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD));
+        if (!pass) entry = (void*)value.function->ptr;
+        else EXPECT_EQ((void*)value.function->ptr, entry);
+        {
+            RootFrame roots(1);
+            Rooted<Item> function(roots, value);
+            EXPECT_TRUE(preamble_state_update_from_compiled(&images.consumer, &images.classic));
+            const char* inline_source = "total+=1;window.totalSeen=total";
+            ASSERT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+                inline_source, strlen(inline_source), "<inline-classic>", &images.consumer, &result_home)));
+            preamble_state_destroy(&images.consumer);
+            if (pass == 2) {
+                // escaping functions keep the image after its cache owner retires.
+                preamble_state_destroy(&images.preamble);
+                preamble_state_destroy(&images.classic);
+            }
+            heap_gc_collect();
+            Item answer = js_call_function_into(function.get(), make_js_undefined(), NULL, 0, &result_home);
+            ASSERT_FALSE(item_is_error(answer));
+            EXPECT_EQ(it2d(answer), 44);
+        }
+        runtime_cleanup(&runtime);
+        runtime = {};
+        runtime_init(&runtime);
+    }
+}
+
 TEST_F(JsFormalMir, PublicHostPublishesNativeCallbackIntoActiveRealm) {
     ASSERT_FALSE(item_is_error(run("0")));
     RootFrame roots(2);

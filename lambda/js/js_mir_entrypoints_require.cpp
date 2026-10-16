@@ -1494,6 +1494,18 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state,
                                       uint64_t* result_home) {
+    if (!js_ast_interpreter_requested() && !js_execution_auto_requested()) {
+        Item result = mvp_lmd_execute_in_runtime(runtime, js_source, js_source_len, filename, result_home);
+        if (out_state && !item_is_error(result)) {
+            out_state->mvp_realm = true;
+            // preserve the host's module-slab bookkeeping; MVP declarations
+            // themselves live in the persistent realm, not a copied prefix.
+            if (lambda_active_module_state_id() == UINT32_MAX &&
+                    !lambda_module_state_reserve_and_activate(0)) return ItemError;
+            out_state->module_state_id = lambda_active_module_state_id();
+        }
+        return result;
+    }
     g_jm_preamble_mode = true;
     g_jm_preamble_out = out_state;
     g_jm_preamble_in = NULL;
@@ -1513,36 +1525,11 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     return result;
 }
 
-static Item compile_js_mir_cached_unit_len(
-    Runtime* runtime, const char* js_source, size_t js_source_len,
-    const char* filename, bool preamble_mode,
-    const JsPreambleState* preamble, JsPreambleState* out_state) {
-    // Cached units retain code and declaration metadata only. Execution is a
-    // separate step so no document heap can become part of the cache owner.
-    g_jm_preamble_mode = preamble_mode;
-    g_jm_preamble_compile_only = true;
-    g_jm_preamble_out = out_state;
-    g_jm_preamble_in = preamble;
-    unsigned int saved_level = g_js_mir_optimize_level;
-    g_js_mir_optimize_level = 3;
-    uint64_t compile_result_home = 0;
-    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
-                                                &compile_result_home);
-    g_js_mir_optimize_level = saved_level;
-    g_jm_preamble_out = NULL;
-    g_jm_preamble_in = NULL;
-    g_jm_preamble_compile_only = false;
-    g_jm_preamble_mode = false;
-    return result;
-}
-
 Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                  const char* filename, JsPreambleState* out_state) {
-    // Unlike js262's hot-heap preamble, a browser preamble captures document
-    // globals. Retain only MIR code and declaration metadata, then instantiate
-    // it separately into each document heap.
-    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
-                                          filename, true, NULL, out_state);
+    // open Scripts resolve declarations through the receiving realm; cached
+    // machine code never borrows a document's live binding cells.
+    return mvp_lmd_compile_script_image(js_source, js_source_len, filename, out_state);
 }
 
 Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
@@ -1550,14 +1537,17 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
                                       const JsPreambleState* preamble,
                                       JsPreambleState* out_state) {
     if (!preamble) return ItemError;
-    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
-                                          filename, false, preamble, out_state);
+    return mvp_lmd_compile_script_image(js_source, js_source_len, filename, out_state);
 }
 
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* base_preamble,
                                           const JsPreambleState* compiled_state,
                                           bool retain_unit_state) {
+    if (compiled_state && compiled_state->mvp_code) {
+        if (!base_preamble || !base_preamble->mvp_realm) return ItemError;
+        return mvp_lmd_execute_script_image(runtime, compiled_state->mvp_code);
+    }
     if (!runtime || !runtime_heap(runtime) || !base_preamble || !compiled_state ||
             !compiled_state->entry_func) {
         return ItemError;
@@ -1616,6 +1606,8 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home) {
+    if (preamble && preamble->mvp_realm)
+        return mvp_lmd_execute_in_runtime(runtime, js_source, js_source_len, filename, result_home);
     bool preamble_available = preamble && context &&
         preamble->module_state_id != UINT32_MAX &&
         preamble->module_state_id < context->module_state_capacity &&
@@ -1639,6 +1631,16 @@ Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_sour
 
 bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state) {
     if (!source || !source->entry_func || !source->mir_ctx || !out_state) return false;
+    if (source->mvp_code) {
+        memset(out_state, 0, sizeof(*out_state));
+        out_state->mvp_code = source->mvp_code;
+        mvp_lmd_code_retain(out_state->mvp_code);
+        out_state->mvp_realm = true;
+        out_state->mir_ctx = source->mir_ctx;
+        out_state->entry_func = source->entry_func;
+        out_state->module_state_id = UINT32_MAX;
+        return true;
+    }
     memset(out_state, 0, sizeof(*out_state));
     out_state->mir_ctx = source->mir_ctx;
     out_state->source_buffer = source->source_buffer;
@@ -1671,6 +1673,11 @@ bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out
 Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state) {
     if (!runtime || !clone_js_preamble_state(cached, out_state)) return ItemError;
+    if (cached->mvp_code) {
+        Item result = mvp_lmd_execute_script_image(runtime, cached->mvp_code);
+        if (item_is_error(result)) preamble_state_destroy(out_state);
+        return result;
+    }
 
     if (context && context->heap) {
         // Cached code is only safe when instantiated into a new document heap.
@@ -1777,6 +1784,7 @@ static bool preamble_state_replace_entries(JsPreambleState* state,
 }
 
 bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
+    if (state && state->mvp_realm) return true;
     if (!g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) return false;
     return preamble_state_replace_entries(
         state, g_eval_preamble_entries, g_eval_preamble_entry_count,
@@ -1786,6 +1794,7 @@ bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
 bool preamble_state_update_from_compiled(JsPreambleState* state,
                                          const JsPreambleState* compiled_state) {
     if (!compiled_state) return false;
+    if (state && state->mvp_realm) return compiled_state->mvp_realm;
     // D1.7/D1.8: only immutable code is shared; declaration metadata is copied
     // into the current document so later classic scripts see this unit's vars.
     return preamble_state_replace_entries(
@@ -1795,6 +1804,11 @@ bool preamble_state_update_from_compiled(JsPreambleState* state,
 
 void preamble_state_destroy(JsPreambleState* state) {
     if (!state) return;
+    if (state->mvp_code) {
+        mvp_lmd_code_release(state->mvp_code);
+        state->mvp_code = NULL;
+        state->mir_ctx = NULL;
+    }
     if (state->owns_compiled_state && state->mir_ctx) {
         MIR_finish((MIR_context_t)state->mir_ctx);
         state->mir_ctx = NULL;
@@ -1816,6 +1830,7 @@ void preamble_state_destroy(JsPreambleState* state) {
     state->module_state_id = UINT32_MAX;
     state->entry_func = NULL;
     state->owns_compiled_state = false;
+    state->mvp_realm = false;
 }
 
 char* js_load_script_source_from_cache(const char* path,

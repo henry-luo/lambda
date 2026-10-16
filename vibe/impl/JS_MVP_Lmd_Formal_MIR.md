@@ -75,6 +75,10 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `document3`, release MVP units | 724/724 pass | Includes reusable module/preamble code and per-realm state |
+| `document3`, focused normal and forced/poisoned GC | 58/58 each | Escaped code survives artifact retirement; fresh realms retain distinct state |
+| `document3`, formal MIR Test262 module/import slice | 693/693 pass | Existing target set, unchanged metadata/source, normal MIR entry |
+| `document3`, isolated Script integration | 197/205 pass; 7 fail; 1 timeout | Three module-cache cases fixed; AUTO publication and RegExp remain |
 | `clone1`, release MVP units | 722/722 pass | Includes persistent public realms, shared cloning, host global identity and Lambda binary ingress |
 | `clone1`, focused forced/poisoned GC | 56/56 pass | Includes heap replacement, native callbacks, child registries, TLA and queued nested imports |
 | `clone1`, isolated Script integration cases | 194/205 pass; 10 fail; 1 timeout | Same 205-case population; default-engine and numeric representation assertions updated as explained below |
@@ -110,15 +114,16 @@ This does not clear the aggregate gate or the real host/promotion gaps.
 | JavaScript ES modules | MVP MIR, or explicitly selected AST |
 | Formal MIR Test262 source/harness batches | MVP body plus retained AST harness |
 | `eval` / Function-family dynamic source | Retained AST, as required by D8.1.3v25 |
-| Document/preamble compiled artifacts | Legacy MIR; migration outstanding |
+| Document/preamble compiled artifacts | MVP MIR; shared code images with fresh realm metadata |
 | Explicit AUTO per-function promotion | Disabled pending MVP publication adapter |
 | TypeScript-specific lowering | Existing path; separate from this JS activation |
 
-1. **Document artifacts.** The document/preamble
-   compiler/cache still uses legacy MIR. Replace it with immutable MVP
-   compilation artifacts plus per-realm state. Public Script entries now
-   share declarations, intrinsic identities and module policy; their retained
-   program records are not yet immutable artifacts suitable for this cache.
+1. **Cached metadata and document hosts.** Document/preamble and external
+   classic-script compilation now use MVP code images. Fresh realms still
+   parse and lower their own metadata before exact-image code reuse. Removing
+   that repeated frontend work requires an immutable frontend image with
+   execution overlays. DOM/Web host adapters remain incomplete, so activating
+   the document compiler does not establish browser-script compatibility.
 2. **AUTO promotion.** Legacy satellite publication is disabled, because its
    callable ABI cannot publish MVP entries. Explicit AUTO still interprets
    supported units and routes whole-unit capability misses to MVP. Per-function
@@ -218,7 +223,8 @@ four assertions tied to the previous default/backend Number representation.
 The last five issues pass the six-case `host_policy1` replay above; numeric
 assertions now use JS equality, allowing the internal integer subtype specified
 by D2.2.5, while the default-selection assertion requires MVP ownership.
-AUTO/cache failures remain. The RegExp wide-subject case timed
+At that checkpoint AUTO/cache failures remained; the module-cache failures are
+fixed in the later code-image work below. The RegExp wide-subject case timed
 out at 120 seconds and remains unresolved; this is not a performance result.
 The final `clone1` isolated replay passes 194/205: seven AUTO publication cases
 and three compiled-module cache cases fail, while the RegExp case records
@@ -243,3 +249,64 @@ module-policy and inline-dynamic-import checks (4/4, `clone1/script-host-fixed.j
 The latest pin also repeats six Lambda interop fixtures with exact golden
 output (`clone1/interop-replay/results.json`); `binary_js_bridge` retains only
 the missing `Buffer.from` discrepancy.
+
+
+### Relocatable code images and document activation
+
+Continuation entry: `8b450390fc4f4d99eb2dc347b9c5c2043f250225`.
+Under **D8.1.3v25, D8.5.1v2 and D5.3**, document preambles, cached external
+classic scripts and their uncached consumer path now enter MVP. Shared module
+artifacts use the same InputManager cache and dependency invalidation service.
+Dynamic source still uses the retained interpreter.
+
+A `MvpLmdCode` owns only finalized MIR/native entries and its serialized code
+image. Every embedded source/metadata pointer in reusable code is loaded from
+an instance-owned relocation table. Slots, literal storage, AST, classes,
+shape/property caches, library state and imported bindings stay with the
+receiving realm. Atomic code references keep entries alive through escaped
+function retirement, independently of cache or document-preamble leases.
+Ordinary uncached Script emission retains immediate constants.
+
+Reuse requires byte-for-byte equal serialized MIR, function counts and
+relocation counts. A mismatch compiles fresh MVP code. This is an intermediate
+implementation: hits save native code generation, but still rebuild and lower
+frontend metadata. It does not claim complete frontend-cache reuse or measured
+performance acceptance. No guest heap is created by compile-only preambles.
+
+New helpers announced before coding: `relocated_constant` / `relocated`,
+`mvp_lmd_code_image`, `mvp_lmd_code_retain/release/bytes`, and
+`mvp_lmd_compile_script_image` / `mvp_lmd_execute_script_image`. Existing compiler
+and public execution adapters accept the cached image; source-reference
+retention was folded into the existing unit compiler.
+
+The module-cache integration tests retain their cache-hit/build/invalidation
+assertions. Their six Number-result comparisons now use JS equality, allowing
+MVP's internal integer representation (**D2.2.5**).
+
+`document1` production SHA-256:
+`eded95fe9902f9ca7802cae3fabf293759c54b9408ac825fbffa7af416501620`.
+Its build records 2,941 unchanged production inputs. Focused normal checks:
+58/58; full MVP units: 724/724. Further integration results are recorded below.
+The new checks require identical native function addresses in successive fresh
+realms, separate closure/class state, fresh property/RegExp metadata, and code
+survival after releasing preamble artifacts. Earlier aggregate gate counts
+above are historical and are not recalculated from these focused checks.
+
+
+Final `document3` release pin:
+`5788cf0b5deb8baac46fadd64b7f1085463897a1038518ba5ec048da6c3f1c83`.
+All 2,941 production fingerprints still match the build. It passes 724/724
+MVP units, 58/58 focused checks both normally and with forced/poisoned GC,
+and the 693 module-code/dynamic-import Test262 cases in the existing target
+set through `--mir-only` (no stripped harness). Artifacts are under
+`temp/js_formal_mir_20261016/document3/`; this selected Test262 run is not a
+whole-suite recount. The earlier `document1` isolated integration replay
+passes 197/205, fixing all three cache failures; only the seven AUTO
+publication cases and the RegExp timeout remain. The final `document3` replay
+confirms the same 197/205 result.
+
+The code owner reuses `lib/atomic.h`. Artifact publication now transfers
+ownership only on success; failed publication frees the temporary wrapper,
+leaving the caller's code/metadata alive for cleanup or execution. Shared
+Lambda/full Test262/full JS aggregate gates have not been recounted in this
+continuation. Benchmark timing remains deferred at the user's request.
