@@ -201,6 +201,11 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     Rooted<Item> part_root(roots, ItemNull);
     Rooted<Item> obj_root(roots, ItemNull);
     Rooted<Item> text_root(roots, ItemNull);
+    // internal Response/clipboard factories can precede the public Blob binding read.
+    if (get_type_id(g_blob_proto) != LMD_TYPE_MAP) {
+        Item ready = js_ensure_host_global_family("Blob");
+        if (item_is_error(ready)) return ready;
+    }
     StrBuf* sb = strbuf_new();
     if (get_type_id(parts_root.get()) == LMD_TYPE_ARRAY) {
         int64_t n = js_array_length(parts_root.get());
@@ -1319,6 +1324,10 @@ extern "C" void js_drag_session_end(void) {
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
         const char* type, double client_x, double client_y) {
     if (!js_active_runtime_state) return false;
+    // D5.3.3: callbacks can collect the target and event before cancellation is read back.
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> event_root(roots, ItemNull);
     // The session DataTransfer must be allocated inside the JS runtime context
     // (js_new_object needs the active runtime heap), so open it here — the
     // caller enters the ctx scope before dispatching. dragstart always starts a
@@ -1328,10 +1337,10 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
     } else if (g_drag_data_transfer.item == ITEM_NULL) {
         js_drag_session_begin();
     }
-    Item ev = js_create_native_drag_event(type, client_x, client_y,
-        g_drag_data_transfer, false, false, false, false);
-    dom_dispatch_event(target_item, ev);
-    return dom_event_host_default_prevented(ev);
+    event_root.set(js_create_native_drag_event(type, client_x, client_y,
+        g_drag_data_transfer, false, false, false, false));
+    dom_dispatch_event(target_root.get(), event_root.get());
+    return dom_event_host_default_prevented(event_root.get());
 }
 
 // =============================================================================

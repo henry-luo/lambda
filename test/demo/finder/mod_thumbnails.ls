@@ -10,10 +10,13 @@ fn measure(owner,slot,viewport) {
     let role = dom.get_attribute(slot,"data-thumb-role")
     let box = dom.bounding_box(slot)
     let row = dom.bounding_box(dom.closest(slot,".file"))
+    let column = dom.closest(slot,".column-list")
+    let scrollport = if (column != null) dom.bounding_box(column) else viewport
     let visible = box.width>0 and box.height>0 and
         (role != "look" or dom.computed_style(dom.get_element_by_id(owner,"quick-look"),"display") != "none") and
         (role != "preview" or dom.computed_style(dom.get_element_by_id(owner,"preview-pane"),"display") != "none") and
-        (role != "tile" or (row.y+row.height >= viewport.y-row.height and row.y <= viewport.y+viewport.height+row.height));
+        (role != "tile" or (row.y+row.height >= scrollport.y-row.height and row.y <= scrollport.y+scrollport.height+row.height and
+            row.x+row.width>viewport.x and row.x<viewport.x+viewport.width));
     {slot:slot,box:box,role:role,visible:visible,status:dom.get_attribute(slot,"data-thumb-state")}
 }
 pn reset_slot(slot) {
@@ -28,6 +31,8 @@ pub pn release(region) {
 pub pn cancel_jobs(owner,st,invalidate=false) {
     if (st.frame>0) dom.cancel_frame(owner,st.frame)
     radiant.image_job(owner,{action:if (invalidate) "invalidate" else "cancel",channel:"thumbnail"})^
+    // ancestor columns survive navigation; a cancelled decode must leave their slots eligible to retry.
+    if (st.request != null and dom.contains(owner,st.request.slot)) reset_slot(st.request.slot)
     return {frame:0,job:0,request:null,generation:st.generation+1}
 }
 pub pn schedule(owner,st,measure=true) {

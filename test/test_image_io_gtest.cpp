@@ -7,10 +7,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <tiffio.h>
-#include <avif/avif.h>
 
 static const ImageCodecFormat writable_formats[] = {IMAGE_CODEC_PNG,  IMAGE_CODEC_JPEG, IMAGE_CODEC_WEBP,
-                                                    IMAGE_CODEC_AVIF, IMAGE_CODEC_BMP,  IMAGE_CODEC_TIFF,
+                                                    IMAGE_CODEC_BMP,  IMAGE_CODEC_TIFF,
+                                                    IMAGE_CODEC_ICO};
+static const ImageCodecFormat readable_formats[] = {IMAGE_CODEC_PNG, IMAGE_CODEC_JPEG, IMAGE_CODEC_WEBP,
+                                                    IMAGE_CODEC_AVIF, IMAGE_CODEC_BMP, IMAGE_CODEC_TIFF,
                                                     IMAGE_CODEC_ICO};
 
 struct ImageFixture {
@@ -36,6 +38,57 @@ static ImageStatus encode_fixture(ImageFixture *fixture, ImageCodecFormat format
     options.lossless = true;
     options.quality = 100;
     return image_encode_to_memory(NULL, &fixture->view, &options, bytes, error);
+}
+// stored AVIF fixtures keep decoder coverage independent of an encoder backend.
+static ImageStatus load_avif_fixture(const char *name, ImageEncoded *bytes) {
+    char path[160];
+    snprintf(path, sizeof(path), "test/input/image/avif/%s", name);
+    char *data = NULL;
+    size_t length = 0;
+    if (!file_read_all_limit(path, MEM_CAT_IMAGE, 16u * 1024u * 1024u, &data, &length))
+        return IMAGE_IO_ERROR;
+    bytes->data = (uint8_t *)data;
+    bytes->length = length;
+    return IMAGE_OK;
+}
+static ImageStatus decode_fixture_bytes(ImageFixture *fixture, ImageCodecFormat format,
+                                         ImageEncoded *bytes, ImageError *error) {
+    return format == IMAGE_CODEC_AVIF ? load_avif_fixture("orientation_0_0.avif", bytes)
+                                     : encode_fixture(fixture, format, bytes, error);
+}
+
+TEST(ImageIO, AvifDecodeOnlyCapabilitiesAndPixels) {
+    EXPECT_TRUE(image_codec_capabilities(IMAGE_CODEC_AVIF)->read);
+    EXPECT_FALSE(image_codec_capabilities(IMAGE_CODEC_AVIF)->write);
+    const char *names[] = {"orientation_0_0.avif", "alpha.avif", "depth10.avif"};
+    for (const char *name : names) {
+        SCOPED_TRACE(name);
+        ImageFixture fixture;
+        if (!strcmp(name, "alpha.avif"))
+            for (size_t i = 0; i < sizeof(fixture.pixels); i += 4)
+                fixture.pixels[i + 3] = (uint8_t)(64 + (i / 4) % 192);
+        ImageEncoded bytes = {};
+        ASSERT_EQ(load_avif_fixture(name, &bytes), IMAGE_OK);
+        ImageSource source = image_source_memory(bytes.data, bytes.length);
+        ImageError error = {};
+        ImageInfo info = {};
+        ASSERT_EQ(image_probe(NULL, &source, &info, &error), IMAGE_OK) << error.message;
+        EXPECT_EQ(info.bit_depth, !strcmp(name, "depth10.avif") ? 10u : 8u);
+        ImageDecoded image = {};
+        ASSERT_EQ(image_decode(NULL, &source, NULL, &image, &error), IMAGE_OK) << error.message;
+        ASSERT_EQ(image.size, sizeof(fixture.pixels));
+        EXPECT_EQ(memcmp(image.pixels, fixture.pixels, sizeof(fixture.pixels)), 0);
+        image_decoded_dispose(&image);
+        image_free(bytes.data);
+    }
+    ImageFixture fixture;
+    ImageEncoded bytes = {};
+    ImageError error = {};
+    EXPECT_EQ(encode_fixture(&fixture, IMAGE_CODEC_AVIF, &bytes, &error), IMAGE_CODEC_UNAVAILABLE);
+    EXPECT_EQ(error.format, IMAGE_CODEC_AVIF);
+    EXPECT_STREQ(error.operation, "encode");
+    EXPECT_EQ(bytes.data, nullptr);
+    EXPECT_EQ(bytes.length, 0u);
 }
 
 TEST(ImageIO, AllFormatRoundTrips) {
@@ -69,7 +122,7 @@ TEST(ImageIO, LosslessTransparency) {
     ImageFixture fixture;
     for (size_t i = 0; i < sizeof(fixture.pixels); i += 4)
         fixture.pixels[i + 3] = (uint8_t)(64 + (i / 4) % 192);
-    const ImageCodecFormat formats[] = {IMAGE_CODEC_PNG, IMAGE_CODEC_WEBP, IMAGE_CODEC_AVIF, IMAGE_CODEC_TIFF,
+    const ImageCodecFormat formats[] = {IMAGE_CODEC_PNG, IMAGE_CODEC_WEBP, IMAGE_CODEC_TIFF,
                                         IMAGE_CODEC_ICO};
     for (ImageCodecFormat format : formats) {
         SCOPED_TRACE(image_codec_capabilities(format)->name);
@@ -253,29 +306,11 @@ TEST(ImageIO, AvifRotationsAndMirrorsPlacePixels) {
     for (unsigned angle = 0; angle < 4; angle++) {
         for (unsigned mirror = 0; mirror < 3; mirror++) {
             SCOPED_TRACE(angle * 3 + mirror);
-            avifImage *image = avifImageCreate(32, 24, 8, AVIF_PIXEL_FORMAT_YUV444);
-            ASSERT_NE(image, nullptr);
-            image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_IDENTITY;
-            image->yuvRange = AVIF_RANGE_FULL;
-            image->transformFlags = AVIF_TRANSFORM_IROT;
-            image->irot.angle = (uint8_t)angle;
-            if (mirror) {
-                image->transformFlags |= AVIF_TRANSFORM_IMIR;
-                image->imir.axis = (uint8_t)(mirror - 1);
-            }
-            avifRGBImage rgb;
-            avifRGBImageSetDefaults(&rgb, image);
-            rgb.format = AVIF_RGB_FORMAT_RGBA;
-            rgb.pixels = fixture.pixels;
-            rgb.rowBytes = (uint32_t)fixture.view.stride;
-            ASSERT_EQ(avifImageRGBToYUV(image, &rgb), AVIF_RESULT_OK);
-            avifEncoder *encoder = avifEncoderCreate();
-            ASSERT_NE(encoder, nullptr);
-            encoder->quality = encoder->qualityAlpha = AVIF_QUALITY_LOSSLESS;
-            encoder->speed = 10;
-            avifRWData bytes = AVIF_DATA_EMPTY;
-            ASSERT_EQ(avifEncoderWrite(encoder, image, &bytes), AVIF_RESULT_OK) << encoder->diag.error;
-            ImageSource source = image_source_memory(bytes.data, bytes.size);
+            char name[48];
+            snprintf(name, sizeof(name), "orientation_%u_%u.avif", angle, mirror);
+            ImageEncoded bytes = {};
+            ASSERT_EQ(load_avif_fixture(name, &bytes), IMAGE_OK);
+            ImageSource source = image_source_memory(bytes.data, bytes.length);
             ImageInfo info = {};
             ImageError error = {};
             ASSERT_EQ(image_probe(NULL, &source, &info, &error), IMAGE_OK) << error.message;
@@ -284,19 +319,17 @@ TEST(ImageIO, AvifRotationsAndMirrorsPlacePixels) {
             ASSERT_EQ(image_decode(NULL, &source, NULL, &decoded, &error), IMAGE_OK) << error.message;
             expect_oriented_corners(&decoded, fixture.pixels, 32, 24, orientations[angle][mirror]);
             image_decoded_dispose(&decoded);
-            avifRWDataFree(&bytes);
-            avifEncoderDestroy(encoder);
-            avifImageDestroy(image);
+            image_free(bytes.data);
         }
     }
 }
 TEST(ImageIO, ThumbnailBoundsAndStrategy) {
     ImageFixture fixture;
-    for (ImageCodecFormat format : writable_formats) {
+    for (ImageCodecFormat format : readable_formats) {
         SCOPED_TRACE(image_codec_capabilities(format)->name);
         ImageEncoded bytes = {};
         ImageError error = {};
-        ASSERT_EQ(encode_fixture(&fixture, format, &bytes, &error), IMAGE_OK) << error.message;
+        ASSERT_EQ(decode_fixture_bytes(&fixture, format, &bytes, &error), IMAGE_OK) << error.message;
         ImageSource source = image_source_memory(bytes.data, bytes.length);
         ImageDecodeOptions options;
         image_decode_options_init(&options);
@@ -383,11 +416,11 @@ static size_t read_chunk(void *user, uint64_t offset, uint8_t *data, size_t size
 }
 TEST(ImageIO, ChunkedReadersShareMemoryBehavior) {
     ImageFixture fixture;
-    for (ImageCodecFormat format : writable_formats) {
+    for (ImageCodecFormat format : readable_formats) {
         SCOPED_TRACE(image_codec_capabilities(format)->name);
         ImageEncoded bytes = {};
         ImageError error = {};
-        ASSERT_EQ(encode_fixture(&fixture, format, &bytes, &error), IMAGE_OK) << error.message;
+        ASSERT_EQ(decode_fixture_bytes(&fixture, format, &bytes, &error), IMAGE_OK) << error.message;
         ChunkedImage reader = {bytes.data, bytes.length};
         ImageSource source = {NULL, bytes.length, read_chunk, &reader};
         ImageDecoded image = {};
@@ -399,13 +432,12 @@ TEST(ImageIO, ChunkedReadersShareMemoryBehavior) {
     }
 }
 TEST(ImageIO, FileContentWinsOverExtension) {
-    ImageFixture fixture;
+    ASSERT_TRUE(create_dir("temp/image-io-tests"));
     ImageError error = {};
-    ImageEncodeOptions options;
-    image_encode_options_init(&options, IMAGE_CODEC_AVIF);
-    ASSERT_EQ(image_io_save_path(NULL, "temp/image-io-tests/content.png", &fixture.view, &options, &error),
-              IMAGE_OK)
-        << error.message;
+    ImageEncoded bytes = {};
+    ASSERT_EQ(load_avif_fixture("orientation_0_0.avif", &bytes), IMAGE_OK);
+    ASSERT_EQ(write_binary_file("temp/image-io-tests/content.png", (const char *)bytes.data, bytes.length), 0);
+    image_free(bytes.data);
     ImageInfo info = {};
     ASSERT_EQ(image_io_probe_path(NULL, "temp/image-io-tests/content.png", &info, &error), IMAGE_OK)
         << error.message;
@@ -658,14 +690,15 @@ TEST(ImageIO, RowEncoderMatchesPixelsAndPreservesCallbackFailure) {
     EXPECT_EQ(encoded.data, nullptr);
 }
 
-static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t red, bool tiled) {
+static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t red, bool tiled,
+                            uint16_t compression = COMPRESSION_LZW) {
     TIFFSetField(tiff, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tiff, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tiff, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tiff, TIFFTAG_BITSPERSAMPLE, 8);
     TIFFSetField(tiff, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tiff, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-    TIFFSetField(tiff, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tiff, TIFFTAG_COMPRESSION, compression);
     uint8_t pixels[32 * 32 * 3] = {};
     for (size_t i = 0; i < sizeof(pixels); i += 3)
         pixels[i] = red;
@@ -677,12 +710,49 @@ static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t
                 if (TIFFWriteTile(tiff, pixels, x, y, 0, 0) < 0)
                     return false;
     } else {
-        TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, 4);
+        // JPEG strips must contain a whole eight-row MCU band.
+        TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, compression == COMPRESSION_JPEG ? 8 : 4);
         for (uint32_t y = 0; y < height; y++)
             if (TIFFWriteScanline(tiff, pixels, y, 0) < 0)
                 return false;
     }
     return TIFFWriteDirectory(tiff) != 0;
+}
+TEST(ImageIO, TiffJpeg8AndUnsupportedJpeg12) {
+    ImageFixture fixture;
+    ImageDecoded image = {};
+    ImageError error = {};
+    for (bool tiled : {false, true}) {
+        SCOPED_TRACE(tiled);
+        const char *path = tiled ? "temp/image-io-tests/jpeg-tiled.tiff"
+                                 : "temp/image-io-tests/jpeg-strips.tiff";
+        TIFF *tiff = TIFFOpen(path, "w");
+        ASSERT_NE(tiff, nullptr);
+        ASSERT_TRUE(write_tiff_page(tiff, 32, 24, 128, tiled, COMPRESSION_JPEG));
+        TIFFClose(tiff);
+        ASSERT_EQ(image_io_decode_path(NULL, path, NULL, &image, &error), IMAGE_OK) << error.message;
+        ASSERT_EQ(image.width, 32u);
+        ASSERT_EQ(image.height, 24u);
+        for (size_t i = 0; i < image.size; i += 4) {
+            EXPECT_NEAR(image.pixels[i], 128, 3);
+            EXPECT_NEAR(image.pixels[i + 1], 0, 3);
+            EXPECT_NEAR(image.pixels[i + 2], 0, 3);
+            EXPECT_EQ(image.pixels[i + 3], 255);
+        }
+        image_decoded_dispose(&image);
+    }
+    // stored JPEG12 data remains identifiable without linking its encoder/decoder adapter.
+    const char *path = "test/input/image/tiff/jpeg12-gray.tiff";
+    ImageInfo info = {};
+    ASSERT_EQ(image_io_probe_path(NULL, path, &info, &error), IMAGE_OK) << error.message;
+    EXPECT_EQ(info.bit_depth, 12u);
+    EXPECT_EQ(info.width, 32u);
+    EXPECT_EQ(info.height, 24u);
+    EXPECT_EQ(image_io_decode_path(NULL, path, NULL, &image, &error), IMAGE_UNSUPPORTED_FEATURE);
+    EXPECT_EQ(error.format, IMAGE_CODEC_TIFF);
+    EXPECT_STREQ(error.operation, "decode");
+    EXPECT_NE(strstr(error.message, "12-bit JPEG"), nullptr);
+    EXPECT_EQ(image.pixels, nullptr);
 }
 TEST(ImageIO, TiffPagesTilesAndReducedSubIfds) {
     ImageFixture fixture;
@@ -732,10 +802,9 @@ TEST(ImageIO, TiffPagesTilesAndReducedSubIfds) {
     image_decoded_dispose(&image);
 }
 TEST(ImageIO, AvifIdentificationSkipsLargePaddingWithoutBufferingIt) {
-    ImageFixture fixture;
     ImageEncoded encoded = {};
     ImageError error = {};
-    ASSERT_EQ(encode_fixture(&fixture, IMAGE_CODEC_AVIF, &encoded, &error), IMAGE_OK) << error.message;
+    ASSERT_EQ(load_avif_fixture("orientation_0_0.avif", &encoded), IMAGE_OK);
     size_t padding = 8192;
     uint8_t *bytes = (uint8_t *)mem_alloc(encoded.length + padding, MEM_CAT_IMAGE);
     ASSERT_NE(bytes, nullptr);

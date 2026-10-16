@@ -1,0 +1,8 @@
+frozen-element
+42
+true
+true
+true
+NotSupportedError
+TypeError
+true

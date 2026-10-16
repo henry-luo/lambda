@@ -1,5 +1,5 @@
 {
-  "name": "Finder compact icon and list layouts",
+  "name": "Finder compact icon, list and column layouts",
   "html": "test/demo/finder/finder.ls",
   "viewport": {"width": 520, "height": 640},
   "events": [
@@ -11,6 +11,18 @@
     {"type":"key_press","key":"escape"},
     {"type":"click","target":{"selector":"#list"}},
     {"type":"assert_script","js":"Array.from(document.querySelectorAll('#files .file')).every(e=>e.getBoundingClientRect().width<=document.getElementById('files').getBoundingClientRect().width)"},
-    {"type":"capture_surface","source":"page","file":"temp/finder/compact.png"}
+    {"type":"capture_surface","source":"page","file":"temp/finder/compact.png"},
+    {"type":"resize","width":420,"height":640},
+    {"type":"click","target":{"selector":"#columns"}},
+    {"type":"click","target":{"selector":"[data-name='Assets']"}},
+    {"type":"assert_script","js":"document.querySelectorAll('.file-column').length===2 && document.getElementById('files').scrollLeft>0 && document.getElementById('column-files-1').getBoundingClientRect().height>300"},
+    {"type":"assert_script","js":"const files=document.getElementById('files').getBoundingClientRect();const child=document.getElementById('column-1').getBoundingClientRect();child.right<=files.right+1 && child.left>=files.left-1"},
+    {"type":"key_press","key":"down"},
+    {"type":"key_press","key":"space"},
+    {"type":"assert_script","js":"document.getElementById('finder').getAttribute('data-look')==='true' && document.querySelector('#look-body img')!==null"},
+    {"type":"key_press","key":"escape"},
+    {"type":"key_press","key":"left"},
+    {"type":"assert_script","js":"document.querySelectorAll('.file-column').length===1 && document.getElementById('files').scrollLeft===0"},
+    {"type":"capture_surface","source":"page","file":"temp/finder/columns-compact.png"}
   ]
 }

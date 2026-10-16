@@ -14,8 +14,21 @@ enum MvpLmdDynamicFunctionKind {
 // all dynamic kinds share retained-interpreter admission and source conversion.
 Item mvp_lmd_dynamic_function_kind(MvpLmdProgram*, Item*, uint64_t,
     Item new_target, MvpLmdDynamicFunctionKind);
-Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram*, Item);
+// adapt Core exports once into the owning module's precise cells.
+Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram*, Item, bool module_export = false);
 Item mvp_lmd_dynamic_unwrap_function(Item);
+extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right);
+// preserve native descriptor identity and rebind aliases to the active global.
+Item mvp_lmd_import_host_property(MvpLmdProgram*, Item owner, Item key,
+    const JsPropertyDescriptor*, Item previous_global = ItemNull);
+enum MvpLmdForeignOperation {
+    LMD_FOREIGN_GET_PROTOTYPE = 32, LMD_FOREIGN_SET_PROTOTYPE,
+    LMD_FOREIGN_EXTENSIBLE, LMD_FOREIGN_PREVENT,
+    LMD_FOREIGN_DESCRIPTOR, LMD_FOREIGN_DEFINE, LMD_FOREIGN_PROJECT
+};
+// false means this is not foreign storage; completion preserves false versus throw.
+bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
+    int operation, Item* completion, JsPropertyDescriptor* descriptor = NULL);
 // Returns undefined for an ordinary MVP callable; dynamic bodies keep their
 // exact retained source independently of the original MIR unit's source span.
 Item mvp_lmd_dynamic_function_source(Item);

@@ -47,6 +47,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/draw/tests",
     "test/demo/word/tests",
     "test/demo/finder/tests",
+    "test/demo/note/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",

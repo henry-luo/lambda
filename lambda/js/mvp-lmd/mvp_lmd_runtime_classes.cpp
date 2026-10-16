@@ -1,5 +1,6 @@
 #include "mvp_lmd_runtime.h"
 #include "mvp_lmd_async.h"
+#include "mvp_lmd_dynamic.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
 #include "../js_runtime.h"
@@ -28,6 +29,9 @@ MvpLmdClass* mvp_lmd_class_record(Item owner) {
         ? (MvpLmdClass*)nominal->extension_data : NULL;
 }
 Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library) {
+    Item foreign;
+    if (mvp_lmd_foreign_candidate(object) && mvp_lmd_foreign_property(object, ItemNull,
+            ItemNull, object, LMD_FOREIGN_GET_PROTOTYPE, &foreign)) return foreign;
     if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object)) return ItemNull;
     if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_is(object)) return js_get_prototype(object);
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object, LMD_PROXY_PROTOTYPE);
@@ -89,6 +93,9 @@ extern "C" Item mvp_lmd_get_prototype(Item object) {
     return mvp_lmd_get_prototype_with_library(object, mvp_lmd_program_library());
 }
 extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
+    Item foreign;
+    if (mvp_lmd_foreign_candidate(object) && mvp_lmd_foreign_property(object, ItemNull,
+            ItemNull, object, prevent ? LMD_FOREIGN_PREVENT : LMD_FOREIGN_EXTENSIBLE, &foreign)) return foreign;
     if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object))
         return Item{.item = b2it(prevent != 0)};
     if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_is(object)) {
@@ -118,6 +125,9 @@ extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
     TypeId kind = get_type_id(prototype);
     if (kind != LMD_TYPE_NULL && !mvp_lmd_is_object(prototype))
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    Item foreign;
+    if (mvp_lmd_foreign_candidate(object) && mvp_lmd_foreign_property(object, ItemNull,
+            prototype, object, LMD_FOREIGN_SET_PROTOTYPE, &foreign)) return foreign;
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, prototype, ItemNull, object, LMD_PROXY_SET_PROTOTYPE);
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
@@ -215,8 +225,9 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
     while (cursor.item != ITEM_NULL) {
         if (item_is_error(cursor)) return cursor;
         if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor) ||
+                mvp_lmd_foreign_candidate(cursor) ||
                 cursor.map->map_kind == MAP_KIND_TYPED_ARRAY)) {
-            // array indices and exotic internal methods need the original receiver and semantic dispatch.
+            // foreign prototype storage, array indices and exotic methods retain semantic dispatch.
             RootFrame roots(3);
             if (!roots.valid()) return ItemError;
             Rooted<Item> held(roots, receiver), parent(roots, cursor), name(roots, Item{.item = s2it(identity)});
@@ -337,6 +348,19 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
         Item status = mvp_lmd_define_own_property(owner, name, &descriptor);
         return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
     }
+    if (!fixed && mvp_lmd_foreign_candidate(owner)) {
+        int opcode = operation & ~LMD_PROP_STRICT;
+        if (opcode >= LMD_PROP_KEYS && opcode <= LMD_PROP_ENTRIES)
+            return mvp_lmd_object_project(owner, opcode - LMD_PROP_KEYS);
+        Item foreign;
+        if (mvp_lmd_foreign_property(owner, name, value, receiver, opcode, &foreign)) {
+            if (item_is_error(foreign)) return foreign;
+            if ((opcode == LMD_PROP_SET || opcode == LMD_PROP_DELETE) &&
+                    (operation & LMD_PROP_STRICT) && foreign.item == ITEM_FALSE)
+                return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            return opcode == LMD_PROP_SET ? value : foreign;
+        }
+    }
     if (get_type_id(owner) == LMD_TYPE_ARRAY)
         return mvp_lmd_array_property(owner, name, value, operation, receiver);
     if (!fixed && get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner)) {
@@ -427,6 +451,11 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                 if (get_type_id(cell) == LMD_TYPE_ARRAY) return cell.array->items[0];
             }
             Item result = found && !presence ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
+            if (!fixed && result.item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
+                // lazy publication may transition the shape; never cache the marker's field.
+                Item resolved;
+                return js_resolve_lazy_global(owner, name, &resolved) ? resolved : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            }
             if (!found && operation != LMD_PROP_OWN) {
                 uint8_t flags;
                 result = mvp_lmd_inherited_member_flags(owner, key->chars, key->len, &found,
@@ -657,6 +686,18 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     if (mvp_lmd_is_proxy(callee)) return mvp_lmd_proxy_invoke(callee, receiver, arguments, argc, new_target);
     if (get_type_id(callee) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     Function* function = callee.function;
+    if (function_has_abi(function, FN_ENTRY_ABI_JS_FUNCTION)) {
+        // reuse the identity-cached native bridge even when ingress bypassed a
+        // foreign property read (for example, a host array's own method).
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
+        MvpLmdLibraryState* library = mvp_lmd_program_library();
+        if (!library) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        held.set(mvp_lmd_dynamic_wrap_function(library->object.program, held.get()));
+        return item_is_error(held.get()) ? held.get() :
+            mvp_lmd_class_invoke(held.get(), self.get(), arguments, argc, target.get());
+    }
     if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context ||
             function->runtime_context != context) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     MvpLmdCallable* fn = (MvpLmdCallable*)function;

@@ -1,10 +1,13 @@
 ['png', true, [4, 6, 4], [2, 3, 4]]
 ['jpeg', true, [4, 6, 4], [2, 3, 4]]
 ['webp', true, [4, 6, 4], [2, 3, 4]]
-['avif', true, [4, 6, 4], [2, 3, 4]]
 ['bmp', true, [4, 6, 4], [2, 3, 4]]
 ['tiff', true, [4, 6, 4], [2, 3, 4]]
 ['ico', true, [4, 6, 4], [2, 3, 4]]
+"AVIF input:"
+[[24, 32, 4], [2, 3, 4]]
+"AVIF output unavailable:"
+true
 "source limit:"
 true
 "unknown option:"

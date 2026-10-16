@@ -12,6 +12,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
 #include "js_state_guards.h"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
 #include "../input/input.hpp"
@@ -100,102 +101,12 @@ extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
         ? typemap_hash_lookup_idless(tm, name->chars, (int)name->len) : nullptr;
 }
 
-// A2-T1: clone the underlying TypeMap + ShapeEntry chain for `obj` so that any
-// subsequent ShapeEntry mutation (flags, accessor flip, future delete bit) does
-// not affect sibling Maps that share the original TypeMap via per-call-site
-// shape cache (transpile_js_mir.cpp §7) or constructor pre-shaping.
-//
-// Idempotent: if the current TypeMap is already this Map's private clone
-// (is_private_clone == true), returns it unchanged. Returns the (possibly new)
-// TypeMap pointer; returns nullptr if cloning is not possible (no underlying
-// map, no js_input pool) — caller decides whether to fall back to in-place
-// mutation or skip.
-//
-// Cloned ShapeEntry's share immutable name StrView*'s with the source (the
-// embedded StrView lives at end-of-entry on entries created via
-// alloc_shape_entry or alloc_type-based paths and is itself
-// immutable; entries created with separate StrView allocations carry an external
-// pointer that is also immutable). Sharing is safe because attribute mutation
-// only touches `flags`, never `name`.
+// Descriptor mutation and Input mutation share one clone kernel. Snapshot
+// callers can force detachment even when the current shape is already private.
 static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
     Map* underlying = js_obj_underlying_map(obj);
-    if (!underlying) return nullptr;
-    TypeMap* tm = (TypeMap*)underlying->type;
-    if (!tm) return nullptr;
-    if (tm->is_private_clone && !force_clone) return tm;
-    if (!js_input || !js_input->pool) return nullptr;
-    Pool* pool = js_input->pool;
-
-    TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!clone) return nullptr;
-    clone->length = tm->length;
-    clone->byte_size = tm->byte_size;
-    clone->type_index = tm->type_index;
-    clone->has_named_shape = tm->has_named_shape;
-    clone->is_trusted_contract = false;
-    clone->struct_name = tm->struct_name;
-    clone->is_private_clone = true;
-    clone->is_shared_constructor_shape = false;
-    clone->is_transition_shared_shape = false;
-    clone->transitions = NULL;
-    // Tune6: descriptor cloning preserves the immutable semantic family; a
-    // shape mutation must never silently turn an instance into another class.
-    clone->js_meta = tm->js_meta;
-    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
-    clone->has_array_index_shape = tm->has_array_index_shape;
-
-    // Clone the shape chain: per-entry shallow copy with `next` rewired and
-    // `name`/`type`/`ns`/`default_value` shared with the source (all
-    // immutable post-shape-creation). `flags` is copied so the clone starts
-    // identical to the source; the caller mutates after this returns.
-    ShapeEntry* prev_clone = nullptr;
-    ShapeEntry* first_clone = nullptr;
-    ShapeEntry* last_clone = nullptr;
-    FOR_EACH_MAP_FIELD(tm, src) {
-        ShapeEntry* dst = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
-        if (!dst) return nullptr;
-        dst->name = src->name;
-        dst->type = src->type;
-        dst->storage = *shape_entry_storage(src);
-        dst->byte_offset = src->byte_offset;
-        dst->ns = src->ns;
-        dst->default_value = src->default_value;
-        dst->name_hash = src->name_hash;
-        dst->name_id = src->name_id;
-        dst->key_kind = src->key_kind;
-        dst->flags = src->flags;
-        dst->accessor = src->accessor;
-        if (!first_clone) first_clone = dst;
-        if (prev_clone) prev_clone->chain_next = dst;
-        prev_clone = dst;
-        last_clone = dst;
-    }
-    clone->shape = first_clone;
-    clone->last = last_clone;
-
-    // Repopulate the per-TypeMap field_index hash against the cloned entries.
-    // Dynamic tables are pool-owned, so clones must never alias the source index.
-    typemap_hash_build(clone, pool);
-
-    // Mirror slot_entries if the source published a slot-indexed lookup
-    // (constructor-shaped objects go through this path).
-    if (tm->slot_entries && tm->slot_count > 0) {
-        ShapeEntry** entries = (ShapeEntry**)pool_calloc(pool, tm->slot_count * sizeof(ShapeEntry*));
-        if (entries) {
-            ShapeEntry* e = first_clone;
-            for (int i = 0; i < tm->slot_count && e; i++, e = typemap_next_field(clone, e)) {
-                entries[i] = e;
-            }
-            clone->slot_entries = entries;
-            clone->slot_count = tm->slot_count;
-        }
-    }
-
-    underlying->type = clone;
-    log_debug("A2-T1: cloned TypeMap %p -> %p for Map %p (%lld fields, slot_count=%d)",
-              (void*)tm, (void*)clone, (void*)underlying,
-              (long long)tm->length, tm->slot_count);
-    return clone;
+    if (!underlying || !js_input || !js_input->pool) return nullptr;
+    return map_clone_typemap_for_mutation(underlying, js_input->pool, force_clone);
 }
 
 // a snapshot Map may already own a private TypeMap. Private ownership is
@@ -220,6 +131,14 @@ static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
     if (!se) return;
     uint8_t new_flags = (uint8_t)((se->flags | set_mask) & ~clear_mask);
     if (new_flags == se->flags) return;
+    Map* underlying = js_obj_underlying_map(obj);
+    TypeMap* shape = underlying ? (TypeMap*)underlying->type : NULL;
+    if (shape && shape->nominal && (shape->nominal->extension == &mvp_lmd_plain_extension ||
+            shape->nominal->extension == &mvp_lmd_class_extension)) {
+        // D3.4: host attributes preserve the same immutable nominal transition graph.
+        TypeMap* transitioned = type_tree_reflag_field(runtime_shape_tree(), shape, se, new_flags);
+        if (transitioned) { underlying->type = transitioned; return; }
+    }
     // A2-T2: detach this Map's TypeMap from any siblings before mutating
     // ShapeEntry::flags. If cloning isn't possible (no js_input pool, or no
     // mutable underlying Map), fall back to in-place mutation — preserves

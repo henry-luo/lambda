@@ -180,7 +180,7 @@ struct JsInterpHostCaller {
 };
 enum JsInterpLookupKind : uint8_t {
     JS_INTERP_LOOKUP_OUTER, JS_INTERP_LOOKUP_SLOT,
-    JS_INTERP_LOOKUP_EVAL, JS_INTERP_LOOKUP_ARGUMENTS
+    JS_INTERP_LOOKUP_EVAL, JS_INTERP_LOOKUP_ARGUMENTS, JS_INTERP_LOOKUP_OBJECT
 };
 struct JsInterpLookup {
     JsInterpLookupKind kind;
@@ -196,7 +196,7 @@ struct JsInterpHostReference {
 enum JsInterpHostReferenceOperation {
     JS_INTERP_REFERENCE_RESOLVE, JS_INTERP_REFERENCE_GET,
     JS_INTERP_REFERENCE_SET, JS_INTERP_REFERENCE_DELETE,
-    JS_INTERP_REFERENCE_TYPEOF
+    JS_INTERP_REFERENCE_TYPEOF, JS_INTERP_REFERENCE_RECEIVER
 };
 JsInterpEnv* js_interp_env_create(NameScope*, JsInterpEnv*);
 Item js_interp_initialize_body_vars(JsInterpEnv* body, JsInterpEnv* parameters);

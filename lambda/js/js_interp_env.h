@@ -14,6 +14,7 @@ enum JsInterpEnvironmentRole {
     JS_INTERP_ENV_PARAMETERS,
     JS_INTERP_ENV_BODY_VARS,
     JS_INTERP_ENV_GLOBAL_OBJECT, // vars resolve through the host global property record
+    JS_INTERP_ENV_WITH_OBJECT, // interleaved with declarative records for hosted eval
 };
 
 enum JsInterpHostCells {
@@ -38,6 +39,8 @@ typedef struct JsInterpEnv {
     // The nearest non-arrow function's live lexical `this` binding. Derived
     // constructors initialize this cell only after their `super()` call.
     uint64_t lexical_this;
+    // retain the object binding across escaped eval closures.
+    uint64_t with_object;
     struct AstNode* function_node;
     // Set on the declarative record of a direct eval linked to an interpreted
     // caller (D8.1.3v21): its slots hold that eval Script's top-level
@@ -61,7 +64,7 @@ static inline void js_interp_env_arguments_store(JsInterpEnv* env, Item value) {
 }
 
 // JS adds lexical metadata to the common durable Item/scalar slot storage.
-// The five Item words are deliberately contiguous so the generic visitor can
+// the six Item words are deliberately contiguous so the generic visitor can
 // trace them with the same contract it uses for ordinary capture slots.
 static inline void js_interp_env_storage(JsInterpEnv* env,
         GcEnvironmentStorage* storage) {
@@ -75,7 +78,7 @@ static inline void js_interp_env_storage(JsInterpEnv* env,
     Item* slots = (Item*)(void*)env->slots;
     gc_environment_storage_init(storage, GC_ENVIRONMENT_LAYOUT_LEXICAL, slots,
         env->slots + env->slot_count, env->slot_count, env->outer,
-        (Item*)(void*)&env->arguments_object, 5);
+        (Item*)(void*)&env->arguments_object, 6);
 }
 
 static inline Item js_interp_env_slot_read(JsInterpEnv* env, uint32_t slot,
