@@ -12,6 +12,7 @@ pub fn attr_list(pairs) => [for (p in pairs where p[1] != null) {name: p[0], val
 
 // A model node's attribute value, or null.
 pub fn attr_get(n, key) => if (is_node(n)) attrs_get(n.attrs, key) else null
+pub fn attr_text(n, key) => if (attr_get(n,key)==null) null else string(attr_get(n,key))
 
 // The literal text of a Mark element: its string descendants, concatenated.
 pub fn plain_text(item) string {

@@ -73,6 +73,11 @@ button svg { flex-shrink:0; }
 .color-clear { width:100%; justify-content:flex-start; font-size:12px; padding:0 7px; }.color-label { display:block; font-size:11px; color:#8c8578; margin:12px 0 7px; }
 .custom-color { display:flex; gap:7px; }.custom-color input { min-width:0; width:100%; padding:6px 8px; border:1px solid #ded8ca; border-radius:5px; background:#fff; font-size:12px; }
 .color-apply { width:auto; padding:0 10px; background:#e9bd49; color:#453713; font-size:12px; }.color-error { margin:10px 0 0; font-size:11px; color:#b94b3f; }
+.note-paper { position:relative; }.note-content img { max-width:100%; height:auto; vertical-align:middle; cursor:default; }
+.image-tools { position:absolute; border:2px solid #d8ac35; pointer-events:none; z-index:5; }
+.image-actions { position:absolute; left:0; top:-36px; display:flex; gap:3px; padding:3px; border:1px solid #ded8ca; border-radius:6px; background:#fffefb; box-shadow:0 2px 8px #493c2226; pointer-events:auto; white-space:nowrap; }
+.image-actions button { height:25px; min-width:27px; padding:0 7px; border-radius:4px; color:#756a51; font-size:12px; }.image-actions button:hover { background:#ece6d5; }
+.image-handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; border:2px solid #fffefb; border-radius:2px; background:#d8ac35; cursor:nwse-resize; pointer-events:auto; touch-action:none; }
 .context-popover { position:fixed; width:240px; padding:6px; max-height:calc(100vh - 16px); overflow:auto; z-index:30; }
 .context-item { width:100%; height:30px; justify-content:flex-start; padding:5px 8px; gap:9px; text-align:left; font-size:12px; }
 .context-item svg { width:16px; height:16px; }.context-item:focus { background:#ece6d5; outline:none; }.context-key { margin-left:auto; color:#a1998b; font-size:11px; }

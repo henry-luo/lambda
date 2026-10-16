@@ -35,6 +35,15 @@ Typing `- ` or `1. ` starts a list. Enter continues the list; Enter in an empty
 item returns to body text.
 Each note keeps its own undo/redo history while the notebook is open.
 
+Paste an image with Cmd/Ctrl+V. On macOS, screenshots, images copied from
+Preview, and copied raster image files use the native clipboard; copying a selected
+image publishes PNG/TIFF plus an HTML alternative. Click an image to select it,
+then drag its bottom-right handle to resize while preserving its proportions.
+The image controls also offer smaller, larger and original-size actions.
+Escape cancels a resize. Copy, Cut, Paste and resizing support undo/redo.
+Clipboard image data and its size are embedded in the notebook, so reopening does not
+depend on the clipboard or an external image file.
+
 Right-click selected text for undo/redo, cut/copy/paste, select all and formatting.
 Right-click a note for pinning, moving, deletion or restoration. Menus stay within
 the window, support arrow-key navigation, and dismiss with Escape or an outside click.
@@ -58,7 +67,7 @@ at startup. The JSON envelope contains folders, note metadata, and Mark-encoded
 editor documents to preserve symbols, exact whitespace and formatting. Reads
 parse data without executing scripts. Atomic writes, lossless round-trip checks,
 overwrite prompts, external-change detection, and unsaved Open/Close Notebook guards
-reuse the shared edit-session file lifecycle. Files are limited to 4 MB; other
+reuse the shared edit-session file lifecycle. Files are limited to 64 MB; other
 save destinations need an existing parent directory. Undo history is session
 state and is not written to disk.
 
@@ -66,7 +75,7 @@ Use **… → Close Notebook** for the save/discard prompt. The viewer host curr
 honors native window-close guards only for `lambda edit` sessions, so closing
 a demo with the OS window control does not prompt; save explicitly first.
 
-Cloud sync, collaboration, attachments, locked notes, tags, scanning, drawing,
+Cloud sync, collaboration, file attachments, locked notes, tags, scanning, drawing,
 OS sharing, and timed trash expiry are outside this demo. Narrow windows hide
 the folder sidebar and retain the list/editor panes.
 
@@ -97,4 +106,8 @@ The list-caret replay checks bullet/numbered marker autoformat, Enter continuati
 in inline and paragraph-wrapped items, empty-item exit, and checklist continuation.
 The color and context-menu replays cover selection preservation, direct toolbar
 marks, custom colors, highlights, clipboard edits, keyboard navigation and menu bounds.
+The image replay covers binary clipboard transport, image replacement, resizing,
+undo/redo and notebook round-trips. Native macOS tests use the OS clipboard;
+headless replays keep binary MIME data in memory. Other desktop platforms retain
+their existing plain-text OS clipboard bridge.
 Captures and results are written under `temp/note/`.

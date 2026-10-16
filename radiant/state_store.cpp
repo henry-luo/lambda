@@ -2007,6 +2007,18 @@ static void editing_composition_reset(EditingCompositionState* composition) {
     composition->canceled = false;
 }
 
+ModelEditSurfaceBinding* model_edit_surface_find_host(
+        DocState* state, const char* host_key) {
+    if (!state || !host_key || !host_key[0]) return nullptr;
+    for (ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+         binding; binding = binding->next) {
+        if (binding->host_key && strcmp(binding->host_key, host_key) == 0) {
+            return binding;
+        }
+    }
+    return nullptr;
+}
+
 void editing_interaction_set_active_surface(DocState* state,
                                             const EditingSurface* surface) {
     if (!state) return;
@@ -2030,9 +2042,14 @@ void editing_interaction_set_active_surface(DocState* state,
         }
         state->editing.active_surface = *surface;
         state->editing.has_active_surface = true;
+        state->editing.active_model_surface_id = 0;
+        ModelEditSurfaceBinding* binding = surface->owner
+            ? model_edit_surface_find_host(state, surface->owner->id) : nullptr;
+        if (binding) state->editing.active_model_surface_id = binding->handle_id;
     } else {
         editing_surface_clear(&state->editing.active_surface);
         state->editing.has_active_surface = false;
+        state->editing.active_model_surface_id = 0;
         state->editing.composing = false;
         state->editing.composition.active = false;
         editing_surface_clear(&state->editing.composition.surface);
@@ -2902,6 +2919,7 @@ static void doc_state_clear_editing_interaction_surface(DocState* state) {
     if (!state) return;
     editing_surface_clear(&state->editing.active_surface);
     state->editing.has_active_surface = false;
+    // retain the logical model handle; completion resolves its replacement DOM host.
     state->editing.composing = false;
     editing_composition_reset(&state->editing.composition);
 }
@@ -8730,19 +8748,23 @@ void clipboard_copy_text(const char* text) {
     // Best-effort GLFW mirror so existing interactive flows keep working
     // in builds where a GLFW window is present. Skip in headless mode to
     // avoid cross-process races on the shared OS pasteboard during tests.
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
+#endif
     log_info("Copied %zu bytes to clipboard", strlen(text));
 }
 
 const char* clipboard_get_text() {
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         const char* s = glfwGetClipboardString(ui_context.window);
         if (s) return s;
     }
+#endif
     return clipboard_store_read_text();
 }
 
@@ -8751,10 +8773,12 @@ void clipboard_copy_html(const char* html) {
     // Write both representations so paste handlers that ask for text/html
     // get rich content and plain-text consumers still see something useful.
     clipboard_store_write_html(html, html);
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);
     }
+#endif
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));
 }
 
@@ -8766,10 +8790,12 @@ void clipboard_copy_rich(const char* html, const char* plain_text) {
     } else {
         clipboard_store_write_text(text);
     }
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
+#endif
     log_debug("clipboard_copy_rich: wrote html=%zu plain=%zu",
               html ? strlen(html) : 0, strlen(text));
 }

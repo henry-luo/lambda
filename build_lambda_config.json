@@ -2061,6 +2061,7 @@
       ],
       "objcxx_source_files": [
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
@@ -2270,6 +2271,7 @@
       "description": "Headless full build: Lambda + Radiant + JS linked against the null windowing backend (radiant/headless.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
       "output": "lambda-headless.exe",
       "extra_exclude_source_files": [
+        "radiant/clipboard_mac.mm",
         "radiant/ime_mac.mm",
         "radiant/app_icon_mac.mm",
         "radiant/webview_child_mac.mm",
@@ -2390,6 +2392,7 @@
       "exclude_source_files": [
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
@@ -3046,6 +3049,7 @@
       "exclude_source_files": [
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],

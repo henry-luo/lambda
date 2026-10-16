@@ -6,6 +6,9 @@ import resources: ~~.mod_resources
 import app: .mod_app
 import model: .mod_model
 import ui: .mod_ui
+import images: .mod_images
+import result: lambda.dom.edit_result
+import lambda.editor.mod_step
 
 let CSS = input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
 
@@ -19,12 +22,16 @@ edit <notes_app> state st:app.initial() {
 }
 on beforeinput() { return 'pass' }
 on editaction(evt) {
-    let run = controller.handle(st.editor,evt,st.dialog!=null or st.selected=="" or model.current(st).deleted)
+    let image = model.selected_image(st.editor)
+    let run = controller.handle(st.editor,evt,st.dialog!=null or st.selected=="" or model.current(st).deleted,
+        "html5_subset","edit-surface",if (image==null) null else st.editor.selection)
     if (run.result.failure is null and evt.input_type!="copy") {
         st = model.update_editor(st,run.editor,app.stamp())
         app.finish(st,evt.target)
     }
-    return run.result
+    return if (image!=null and (evt.input_type=="copy" or evt.input_type=="deleteByCut"))
+        result.with_clipboard_image(run.result,attrs_get(image.node.attrs,'src'),model.image_html(image),attrs_get(image.node.attrs,'alt') or "")
+        else run.result
 }
 on selectionchange(evt) {
     let adopted = app.adopt(st,evt)
@@ -56,6 +63,13 @@ on control_change(req) {
 }
 on mousedown(evt) {
     if (evt.button==1 and dom.closest(evt.target,"#edit-surface")!=null) { return 'prevent-default' }
+    let image = if (evt.button==0) images.hit(st.editor,evt.target) else null
+    if (image!=null and st.dialog==null and not model.current(st).deleted) {
+        st = {*:st,editor:model.select_image(controller.mount(st.editor,evt.target),image),menu:""}
+        controller.focus(evt.target)
+        app.finish(st,evt.target,true)
+        return 'prevent-default'
+    }
     // checkbox presses must cancel native caret placement before the generated check glyph is hit.
     return if (evt.button==0 and ui.task_hit(st,evt)!=null) 'prevent-default' else 'pass'
 }
@@ -76,6 +90,8 @@ on click(evt) {
 }
 on contextmenu(evt) {
     if (st.dialog!=null or dom.closest(evt.target,"#edit-surface,.note-row")==null) { return 'pass' }
+    let image = images.hit(st.editor,evt.target)
+    if (image!=null) { st = {*:st,editor:model.select_image(st.editor,image)} }
     st = app.open_context(st,evt)
     app.finish(st,evt.target,true)
     return 'prevent-default'

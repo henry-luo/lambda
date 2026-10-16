@@ -9,6 +9,13 @@ import html: lambda.edit.html
 import controller: lambda.edit.controller
 import inline_format: lambda.editor.mod_inline_format
 import component: lambda.ui.core.component
+import image: lambda.editor.mod_image
+
+pub let images = image.images
+pub let selected_image = image.selected
+pub let select_image = image.select_image
+pub let resize_image = image.resize_image
+pub fn image_html(entry) => html.inline_html([entry.node])
 
 pub let color_properties = {color:"color",highlight:"background-color"}
 pub let default_colors = {color:"#38352f",highlight:"#fff09b"}
@@ -90,9 +97,8 @@ pub fn navigate(st,delta) {
 }
 pub fn selection_path(editor) => inline_format.selection_path(editor.selection)
 pub fn task_path(editor,path=null) => commands.ancestor_tag(editor.doc,path or selection_path(editor),'li')
-pub fn tasks(doc,path=[]) => if (not is_node(doc)) [] else [
-    *if (doc.tag=='li' and attrs_get(doc.attrs,'checked')!=null) [{path:path,checked:attrs_get(doc.attrs,'checked')}] else [],
-    *[for (i,child in doc.content) for (task in tasks(child,[*path,i])) task]]
+pub fn tasks(doc,path=[]) => [for (entry in descendants(doc,path),let n=entry.node
+    where is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
 pub fn toggle_task(editor,path=null) {
     let target = path or task_path(editor)
     let item = node_at(editor.doc,target);

@@ -77,7 +77,7 @@ pub pn focus(node, id = "edit-surface") {
     if (host == null) false else dom.focus_set(host, false)
 }
 
-pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface") {
+pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface", selection = null) {
     if (read_only) { return {editor: editor, result: result.decline(true, false, "read-only", 0)} }
     // copy has already populated the native clipboard; it must not redraw or
     // create history, which would replace the selected nodes unnecessarily.
@@ -85,7 +85,8 @@ pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edi
         return {editor: editor, result: result.model_applied(false, false, false, "",
             editor.selection, editor.model_revision)}
     }
-    edit_handle_dom_action(mount(editor, evt.target, preset, id), evt)
+    // keep the host event intact; an owned atomic selection is a separate model target.
+    edit_handle_dom_action(mount(editor, evt.target, preset, id), evt, selection)
 }
 
 pub pn request(editor, input_type, payload = {}) {

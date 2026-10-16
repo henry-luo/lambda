@@ -5,6 +5,7 @@ import icons: lambda.ui.dtna.icons
 import controls: lambda.ui.controls
 import rich: lambda.edit.rich_text
 import model: .mod_model
+import images: .mod_images
 
 pub fn icon(name) => icons.render({name:name,width:19,height:19})^
 pub pn task_hit(st,evt) {
@@ -152,7 +153,7 @@ on render(evt) {
 }
 fn context_menu(st) {
     let n = model.current(st)
-    let selected = st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head
+    let selected = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
     let disabled = n==null or n.deleted;
     apply(<note_context rendered:<div id:"note-context-menu",class:"popover context-popover",role:"menu",["aria-label"]:if (st.context.kind=="text") "Text actions" else "Note actions",
         style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
@@ -203,7 +204,8 @@ pub fn editor(st) {
             button("empty-new","note.new","New Note",null,{},false,false,"primary")> else <div class:"editor-scroll",
             <div class:"note-date",n.updated ++ " · " ++ model.folder_name(st,n.folder)>
             if (n.deleted) <div class:"deleted-banner","This note is in Recently Deleted. Restore it to make changes."> else null;
-            <div class:"note-paper",*:if (n.deleted) {inert:""} else {},rich.surface(st.editor,"note-content")>
+            <div id:"note-paper",class:"note-paper",*:if (n.deleted) {inert:""} else {},
+                rich.surface(st.editor,"note-content");if (not n.deleted) images.tools(st.editor) else null>
         >;
         <footer class:"editor-footer",<span id:"status",role:"status",st.status>
             <span if (n!=null) string(len(join(model.lines(n)," "))) ++ " characters" else "">

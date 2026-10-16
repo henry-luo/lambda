@@ -3005,8 +3005,8 @@ RADIANT_C_API Item fn_radiant_dom_edit_clipboard_write(Item node_item,
     if (!invocation) return radiant_bool_item(false);
     const char* html = fn_to_cstr(html_item);
     const char* text = fn_to_cstr(text_item);
-    if (!text || !text[0]) return radiant_bool_item(false);
-    if (html && html[0]) clipboard_copy_rich(html, text);
+    if ((!text || !text[0]) && (!html || !html[0])) return radiant_bool_item(false);
+    if (html && html[0]) clipboard_copy_rich(html, text ? text : "");
     else clipboard_copy_text(text);
     return radiant_bool_item(true);
 }

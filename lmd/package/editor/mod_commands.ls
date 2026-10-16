@@ -107,12 +107,15 @@ fn replace_all_with_text(st, txt) {
 
 fn last_caret_pos_in(n, path) {
   if (is_text(n)) { pos(path, len(n.text)) }
+  // atomic images have no internal caret; continue at their parent's child boundary.
+  else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)+1) }
   else if (is_node(n) and len(n.content) > 0) { last_caret_pos_in(n.content[len(n.content) - 1], [*path, len(n.content) - 1]) }
   else { pos(path, 0) }
 }
 
 fn first_caret_pos_in(n, path) {
   if (is_text(n)) { pos(path, 0) }
+  else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)) }
   else if (is_node(n) and len(n.content) > 0) { first_caret_pos_in(n.content[0], [*path, 0]) }
   else { pos(path, 0) }
 }
@@ -192,6 +195,13 @@ fn replace_node_with_blocks(st, blocks) {
     let selected_parent_path = parent_path(st.selection.path)
     let selected_index = last_index(st.selection.path)
     if (len(selected_parent_path) == 0) { replace_node_with_slice(st, blocks, selection_after_inserted_blocks(selected_index, blocks)) }
+    else if (len(blocks)==1 and block_allows_inline(st,blocks[0].tag) and
+             block_allows_inline(st,node_at(st.doc,selected_parent_path).tag) and len(blocks[0].content)>0) {
+      // replacing an inline object must retain pasted inline objects, not flatten them to text.
+      let kids = blocks[0].content
+      let last_path = [*selected_parent_path,selected_index+len(kids)-1]
+      replace_node_with_slice(st,kids,caret(last_caret_pos_in(kids[len(kids)-1],last_path)))
+    }
     else { replace_node_with_text(st, doc_text(node('fragment', blocks))) }
   }
 }
@@ -688,23 +698,27 @@ pub fn cmd_paste_fragment(st, fragment) {
     let lo = sel_lo(sel)
     let hi = sel_hi(sel)
     let leaf = node_at(st.doc, lo.path)
-    if (leaf == null or not is_text(leaf) or len(lo.path) < 2) { null }
+    let boundary = is_node(leaf) and block_allows_inline(st,leaf.tag) and pos_equal(lo,hi)
+    if (leaf == null or (not boundary and (not is_text(leaf) or len(lo.path) < 2))) { null }
     else {
       let blocks = coerce_children(state_schema(st), fragment, 'block')
       if (len(blocks) == 0) { null }
       else {
-        let block_path = find_inline_container_path(st.doc, state_schema(st), lo.path, 0)
+        let block_path = if (boundary) lo.path else find_inline_container_path(st.doc, state_schema(st), lo.path, 0)
         let block = if (block_path == null) { null } else { node_at(st.doc, block_path) }
         if (block == null or not is_node(block)) { cmd_paste_text(st, doc_text(node('fragment', blocks))) }
         else {
-          let top_index = lo.path[len(block_path)]
+          let top_index = if (boundary) lo.offset else lo.path[len(block_path)]
           let target = block.content[top_index]
           let rel_lo = slice(lo.path, len(block_path) + 1, len(lo.path))
           let rel_hi = slice(hi.path, len(block_path) + 1, len(hi.path))
           let before = inline_prefix_before_pos(target, rel_lo, lo.offset)
           let after = inline_suffix_after_pos(target, rel_hi, hi.offset)
-          let head_inline = list_concat(list_slice(block.content, 0, top_index), before)
-          let tail_inline = list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
+          // rich paste also accepts child-boundary carets, including an empty block after Cut.
+          let head_inline = if (boundary) list_slice(block.content,0,top_index)
+            else list_concat(list_slice(block.content, 0, top_index), before)
+          let tail_inline = if (boundary) list_slice(block.content,top_index,len(block.content))
+            else list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
           let first = blocks[0]
           let tail_block = blocks[len(blocks) - 1]
           let blk_inl = block_allows_inline(st, block.tag)

@@ -35,12 +35,20 @@ pub fn normalize_source_pos(doc, source_pos) {
   else normalize_source_pos(doc, pos(parent_path(source_pos.path), source_pos.offset))
 }
 
-pub fn normalize_source_selection(doc, selection) {
+pub fn normalize_source_selection(doc, selection, schema=null) {
   if (selection == null) null
   else if (selection.kind == 'text') {
     let anchor = normalize_source_pos(doc, selection.anchor)
     let head = normalize_source_pos(doc, selection.head)
-    if (anchor == null or head == null) null else text_selection(anchor, head)
+    if (anchor == null or head == null) null else {
+      let lo = pos_min(anchor,head)
+      let hi = pos_max(anchor,head)
+      let path = [*lo.path,lo.offset]
+      let child = if (lo.path==hi.path and hi.offset==lo.offset+1) node_at(doc,path) else null
+      let entry = if (schema==null or not is_node(child)) null else schema[child.tag]
+      // a DOM range surrounding one selectable atom is the model's node selection.
+      if (entry!=null and entry.atomic and entry.selectable) node_selection(path) else text_selection(anchor,head)
+    }
   }
   else if (selection.kind == 'node' and node_at(doc, selection.path) != null) selection
   else if (selection.kind == 'multi-node' and
@@ -58,7 +66,7 @@ fn selection_equal(left, right) {
 }
 
 fn event_selection(editor, evt) {
-  let projected = normalize_source_selection(editor.doc, evt.source_selection)
+  let projected = normalize_source_selection(editor.doc, evt.source_selection, editor.schema)
   if (projected != null) projected
   else {
     let projected_pos = normalize_source_pos(editor.doc, evt.source_pos)
@@ -69,7 +77,7 @@ fn event_selection(editor, evt) {
 fn target_selection(editor, snapshot) {
   if (snapshot == null) editor.selection
   else if (snapshot.source_target_ranges != null and len(snapshot.source_target_ranges) > 0)
-    normalize_source_selection(editor.doc, snapshot.source_target_ranges[0])
+    normalize_source_selection(editor.doc, snapshot.source_target_ranges[0], editor.schema)
   else event_selection(editor, snapshot)
 }
 
@@ -180,8 +188,9 @@ fn execute(editor, evt, descriptor, snapshot) {
   }
 }
 
-pub fn handle_event(editor, evt) =>
-  execute(editor, evt, descriptor_for_intent(evt.input_type), evt)
+pub fn handle_event(editor, evt, selection=null) =>
+  execute(editor, evt, descriptor_for_intent(evt.input_type),
+    if (selection==null) evt else {source_selection:selection})
 
 pub fn handle_request(editor, edit_request) =>
   execute(editor, edit_request, descriptor_for_intent(edit_request.input_type), null)

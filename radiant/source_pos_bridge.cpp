@@ -68,7 +68,7 @@ extern "C" __attribute__((weak)) bool state_store_set_selection(
         out_exception);
 }
 
-static bool source_item_is_editor_text_leaf(Item item) {
+static bool source_item_is_editor_kind(Item item, const char* expected) {
     uintptr_t raw = (uintptr_t)item.item;
     if (raw == 0 || item._type_id != 0 || (raw & ITEM_DBL_MASK) ||
         raw < 0x10000ULL || (raw & (sizeof(void*) - 1)) != 0) {
@@ -81,7 +81,11 @@ static bool source_item_is_editor_text_leaf(Item item) {
     ItemReader kind = m.get("kind");
     if (!kind.isSymbol()) return false;
     Symbol* sym = kind.asSymbol();
-    return sym && strcmp(sym->chars, "text") == 0;
+    return sym && strcmp(sym->chars, expected) == 0;
+}
+
+static bool source_item_is_editor_text_leaf(Item item) {
+    return source_item_is_editor_kind(item, "text");
 }
 
 extern "C" {
@@ -241,13 +245,18 @@ static bool is_generated_content_node(DomNode* node) {
         (node && node->node_type == DOM_NODE_ELEMENT && node->view_type == RDT_VIEW_MARKER);
 }
 
-static int source_child_index(DomNode* node) {
-    if (!node) return -1;
-    int index = 0;
-    for (DomNode* sib = node->prev_sibling; sib; sib = sib->prev_sibling) {
-        if (!is_generated_content_node(sib)) index++;
+static uint32_t source_child_offset(DomElement* parent, uint32_t dom_offset) {
+    uint32_t index = 0, source_index = 0;
+    for (DomNode* child = parent ? parent->first_child : nullptr; child && index < dom_offset;
+         child = child->next_sibling, index++) {
+        if (!is_generated_content_node(child)) source_index++;
     }
-    return index;
+    return source_index;
+}
+
+static int source_child_index(DomNode* node) {
+    if (!node || !node->parent || !node->parent->is_element()) return -1;
+    return (int)source_child_offset(node->parent->as_element(), dom_node_child_index(node)); // INT_CAST_OK: DOM child counts fit source path indices.
 }
 
 static DomNode* source_child_at(DomElement* de, int target_idx) {
@@ -361,7 +370,8 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
         out->offset = leaf_u8_offset;
         out->kind = SOURCE_POS_TEXT;
     } else {
-        out->offset = boundary->offset;  // child index — same in source tree
+        // generated markers consume DOM child slots, but never editor child slots.
+        out->offset = source_child_offset(boundary->node->as_element(), boundary->offset);
         out->kind = SOURCE_POS_ELEMENT;
     }
     return true;
@@ -433,6 +443,17 @@ static DomNode* source_descendant_at(DomElement* root,
     return node;
 }
 
+static uint32_t source_selection_child_count(DomNode* node) {
+    uint32_t child_count = 0;
+    if (node && node->is_element()) {
+        for (DomNode* child = node->as_element()->first_child; child;
+             child = child->next_sibling) {
+            child_count++;
+        }
+    }
+    return child_count;
+}
+
 // Resolve a SourcePos against a single DomElement candidate. Reads its
 // recorded source path; on a match, fills the boundary and source-path depth.
 static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
@@ -461,11 +482,28 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
         }
     } else { // SOURCE_POS_TEXT
         if (source_path_equal(&pos->path, &recorded)) {
+            if (source_item_is_editor_kind(lookup.source_item, "node")) {
+                ItemReader content = MapReader::fromItem(lookup.source_item).get("content");
+                DomText* placeholder = pos->offset == 0 && content.isArray() && content.asArray().length() == 0
+                    ? first_text_descendant(de) : nullptr;
+                if (placeholder) {
+                    // an empty model block projects a presentation-only leaf that owns its visible caret.
+                    out->node = placeholder;
+                    out->offset = 0;
+                } else {
+                    // SourcePos has no kind field: a model container's offset counts children, not text bytes.
+                    DomNode* child = pos->offset <= INT_MAX ? source_child_at(de, pos->offset) : nullptr;
+                    out->node = de;
+                    out->offset = child ? dom_node_child_index(child) : source_selection_child_count(de);
+                }
+                matched = true;
+            } else {
             DomText* tn = first_text_descendant(static_cast<DomNode*>(de));
             if (tn) {
                 out->node = static_cast<DomNode*>(tn);
                 out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
                 matched = true;
+            }
             }
         } else if (recorded.depth < pos->path.depth &&
                    path_equals_prefix(&pos->path, recorded.depth, &recorded)) {
@@ -689,16 +727,6 @@ static DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* 
     return b.node;
 }
 
-static uint32_t source_selection_child_count(DomNode* node) {
-    uint32_t child_count = 0;
-    if (node && node->is_element()) {
-        for (DomNode* child = node->as_element()->first_child; child;
-             child = child->next_sibling) {
-            child_count++;
-        }
-    }
-    return child_count;
-}
 
 extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
                                                      DomNode* dom_root,
@@ -741,8 +769,11 @@ extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
         source_path_free(&path);
         if (!node) return false;
         if (!ds->state) return false;
-        DomBoundary start = { node, 0 };
-        DomBoundary end = { node, source_selection_child_count(node) };
+        // selecting an atomic image's empty contents collapses the range; select the node itself.
+        if (!node->parent) return false;
+        uint32_t index = dom_node_child_index(node);
+        DomBoundary start = { node->parent, index };
+        DomBoundary end = { node->parent, index + 1 };
         return state_store_set_selection(ds->state, &start, &end, &exc);
     }
 

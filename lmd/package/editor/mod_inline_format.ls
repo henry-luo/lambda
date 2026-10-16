@@ -5,8 +5,7 @@ import .mod_step
 import .mod_source_pos
 import .mod_transaction
 
-pub fn leaves(n,path=[]) => if (is_text(n)) [{path:path,leaf:n}]
-    else if (is_node(n)) [for (i,child in n.content) for (entry in leaves(child,[*path,i])) entry] else []
+pub fn leaves(n,path=[]) => [for (entry in descendants(n,path) where is_text(entry.node)) {path:entry.path,leaf:entry.node}]
 
 pub fn selection_path(sel) => if (sel.kind == 'text') sel.head.path else if (sel.kind == 'node') sel.path else []
 

@@ -10,6 +10,7 @@ import decorations: lambda.editor.mod_decorations
 import html: lambda.edit.html
 import rendering: lambda.edit.model
 import inline_format: lambda.editor.mod_inline_format
+import image: lambda.editor.mod_image
 import document: .mod_document
 import page: .mod_page
 import review: .mod_review
@@ -193,8 +194,7 @@ fn picture_transaction(editor,id,p) map^ {
             else commands.cmd_insert_image(editor,p.src,p.alt or "")
         if (tx == null) raise error("Word: a picture cannot be inserted at this selection") else {
             let path = if (id == "picture.size") image.path else tx.sel_after.path
-            tx_step(tx_step(tx_step(tx,step_set_attr(path,'width',p.width)),
-                step_set_attr(path,'height',if (p.height == 0) null else p.height)),step_set_attr(path,'alt',p.alt or ""))
+            tx_step(image.resize_transaction(tx,path,p.width,if (p.height == 0) null else p.height),step_set_attr(path,'alt',p.alt or ""))
         }
     }
 }

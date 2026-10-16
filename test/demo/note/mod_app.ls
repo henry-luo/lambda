@@ -17,7 +17,7 @@ pub pn open_context(st,evt,x=null,y=null) {
     let surface = dom.closest(evt.target,"#edit-surface")
     if (row==null and surface==null) { return st }
     // a context-menu hit names a pointer position, not a replacement for the existing text range.
-    let has_range = st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head
+    let has_range = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
     let next = if (row==null) (if (has_range) st else adopt(st,evt))
         else command(st,"note.select",{id:dom.get_attribute(row,"data-note")},evt.target)
     return {*:next,menu:"context",context:{kind:if (row==null) "text" else "note",
@@ -27,6 +27,7 @@ pub fn primary(evt) => evt.metaKey==true or evt.ctrlKey==true
 pub pn stamp() { return format(now(),"YYYY-MM-DD HH:mm") }
 pub pn adopt(st,evt) {
     if (st.selected=="" or st.dialog!=null) { return st }
+    if (model.selected_image(st.editor)!=null and dom.closest(evt.target,"#edit-surface")==null) { return st }
     let accepted = controller.adopt(st.editor,evt)
     return if (accepted.changed) {*:st,editor:model.clean(accepted.editor)} else st
 }
@@ -105,6 +106,11 @@ pub pn command(st,id,params,node) {
     if (id=="note.new") {
         controller.focus(node)
         return {*:model.create(st,stamp()),menu:"",status:"New note"}
+    }
+    if (id=="image.resize") {
+        let next = model.resize_image(st.editor,params.path,params.width,params.height) ^ { return {*:st,status:^.message} }
+        controller.focus(node)
+        return {*:model.update_editor(st,next,stamp()),menu:"",status:"Image resized"}
     }
     if (id=="note.select") { return {*:model.select(st,params.id),menu:""} }
     if (id=="folder.select") { return {*:model.scope(st,params.folder),menu:""} }

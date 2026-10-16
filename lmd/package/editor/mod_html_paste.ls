@@ -58,6 +58,8 @@ fn attr_value(n, key) =>
   else if (type(n) == element and key == 'title') { n.title }
   else if (type(n) == element and key == 'src') { n.src }
   else if (type(n) == element and key == 'alt') { n.alt }
+  else if (type(n) == element and key == 'width') { n.width }
+  else if (type(n) == element and key == 'height') { n.height }
   else { null }
 
 fn html_schema_mode(schema) => schema.p != null and schema.paragraph == null
@@ -77,7 +79,8 @@ fn heading_node(schema, level, kids) =>
   else { node_attrs('heading', [{name: 'level', value: level}], kids) }
 
 fn image_node(schema, n) map | error =>
-  node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])
+  node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')},
+    *[for (key in ['width','height'],let value=attr_value(n,key) where value!=null) {name:key,value:value}]], [])
 
 // HTML input is dynamically shaped, so node construction reports malformed
 // attributes as ordinary data rather than pretending that paste succeeded.

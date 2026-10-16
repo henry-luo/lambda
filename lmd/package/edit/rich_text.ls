@@ -126,7 +126,9 @@ fn render_node(n, kids) {
   else if (tag == 'hr') <hr>
   else if (tag == 'br') <br>
   else if (tag == 'a') <a class: "edit-link", title: attr_get(n, 'href'), *kids>
-  else if (tag == 'img') <img src: attr_get(n, 'src'), alt: attr_get(n, 'alt'), title: attr_get(n, 'title')>
+  else if (tag == 'img') <img src: attr_get(n, 'src'), alt: attr_get(n, 'alt'), title: attr_get(n, 'title'),
+    // HTML attributes are text; model transactions store numeric image sizes.
+    width: attr_text(n, 'width'), height: attr_text(n, 'height'), draggable:"false">
   else if (tag == 'table') <table *kids>
   else if (tag == 'thead') <thead *kids>
   else if (tag == 'tbody') <tbody *kids>
