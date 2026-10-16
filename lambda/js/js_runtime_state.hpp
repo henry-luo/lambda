@@ -124,6 +124,7 @@ struct JsRegexpLastMatch {
     int group_count = 0;
     int match_start = 0;
     int match_end = 0;
+    bool utf16_offsets = false;
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the

@@ -388,6 +388,40 @@ TEST_F(JsFormalMir, TemporalDeadZoneReportsBindingName) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, RegExpLegacyStateKeepsUtf16CapturesAndDynamicCalls) {
+    Item result = run("/(.)(.)/.exec('😀');"
+        "const a=RegExp.$1,b=RegExp.$2;gc();"
+        "const pairs=a.length===1&&a.charCodeAt(0)===0xd83d&&"
+        "b.length===1&&b.charCodeAt(0)===0xde00&&RegExp.input==='😀';"
+        "eval('/(漢)/.exec(\"é漢z\")');gc();"
+        "pairs&&RegExp.$1==='漢'&&RegExp.lastParen==='漢'&&"
+        "RegExp.lastMatch==='漢'&&RegExp.leftContext==='é'&&RegExp.rightContext==='z'&&"
+        "RegExp.$2===''&&RegExp['$&']==='漢'&&RegExp['$_']==='é漢z'");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, RegExpLegacyStateIsLocalToChildRealm) {
+    Item result = run("/(parent)/.test('parent');"
+        "const child=$262.createRealm();child.evalScript('/(child)/.test(\"child\")');gc();"
+        "const getter=Object.getOwnPropertyDescriptor(child.global.RegExp,'lastMatch').get;"
+        "let rejected=false;try{getter.call(RegExp)}catch(e){rejected=true}"
+        "RegExp.lastMatch==='parent'&&child.global.RegExp.lastMatch==='child'&&rejected&&"
+        "child.evalScript('RegExp.$1')==='child'");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, RegExpCompileRefreshesUnicodeMatchingMode) {
+    Item result = run("const r=/./;r.compile('.','u');"
+        "const whole=r.exec('😀')[0];r.compile('.','');"
+        "const half=r.exec('😀')[0];"
+        "whole==='😀'&&half.length===1&&half.charCodeAt(0)===0xd83d&&"
+        "RegExp.rightContext.length===1&&RegExp.rightContext.charCodeAt(0)===0xde00");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 class JsMvpLmd : public ::testing::Test {
 protected:
     MvpLmdExecution* execution = NULL;

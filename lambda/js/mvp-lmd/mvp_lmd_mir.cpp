@@ -375,6 +375,7 @@ void mvp_lmd_runtime_reset() {
     js_runtime_state.modules.source_owner = NULL;
     context_capsule_extensions_drop_owner(context, MVP_LMD_MODULE_OWNER);
     context_capsule_extensions_drop_owner(context, MVP_LMD_DYNAMIC_OWNER);
+    context_capsule_extensions_drop_owner(context, MVP_LMD_REGEXP_OWNER);
     context_capsule_extensions_drop_owner(context, MVP_LMD_CAPSULE_OWNER);
 }
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program) {
@@ -12542,6 +12543,8 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
             else if (named(name, "prototype") || named(name, "constructor") || named(name, "exec") ||
                     js_builtin_catalog_find(JS_BUILTIN_OWNER_REGEXP_ACCESSOR_INTERNAL, name->chars, name->len))
                 regexp_unobserved = false;
+            for (int legacy = 0; name && regexp_unobserved && js_regexp_legacy_name(legacy); legacy++)
+                if (named(name, js_regexp_legacy_name(legacy))) regexp_unobserved = false;
         }
         p->library->regexp_protocol_unobserved = regexp_unobserved;
         static const ContextCapsuleOps ops = {"js-mvp-library", CONTEXT_CAPSULE_LIFETIME_CONTEXT,

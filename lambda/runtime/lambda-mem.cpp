@@ -1412,6 +1412,8 @@ void heap_destroy() {
             context->heap->pool = NULL;
         }
         mem_free(context->heap);
+        // later capsule teardown checks root epochs; the retired heap is no longer an owner.
+        context->heap = NULL;
     }
 }
 

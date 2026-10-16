@@ -114,12 +114,66 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 #define js_async_hooks_key js_runtime_key
 #define js_cc_key js_runtime_key
 
-static String* js_regexp_last_match_string_at(int slot) {
-    if (slot < 0 || slot >= (int)root_vector_count(&js_regexp_last_match.values)) {
+static String* js_regexp_last_match_string_at(JsRegexpLastMatch* state, int slot) {
+    if (slot < 0 || slot >= (int)root_vector_count(&state->values)) {
         return NULL;
     }
-    Item value = *root_vector_at(&js_regexp_last_match.values, slot);
+    Item value = *root_vector_at(&state->values, slot);
     return get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+}
+
+const char* js_regexp_legacy_name(int index) {
+    static const char* names[] = {"input", "$_", "lastMatch", "$&", "lastParen", "$+",
+        "leftContext", "$`", "rightContext", "$'", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"};
+    return index >= 0 && index < (int)(sizeof(names) / sizeof(*names)) ? names[index] : NULL;
+}
+bool js_regexp_legacy_get(JsRegexpLastMatch* state, const char* name, int length, Item* out) {
+    if (length == 2 && name[0] == '$' &&
+        name[1] >= '1' && name[1] <= '9') {
+        int gi = name[1] - '1'; // $1 → index 0
+        String* gs = js_regexp_last_match_string_at(state, gi + 2);
+        *out = gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 5 && strncmp(name, "input", 5) == 0) ||
+        (length == 2 && strncmp(name, "$_", 2) == 0)) {
+        String* s = js_regexp_last_match_string_at(state, 0);
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 9 && strncmp(name, "lastMatch", 9) == 0) ||
+        (length == 2 && strncmp(name, "$&", 2) == 0)) {
+        String* s = js_regexp_last_match_string_at(state, 1);
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 9 && strncmp(name, "lastParen", 9) == 0) ||
+        (length == 2 && strncmp(name, "$+", 2) == 0)) {
+        int gc = state->group_count;
+        String* s = gc > 0
+            ? js_regexp_last_match_string_at(state, gc + 1) : NULL;
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 11 && strncmp(name, "leftContext", 11) == 0) ||
+        (length == 2 && strncmp(name, "$`", 2) == 0)) {
+        String* inp = js_regexp_last_match_string_at(state, 0);
+        if (inp && state->match_start > 0) {
+            *out = state->utf16_offsets ? js_str_substring_utf16(Item{.item = s2it(inp)}, 0, state->match_start)
+                : Item{.item = s2it(heap_strcpy(inp->chars, state->match_start))}; return true;
+        }
+        *out = (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 12 && strncmp(name, "rightContext", 12) == 0) ||
+        (length == 2 && strncmp(name, "$'", 2) == 0)) {
+        String* inp = js_regexp_last_match_string_at(state, 0);
+        if (inp && state->utf16_offsets) {
+            *out = js_str_substring_utf16(Item{.item = s2it(inp)}, state->match_end,
+                js_string_utf16_length(inp)); return true;
+        }
+        if (inp && state->match_end < (int)inp->len) {
+            *out = (Item){.item = s2it(heap_strcpy(inp->chars + state->match_end,
+                (int)inp->len - state->match_end))}; return true;
+        }
+        *out = (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    return false;
 }
 
 typedef struct JsProxyMapCarrier {
@@ -5710,49 +5764,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 return js_get_key_core(object_root.get(), key_root.get(),
                     receiver_root.get());
             }
-            // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
-            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP) {
-                if (str_key->len == 2 && str_key->chars[0] == '$' &&
-                    str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
-                    int gi = str_key->chars[1] - '1'; // $1 → index 0
-                    String* gs = js_regexp_last_match_string_at(gi + 2);
-                    return gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 5 && strncmp(str_key->chars, "input", 5) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$_", 2) == 0)) {
-                    String* s = js_regexp_last_match_string_at(0);
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 9 && strncmp(str_key->chars, "lastMatch", 9) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$&", 2) == 0)) {
-                    String* s = js_regexp_last_match_string_at(1);
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 9 && strncmp(str_key->chars, "lastParen", 9) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$+", 2) == 0)) {
-                    int gc = js_regexp_last_match.group_count;
-                    String* s = gc > 0
-                        ? js_regexp_last_match_string_at(gc + 1) : NULL;
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 11 && strncmp(str_key->chars, "leftContext", 11) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$`", 2) == 0)) {
-                    String* inp = js_regexp_last_match_string_at(0);
-                    if (inp && js_regexp_last_match.match_start > 0) {
-                        return (Item){.item = s2it(heap_strcpy(inp->chars, js_regexp_last_match.match_start))};
-                    }
-                    return (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 12 && strncmp(str_key->chars, "rightContext", 12) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$'", 2) == 0)) {
-                    String* inp = js_regexp_last_match_string_at(0);
-                    if (inp && js_regexp_last_match.match_end < (int)inp->len) {
-                        return (Item){.item = s2it(heap_strcpy(inp->chars + js_regexp_last_match.match_end,
-                            (int)inp->len - js_regexp_last_match.match_end))};
-                    }
-                    return (Item){.item = s2it(heap_create_name("", 0))};
-                }
-            }
+            // shared state is selected by the constructor's owning realm.
+            Item legacy;
+            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP &&
+                    js_regexp_legacy_get(&js_regexp_last_match, str_key->chars, str_key->len, &legacy))
+                return legacy;
             // v83: __proto__ for function objects → return Function.prototype
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                 return js_get_prototype_of(object);
@@ -15364,59 +15380,48 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this,
 #include "js_regexp_compile.h"
 #include "js_bt_regex.h"
 
-// update legacy static state after a successful regex exec
-static void js_regexp_update_last_match(String* input_s,
-    re2::StringPiece* matches, int num_groups) {
-    const char* input_str = input_s ? input_s->chars : "";
-    int input_len = input_s ? (int)input_s->len : 0;
-    RootFrame roots(3);
-    Rooted<Item> input_root(roots, ItemNull);
-    Rooted<Item> match_root(roots, ItemNull);
-    Rooted<Item> group_root(roots, ItemNull);
-    input_root.set((Item){.item = s2it(input_s ? input_s : heap_create_name("", 0))});
-    if (matches[0].data() && input_s && matches[0].data() == input_str &&
-        (int)matches[0].size() == input_len) {
-        match_root.set(input_root.get());
-    } else {
-        match_root.set((Item){.item = s2it(matches[0].data()
-            ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
-            : heap_create_name("", 0))});
-    }
-    js_regexp_last_match.match_start = matches[0].data()
-        ? (int)(matches[0].data() - input_str) : 0;
-    js_regexp_last_match.match_end = js_regexp_last_match.match_start
-        + (matches[0].data() ? (int)matches[0].size() : 0);
-    int gc = num_groups - 1; // exclude group 0 (full match)
-    if (gc < 0) gc = 0;
-    root_vector_clear(&js_regexp_last_match.values);
-    if (!root_vector_push(&js_regexp_last_match.values, input_root.get()) ||
-            !root_vector_push(&js_regexp_last_match.values, match_root.get())) {
-        js_regexp_last_match.group_count = 0;
-        root_vector_clear(&js_regexp_last_match.values);
-        log_error("js-regexp: cannot record legacy match state");
-        return;
-    }
-    js_regexp_last_match.group_count = gc;
-    for (int i = 0; i < gc; i++) {
-        int gi = i + 1; // groups[0] is full match, groups[1] is $1
-        if (gi < num_groups && matches[gi].data()) {
-            if (input_s && matches[gi].data() == input_str &&
-                (int)matches[gi].size() == input_len) {
-                group_root.set(input_root.get());
-            } else {
-                group_root.set((Item){.item = s2it(heap_strcpy(
-                    (char*)matches[gi].data(), (int)matches[gi].size()))});
+// both engines publish through the same rooted carrier; offsets belong to the supplied subject.
+Item js_regexp_update_last_match_spans(JsRegexpLastMatch* state, Item input,
+        const int* starts, const int* ends, int count, bool utf16) {
+    if (!state || count < 1 || starts[0] < 0) return ItemNull;
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, input), value(roots, ItemNull);
+    root_vector_clear(&state->values);
+    state->group_count = 0;
+    if (!root_vector_push(&state->values, source.get())) return ItemError;
+    state->match_start = starts[0]; state->match_end = ends[0];
+    state->utf16_offsets = utf16;
+    for (int i = 0; i < count; i++) {
+        String* text = source.get().get_string();
+        value.set(ItemEmptyString);
+        if (starts[i] >= 0) {
+            if (utf16) value.set(js_str_substring_utf16(source.get(), starts[i], ends[i]));
+            else if (starts[i] == 0 && ends[i] == (int)text->len) value.set(source.get());
+            else {
+                String* piece = heap_strcpy(text->chars + starts[i], ends[i] - starts[i]);
+                value.set(piece ? Item{.item = s2it(piece)} : ItemError);
             }
-        } else {
-            group_root.set((Item){.item = s2it(heap_create_name("", 0))});
         }
-        if (!root_vector_push(&js_regexp_last_match.values, group_root.get())) {
-            js_regexp_last_match.group_count = 0;
-            root_vector_clear(&js_regexp_last_match.values);
-            log_error("js-regexp: cannot grow legacy capture state");
-            return;
+        if (item_is_error(value.get()) || !root_vector_push(&state->values, value.get())) {
+            root_vector_clear(&state->values);
+            return ItemError;
         }
     }
+    state->group_count = count - 1;
+    return ItemNull;
+}
+static void js_regexp_update_last_match(String* input,
+        re2::StringPiece* matches, int count) {
+    JsRegexScratch<int> offsets(count * 2);
+    if (offsets.count != count * 2) return;
+    for (int i = 0; i < count; i++) {
+        offsets.slots[i] = matches[i].data() ? (int)(matches[i].data() - input->chars) : -1;
+        offsets.slots[count + i] = offsets.slots[i] + matches[i].size();
+    }
+    Item status = js_regexp_update_last_match_spans(&js_regexp_last_match,
+        Item{.item = s2it(input)}, offsets.slots, offsets.slots + count, count, false);
+    if (item_is_error(status)) log_error("js-regexp: cannot record legacy match state");
 }
 
 static void js_regexp_update_last_match_span(String* input, int start,
@@ -15425,13 +15430,6 @@ static void js_regexp_update_last_match_span(String* input, int start,
     re2::StringPiece match(input->chars + start, length);
     js_regexp_update_last_match(input, &match, 1);
 }
-
-typedef enum JsRegexSimpleClassKind {
-    JS_REGEX_SIMPLE_CLASS_NONE = 0,
-    JS_REGEX_SIMPLE_CLASS_DIGIT,
-    JS_REGEX_SIMPLE_CLASS_WORD,
-    JS_REGEX_SIMPLE_CLASS_WHITESPACE,
-} JsRegexSimpleClassKind;
 
 // One alias row keeps the RE2 spelling and public ECMAScript spelling of a
 // named capture together. They are one mapping fact, not four parallel arrays.
@@ -15449,11 +15447,7 @@ struct JsRegexData {
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
     int han_all_kind;          // +/-: immutable ^\\p{Script=Han}+$ classifier
-    JsRegexSimpleClassKind simple_class_kind;
-    bool simple_class_negated;
-    bool simple_class_one_or_more;
-    bool simple_class_anchor_start;
-    bool simple_class_anchor_end;
+    JsRegexSimpleClass simple_class;
     JsRegexNameAlias* named_aliases;
     int named_alias_count;
     bool global;              // 'g' flag
@@ -16127,8 +16121,8 @@ static bool js_is_whitespace_cp(uint32_t cp) {
 // `+`. It preserves the ordinary matcher for groups, alternation, case-folded
 // word classes, and multiline anchors while avoiding an RE2 scan of generated
 // all-codepoint inputs.
-static bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
-        JsRegExpCompileInfo* info, JsRegexData* rd) {
+bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
+        const JsRegExpCompileInfo* info, JsRegexSimpleClass* rd) {
     if (!pattern || pattern_len < 2 || !info || !rd) return false;
     int pos = 0;
     bool anchor_start = false;
@@ -16163,11 +16157,11 @@ static bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
             (info->ignore_case && kind == JS_REGEX_SIMPLE_CLASS_WORD)) {
         return false;
     }
-    rd->simple_class_kind = kind;
-    rd->simple_class_negated = negated;
-    rd->simple_class_one_or_more = one_or_more;
-    rd->simple_class_anchor_start = anchor_start;
-    rd->simple_class_anchor_end = anchor_end;
+    rd->kind = kind;
+    rd->negated = negated;
+    rd->one_or_more = one_or_more;
+    rd->anchor_start = anchor_start;
+    rd->anchor_end = anchor_end;
     return true;
 }
 
@@ -16185,19 +16179,18 @@ static bool js_regex_simple_class_contains(JsRegexSimpleClassKind kind, int cp) 
     }
 }
 
-static bool js_regex_simple_class_matches(const JsRegexData* rd, int cp) {
-    bool contains = js_regex_simple_class_contains(rd->simple_class_kind, cp);
-    return rd->simple_class_negated ? !contains : contains;
+static bool js_regex_simple_class_matches(const JsRegexSimpleClass* rd, int cp) {
+    bool contains = js_regex_simple_class_contains(rd->kind, cp);
+    return rd->negated ? !contains : contains;
 }
 
-static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input,
-        int input_len, int start_pos, re2::RE2::Anchor anchor,
-        re2::StringPiece* matches, int num_groups) {
+bool js_regex_match_simple_class(const JsRegexSimpleClass* rd, const char* input,
+        int input_len, int start_pos, bool sticky, int* match_start, int* match_end) {
     if (!rd || !input || start_pos < 0 || start_pos > input_len) return false;
     // `^` anchors to the subject start, not a sticky/global lastIndex.
-    if (rd->simple_class_anchor_start && start_pos != 0) return false;
-    bool must_start = rd->simple_class_anchor_start ||
-        anchor == re2::RE2::ANCHOR_START;
+    if (rd->anchor_start && start_pos != 0) return false;
+    bool must_start = rd->anchor_start ||
+        sticky;
     int candidate = start_pos;
     while (candidate < input_len) {
         int next = candidate;
@@ -16208,7 +16201,7 @@ static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input
             continue;
         }
         int end = next;
-        if (rd->simple_class_one_or_more) {
+        if (rd->one_or_more) {
             while (end < input_len) {
                 int following = end;
                 int following_cp = js_regex_decode_utf8_permissive(input,
@@ -16217,14 +16210,13 @@ static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input
                 end = following;
             }
         }
-        if (rd->simple_class_anchor_end && end != input_len) {
+        if (rd->anchor_end && end != input_len) {
             if (must_start) return false;
             candidate = next;
             continue;
         }
-        if (num_groups > 0) {
-            matches[0] = re2::StringPiece(input + candidate, end - candidate);
-        }
+        *match_start = candidate;
+        *match_end = end;
         return true;
     }
     return false;
@@ -16758,7 +16750,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 // Helper: get the correct number of capturing groups for output.
 static int js_regex_num_groups(JsRegexData* rd) {
     if (rd->special_property_kind != 0) return 1;
-    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
+    if (rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
     if (rd->literal_fast) return 1;
     if (rd->bt) return js_bt_group_count(rd->bt) + 1; // +1 for full match
     return rd->re2->NumberOfCapturingGroups() + 1;
@@ -16780,9 +16772,12 @@ static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* i
                                                start_pos, matches, num_groups) ?
             JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
-    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
-        return js_regex_match_simple_class(rd, input, input_len, start_pos,
-            anchor, matches, num_groups) ? JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
+    if (rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+        int start = 0, end = 0;
+        if (!js_regex_match_simple_class(&rd->simple_class, input, input_len, start_pos,
+                anchor == re2::RE2::ANCHOR_START, &start, &end)) return JS_REGEX_MATCH_NO_MATCH;
+        if (num_groups > 0) matches[0] = re2::StringPiece(input + start, end - start);
+        return JS_REGEX_MATCH_FOUND;
     }
     if (rd->literal_fast) {
         if (start_pos < 0 || start_pos > input_len) return JS_REGEX_MATCH_NO_MATCH;
@@ -17809,7 +17804,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     {
         JsRegexData simple_class = {};
         if (js_regex_detect_simple_class(pattern, pattern_len,
-                &compile_info, &simple_class)) {
+                &compile_info, &simple_class.simple_class)) {
             JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool,
                 sizeof(JsRegexData));
             if (!rd) return ItemError;
@@ -20080,6 +20075,83 @@ static Item js_try_builtin_regexp_match_bulk(Item regex, Item str,
     return match_count == 0 ? ItemNull : results_root.get();
 }
 
+// no observable exec/callback runs here: retain only the final match and stream byte spans.
+Item js_regexp_replace_spans(Item regex, Item str, Item replacement, void* matcher,
+        const JsRegExpOps* values, const JsRegExpReplaceSpanOps* spans) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> regex_root(roots, regex), str_root(roots, str), replacement_root(roots, replacement);
+    String* input = str_root.get().get_string();
+    String* repl = replacement_root.get().get_string();
+    // A replacement with no '$' has no capture/template substitutions. Test
+    // once for the whole guarded builtin loop rather than parsing each match.
+    bool literal_replacement = memchr(repl->chars, '$', repl->len) == NULL;
+
+    Item set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+    if (item_is_error(set_status)) return set_status;
+    StrBuf* output = strbuf_new();
+    if (!output) return ItemError;
+    int position = 0;
+    int copy_position = 0;
+    bool found_match = false;
+    int last_start = -1;
+    int last_length = 0;
+    while (position <= (int)input->len) {
+        int start = 0, end = 0;
+        int match = spans->match(matcher, input->chars, input->len, position, &start, &end);
+        if (match < 0) {
+            strbuf_free(output);
+            Item recorded = spans->record(matcher, str_root.get(), last_start, last_start + last_length);
+            return item_is_error(recorded) ? recorded : spans->failure(match);
+        }
+        if (!match) break;
+        int match_len = end - start;
+        if (start > copy_position) {
+            strbuf_append_str_n(output, input->chars + copy_position,
+                start - copy_position);
+        }
+        Item replacement_status = ItemNull;
+        if (literal_replacement) {
+            strbuf_append_str_n(output, repl->chars, (int)repl->len);
+        } else {
+            replacement_status = js_apply_replacement_from_items(output,
+                repl->chars, (int)repl->len, input->chars, (int)input->len, start,
+                input->chars + start, match_len, NULL, 0,
+                make_js_undefined(), values, str_root.get(), false);
+        }
+        if (item_is_error(replacement_status)) {
+            strbuf_free(output);
+            Item recorded = spans->record(matcher, str_root.get(), start, end);
+            return item_is_error(recorded) ? recorded : replacement_status;
+        }
+        last_start = start;
+        last_length = match_len;
+        found_match = true;
+        copy_position = start + match_len;
+        // matching never moves backward; an empty terminal match is processed once.
+        // stop before adding one past the representable subject length.
+        if (!match_len && copy_position == (int)input->len) break;
+        position = copy_position + (match_len == 0 ? 1 : 0);
+    }
+    if (!found_match) {
+        strbuf_free(output);
+        set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+        return item_is_error(set_status) ? set_status : str_root.get();
+    }
+    if (copy_position <= (int)input->len) {
+        strbuf_append_str_n(output, input->chars + copy_position,
+            (int)input->len - copy_position);
+    }
+    set_status = spans->record(matcher, str_root.get(), last_start, last_start + last_length);
+    if (!item_is_error(set_status))
+        set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+    if (item_is_error(set_status)) {
+        strbuf_free(output);
+        return set_status;
+    }
+    return js_strbuf_take_item(output);
+}
+
 static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
         Item replacement, bool* out_admitted) {
     if (out_admitted) *out_admitted = false;
@@ -20099,84 +20171,25 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     if (!input || !repl) return ItemNull;
     // quantified built-in classes are nonempty and keep surrogate pairs in one run;
     // their byte spans support substitution without allocating UTF-16 match records.
-    if (!input->is_ascii && (rd->simple_class_kind == JS_REGEX_SIMPLE_CLASS_NONE ||
-            !rd->simple_class_one_or_more)) return ItemNull;
+    if (!input->is_ascii && (rd->simple_class.kind == JS_REGEX_SIMPLE_CLASS_NONE ||
+            !rd->simple_class.one_or_more)) return ItemNull;
     if (out_admitted) *out_admitted = true;
-    // A replacement with no '$' has no capture/template substitutions. Test
-    // once for the whole guarded builtin loop rather than parsing each match.
-    bool literal_replacement = memchr(repl->chars, '$', repl->len) == NULL;
-
-    Item last_index_key = js_name_item("lastIndex", 9);
-    Item set_status = js_regex_set_lastindex_strict(regex_root.get(),
-        last_index_key, 0);
-    if (item_is_error(set_status)) return set_status;
-    JsRegexScratch<re2::StringPiece> matches_buf(1);
-    if (matches_buf.count != 1 || !matches_buf.slots) return ItemError;
-    StrBuf* output = strbuf_new();
-    if (!output) return ItemError;
-    int position = 0;
-    int copy_position = 0;
-    bool found_match = false;
-    int last_start = -1;
-    int last_length = 0;
-    while (position <= (int)input->len) {
-        re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
-            re2::RE2::UNANCHORED;
-        JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
-            (int)input->len, position, anchor, matches_buf.slots, 1);
-        if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
-            strbuf_free(output);
-            js_regexp_update_last_match_span(input, last_start, last_length);
-            return js_throw_range_error("RegExp match exceeded engine resources");
-        }
-        if (match != JS_REGEX_MATCH_FOUND) break;
-        int start = (int)(matches_buf.slots[0].data() - input->chars);
-        int match_len = (int)matches_buf.slots[0].size();
-        if (start > copy_position) {
-            strbuf_append_str_n(output, input->chars + copy_position,
-                start - copy_position);
-        }
-        Item replacement_status = ItemNull;
-        if (literal_replacement) {
-            strbuf_append_str_n(output, repl->chars, (int)repl->len);
-        } else {
-            replacement_status = js_apply_replacement_from_items(output,
-                repl->chars, (int)repl->len, input->chars, (int)input->len, start,
-                matches_buf.slots[0].data(), match_len, NULL, 0,
-                make_js_undefined(), NULL, str_root.get(), false);
-        }
-        if (item_is_error(replacement_status)) {
-            strbuf_free(output);
-            js_regexp_update_last_match_span(input, last_start, last_length);
-            return replacement_status;
-        }
-        last_start = start;
-        last_length = match_len;
-        found_match = true;
-        copy_position = start + match_len;
-        // matching never moves backward; an empty terminal match is processed once.
-        // stop before adding one past the representable subject length.
-        if (!match_len && copy_position == (int)input->len) break;
-        position = copy_position + (match_len == 0 ? 1 : 0);
-    }
-    if (!found_match) {
-        strbuf_free(output);
-        set_status = js_regex_set_lastindex_strict(regex_root.get(),
-            last_index_key, 0);
-        return item_is_error(set_status) ? set_status : str_root.get();
-    }
-    if (copy_position <= (int)input->len) {
-        strbuf_append_str_n(output, input->chars + copy_position,
-            (int)input->len - copy_position);
-    }
-    js_regexp_update_last_match_span(input, last_start, last_length);
-    set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
-        0);
-    if (item_is_error(set_status)) {
-        strbuf_free(output);
-        return set_status;
-    }
-    return js_strbuf_take_item(output);
+    static const JsRegExpReplaceSpanOps spans = {
+        [](void* opaque, const char* input, int length, int position, int* start, int* end) {
+            auto* data = (JsRegexData*)opaque;
+            re2::StringPiece match;
+            int found = js_regex_match_internal(data, input, length, position,
+                data->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED, &match, 1);
+            if (found > 0) { *start = match.data() - input; *end = *start + match.size(); }
+            return found;
+        },
+        [](void*, Item input, int start, int end) {
+            return js_regexp_update_last_match_spans(&js_regexp_last_match, input, &start, &end, 1, false);
+        },
+        [](int) { return js_throw_range_error("RegExp match exceeded engine resources"); }
+    };
+    return js_regexp_replace_spans(regex_root.get(), str_root.get(), replacement_root.get(),
+        rd, &js_regexp_default_ops, &spans);
 }
 
 // RegExp.prototype[@@match](string) — ES spec §22.2.5.6 (ES2021)
@@ -21967,7 +21980,7 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
 
 // build a named groups object from regex match data (for replace $<name> and callback)
 static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, int num_groups) {
-    if (rd && rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+    if (rd && rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) {
         return make_js_undefined();
     }
     if (rd->bt) {

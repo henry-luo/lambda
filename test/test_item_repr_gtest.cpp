@@ -356,6 +356,24 @@ TEST_F(RuntimeShapeTransition, EmptyStringUsesPinnedSharedItem) {
     EXPECT_EQ(heap_strcpy("", 0), empty);
 }
 
+TEST_F(RuntimeShapeTransition, HeapDestructionRetiresRootVectorOwner) {
+    ASSERT_TRUE(eval_context_shutdown(&eval));
+    EvalContext other = {};
+    ASSERT_TRUE(eval_context_init(&other));
+    heap_init();
+    ASSERT_NE(other.heap, nullptr);
+    RootVector retained = {};
+    root_vector_init(&retained, &other, "teardown epoch regression");
+    ASSERT_TRUE(root_vector_push(&retained, Item{.item = s2it(heap_strcpy("retained", 8))}));
+    heap_destroy();
+    EXPECT_EQ(other.heap, nullptr);
+    EXPECT_EQ(heap_generation_for(&other), 0u);
+    root_vector_destroy(&retained);
+    EXPECT_EQ(retained.block_count, 0);
+    EXPECT_TRUE(eval_context_shutdown(&other));
+    EXPECT_TRUE(eval_context_init(&eval));
+}
+
 TEST_F(RuntimeShapeTransition, LargeNdimConstructionDoesNotPromoteItsUnwrittenPayload) {
     gc_heap_t* heap=eval.heap->gc;
     heap->gc_threshold=gc_data_zone_used(heap->data_zone)+1024;

@@ -738,6 +738,20 @@ typedef struct JsRegExpOps {
 // native matchers provide UTF-16 offsets and pool-owned names; unmatched spans start at -1.
 typedef struct JsRegExpIndexSpan { int64_t start, end; } JsRegExpIndexSpan;
 typedef struct JsRegExpIndexName { const char* chars; int length, capture; } JsRegExpIndexName;
+struct JsRegexpLastMatch;
+const char* js_regexp_legacy_name(int index);
+bool js_regexp_legacy_get(struct JsRegexpLastMatch* state, const char* name, int length, Item* out);
+Item js_regexp_update_last_match_spans(struct JsRegexpLastMatch* state, Item input,
+    const int* starts, const int* ends, int count, bool utf16);
+// callers prove native exec, writable lastIndex, string replacement, no captures,
+// and byte spans that do not split a UTF-16 surrogate pair (or an ASCII subject).
+typedef struct JsRegExpReplaceSpanOps {
+    int (*match)(void*, const char*, int, int, int*, int*); // found=1, absent=0, error<0
+    Item (*record)(void*, Item, int, int);
+    Item (*failure)(int);
+} JsRegExpReplaceSpanOps;
+Item js_regexp_replace_spans(Item regex, Item input, Item replacement, void* matcher,
+    const JsRegExpOps* values, const JsRegExpReplaceSpanOps* spans);
 typedef struct JsRegExpIndicesOps {
     const JsRegExpOps* values;
     Item (*null_object)(void);

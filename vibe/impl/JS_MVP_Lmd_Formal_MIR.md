@@ -75,6 +75,12 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `regexp2`, release MVP units | 727/727 pass | Three new RegExp state/realm/recompile checks |
+| `regexp2`, focused normal and forced/poisoned GC | 61/61 each | Includes UTF-16 captures, child realms and retained dynamic source |
+| `regexp2`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Wide-subject RegExp case fixed; seven AUTO publication cases remain |
+| `regexp2`, existing named-capture fixture gates | 2/2 pass | Normal formal MIR fixture runner, unchanged golden |
+| `regexp2`, shared Item/shape suite | 39/39 pass | Includes root-vector retirement after heap destruction |
+| `regexp2`, canonical RegExp Test262 slice after individual replay | 1,650/1,721 pass; 70 fail; 1 timeout | All 151 initially nonpassing cases have identical replay outcomes on the previous `document3` pin |
 | `document3`, release MVP units | 724/724 pass | Includes reusable module/preamble code and per-realm state |
 | `document3`, focused normal and forced/poisoned GC | 58/58 each | Escaped code survives artifact retirement; fresh realms retain distinct state |
 | `document3`, formal MIR Test262 module/import slice | 693/693 pass | Existing target set, unchanged metadata/source, normal MIR entry |
@@ -131,8 +137,10 @@ This does not clear the aggregate gate or the real host/promotion gaps.
 3. **Host API integration.** DOM/Web, Intl, CommonJS, process events and object
    timer handles need shared service adapters. The full fixture failures are
    retained; no legacy retry or test-harness exclusion hides these gaps.
-4. **Language/environment gaps.** Direct eval inside MIR `with`, RegExp legacy
-   statics and independent agents remain open.
+4. **Language/environment gaps.** Direct eval inside MIR `with` and independent
+   agents remain open. RegExp legacy match reads and the wide-subject replacement
+   integration failure are repaired in `regexp2` below; broader conformance is
+   recorded separately.
    The `v9_number_json` fixture also expects the legacy JSON parser's i64-to-
    BigInt result for a large JSON integer, whereas MVP requests JS Number
    parsing. S4.9.1 defines actual host numeric crossings; the JSON contract
@@ -310,3 +318,60 @@ ownership only on success; failed publication frees the temporary wrapper,
 leaving the caller's code/metadata alive for cleanup or execution. Shared
 Lambda/full Test262/full JS aggregate gates have not been recounted in this
 continuation. Benchmark timing remains deferred at the user's request.
+
+### Shared RegExp match state and streaming replacement
+
+`regexp2` keeps the normal formal MIR entry and reuses the existing runtime
+kernels (D8.1.3v25). The earlier pinned CLI returned `undefined` for legacy
+RegExp captures/context; its million-run wide replacement exceeded the
+15-second reproducer deadline. The unchanged integration test had exceeded
+120 seconds. Both cases now complete correctly; these are functional timeout
+checks, not benchmark measurements.
+
+The shared `js_regexp_update_last_match_spans` extends the existing rooted
+match-state publisher with byte/UTF-16 coordinates. `js_regexp_legacy_get` and
+`js_regexp_legacy_name` expose its readers/catalog. MVP's small accessor and
+initialization adapters retain a separate `JsRegexpLastMatch` in each realm
+capsule; dynamic AST calls use the same realm state. Successful native matches
+publish captures; failed matches retain the previous state. Closed units whose
+analysis excludes observation retain the unobserved path.
+
+`js_regex_detect_simple_class` and `js_regex_match_simple_class` are promoted
+from the existing character-class scanner. `js_regexp_replace_spans` extracts
+the existing replacement loop behind matcher/state callbacks for both engines.
+Its guard requires ordinary native protocol behavior, writable `lastIndex`,
+a string replacement and no captures. Wide subjects additionally require
+quantified built-in classes with safe byte spans. The loop copies directly to
+the existing `StrBuf` and records only the final match, eliminating retained
+per-hit arrays and repeated UTF-16 prefix scans. Overrides, callable
+replacements and other patterns keep the existing JS protocol path
+(D8.1.3v25).
+
+`RegExp.compile()` now refreshes its Unicode matching mode as well as flags
+and matcher metadata. Validation also exposed a shared teardown defect:
+`heap_destroy()` freed the heap without clearing its owner's pointer. Later
+root-vector retirement inspected that freed allocation. The shared destructor
+now clears the pointer; roots remain precise (D5.3/D5.4), and a direct Item-suite
+regression covers retirement after destruction.
+
+Release SHA-256:
+`6a76928c8c4a35780bfc7a44a78602662175bbfee3170fed589f3a6b6231e5d7`.
+Artifacts, exact commands and source fingerprints are under
+`temp/js_formal_mir_20261016/regexp2/`. All 727 MVP unit tests and 61 focused
+checks pass, including all 61 with forced collection and poisoned freed memory.
+The existing 205-case isolated Script replay improves from 197 pass / 7 fail /
+1 timeout to 198 pass / 7 fail / 0 timeout. Its wide-replacement case covers
+17 sources under AST and formal MIR, each with normal and forced collection.
+The two named-capture fixture gates and all 39 shared Item/shape tests pass.
+Full historical aggregates above are not recomputed from these focused gains.
+
+The canonical RegExp slice covers 1,721 IDs through the unchanged formal MIR
+runner (`--mir-only --no-stripped`). Its first chunked run reports 1,570 pass,
+146 fail and 5 timeout; interrupted chunks leave some cases unreported.
+Individual replay of all 151 nonpassing IDs gives 80 pass, 70 fail and 1
+timeout. The previous `document3` pin produces **exactly the same 151 replay
+outcomes**. Thus the candidate has 1,650 passing IDs after replay; 70 generated
+Unicode property/string cases and `Unified_Ideograph` (timeout) remain open.
+This is a selected-slice comparison, not a whole Test262 recount or a claim
+that timing is stable. Raw runs and `regexp-comparison.json` preserve both
+the initial outcomes and their replays. Benchmark timing remains deferred.

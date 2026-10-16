@@ -1,11 +1,12 @@
 #pragma once
 
 enum { MVP_LMD_CAPSULE_OWNER = 0x4d56504c, MVP_LMD_DYNAMIC_OWNER = 0x4d564459,
-    MVP_LMD_MODULE_OWNER = 0x4d564d4f };
+    MVP_LMD_MODULE_OWNER = 0x4d564d4f, MVP_LMD_REGEXP_OWNER = 0x4d565245 };
 #include "../../lambda-data.hpp"
 
 struct MvpLmdProgram;
 struct MvpLmdRegExpAccessor;
+struct JsRegexpLastMatch;
 struct JsArrayOps;
 struct JsBufferViewOps;
 extern const JsArrayOps mvp_lmd_array_ops;
@@ -158,6 +159,7 @@ struct MvpLmdLibraryState {
     TypeMap* regexp_accessor_shape; // pool-owned initial prototype shape, never a successful-guard cache
     int regexp_accessor_count;
     bool regexp_protocol_unobserved; // final whole-program proof; native numeric/data checks remain runtime checks
+    JsRegexpLastMatch* regexp_last_match; // realm capsule owns precise legacy-state roots
     MvpLmdClass object;
     MvpLmdClass array;
     MvpLmdClass generator;

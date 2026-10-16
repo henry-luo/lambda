@@ -1951,3 +1951,11 @@ frontend-image reuse and AUTO per-function publication remain incomplete. The im
 records failing integrated gates separately from passing focused tests.
 Performance acceptance remains open, including the cost of complete public
 realm semantics versus standalone closed-unit analysis.
+
+The RegExp migration follow-up reuses shared match-state and streaming
+replacement kernels, with precise state owned by each MVP realm (D5.3,
+D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
+timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
+capsule teardown. Latest focused gates: 727 MVP units, 61 forced-GC checks,
+and 198/205 isolated Script cases pass; the seven failures are AUTO publication.
+Whole-suite and performance acceptance remain open.
