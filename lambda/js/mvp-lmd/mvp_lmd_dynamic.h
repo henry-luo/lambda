@@ -16,6 +16,10 @@ Item mvp_lmd_dynamic_function_kind(MvpLmdProgram*, Item*, uint64_t,
     Item new_target, MvpLmdDynamicFunctionKind);
 Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram*, Item);
 Item mvp_lmd_dynamic_unwrap_function(Item);
+extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right);
+// preserve native descriptor identity and rebind aliases to the active global.
+Item mvp_lmd_import_host_property(MvpLmdProgram*, Item owner, Item key,
+    const JsPropertyDescriptor*, Item previous_global = ItemNull);
 enum MvpLmdForeignOperation {
     LMD_FOREIGN_GET_PROTOTYPE = 32, LMD_FOREIGN_SET_PROTOTYPE,
     LMD_FOREIGN_EXTENSIBLE, LMD_FOREIGN_PREVENT,

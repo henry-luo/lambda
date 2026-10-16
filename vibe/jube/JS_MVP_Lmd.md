@@ -1972,11 +1972,28 @@ arrays through their existing ABI bridge, and preserves host array prototypes
 and native callable home realms (D3.4, D5.3/D5.4, D6.2.2v2). Performance and Date
 now reuse the host's existing virtual/frame clock and time origin.
 
-**Latest verification:** 743/743 MVP units, 76/76 focused forced-GC checks,
-25/25 selected DOM/Intl fixtures and 583/583 canonical Date cases. Script
-integration remains 198/205, with seven AUTO publication failures. The earlier
-complete isolated formal fixture diagnostic records 461/507 passes, 41 failures
-and five outer timeouts; later focused fixes are not added to that aggregate.
-Exact pins and unresolved host/environment/library cases are in the
-implementation plan. Full baseline closure and performance acceptance remain
-open; benchmark timing stays deferred.
+The public host follow-up shares lazy host-family installers, native Timeout
+handles and classic string-handler execution through the retained interpreter
+(**D8.1.3v25, D5.3/D5.4**). Native property/descriptor operations and prototype
+walks use existing ABI/nominal ownership; shared iterator caches are private and
+unforgeable (**D3.4.3v5, D6.2.2v2**). Host subclasses reuse native construction,
+virtual collection `for…in` reuses foreign descriptors, and source-relative
+CommonJS require shares the existing resolver, cache and native closure layout.
+The retained AST keeps its existing implicit require policy.
+
+Function-source reflection now reuses the retained interpreter's method-span
+helper and the shared IdentifierName validator. Static methods omit their
+class-only prefix; native names that cannot form an identifier use anonymous
+native-function syntax (**D6.2.2v2, D8.1.3v25**).
+
+**Latest verification:** `host45` passes 756/756 MVP units, 89/89 focused checks
+normally and with forced/poisoned GC, all 45 selected host fixtures, and all
+2,382 selected canonical property/Function/Date/Array iterator cases. The prior
+17 failures in that Test262 slice are repaired. Script integration remains
+198/205, with seven known AUTO publication failures; the separate replay of
+previously failing small fixtures is 24/32. This is not a whole-suite recount.
+The implementation plan records exact pins and remaining work. The earlier
+complete isolated fixture diagnostic remains 461/507 passes, 41 failures and
+five outer timeouts; focused fixes are not added to that aggregate. Full
+baseline closure and performance acceptance remain open; benchmark timing
+stays deferred.

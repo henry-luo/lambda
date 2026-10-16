@@ -124,6 +124,247 @@ TEST_F(JsFormalMir, HostPerformanceAndDateShareVirtualAndFrameClocks) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, PublicTimersReuseNativeHandlesAndCancellation) {
+    Item result = run(R"JS(
+        let timer=setInterval(()=>{throw 'cancelled timer ran'},100000),
+            numeric=setTimeout(()=>{throw 'numeric cancellation failed'},100000);
+        gc();
+        let valid=typeof timer==='object' && typeof timer[Symbol.toPrimitive]==='function' &&
+            timer.hasRef() && timer.unref()===timer && !timer.hasRef() &&
+            timer.ref()===timer && timer.hasRef() && timer.refresh()===timer && Number(timer)>0;
+        clearInterval(timer); clearTimeout(Number(numeric));
+        valid && timer._destroyed && numeric._destroyed
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, StandaloneHostFamiliesShareDescriptorsAndConstructorIdentity) {
+    Item result = run(R"JS(
+        localStorage.clear(); localStorage.setItem('formal','value');
+        sessionStorage.clear(); sessionStorage.setItem('other','session');
+        let storage=localStorage, storageDescriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+        let encoder=new TextEncoder(), decoder=new TextDecoder();
+        let headers=new Headers([['X-Formal','value']]);
+        let strategy=new CountQueuingStrategy({highWaterMark:3});
+        gc();
+        globalThis===self && self===window && window===parent && parent===top && top===global &&
+        typeof event==='undefined' && storage===localStorage && storage instanceof Storage &&
+        storage.getItem('formal')==='value' && sessionStorage.getItem('other')==='session' &&
+        typeof storageDescriptor.get==='function' && storageDescriptor.set===undefined &&
+        Storage.prototype.constructor===Storage && typeof matchMedia('(min-width: 1px)').matches==='boolean' &&
+        decoder.decode(encoder.encode('héllo'))==='héllo' && TextEncoder.prototype.constructor===TextEncoder &&
+        headers.get('x-formal')==='value' && Headers.prototype.constructor===Headers &&
+        strategy.highWaterMark===3 && strategy.size('anything')===1
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, LazyHostFamiliesPreserveReplacedAndDeletedGlobals) {
+    Item result = run(R"JS(
+        let replacement=function UserDecoder(){};
+        Object.defineProperty(globalThis,'TextDecoder',{value:replacement,writable:false,configurable:false});
+        delete globalThis.sessionStorage;
+        Object.preventExtensions(globalThis);
+        let Encoder=TextEncoder, storage=localStorage;
+        gc();
+        let valid=TextDecoder===replacement && !('sessionStorage' in globalThis) &&
+            Object.getOwnPropertyDescriptor(globalThis,'TextDecoder').writable===false &&
+            Encoder.prototype.constructor===Encoder && new Encoder().encode('ok').length===2 &&
+            storage instanceof Storage;
+        delete globalThis.TextEncoder;
+        valid && !('TextEncoder' in globalThis) && new Encoder().encode('kept').length===4
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeOwnKeysPreserveMvpSymbolIdentity) {
+    Item value = run("let nativeKey=Symbol('native-key');({value:1,[nativeKey]:2})");
+    ASSERT_FALSE(item_is_error(value));
+    RootFrame roots(2);
+    Rooted<Item> object(roots, value), keys(roots, js_reflect_own_keys(object.get()));
+    ASSERT_EQ(get_type_id(keys.get()), LMD_TYPE_ARRAY);
+    ASSERT_EQ(keys.get().array->length, 2);
+    EXPECT_EQ(get_type_id(keys.get().array->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(keys.get().array->items[1]), LMD_TYPE_SYMBOL);
+    Item key = run("nativeKey");
+    ASSERT_FALSE(item_is_error(key));
+    EXPECT_EQ(keys.get().array->items[1].item, key.item);
+}
+
+TEST_F(JsFormalMir, NativeWindowTasksRetainTheActiveGlobalAndPayload) {
+    Item value = run(R"JS(
+        let messages=[];
+        window.addEventListener('message', function(event) {
+            gc(); messages.push(this===window && event.source===window &&
+                event.data.tiny===5e-324 && event instanceof MessageEvent);
+        });
+        window.postMessage({tiny:5e-324},'*'); gc(); messages
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    ASSERT_EQ(value.array->length, 1);
+    EXPECT_EQ(value.array->items[0].item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeHostBasesPreserveConstructionFieldsAndLiveLinks) {
+    Item value = run(R"JS(
+        class Strategy extends CountQueuingStrategy {
+            constructor(n) { super({highWaterMark:n}); this.own=n+1; }
+            size() { return this.own; }
+        }
+        class Derived extends Strategy { extra=6; }
+        let instance=new Derived(4), getter=Object.getOwnPropertyDescriptor(CountQueuingStrategy.prototype,'highWaterMark').get;
+        gc();
+        let valid=instance instanceof Derived && instance instanceof Strategy &&
+            instance instanceof CountQueuingStrategy && instance.highWaterMark===4 &&
+            instance.size()===5 && instance.extra===6 &&
+            Object.getPrototypeOf(Strategy)===CountQueuingStrategy &&
+            Object.getPrototypeOf(Strategy.prototype)===CountQueuingStrategy.prototype;
+        Object.setPrototypeOf(instance,null);
+        valid && getter.call(instance)===4
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeWritesPreserveMvpIteratorShapeAndMethods) {
+    Item value = run("[1,2].values()");
+    ASSERT_FALSE(item_is_error(value));
+    RootFrame roots(3);
+    Rooted<Item> iterator(roots, value), prototype(roots, js_get_prototype_of(iterator.get()));
+    Rooted<Item> next(roots, js_get_key_cstr(iterator.get(), "next"));
+    ASSERT_EQ(get_type_id(next.get()), LMD_TYPE_FUNC);
+    TypeMap* shared_shape = (TypeMap*)iterator.get().map->type;
+    int64_t shared_length = shared_shape->length;
+    ASSERT_FALSE(item_is_error(js_iterator_return_checked(iterator.get(), true, "invalid iterator")));
+    EXPECT_EQ(shared_shape->length, shared_length);
+    heap_gc_collect();
+    EXPECT_EQ(js_get_prototype_of(iterator.get()).item, prototype.get().item);
+    EXPECT_EQ(js_get_key_cstr(iterator.get(), "next").item, next.get().item);
+    Item keys = js_reflect_own_keys(iterator.get());
+    ASSERT_EQ(get_type_id(keys), LMD_TYPE_ARRAY);
+    EXPECT_EQ(keys.array->length, 0);
+    Item result = js_iterator_step(iterator.get());
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 1);
+    iterator.set(run("[3,4].values()"));
+    ASSERT_FALSE(item_is_error(iterator.get()));
+    result = js_iterator_step(iterator.get());
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 3);
+}
+
+TEST_F(JsFormalMir, NativeFactoriesKeepLazyBindingOverridesAndIntrinsicPrototypes) {
+    Item value = run(R"JS(
+        let blobs=[];
+        delete globalThis.Blob;
+        Object.defineProperty(globalThis,'Blob',{get(){throw 'guest Blob read'},configurable:true});
+        new Response('kept',{headers:{'content-type':'text/plain'}}).blob().then(async blob=>{
+            gc(); blobs.push(await blob.text()==='kept' && blob.type==='text/plain' &&
+                typeof Object.getPrototypeOf(blob).constructor==='function');
+        }); blobs
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    ASSERT_EQ(value.array->length, 1);
+    EXPECT_EQ(value.array->items[0].item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeIteratorCacheBypassesGuestPropertiesAndKeepsNextSnapshot) {
+    Item value = run(R"JS(
+        let nextReads=0;
+        let source=Object.freeze({
+            get next(){nextReads++;return function(){gc();return {value:7,done:false}}},
+            get __iter_next__(){throw 'guest cache read'},
+            [Symbol.iterator](){return this}
+        }); source
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    RootFrame roots(2);
+    Rooted<Item> source(roots, value), iterator(roots, js_get_iterator(source.get()));
+    ASSERT_FALSE(item_is_error(iterator.get()));
+    heap_gc_collect();
+    for (int i = 0; i < 2; i++) {
+        Item result = js_iterator_step(iterator.get());
+        ASSERT_FALSE(item_is_error(result));
+        EXPECT_EQ(it2d(result), 7);
+    }
+    Item result = run("nextReads===1 && Reflect.ownKeys(source).length===3 && Object.isFrozen(source)");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, SharedRequireRetainsSourcePathAndNestedModuleCache) {
+    const char* source = R"JS(
+        let retainedRequire=require, first=require('./main.cjs'), second=require('./main.cjs');
+        let explicitRequire=require('module').createRequire('test/js/interp_cjs/entry.js');
+        gc(); first.answer===42 && first===second && explicitRequire('./main.cjs')===first &&
+            globalThis.__interp_cjs_main_loads===1 && globalThis.__interp_cjs_dep_loads===1
+    )JS";
+    Item value = transpile_js_to_mir_len(&runtime, source, strlen(source),
+        "test/js/interp_cjs/entry.js", &result_home);
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+    value = run("gc();typeof console.log==='function' && retainedRequire('./dep.cjs').value===40");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, StaticMethodSourceReusesSharedFunctionSpans) {
+    Item value = run(R"JS(
+        class Sources {
+            static /* before */ method /* args */ () { /* body */ }
+            static /* before */ get value() { return 1; }
+            static /* before */ set value(v) { }
+            static /* before */ async task() { }
+            static /* before */ *items() { }
+            static /* before */ async *tasks() { }
+            static /* before */ #hidden() { }
+            static reveal() { return this.#hidden; }
+        }
+        let show=Function.prototype.toString, descriptor=Object.getOwnPropertyDescriptor(Sources,'value');
+        gc(); show.call(Sources.method)==='method /* args */ () { /* body */ }' &&
+            show.call(descriptor.get)==='get value() { return 1; }' &&
+            show.call(descriptor.set)==='set value(v) { }' &&
+            show.call(Sources.task)==='async task() { }' &&
+            show.call(Sources.items)==='*items() { }' &&
+            show.call(Sources.tasks)==='async *tasks() { }' &&
+            show.call(Sources.reveal())==='#hidden() { }'
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, LooseBoxedEqualityReusesRetainedCoercion) {
+    Item value = run(R"JS(
+        let calls=0, hint='', marker={};
+        let object={[Symbol.toPrimitive](h){calls++;hint=h;gc();return 5e-324}};
+        let same={}, different={valueOf(){throw 'unexpected identity coercion'}};
+        let valid=Object.bind(null)(42)==42 && new Boolean(true)==true &&
+            object==5e-324 && calls===1 && hint==='default' &&
+            same==same && !(same==different) && !(object==null);
+        let failed=false;
+        try { ({valueOf(){gc();throw marker}})==1; } catch(error) {failed=error===marker}
+        valid && failed
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, FunctionEnumerationPreparesOwnStorageAndSkipsInheritedAccessors) {
+    Item value = run(R"JS(
+        Object.defineProperty(Function.prototype,'hidden',{get(){throw 'getter ran'},configurable:true});
+        function fresh(){} let keys=[];
+        for(let name in fresh) keys.push(name);
+        gc(); keys.length===0 && !fresh.hasOwnProperty('hidden')
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, ArrayKeyAndEntryIteratorsReuseSequenceStorage) {
     Item result = run(R"JS(
         let values=[5e-324,,3],keys=values.keys(),entries=values.entries();
@@ -660,6 +901,7 @@ TEST_F(JsFormalMir, NativeFunctionSourceKeepsOriginalName) {
         "Object.defineProperty(Object,'name',{get(){throw Error('observable name')}});"
         "a==='function Object() { [native code] }'&&"
         "b==='function DataView() { [native code] }'&&show.call(Object)===a&&"
+        "show.call(Object.getOwnPropertyDescriptor(RegExp,'$&').get)==='function () { [native code] }'&&"
         "show.call(DataView.bind(null))==='function () { [native code] }'");
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, ITEM_TRUE);

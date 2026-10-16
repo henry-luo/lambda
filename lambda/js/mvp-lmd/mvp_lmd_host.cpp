@@ -1,5 +1,6 @@
 #include "mvp_lmd.h"
 #include "mvp_lmd_runtime.h"
+#include "mvp_lmd_dynamic.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_event_loop.h"
@@ -189,12 +190,13 @@ Item mvp_lmd_host_task(Item callback, Item receiver, Item arguments) {
     return js_new_native_closure(host_task_call, 0, environment, 4);
 }
 
-static Item host_schedule(Context*, MvpLmdProgram*, Item* args, uint64_t count,
+static Item host_schedule(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item, Item) {
     MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
     bool microtask = self.item == state->timers[LMD_TIMER_MICROTASK].item;
     bool interval = self.item == state->timers[LMD_TIMER_INTERVAL].item;
-    if (!count || !mvp_lmd_is_callable(args[0])) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!count || ((microtask || !state->native_timers) && !mvp_lmd_is_callable(args[0])))
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (count > INT_MAX) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
@@ -202,6 +204,21 @@ static Item host_schedule(Context*, MvpLmdProgram*, Item* args, uint64_t count,
     Rooted<Item> callback(roots, args[0]),
         delay(roots, lambda_item_adopt_scalar_home(count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, &delay_home)),
         arguments(roots, ItemNull), thunk(roots, ItemNull);
+    if (!microtask && state->native_timers) {
+        callback.set(js_timer_normalize_handler(callback.get(),
+            [](Item value) { return mvp_lmd_primitive_to_string(value); },
+            [](Item source, void* owner) -> Item {
+                RootFrame roots(3);
+                if (!roots.valid()) return ItemError;
+                Rooted<Item> text(roots, source), evaluator(roots, ItemNull), inputs(roots, ItemNull);
+                evaluator.set(mvp_lmd_native_function((MvpLmdProgram*)owner, NULL, mvp_lmd_eval_script, 1));
+                if (item_is_error(evaluator.get())) return evaluator.get();
+                inputs.set(js_pack_args_span((Item*)text.home(), 1));
+                if (get_type_id(inputs.get()) != LMD_TYPE_ARRAY) return ItemError;
+                return mvp_lmd_host_task(evaluator.get(), make_js_undefined(), inputs.get());
+            }, program));
+        if (item_is_error(callback.get())) return callback.get();
+    }
     // own wide callback arguments before delay coercion can reenter guest code.
     arguments.set(js_pack_args_span(!microtask && count > 2 ? args + 2 : NULL,
         !microtask && count > 2 ? (int)count - 2 : 0));
@@ -219,14 +236,20 @@ static Item host_schedule(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         js_microtask_enqueue(thunk.get());
         return Item{.item = ITEM_JS_UNDEFINED};
     }
-    Item timer = js_schedule_timer(thunk.get(), delay.get(), ItemNull, false, interval, true);
-    return item_is_error(timer) || get_type_id(timer) == LMD_TYPE_INT ? timer : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item timer = js_schedule_timer(thunk.get(), delay.get(), ItemNull, false, interval, !state->native_timers);
+    return item_is_error(timer) || get_type_id(timer) == LMD_TYPE_INT ||
+        (state->native_timers && get_type_id(timer) == LMD_TYPE_MAP) ? timer : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 
 static Item host_clear_timer(Context*, MvpLmdProgram*, Item* args, uint64_t count,
-        Item, Item, Item) {
-    // both clear functions share the numeric timer identity and cancellation registry.
+        Item self, Item, Item) {
+    MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
+    // native handles retain their resource identity; numeric callers share the same registry.
     if (count) {
+        if (state->native_timers && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            js_clearTimeout(args[0]);
+            return make_js_undefined();
+        }
         Item id = mvp_lmd_primitive_to_number(args[0]);
         if (item_is_error(id)) return id;
         double number = get_type_id(id) == LMD_TYPE_FLOAT ? it2d(id) :
@@ -242,6 +265,7 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
     if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
     if (!context->name_pool) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     Item result = ItemNull;
+    state->native_timers = host && host->native_timers;
     // dynamic modules need timers even when the embedder supplies no console/filesystem host.
     if (state->values && host) {
         state->output = host->output ? host->output : stdout;

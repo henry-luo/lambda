@@ -282,7 +282,7 @@ static Item dynamic_name(Item function, Item name) {
 
 // Only primitive operands reach shared LJS scalar algorithms. Object coercion,
 // BigInt errors and all user reentry retain the MVP property/call policy.
-static Item dynamic_binary(int operation, Item left, Item right) {
+extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
     RootFrame roots(2);
     uint64_t homes[2] = {};
     Rooted<Item> a(roots, lambda_item_adopt_scalar_home(left, &homes[0]));
@@ -448,7 +448,7 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
     }
     state->ops = {state, dynamic_global, dynamic_global_this, dynamic_property,
         mvp_lmd_property_key, dynamic_invoke, dynamic_object, dynamic_wrap, dynamic_unwrap,
-        dynamic_name, dynamic_binary, dynamic_unary, dynamic_fail, dynamic_raise,
+        dynamic_name, mvp_lmd_dynamic_binary, dynamic_unary, dynamic_fail, dynamic_raise,
         dynamic_caught, dynamic_bind_this, dynamic_retain_script, dynamic_class,
         mvp_lmd_array_new, dynamic_array_append, dynamic_arguments, dynamic_parameter_cell,
         dynamic_string, dynamic_iterator_get, dynamic_iterator_step, mvp_lmd_iterator_close,
@@ -723,6 +723,31 @@ Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
     }
     callable->foreign_properties = !ast;
     return wrapper.get();
+}
+Item mvp_lmd_import_host_property(MvpLmdProgram* program, Item owner, Item key,
+        const JsPropertyDescriptor* source, Item previous_global) {
+    if (get_type_id(owner) != LMD_TYPE_MAP) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(6);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> object(roots, owner), name(roots, key), previous(roots, previous_global),
+        value(roots, lambda_item_adopt_scalar_home(source->value, &home)),
+        getter(roots, source->getter), setter(roots, source->setter);
+    ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)object.get().map->type, name.get().get_string());
+    if (field && !(field->flags & (JSPD_IS_ACCESSOR | JSPD_DELETED)) &&
+            map_shape_field_to_item(object.get().map->data, field).item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
+        // descriptor validation must not resolve its own lazy marker recursively.
+        if (!map_shape_set(object.get().map, name.get().get_string(), make_js_undefined())) return ItemError;
+    }
+    value.set(get_type_id(previous.get()) == LMD_TYPE_MAP && value.get().item == previous.get().item
+        ? object.get() : mvp_lmd_dynamic_wrap_function(program, value.get()));
+    getter.set(mvp_lmd_dynamic_wrap_function(program, getter.get()));
+    setter.set(mvp_lmd_dynamic_wrap_function(program, setter.get()));
+    if (item_is_error(value.get()) || item_is_error(getter.get()) || item_is_error(setter.get())) return ItemError;
+    JsPropertyDescriptor descriptor = *source;
+    descriptor.value = value.get(); descriptor.getter = getter.get(); descriptor.setter = setter.get();
+    Item status = mvp_lmd_define_own_property(object.get(), name.get(), &descriptor);
+    return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
 }
 static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item receiver, Item target) {

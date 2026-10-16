@@ -749,32 +749,33 @@ extern "C" Item js_timeout_toPrimitive(Item this_val) {
 }
 
 static Item make_timer_object(int64_t id, JsClass cls) {
-    Item obj = js_new_object_with_class(cls);
-    js_set_key_cstr(obj, "_timerId", (Item){.item = i2it(id)});
-    js_set_key_cstr(obj, "_destroyed", (Item){.item = b2it(false)});
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, js_new_object_with_class(cls)), method(roots, ItemNull);
+    JS_RETURN_IF_ERROR(js_set_key_cstr(object.get(), "_timerId", (Item){.item = i2it(id)}));
+    JS_RETURN_IF_ERROR(js_set_key_cstr(object.get(), "_destroyed", (Item){.item = b2it(false)}));
 
     // bind methods
     // Native timeout methods use one Item ABI argument (the JS argument or
     // undefined). Declaring zero made the invoke trampoline call a P0 function
     // even though these handlers read Item this_val, corrupting `@@toPrimitive`.
-    Item ref_fn = js_new_native_function(js_timeout_ref);
-    Item unref_fn = js_new_native_function(js_timeout_unref);
-    Item hasRef_fn = js_new_native_function(js_timeout_hasRef);
-    Item refresh_fn = js_new_native_function(js_timeout_refresh);
-
-    js_set_key_cstr(obj, "ref", ref_fn);
-    js_set_key_cstr(obj, "unref", unref_fn);
-    js_set_key_cstr(obj, "hasRef", hasRef_fn);
-    js_set_key_cstr(obj, "refresh", refresh_fn);
+    struct Binding { const char* name; JsNativeP1 call; };
+    const Binding bindings[] = {{"ref", js_timeout_ref}, {"unref", js_timeout_unref},
+        {"hasRef", js_timeout_hasRef}, {"refresh", js_timeout_refresh}};
+    // retain the unpublished handle and each method across allocating setup.
+    for (const Binding& binding : bindings) {
+        method.set(js_new_native_function(binding.call));
+        JS_RETURN_IF_ERROR(js_set_key_cstr(object.get(), binding.name, method.get()));
+    }
 
     // Symbol.toPrimitive uses its realm-local identity key.
     // @@toPrimitive receives the coercion hint. Declaring that ABI argument
     // prevents the generic call trampoline from invoking this one-argument C
     // function as P0 while it recovers the Timeout receiver from `this`.
-    Item toPrim_fn = js_new_native_function(js_timeout_toPrimitive);
-    js_set_key_default(obj, js_well_known_symbol_key(2), toPrim_fn);
+    method.set(js_new_native_function(js_timeout_toPrimitive));
+    JS_RETURN_IF_ERROR(js_set_key_default(object.get(), js_well_known_symbol_key(2), method.get()));
 
-    return obj;
+    return object.get();
 }
 
 // Extract timer id from either a plain integer or a Timeout object
@@ -964,6 +965,10 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, delay, repeat);
     timer_root.set(numeric_handle ? Item{.item = i2it(th->job.id)} : make_timer_object(th->job.id, timer_class));
+    if (item_is_error(timer_root.get())) {
+        timer_close_handle(th);
+        return timer_root.get();
+    }
     th->job.callback = callback_root.get();
     th->job.arguments = arguments_root.get();
     th->job.context.resource = resource_root.get();
@@ -983,7 +988,8 @@ static Item js_timer_run_string_handler(Item env_item) {
     return js_builtin_eval(env[0], 1);
 }
 
-static Item js_timer_normalize_handler(Item handler) {
+extern "C" Item js_timer_normalize_handler(Item handler, Item (*to_string)(Item),
+        Item (*source_task)(Item, void*), void* source_owner) {
     if (js_is_callable(handler)) return handler;
     if (!dom_get_document()) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
@@ -994,8 +1000,9 @@ static Item js_timer_normalize_handler(Item handler) {
     // a closure so it is evaluated only when the timer task runs.
     RootFrame roots(2);
     Rooted<Item> handler_root(roots, handler);
-    Rooted<Item> source_root(roots, js_to_string(handler_root.get()));
+    Rooted<Item> source_root(roots, (to_string ? to_string : js_to_string)(handler_root.get()));
     if (item_is_error(source_root.get())) return source_root.get();
+    if (source_task) return source_task(source_root.get(), source_owner);
 
     Item* env = js_alloc_env(1);
     if (!env) return ItemError;
@@ -1006,7 +1013,7 @@ static Item js_timer_normalize_handler(Item handler) {
 extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
                               bool has_args, bool is_interval, bool numeric_handle) {
     RootFrame roots(1);
-    Rooted<Item> callback_root(roots, js_timer_normalize_handler(callback));
+    Rooted<Item> callback_root(roots, js_timer_normalize_handler(callback, NULL, NULL, NULL));
     if (item_is_error(callback_root.get())) return callback_root.get();
     // lazy host scheduling must preserve Promise jobs already queued in this turn.
     if (numeric_handle) {

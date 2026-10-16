@@ -60,14 +60,15 @@
 #include "../dom/dom.h"
 
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
-extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
-extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
-extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
 extern "C" Item js_get_intl_object_value(void);
+extern "C" Item js_cjs_enter(Item module, Item filename);
+extern "C" Item js_cjs_complete(Item module);
+extern "C" Item js_cjs_leave(Item module);
+extern "C" void js_register_clipboard_globals(Item global);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
 
@@ -105,7 +106,53 @@ struct JsLazyGlobalSpec {
     size_t name_length;
     JsLazyGlobalBuilder build;
     bool requires_node_core;
+    bool formal_only = false;
 };
+
+enum JsHostGlobalGroup {
+    JS_HOST_GROUP_CJS, JS_HOST_GROUP_WINDOW, JS_HOST_GROUP_XHR,
+    JS_HOST_GROUP_STORAGE, JS_HOST_GROUP_MEDIA, JS_HOST_GROUP_OBSERVERS,
+    JS_HOST_GROUP_NODE_FILTER, JS_HOST_GROUP_ABORT_CONTROLLER, JS_HOST_GROUP_ABORT_SIGNAL,
+    JS_HOST_GROUP_CODECS, JS_HOST_GROUP_STREAMS, JS_HOST_GROUP_HEADERS,
+    JS_HOST_GROUP_PERFORMANCE, JS_HOST_GROUP_MESSAGING, JS_HOST_GROUP_URL,
+    JS_HOST_GROUP_EXCEPTION, JS_HOST_GROUP_OPTION, JS_HOST_GROUP_CANVAS,
+    JS_HOST_GROUP_CLIPBOARD, JS_HOST_GROUP_COUNT
+};
+struct JsHostGlobalSpec { const char* name; JsHostGlobalGroup group; };
+static const JsHostGlobalSpec js_host_globals[] = {
+    {"__lambda_cjs_enter", JS_HOST_GROUP_CJS}, {"__lambda_cjs_complete", JS_HOST_GROUP_CJS},
+    {"__lambda_cjs_leave", JS_HOST_GROUP_CJS},
+    {"addEventListener", JS_HOST_GROUP_WINDOW}, {"removeEventListener", JS_HOST_GROUP_WINDOW},
+    {"dispatchEvent", JS_HOST_GROUP_WINDOW}, {"postMessage", JS_HOST_GROUP_WINDOW},
+    {"XMLHttpRequest", JS_HOST_GROUP_XHR},
+    {"Storage", JS_HOST_GROUP_STORAGE}, {"localStorage", JS_HOST_GROUP_STORAGE},
+    {"sessionStorage", JS_HOST_GROUP_STORAGE}, {"matchMedia", JS_HOST_GROUP_MEDIA},
+    {"MutationObserver", JS_HOST_GROUP_OBSERVERS}, {"ResizeObserver", JS_HOST_GROUP_OBSERVERS},
+    {"IntersectionObserver", JS_HOST_GROUP_OBSERVERS}, {"NodeFilter", JS_HOST_GROUP_NODE_FILTER},
+    {"IntersectionObserverEntry", JS_HOST_GROUP_NODE_FILTER},
+    {"AbortController", JS_HOST_GROUP_ABORT_CONTROLLER}, {"AbortSignal", JS_HOST_GROUP_ABORT_SIGNAL},
+    {"TextEncoder", JS_HOST_GROUP_CODECS}, {"TextDecoder", JS_HOST_GROUP_CODECS},
+    {"ReadableStream", JS_HOST_GROUP_STREAMS}, {"WritableStream", JS_HOST_GROUP_STREAMS},
+    {"TransformStream", JS_HOST_GROUP_STREAMS}, {"TextEncoderStream", JS_HOST_GROUP_STREAMS},
+    {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
+    {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
+    {"Response", JS_HOST_GROUP_HEADERS}, {"performance", JS_HOST_GROUP_PERFORMANCE},
+    {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE}, {"MessageChannel", JS_HOST_GROUP_MESSAGING},
+    {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
+    {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
+    {"Option", JS_HOST_GROUP_OPTION}, {"OffscreenCanvas", JS_HOST_GROUP_CANVAS},
+    {"Blob", JS_HOST_GROUP_CLIPBOARD}, {"File", JS_HOST_GROUP_CLIPBOARD},
+    {"FileReader", JS_HOST_GROUP_CLIPBOARD}, {"ClipboardItem", JS_HOST_GROUP_CLIPBOARD},
+    {"FileList", JS_HOST_GROUP_CLIPBOARD}, {"ClipboardEvent", JS_HOST_GROUP_CLIPBOARD},
+    {"DataTransfer", JS_HOST_GROUP_CLIPBOARD}, {"Clipboard", JS_HOST_GROUP_CLIPBOARD},
+    {"Navigator", JS_HOST_GROUP_CLIPBOARD}, {"navigator", JS_HOST_GROUP_CLIPBOARD},
+    {"__lambda_clipboard_clear", JS_HOST_GROUP_CLIPBOARD},
+    {"__lambda_clipboard_write_records", JS_HOST_GROUP_CLIPBOARD},
+    {"__lambda_clipboard_read_records", JS_HOST_GROUP_CLIPBOARD},
+    {"__lambda_clipboard_set_perm", JS_HOST_GROUP_CLIPBOARD},
+    {"__lambda_clipboard_get_perm", JS_HOST_GROUP_CLIPBOARD}
+};
+static Item js_install_host_global_group(Item target, JsHostGlobalGroup group);
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_profiled_process_object, false},
@@ -118,6 +165,11 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"Atomics", 7, js_get_atomics_object_value, false},
     {"console", 7, js_get_console_object_value, false},
     {"CSS", 3, js_get_css_object_value, false},
+    {"require", 7, []() {
+        MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
+        const char* reference = library ? mvp_lmd_program_reference(library->object.program) : NULL;
+        return js_module_create_require(reference ? js_name_item(reference) : make_js_undefined());
+    }, false, true},
 };
 
 static Item js_publish_lazy_global(Item object, Item key, Item value) {
@@ -139,27 +191,41 @@ static Item js_publish_lazy_global(Item object, Item key, Item value) {
     return value_root.get();
 }
 
-Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item), bool constructors) {
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, global), key(roots, ItemNull);
-    auto install = [&](const char* name, size_t length) -> Item {
+    auto install = [&](const char* name, size_t length, Item value) -> Item {
         key.set(js_name_item(name, length));
-        return writer(object.get(), key.get());
+        return writer(object.get(), key.get(), value);
     };
+    const char* aliases[] = {"globalThis", "self", "window", "parent", "top", "global"};
+    for (const char* name : aliases) {
+        Item status = install(name, strlen(name), object.get());
+        if (item_is_error(status)) return status;
+    }
+    Item status = install("event", 5, make_js_undefined());
+    if (item_is_error(status)) return status;
+    Item marker = {.item = ITEM_JS_LAZY_GLOBAL_SENTINEL};
     if (constructors) for (int i = 0; i < js_builtin_global_count(); i++) {
         const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
-        if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
+        if (!spec || (spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR && spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) ||
                 !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
-        Item status = install(spec->name, spec->len);
+        Item status = install(spec->name, spec->len, marker);
         if (item_is_error(status)) return status;
     }
     for (size_t i = 0;
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
             i++) {
         const JsLazyGlobalSpec* spec = &js_lazy_host_globals[i];
+        // retained AST calls already resolve implicit require against their source environment.
+        if (spec->formal_only && !constructors) continue;
         if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
-        Item status = install(spec->name, spec->name_length);
+        Item status = install(spec->name, spec->name_length, marker);
+        if (item_is_error(status)) return status;
+    }
+    if (constructors) for (const auto& spec : js_host_globals) {
+        Item status = install(spec.name, strlen(spec.name), marker);
         if (item_is_error(status)) return status;
     }
     int module_count = jube_static_module_count();
@@ -174,11 +240,44 @@ Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item), bo
             if (!name || !name[0]) continue;
             // Keep Jube globals as ordinary writable data properties while
             // deferring module activation until the property is actually read.
-            Item status = install(name, strlen(name));
+            Item status = install(name, strlen(name), marker);
             if (item_is_error(status)) return status;
         }
     }
     return ItemNull;
+}
+
+static Item js_materialize_host_global_group(Item object, Item requested, JsHostGlobalGroup group, bool read_requested = true) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> global(roots, object), key(roots, requested), staging(roots, js_new_object());
+    if (get_type_id(staging.get()) != LMD_TYPE_MAP) return ItemError;
+    // build the complete family before publication. Only still-owned markers
+    // may change; a deleted or replaced sibling stays under guest control.
+    JS_RETURN_IF_ERROR(js_install_host_global_group(staging.get(), group));
+    js_mark_all_non_enumerable(staging.get());
+    for (const auto& spec : js_host_globals) {
+        if (spec.group != group) continue;
+        NameRef name = heap_create_name(spec.name, strlen(spec.name));
+        if (!name) return ItemError;
+        ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)global.get().map->type, name);
+        if (!field || (field->flags & (JSPD_IS_ACCESSOR | JSPD_DELETED)) ||
+                map_shape_field_to_item(global.get().map->data, field).item != ITEM_JS_LAZY_GLOBAL_SENTINEL) continue;
+        JsPropertyDescriptor descriptor = {};
+        if (!js_get_own_property_descriptor_name_id(staging.get(), name_ref_id(name), &descriptor)) return ItemError;
+        Item status = mvp_lmd_import_host_property(mvp_lmd_program_library()->object.program,
+            global.get(), Item{.item = s2it(name)}, &descriptor);
+        if (item_is_error(status)) return status;
+    }
+    return read_requested ? js_get_key_default(global.get(), key.get()) : ItemNull;
+}
+
+Item js_ensure_host_global_family(const char* name) {
+    // native factories may need an intrinsic before its lazy guest binding is read.
+    if (!js_runtime_state.formal_mir_owner) return ItemNull;
+    for (const auto& spec : js_host_globals) if (strcmp(name, spec.name) == 0)
+        return js_materialize_host_global_group(js_get_global_this(), ItemNull, spec.group, false);
+    return ItemError;
 }
 
 bool js_host_object_has_property(Item object, Item key, Item* out) {
@@ -216,11 +315,18 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
         if (out_value) *out_value = value_root.get();
         return true;
     }
+    if (js_runtime_state.formal_mir_owner) for (const auto& spec : js_host_globals) {
+        if (name->len != strlen(spec.name) || memcmp(name->chars, spec.name, name->len)) continue;
+        value_root.set(js_materialize_host_global_group(object_root.get(), key_root.get(), spec.group));
+        if (out_value) *out_value = value_root.get();
+        return true;
+    }
     const JsBuiltinGlobalSpec* constructor = js_builtin_global_find(
         name->chars, (int)name->len);
-    if (constructor && constructor->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR &&
+    if (constructor && (constructor->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR || constructor->kind == JS_BUILTIN_GLOBAL_FUNCTION) &&
             (constructor->flags & JS_BUILTIN_GLOBAL_INSTALL)) {
-        value_root.set(js_get_constructor(key_root.get()));
+        value_root.set(constructor->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR ? js_get_constructor(key_root.get()) :
+            js_get_global_builtin_fn_by_id(Item{.item = i2it(constructor->id)}));
         value_root.set(js_publish_lazy_global(object_root.get(), key_root.get(),
             value_root.get()));
         if (out_value) *out_value = value_root.get();
@@ -5478,6 +5584,8 @@ static Item js_get_async_function_prototype() {
 }
 
 extern "C" Item js_get_prototype_of(Item object) {
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+        return mvp_lmd_get_prototype(object);
     // Proxy [[GetPrototypeOf]] trap
     if (js_is_proxy(object)) {
         return js_proxy_trap_get_prototype_of(object);
@@ -5679,6 +5787,14 @@ extern "C" Item js_reflect_own_keys(Item obj) {
         names_root, ItemNull,
         symbols_root, ItemNull,
         result_root, ItemNull);
+    TypeId type = get_type_id(obj);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() &&
+            mvp_lmd_owns_properties(obj)) {
+        // native consumers retain the owning engine's Symbol identities and private-key filtering.
+        if (type == LMD_TYPE_FUNC && !mvp_lmd_foreign_candidate(obj))
+            JS_RETURN_IF_ERROR(mvp_lmd_function_prepare(object_root.get()));
+        return mvp_lmd_own_keys(object_root.get());
+    }
     // ES §28.1.13 Reflect.ownKeys: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "ownKeys"));
     if (js_is_resting_error(obj)) {
@@ -5985,6 +6101,13 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         descriptor_root, ItemNull,
         current_root, ItemNull,
         receiver_descriptor_root, ItemNull);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(target_root.get())) {
+        // native Set must not append fields to the MVP family's immutable shape.
+        if (receiver_root.get().item == ITEM_NULL) receiver_root.set(target_root.get());
+        key_root.set(mvp_lmd_property_key(key_root.get()));
+        return item_is_error(key_root.get()) ? key_root.get() :
+            mvp_lmd_set_completion(target_root.get(), key_root.get(), value_root.get(), receiver_root.get());
+    }
     TypeId target_type = get_type_id(target_root.get());
     bool primitive_target = target_type == LMD_TYPE_BOOL ||
         target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
@@ -6362,6 +6485,13 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
     JS_ROOTS(roots, object_root, obj, key_root, key, descriptor_root, desc);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+        key_root.set(mvp_lmd_property_key(key_root.get()));
+        if (item_is_error(key_root.get())) return key_root.get();
+        JsPropertyDescriptor converted = {}; uint64_t home = 0;
+        Item status = mvp_lmd_descriptor_from_object(descriptor_root.get(), &converted, &home);
+        return item_is_error(status) ? status : mvp_lmd_define_own_property(object_root.get(), key_root.get(), &converted);
+    }
     // ES §28.1.3 Reflect.defineProperty: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperty"));
     // step 2: Let key be ? ToPropertyKey(propertyKey).
@@ -6626,6 +6756,11 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     Rooted<Item> original_name_root(roots, name);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> descriptor_root(roots, ItemNull);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+        name_root.set(mvp_lmd_property_key(name_root.get()));
+        return item_is_error(name_root.get()) ? name_root.get() :
+            mvp_lmd_get_own_descriptor(object_root.get(), name_root.get());
+    }
     // v20: GOPD should accept primitives (ES spec uses ToObject internally)
     // Only null/undefined throw TypeError
     TypeId type = get_type_id(obj);
@@ -7321,6 +7456,11 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         name_root, name,
         descriptor_root, descriptor,
         result_root, ItemNull);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+        name_root.set(mvp_lmd_property_key(name_root.get()));
+        return item_is_error(name_root.get()) ? name_root.get() :
+            mvp_lmd_define_property(object_root.get(), name_root.get(), descriptor_root.get());
+    }
     obj = object_root.get();
     name = name_root.get();
     descriptor = descriptor_root.get();
@@ -12531,14 +12671,15 @@ extern "C" void js_set_window_event_global_value(Item value) {
 
 static Item js_window_post_message_dispatch(Item env_item) {
     JS_ENV_OR_UNDEFINED(env, env_item);
-    return radiant_dom_window_dispatch_event(env[0]);
+    return dom_dispatch_event(js_get_global_this(), env[0]);
 }
 
 static Item js_window_post_message(Item message, Item target_origin,
         Item transfer_or_options) {
-    RootFrame roots(6);
+    RootFrame roots(7);
     Rooted<Item> message_root(roots, message);
     Rooted<Item> transfer_root(roots, transfer_or_options);
+    Rooted<Item> global_root(roots, js_get_global_this());
     Rooted<Item> origin_root(roots, dom_location_get_property(js_name_item("origin")));
     Rooted<Item> cloned(roots, ItemNull), event_root(roots, ItemNull);
     Rooted<Item> callback_root(roots, ItemNull);
@@ -12548,7 +12689,7 @@ static Item js_window_post_message(Item message, Item target_origin,
     }
     cloned.set(structured_clone_transfer_impl(message_root.get(), transfer_root.get(), 0));
     JS_RETURN_IF_ERROR(cloned.get());
-    event_root.set(js_create_message_event("message", cloned.get(), js_global_this_obj, origin_root.get()));
+    event_root.set(js_create_message_event("message", cloned.get(), global_root.get(), origin_root.get()));
     JS_RETURN_IF_ERROR(event_root.get());
     // The single browsing context still queues same-window messages after the
     // current task, matching the observable postMessage ordering contract.
@@ -13596,6 +13737,271 @@ static Item js_install_queuing_strategy(Item global, const char* name, JsClass b
     return constructor.get();
 }
 
+static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> global(roots, target);
+    switch (group) {
+    case JS_HOST_GROUP_CJS: {
+        js_install_native_method(global.get(), "__lambda_cjs_enter",
+            js_cjs_enter);
+        js_install_native_method(global.get(), "__lambda_cjs_complete",
+            js_cjs_complete);
+        js_install_native_method(global.get(), "__lambda_cjs_leave",
+            js_cjs_leave);
+        break;
+    }
+    case JS_HOST_GROUP_WINDOW: {
+        // EventTarget interface methods on globalThis (window/self acts as
+        // an EventTarget per HTML spec).
+        {
+            js_event_target_install_methods(global.get());
+            js_install_native_method(global.get(), "postMessage",
+                js_window_post_message);
+        }
+        break;
+    }
+    case JS_HOST_GROUP_XHR: {
+        // D6.2.2v2: host constructors must publish [[Construct]] because `new`
+        // no longer infers behavior from the global property's spelling.
+        js_install_native_constructor(global.get(), "XMLHttpRequest",
+            js_xhr_new);
+        dom_xhr_install_interface(js_get_key_cstr(js_get_key_cstr(global.get(),
+            "XMLHttpRequest"), "prototype"));
+        break;
+    }
+    case JS_HOST_GROUP_STORAGE: {
+        dom_install_storage_globals(global.get());
+        break;
+    }
+    case JS_HOST_GROUP_MEDIA: {
+        js_install_native_method(global.get(), "matchMedia",
+            dom_match_media);
+        break;
+    }
+    case JS_HOST_GROUP_OBSERVERS: {
+        dom_install_observer_globals(global.get());
+        break;
+    }
+    case JS_HOST_GROUP_NODE_FILTER: {
+        // Editor sanitizers use the standard NodeFilter mask with a detached
+        // document TreeWalker; expose the shared DOM constants rather than
+        // giving an editor-specific traversal path.
+        js_set_key_cstr(global.get(), "NodeFilter", js_node_filter_new());
+        js_install_native_constructor(global.get(), "IntersectionObserverEntry",
+            js_intersection_observer_entry_new);
+        break;
+    }
+    case JS_HOST_GROUP_ABORT_CONTROLLER: {
+        // AbortController constructor
+        {
+            RootFrame abort_controller_roots(2);
+            Rooted<Item> ac_ctor_root(abort_controller_roots,
+                js_new_native_constructor(js_new_AbortController));
+            Rooted<Item> ac_proto_root(abort_controller_roots, js_new_object());
+            // D5.4.3: constructor and prototype are unpublished across
+            // allocating setup calls and therefore need explicit roots.
+            js_set_key_cstr(ac_ctor_root.get(), "prototype", ac_proto_root.get());
+            // abort method on instances (set by constructor), but also add as static for access
+            js_install_native_method(ac_proto_root.get(), "abort",
+                js_abort_controller_abort);
+            js_set_key_cstr(global.get(), "AbortController", ac_ctor_root.get());
+        }
+        break;
+    }
+    case JS_HOST_GROUP_ABORT_SIGNAL: {
+        // AbortSignal — global with static methods abort() and timeout()
+        {
+            extern Item js_abort_signal_abort(Item reason);
+            extern Item js_abort_signal_timeout(Item ms);
+            RootFrame abort_signal_roots(1);
+            Rooted<Item> as_ctor_root(abort_signal_roots,
+                js_new_native_function(js_make_abort_signal));
+            // D5.4.3: method installation allocates before global publication.
+            js_install_native_method(as_ctor_root.get(), "abort", js_abort_signal_abort);
+            js_install_native_method(as_ctor_root.get(), "timeout",
+                js_abort_signal_timeout);
+            js_set_key_cstr(global.get(), "AbortSignal", as_ctor_root.get());
+        }
+        break;
+    }
+    case JS_HOST_GROUP_CODECS: {
+        // TextEncoder / TextDecoder constructors as globals
+        {
+            RootFrame text_codec_roots(8);
+            Rooted<Item> encoder_ctor(text_codec_roots,
+                js_new_native_constructor(js_text_encoder_new));
+            Rooted<Item> decoder_ctor(text_codec_roots,
+                js_new_native_constructor(js_text_decoder_new));
+            Rooted<Item> encoder_proto(text_codec_roots,
+                js_get_key_cstr(encoder_ctor.get(), "prototype"));
+            Rooted<Item> decoder_proto(text_codec_roots,
+                js_get_key_cstr(decoder_ctor.get(), "prototype"));
+            Rooted<Item> encode_method(text_codec_roots,
+                js_new_native_this_span_function(js_text_encoder_encode_method));
+            Rooted<Item> decode_method(text_codec_roots,
+                js_new_native_this_span_function(js_text_decoder_decode_method));
+            // D6.2.2v2 removed receiver/name dispatch, so codec behavior must be
+            // published as real prototype properties owned by each constructor.
+            // Keep both keys rooted: the first property write can collect while
+            // the second key is still waiting in the native setup sequence
+            // (D5.4.3).
+            Rooted<Item> encode_key(text_codec_roots, make_string_item("encode"));
+            Rooted<Item> decode_key(text_codec_roots, make_string_item("decode"));
+            js_set_key_default(encoder_proto.get(), encode_key.get(), encode_method.get());
+            js_set_key_default(decoder_proto.get(), decode_key.get(), decode_method.get());
+            js_mark_non_enumerable(encoder_proto.get(), encode_key.get());
+            js_mark_non_enumerable(decoder_proto.get(), decode_key.get());
+            js_set_key_cstr(global.get(), "TextEncoder", encoder_ctor.get());
+            js_set_key_cstr(global.get(), "TextDecoder", decoder_ctor.get());
+        }
+        break;
+    }
+    case JS_HOST_GROUP_STREAMS: {
+        // Web Streams are already implemented for the Node stream surface;
+        // publish the same constructors for browser scripts as well.
+        js_install_native_constructor(global.get(), "ReadableStream",
+            js_readable_stream_new);
+        js_install_native_constructor(global.get(), "WritableStream",
+            js_writable_stream_new);
+        js_install_native_constructor(global.get(), "TransformStream",
+            js_transform_stream_new);
+        js_install_native_constructor(global.get(), "TextEncoderStream",
+            js_text_encoder_stream_new);
+        js_install_native_constructor(global.get(), "TextDecoderStream",
+            js_text_decoder_stream_new);
+        // Streams §7.2/§7.3: size functions are shared per realm; instance state is private.
+        js_install_queuing_strategy(global.get(), "ByteLengthQueuingStrategy",
+            JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY);
+        js_install_queuing_strategy(global.get(), "CountQueuingStrategy",
+            JS_CLASS_COUNT_QUEUING_STRATEGY);
+        break;
+    }
+    case JS_HOST_GROUP_HEADERS: {
+        js_install_headers(global.get());
+        js_install_response(global.get());
+        break;
+    }
+    case JS_HOST_GROUP_PERFORMANCE: {
+        // globalThis.performance shares the document clock used by rAF/events.
+        {
+            extern Item js_performance_observer_new(Item callback);
+            RootFrame performance_roots(5);
+            Item perf = js_new_object();
+            Rooted<Item> perf_root(performance_roots, perf);
+            Rooted<Item> timing_root(performance_roots, ItemNull);
+            Rooted<Item> origin_root(performance_roots, ItemNull);
+            Rooted<Item> observer_root(performance_roots, ItemNull);
+            Rooted<Item> supported_types_root(performance_roots, ItemNull);
+            js_install_native_method(perf, "now", js_performance_now);
+            js_install_native_method(perf, "mark", js_performance_noop_1);
+            js_install_native_method(perf, "measure", js_performance_noop_3);
+            js_install_native_method(perf, "getEntries",
+                js_performance_empty_entries);
+            js_install_native_method(perf, "getEntriesByName",
+                js_performance_empty_entries_2);
+            js_install_native_method(perf, "getEntriesByType",
+                js_performance_entries_by_type);
+            origin_root.set(push_d(js_performance_time_origin_ms()));
+            js_set_key_cstr(perf, "timeOrigin", origin_root.get());
+            timing_root.set(js_new_object());
+            js_set_key_cstr(perf, "timing", timing_root.get());
+            js_set_key_cstr(global.get(), "performance", perf);
+            Item perf_observer = js_new_native_constructor(
+                js_performance_observer_new);
+            observer_root.set(perf_observer);
+            Item supported_types = js_array_new(0);
+            supported_types_root.set(supported_types);
+            js_array_push(supported_types, make_string_item("layout-shift"));
+            js_set_key_cstr(perf_observer, "supportedEntryTypes",
+                supported_types);
+            js_set_key_cstr(global.get(), "PerformanceObserver", perf_observer);
+        }
+        break;
+    }
+    case JS_HOST_GROUP_MESSAGING: {
+        // globalThis.MessageChannel / MessagePort stubs
+        {
+            extern Item js_message_channel_new(void);
+            extern Item js_message_port_new(void);
+            js_install_native_constructor(global.get(), "MessageChannel",
+                js_message_channel_new);
+            js_install_native_constructor(global.get(), "MessagePort",
+                js_message_port_new);
+        }
+        break;
+    }
+    case JS_HOST_GROUP_URL: {
+        // globalThis.URLSearchParams
+        {
+            js_install_native_constructor(global.get(), "URLSearchParams",
+                js_global_url_search_params_new);
+        }
+
+        // globalThis.URL constructor
+        {
+            js_install_native_constructor(global.get(), "URL",
+                js_url_construct_with_base);
+        }
+        break;
+    }
+    case JS_HOST_GROUP_EXCEPTION: {
+        // globalThis.DOMException constructor
+        {
+            RootFrame dom_exception_roots(2);
+            Rooted<Item> ctor_root(dom_exception_roots,
+                js_new_native_constructor(js_domexception_new));
+            Rooted<Item> proto_root(dom_exception_roots, js_new_object());
+            // D5.4.3: neither side of the constructor/prototype cycle is
+            // published when the first allocating property store runs.
+            js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+            js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
+            js_set_key_cstr(global.get(), "DOMException", ctor_root.get());
+        }
+        break;
+    }
+    case JS_HOST_GROUP_OPTION: {
+        // globalThis.Option constructor (HTMLOptionElement)
+        {
+            extern Item js_option_new(Item text, Item value);
+            js_install_native_constructor(global.get(), "Option",
+                js_option_new);
+        }
+        break;
+    }
+    case JS_HOST_GROUP_CANVAS: {
+        // OffscreenCanvas is a normal replaceable global binding. Its native
+        // constructor supplies the legacy text-measurement compatibility path.
+        js_install_native_constructor(global.get(), "OffscreenCanvas",
+            js_offscreen_canvas_new);
+        js_canvas_install_offscreen_canvas_interface(js_get_key_cstr(
+            global.get(), "OffscreenCanvas"));
+        break;
+    }
+    case JS_HOST_GROUP_CLIPBOARD: {
+        JS_ROOTS(url_roots, active, js_get_global_this(),
+            constructor, ItemNull);
+        JsPropertyDescriptor url = {};
+        if (js_get_own_property_descriptor(active.get(), "URL", 3, &url) && (url.flags & JS_PD_HAS_VALUE)) {
+            constructor.set(url.value.item == ITEM_JS_LAZY_GLOBAL_SENTINEL
+                ? js_get_key_cstr(active.get(), "URL") : url.value);
+            constructor.set(mvp_lmd_dynamic_unwrap_function(constructor.get()));
+            if (get_type_id(constructor.get()) == LMD_TYPE_FUNC &&
+                    function_has_abi(constructor.get().function, FN_ENTRY_ABI_JS_FUNCTION))
+                JS_RETURN_IF_ERROR(js_set_key_cstr(global.get(), "URL", constructor.get()));
+        }
+        // Web Clipboard / Blob / File / ClipboardItem / ClipboardEvent /
+        // navigator.clipboard / navigator.permissions
+        {
+            js_register_clipboard_globals(global.get());
+        }
+        break;
+    }
+    case JS_HOST_GROUP_COUNT: return ItemError;
+    }
+    return ItemNull;
+}
+
 // cumulative thread-local timing survives nested eval resetting phase counters.
 static __thread uint64_t js_realm_init_us = 0;
 
@@ -13613,9 +14019,6 @@ extern "C" Item js_get_global_this() {
         js_global_this_obj = js_new_object();
         // populate standard globals
         js_set_key_cstr(js_global_this_obj, "undefined", make_js_undefined());
-        // Legacy IE-style `window.event` — initially undefined, set to the
-        // in-flight event during dispatch by dom_dispatch_event.
-        js_set_key_cstr(js_global_this_obj, "event", make_js_undefined());
         js_set_key_cstr(js_global_this_obj, "NaN", push_d(NAN));
         js_set_key_cstr(js_global_this_obj, "Infinity", push_d(INFINITY));
 
@@ -13643,23 +14046,13 @@ extern "C" Item js_get_global_this() {
                 js_mark_non_enumerable(js_global_this_obj, name_item);
             }
         }
-        // globalThis self-reference
-        js_set_key_cstr(js_global_this_obj, "globalThis", js_global_this_obj);
-        // A top-level browsing context is its own parent and top Window.
-        // These aliases keep legacy DOM bundles from treating a missing `top`
-        // as a false cross-origin frame probe.
-        js_set_key_cstr(js_global_this_obj, "self", js_global_this_obj);
-        js_set_key_cstr(js_global_this_obj, "window", js_global_this_obj);
-        js_set_key_cstr(js_global_this_obj, "parent", js_global_this_obj);
-        js_set_key_cstr(js_global_this_obj, "top", js_global_this_obj);
-
         // Node compatibility namespaces are ordinary own data slots, but their
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
         // startup budget (D6.2.2v2).
-        js_install_host_namespace_slots(js_global_this_obj, [](Item global, Item key) -> Item {
-            JS_ROOTS(roots, object, global, name, key);
-            Item stored = js_set_key_default(object.get(), name.get(), (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
+        js_install_host_namespace_slots(js_global_this_obj, [](Item global, Item key, Item value) -> Item {
+            JS_ROOTS(roots, object, global, name, key, held, value);
+            Item stored = js_set_key_default(object.get(), name.get(), held.get());
             if (!item_is_error(stored)) js_mark_non_enumerable(object.get(), name.get());
             return stored;
         }, false);
@@ -13677,218 +14070,8 @@ extern "C" Item js_get_global_this() {
             js_set_key_default(js_global_this_obj, name_item, fn);
         }
 
-        // Node.js: 'global' is an alias for globalThis
-        js_set_key_cstr(js_global_this_obj, "global", js_global_this_obj);
-
-        extern Item js_cjs_enter(Item module, Item filename);
-        extern Item js_cjs_complete(Item module);
-        extern Item js_cjs_leave(Item module);
-        js_install_native_method(js_global_this_obj, "__lambda_cjs_enter",
-            js_cjs_enter);
-        js_install_native_method(js_global_this_obj, "__lambda_cjs_complete",
-            js_cjs_complete);
-        js_install_native_method(js_global_this_obj, "__lambda_cjs_leave",
-            js_cjs_leave);
-
-        // EventTarget interface methods on globalThis (window/self acts as
-        // an EventTarget per HTML spec).
-        {
-            js_install_native_method(js_global_this_obj, "addEventListener",
-                radiant_dom_window_add_event_listener);
-            js_install_native_method(js_global_this_obj, "removeEventListener",
-                radiant_dom_window_remove_event_listener);
-            js_install_native_method(js_global_this_obj, "dispatchEvent",
-                radiant_dom_window_dispatch_event);
-            js_install_native_method(js_global_this_obj, "postMessage",
-                js_window_post_message);
-        }
-
-        // D6.2.2v2: host constructors must publish [[Construct]] because `new`
-        // no longer infers behavior from the global property's spelling.
-        js_install_native_constructor(js_global_this_obj, "XMLHttpRequest",
-            js_xhr_new);
-        dom_xhr_install_interface(js_get_key_cstr(js_get_key_cstr(js_global_this_obj,
-            "XMLHttpRequest"), "prototype"));
-
-        dom_install_storage_globals(js_global_this_obj);
-        js_install_native_method(js_global_this_obj, "matchMedia",
-            dom_match_media);
-        dom_install_observer_globals(js_global_this_obj);
-        // Editor sanitizers use the standard NodeFilter mask with a detached
-        // document TreeWalker; expose the shared DOM constants rather than
-        // giving an editor-specific traversal path.
-        js_set_key_cstr(js_global_this_obj, "NodeFilter", js_node_filter_new());
-        js_install_native_constructor(js_global_this_obj, "IntersectionObserverEntry",
-            js_intersection_observer_entry_new);
-
-        // AbortController constructor
-        {
-            RootFrame abort_controller_roots(2);
-            Rooted<Item> ac_ctor_root(abort_controller_roots,
-                js_new_native_constructor(js_new_AbortController));
-            Rooted<Item> ac_proto_root(abort_controller_roots, js_new_object());
-            // D5.4.3: constructor and prototype are unpublished across
-            // allocating setup calls and therefore need explicit roots.
-            js_set_key_cstr(ac_ctor_root.get(), "prototype", ac_proto_root.get());
-            // abort method on instances (set by constructor), but also add as static for access
-            js_install_native_method(ac_proto_root.get(), "abort",
-                js_abort_controller_abort);
-            js_set_key_cstr(js_global_this_obj, "AbortController", ac_ctor_root.get());
-        }
-
-        // AbortSignal — global with static methods abort() and timeout()
-        {
-            extern Item js_abort_signal_abort(Item reason);
-            extern Item js_abort_signal_timeout(Item ms);
-            RootFrame abort_signal_roots(1);
-            Rooted<Item> as_ctor_root(abort_signal_roots,
-                js_new_native_function(js_make_abort_signal));
-            // D5.4.3: method installation allocates before global publication.
-            js_install_native_method(as_ctor_root.get(), "abort", js_abort_signal_abort);
-            js_install_native_method(as_ctor_root.get(), "timeout",
-                js_abort_signal_timeout);
-            js_set_key_cstr(js_global_this_obj, "AbortSignal", as_ctor_root.get());
-        }
-
-        // TextEncoder / TextDecoder constructors as globals
-        {
-            RootFrame text_codec_roots(8);
-            Rooted<Item> encoder_ctor(text_codec_roots,
-                js_new_native_constructor(js_text_encoder_new));
-            Rooted<Item> decoder_ctor(text_codec_roots,
-                js_new_native_constructor(js_text_decoder_new));
-            Rooted<Item> encoder_proto(text_codec_roots,
-                js_get_key_cstr(encoder_ctor.get(), "prototype"));
-            Rooted<Item> decoder_proto(text_codec_roots,
-                js_get_key_cstr(decoder_ctor.get(), "prototype"));
-            Rooted<Item> encode_method(text_codec_roots,
-                js_new_native_this_span_function(js_text_encoder_encode_method));
-            Rooted<Item> decode_method(text_codec_roots,
-                js_new_native_this_span_function(js_text_decoder_decode_method));
-            // D6.2.2v2 removed receiver/name dispatch, so codec behavior must be
-            // published as real prototype properties owned by each constructor.
-            // Keep both keys rooted: the first property write can collect while
-            // the second key is still waiting in the native setup sequence
-            // (D5.4.3).
-            Rooted<Item> encode_key(text_codec_roots, make_string_item("encode"));
-            Rooted<Item> decode_key(text_codec_roots, make_string_item("decode"));
-            js_set_key_default(encoder_proto.get(), encode_key.get(), encode_method.get());
-            js_set_key_default(decoder_proto.get(), decode_key.get(), decode_method.get());
-            js_mark_non_enumerable(encoder_proto.get(), encode_key.get());
-            js_mark_non_enumerable(decoder_proto.get(), decode_key.get());
-            js_set_key_cstr(js_global_this_obj, "TextEncoder", encoder_ctor.get());
-            js_set_key_cstr(js_global_this_obj, "TextDecoder", decoder_ctor.get());
-        }
-
-        // Web Streams are already implemented for the Node stream surface;
-        // publish the same constructors for browser scripts as well.
-        js_install_native_constructor(js_global_this_obj, "ReadableStream",
-            js_readable_stream_new);
-        js_install_native_constructor(js_global_this_obj, "WritableStream",
-            js_writable_stream_new);
-        js_install_native_constructor(js_global_this_obj, "TransformStream",
-            js_transform_stream_new);
-        js_install_native_constructor(js_global_this_obj, "TextEncoderStream",
-            js_text_encoder_stream_new);
-        js_install_native_constructor(js_global_this_obj, "TextDecoderStream",
-            js_text_decoder_stream_new);
-        // Streams §7.2/§7.3: size functions are shared per realm; instance state is private.
-        js_install_queuing_strategy(js_global_this_obj, "ByteLengthQueuingStrategy",
-            JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY);
-        js_install_queuing_strategy(js_global_this_obj, "CountQueuingStrategy",
-            JS_CLASS_COUNT_QUEUING_STRATEGY);
-        js_install_headers(js_global_this_obj);
-        js_install_response(js_global_this_obj);
-
-        // globalThis.performance shares the document clock used by rAF/events.
-        {
-            extern Item js_performance_observer_new(Item callback);
-            RootFrame performance_roots(5);
-            Item perf = js_new_object();
-            Rooted<Item> perf_root(performance_roots, perf);
-            Rooted<Item> timing_root(performance_roots, ItemNull);
-            Rooted<Item> origin_root(performance_roots, ItemNull);
-            Rooted<Item> observer_root(performance_roots, ItemNull);
-            Rooted<Item> supported_types_root(performance_roots, ItemNull);
-            js_install_native_method(perf, "now", js_performance_now);
-            js_install_native_method(perf, "mark", js_performance_noop_1);
-            js_install_native_method(perf, "measure", js_performance_noop_3);
-            js_install_native_method(perf, "getEntries",
-                js_performance_empty_entries);
-            js_install_native_method(perf, "getEntriesByName",
-                js_performance_empty_entries_2);
-            js_install_native_method(perf, "getEntriesByType",
-                js_performance_entries_by_type);
-            origin_root.set(push_d(js_performance_time_origin_ms()));
-            js_set_key_cstr(perf, "timeOrigin", origin_root.get());
-            timing_root.set(js_new_object());
-            js_set_key_cstr(perf, "timing", timing_root.get());
-            js_set_key_cstr(js_global_this_obj, "performance", perf);
-            Item perf_observer = js_new_native_constructor(
-                js_performance_observer_new);
-            observer_root.set(perf_observer);
-            Item supported_types = js_array_new(0);
-            supported_types_root.set(supported_types);
-            js_array_push(supported_types, make_string_item("layout-shift"));
-            js_set_key_cstr(perf_observer, "supportedEntryTypes",
-                supported_types);
-            js_set_key_cstr(js_global_this_obj, "PerformanceObserver", perf_observer);
-        }
-
-        // globalThis.MessageChannel / MessagePort stubs
-        {
-            extern Item js_message_channel_new(void);
-            extern Item js_message_port_new(void);
-            js_install_native_constructor(js_global_this_obj, "MessageChannel",
-                js_message_channel_new);
-            js_install_native_constructor(js_global_this_obj, "MessagePort",
-                js_message_port_new);
-        }
-
-        // globalThis.URLSearchParams
-        {
-            js_install_native_constructor(js_global_this_obj, "URLSearchParams",
-                js_global_url_search_params_new);
-        }
-
-        // globalThis.URL constructor
-        {
-            js_install_native_constructor(js_global_this_obj, "URL",
-                js_url_construct_with_base);
-        }
-
-        // globalThis.DOMException constructor
-        {
-            RootFrame dom_exception_roots(2);
-            Rooted<Item> ctor_root(dom_exception_roots,
-                js_new_native_constructor(js_domexception_new));
-            Rooted<Item> proto_root(dom_exception_roots, js_new_object());
-            // D5.4.3: neither side of the constructor/prototype cycle is
-            // published when the first allocating property store runs.
-            js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-            js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-            js_set_key_cstr(js_global_this_obj, "DOMException", ctor_root.get());
-        }
-
-        // globalThis.Option constructor (HTMLOptionElement)
-        {
-            extern Item js_option_new(Item text, Item value);
-            js_install_native_constructor(js_global_this_obj, "Option",
-                js_option_new);
-        }
-
-        // OffscreenCanvas is a normal replaceable global binding. Its native
-        // constructor supplies the legacy text-measurement compatibility path.
-        js_install_native_constructor(js_global_this_obj, "OffscreenCanvas",
-            js_offscreen_canvas_new);
-        js_canvas_install_offscreen_canvas_interface(js_get_key_cstr(
-            js_global_this_obj, "OffscreenCanvas"));
-
-        // Web Clipboard / Blob / File / ClipboardItem / ClipboardEvent /
-        // navigator.clipboard / navigator.permissions
-        {
-            extern void js_register_clipboard_globals(Item global_this);
-            js_register_clipboard_globals(js_global_this_obj);
+        for (int group = 0; group < JS_HOST_GROUP_COUNT; group++) {
+            js_install_host_global_group(js_global_this_obj, (JsHostGlobalGroup)group);
         }
 
         // ES spec: all standard global properties are non-enumerable
@@ -16420,6 +16603,10 @@ static void js_typed_array_base_reset() {
 // Get/create per-type prototype for a typed array element type.
 // Sets constructor → concrete constructor, BYTES_PER_ELEMENT, __proto__ → %TypedArray%.prototype
 extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
+    MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
+    if (library && library->typed_arrays && element_type >= 0 && element_type < JS_TYPED_ARRAY_TYPE_COUNT &&
+            get_type_id(library->typed_arrays[element_type].values[1]) == LMD_TYPE_MAP)
+        return library->typed_arrays[element_type].values[1];
     if (element_type < 0 || element_type >= JS_TYPED_ARRAY_TYPE_COUNT) return js_get_typed_array_base_proto();
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_per_type_proto_at(element_type).item != 0) {
