@@ -75,6 +75,13 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `host56`, release MVP units | 759/759 pass | Lambda fn/pn imports, rooted export cells, foreign map reads and native construction of MVP classes |
+| `host56`, focused normal and forced/poisoned GC | 92/92 each | Includes warm Lambda namespace admission and default class callable/construct capabilities |
+| `host55`, selected host fixtures | 49/49 pass | CLI is byte-identical to `host56`; includes both original Lambda import cases and two custom-element fixtures |
+| `host55`, import/custom-element fixtures with forced/poisoned GC | 4/4 pass | Original imports, original custom elements and frozen-constructor ownership |
+| `host55`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Same seven AUTO publication cases |
+| `host55`, replay of previously failing small fixtures | 27/32 pass; 5 fail | Both Lambda import failures and custom-element construction repaired; same selected population |
+| `host56`, canonical property/Function/Date/Array iterator/module slice | 3,114/3,114 pass | Union of the prior 2,382-case slice and 732 module/import/export cases; unchanged corpus and runner, formal MIR, no stripped mode |
 | `host45`, release MVP units | 756/756 pass | Includes retained loose-equality coercion and preparation of function enumeration storage |
 | `host45`, focused normal and forced/poisoned GC | 89/89 each | Includes coercion reentry, original throw identity, and unread inherited accessors |
 | `host45`, selected host fixtures | 45/45 pass | Same original fixtures and goldens as `host44` |
@@ -700,4 +707,84 @@ unchanged. All 2,382 cases in the selected canonical slice pass, including
 all four final admission failures; normal/forced-GC, runtime fixture and
 isolated Script results are recorded in the table. Full Lambda/Test262/JS
 baseline closure, the remaining host/environment/library work and performance
+acceptance remain open. Benchmark timing remains deferred.
+
+### Lambda imports and custom-element constructors
+
+The next migration increment reuses `load_script_mir_direct`, the canonical
+module registry and the existing Lambda procedure-to-Promise membrane
+(D7.2.1, D8.1.3v25). New helpers announced before implementation:
+`js_load_lambda_module`, extracted from the interpreter loader, and
+`prepare_lambda_module`, which publishes foreign exports into the existing
+precisely rooted module slabs. Lambda dependencies are not parsed as JS and
+have no JS body to instantiate or evaluate. Named imports, namespace imports,
+re-exports and dynamic imports share one source record and export-cell identity.
+
+The original Lambda namespace remains on its canonical descriptor. JS uses
+the existing module namespace exotic, with its own exact root and the same
+readonly/sorted export policy as JS modules. The callable adapter accepts Core
+exports only at module publication, preserving their compact ABI and invoking
+them through `js_call`/`fn_call_into`; the module slab owns the adapter rather
+than a new realm-wide cache (D5.3/D5.4.3, D6.2.2v2). Public `pn` exports keep
+the existing Promise scheduler and ordering. This does not add support for
+Lambda public variables beyond the shared namespace builder's current exports.
+
+Packed Lambda maps reuse `map_shape_field_to_item` for reads, while writes
+continue to require the existing owner/contract admission. Returned Lambda
+VMaps reuse the native data-map read path, preserving null versus a missing
+field. They do not change the representation of ordinary JS objects or Maps
+(D3.4.3v5, D3.4.7). Resting native errors read their owned fields through the
+existing `js_get_key_core` carrier path rather than losing their message in
+ordinary map/prototype lookup (D6.2.2v2).
+
+Custom-element registration previously cast MVP constructors to `JsFunction`
+and crashed in `js_fn_class_ensure`. The announced `_custom_element_class_name`
+helper selects the existing JS class association or MVP's private shape slots
+by callable ABI. Frozen constructors retain this internal association without
+an observable property, a new Container flag or a new native payload layout
+(D3.4.7, D5.3, D6.2.2v2). Validation includes constructor identity, duplicate
+registration, native `super()` construction, fields and GC.
+
+Checkpoint `host52` passes 758/758 MVP units, 91/91 focused normal and
+forced/poisoned-GC checks, 732/732 selected canonical module/import/export
+cases, and 198/205 isolated Script cases. Both original Lambda import fixtures
+pass. Custom-element construction no longer crashes, but `createElement` still
+selects the ordinary HTMLElement prototype; that integration mismatch is
+repaired by the follow-up below. These selected gates do not replace the
+complete baseline recount or the deferred performance gate.
+
+The DOM lookup called shared `js_is_callable`, whose MVP branch incorrectly
+required a non-null body pointer. Default class constructors instead dispatch
+through MVP class metadata. The capability query now reuses
+`mvp_lmd_is_callable`; calling a class still throws, and construction retains
+MVP's native-super/new-target protocol (D6.2.2v2). Shared
+`js_construct_value` also routes MVP constructors through that protocol before
+reading any JsFunction tail. This keeps native adapters and interpreter
+callbacks on the formal callable ABI.
+
+Checkpoint `host54` passes all 49 selected host fixtures (the previous 45,
+both Lambda import fixtures, the original custom-element fixture and the new
+frozen-constructor fixture). The four import/custom-element fixtures also pass
+with forced-every-allocation and poisoned GC. The new direct native-construction
+unit exposed the missing `js_construct_value` branch; its repair passes in
+`host55` and is reverified in `host56`. No original fixture, golden, Test262
+metadata or runner was changed to obtain these results.
+
+Final release pin `host56` has SHA-256
+`658edb6fe192a32157f22c95d4b6d54c9a4aca1f8cc05deaba37eac9135ca17c`.
+It is byte-identical to `host55`, whose host fixtures and isolated Script
+results are recorded above. The direct native-construction repair passes all
+759 MVP units and both 92-case focused runs. The 2,941 production inputs and
+1,045 verification inputs are unchanged. Its final canonical rerun passes all
+3,114 cases with no unresolved records. Exact commands, source/corpus hashes
+and the bit-identical CLI comparison are retained under the private pin.
+The four import/custom-element fixtures also pass explicit AST execution,
+checking the shared loader and the retained constructor-association path.
+The exception catalog reports zero violations; the callable census still
+fails its existing 38-case ratchet, unchanged from HEAD.
+
+The five remaining small replay failures are the two agent-state entries,
+direct eval with an object environment, and the CSS/large-JSON legacy contract
+cases. Large-library compilation/execution, AUTO publication, frontend
+overlays, the Unicode version decision, full baseline closure and performance
 acceptance remain open. Benchmark timing remains deferred.

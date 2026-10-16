@@ -149,7 +149,8 @@ Map* mvp_lmd_property_map(Item owner, bool writing, bool numeric_attributes) {
     }
     Map* map = owner.map;
     TypeMap* type = (TypeMap*)map->type;
-    return type && type->nominal && !type->js_meta &&
+    // packed Lambda maps share field reads; guest writes still require an MVP owner.
+    return type && (type->nominal || !writing) && !type->js_meta &&
         (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED ||
          map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR ||
          map->map_kind == MAP_KIND_ARRAYBUFFER || map->map_kind == MAP_KIND_DATAVIEW ||

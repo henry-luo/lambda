@@ -791,6 +791,89 @@ TEST_F(JsFormalMir, PublicModuleEntryReturnsLiveNamespace) {
     EXPECT_EQ(it2d(vmap_get_by_str(repeated.vmap, "answer")), 42);
 }
 
+TEST_F(JsFormalMir, LambdaImportsReuseCanonicalNamespaceAndRootedExportCells) {
+    create_dir("temp/mvp_modules");
+    write_text_file("temp/mvp_modules/formal-exports.ls",
+        "pub fn add(x, y) { x + y }\npub fn data() { {n: 42} }\n"
+        "pub fn record() { map([\"tick\",120,\"empty\",null,\"nested\",map([\"height\",2.5])]) }\n"
+        "pub pn later(value) { return value + 1 }\n");
+    write_text_file("temp/mvp_modules/formal-exports.txt", "null\n");
+    write_text_file("temp/mvp_modules/formal-reexports.mjs",
+        "export * from './formal-exports.ls';export {add as sum} from './formal-exports.ls';");
+    Item result = transpile_js_module_to_mir(&runtime, R"JS(
+import {add, data, later, record} from './formal-exports.ls';
+import * as ns from './formal-exports.ls';
+import {sum} from './formal-reexports.mjs';
+gc();
+let rejected=false;try{new add(1,2)}catch(e){rejected=e instanceof TypeError}
+export const good=add===ns.add&&add===sum&&add.name==='add'&&add.length===2&&
+    add(20,22)===42&&data().n===42&&record().tick===120&&record().empty===null&&
+    record().missing===undefined&&record().nested.height===2.5&&rejected&&Object.getPrototypeOf(ns)===null&&
+    !Object.isExtensible(ns)&&!Reflect.set(ns,'add',1)&&
+    Object.keys(ns).join(',')==='add,data,later,record'&&Object.prototype.toString.call(ns)==='[object Module]';
+export const pending=later(41).then(value=>{gc();return value===42&&ns.add===add});
+export const repeat=import('./formal-exports.ls').then(value=>value===ns&&value.add===add);
+)JS", "temp/mvp_modules/formal-entry.mjs");
+    ASSERT_FALSE(item_is_error(result));
+    RootFrame roots(2);
+    Rooted<Item> ns(roots, result), promise(roots, ItemNull);
+    EXPECT_EQ(js_get_key_cstr(ns.get(), "good").item, ITEM_TRUE);
+    for (const char* name : {"pending", "repeat"}) {
+        promise.set(js_get_key_cstr(ns.get(), name));
+        ASSERT_TRUE(js_promise_is(promise.get()));
+        auto* settled = (JsPromise*)promise.get().vmap;
+        ASSERT_EQ(settled->state, JS_PROMISE_FULFILLED);
+        EXPECT_EQ(settled->result.item, ITEM_TRUE);
+    }
+    ModuleDescriptor* foreign = module_get_for_runtime(&runtime, "temp/mvp_modules/formal-exports.ls");
+    ASSERT_NE(foreign, nullptr);
+    EXPECT_STREQ(foreign->source_lang, "lambda");
+    // the Lambda registry retains its Core Function, independently of the JS adapter.
+    Item original = module_namespace_get(foreign, "add");
+    ASSERT_EQ(get_type_id(original), LMD_TYPE_FUNC);
+    EXPECT_TRUE(function_has_abi(original.function, FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION));
+}
+
+TEST_F(JsFormalMir, WarmLambdaImportsValidateExportsBeforeEnteringTheImporter) {
+    ASSERT_FALSE(item_is_error(run("globalThis.importEffects=0")));
+    RootFrame roots(2);
+    Rooted<Item> original(roots, js_load_lambda_module(&runtime, "test/js/_lambda_data_map.ls")), ns(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(original.get()));
+    Item failed = transpile_js_module_to_mir(&runtime,
+        "import {absent} from './_lambda_data_map.ls';globalThis.importEffects++;",
+        "test/js/formal-missing-export.mjs");
+    ASSERT_TRUE(item_is_error(failed));
+    Item effects = run("importEffects");
+    ASSERT_FALSE(item_is_error(effects));
+    EXPECT_EQ(it2d(effects), 0);
+    ns.set(transpile_js_module_to_mir(&runtime,
+        "export {data_map as kept} from './_lambda_data_map.ls';", "test/js/formal-warm-export.mjs"));
+    ASSERT_FALSE(item_is_error(ns.get()));
+    Item exported = js_get_key_cstr(ns.get(), "kept");
+    ASSERT_EQ(get_type_id(exported), LMD_TYPE_FUNC);
+    EXPECT_TRUE(function_has_abi(exported.function, FN_ENTRY_ABI_MVP_LMD));
+    ModuleDescriptor* descriptor = module_get_for_runtime(&runtime, "test/js/_lambda_data_map.ls");
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->namespace_obj.item, original.get().item);
+}
+
+TEST_F(JsFormalMir, SharedCallCapabilityRecognizesDefaultClassConstructors) {
+    Item result = run("class Empty{};class Derived extends Empty{};[Empty,Derived]");
+    ASSERT_FALSE(item_is_error(result));
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    RootFrame roots(3);
+    Rooted<Item> constructors(roots, result), constructor(roots, ItemNull), instance(roots, ItemNull);
+    for (int index = 0; index < 2; index++) {
+        constructor.set(constructors.get().array->items[index]);
+        EXPECT_TRUE(js_has_call_capability(constructor.get()));
+        EXPECT_TRUE(js_is_callable(constructor.get()));
+        instance.set(js_construct_value(constructor.get(), NULL, 0, constructor.get(), NULL, true));
+        ASSERT_FALSE(item_is_error(instance.get()));
+        EXPECT_EQ(mvp_lmd_instanceof(instance.get(), constructor.get()).item, ITEM_TRUE);
+        EXPECT_TRUE(item_is_error(js_call_function_into(constructor.get(), make_js_undefined(), NULL, 0, &result_home)));
+    }
+}
+
 TEST_F(JsFormalMir, ChildRealmModulesRetainRegistryAndQueuedPolicy) {
     create_dir("temp/mvp_modules");
     write_text_file("temp/mvp_modules/child-identity.js",

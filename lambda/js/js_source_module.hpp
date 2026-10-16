@@ -65,6 +65,7 @@ struct JsSourceModuleOps {
     Runtime* (*ensure_runtime)(void* owner);
     Item (*to_string)(void* owner, Item value);
     Item (*error_value)(void* owner, Item error);
+    Item (*import_value)(void* owner, Item value);
 };
 struct JsSourceModuleRecord {
     Runtime* runtime;
@@ -88,6 +89,13 @@ struct JsSourceModuleRecord {
     uint32_t evaluation_ancestor;
     uint64_t async_evaluation_order;
     bool async_evaluation;
+    // foreign exports retain the canonical language namespace and use the
+    // same precise module cells and JS namespace exotic as source exports.
+    bool foreign_module;
+    NameEntry* foreign_entries;
+    void* foreign_module_state;
+    Item foreign_js_namespace;
+    bool foreign_namespace_registered;
 };
 
 // Existing resolution/source-cache services, promoted without a second loader.
@@ -97,6 +105,8 @@ void js_resolve_script_module_path(Runtime* runtime, const char* reference,
 char* js_load_script_source_from_cache(const char* path, const char* profile,
     const char* execution_mode, bool module_mode, size_t* out_length,
     InputResourcePolicy policy = INPUT_RESOURCE_ALLOW_NETWORK);
+bool jm_path_is_lambda_source(const char* path);
+Item js_load_lambda_module(Runtime* runtime, const char* path);
 
 Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* owner,
     const char* path, const char* source, size_t length, JsSourceModuleRecord** output);

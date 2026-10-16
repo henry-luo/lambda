@@ -5,6 +5,7 @@
 #include "../js_props.h"
 #include "../js_object_meta.h"
 #include "../js_host_hooks.h"
+#include "../js_source_module.hpp"
 #include "../js_runtime_state.hpp"
 #include "../../runtime/ast-core.hpp"
 #include "../../runtime/context_capsule.h"
@@ -502,7 +503,11 @@ Item mvp_lmd_dynamic_unwrap_function(Item function) {
 bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         int operation, Item* completion, JsPropertyDescriptor* descriptor) {
     if (!mvp_lmd_foreign_candidate(owner)) return false;
-    if (is_virtual_container_type_id(get_type_id(owner)) && !js_host_object_type(owner)) return false;
+    bool virtual_type = is_virtual_container_type_id(get_type_id(owner));
+    bool host = virtual_type && js_host_object_type(owner);
+    bool data_map = get_type_id(owner) == LMD_TYPE_VMAP && !host && !js_promise_is(owner) &&
+        !js_module_namespace_record(owner);
+    if (virtual_type && !host && !data_map) return false;
     *completion = ItemError;
     RootFrame roots(8);
     if (!roots.valid()) return true;
@@ -533,6 +538,12 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     JsPropertyLane lane = js_property_lane_for_canonical_key(name.get());
     switch (operation) {
     case LMD_PROP_GET: case LMD_PROP_CALLEE: {
+        // native Lambda VMaps and resting errors own fields outside the ordinary
+        // map payload and the JsClassMeta exotic callback table.
+        if (data_map || js_is_resting_error(object.get())) {
+            result.set(js_get_key_core(object.get(), name.get(), target.get()));
+            break;
+        }
         Item found = ItemNull;
         bool ready = js_dispatch_property_op(JS_EXOTIC_GET, object.get(), lane, name.get(),
             target.get(), ItemNull, ItemNull, false, &found);
@@ -635,6 +646,7 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
 Item mvp_lmd_dynamic_function_source(Item function) {
     Item underlying = mvp_lmd_dynamic_unwrap_function(function);
     if (underlying.item != function.item && get_type_id(underlying) == LMD_TYPE_FUNC &&
+            function_has_abi(underlying.function, FN_ENTRY_ABI_JS_FUNCTION) &&
             !((MvpLmdCallable*)function.function)->constructor) {
         String* source = js_fn_source_text((JsFunction*)underlying.function);
         return source ? Item{.item = s2it(source)} : Item{.item = ITEM_JS_UNDEFINED};
@@ -649,25 +661,28 @@ Item mvp_lmd_dynamic_function_source(Item function) {
     return field ? map_shape_field_to_item(properties->data, field)
         : Item{.item = ITEM_JS_UNDEFINED};
 }
-Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
-    if (get_type_id(function) != LMD_TYPE_FUNC ||
-            !function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION)) return function;
+Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function, bool module_export) {
+    if (get_type_id(function) != LMD_TYPE_FUNC) return function;
+    bool js = function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION);
+    if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
+            js_has_call_capability(function))) return function;
     // native jobs and array slots can enter without a property membrane. Their
     // existing home global, not the current caller, determines a known realm.
-    MvpLmdProgram* home = mvp_lmd_program_for_global(program, ((JsFunction*)function.function)->home_global);
+    MvpLmdProgram* home = js ? mvp_lmd_program_for_global(program, ((JsFunction*)function.function)->home_global) : NULL;
     if (home) program = home;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, function), wrapper(roots, ItemNull), length(roots, ItemNull);
     MvpLmdDynamic* state = dynamic_state(program);
     if (!state) return dynamic_fail(LMD_MVP_MEMORY);
-    JsFunction* internal = (JsFunction*)target.get().function;
-    if (get_type_id(internal->properties_map) == LMD_TYPE_MAP) {
+    // compact Core Functions have no JsFunction tail; only shared JS callables own the cache.
+    JsFunction* internal = js ? (JsFunction*)target.get().function : NULL;
+    if (internal && get_type_id(internal->properties_map) == LMD_TYPE_MAP) {
         Map* properties = internal->properties_map.map;
         ShapeEntry* cached = typemap_hash_lookup_key((TypeMap*)properties->type, state->wrapper_key);
         if (cached) return map_shape_field_to_item(properties->data, cached);
     }
-    int arity = js_fn_formal_length(internal);
+    int arity = internal ? js_fn_formal_length(internal) : target.get().function->arity;
     if (arity < 0) arity = js_fn_param_count(internal);
     wrapper.set(mvp_lmd_native_function(program, state, dynamic_call,
         (uint8_t)(arity > 255 ? 255 : arity)));
@@ -678,20 +693,21 @@ Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
     wrapper.get().function->closure_env = environment;
     wrapper.get().function->closure_field_count = 1;
     MvpLmdCallable* callable = (MvpLmdCallable*)wrapper.get().function;
-    bool ast = js_fn_body_kind(internal) == JS_FUNCTION_BODY_AST;
+    bool ast = internal && js_fn_body_kind(internal) == JS_FUNCTION_BODY_AST;
     callable->def = ast ? (AstNode*)js_fn_ast_function(internal) : NULL;
     callable->non_constructible = ast ? (internal->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_ASYNC_GEN)) != 0
-        : internal->construct == NULL;
-    callable->native_constructor = !ast && internal->construct != NULL;
+        : !internal || internal->construct == NULL;
+    callable->native_constructor = internal && !ast && internal->construct != NULL;
     callable->custom_new_target = callable->native_constructor;
     Item ready = mvp_lmd_function_prepare(wrapper.get());
     if (item_is_error(ready)) return ready;
-    Item named = mvp_lmd_named_set(wrapper.get(), "name",
-        internal->name ? Item{.item = s2it(internal->name)} : js_make_string(""),
+    Item label = internal ? (internal->name ? Item{.item = s2it(internal->name)} : js_make_string(""))
+        : js_make_string(target.get().function->name ? target.get().function->name : "");
+    Item named = mvp_lmd_named_set(wrapper.get(), "name", label,
         JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
     if (item_is_error(named)) return named;
     length.set(Item{.item = i2it(arity)});
-    if (!ast) {
+    if (internal && !ast) {
         // bound native code has a dispatch arity independent of its published length.
         JsPropertyDescriptor descriptor = {};
         if (js_get_own_property_descriptor(target.get(), "length", 6, &descriptor) &&
@@ -702,6 +718,9 @@ Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
     Item defined = mvp_lmd_named_set(wrapper.get(), "length", length.get(),
         JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
     if (item_is_error(defined)) return defined;
+    // the source-module slab retains Core adapters. Keeping another realm-wide
+    // cache would extend the lifetime of their Lambda captures unnecessarily.
+    if (!internal) return wrapper.get();
     // This hidden slot uses only Lambda's shared map storage. In particular,
     // it must not initialize a second LJS realm for an AST-only host client.
     if (get_type_id(internal->properties_map) != LMD_TYPE_MAP) {
@@ -754,8 +773,9 @@ static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t 
     if (count > INT_MAX) return dynamic_fail(LMD_MVP_RANGE);
     MvpLmdDynamic* state = (MvpLmdDynamic*)((MvpLmdNativeCallable*)self.function)->state;
     Item underlying = mvp_lmd_dynamic_unwrap_function(self);
-    JsFunction* function = (JsFunction*)underlying.function;
-    if (js_fn_body_kind(function) == JS_FUNCTION_BODY_AST)
+    JsFunction* function = function_has_abi(underlying.function, FN_ENTRY_ABI_JS_FUNCTION)
+        ? (JsFunction*)underlying.function : NULL;
+    if (function && js_fn_body_kind(function) == JS_FUNCTION_BODY_AST)
         return js_interp_call_host_function(&state->ops, self, function, receiver, args, (int)count, target);
     // Native callbacks such as Promise resolving functions already belong to
     // this Context's shared service; they must never create another JS realm.

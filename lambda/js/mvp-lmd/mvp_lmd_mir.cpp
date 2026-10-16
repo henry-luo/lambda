@@ -750,7 +750,8 @@ NameRef mvp_lmd_internal_name(MvpLmdInternalName name) {
         "MVP [[PrimitiveValue]]", "MVP [[DateValue]]", "MVP [[ErrorData]]",
         "MVP [[ParameterMap]]", "MVP [[RegExpSource]]", "MVP [[RegExpFlags]]",
         "RegExp iterator matcher", "RegExp iterator string", "RegExp iterator global",
-        "RegExp iterator unicode", "RegExp iterator done", "MVP [[IteratorNext]]"};
+        "RegExp iterator unicode", "RegExp iterator done", "MVP [[IteratorNext]]",
+        "MVP [[CustomElementName]]"};
     static_assert(sizeof(names) / sizeof(names[0]) == LMD_INTERNAL_NAME_COUNT);
     static const ContextCapsuleOps ops = {"js-mvp-internal-names", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
         sizeof(NameRef) * LMD_INTERNAL_NAME_COUNT, NULL, NULL, NULL};
@@ -12979,7 +12980,8 @@ static const JsSourceModuleOps mvp_lmd_source_module_ops = {
     mvp_module_instantiate, mvp_module_evaluate, mvp_lmd_same_value, mvp_module_import_meta, mvp_module_error,
     mvp_lmd_prepare_module_realm,
     [](void*, Item value) { return mvp_lmd_primitive_to_string(value); },
-    [](void* owner, Item error) { return mvp_lmd_caught_value(((MvpLmdProgram*)owner)->library, error); }
+    [](void* owner, Item error) { return mvp_lmd_caught_value(((MvpLmdProgram*)owner)->library, error); },
+    [](void* owner, Item value) { return mvp_lmd_dynamic_wrap_function((MvpLmdProgram*)owner, value, true); }
 };
 Item mvp_lmd_dynamic_import(MvpLmdProgram* program, Item specifier, const char* reference) {
     program = mvp_lmd_program_realm(program);

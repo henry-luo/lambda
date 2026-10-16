@@ -1986,12 +1986,23 @@ helper and the shared IdentifierName validator. Static methods omit their
 class-only prefix; native names that cannot form an identifier use anonymous
 native-function syntax (**D6.2.2v2, D8.1.3v25**).
 
-**Latest verification:** `host45` passes 756/756 MVP units, 89/89 focused checks
-normally and with forced/poisoned GC, all 45 selected host fixtures, and all
-2,382 selected canonical property/Function/Date/Array iterator cases. The prior
-17 failures in that Test262 slice are repaired. Script integration remains
-198/205, with seven known AUTO publication failures; the separate replay of
-previously failing small fixtures is 24/32. This is not a whole-suite recount.
+Lambda-source imports now reuse the existing Lambda loader, canonical module
+registry, precise export slabs and procedure-to-Promise scheduler. JS namespace
+imports keep the existing module exotic while the native Lambda namespace
+stays intact (**D5.3/D5.4.3, D7.2.1, D8.1.3v25**). Native callable adapters
+preserve Core Function layout, packed Lambda maps share field reads, and
+Lambda VMaps/native errors reuse their existing carrier reads. Custom-element
+constructors use ABI-aware private associations; shared call/construct entry
+points recognize default MVP classes (**D3.4.7, D6.2.2v2**).
+
+**Latest verification:** `host56` passes 759/759 MVP units and 92/92 focused
+checks normally and with forced/poisoned GC. Its CLI is byte-identical to
+`host55`, which passes all 49 selected host fixtures and four import/custom-
+element fixtures with forced/poisoned GC. Script integration remains 198/205,
+with seven known AUTO publication failures; the separate replay of previously
+failing small fixtures improves to 27/32. The final `host56` pin passes all
+3,114 selected canonical property/Function/Date/Array iterator/module cases.
+This is not a whole-suite recount.
 The implementation plan records exact pins and remaining work. The earlier
 complete isolated fixture diagnostic remains 461/507 passes, 41 failures and
 five outer timeouts; focused fixes are not added to that aggregate. Full

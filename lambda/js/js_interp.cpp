@@ -7490,11 +7490,6 @@ Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         JS_INTERP_SOURCE_MODULE, strict, false, result_home);
 }
 
-static bool js_interp_is_lambda_module_path(const char* filename) {
-    size_t length = filename ? strlen(filename) : 0;
-    return length >= 3 && strcmp(filename + length - 3, ".ls") == 0;
-}
-
 static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     if (runtime && !input_resource_policy_admits(runtime->resource_policy, filename))
         return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
@@ -7513,30 +7508,10 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
         mem_free(canonical_filename);
         return existing;
     }
-    if (js_interp_is_lambda_module_path(module_filename)) {
-        // Publish the loading record directly into the shared registry. This
-        // keeps Lambda's compiler and JS linker on one descriptor rather than
-        // registering a temporary JS namespace and replacing it afterward.
-        runtime->js_runtime_used = true;
-        // An outer JS turn can initialize before its static imports are
-        // linked. Attach only the Lambda scheduler here; reinitializing the
-        // event loop would discard callbacks already queued by that turn.
-        js_event_loop_attach_lambda_scheduler();
-        ModuleDescriptor* loading = module_register_loading_with_namespace_ops_for_runtime(
-            runtime, module_filename, "lambda", NULL);
-        if (!loading) {
-            mem_free(canonical_filename);
-            return ItemError;
-        }
-        Script* lambda_script = load_script_mir_direct(runtime, module_filename, NULL, true);
-        ModuleDescriptor* lambda_module = lambda_script
-            ? module_get_for_runtime(runtime, lambda_script->reference) : NULL;
-        if (!lambda_module) {
-            mem_free(canonical_filename);
-            return js_throw_reference_error(js_make_string("Cannot load Lambda module"));
-        }
+    if (jm_path_is_lambda_source(module_filename)) {
+        Item result = js_load_lambda_module(runtime, module_filename);
         mem_free(canonical_filename);
-        return lambda_module->namespace_obj;
+        return result;
     }
     size_t source_length = 0;
     char* source = js_load_script_source_from_cache(

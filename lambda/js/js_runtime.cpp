@@ -1390,7 +1390,8 @@ extern "C" bool js_has_call_capability(Item target) {
         Function* lambda_fn = target.function;
         // D6.2.2v2: MVP has no JsFunction tail; use its published entry ABI.
         if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD))
-            return lambda_fn->ptr != NULL;
+            // default class constructors dispatch through class metadata, without a body pointer.
+            return mvp_lmd_is_callable(target);
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
@@ -14495,6 +14496,14 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
     JS_ROOTS(roots, callee_root, callee, target_root, new_target.item ? new_target : callee);
     TypeId type = get_type_id(callee_root.get());
     if (type == LMD_TYPE_FUNC) {
+        if (function_has_abi(callee_root.get().function, FN_ENTRY_ABI_MVP_LMD)) {
+            // allocation, derived super() and new.target belong to MVP's own construct protocol.
+            if (!mvp_lmd_is_constructor(callee_root.get()) || !mvp_lmd_is_constructor(target_root.get()))
+                return js_throw_type_error("is not a constructor");
+            Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
+                callee_root.get(), make_js_undefined(), args, arg_count, target_root.get()));
+            return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
+        }
         JsFunction* fn = (JsFunction*)callee_root.get().function;
         if (!fn || !fn->construct) {
             return js_throw_type_error("is not a constructor");

@@ -36,6 +36,7 @@
 #include "js_function.hpp"
 #include "js_props.h"
 #include "js_property_attrs.h"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../dom/dom_ops.h"
 #include "../input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
@@ -52,6 +53,36 @@ extern "C" const void* radiant_dom_selection_host_type(void);
 
 JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (void), js_throw_type_error, ("Illegal constructor"))
 
+static Item _custom_element_class_name(Item constructor, Item name = make_js_undefined()) {
+    if (get_type_id(constructor) != LMD_TYPE_FUNC) return make_js_undefined();
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, constructor), value(roots, name);
+    bool write = value.get().item != ITEM_JS_UNDEFINED;
+    if (function_has_abi(owner.get().function, FN_ENTRY_ABI_MVP_LMD)) {
+        NameRef internal = mvp_lmd_internal_name(LMD_INTERNAL_CUSTOM_ELEMENT_NAME);
+        if (!internal) return ItemError;
+        Item key = {.item = s2it(internal)};
+        Item present = mvp_lmd_private_element(owner.get(), key, ItemNull, LMD_PRIVATE_HAS);
+        if (item_is_error(present)) return present;
+        // registration is engine-owned and remains valid on frozen constructors.
+        return !write && present.item == ITEM_FALSE ? make_js_undefined() :
+            mvp_lmd_private_element(owner.get(), key, value.get(), !write ? LMD_PRIVATE_GET :
+                present.item == ITEM_TRUE ? LMD_PRIVATE_SET : LMD_PRIVATE_ADD);
+    }
+    if (!function_has_abi(owner.get().function, FN_ENTRY_ABI_JS_FUNCTION)) return make_js_undefined();
+    auto* function = (JsFunction*)owner.get().function;
+    if (!write) {
+        const JsClassData* data = js_fn_class(function);
+        return data ? data->custom_element_name : make_js_undefined();
+    }
+    JsClassData* data = js_fn_class_ensure(function);
+    if (!data) return ItemError;
+    data->custom_element_name = value.get();
+    js_function_root_item_if_needed(function, &data->custom_element_name);
+    return value.get();
+}
+
 static Item _html_element_constructor(void) {
     RootFrame roots(5);
     Rooted<Item> target_root(roots, js_get_new_target());
@@ -61,9 +92,8 @@ static Item _html_element_constructor(void) {
     if (get_type_id(target_root.get()) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Illegal constructor");
     }
-    JsFunction* target = (JsFunction*)target_root.get().function;
-    const JsClassData* class_data = js_fn_class(target);
-    name_root.set(class_data->custom_element_name);
+    name_root.set(_custom_element_class_name(target_root.get()));
+    if (item_is_error(name_root.get())) return name_root.get();
     if (get_type_id(name_root.get()) != LMD_TYPE_STRING) {
         return js_throw_type_error("Illegal constructor");
     }
@@ -394,26 +424,18 @@ static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
         return _custom_elements_dom_exception("NotSupportedError",
             "Custom element name is already defined");
     }
-    JsClassData* class_data = nullptr;
-    if (get_type_id(constructor_root.get()) == LMD_TYPE_FUNC) {
-        JsFunction* function = (JsFunction*)constructor_root.get().function;
-        class_data = js_fn_class_ensure(function);
-        if (!class_data) return ItemError;
-        if (get_type_id(class_data->custom_element_name) == LMD_TYPE_STRING) {
-            return _custom_elements_dom_exception("NotSupportedError",
-                "Custom element constructor is already registered");
-        }
+    stored_root.set(_custom_element_class_name(constructor_root.get()));
+    if (item_is_error(stored_root.get())) return stored_root.get();
+    if (get_type_id(stored_root.get()) == LMD_TYPE_STRING) {
+        return _custom_elements_dom_exception("NotSupportedError",
+            "Custom element constructor is already registered");
     }
+    // HTMLElement's native super() reads this private association by ABI.
+    stored_root.set(_custom_element_class_name(constructor_root.get(), name_root.get()));
+    if (item_is_error(stored_root.get())) return stored_root.get();
     js_set_key_default(record_root.get(), js_name_item("constructor"),
         constructor_root.get());
     dom_custom_elements_registry_changed();
-    if (class_data) {
-        // The HTMLElement constructor resolves its local name from this
-        // internal class association during derived `super()` construction.
-        class_data->custom_element_name = name_root.get();
-        JsFunction* function = (JsFunction*)constructor_root.get().function;
-        js_function_root_item_if_needed(function, &class_data->custom_element_name);
-    }
     waiters_root.set(js_get_key_default(record_root.get(), js_name_item("waiters")));
     if (get_type_id(waiters_root.get()) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(waiters_root.get());
