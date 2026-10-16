@@ -230,6 +230,13 @@ ImageStatus image_tiff_decode(ImageOperation *op, const ImageSource *source,
         TIFFClose(tiff);
         return op->error->code;
     }
+    uint16_t compression = COMPRESSION_NONE;
+    TIFFGetFieldDefaulted(tiff, TIFFTAG_COMPRESSION, &compression);
+    // the RGBA reader cannot consume 12-bit samples; the bundled TIFF profile omits JPEG12.
+    if (result->info.bit_depth == 12 && compression == COMPRESSION_JPEG) {
+        TIFFClose(tiff);
+        return image_fail(op, IMAGE_UNSUPPORTED_FEATURE, "12-bit JPEG-compressed TIFF is not enabled");
+    }
     uint32_t width = result->info.width, height = result->info.height, tw, th;
     image_target_size(&result->info, options, &tw, &th);
     if (options->mode == IMAGE_DECODE_THUMBNAIL && (tw < width || th < height)) {

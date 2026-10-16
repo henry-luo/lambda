@@ -690,14 +690,15 @@ TEST(ImageIO, RowEncoderMatchesPixelsAndPreservesCallbackFailure) {
     EXPECT_EQ(encoded.data, nullptr);
 }
 
-static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t red, bool tiled) {
+static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t red, bool tiled,
+                            uint16_t compression = COMPRESSION_LZW) {
     TIFFSetField(tiff, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tiff, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tiff, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tiff, TIFFTAG_BITSPERSAMPLE, 8);
     TIFFSetField(tiff, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tiff, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-    TIFFSetField(tiff, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tiff, TIFFTAG_COMPRESSION, compression);
     uint8_t pixels[32 * 32 * 3] = {};
     for (size_t i = 0; i < sizeof(pixels); i += 3)
         pixels[i] = red;
@@ -709,12 +710,49 @@ static bool write_tiff_page(TIFF *tiff, uint32_t width, uint32_t height, uint8_t
                 if (TIFFWriteTile(tiff, pixels, x, y, 0, 0) < 0)
                     return false;
     } else {
-        TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, 4);
+        // JPEG strips must contain a whole eight-row MCU band.
+        TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, compression == COMPRESSION_JPEG ? 8 : 4);
         for (uint32_t y = 0; y < height; y++)
             if (TIFFWriteScanline(tiff, pixels, y, 0) < 0)
                 return false;
     }
     return TIFFWriteDirectory(tiff) != 0;
+}
+TEST(ImageIO, TiffJpeg8AndUnsupportedJpeg12) {
+    ImageFixture fixture;
+    ImageDecoded image = {};
+    ImageError error = {};
+    for (bool tiled : {false, true}) {
+        SCOPED_TRACE(tiled);
+        const char *path = tiled ? "temp/image-io-tests/jpeg-tiled.tiff"
+                                 : "temp/image-io-tests/jpeg-strips.tiff";
+        TIFF *tiff = TIFFOpen(path, "w");
+        ASSERT_NE(tiff, nullptr);
+        ASSERT_TRUE(write_tiff_page(tiff, 32, 24, 128, tiled, COMPRESSION_JPEG));
+        TIFFClose(tiff);
+        ASSERT_EQ(image_io_decode_path(NULL, path, NULL, &image, &error), IMAGE_OK) << error.message;
+        ASSERT_EQ(image.width, 32u);
+        ASSERT_EQ(image.height, 24u);
+        for (size_t i = 0; i < image.size; i += 4) {
+            EXPECT_NEAR(image.pixels[i], 128, 3);
+            EXPECT_NEAR(image.pixels[i + 1], 0, 3);
+            EXPECT_NEAR(image.pixels[i + 2], 0, 3);
+            EXPECT_EQ(image.pixels[i + 3], 255);
+        }
+        image_decoded_dispose(&image);
+    }
+    // stored JPEG12 data remains identifiable without linking its encoder/decoder adapter.
+    const char *path = "test/input/image/tiff/jpeg12-gray.tiff";
+    ImageInfo info = {};
+    ASSERT_EQ(image_io_probe_path(NULL, path, &info, &error), IMAGE_OK) << error.message;
+    EXPECT_EQ(info.bit_depth, 12u);
+    EXPECT_EQ(info.width, 32u);
+    EXPECT_EQ(info.height, 24u);
+    EXPECT_EQ(image_io_decode_path(NULL, path, NULL, &image, &error), IMAGE_UNSUPPORTED_FEATURE);
+    EXPECT_EQ(error.format, IMAGE_CODEC_TIFF);
+    EXPECT_STREQ(error.operation, "decode");
+    EXPECT_NE(strstr(error.message, "12-bit JPEG"), nullptr);
+    EXPECT_EQ(image.pixels, nullptr);
 }
 TEST(ImageIO, TiffPagesTilesAndReducedSubIfds) {
     ImageFixture fixture;

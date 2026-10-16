@@ -515,7 +515,7 @@
       "lang": "c17",
       "pic": true,
       "single_project": true,
-      "optimize": "Speed",
+      "optimize": "Size",
       "source_files": [
         "build_temp/image-config/aom_build_config.c",
         "lib/image/giflib/dgif_lib.c",
@@ -751,19 +751,14 @@
         "lib/image/libtiff/libtiff/tif_getimage.c",
         "lib/image/libtiff/libtiff/tif_hash_set.c",
         "lib/image/libtiff/libtiff/tif_jpeg.c",
-        "lib/image/libtiff/libtiff/tif_jpeg_12.c",
-        "lib/image/libtiff/libtiff/tif_luv.c",
         "lib/image/libtiff/libtiff/tif_lzw.c",
-        "lib/image/libtiff/libtiff/tif_next.c",
         "lib/image/libtiff/libtiff/tif_open.c",
         "lib/image/libtiff/libtiff/tif_packbits.c",
-        "lib/image/libtiff/libtiff/tif_pixarlog.c",
         "lib/image/libtiff/libtiff/tif_predict.c",
         "lib/image/libtiff/libtiff/tif_print.c",
         "lib/image/libtiff/libtiff/tif_read.c",
         "lib/image/libtiff/libtiff/tif_strip.c",
         "lib/image/libtiff/libtiff/tif_swab.c",
-        "lib/image/libtiff/libtiff/tif_thunder.c",
         "lib/image/libtiff/libtiff/tif_tile.c",
         "lib/image/libtiff/libtiff/tif_version.c",
         "lib/image/libtiff/libtiff/tif_warning.c",
@@ -1041,15 +1036,6 @@
           ],
           "build_options": [
             "-msse4.1"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/**.c",
-            "lib/image/libavif/**.c"
-          ],
-          "build_options": [
-            "-Os"
           ]
         }
       ],
@@ -7615,12 +7601,8 @@
           "HOST_BIGENDIAN": "0",
           "CCITT_SUPPORT": "1",
           "JPEG_SUPPORT": "1",
-          "LOGLUV_SUPPORT": "1",
           "LZW_SUPPORT": "1",
-          "NEXT_SUPPORT": "1",
           "PACKBITS_SUPPORT": "1",
-          "PIXARLOG_SUPPORT": "1",
-          "THUNDER_SUPPORT": "1",
           "ZIP_SUPPORT": "1",
           "STRIPCHOP_DEFAULT": "TIFF_STRIPCHOP",
           "SUBIFD_SUPPORT": "1",
@@ -7647,8 +7629,6 @@
           "HAVE_ASSERT_H": "1",
           "HAVE_FCNTL_H": "1",
           "HAVE_SYS_TYPES_H": "1",
-          "HAVE_JPEGTURBO_DUAL_MODE_8_12": "1",
-          "LIBJPEG_12_PATH": "\"\"",
           "PACKAGE": "\"LibTIFF Software\"",
           "PACKAGE_BUGREPORT": "\"tiff@lists.osgeo.org\"",
           "PACKAGE_NAME": "\"LibTIFF Software\"",

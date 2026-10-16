@@ -4,6 +4,14 @@
 
 **Status:** implementation authorized by the user on 2026-10-15. The common native API, Lambda/Radiant migration, eight readers, six writers, and thumbnail planner are implemented. The 2026-10-16 decoder-only AVIF profile retires AVIF encoding to reduce native binary size; validation and supported subsets are recorded in [the implementation record](impl/Lib_Image_Impl.md).
 
+The 2026-10-16 size profile compiles all image codecs with size optimization
+and excludes TIFF JPEG12, PixarLog, LogLuv, NeXT, and ThunderScan. Ordinary
+8-bit JPEG-in-TIFF, Deflate, LZW, PackBits, and CCITT Fax remain. JPEG12's
+specialist GeoTIFF use and the complete dependency/build inventory are recorded
+in [the image build review](lib/Lib_Image.c). The byte-codec boundary remains
+**D7.1.2v2**; JPEG12 pixel requests return an explicit checked-channel error
+under **S7.4.4**. No formal ruling changes are introduced.
+
 **Confirmed source policy (2026-10-15):** the user directs that official codec source be imported under `./lib/image/` and modified directly, following the local-source approach of `lib/re2/`. Separate vendor patch files are not required for this image-library work.
 
 **Confirmed build policy (2026-10-15):** image sources, generated feature headers, CPU/platform selection, and linking are declared only in `build_lambda_config.json`. The ordinary Lambda build compiles the explicit image I/O source subset into one static archive. All upstream CMake and related build configurations are removed; no separate codec build system or installed-codec prefix is used (**D7.1.1**, **D7.1.6–D7.1.7v6**).
