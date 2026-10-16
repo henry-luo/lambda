@@ -1,0 +1,15 @@
+{
+  "name":"Finder native drag cancellation survives collecting Lambda callbacks",
+  "html":"test/demo/finder/finder.ls",
+  "env":[{"key":"LAMBDA_GC_FORCE_EVERY","value":"1"},{"key":"LAMBDA_GC_POISON_FREED","value":"1"}],
+  "viewport":{"width":1100,"height":720},
+  "events":[
+    {"type":"script","js":"globalThis.finderDropCount=0;document.getElementById('finder').addEventListener('drop',e=>{finderDropCount++;e.preventDefault();e.stopImmediatePropagation()},true)"},
+    {"type":"drag_and_drop","target":{"selector":"[data-name='Welcome.md']"},"to_target":{"selector":"[data-name='Assets']"}},
+    {"type":"assert_script","js":"finderDropCount===1"},
+    {"type":"assert_text","target":{"selector":"#error-text"},"equals":""},
+    {"type":"assert_script","js":"document.querySelector('[data-name=\"Welcome.md\"]')!==null && document.getElementById('finder').getAttribute('data-dragging')==='false'"},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

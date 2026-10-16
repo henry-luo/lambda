@@ -490,6 +490,10 @@ S2.2.2v2 + S8.2.2v3 (spec v52.0.0). Surfaced by Java `.properties` input, whose
 
 ### C2. Truthiness of literals (2026-07-03) — RESOLVED: falsy = {null, false, error, ""}
 
+> **Historical error rule superseded 2026-10-16.** C2.4 and **S3.1v2–S3.5**
+> remove errors from truthiness; the July discussion below records the former
+> decision. Other truthiness choices are unchanged.
+
 **Decision (designer ruling):**
 
 1. **All numbers are truthy** — including `0` and `nan`. The C family treating 0 as
@@ -595,6 +599,34 @@ model.
 4. Implementation delta vs. current behavior is minimal: only `""` changes (from
    falsy-because-null to falsy-as-string, pending C1's literal mechanics); `0`,
    `nan`, `[]`, `{}`, elements already behave as ruled.
+
+#### C2.4 Errors have no truth value (2026-10-16) — supersedes the error part of C2
+
+**Decision (USER); implementation pending.** Under **S3.1v2–S3.5**, the ordinary
+falsy values are `null`, `false`, and `""`. Errors are neither truthy nor falsy.
+When `and`, `or`, `not`, or an `if` expression must inspect an error, that
+expression yields the same error instead of selecting a successful value.
+`if (e) a else b` evaluates `e` once and evaluates neither branch on error.
+Normal short-circuiting still applies: `true or error("unused")` never evaluates
+the error constructor. No implicit return from the enclosing function is added
+(**S7.7.1**); explicit postfix propagation remains **S7.6.3v2**.
+
+**Reason.** `expr or default` is routinely written for absence and empty input.
+Having it also erase a failed conversion or read conceals a materially different
+outcome. **S7.5.3v2** assigns that recovery to an explicit handler or type-directed
+branch. Simply making errors truthy was rejected: it would make a failed
+condition enter the successful branch. The tag-based classification invariant
+is retained as **S3.2v2 / SI9v2**, with an error outcome alongside true and false.
+
+**Scope.** This decision settles logical operators and `if` expressions. The
+same-day follow-up [C8.8](Lambda_Semantics_Formal2.md#c88-comparisons-preserve-errors-recursively-2026-10-16-user)
+adopts error-preserving comparisons, including recursive container equality
+with decisive-mismatch short-circuiting (**S5.1.1v2–S5.1.5**), and explicitly
+retains total sorting (**S6.2**). Collection-predicate result policy remains
+open. Metadata inspection, printing, explicit handling/propagation and
+container retention remain available (**S7.4.4, S7.6, S7.9.1, S7.9.3–S7.9.4**).
+The acknowledgment, migration and acceptance cases are recorded in
+[TE-22](Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user).
 
 ### C3. Integer overflow and the numeric model (2026-07-03) — RESOLVED: 53-bit symmetric `int` promoting to float; Go-aligned machine tier
 

@@ -3148,7 +3148,9 @@ static DisplayValue resolve_display_value_raw(void* child,
         }
         if (dom_elem && !has_specified_display && !has_css_all_reset && !is_mathml &&
             dom_elem->display.inner != CSS_VALUE_NONE &&
-            dom_elem->display.inner != 0 && dom_elem->styles_resolved()) {
+            dom_elem->display.inner != 0 && dom_elem->styles_resolved() &&
+            !dom_elem->needs_style_recompute()) {
+            // a removed display declaration must not reuse the pre-mutation formatting context.
             // CSS 2.1 §9.7: Even pre-resolved elements must be blockified when
             return needs_blockify ? blockify_display(dom_elem->display) : dom_elem->display;
         }

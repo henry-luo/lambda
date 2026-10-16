@@ -985,8 +985,9 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
             if (text && *text) {
                 CssEnum white_space = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT
                     ? get_white_space_value(node) : CSS_VALUE_NORMAL;
-                bool retained_space = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
-                    !layout_white_space_collapses(white_space);
+                bool retained_space = mode == LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE ||
+                    (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+                     !layout_white_space_collapses(white_space));
                 uint32_t edge = 0;
                 const unsigned char* end = text + strlen((const char*)text);
                 while (text < end) {
@@ -1029,7 +1030,7 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
                 if (pending_before || pending_after || layout_is_shadow_slot(node)) return 0xFFFC;
             }
             if ((display.outer == CSS_VALUE_INLINE ||
-                 (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+                 (mode != LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE &&
                   display.outer == CSS_VALUE_CONTENTS)) &&
                 !layout_intrinsic_element_is_atomic_inline(elmt) &&
                 elmt->tag() != MARKUP_NAME_BR) {
@@ -1047,13 +1048,17 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
     return 0;
 }
 
-static uint32_t adjacent_inline_codepoint(DomNode* node, bool backwards,
-        LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE) {
+uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
+        LayoutInlineTextEdgeMode mode, DomNode** common_ancestor) {
+    if (common_ancestor) *common_ancestor = nullptr;
     while (node) {
         DomNode* sibling = backwards ? node->prev_sibling : node->next_sibling;
         if (sibling) {
             uint32_t cp = layout_inline_text_edge_codepoint(sibling, backwards, mode);
-            if (cp) return cp;
+            if (cp) {
+                if (common_ancestor) *common_ancestor = node->parent;
+                return cp;
+            }
         }
         DomNode* parent = node->parent;
         if (!parent || !parent->is_element()) break;
@@ -1062,7 +1067,7 @@ static uint32_t adjacent_inline_codepoint(DomNode* node, bool backwards,
             layout_ruby_annotation_node(parent)) break;
         CssEnum parent_display = resolve_display_value(parent).outer;
         if (parent_display != CSS_VALUE_INLINE &&
-            !(mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+            !(mode != LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE &&
               parent_display == CSS_VALUE_CONTENTS)) break;
         node = parent;
     }
@@ -1070,7 +1075,19 @@ static uint32_t adjacent_inline_codepoint(DomNode* node, bool backwards,
 }
 
 static uint32_t peek_next_inline_codepoint(DomNode* node) {
-    return adjacent_inline_codepoint(node, false);
+    return layout_adjacent_inline_codepoint(node, false);
+}
+
+bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
+        DomNode* node, bool before) {
+    DomNode* ancestor = nullptr;
+    uint32_t neighbor = layout_adjacent_inline_codepoint(node, before,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &ancestor);
+    // the shared boundary uses its common ancestor's wrap mode; glue at
+    // either atomic edge still forbids a break, while an actual space permits it.
+    DomNode* owner = ancestor ? ancestor : (node ? node->parent : nullptr);
+    return layout_atomic_wrap_neighbor_allows(neighbor) &&
+        get_text_wrap_mode_value(owner, lycon) != CSS_VALUE_NOWRAP;
 }
 
 /**
@@ -1677,15 +1694,6 @@ static inline bool ws_collapse_spaces(CssEnum ws) {
 }
 
 /**
- * Check if newlines should be collapsed (treated as spaces).
- * Returns true for: normal, nowrap
- * Returns false for: pre, pre-wrap, pre-line, break-spaces
- */
-static inline bool ws_collapse_newlines(CssEnum ws) {
-    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP || ws == 0;
-}
-
-/**
  * Check if a white-space value is concrete (not inherit/initial/unset/revert).
  * These special values need to be resolved by walking up the parent chain.
  */
@@ -1748,6 +1756,8 @@ static CssEnum white_space_wrap_mode(CssEnum white_space) {
 }
 
 CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon) {
+    // an owner's native line keep constrains its inline descendants independently of their CSS wrap declarations.
+    if (lycon && lycon->paged && paged_line_keep(lycon, node)) return CSS_VALUE_NOWRAP;
     DomNode* current = node && node->is_element() ? node : (node ? node->parent : nullptr);
     while (current) {
         if (!current->is_element()) {
@@ -1820,7 +1830,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
 
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     bool collapse_spaces = ws_collapse_spaces(white_space);
-    bool collapse_newlines = ws_collapse_newlines(white_space);
+    bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
     // CSS Text 3 §4.1.2: a wholly hanging fragment has no alignment opportunities.
     if (rect->hanging_trim > 0.0f && rect->hanging_trim >= rect->width) return 0;
     return count_justify_opportunities_impl(
@@ -4078,7 +4088,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     CssEnum white_space = get_white_space_value(text_node);  // todo: white-space should be put in BlockContext
     bool collapse_spaces = ws_collapse_spaces(white_space);
-    bool collapse_newlines = ws_collapse_newlines(white_space);
+    bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
     // CSS Text 3 §4.1.1: trim a preceding inline's collapsible trailing space
     // before a preserved segment break forces the next line.
     if (!collapse_newlines && (*text_start == '\n' || *text_start == '\r') &&
@@ -4143,7 +4153,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     LayoutTextBreaks native_breaks((const char*)text_start,
         (size_t)(text_end - text_start), wrap_lines && !break_all);
     // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
-    uint32_t last_processed_cp = adjacent_inline_codepoint(text_node, true);
+    uint32_t last_processed_cp = layout_adjacent_inline_codepoint(text_node, true);
     // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
     bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
     bool had_explicit_leading_space =
@@ -5122,15 +5132,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             if (wrap_lines) {
                 record_line_break_opportunity(
                     lycon, str - 1, rect->width, BRK_SPACE);
+                // both collapsed and preserved separators can wrap a following nowrap inline.
+                if (!lycon->line.is_line_start && !*str) {
+                    lycon->line.wrap_opportunity_before_nowrap = true;
+                }
             }
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces.
             if (collapse_spaces) {
                 lycon->line.has_space = true;
-                if (wrap_lines && !lycon->line.is_line_start && !*str &&
-                    font_box_handle(&lycon->font) &&
-                    font_handle_is_document_font(font_box_handle(&lycon->font))) {
-                    lycon->line.wrap_opportunity_before_nowrap = true;
-                }
             }
             // CSS 2.1 §16.6.1: Only track trailing space for end-of-line trimming
             if (collapse_spaces) {
@@ -5286,7 +5295,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
     if (collapse_spaces && lycon->line.trailing_space_width > 0.0f) {
-        uint32_t following = adjacent_inline_codepoint(
+        uint32_t following = layout_adjacent_inline_codepoint(
             text_node, false, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT);
         if (!following || following == '\n') {
             // css text 3 §4.1.2 removes end spaces across inline boundaries;

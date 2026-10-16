@@ -9983,34 +9983,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x >= lycon->line.left) {
                 lycon->line.advance_x = effective_left;
             }
-            bool parent_nowrap = false;
-            View* nowrap_descendant = static_cast<View*>(block);
-            for (DomNode* cur = block->parent; cur; cur = cur->parent) {
-                if (!cur->is_element()) break;
-                DomElement* elem = lam::dom_require_element(cur);
-                if (elem->view_type == RDT_VIEW_INLINE) {
-                    ViewSpan* inline_parent = lam::view_require<RDT_VIEW_INLINE>(elem);
-                    // CSS Text: a nowrap inline box may still start on a new
-                    // line; only its prior in-flow content makes this child
-                    // part of an unbreakable sequence.
-                    bool has_prior_inline_content =
-                        inline_parent->first_placed_child() != nowrap_descendant;
-                    if (elem->blk && elem->block_mut()->white_space != 0) {
-                        CssEnum ws = elem->block()->white_space;
-                        if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
-                            parent_nowrap = has_prior_inline_content;
-                            break;
-                        }
-                    }
-                    nowrap_descendant = static_cast<View*>(inline_parent);
-                    continue;
-                }
-                if (elem->blk && elem->block_mut()->white_space != 0) {
-                    CssEnum ws = elem->block()->white_space;
-                    parent_nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
-                    break;
-                }
-            }
+            bool boundary_allows_wrap =
+                layout_atomic_inline_boundary_allows_soft_wrap(lycon, block, true);
             ViewBlock* inline_parent_for_placement =
                 layout_nearest_block_ancestor(block->parent_view());
             bool vertical_inline_parent_for_placement = inline_parent_for_placement &&
@@ -10036,7 +10010,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // CSS Text: a collapsible separator is a break opportunity before
             // an atomic inline; include it in fit testing so overflow selects
             // that opportunity, then line_break() removes the separator.
-            if (lycon->line.advance_x + margin_box_width > effective_right && !parent_nowrap) {
+            if (lycon->line.advance_x + margin_box_width > effective_right && boundary_allows_wrap) {
                 if (!lycon->line.is_line_start && has_prior_flow_content) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
                     line_break(lycon);

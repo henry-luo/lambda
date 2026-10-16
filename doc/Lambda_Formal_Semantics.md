@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 66.0.0 (2026-10-15)
+**Spec version:** 68.0.0 (2026-10-16)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -147,8 +147,9 @@ harnesses.
   its own poison; nans never equal anything, themselves included;
   same-signed infinities are one value across domains; poison is unequal,
   not untypeable — it classifies normally. [S4.2]
-- **SI9 — Truthiness tag-decidability.** Truthiness is decidable from the
-  type tag alone; the falsy set is exactly `{null, false, error, ""}`. [S3]
+- **SI9v2 — Truthiness tag-decidability.** Truth classification is decidable
+  from the type tag alone; the falsy set is exactly `{null, false, ""}`.
+  Errors produce no Boolean answer and flow through logical evaluation. [S3]
 - **SI10 — Literal strictness, data totality.** An unsuffixed int-form
   literal outside the band is a compile error; parsed data always lands in
   an exact home — parsers never reject numeric data and never silently
@@ -487,21 +488,38 @@ harnesses.
 
 ## S3 Truthiness
 
-- **S3.1** The falsy set is exactly **`null` · `false` · error values · `""`**.
-  Everything else is truthy — all numbers (`0`, `-0.0`, `nan`), all containers
-  (empty or not), datetimes, symbols, binaries, functions, types. [C2]
-- **S3.2** **Truthiness is decidable from the type tag alone** — a design
-  invariant, not an accident. Any proposal to make a *value* of a truthy type
-  falsy must clear this bar; `nan` stays truthy because poison carries no
-  falsy tag. [C17]
-- **S3.3v2** Consequences to teach: truthy-0 keeps `or` a safe coalescing
+- **S3.1v2*** The falsy set is exactly **`null` · `false` · `""`**.
+  **Errors are neither truthy nor falsy: they produce no Boolean answer.**
+  Every other value is truthy — all numbers (`0`, `-0.0`, `nan`), all
+  containers (empty or not), datetimes, symbols, binaries, functions, types.
+  [C2.4, TE-22]
+- **S3.2v2*** **Truth classification is decidable from the type tag alone**
+  — a design invariant, not an accident. The outcomes are truthy, falsy, or
+  an error to preserve, never a Boolean coercion of that error. Any proposal
+  to make a *value* of a truthy type falsy must clear this bar; `nan` stays
+  truthy because poison carries no falsy tag. [C17, C2.4]
+- **S3.3v3*** Consequences to teach: truthy-0 keeps `or` a safe coalescing
   operator (no `??` needed); `if (results)` does not mean "any results" for
   an array — write `len(results) > 0`; for a list result the empty case is
   `null`, so `results or default` works, but a one-item list is its item and
-  the item's own truthiness applies — a single `false`, `""`, `null`, or
-  error result reads as no result (S2.5.5v2); `a div b or 0` does not rescue
-  a zero divisor (poison is truthy) — guard the divisor or test `is nan`.
-  [C2, C17]
+  the item's own truthiness applies — a single `false`, `""`, or `null`
+  selects the default, while an error remains an error (S2.5.5v2);
+  `a div b or 0` does not rescue a zero divisor (poison is truthy) — guard
+  the divisor or test `is nan`.
+  [C2.4, C17]
+- **S3.4*** **Logical evaluation preserves an encountered error.** `not e`
+  returns `e` unchanged when it is an error. `a and b` and `a or b`
+  evaluate `a` once; an error returns unchanged without evaluating `b`.
+  Otherwise ordinary scalar short-circuit selection applies, and a selected
+  `b` is evaluated once and returned unchanged, including an error. Thus
+  `false and error("unused")` is false and `true or error("unused")` is
+  true: an unevaluated operand contributes no error. [C2.4, TE-22]
+- **S3.5*** **An `if` expression evaluates its condition once.** An error
+  condition is the result of the whole expression; neither branch runs.
+  Otherwise truthiness selects exactly one branch. The result type includes
+  possible condition errors as well as selected-arm results. This is
+  expression-value flow, not implicit postfix-`^` propagation from the
+  enclosing function (S7.7.1, S7.6.3v2). [C2.4, TE-22]
 
 ---
 
@@ -515,8 +533,9 @@ Only the sized machine ints stand outside it: bounded, wrapping, poison-free.
 **Interior versus ingress.** Poison arises only *inside* number math (computed
 zero divisors, saturation); failure at the numeric world's boundaries —
 parsing, casting, narrowing admission, validation — reports `error()`. So
-`1 div 0` is `inf` while `int("abc")` is an `error`; `int(s) or 0` is the
-working default idiom and `a div b or 0` is not. [C14c, C17]
+`1 div 0` is `inf` while `int("abc")` is an `error`; `int(s) ^ { 0 }`
+handles a conversion error, while `a div b or 0` does not rescue numeric
+poison. [C14c, C17, S7.5.3v2]
 
 ### S4.1 The `int` type (v5: int53, total)
 
@@ -661,29 +680,44 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
 ## S5 Equality
 
-### S5.1 Total deep value equality
+### S5.1 Error-preserving deep value equality
 
-- **S5.1.1** `==` is total over all value pairs: cross-family comparison
-  returns `false`, never an error; within-family it is deep, structural, and
-  value-based. `!=` is the exact negation. [C8]
-- **S5.1.2** **Two designed poison carve-outs**: `nan` (the whole family) and
-  `error` values never equal anything, including themselves — the only
-  exceptions to reflexivity. An error compared equal could silently enter an
-  `if` branch. Detection is `is error` / `is nan`, never `==`. [C8.5]
+- **S5.1.1v2*** `==` is deep, structural, value-based equality. **An error
+  operand is an error result, never a Boolean answer.** Non-error
+  cross-family operands compare false; within-family comparisons recurse
+  under S5.1.5. `!=` negates a successful Boolean result and preserves a
+  comparison error unchanged. Types must retain the possibility of an error
+  from either operand or a visited nested comparison. [C8.8]
+- **S5.1.2v2*** **NaN is unequal; errors propagate.** If neither operand is
+  an error, a `nan` (the whole family) equals nothing, itself included.
+  An error operand instead propagates even against `null` or `nan`; an
+  error is not a non-reflexive successful value. Detection remains
+  `is error` / `is nan`, never `==`. [C8.5, C8.8]
 - **S5.1.3** Structural recursion is depth-limited; exceeding the limit
   **raises** a system fault (a wrong `false` would be silent; a hang worse).
   Cycles are unconstructible natively (§S9) but importable via interop. [C8.5-8]
-- **S5.1.4v2*** `==` is the only **value** equality and compares content
+- **S5.1.4v3*** `==` is the only **value** equality and compares content
   alone. **Identity is data, not a reference**: a container loaded from or
   created within an addressable document may carry a universal node
   identity — conceptually the document path plus the node's id within it,
   one scheme across local and online documents. `===` compares that identity
-  and never content; an operand without identity compares `===`-false,
-  never equal to anything. `==`, hashing, and the total order ignore
+  and never content; a direct error operand propagates, while a non-error
+  operand without identity compares `===`-false, never equal to anything.
+  `==`, hashing, and the total order ignore
   identity. No `ref_eq` or address comparison exists — reference identity
   (sharing versus copying) remains unobservable (S1.6, S9.1.2). Which
   operations preserve an identity and how it is carried are open (SO39).
-  [C4, C8, OB10]
+  [C4, C8.8, OB10]
+- **S5.1.5*** **Container equality recursively compares content and
+  short-circuits.** A visited child comparison that yields an error is the
+  whole comparison's error: `[e] == [e]` and `{a:e} == {a:e}` yield `e`.
+  A decisive mismatch ends comparison without inspecting remaining content;
+  sequences compare corresponding items in increasing index order, so
+  `[1,e] == [2,e]` is false and `[e,1] == [e,2]` is `e`. Length or shape
+  mismatches can decide inequality without a content walk. There is no deep
+  error pre-scan, and shared storage must not bypass required content
+  comparisons. This recurses through S5.3–S5.5; map traversal and competing
+  error selection are SO50. [C8.8]
 
 ### S5.2 Numbers
 
@@ -718,19 +752,24 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
 ### S5.5 Functions and types
 
-- **S5.5.1** Function equality is **intensional**: same definition site +
+- **S5.5.1v2*** Function equality is **intensional**: same definition site +
   deep-equal captures. Site = static AST node identity `(module, node)` —
   never a memory address. Dynamically constructed functions compare by the
   content hash of their normalized AST (alpha-normalized), so
-  `(x) => x + 1 == (y) => y + 1`. `f == f` is always true.* [C8.7, C9]
+  `(x) => x + 1 == (y) => y + 1`. Captures compare recursively under
+  S5.1.5, including errors and nan; self-identity does not bypass that
+  comparison. [C8.7, C8.8, C9]
 - **S5.5.2** Type equality is **representational** — normalized forms compare
   (`int|string == string|int`), not semantic equivalence (undecidable with
   constraints). [C8.5-4]
 
 ### S5.6 Dedup, grouping, hashing
 
-- **S5.6.1** `unique`, set semantics, and grouping are defined by `==` with no
-  special cases: nulls group together; each `nan`/`error` stands alone. [C8.6]
+- **S5.6.1v2*** `unique`, set semantics, and grouping use `==`: nulls group
+  together and each `nan` stands alone. A comparison error must be preserved
+  as failure, never treated as false or a successful singleton group; sort
+  ties do not substitute for equality. The containing operation's error
+  result boundary is SO50. [C8.6, C8.8]
 - **S5.6.2** `a == b ⟹ hash(a) == hash(b)` wherever values are hashed: maps
   hash in canonically sorted key order; numbers hash via canonical value
   across representations. [C8.6-R, C8.5a]
@@ -749,9 +788,10 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   others → `error()`). Not comparable — `error()`: symbols, binaries,
   booleans, containers, all cross-family pairs. Statically-visible invalid
   comparisons are compile errors; dynamic ones return `error()`.* [C11.5]
-- **S6.1.2** Poison stays incomparable (`nan < x` false both ways; `error`
-  operands taint); `null < x` → `null` (absorption, one rule with
-  `null + 1 → null`). [C11.5]
+- **S6.1.2v2*** An error operand to `< <= > >=` propagates unchanged,
+  including against null or nan. For non-error operands, poison stays
+  incomparable (`nan < x` false both ways); `null < x` → `null`
+  (absorption, one rule with `null + 1 → null`). [C11.5, C8.8]
 
 ### S6.2 The Lambda total order
 
@@ -876,21 +916,22 @@ it.* [TE-13, C14]
 
 ### S7.5 Acknowledgment
 
-- **S7.5.1** A call carrying a `^` channel must engage the error at the
+- **S7.5.1v2*** A call carrying a `^` channel must engage the error at the
   **immediate expression**, through exactly one of: an `error` arm in
-  `match`; the `^ { }` handler; postfix `^`; an `or` rescue; or a receiving
+  `match`; the `^ { }` handler; postfix `^`; or a receiving
   position that textually admits error (`let x: T^`, `let x: T | error`, or
   a declared param/return of that shape). *Must-handle = must-engage-
-  explicitly.* [TE-13, TE-16]
+  explicitly.* Logical operators do not acknowledge raised errors.
+  [TE-13, TE-16, TE-22]
 - **S7.5.2** `any` never acknowledges (it admits error but engages nothing);
   a bare `let x = a()` never acknowledges. Automatic containment (§S7.7)
   never acknowledges: *skip is containment, not acknowledgement.* [TE-13, TE-16]
-- **S7.5.3** `or`-rescue is not a rule-bend: errors are falsy, so `a() or 0`
-  consumes the error by the truthiness definitions and counts as engagement.
-  The typing rule is normative: `type(a or b) = (type(a) \ {error, null}) |
-  type(b)`, so `int(s) or 0 : int` — plain union arithmetic, no flow
-  analysis. Errors log at origination, so a consumed diagnostic still leaves
-  a breadcrumb. [TE-13]
+- **S7.5.3v2*** `a or b` defaults only `null`, `false`, and `""`; an error
+  from `a` remains the expression's error and `b` is not evaluated (S3.4).
+  Its type must retain that error possibility: `or` never narrows away error
+  or discharges a raised channel. Recovery is explicit, as in
+  `int(s) ^ { 0 }`; ordinary defaulting after propagation is `a()^ or b`
+  where the enclosing function permits propagation. [TE-22]
 
 ### S7.6 Discharge: the handler and postfix `^`
 
@@ -900,7 +941,7 @@ it.* [TE-13, C14]
   (innermost-wins). In the one-arm form, the handler introduces no `~`
   binding: `~` retains the current-value meaning supplied by an enclosing pipe,
   match, constraint, or view context, and a non-error operand passes through
-  unchanged. Typing mirrors `or`:
+  unchanged. Typing removes the handled error alternatives:
   `type(e ^ { h }) = (type(e) \ error) | type(h)`.
 
   The optional two-arm form **`e ^ { h } ~ { v }`** evaluates `e` exactly
@@ -959,12 +1000,12 @@ it.* [TE-13, C14]
   postfix braced-handler delimitation, the type-level channel, and the
   handler-local current-error atom — all meaning "the error channel". There
   is no general prefix error test or prefix braced-handler shorthand.* [TE-16]
-- **S7.6.6v2** Division of labor: `or` catches all falsy without access;
+- **S7.6.6v3*** Division of labor: `or` defaults ordinary falsy values and
+  preserves errors;
   `^ { }` catches errors only, with access and normal-value pass-through;
   `^ { } ~ { }` branches explicitly between error and non-error outcomes;
-  `e^` catches errors only, propagating. `or` and `^` are *not* a soft/hard
-  split — both work on both channels; the axis is coalescing-without-access
-  vs error-specific handling. [TE-16]
+  `e^` catches errors only, propagating. Both caret forms remain
+  channel-agnostic; `or` acknowledges neither error channel. [TE-16, TE-22]
 - **S7.6.7v4** A statement-position procedure handler
   `pn_call() ^ { error_body }` may protect a possibly-suspending call. The
   call parks and resumes in place, so its error reaches the handler exactly
@@ -1011,9 +1052,9 @@ dominates the scope.* [TE-15, TE-18]
   module-level reassignment **aborts module initialization**; a cross-frame
   reassignment from a closure becomes an error return of the inner function,
   re-originating at the call site. [TE-18]
-- **S7.7.7** Rescue moves to the initializer: `let a: T = e or 0` and
-  `let a = e ^ { … }`; an `a or 0` *after* the binding is unreachable by
-  construction. [TE-15]
+- **S7.7.7v2*** Recovery belongs in the initializer: `let a: T = e ^ { … }`.
+  Recovery after a failed declaration is unreachable by construction;
+  `or` in the initializer does not contain an error. [TE-15, TE-22]
 
 ### S7.8 Containers and errors
 
@@ -1041,9 +1082,13 @@ question: **can the result be mistaken for a successful computation?** [§7.6 re
 
 - **S7.9.1** **Type family participates**: `err is error` → true, `type(err)`
   → `error`, `match` dispatches the error arm — detection must always work.
-- **S7.9.2** **Truthy family participates**: `if (err)`, `not err`,
-  `err or d`, `err == err`, `err ^ { }` — these are the discharge surfaces;
-  absorbing is their job.
+- **S7.9.2v3*** **Logical evaluation and comparisons propagate**: `if (err)`, `not err`,
+  `err and x`, and `err or x` yield the encountered error (S3.4–S3.5).
+  Recovery remains explicit through the handler or a type-directed branch.
+  Equality and magnitude comparisons likewise preserve encountered errors,
+  including recursive content comparisons (S5.1.1v2–S5.1.5, S6.1.2v2).
+  Type classification (S7.9.1) and total sorting (S6.2) remain separate.
+  [TE-22, C8.8]
 - **S7.9.3** **Value family propagates**: `string/symbol/name(err)`,
   `len(err)`, arithmetic, comparisons, conversions, `err in x`, `err at x`,
   and every other value function return the error. `in` searches one level,
@@ -1052,7 +1097,8 @@ question: **can the result be mistaken for a successful computation?** [§7.6 re
   inspection, and it emits rather than returning a flowable value.
 - **S7.9.4** **Containment is not participation**: `[err]` is an array,
   `len([1, err, 3])` is 3 — propagation concerns an error *being* the
-  operand, not being reachable from it.
+  operand, not being reachable from it. A recursive content comparison does
+  make a visited child its operand, so S5.1.5 applies there.
 
 ### S7.10 The sys-func return contract
 
@@ -1069,8 +1115,9 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   case has a meaningful no-answer reading and returns result-domain absence
   (`arr[-1]`, `argmin([])`); a **non-admissive** case returns a detailed
   `error()` where absence would hide a malformed source (`int("abc")`,
-  malformed `parse`). Both absences are falsy, so `f(x) or default` rescues
-  uniformly. A declared type boundary is always non-admissive on mismatch.
+  malformed `parse`). Both absences are falsy, so `f(x) or default` handles
+  absence uniformly; an error requires explicit recovery (S7.5.3v2).
+  A declared type boundary is always non-admissive on mismatch.
 - **S7.10.3** **No in-band sentinels, ever.** `index_of`, `last_index_of`,
   and `ord` return `int | null` — absence is never `-1`, never an unchanged
   input. *A sentinel is only a sentinel at rest; `null` survives
@@ -1473,11 +1520,14 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   rule of S2.5.7v4: a scalar operand leaves the kind alone (`(1, 2, 3) + 1`
   is `(2, 3, 4)`), an array or range operand gives an array
   (`(1, 2, 3) + [1, 2, 3]` is `[2, 4, 6]`). [C10]
-- **S10.2.2*** Bare comparisons `< <= > >=` are **scalar-only**, never
+- **S10.2.2v2*** Bare comparisons `< <= > >=` are **scalar-only**, never
   element-wise (a mask is a container, containers are truthy — exhibit in
   the C10 record). Element-wise
   comparison has its own keyword operators **`eq ne lt le gt ge`**, yielding
-  bool masks; nan lanes compare false. Bare `==` is untouched. [C10]
+  bool masks on success; nan lanes compare false. Error operands or visited
+  error lanes must preserve comparison failure, never become successful
+  Boolean answers; the whole-result versus per-lane error shape is SO50.
+  Bare `==` uses deep scalar equality under S5.1. [C10, C8.8]
 - **S10.2.3*** Mask consumption is explicit and non-magical: `sum(mask)`
   counts true lanes; `a[mask]` is boolean indexing. `and`/`or` remain scalar
   short-circuit operators, never mask combinators. Condition-position lints
@@ -2764,6 +2814,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S3.1v2–S3.5, S7.5.1v2, S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v3 | **Ruled 2026-10-16 (USER); implementation pending.** Errors have no truth value; logical operators and `if` expressions preserve encountered errors, and `or` no longer handles them. Runtime coercions, interpreter/MIR branches, acknowledgment/type inference, reference docs and existing `or` recovery sites still need migration. Equality is ruled in C8.8; sorting is retained; collection-predicate policy remains open. Record: [TE-22](../vibe/Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user), [C2.4](../vibe/Lambda_Semantics_Formal.md#c24-errors-have-no-truth-value-2026-10-16--supersedes-the-error-part-of-c2). |
+| S5.1.1v2–S5.1.2v2, S5.1.4v3–S5.1.5, S5.5.1v2, S5.6.1v2, S6.1.2v2, S10.2.2v2 | **Ruled 2026-10-16 (USER); implementation pending.** Comparisons preserve encountered errors, including visited nested content; decisive mismatches short-circuit. Shared-storage shortcuts, Bool lanes, inference and equality consumers need migration. Total sorting is unchanged; the remaining policies are SO50. Record: [C8.8](../vibe/Lambda_Semantics_Formal2.md#c88-comparisons-preserve-errors-recursively-2026-10-16-user). |
 | S11.5.1v2, S11.5.2, S11.5.3v3, S11.5.4 | **Fixed-record/native P2 profile implemented 2026-10-15 on interpreter and MIR Direct.** Fixed byte layouts, nested records, lazy native references and counted native spans use separate `& {…}` metadata. Versioned bindings reject mismatches; native spans check count/extent contracts and implement the ratified empty/absent distinction. Byte spans return owned copies. Native projections reject writes and stale structural reads. Buffer counted arrays, offset references, serialization and binary predicates remain outside the profile. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | S11.1.2v4 | **Implemented 2026-10-09 on interp, jit and auto.** The production lexer recognizes quoted class escapes only inside the shared island; the type-pattern resolver checks every quoted fragment and resolved reference for one consistent domain, rejecting mixed and wildcard-only islands. Literal-only string and symbol islands retain ordinary literal-union identity. Lowering and canonical printing preserve quotes and domains, including named symbol literal unions; string search refuses symbol-domain operands. The reference grammar and executable corpus use the new surface. Fixtures `pattern_quoted_classes.ls` and `negative/semantic/pattern_*.ls` cover fragment repetition, one-pass ordinary escapes, references, ranges, complement, wildcards, contracts and value-run separation. Syntax gates: C 411/411, Tree-sitter 397/397. Design and validation: [String Pattern SP24](../vibe/Lambda_Design_String_Pattern.md#4-implementation-and-validation). |
 | S2.4.1v2, S2.4.2v5, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. **S2.4.2v5 conformant as of 2026-09-21** (JIT and interpreter identical): the bare roots `/` and `\`, and `\` prints as the empty relative path; integer first keys `\.1` and `/.1`; index steps (`/[1]` ≡ `/.1`, `\[1]` ≡ `\.1`, `p[k]` ≡ `p.k`, numeric keys normalized through S8.2.1v4); key steps throughout a path literal (`\[1].name` is `\.1.name`, `\.a['name']` is `\.a.name`); integer steps after `.`, `\`, `./`, `~~` and `.*` (`\.1.2`, `file./.1`). `\.` alone and `.[` anywhere are E100. Broken path lines were checked against S16.1.1. That day's probe defect, `\.1.x` evaluating to `file./`, is fixed ([Type_Path §10.1](../vibe/Lambda_Type_Path.md)). Fixtures: `path_roots_steps.ls`, `path_line_continuation.ls`, `path_index_capture.ls`, `member_int_steps.ls`, `proc/return_relative_path.ls`, and four negative syntax fixtures. S16 harnesses: C parser 197/197, reference grammar 180/180. Lambda baseline 3632/3633; the one failure is an unrelated JS trace-parser test. Still deferred: the default resolver qualifies logical roots to local `file./`, and generalized immutable mount tables, remote transport, network hostname discovery, and S8.2.1v4 key normalization outside path subscripts are not built. |
@@ -2874,6 +2926,12 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO4** Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs a sweep.
 
 **Errors and enforcement**
+- **SO50** Error-preserving comparison follow-ups: canonical field traversal
+  for key-unordered maps, selection among multiple distinct errors, error
+  result boundaries for grouping/dedup/search, and whole-result versus
+  per-lane errors in `eq/ne/lt/le/gt/ge`. Scalar propagation, recursive
+  equality with decisive-mismatch short-circuiting, and retained total sort
+  order are settled by S5.1.1v2–S5.1.5 and S6.2. [C8.8]
 - **SO5** TE-17 transitivity: does discharging `(int | error)[]` re-narrow in place, or only by copy? Copy is the safe default. [TE-17 §Open]
 - **SO6** Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); where containment materializes under deferred evaluation.
 - **SO7** TE-5 R5 sticky `any`; validator schema-`any` uniformity.
@@ -2979,8 +3037,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
-| S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
-| S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
+| S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
+| S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |

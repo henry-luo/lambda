@@ -493,18 +493,6 @@ static const char* page_inherited_native(DomElement* element, const char* name) 
     return nullptr;
 }
 
-// a keep trait, compound or per scope, that keeps within a page or column
-static bool page_native_keep(DomElement* element, const char* name) {
-    char key[64];
-    const char* scopes[] = {"", ".within-page", ".within-column"};
-    for (const char* scope : scopes) {
-        snprintf(key, sizeof(key), "%s%s", name, scope);
-        const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, key);
-        if (value && strcmp(value, "auto") && strcmp(value, "inherit")) return true;
-    }
-    return false;
-}
-
 // the label cell of a label/body grid: the first cell of the first row of a table
 // declaring r:label-body-grid (XSL 1.1 §6.8: a list item's label and body)
 static DomElement* page_label_grid(DomElement* cell) {
@@ -546,16 +534,8 @@ void radiant_native_hints_declare(LayoutContext* lycon, DomElement* element) {
         properties[count] = "white-space";
         values[count++] = spaces ? (wrapping ? "pre-wrap" : "pre") : lines ? (wrapping ? "pre-line" : "pre") : wrapping ? "normal" : "nowrap";
     }
-    const char* keeps[][2] = {{"keep-with-next", "break-after"}, {"keep-with-previous", "break-before"}, {"keep-together", "break-inside"}};
-    for (const auto& keep : keeps) if (page_native_keep(element, keep[0])) { properties[count] = keep[1]; values[count++] = "avoid"; }
-    const char* margins[] = {"margin-top", "margin-bottom"};
-    for (size_t i = 0; i < 2; i++) {
-        char key[64];
-        snprintf(key, sizeof(key), "%s.optimum", flow_space_names[i]);
-        const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, key);
-        if (!value) value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, flow_space_names[i]);
-        if (value && strcmp(value, "inherit")) { properties[count] = margins[i]; values[count++] = value; }
-    }
+    // keeps resolve as selected native strengths in the paged hooks, independently of CSS break declarations.
+    // native spaces resolve independently of CSS margins in the flow boundary journal.
     bool retain = false;
     for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++) {
         const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, flow_decoration_names[i][j]);
@@ -625,6 +605,8 @@ void radiant_native_resolved(LayoutContext* lycon, DomElement* element) {
         if (block->boundary_mut())
             block->boundary_mut()->padding.right = page_native_length(lycon, CSS_PROPERTY_PADDING_RIGHT, page_label_body_value(table, true));
     }
+    // paged geometry binds after page selection, using the edition's computed traits.
+    if (lycon->paged) return;
     if (!page_reference_geometry(element)) return;
     BoundaryProp* boundary = block->boundary_mut() ? block->boundary_mut() : (block->ensure_boundary(lycon), block->boundary_mut());
     if (!boundary) return;
@@ -665,15 +647,26 @@ bool radiant_table_column_proportion(const CssValue* value, float* result) {
     return *result > 0.0f;
 }
 
-bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range) {
-    const RadiantFlowTraits* traits = style->flow_traits.get();
-    range->column = traits && traits->column_number ? traits->column_number - 1 : next;
-    range->property_span = traits && traits->column_property_span ? traits->column_property_span : 1;
-    range->repeat = layout_table_column_span(style->source);
+static bool page_table_column_range(uint32_t number, uint32_t property_span, size_t repeat,
+        size_t next, size_t limit, RadiantTableColumnRange* range) {
+    range->column = number ? number - 1u : next;
+    range->property_span = property_span ? property_span : 1u;
+    range->repeat = repeat;
     if (range->column >= limit || range->repeat - 1 > (limit - 1 - range->column) / range->property_span) return false;
     // repeated property declarations advance by their qualifying span; auto follows the final start by one.
     range->next = range->column + (range->repeat - 1) * range->property_span + 1;
     return true;
+}
+
+bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range) {
+    const RadiantFlowTraits* traits = style->flow_traits.get();
+    return page_table_column_range(traits ? traits->column_number : 0,
+        traits ? traits->column_property_span : 1, layout_table_column_span(style->source), next, limit, range);
+}
+
+bool radiant_table_column_range(DomElement* source, size_t next, size_t limit, RadiantTableColumnRange* range) {
+    return page_table_column_range(radiant_table_column_number(source), radiant_table_column_property_span(source),
+        layout_table_column_span(source), next, limit, range);
 }
 
 bool radiant_decoration_retain(const ViewCssStyle* style, bool padding, bool after) {
@@ -744,6 +737,38 @@ static bool flow_integer(const char* value, int32_t* result) {
     return true;
 }
 
+static bool flow_column_count(const char* value, uint32_t inherited, uint32_t* result,
+        uint32_t maximum = INT32_MAX, bool automatic = true) {
+    *result = automatic ? 0 : 1;
+    if (!value || (automatic && !strcmp(value, "auto"))) return true;
+    if (!strcmp(value, "inherit")) { *result = inherited; return true; }
+    int32_t number = 0;
+    if (!flow_integer(value, &number) || number < 1 || (uint32_t)number > maximum) return false;
+    *result = static_cast<uint32_t>(number);
+    return true;
+}
+
+static uint32_t page_source_column_count(DomElement* element, bool property_span) {
+    uint32_t initial = property_span ? 1u : 0u;
+    if (!element) return initial;
+    const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE,
+        property_span ? "column-property-span" : "column-number");
+    uint32_t inherited = value && !strcmp(value, "inherit")
+        ? page_source_column_count(element->parent_element(), property_span) : initial;
+    uint32_t number = initial;
+    // admission reports invalid traits; structural and computed readers share their strict count domains.
+    flow_column_count(value, inherited, &number, property_span ? 1000u : INT32_MAX, !property_span);
+    return number;
+}
+
+uint32_t radiant_table_column_number(DomElement* element) {
+    return page_source_column_count(element, false);
+}
+
+uint32_t radiant_table_column_property_span(DomElement* element) {
+    return page_source_column_count(element, true);
+}
+
 static bool flow_computed_integer(ViewTree* tree, ViewCssStyle* style, const CssValue* value, int32_t* result) {
     double number = view_css_number(value, tree, style);
     if (!isfinite(number) || number != floor(number) || number < INT32_MIN || number > INT32_MAX) return false;
@@ -810,24 +835,10 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     for (size_t i = 0; i < 2; i++) if (table_omit[i] &&
         !radiant_page_boolean(table_omit[i], parent->table_omit[i], &traits->table_omit[i]))
         return fail("table furniture omission requires true, false or inherit");
-    if (column_number && strcmp(column_number, "auto")) {
-        if (!strcmp(column_number, "inherit")) traits->column_number = parent->column_number;
-        else {
-            int32_t number = 0;
-            if (!flow_integer(column_number, &number) || number < 1)
-                return fail("column number requires auto or a positive integer in the counter domain");
-            traits->column_number = static_cast<uint32_t>(number);
-        }
-    }
-    if (column_property_span) {
-        if (!strcmp(column_property_span, "inherit")) traits->column_property_span = parent->column_property_span;
-        else {
-            int32_t span = 0;
-            if (!flow_integer(column_property_span, &span) || span < 1 || span > 1000)
-                return fail("column property span requires a positive integer through the HTML colspan limit");
-            traits->column_property_span = static_cast<uint32_t>(span);
-        }
-    }
+    if (!flow_column_count(column_number, parent->column_number, &traits->column_number))
+        return fail("column number requires auto or a positive integer in the counter domain");
+    if (!flow_column_count(column_property_span, parent->column_property_span, &traits->column_property_span, 1000, false))
+        return fail("column property span requires a positive integer through the HTML colspan limit");
     if (column_proportion && strcmp(column_proportion, "none")) {
         if (!strcmp(column_proportion, "inherit")) traits->column_proportion = parent->column_proportion;
         else {
@@ -855,6 +866,11 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
             return fail("reference indents require a finite length or length-percentage expression");
         const CssValue* computed = view_css_compute_length(tree, style, CSS_PROPERTY_MARGIN_LEFT, resolved, nullptr);
         if (!computed) return false;
+        CssMathEvaluationContext math = {}; math.preserve_percentages = true;
+        CssMathResult finite = css_math_evaluate(computed, &math);
+        // deferred percentages still reject nonfinite arithmetic at their declaration owner.
+        if (finite.resolved && (!isfinite(finite.value) || !isfinite(finite.percentage)))
+            return fail("reference indents require finite computed lengths");
         traits->indent_expressions[i] = nullptr; traits->indent_owners[i] = nullptr;
         if (layout_css_value_has_percentage(computed)) {
             if (style->display.outer != CSS_VALUE_BLOCK || style->display.inner != CSS_VALUE_FLOW)
@@ -877,6 +893,18 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         else if (strcmp(inline_geometry, "css")) return fail("block inline geometry requires css or reference");
         if (traits->reference_inline && (style->display.outer != CSS_VALUE_BLOCK || style->display.inner != CSS_VALUE_FLOW))
             return fail("reference inline geometry requires an ordinary block formatting context");
+        if (traits->reference_inline) {
+            const CssValue* sizes[] = {style->width, style->min_width, style->max_width};
+            for (const CssValue* size : sizes) if (size && !css_value_is_auto(size) && !css_value_is_none(size))
+                return fail("reference block geometry conflicts with CSS inline sizing");
+            const CssBoxSide sides[] = {CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT};
+            for (CssBoxSide side : sides) if (style->margin[side]) {
+                CssMathEvaluationContext math = {}; math.preserve_percentages = true;
+                CssMathResult margin = css_math_evaluate(style->margin[side], &math);
+                if (!margin.resolved || margin.value != 0.0 || margin.percentage != 0.0)
+                    return fail("reference block geometry conflicts with CSS inline margins");
+            }
+        }
     }
     if (line_stacking && strcmp(line_stacking, "inherit")) {
         if (!strcmp(line_stacking, "max-height")) traits->line_stacking = RADIANT_LINE_STACK_MAX;

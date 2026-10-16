@@ -12,6 +12,8 @@ let strokes = {
     back:"M15 5l-7 7 7 7",forward:"M9 5l7 7-7 7",up:"M5 14l7-7 7 7",
     icons:"M3 3h6v6H3z M15 3h6v6h-6z M3 15h6v6H3z M15 15h6v6h-6z",
     list:"M8 5h13 M8 12h13 M8 19h13 M3 5h1 M3 12h1 M3 19h1",
+    columns:"M3 4h18v16H3z M9 4v16 M15 4v16",
+    actions:"M5 12h1 M11 12h1 M17 12h1",newfolder:"M3 7V4h7l3 3h8v13H3z M12 10v7 M8.5 13.5h7",
     preview:"M3 4h18v16H3z M15 4v16",search:"M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14 M15 15l6 6",
     refresh:"M20 9a8 8 0 1 0 0 6 M20 3v6h-6",go:"M3 8h18v12H3z M3 8V5h7l3 3 M12 11v6 M9 14l3 3 3-3",
     home:"M3 10l9-7 9 7 M5 9v12h14V9 M9 21v-8h6v8",
@@ -46,16 +48,26 @@ fn graphic(entry,role="tile") => <span class:if (entry.kind == "Image" and entry
     (if (entry.kind == "Image" and entry.extension == "svg") <img class:"vector-thumbnail",src:entry.path,alt:"">
     else (file_icon(entry)));
     (if (entry.kind == "Image" and entry.extension != "svg") <canvas class:"thumbnail-canvas",width:"1",height:"1",'aria-hidden':"true"> else null)>
-pub fn files(st) {
+fn file_rows(st,prefix="file-",column=-1) {
     let rows = model.visible(st);
     if (len(rows)==0) <div class:"empty",(icon("search"));<h2 if (trim(st.query)!="") "No matching files" else "This folder is empty">
         <p if (trim(st.query)!="") "Try another name or clear your search." else "There’s room for something new.">>
-    else <div class:if (st.mode == "icons") "icon-grid" else "file-list",
-        *[for (i,e in rows) <button id:"file-" ++ string(i),class:"file",type:"button",role:"option",tabindex:"-1",
-            'data-path':e.path,'data-name':e.name,'aria-selected':string(contains(st.selected,e.path)),'data-focused':string(e.path == st.focus),title:e.name,
+    else <div class:if (st.mode == "icons") "icon-grid" else if (st.mode == "columns") "column-rows" else "file-list",
+        *[for (i,e in rows) <button id:prefix ++ string(i),class:"file",type:"button",role:"option",tabindex:"-1",
+            *:(if (column>=0) {'data-column':string(column),'data-trail':string(column<len(st.columns)-1 and contains(st.selected,e.path))} else {}),
+            'data-path':e.path,'data-name':e.name,'data-dir':string(e.dir),draggable:"true",
+            'aria-selected':string(contains(st.selected,e.path)),'data-focused':string(e.path == st.focus),title:e.name,
             graphic(e);<span class:"file-name",e.name><span class:"file-date",e.modified>
-            <span class:"file-size",if (e.dir) "—" else model.size_label(e.size)><span class:"file-kind",e.kind>>]>
+            <span class:"file-size",if (e.dir) "—" else model.size_label(e.size)><span class:"file-kind",e.kind>;
+            (if (st.mode == "columns" and e.dir) <span class:"folder-chevron",'aria-hidden':"true","›"> else null)>]>
 }
+pub fn column_files(st,index) => file_rows(model.column(st,index),"file-" ++ string(index) ++ "-",index)
+pub fn column(st,index) => <section id:"column-" ++ string(index),class:"file-column",'data-folder':st.columns[index].path,'data-column':string(index),
+    'aria-label':model.basename(st.columns[index].path),
+    <h2 class:"column-heading",title:st.columns[index].path,model.basename(st.columns[index].path)>;
+    <div id:"column-files-" ++ string(index),class:"column-list",role:"group",'aria-label':st.columns[index].path,
+        column_files(st,index)>>
+pub fn files(st) => if (st.mode == "columns") <div class:"columns",*[for (i,c in st.columns) column(st,i)]> else file_rows(st)
 pub fn breadcrumb(st) => <nav 'aria-label':"Folder path",class:"crumbs",
     *[for (i,c in model.crumbs(st.path)) <span
         (if (i>0) <span class:"crumb-separator","›"> else null);
@@ -63,6 +75,12 @@ pub fn breadcrumb(st) => <nav 'aria-label':"Folder path",class:"crumbs",
 fn metadata(entry) => <dl class:"metadata",
     *[for (key,value in {Kind:entry.kind,Size:if (entry.dir) "—" else model.size_label(entry.size),Modified:entry.modified,Where:model.parent(entry.path)})
         <div <dt string(key)><dd value>>]>
+pub fn menu(st) => [for (action,caption in {open:"Open",look:"Quick Look",rename:"Rename…",move:"Move to…",delete:"Delete…",
+    'new-file':"New File…",'new-folder':"New Folder…",refresh:"Refresh"})
+    <button id:"menu-" ++ string(action),type:"button",role:"menuitem",'data-action':string(action),
+        class:if (action == 'delete') "menu-item danger-text" else "menu-item",
+        *:(if ((contains(['open','look','move','delete'],action) and len(st.selected)==0) or
+            (action == 'rename' and len(st.selected)!=1)) {disabled:""} else {}),caption>]
 pub fn preview(st,large=false) {
     let e = model.focused(st)
     let data = st.preview_data;
@@ -95,9 +113,12 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
             <div class:"navigation",(button("back","Back (⌘[)","back"));(button("forward","Forward (⌘])","forward"))>;
             <div class:"folder-heading",<h1 id:"folder-title",if (st.path == places[0].path) "Demo Files" else model.basename(st.path)><p id:"folder-subtitle","Your files, a little more familiar.">>;
             <div class:"toolbar-actions",
-                <div class:"segmented",(button("icons","Icon view (⌘1)","icons"));(button("list","List view (⌘2)","list"))>
+                <div class:"segmented",(button("icons","Icon view (⌘1)","icons"));(button("list","List view (⌘2)","list"));
+                    (button("columns","Column view (⌘3)","columns"))>
                 ;(button("refresh","Refresh (⌘R)","refresh"));(button("go","Go to Folder (⌘⇧G)","go"));
-                (button("preview","Toggle preview pane","preview"))>;
+                (button("preview","Toggle preview pane","preview"));(button("new-folder","New Folder (⌘⇧N)","newfolder"));
+                <button id:"actions",type:"button",class:"tool",'data-action':"actions",title:"File actions",'aria-label':"File actions",
+                    'aria-haspopup':"menu",'aria-expanded':"false",(icon("actions"))>>;
             <label class:"search",(icon("search"));<input id:"search",type:"search",placeholder:"Search this folder",'aria-label':"Search this folder">>
         >;
         <div class:"location-bar",<div id:"breadcrumbs",(breadcrumb(st))>;
@@ -120,6 +141,14 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
             <div <button id:"hidden",type:"button",'data-action':"hidden",'aria-pressed':"false","Show hidden files">
                 <span class:"status-hint","Space for Quick Look">>>
     >;
+    <div id:"context-menu",class:"context-menu",style:"display:none",role:"menu",'aria-label':"File actions",(menu(st))>;
+    <div id:"operation-dialog",class:"overlay operation-overlay",style:"display:none",role:"dialog",'aria-modal':"true",'aria-labelledby':"operation-title",
+        <div class:"go-card",<h2 id:"operation-title">;<p id:"operation-description">;
+            <div id:"operation-field",<label 'for':"operation-value",id:"operation-label","Name">
+                <input id:"operation-value",type:"text",autocomplete:"off">>;
+            <p id:"operation-error",class:"dialog-error",role:"alert">;
+            <div class:"dialog-actions",<button id:"operation-cancel",type:"button",'data-action':"operation-cancel","Cancel">
+                <button id:"operation-confirm",type:"button",class:"primary",'data-action':"operation-confirm","Create">>>>;
     <div id:"go-dialog",class:"overlay",style:"display:none",role:"dialog",'aria-modal':"true",'aria-labelledby':"go-title",
         <div class:"go-card",<div class:"dialog-heading",(icon("go"));<h2 id:"go-title","Go to Folder">>;
             <p "Where would you like to go?">;

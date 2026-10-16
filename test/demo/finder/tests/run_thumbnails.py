@@ -9,6 +9,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[4]
 SCRATCH = ROOT / "temp/finder/scrolling"
 SCRATCH.mkdir(parents=True, exist_ok=True)
+(SCRATCH / "Nested/Empty").mkdir(parents=True, exist_ok=True)
 for index in range(60):
     shutil.copyfile(ROOT / "test/input/image/sample.png", SCRATCH / f"image-{index:02}.png")
 shutil.copyfile(ROOT / "test/input/image/sample.png", SCRATCH / "space # ü.png")
@@ -46,6 +47,21 @@ events = [
     check("document.querySelector('[data-name=\"image-59.png\"] .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"),
     check("document.querySelector('[data-name=\"image-59.png\"] .thumbnail-slot').getAttribute('data-thumb-cache-hit')==='false'"),
     event("script", js="document.getElementById('files').scrollTop=0;document.getElementById('files').dispatchEvent(new Event('scroll'))"),
+    click("#columns"),
+    check("document.querySelector('[data-name=\"image-00.png\"] .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"),
+    check("document.querySelector('[data-name=\"image-59.png\"] .thumbnail-slot').getAttribute('data-thumb-state')==='pending'"),
+    event("script", js="document.querySelector('.column-list').scrollTop=10000;document.querySelector('.column-list').dispatchEvent(new Event('scroll'))"),
+    check("document.querySelector('[data-name=\"image-59.png\"] .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"),
+    check("document.querySelector('[data-name=\"image-00.png\"] canvas').width===1"),
+    event("script", js="document.querySelector('.column-list').scrollTop=0;document.querySelector('.column-list').dispatchEvent(new Event('scroll'))"),
+    click("[data-name='Nested']"), click("[data-name='Empty']"),
+    check("document.querySelectorAll('.file-column').length===3 && document.querySelector('#column-2 .empty h2').textContent==='This folder is empty'"),
+    event("key_press", key="down"),
+    check("document.getElementById('finder').getAttribute('data-selected')==='0'"),
+    event("key_press", key="left"),
+    check("document.querySelector('#column-1 [data-focused=true]').getAttribute('data-name')==='Empty'"),
+    event("key_press", key="left"),
+    check("document.querySelector('[data-name=\"image-00.png\"] .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"),
     click("#place-demo"),
     check("document.querySelectorAll('#files .thumbnail-slot').length===0 && document.getElementById('finder').getAttribute('data-thumbnail-loading')==='false'"),
     event("window_close"), event("assert_window_closed", closed=True),

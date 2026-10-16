@@ -1,0 +1,27 @@
+{
+  "name":"Notes compact layout, sidebar toggle, menu and permanent deletion",
+  "html":"test/demo/note/note.ls",
+  "viewport":{"width":700,"height":650},
+  "events":[
+    {"type":"assert_count","target":{"selector":".note-row"},"count":7},
+    {"type":"assert_text","target":{"selector":"#edit-surface h1"},"equals":"A slower kind of weekend"},
+    {"type":"capture_surface","source":"page","file":"temp/note/compact.png"},
+    {"type":"click","target":{"selector":"#more"}},
+    {"type":"assert_count","target":{"selector":".more-popover"},"count":1},
+    {"type":"key_press","key":"escape"},
+    {"type":"assert_count","target":{"selector":".popover"},"count":0},
+    {"type":"resize","width":1280,"height":800},
+    {"type":"click","target":{"selector":"#toggle-sidebar"}},
+    {"type":"assert_class","target":{"selector":"#notes"},"class":"sidebar-hidden","present":true},
+    {"type":"click","target":{"selector":"#toggle-sidebar"}},
+    {"type":"click","target":{"selector":"#delete-note"}},
+    {"type":"click","target":{"selector":"#folder-trash"}},
+    {"type":"click","target":{"selector":"#delete-note"}},
+    {"type":"assert_text","target":{"selector":".dialog-card h2"},"equals":"Delete Note Permanently?"},
+    {"type":"click","target":{"selector":"#dialog-cancel"}},
+    {"type":"assert_count","target":{"selector":".note-row"},"count":1},
+    {"type":"click","target":{"selector":"#delete-note"}},
+    {"type":"click","target":{"selector":"#dialog-confirm"}},
+    {"type":"assert_count","target":{"selector":".note-row"},"count":0}
+  ]
+}

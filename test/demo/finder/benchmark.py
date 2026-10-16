@@ -16,7 +16,9 @@ SOURCE = ROOT / "test/demo/finder"
 def prepare(name, revision):
     target = WORK / name
     target.mkdir(parents=True, exist_ok=True)
-    for path in SOURCE.glob("*.ls"):
+    for path in SOURCE.iterdir():
+        if path.suffix not in (".ls", ".js"):
+            continue
         shutil.copyfile(path, target / path.name)
     shutil.copyfile(SOURCE / "finder.css", target / "finder.css")
     shutil.copytree(SOURCE / "files", target / "files", dirs_exist_ok=True)

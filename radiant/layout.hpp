@@ -1415,6 +1415,13 @@ bool layout_content_visibility_settle(LayoutContext* lycon, DomNode* root, bool*
 void layout_content_visibility_destroy(ViewTree* tree);
 bool layout_content_visibility_clone(ViewTree* destination, const ViewTree* source,
                                      DomDocument* document);
+struct LayoutContentVisibilityTransaction {
+    lam::Up<ViewTree> tree;
+    lam::Own<struct ContentVisibilityState> saved;
+    bool begin(ViewTree* target);
+    void close(bool commit = false);
+    ~LayoutContentVisibilityTransaction() { close(); }
+};
 void layout_content_visibility_forget_subtree(DomNode* root);
 void layout_content_visibility_invalidate(DocState* state);
 bool layout_get_last_remembered_size(LayoutContext* lycon, DomElement* element,
@@ -1717,6 +1724,9 @@ inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
            white_space == CSS_VALUE_PRE_LINE || white_space == 0;
 }
+inline bool layout_white_space_collapses_newlines(CssEnum white_space) {
+    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP || white_space == 0;
+}
 inline bool white_space_preserves_space_advance(CssEnum white_space) {
     return white_space == CSS_VALUE_PRE ||
         white_space == CSS_VALUE_PRE_WRAP ||
@@ -1752,10 +1762,16 @@ CssEnum layout_inherited_text_transform(DomNode* node);
 enum LayoutInlineTextEdgeMode {
     LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
     LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT,
+    LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE,
 };
 bool layout_ruby_annotation_node(DomNode* node);
 uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
     LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE);
+uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
+    LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
+    DomNode** common_ancestor = nullptr);
+bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
+    DomNode* node, bool before);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
@@ -4494,6 +4510,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode* elmt);
 
 // ===== paged flow hooks (layout_paged.cpp) =====
+ViewTree* paged_flow_view_tree(const LayoutContext* lycon);
 // Every hook is called only while lycon->paged is set. The page flow is the
 // ordinary browsing layout of the document at the page body width; pages are
 // consecutive fragmentainers of that one flow, and a page break is a strut
@@ -4510,8 +4527,11 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
 void paged_line_start(LayoutContext* lycon, ViewBlock* block);
 void paged_line_metrics(LayoutContext* lycon);
+bool paged_line_keep(LayoutContext* lycon, DomNode* node);
 // native content dimensions size the object and only fill unspecified viewport axes.
 void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height);
+void paged_table_cell_alignment(LayoutContext* lycon, ViewTableCell* cell);
+float paged_table_column_share(LayoutContext* lycon, ViewElement* column, bool fixed_definite);
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
     const CssValue* value, bool* handled);
 // after a post-hoc margin adjustment moved a finished block by delta: the

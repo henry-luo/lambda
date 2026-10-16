@@ -680,3 +680,841 @@ and the repaired-case inventory are in `temp/view_reuse_remaining.json`.
 Changed-width table continuations, remaining native whitespace/reference
 geometry, table-model migration and terminal-float fitting remain open; this
 milestone does not complete P6/P7.
+
+### 2026-10-16: computed reference geometry in the shared layout
+
+**Milestone.** Repair reference-block geometry through ordinary block layout:
+computed indent inheritance, negative outdents, nested decoration, changing body
+widths, first-area selection at forced/avoid breaks and terminal master selection,
+and independent cell/static reference areas. Acceptance uses the existing native,
+percentage-indent and FO ancestry cases without changing assertions. Focused
+checks precede the unchanged View Reuse selection, its complementary reuse/style
+selection and the required Radiant baseline. The contract is paged-media design
+§11.3; edition ownership follows **D4.5.1v4 / D4.1.4v5**.
+
+**Implemented.** Paged reference geometry consumes the selected CSS snapshot's
+computed native traits after page selection. It no longer reparses inherited
+declarations in a receiving font or lets a zero CSS margin suppress the native
+geometry. Reference frames retain their inline extent through decorated ordinary
+ancestors; cells and detached auxiliary regions establish independent frames.
+Percentage bases bind by declaring style within the layout pass and remain
+available to inheriting descendants. Pure measurements do not create bindings,
+and condition passes clear them before selecting areas again. Static composition
+restores the paged context inside its detached scope so the same computed traits
+reach furniture. Width replay includes auto-width ordinary descendants for line
+wrapping and fragment publication. Nonfinite deferred arithmetic and conflicting
+CSS inline sizes/margins fail admission before pages are published.
+
+**Qualification.** The unchanged selection improves **351/490 → 360/490**,
+repairing nine existing cases with no newly failing case. The complementary
+reuse/style selection passes **124/124**; integer-cast lint and `git diff --check`
+pass. The rebuilt Radiant baseline reports **5,720 pass / 154 accepted partial /
+130 fail / one skip** of 6,005, with every failure in View Reuse. Layout retains
+**3,144 pass / 150 accepted partial / zero regressions**; native text/layout,
+UI automation, DOM UI, application views, Scene3D and render visual gates pass.
+Receipts: `temp/view_reuse_next/radiant_gate/test_summary.json` and
+`temp/view_reuse_next/remaining.json`.
+
+Changed-width table tracks/cell continuations and note continuation reflow remain
+open; their existing failures and diagnostics are retained. This milestone does
+not complete P6/P7.
+
+### 2026-10-16: table sizing, baseline alignment and counter contract audit
+
+**Long-running goal.** Resolve every remaining View Reuse failure by shared
+cause. The first milestone covers definite/percentage caption sizing and auto
+margins, first-row spanning tracks, column percentages, computed inherited table
+spacing, and row baselines for mixed fonts, superscripts and empty cells. Focused
+existing cases precede the full binary and rebuilt Radiant baseline. Table
+continuation reflow, native text/auxiliary behavior and page-program fitting are
+subsequent milestones. Assertions that conflict with the current integration
+contract remain identified separately while that contract is clarified.
+
+**Implemented.** Fixed spans subtract internal spacing before distributing their
+width and fill only tracks not already established by columns. Track totals count
+overwrites once; the automatic algorithm receives column percentage constraints
+through its existing percentage distributor. Captions recompute percentages
+after their wrapper width settles and resolve horizontal auto margins there.
+Inherited border spacing uses its declaring ancestor's font. Published table
+wrappers contain before captions, the decorated grid and after captions in visual
+order; rows, columns and repeated groups belong to that grid. Published ownership
+continues to follow **D4.5.1v4 / D4.1.4v5**.
+
+Table alignment uses the same platform baseline offset as glyph paint and the
+cell's first formatted line baseline instead of its first glyph. Subpixel shifts
+and cached line baselines stay together. Empty cells retain a synthesized
+content-edge baseline before row growth; they participate in baseline alignment
+without changing their computed vertical alignment. Counter-reset scope remains
+under contract audit: the paged fixture's sibling inheritance expectations
+conflict with the required `counters-004` WPT reference. The runtime retention
+experiment was removed after it regressed that reference and reversed counters.
+
+**Focused qualification.** The unchanged baseline selection improves
+**360/490 → 370/490**, with ten repaired cases and no newly failing case.
+The complementary reuse/style selection passes **124/124**. Aggregate
+qualification exposed percentage-column regressions in auto-width tables. Empty
+trailing columns contribute spacing without percentage constraints. Preferred
+width becomes unbounded only when percentage tracks consume the budget while
+nonpercentage content still requires space; ordinary intrinsic table sizing
+then applies its containing-block cap.
+
+The corrected rebuilt Radiant gate reports **5,730 pass / 154 accepted partial /
+120 fail / one skip** of 6,005. Every failure is in the remaining View Reuse
+selection. Layout is **3,144 pass / 150 accepted partial / zero regressions**;
+the affected table/list categories, UI automation, DOM UI, application views,
+native text/layout, Scene3D and render gates pass. Integer-cast lint and
+`git diff --check` pass. Receipts are in
+`temp/view_reuse_goal/radiant_gate2/test_summary.json`; the remaining-case
+inventory is `temp/view_reuse_goal/remaining.json`. The goal remains active.
+
+### 2026-10-16: native cell content-edge alignment
+
+**Implemented.** The shared table producer consumes the selected edition's
+computed `relative-before` cell policy. Each row aligns that group's first
+content edges independently from the CSS baseline group, using retained line
+metrics through decorated child blocks. Both policies reuse the row shift and
+height-reservation algorithm. Cell continuations retain the initial shift and
+start subsequent slices at their fresh content edge. Preserved line-break source
+bytes remain in fragment ranges but no longer appear as painted glyphs in the
+common text exporter. This implements paged-media design §11.3 with retained
+ownership under **D4.5.1v4 / D4.1.4v5**.
+
+**Qualification.** Both existing native cell cases pass; the mutation case also
+checks row-span height distribution. Seven text-export checks pass, including
+LF/CRLF handling in preserved and collapsed whitespace modes. The unchanged
+selection improves **370/490 → 372/490**, with no newly failing case; the
+complementary selection remains **124/124**. The rebuilt Radiant gate reports
+**5,732 pass / 154 accepted partial / 118 fail / one skip** of 6,005. Every failure
+remains in View Reuse; layout retains **3,144 pass / 150 accepted partial / zero
+regressions**. Integer-cast lint and `git diff --check` pass. Receipts are under
+`temp/view_reuse_goal/native_cell/`. Native column policies, changed-width
+continuations, whitespace, auxiliary areas and page-program fitting remain open;
+the long-running goal remains active.
+
+### 2026-10-16: computed proportional table columns
+
+**Implemented.** Shared table lookup accounts for every track of a repeated
+column. Paged sizing consumes its selected computed proportional coefficient,
+including explicit group inheritance, and rejects automatic or indefinite tables
+without a proportional intrinsic-sizing policy. CSS column widths remain fixed
+bases, first-row cells fill only unweighted unspecified tracks, and remaining
+automatic tracks share the remainder with unit weight. The common distributor
+continues to normalize large weights in double precision. Style admission reuses
+one selected-source helper. This implements paged-media design §11.3 while
+retaining **D4.5.1v4 / D4.1.4v5** ownership.
+
+**Qualification.** The inherited-base and mutation/diagnostic case now passes;
+the repeated-column case has correct first-page tracks and still exposes its
+changed-width continuation failure. The strengthened distributor check covers
+mixed automatic and weighted tracks. The full binary has one fewer failing case
+and no new failure: **373/490**, with **124/124** complementary cases passing.
+The rebuilt Radiant gate reports **5,733 pass / 154 accepted partial / 117 fail /
+one skip** of 6,005, all failures in View Reuse. Layout retains **3,144 pass / 150
+accepted partial / zero regressions**. Integer-cast lint and `git diff --check`
+pass. Receipts are under `temp/view_reuse_goal/column_weights/`. Next is
+transactional edition sizing history; continuation reflow remains open.
+
+### 2026-10-16: transactional edition sizing history
+
+**Implemented.** Shared content-visibility layout reads relevance and remembered
+intrinsic sizes from the selected paged edition while geometry remains in the
+DOM workspace. Each reference attempt clones history through the existing
+helper; nonfinal or failed attempts restore the last successful state. Only a
+committed edition replaces that state. This preserves independent screen/print
+editions and retained page generations under **D4.5.1v4 / D4.1.4v5**. Zero
+resource capacities report exhausted budgets before composition starts.
+
+**Contract and checks.** The existing history case retains all its sizing,
+published geometry, retained-page and pixel assertions. A new publication-budget
+failure checks rollback after layout has updated remembered sizes. One stale
+assertion that the DOM keeps its original browsing height is replaced with a
+check that it holds the final edition layout, as required by §4.7 above. No test
+is removed or disabled.
+
+**Qualification.** The history case now passes. The full binary improves
+**373/490 → 374/490**, with **124/124** complementary cases and no newly failing
+case. The rebuilt Radiant gate reports **5,734 pass / 154 accepted partial /
+116 fail / one skip** of 6,005, all failures in View Reuse. Layout retains
+**3,144 pass / 150 accepted partial / zero regressions**; UI automation,
+application views, DOM UI, native text/layout, Scene3D and render gates pass.
+Integer-cast lint and `git diff --check` pass. Receipts are under
+`temp/view_reuse_goal/edition_history/`; the current inventory is
+`temp/view_reuse_goal/remaining.json`. The long-running goal remains active;
+next is list-marker publication and its obsolete item-era fixture assumptions.
+
+### 2026-10-16: shared marker baselines and retained list publication
+
+**Implemented.** Raster, SVG and paged marker paint use one baseline helper
+over the marker's computed line ascent. Marker coordinates start at the line
+box; raw face ascent and glyph-rectangle ascent had discarded or double-counted
+its leading. The existing list cases now read painted color from glyph runs and
+retain authored text identities before marker materialization. Following §4.5
+and §4.7, baseline checks compare actual glyph baselines, and the old workspace
+preservation check becomes a stricter retained-edition reflow check. Original
+source ranges, marker count/color/page, empty-item height and export assertions
+remain covered. Retained source/paint ownership follows **D4.5.1v4 / D4.1.4v5**.
+
+**Qualification.** All 18 focused list/marker checks and seven neighboring text
+export checks pass. The original fixture also verifies aligned blue/black glyph
+pixels and pixel-identical leased pages after width mutation. Flat SVG places
+the marker at the A outline's baseline; PNG confirms their ink bottoms agree.
+The full binary improves **374/490 → 377/490**, with **124/124** complementary
+cases and no new failure. Integer-cast lint and `git diff --check` pass.
+
+The rebuilt Radiant gate exhausted disk space in four late harness components.
+Their ENOSPC logs remain; completed debug traces were compressed and two redundant
+older traces removed. The four affected components pass on retry. Combining their
+receipts with the 24 completed components covers the unchanged 6,005-test
+inventory: **5,737 pass / 154 accepted partial / 113 fail / one skip**, all failures
+in View Reuse. Layout retains **3,144 pass / 150 accepted partial / zero
+regressions**. Evidence is under `temp/view_reuse_goal/list_markers/`, including
+`qualification_summary.json`, its derivation script and export checks. The goal
+remains active; native note admission is the next bounded producer milestone.
+
+### 2026-10-16: native note admission in shared flow
+
+**Implemented.** Selected-style admission consumes computed note-binding errors
+through the same parameterized status check as other native traits. Element entry
+admits inline bindings, diagnoses native notes nested in calls or auxiliary flow,
+and rejects in-flow block call content. Atomic inline formatting contexts and
+hidden blocks remain valid. Anchor classification is independent of admission so
+detached layout can recognize nested classic footnotes without suppressing its
+own note root. Existing diagnostic reasons and source identities are unchanged;
+transactional publication follows **D4.5.1v4 / D4.1.4v5** and native notes follow
+paged-media design §11.3.
+
+**Qualification.** The original diagnostic case passes, with added positive
+atomic/hidden-content checks and nested call/classic-note checks. The 39-case
+note selection has no new failures. The full binary improves **377/490 →
+378/490**, with **124/124** complementary cases and no new failure. The rebuilt
+Radiant gate reports **5,738 pass / 154 accepted partial / 112 fail / one skip**
+of 6,005; all failures remain in View Reuse and layout has zero regressions.
+Integer-cast lint and `git diff --check` pass. Receipts are under
+`temp/view_reuse_goal/note_admission/`. Empty authored-call anchors remain open.
+
+### 2026-10-16: empty inline source positions
+
+**Implemented.** Inline publication reuses the shared fragment geometry for
+zero-width spans without line content, retaining a nonpainting source position
+even when the span has no decorated box. Decoration paint and insertion geometry
+use one parameterized callback; decorated zero-width boxes retain their paint.
+This restores empty authored-note calls through ordinary inline publication,
+without synthesizing numbering or specializing the publisher for native tags.
+Source/retained ownership follows **D4.5.1v4 / D4.1.4v5** and native note anchors
+follow paged-media design §11.3.
+
+**Qualification.** The existing empty-call case passes with all original
+assertions, plus an ordinary empty span, forced page reflow and retained-position
+checks. The full binary improves **378/490 → 379/490**, with **124/124**
+complementary cases and no new failure. The rebuilt Radiant gate reports
+**5,739 pass / 154 accepted partial / 111 fail / one skip** of 6,005; all failures
+are View Reuse, and layout has zero regressions. Integer-cast lint and
+`git diff --check` pass. Receipts are under `temp/view_reuse_goal/empty_inline/`.
+The long-running goal remains active. Trailing-whitespace export is next;
+whitespace-only native call areas and table-group breaks remain open.
+
+### 2026-10-16: text publication regression contracts
+
+**Reconciled.** Two fixtures still assumed the item composer's flattened text
+shape. The margin-context fixture now selects its `[Line]` and `Two` glyph runs
+through the existing source lookup, retaining its exact 10px line-spacing,
+quote, variable, font and footnote-area checks and adding generated-role and blue
+text checks. The detached block remains in the published hierarchy (§3.4).
+The atomic-wrap fixture retains `A ` in its TextRect payload (§4.5) and checks
+that its published width equals the selected font's `A` advance, with every
+source byte covered once and the original DOM bytes unchanged. Its image-wrap
+geometry checks remain. Source/edition ownership follows **D4.5.1v4 /
+D4.1.4v5**; these are assertion repairs, with no changed text-layout behavior.
+
+An attempted consumed-space export mark was removed: it erased the separators
+from three passing reference-repagination cases. A separate Unicode atomic-wrap
+candidate passes its focused assertions but disagrees with seven current
+Chromium geometry references. Headless Chromium 152 reproduces those references,
+whereas [CSS Text 3 §5.5](https://www.w3.org/TR/css-text-3/#line-break-details)
+prohibits the relevant GL/WJ/ZWJ boundary breaks. On 2026-10-16 the user chose
+the CSS Text no-break rule. The candidate is now installed and its expanded
+native case passes; the current wrapping milestone must qualify its aggregate
+impact. A fresh Chromium152 audit confirms that Ahem loaded in all seven cases
+(`document.fonts.check`, each FontFace status and a 100px Ahem advance), so the
+browser differences are real. No browser reference was changed. Evidence:
+`temp/view_reuse_goal/atomic_wrap/browser_font_audit.json`.
+
+**Qualification.** Seven focused text/margin/reference cases pass. The
+full binary improves **379/490 → 381/490**, with **124/124** complementary cases
+and no new failure. Integer-cast lint and `git diff --check` pass. The rebuilt
+Radiant gate reports **5,741 pass / 154 accepted partial / 109 fail / one skip**
+of 6,005; all failures remain in View Reuse, and layout has zero regressions.
+Receipts are under `temp/view_reuse_goal/margin_text/`.
+The long-running goal remains active; short tables skipping forced internal
+boundaries are the next bounded layout milestone.
+
+### 2026-10-16: internal forced breaks in fitting tables
+
+**Implemented.** The table-fragment pass's fitting-table shortcut now checks
+the existing body-row boundary resolver before returning. A forced internal
+boundary enters the ordinary fragmentation loop even when the whole table's
+height fits. The row/group break handler, furniture reservation and avoidance
+rules are shared with overflowing tables; no second table producer was added.
+This follows [CSS Fragmentation 3 §4.3](https://www.w3.org/TR/css-break-3/#forced-breaks).
+Retained edition ownership follows **D4.5.1v4 / D4.1.4v5**.
+
+**Qualification.** The original forced-row/avoided-group case passes and
+now covers both `break-before` and `break-after` at the boundary, removing the
+break on recomposition, and retained row-page assignments. The additional-header
+group case also passes without assertion changes. The full binary improves
+**381/490 → 383/490**, with **124/124** complementary cases and no new failure.
+Integer-cast lint and `git diff --check` pass. The rebuilt Radiant gate reports
+**5,743 pass / 154 accepted partial / 107 fail / one skip** of 6,005; all failures
+remain in View Reuse, and layout has zero regressions. Receipts are under
+`temp/view_reuse_goal/table_forced/`. Sided-break
+precedence and propagation at the table's outer edges remain open.
+
+### 2026-10-16: adjoining sided-break precedence
+
+**Implemented.** Table boundaries and ordinary sibling boundaries use one
+ordered break combiner. A later sided value overrides an earlier side; generic
+page/column demands continue to combine without erasing an existing side. Each
+table group's value precedes its descendant row's value, and the following side
+of the boundary follows the previous side. This replaces enum-number priority
+and follows [CSS Fragmentation 3 §4.3](https://www.w3.org/TR/css-break-3/#forced-breaks).
+The change adds no edition or style borrows; existing ownership remains under
+**D4.5.1v4 / D4.1.4v5**.
+
+**Qualification.** The expanded original table-group case and ordinary
+sibling fixture fail on the old resolver and pass after the repair. They retain
+their original page/header assertions and cover both side directions, row/group
+conflicts, recto/verso, an earlier side followed by a generic page break, and
+page/column requests. Six focused cases pass, including table-column furniture
+and named/sided-page neighbors. Full614 improves **383/490 → 384/490**, with
+**124/124** complementary cases and no new failure. Integer-cast lint and
+`git diff --check` pass. The rebuilt Radiant gate reports **5,744 pass / 154
+accepted partial / 106 fail / one skip** of 6,005; all failures remain in View
+Reuse, and layout has zero regressions. Receipts are under
+`temp/view_reuse_goal/sided_break/`. Table outer-edge propagation remains
+the next bounded milestone.
+
+### 2026-10-16: table outer-edge break propagation
+
+**Implemented.** The table's used break before/after combines its own value
+with the first/last body group's and edge row's values. The same effective
+boundary reaches the ordinary block break and sibling keep-chain handlers.
+Source lookup precedes table-child layout and reads the shared cascade through
+the selected edition's declaration/value APIs, including aliases and variables.
+Computed `BlockProp::break_before/after` values remain unchanged, as required by
+[CSS Fragmentation 3 §3.1.1](https://www.w3.org/TR/css-break-3/#break-propagation).
+Lookup values do not escape the call; selected metadata ownership follows
+**D4.5.1v4 / D4.1.4v5**.
+
+Normal table ordering, paged collection and source-edge lookup share the rule
+that only the first header/footer groups are furniture. Laid-out groups keep
+their existing computed classifier; source lookup resolves roles before views
+exist and crosses transparent contents. The normalizer and table producer stay
+shared. An adjoining-table fixture now checks its wrapper plus exactly one
+painted grid on the original expected page, replacing the retired one-node
+table count (§3.4), and asserts the table's computed break values remain `auto`.
+
+**Qualification.** Seven focused break/keep/furniture cases pass. The
+generic-page case following a group side, variable/alias cases and computed-value
+checks pass. Full614 improves **384/490 → 387/490**, with **124/124** complementary
+cases and no new failure: exterior breaks around connected row spans also pass
+without assertion changes. Integer-cast lint and `git diff --check` pass.
+The rebuilt Radiant gate reports **5,747 pass / 154 accepted partial / 103 fail /
+one skip** of 6,005; all failures remain in View Reuse, and layout has zero
+regressions. Receipts are under `temp/view_reuse_goal/table_edges/`.
+Collapsed source whitespace and following
+zero-height insertion anchors remain open.
+
+### 2026-10-16: fragmentainer failures abort publication
+
+**Implemented.** Fragmentainer append records failed page/column creation and
+storage growth in the flow's sticky status. Void layout hooks can no longer lose
+the returned error and leave publication believing a truncated page table is
+complete. A failed blank-page insertion prevents material-page creation, resumed
+note errors propagate, and existing producer diagnostics keep their precise
+source/reason. This restores transactional edition failure under **D4.1.4v5 /
+D4.5.1v4**.
+
+**Qualification.** Expanded sided-boundary budget cases fail on the old
+code and now reject both insufficient blank-page and material-page budgets,
+with a diagnostic, zero pages and no committed model. Terminal-column budget
+failure now permits successful recomposition with identical recovered and
+retained page pixels. Full614 improves **387/490 → 390/490**, with **124/124**
+complementary cases and no new failure; native authored-note budgets and sequence
+master exhaustion also pass unchanged. The body-column rule fixture's late
+budget assertions pass; its 75 glyph-top assertions remain for a metric-contract
+audit. Integer-cast lint and `git diff --check` pass. The rebuilt Radiant gate
+reports **5,750 pass / 154 accepted partial / 100 fail / one skip** of 6,005;
+all failures remain in View Reuse, and layout has zero regressions. Receipts are
+under `temp/view_reuse_goal/page_budget/`.
+
+### 2026-10-16: glyph coordinates retain the line allocation contract
+
+**Audited.** Five legacy checks compared published font rectangles with line-box
+tops. The shared assertion now derives the expected baseline from the selected
+captured face and the original absolute line grid, then verifies glyph top,
+height and baseline. It preserves page/column positions, source-byte coverage,
+pixels, rule strokes, exports and retained rollback checks. The CSS cases use
+[CSS 2 §10.8.1](https://www.w3.org/TR/CSS2/visudet.html#leading) with Radiant's
+existing ascent-leading snapping; independent Chromium152 captures confirm
+Arial10/20 and Times10/12 rectangles. FO uses nominal font geometry and unsnapped
+half-leading under [XSL1.1 §4.5](https://www.w3.org/TR/2006/REC-xsl11-20061205/#area-line),
+explaining its fractional top. Captured fonts follow **D4.5.1v4**. No engine
+source changed, and temporary metric logging was removed.
+
+**Qualification.** All five cases pass. Full614 improves **390/490 → 395/490**,
+with **124/124** complementary cases and no new failure. A fresh unchanged
+490-case selection confirms395pass/95fail. The Radiant archive and CLI SHA256
+are identical to the preceding aggregate; preserving its unchanged-component
+evidence gives **5,755 pass /154 accepted partial /95 fail /one skip** of6,005.
+`git diff --check` passes. Receipts, metric traces, browser script/captures and
+the explicit qualification manifest are in `temp/view_reuse_goal/glyph_coordinates/`.
+Body-region display alignment remains a real missing behavior, separate from
+these obsolete rectangle expectations.
+
+### 2026-10-16: settled body-region display alignment
+
+**Implemented.** Native body-region `display-align` was parsed and validated but
+never applied by body publication. The publisher now computes before/center/after
+translation independently for each settled fragmentainer. The shared slice-break
+lookup finds its last material boundary, excluding the empty forced-break tail
+and including closing edges and repeated table footers. The translation uses
+the existing publication mapping for boxes, glyphs, images and paint. It is
+removed before auxiliary publication, so top/bottom floats and footnote areas
+keep their assigned slots. Pagination and mutable DOM geometry stay independent
+of this publication-only translation; edition ownership follows **D4.5.1v4 /
+D4.1.4v5**. This implements the body-column alignment contract in design §11.3.
+
+**Qualification.** The expanded original column case fails30assertions on the
+old publisher. It now passes before/center/after for equal and unequal column
+heights, checks original line grids through captured glyph baselines, and
+verifies color pixels, every source byte, retained pixels after mutation and
+failed recomposition. An auxiliary case has real spare space and verifies that
+body movement leaves top/bottom floats and notes fixed. Five focused cases pass.
+The table/furniture neighbor retains independent row-sizing and footer-role
+failures; those expectations were not altered. Full614 improves **395/490 →
+396/490**, with **124/124** complementary cases and no new failure. Integer-cast
+lint and `git diff --check` pass. The rebuilt Radiant gate reports **5,756 pass /
+154 accepted partial /94 fail /one skip** of6,005, with every failure in View
+Reuse and no new layout regression. Receipts are in
+`temp/view_reuse_goal/body_alignment/`.
+
+### 2026-10-16: caption fixture sizing contracts
+
+**Audited.** The caption-wrapper fixture omitted `box-sizing` while expecting
+content-box dimensions. The shared UA table default is border-box; independent
+Chromium152 capture confirms110px/x65 for border-box and120px/x60 for content-box
+in the authored220px containing block. The fixture now checks default, explicit
+border-box and explicit content-box, retaining the original content-box geometry
+and all wrapper/caption/source-order checks. Added pixels verify that blue grid
+borders and yellow padding paint separately from captions.
+
+The alternating-page fixture now asserts one220px table grid throughout the run
+under §4.2, while independently checking220/180/220px page content widths and
+240/200/240px physical snapshots. Captions still occur only on the original
+first/last pages, and header/footer rows still repeat exactly once per page.
+No engine source changed; edition ownership remains **D4.5.1v4 / D4.1.4v5**.
+
+**Qualification.** All ten caption cases pass. Full614 improves **396/490 →
+398/490**, with **124/124** complementary cases and no new failure. A fresh
+unchanged490-case selection confirms398pass/92fail. The Radiant archive and CLI
+SHA256 match the completed body-alignment gate; preserving unchanged-component
+evidence gives **5,758 pass /154 accepted partial /92 fail /one skip** of6,005.
+`git diff --check` passes. Browser geometry/script, focused/full receipts and the
+explicit qualification manifest are in `temp/view_reuse_goal/caption_contract/`.
+
+### 2026-10-16: shared numbered table placement and property declarations
+
+**Implemented.** Native/FO column numbers now reach common cell placement and
+one column-range traversal shared by sizing, source lookup, visibility, geometry,
+paint layers and publication. Explicit starts may decrease without reordering
+authored sources; implicit declarations follow the preceding endpoint. Columns
+and computed bindings share strict count parsing and range arithmetic.
+Span-qualified property declarations advance the source cursor and select values
+by `(column, qualifying span)` without allocating or painting geometric tracks.
+Duplicate keys, explicit cell/span overlaps and track/coverage budgets fail before
+publication. Empty unassigned columns preserve their group-local zero origin.
+
+New source rows/cells merge with retained anonymous row runs before rowspan
+normalization, so appending a row cannot truncate an existing span at a stale
+generated group boundary. Existing retirement helpers preserve ownership under
+**D4.5.1v4 / D4.1.4v5**. Fixtures check exact uncovered-track coverage for absent
+cells (§3.4), unique geometric occurrences and zero property-only occurrences.
+Repeated tracks retain the §4.2 constant run width while physical page widths
+still alternate. Added column-color pixels, extreme-position budgets, recovery
+and retained pixels cover the common placement and capture paths.
+
+**Qualification.** Twenty focused numbered/property/caption cases pass. Full614
+improves **398/490 → 405/490**, retaining **124/124** complementary cases and
+introducing no new failure. Integer-cast lint and `git diff --check` pass.
+All57 CSS table baseline cases pass. The final rebuilt Radiant gate reports
+**5,765 pass /154 accepted partial /85 fail /one skip** of6,005; all failures
+remain in View Reuse and all layout categories retain their prior baselines.
+Receipts and final review patches are under `temp/view_reuse_goal/numbered_tracks/`;
+`qualification_summary.json` identifies the final full-suite and aggregate runs.
+
+### 2026-10-16: anonymous inline runs at forced table boundaries
+
+**Implemented.** Direct text children of a document-fragment root now enter the
+common text layout path. The root's element-only walk previously dropped them
+before whitespace policy or line commitment could run. Anonymous inline runs
+also consume the preceding block/table's pending forced break at their first
+actual line. Page, column and sided targeting, empty-page sidedness and line
+strut translation reuse the existing pagination machinery; earlier table rows
+and repeated furniture keep their geometry. Continuous editions ignore these
+paged break requests.
+
+Collapsed source whitespace has no TextRect and therefore no source occurrence
+under §3.4/4.5. Preserved LF retains its byte in a zero-width font-cell fragment;
+glyph text retains its complete source range. The expanded existing case checks
+both policies at the root and in a two-column native sequence, all four forced
+break values, insufficient-page rollback, successful recovery and retained
+nonempty header pixels after recomposition. Frozen edition ownership remains
+**D4.5.1v4 / D4.1.4v5**; no formal ruling changes.
+
+**Qualification.** All five focused boundary, furniture and keep controls pass.
+The unchanged 614-case inventory now passes **407/490** baseline and **124/124**
+complementary cases, with no new failures. The rebuilt Radiant gate reports
+**5,767 pass /154 accepted partial /83 fail /one skip** of6,005; every failure
+remains in View Reuse. Integer-cast lint and `git diff --check` pass. Receipts,
+the two-stage reproduction and review patches are in
+`temp/view_reuse_goal/inline_boundaries/`.
+
+### 2026-10-16: native block spaces in the shared flow
+
+**Implemented.** Native before/after spaces now enter a flow boundary journal
+instead of CSS margin hints. The selected typed ranges already computed correctly,
+but author `margin:0` hid the hints and the old fit path shrank CSS margin fields.
+The common `radiant_spaces_resolve` now combines pending spaces across open
+ancestors and completed empty siblings. Real line material, atomic/definite boxes
+and decoration edges close the relevant boundary. Only the outermost open box
+and separate empty anchors move; saved parent-context pointers are cleared before
+an empty layout call returns. Closing padding/borders reserve the inner resolved
+space separately from the following outer boundary. Final conditional spaces
+disappear, while retained ones position trailing empty anchors.
+
+Shrinkable allocations retain their normalized range and used size. A line that
+would cross its fragmentainer first shrinks eligible earlier gaps to their minima,
+using current geometry after keeps/refits. Existing flow translation updates
+closed ancestor heights, following siblings and the live parent cursor together;
+CSS margin collapse and authored margin values remain independent. Leading
+conditionality uses the boundary captured before CSS margin placement, so a
+preserved margin cannot turn a fresh page into a noninitial native boundary.
+Selected values and frozen paint retain **D4.5.1v4 / D4.1.4v5** ownership.
+
+The three original cases now also check before/after range symmetry, normalized
+computed values, exact source coverage, CSS margin preservation and addition,
+discard/retain after forced breaks with a margin, decoration-separated spaces,
+shrinkage inside a padded ancestor, optimum restoration, trailing anchors,
+page-budget rollback and retained nonempty pixels. Ten focused native-space,
+binding, FO and boundary controls pass. Weighted keeps, closed formatting-context
+subflows and the remaining native whitespace/continuation profiles remain open;
+this increment does not claim complete P6 packing.
+
+**Qualification.** The full unchanged 614-case inventory improves **407/490 →
+410/490**, with **124/124** complementary cases passing. No new case fails and
+no remaining case gains additional failed assertions. Integer-cast lint and
+`git diff --check` pass. The rebuilt Radiant gate reports **5,770 pass /154
+accepted partial /80 fail /one skip** of6,005; all failures remain in View Reuse.
+Focused, full, aggregate, two red reproductions and final review receipts are
+under `temp/view_reuse_goal/native_spacing/`.
+
+
+### Shared inline wrapping: native hard keeps and Unicode atomic boundaries (2026-10-16)
+
+Native `keep-together.within-line=always` now constrains descendant inline wrap
+queries through the existing nowrap path (§11.3 of
+`vibe/radiant/Radiant_Layout_Paged_Media.md`). Descendant CSS wrapping or native
+`auto` cannot weaken that owner constraint; forced BR and preserved LF still
+break lines. The lookup stops at the current inline formatting context. Selected
+style ownership remains **D4.5.1v4 / D4.1.4v5**.
+
+The shared text path had recorded a terminal separator for nowrap movement only
+for document fonts and collapsed spaces. It now records the existing legal
+space opportunity for system fonts and preserved wrapping spaces as well.
+Normal/pre-wrap move a following nowrap phrase; nowrap keeps the overfull line,
+matching an independent Chromium152 Arial capture. The expanded original native
+case checks exact source ranges and glyph payloads, nested/explicit inheritance,
+forced breaks, page-budget rollback/recovery and immutable retained raster pixels.
+
+Both edges of atomic inlines now use the existing adjacent-source traversal,
+Unicode control classifier and the nearest common ancestor's wrapping mode.
+The user selected [CSS Text 3 §5.5](https://www.w3.org/TR/css-text-3/#line-break-details)
+over Chromium compatibility: GL/WJ/ZWJ suppress boundary breaks while NBSP keeps
+its compatibility exception. Explicit intervening spaces remain opportunities;
+hidden siblings and the first atomic child of a nowrap wrapper are covered.
+The browser references remain unchanged. Seven atomic captures disagree with
+this selected behavior; Ahem loading was verified, so these are recorded
+standards/browser differences rather than capture repairs.
+
+The full unchanged native inventory has 412/490 baseline and 124/124 complementary
+passes, with no new case failure or increased assertion count. The required
+6005-case Radiant aggregate completes with 5759 passes, 160 accepted partials,
+85 failures and one skip: 78 remaining View Reuse failures plus the seven atomic
+Chromium comparisons. All other aggregate components pass. Evidence and the
+wrapping comparison inventory are under `temp/view_reuse_goal/inline_keep/`.
+The aggregate is therefore not green; native whitespace, weighted/page-domain
+keeps and the other remaining View Reuse behavior stay open.
+
+
+### Repeated-table alignment qualification (2026-10-16)
+
+The original middle/bottom and baseline fixtures now preserve their oversized
+42px-group/140px-body omission controls and add 180px bodies with enough rows to
+exercise actual repetition. Shared assertions verify direct cell ownership per
+TextRect (§3.4/§4.5), complete source payloads exactly once on each expected page,
+font-line geometry, and original header-first/footer-last roles. Budget failure,
+recovery, changed source-cell geometry and nonempty retained pixels preserve the
+edition ownership required by **D4.5.1v4 / D4.1.4v5**. No engine behavior changed.
+
+All five focused table/alignment cases pass. The unchanged 614-case inventory
+now passes 414/490 baseline and 124/124 complementary cases, with no new failure
+or increased assertion count. Unchanged engine sources and CLI hashes reuse the
+completed wrapping aggregate above; only the changed native test binary was
+rebuilt and rerun. The seven Chromium atomic-wrap differences remain visible.
+Evidence: `temp/view_reuse_goal/repeated_alignment/`; 76 View Reuse failures remain.
+
+
+### Typed sibling keep priorities and boundary domains (2026-10-16)
+
+The flow now reads native next/previous strengths from selected computed traits
+at the actual sibling boundary, replacing their CSS `avoid` hints. This preserves
+signed numeric values, computed/inherited values, and `always` as a distinct kind
+above every integer (§11.3 of `vibe/radiant/Radiant_Layout_Paged_Media.md`;
+[XSL 1.1 §4.8](https://www.w3.org/TR/xsl11/#keepbreak)). Native keeps coexist with
+CSS `auto`; CSS avoidance retains its strongest break preference and relaxation
+policy. Page constraints apply at physical page transitions, while column
+constraints apply in their column context. Selected style and retained payload
+ownership remain **D4.5.1v4 / D4.1.4v5**.
+
+Block and table-row chains choose the weakest feasible existing cut, retaining
+the earlier-cut tie behavior and preserving stronger later keeps. Committed
+material and incoming anchor reservations constrain feasibility; anchors already
+on the destination are counted once. Incoming reservations accumulate while
+walking backward. Existing strut undo/shift/refit and forced-boundary handling
+remain the movement path. Row-group boundaries use the same typed queries.
+The table pass also considers rows reaching a fragmentainer boundary exactly;
+a recorded or authored cut is consumed once, preserving relaxation accounting.
+
+The original priority case now covers ordinary blocks and table rows, signed
+extrema/zero/auto, variable and arithmetic values, explicit inheritance,
+previous-side keeps, `always` versus INT32_MAX, both forced sides, exact source
+payload coverage, page budgets/recovery and nonempty immutable retained pixels.
+The domain case retains its original column decisions and now checks font
+rectangles through the existing line-position helper (§4.5). Table-row checks
+assert row geometry and source/ink bounds; a separate positive-half-leading
+cell alignment defect is recorded in `weighted_keeps/plan.txt` and remains open.
+
+The unchanged 614-case inventory passes 416/490 baseline and 124/124 complementary
+cases, with no newly failing case. The existing whole-sheet sibling keep case
+increases from four to six failed assertions: its three geometry failures are
+unchanged, and native variants now report the same actual relaxation already
+reported by the CSS variant. `weighted_keeps/diagnostic_delta.json` preserves
+that comparison; the whole-sheet geometry and diagnostic expectations remain
+unfixed. The initial no-assertion-increase qualification condition is therefore
+not fully met, and this checkpoint carries that explicit limitation.
+
+The rebuilt 6005-case aggregate completes with 5763 passes, 160 accepted partials,
+81 failures and one skip: 74 View Reuse cases and the same seven Chromium atomic
+references. All other components pass; all layout category totals and retained
+failure identities match the prior wrapping aggregate. Lint and diff checks pass.
+The aggregate remains failing. Evidence: `temp/view_reuse_goal/weighted_keeps/`.
+Keep-together hints, whole-sheet/earlier-column rewind, hard native group legality
+and table text leading remain follow-up work rather than completed keep support.
+
+
+### Physical-page keeps and oversized groups (2026-10-16)
+
+Native together/next/previous keeps now remain typed computed vectors, independent
+of CSS `auto`. Whole-sheet feasibility sums the selected columns, counts existing
+anchor reservations once, and reuses strut undo/shift/refit when a group starts in
+an earlier column. Forced boundaries still stop rewind. The shared column-context
+lookup also handles continuous editions, which intentionally have no physical
+page. Selected styles and immutable retained payloads remain governed by
+**D4.5.1v4 / D4.1.4v5**.
+
+Oversized native `always` groups relax and slice under §1.3.4 of
+`vibe/radiant/Radiant_Layout_Paged_Media.md` and §4.1/§4.4 above. The old rejection
+assertions were replaced with source-complete slice geometry, visible retained
+pixels and real page-budget failure/recovery controls. This applies the current
+architecture; it does not introduce a new formal ruling. Native and CSS whole-sheet
+fixtures cover a prior column strut, both sibling sides, forced pages, exact glyph
+positions, source coverage and retained editions after mutations. Mixed native
+spaces and forced-column combinations remain outside this finite acceptance set.
+
+The unchanged 614-case inventory now passes 420/490 baseline and 124/124
+complementary cases. All four selected original cases pass, no case or assertion
+failure increases, and the prior whole-sheet diagnostic qualification limit is
+resolved. The rebuilt 6005-case aggregate completes with 5767 passes, 160 accepted
+partials, 77 failures and one skip: 70 remaining View Reuse failures plus the same
+seven Chromium atomic-wrap conflicts. All other components pass. Lint and diff
+checks pass; the aggregate remains failing. Evidence, comparison inventories,
+source/binary hashes and verified trace compression are under
+`temp/view_reuse_goal/page_keeps/`. Table text leading, independent native
+whitespace, remaining table behavior and terminal/changed-width profiles remain
+open.
+
+
+### Automatic table percentage finalization (2026-10-16)
+
+The shared table pass now finalizes intrinsic percentages before preferred sizing
+and distribution. Later logical columns receive only the remaining percentage
+budget ([CSS Tables 3 §3.8.3](https://www.w3.org/TR/css-tables-3/#computing-column-measures)).
+Spanning cells contribute their remaining percentage only to unassigned columns,
+weighted by their non-spanning max-content measures. Column constraints join the
+non-spanning baseline first. Identical spans merge their strongest percentage;
+overlapping spans resolve in logical column order for browser compatibility.
+This follows the flexibility of
+[CSS 2.2 §17.5.2.2](https://www.w3.org/TR/CSS22/tables.html#auto-table-layout);
+the simultaneous equal-span algorithm in the CSS Tables working draft differs
+from Chromium on the independently captured overlap cases. No formal ruling changes.
+
+The original percentage case covers 24 font-derived scenarios: automatic and
+explicit widths, calc values, both directions, cell/column constraints and
+overlapping spans in both row orders. Independent Chromium 152 captures agree
+with all selected geometries. A reproducible Markdown regression exposed the
+old equal-division span bug; before/candidate/final comparisons were repeated
+three times each. The final result exceeds the unchanged recorded floor.
+
+Two original table expectations still described the retired composer: a cell's
+preferred width was treated as its intrinsic minimum, and a wide nowrap grid was
+rejected. Their updated cases apply the common engine and overflow contract of
+§4.1, asserting font-derived grid/cell widths, source-complete glyph payloads,
+nonempty retained pixels, changed geometry/paint and real page-budget failure
+and recovery. Retained ownership remains **D4.5.1v4 / D4.1.4v5**. The tests retain
+their names and inventory; no reference or score floor changed.
+
+The final unchanged 614-case native inventory passes 423/490 baseline and
+124/124 complementary cases, with no new failure or increased assertion count.
+Lint and diff checks pass. The final aggregate stopped on disk exhaustion while
+writing reports; completed trace bytes were compressed and verified. The view
+component was then rerun through the unchanged standard runner with completed
+traces archived only after their owning processes exited: 204/204 pass. Map and
+render were also recovered through the standard runner. Combined evidence covers
+all 28 components and 6005 selected cases with unchanged build inputs/binaries:
+5770 passes, 160 accepted partials, 74 failures and one skip. The 74 failures are
+the remaining 67 View Reuse cases and the same seven Chromium atomic-wrap
+comparisons. This is recovered component qualification, not a pristine single
+aggregate run. All evidence and hashes are under
+`temp/view_reuse_goal/table_percent/`; final goal-wide qualification remains open.
+
+
+### Common admission and root style replacement (2026-10-16)
+
+The original oversized-image, formatting-context and missing-image cases now
+apply §1.3.4 of `vibe/radiant/Radiant_Layout_Paged_Media.md` and §4.1 above.
+A 90px image in a 60px body publishes two clipped slices with one retained
+resource and continuous image coordinates. HTML missing/denied images keep
+the common browsing fallback; a native `r:page-document` still reports its
+unavailable graphic at the correct source under **D7.1.2v2**. Hidden descendants
+stay absent, and an empty SVG viewport participates in ordinary box painting.
+Eight ordinary formatting contexts and a grid root are checked through source
+coverage, font geometry, visible pixels, mutations and real budget rollback.
+The cases retain their names and inventory.
+
+Those mutation controls exposed a shared root recascade defect. Removed display
+declarations could reuse a dirty cached display, and the root bypassed the
+flow dispatch that refreshes it. The shared display cache now checks the existing
+recompute flag. Root dispatch resolves its current display before HTML defaults
+and CSS, preserving closed-dialog defaults and orthogonal inline used boxes.
+The existing non-inherited style reset also clears cached preferred sizes,
+percentage bases and size kinds from `BLOCK_PROP_DEFAULT`, so removed width and
+height declarations stop acting authored. No fixture-specific engine branch or
+explicit CSS reset is needed.
+
+The context fixture verifies a removed 90% root width returns to the viewport
+width, removed grid display returns to flow, and removed height becomes auto.
+The root keeps its viewport box with the second page in its overflow. Authored
+text identity survives inserted list markers. Image assets, source ranges and
+nonempty retained pixels remain stable after resource/cache and DOM changes,
+as required by **D4.5.1v4 / D4.1.4v5**. No formal ruling changes.
+
+A broad late display refresh initially regressed a mixed-writing-mode baseline
+and a closed dialog. Both reproduced three times; moving the refresh into root
+dispatch restored all three scores to 100% in three final repeats. References
+and floors are unchanged. The final unchanged 614-case native inventory passes
+426/490 baseline and 124/124 complementary cases, without new failures or
+increased assertion counts. Lint and diff checks pass. A complete rebuilt
+6005-case aggregate finishes with 5773 passes, 160 accepted partials, 71 failures
+and one skip: 64 remaining View Reuse cases plus the same seven atomic Chromium
+comparisons. All other components pass. This fresh aggregate supersedes the
+previous checkpoint's interrupted-aggregate qualification limit.
+
+Evidence and hashes are under `temp/view_reuse_goal/admission_contract/`.
+Completed traces are archived only after their owning processes exit, with
+content hashes verified. A separate verified archive preserves this goal's
+completed workspace logs and reclaims space without following fixture symlinks.
+Constant-width table editions, independent native whitespace and the other
+remaining behavior are still open.
+
+
+### Constant-width table editions and internal layer borders (2026-10-16)
+
+Eight original table cases now apply the constant flow width from §1.3 of
+`vibe/radiant/Radiant_Layout_Paged_Media.md` and §4.2 above. Alternating 240px
+and 200px physical sheets retain a 220px flow basis established by the first
+sheet. Fixed and automatic percentage tracks, spans, repeated groups, spacing,
+weighted columns and baseline content keep that basis. Physical page bounds
+still clip painted content. Repeated headers retain their natural first-page
+role and footers their natural last-page role; other copies are repeated-table
+fragments. Text follows the per-`TextRect` publication contract in §4.5.
+
+The cases verify source-byte coverage, actual cell ancestry, owned glyph payloads,
+font geometry, visible track colors, causal width/style changes, retained pixels
+and page/node budget rollback with recovery. Authored cell pointers are retained
+across common anonymous row-group fixup. DOM-backed properties are the current
+layout workspace, while published editions retain independent geometry and
+paint under **D4.5.1v4 / D4.1.4v5**. Names and test inventory are unchanged.
+
+A blue column with an authored red border exposed an independent publication
+bug: internal table boundaries were passed to the generic box painter as if
+all their border and padding properties applied. The existing table-layer
+classifier is now shared by boundary publication. Rows, row groups, columns
+and column groups publish zero used padding and no independent border. Their
+backgrounds continue to paint under originating cells. Source declarations
+remain intact for collapsed-border conflict resolution (CSS 2.2 §17.3,
+§17.5.1 and §17.6); an adjacent control checks an 8px column border becomes a
+resolved cell edge with a 4px outward extent and visible pixels. The shared
+box painter is unchanged. No formal ruling changes.
+
+Qualification evidence is recorded under
+`temp/view_reuse_goal/constant_table_runs/`. The native 614-case inventory
+passes 434/490 baseline and 124/124 complementary cases, with no new failures,
+increased assertion counts or changed remaining assertions (excluding source
+line numbers and allocation addresses). The focused run passes all eight
+selected cases and six neighbors; two existing collapsed-table failures remain
+unchanged. Lint and diff checks pass. The freshly rebuilt 6005-case Radiant
+aggregate completes with 5781 passes, 160 accepted partials, 63 failures and one
+skip: the remaining 56 View Reuse cases and the same seven atomic Chromium
+comparisons. All other components pass, including 204 view cases and 631 UI
+automation cases. References and floors are unchanged. This milestone does not
+close the remaining View Reuse or reference work.
+
+
+### Collapsed fixed tracks and grid paint (2026-10-16)
+
+The shared explicit-content-width helper now serves automatic and fixed table
+layout, first-row/column percentages, and final fixed grid sizing. Collapsed
+tracks subtract resolved half-borders, rather than the full authored borders
+that conflict resolution may replace. An unchanged original case now yields a
+220px table with two 108px cells, matching independent Chromium 152 measurements
+for fixed and automatic layout. Separate-border controls retain their geometry.
+
+The published collapsed grid has zero used padding and no independent border
+paint: cells own the resolved shared edges. A hidden resolved cell edge keeps
+its `hidden` style in retained metadata while its used paint width stays zero.
+This preserves the conflict result and prevents the table's authored border
+from drawing over it. Published state remains edition-owned under
+**D4.5.1v4 / D4.1.4v5**. No test expectation, test name or formal ruling changed.
+
+The full unchanged native inventory now passes 435/490 baseline and 124/124
+complementary cases, with no new failures, increased assertion counts or changed
+remaining assertions. The original border conflict/geometry/pixel case passes
+all its assertions; the adjacent fragmented-table edge case still has its same
+three failures and remains open. The user requested wrapping up at this point,
+so that further repair is deferred. Lint and diff checks pass. The final rebuilt
+6005-case Radiant aggregate completes with 5782 passes, 160 accepted partials,
+62 failures and one skip: the remaining 55 View Reuse cases plus the same seven
+atomic Chromium comparisons. All other components pass. Evidence, unchanged
+failure comparisons and source/binary hashes are under
+`temp/view_reuse_goal/collapsed_table_edges/`. Work is paused at the user’s
+request with the full remaining goal preserved.

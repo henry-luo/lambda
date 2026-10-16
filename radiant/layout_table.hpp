@@ -4,8 +4,24 @@
 struct DomElement;
 struct CollapsedBorder;
 struct ViewTable;
+struct ViewTableRowGroup;
 struct ViewBlock;
+struct ViewElement;
 bool table_view_is_caption(ViewBlock* child);
+bool table_caption_is_bottom(ViewBlock* caption);
+
+// only the first header/footer groups are furniture; additional groups are body material.
+struct LayoutTableSectionOrder {
+    DomElement* header = nullptr;
+    DomElement* footer = nullptr;
+    bool accept_body_group(DomElement* group);
+    bool accept_body_group(ViewTableRowGroup* group);
+};
+struct LayoutTableBodyEdge {
+    DomElement* group = nullptr;
+    DomElement* row = nullptr;
+};
+LayoutTableBodyEdge layout_table_source_body_edge(DomElement* table, bool after);
 
 // captions belong to the transparent wrapper, outside the grid's border box.
 RdtLogicalRect layout_table_grid_rect(const ViewTable* table);
@@ -14,6 +30,18 @@ size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);
 size_t layout_table_cell_rowspan(DomElement* element);
 size_t layout_table_used_rowspan(size_t specified, size_t remaining);
+
+// column groups with children report their bounding range after the leaf declarations.
+typedef void (*LayoutTableColumnFn)(void*, ViewElement*, size_t first, size_t span, bool container);
+void layout_table_visit_columns(ViewTable* table, void* context, LayoutTableColumnFn visitor, bool properties);
+template<typename Fn>
+void layout_table_each_column(ViewTable* table, Fn fn, bool properties = false) {
+    layout_table_visit_columns(table, &fn,
+        [](void* context, ViewElement* column, size_t first, size_t span, bool container) {
+            (*static_cast<Fn*>(context))(column, first, span, container);
+        }, properties);
+}
+bool layout_table_column_range(ViewElement* source, size_t* first, size_t* span);
 
 // both producers skip occupied slots before covering a cell's rectangular span.
 template<typename Index, typename Occupied, typename Cover>

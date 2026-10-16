@@ -1,5 +1,11 @@
 # Lambda Formal Semantics 2 — Continuation
 
+> **2026-10-16 amendments:** **S3.1v2–S3.5** remove errors from truthiness;
+> **S5.1.1v2–S5.1.2v2, S5.1.5, S6.1.2v2** make comparisons preserve
+> encountered errors. C8.8 records the comparison decision. Earlier error-falsy
+> and error-unequal descriptions below are historical; the total sort order
+> in C11.4 / **S6.2** is retained. Implementation is pending.
+
 **Status:** open backlog — discussions to be held
 **Predecessor:** [Lambda_Semantics_Formal.md](Lambda_Semantics_Formal.md) — concluded 2026-07-04 with the core principles and designs (decision records C1–C4, findings A1–A10, recommendations B1–B8, and the overall assessment). Finding/decision IDs below refer to that document. New decisions here continue the numbering at **C5**.
 
@@ -7,7 +13,8 @@ The core principles decided there, which future decisions should stay consistent
 with:
 
 1. **Emptiness ≠ nothingness** — `""` is a string (falsy); containers are things.
-2. **Values vs. containers** (the 2×2) — falsy = `{null, false, error, ""}` only.
+2. **Values vs. containers** (the 2×2) — falsy = `{null, false, ""}` only;
+   errors have no truth value (**S3.1v2**, amended 2026-10-16).
 3. **Exact until you ask for float** — 53-bit flex `int` ⊂ float64 promoting on
    overflow; Go-aligned machine tier; literal strictness; smallest-exact-home data.
 4. **Mutation is visible or it doesn't exist** — `let` final; bindings copy (COW,
@@ -505,6 +512,10 @@ must be built, not merely defended. (A10 aspirational-docs family.)
 
 ### C8. Equality across type families (2026-07-04) — RESOLVED: `==` is total; cross-family → `false`
 
+> **Historical error rule superseded by C8.8 (2026-10-16).** The earlier
+> false-on-error and singleton-error-group consequences are no longer the
+> rule; ordinary non-error cross-family inequality is retained.
+
 **Decision (designer ruling):** `symbol == string` returns **`false`** — as the
 docs always specified (`'name' == "name"` → false, `Lambda_Cheatsheet.md`); the
 implementation raising `== not found` is the bug.
@@ -974,6 +985,60 @@ From reading the equality implementation (`lambda/lambda-eval.cpp`, dispatcher
    the site + deep-equal-captures rule compares (`make_adder(10) ==
    make_adder(10)` → true; `== make_adder(20)` → false). Builtins use their
    builtin index as the site. *(Extended for true dynamic construction by §C9.)*
+
+#### C8.8 Comparisons preserve errors, recursively (2026-10-16, user)
+
+**Decision; implementation pending.** Following **S3.1v2–S3.5**, errors do not
+produce successful comparison answers. **S5.1.1v2–S5.1.2v2** require `==` and
+`!=` to preserve an error operand; **S6.1.2v2** applies the same rule to
+`<`, `<=`, `>`, and `>=`. `!=` negates only a successful Boolean from equality.
+Error classification (`is`, `type`, type arms in `match`) remains available
+under **S7.9.1**. Comparing the `error` type value is not comparing an error
+instance. NaN's successful-comparison rules are unchanged for non-error pairs.
+
+**Containers recurse, rather than hiding failure.** Under **S5.1.5**, comparing
+`[e]` with `[e]`, or `{a:e}` with `{a:e}`, compares their contents and returns
+`e`. Shared storage is not a proof of equality: it cannot bypass a required
+comparison of error-bearing content. The same rule applies through nested
+arrays, maps, element attributes/children, nominal object data, and function
+captures (**S5.3–S5.5**). Identity comparison `===` only compares identity data;
+a direct error operand still propagates (**S5.1.4v3**).
+
+**Short-circuit decision (USER follow-up).** A decisive mismatch ends the
+comparison. Sequences compare corresponding content in increasing index order:
+`[1,e] == [2,e]` returns false without inspecting the second pair, whereas
+`[e,1] == [e,2]` returns `e`. `!=` gives true and `e` respectively. This is
+consistent with **S3.4**: an error in unvisited content contributes no result.
+Different lengths or incompatible non-error shapes can decide inequality
+without traversing their content. There is no deep error pre-scan.
+
+**Sorting is retained explicitly (USER).** **S6.2.1–S6.2.3** remain the separate
+total ordering for `sort` and `order by`, including error placement and stable
+ties. A sort tie does not establish successful `==`. In the refinement law,
+only an equality result of Boolean true establishes the equality premise.
+
+**Consequences for consumers.** **S5.6.1v2** continues to define dedup, grouping
+and set equality through `==`. Its former "each error stands alone" consequence
+is withdrawn: an encountered error cannot be interpreted as a false comparison
+or a fresh singleton group. Membership and equality-based searches also must
+not coerce a comparison error to false. **SO50** leaves the containing
+operation's result boundary explicit; this decision does not invent a batch
+error policy or replace equality with the sort comparator.
+
+**Remaining decisions (SO50).** Map equality must remain independent of stored
+key order (**S5.4.1**), so field traversal and competing error/mismatch outcomes
+need a canonical policy. Multiple distinct errors need a diagnostic-selection
+rule. Element-wise `eq/ne/lt/le/gt/ge` must preserve comparison failure rather
+than publish a clean Boolean mask, but its whole-result versus per-lane error
+shape also needs a ruling. These details are open, not implementation freedom
+to discard an error.
+
+**Acceptance for implementation.** Cover direct errors on either side, error
+versus null/nan, nested containers and captures, aliased containers, decisive
+early mismatch, and preserved payloads through `!=`. Verify clean comparisons
+and sorting keep their existing results. Inference and optimized equality
+consumers must retain the error alternative on interp, jit and auto; a native
+Bool return must not erase it. This record changes no runtime behavior.
 
 ### C9. Dynamic function construction (2026-07-04) — direction set; quote syntax open
 
