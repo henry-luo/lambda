@@ -4,7 +4,7 @@ import dom
 // native scroll does not bubble; notify the retained Finder owner directly.
 view <finder_scrollport> { ~.rendered }
 on scroll(evt) {
-    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"finder"),"finder_viewport")
+    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"finder"),"finder_measure")
     return 'handled'
 }
 
@@ -42,28 +42,36 @@ pub fn file_icon(entry) => <svg class:"file-icon",width:"76",height:"68",viewBox
             upper(slice(entry.extension or "FILE",0,5))>
     >)>
 pub fn button(id,title,graphic) => <button id:id,type:"button",class:"tool",'data-action':id,title:title,'aria-label':title,(icon(graphic))>
-fn graphic(entry,role="tile") => <span class:if (entry.kind == "Image" and entry.extension != "svg") "file-graphic thumbnail-slot" else "file-graphic",
-    *:(if (entry.kind == "Image" and entry.extension != "svg")
+// filesystem thumbnail jobs cannot consume captured archive members; decode only the selected preview.
+fn raster(entry) => entry.kind == "Image" and entry.extension != "svg" and entry.readonly != true
+fn graphic(entry,role="tile") => <span class:if (raster(entry)) "file-graphic thumbnail-slot" else "file-graphic",
+    *:(if (raster(entry))
         {'data-thumb-path':entry.path,'data-thumb-role':role,'data-thumb-state':"pending"} else {}),
-    (if (entry.kind == "Image" and entry.extension == "svg") <img class:"vector-thumbnail",src:entry.path,alt:"">
+    (if (entry.kind == "Image" and entry.extension == "svg" and entry.readonly != true) <img class:"vector-thumbnail",src:entry.path,alt:"">
     else (file_icon(entry)));
-    (if (entry.kind == "Image" and entry.extension != "svg") <canvas class:"thumbnail-canvas",width:"1",height:"1",'aria-hidden':"true"> else null)>
+    (if (raster(entry)) <canvas class:"thumbnail-canvas",width:"1",height:"1",'aria-hidden':"true"> else null)>
 fn file_rows(st,prefix="file-",column=-1) {
-    let rows = model.visible(st);
+    let rows = model.visible(st)
+    let window = model.window(st);
     if (len(rows)==0) <div class:"empty",(icon("search"));<h2 if (trim(st.query)!="") "No matching files" else "This folder is empty">
         <p if (trim(st.query)!="") "Try another name or clear your search." else "There’s room for something new.">>
-    else <div class:if (st.mode == "icons") "icon-grid" else if (st.mode == "columns") "column-rows" else "file-list",
-        *[for (i,e in rows) <button id:prefix ++ string(i),class:"file",type:"button",role:"option",tabindex:"-1",
+    else <div class:"listing-window",'data-total':string(len(rows)),
+        <div class:"listing-spacer",'aria-hidden':"true",style:"height:" ++ string(window.before) ++ "px">;
+        <div class:(if (st.mode == "icons") "icon-grid" else if (st.mode == "columns") "column-rows" else "file-list") ++ " listing-rows",
+        *[for (offset,e in slice(rows,window.first,window.last)) <button id:prefix ++ string(window.first+offset),class:"file",type:"button",role:"option",tabindex:"-1",
             *:(if (column>=0) {'data-column':string(column),'data-trail':string(column<len(st.columns)-1 and contains(st.selected,e.path))} else {}),
-            'data-path':e.path,'data-name':e.name,'data-dir':string(e.dir),draggable:"true",
+            'data-path':e.path,'data-name':e.name,'data-dir':string(e.dir),'data-readonly':string(e.readonly == true),draggable:string(e.readonly != true),
             'aria-selected':string(contains(st.selected,e.path)),'data-focused':string(e.path == st.focus),title:e.name,
+            'aria-posinset':string(window.first+offset+1),'aria-setsize':string(len(rows)),
+            'data-even':string((window.first+offset)%2 == 1),
             graphic(e);<span class:"file-name",e.name><span class:"file-date",e.modified>
             <span class:"file-size",if (e.dir) "—" else model.size_label(e.size)><span class:"file-kind",e.kind>;
-            (if (st.mode == "columns" and e.dir) <span class:"folder-chevron",'aria-hidden':"true","›"> else null)>]>
+            (if (st.mode == "columns" and model.browsable(e)) <span class:"folder-chevron",'aria-hidden':"true","›"> else null)>]>;
+        <div class:"listing-spacer",'aria-hidden':"true",style:"height:" ++ string(window.after) ++ "px">>
 }
 pub fn column_files(st,index) => file_rows(model.column(st,index),"file-" ++ string(index) ++ "-",index)
 pub fn column(st,index) => <section id:"column-" ++ string(index),class:"file-column",'data-folder':st.columns[index].path,'data-column':string(index),
-    'aria-label':model.basename(st.columns[index].path),
+    'aria-label':model.basename(st.columns[index].path),'data-readonly':string(model.read_only(model.column(st,index))),
     <h2 class:"column-heading",title:st.columns[index].path,model.basename(st.columns[index].path)>;
     <div id:"column-files-" ++ string(index),class:"column-list",role:"group",'aria-label':st.columns[index].path,
         column_files(st,index)>>
@@ -71,7 +79,8 @@ pub fn files(st) => if (st.mode == "columns") <div class:"columns",*[for (i,c in
 pub fn breadcrumb(st,destination=false) => <nav 'aria-label':if (destination) "Destination folder path" else "Folder path",class:"crumbs",
     *[for (i,c in model.crumbs(st.path)) <span
         (if (i>0) <span class:"crumb-separator","›"> else null);
-        <button type:"button",*:(if (destination) {'data-destination':c.path} else {'data-location':c.path}),title:c.path,c.name>>]>
+        <button type:"button",*:(if (destination) {'data-destination':c.path} else
+            {'data-location':c.path,'data-readonly':string(model.location_readonly(st,c.path))}),title:c.path,c.name>>]>
 pub fn destination_folders(picker) => if (picker == null) <div class:"destination-empty","Enter a folder path and choose Browse.">
     else if (len(picker.entries)==0) <div class:"destination-empty","This folder has no subfolders.">
     else [for (entry in picker.entries) <button type:"button",class:"destination-folder",'data-destination':entry.path,
@@ -88,20 +97,23 @@ pub fn menu(st) => [for (action,caption in {open:"Open",look:"Quick Look",rename
         *:(if ((contains(['open','look','move','delete'],action) and len(st.selected)==0) or
             (action == 'rename' and len(st.selected)!=1)) {disabled:""} else {}),caption>]
 pub fn preview(st,large=false) {
-    let e = model.focused(st)
+    let e = model.preview_entry(st)
     let data = st.preview_data;
     if (e == null) <div class:"preview-empty",(icon("preview"));<h3 "A closer look"><p "Select a file to see its preview and details.">>
     else <div class:if (large) "preview-content large" else "preview-content",
-        <div class:"preview-media",
-            (if (data.kind == "image" and e.extension == "svg") <img src:data.src,alt:e.name>
+        <div class:if (data.kind == "document") "preview-media document-preview" else "preview-media",
+            (if (data.kind == "image" and (e.extension == "svg" or data.inline == true)) <img src:data.src,alt:e.name>
             else if (data.kind == "image") (graphic(e,if (large) "look" else "preview"))
+            else if (data.kind == "document") <iframe id:if (large) "look-document" else "preview-document",
+                class:"document-frame",*:(if (data.html != null) {srcdoc:data.html} else {src:data.src}),title:e.name,frameborder:"0">
             else if (data.kind == "text") <pre data.text>
             else <div class:"generic-preview",(file_icon(e));<p if (data.kind == "folder") "Folder" else data.message or "Preview unavailable.">>)>;
         <div class:"preview-description",<h2 e.name><p class:"preview-subtitle",e.kind>;
             (if (data.truncated == true) <p class:"preview-note","Showing the first 6,000 characters."> else null);
             (if (data.kind == "error") <p class:"preview-note",data.message> else null);
             (metadata(e));
-            (if (e.dir) <button type:"button",class:"primary",'data-action':"open","Open folder"> else null)>
+            (if (model.browsable(e) and e.path != st.path) <button type:"button",class:"primary",'data-action':"open",
+                if (model.archive(e)) "Open archive" else "Open folder"> else null)>
     >
 }
 pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.path,'data-selected':"0",'data-hidden':"false",
@@ -139,6 +151,8 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
                 <div class:"list-heading",id:"list-heading",style:"display:none",<span "Name"><span "Date modified"><span "Size"><span "Kind">>;
                 apply(<finder_scrollport rendered:<div id:"files",tabindex:"0",role:"listbox",'aria-label':"Files",'aria-multiselectable':"true",(files(st))>>)
             >;
+            <div id:"preview-divider",class:"preview-divider",role:"separator",tabindex:"0",'aria-label':"Resize preview panel",
+                'aria-controls':"preview-pane",'aria-orientation':"vertical",'aria-valuemin':"180",'aria-valuemax':"600",'aria-valuenow':"260">;
             <aside id:"preview-pane",class:"preview-pane",'aria-label':"File preview",<div class:"preview-heading",<span "PREVIEW">
                 <button type:"button",class:"text-tool",'data-action':"look","Quick Look ↗">>;
                 <div id:"preview-body",(preview(st))>>

@@ -1,0 +1,16 @@
+{
+  "name":"Removing a Lambda iframe from a Lambda callback preserves the caller runtime",
+  "html":"test/ui/dom_iframe_retire.ls",
+  "env":[{"key":"LAMBDA_GC_FORCE_EVERY","value":"1"},{"key":"LAMBDA_GC_POISON_FREED","value":"1"}],
+  "events":[
+    {"type":"switch_frame","selector":"#child"},
+    {"type":"assert_text","target":{"selector":"h1"},"equals":"Rendered preview"},
+    {"type":"switch_frame"},
+    {"type":"click","target":{"selector":"#replace"}},
+    {"type":"assert_attribute","target":{"selector":"#frame-host"},"attribute":"data-alive","equals":"true"},
+    {"type":"assert_text","target":{"selector":"#replacement"},"equals":"Replaced safely"},
+    {"type":"assert_script","js":"document.getElementById('child')===null"},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

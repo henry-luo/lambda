@@ -21,6 +21,7 @@
 // str.h included via view.hpp
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -2894,8 +2895,15 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     return removed;
 }
 
-static bool state_store_tree_contains_node(DomNode* root, void* node) {
-    return node && view_tree_contains_view(root, static_cast<View*>(node));
+static bool state_store_tree_contains_node(DomDocument* doc, DomNode* root, void* node) {
+    if (!node) return false;
+    View* view = static_cast<View*>(node);
+    // registry ownership validates the address before walking its parent path;
+    // searching the whole DOM for every state entry makes large reflows quadratic.
+    if (dom_node_registry_owns(doc, static_cast<DomNode*>(view))) {
+        return view_state_view_is_connected(doc, view);
+    }
+    return view_tree_contains_view(root, view);
 }
 
 static bool editing_surface_is_stale(DomNode* root,
@@ -2947,28 +2955,60 @@ static uint32_t view_state_clear_interaction_flag(DocState* state, const char* n
     return changed;
 }
 
-static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
-    if (!state || !state->state_map || !name) return 0;
-    const char* interned = intern_state_name(state, name);
+template<typename Entry, typename Predicate, typename BeforeErase>
+static uint32_t state_map_erase_matching(HashMap* map, Predicate matches,
+                                        BeforeErase before_erase) {
+    // robin-hood deletion moves buckets; collect keys once instead of restarting
+    // a full scan for every removed flag or orphan in a large document.
+    lam::ArrayList<Entry> retired(MEM_CAT_LAYOUT, 0);
+    size_t iter = 0;
+    void* item = nullptr;
+    bool collected_all = true;
+    while (hashmap_iter(map, &iter, &item)) {
+        Entry* entry = (Entry*)item;
+        if (matches(entry) && !retired.append(*entry)) {
+            log_error("state_map_erase_matching: unable to collect remaining retired state keys");
+            collected_all = false;
+            break;
+        }
+    }
     uint32_t removed = 0;
-    bool found_entry = true;
-    while (found_entry) {
-        found_entry = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->state_map, &iter, &item)) {
-            StateEntry* entry = (StateEntry*)item;
-            if (!entry || !entry->key.name) continue;
-            if (entry->key.name != interned && strcmp(entry->key.name, interned) != 0) continue;
-            StateEntry query = { .key = { entry->key.node, interned } };
-            if (hashmap_delete(state->state_map, &query)) {
-                removed++;
-                found_entry = true;
+    for (const Entry& key : retired) {
+        Entry* entry = (Entry*)hashmap_get(map, &key);
+        if (!entry) continue;
+        before_erase(entry);
+        if (hashmap_delete(map, &key)) removed++;
+    }
+    // allocation pressure must not leave stale raw owners behind before retirement.
+    if (!collected_all) {
+        bool erased = true;
+        while (erased) {
+            erased = false;
+            iter = 0;
+            while (hashmap_iter(map, &iter, &item)) {
+                Entry* entry = (Entry*)item;
+                if (!matches(entry)) continue;
+                Entry key = *entry;
+                before_erase(entry);
+                if (hashmap_delete(map, &key)) {
+                    removed++;
+                    erased = true;
+                }
                 break;
             }
         }
     }
     return removed;
+}
+
+static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
+    if (!state || !state->state_map || !name) return 0;
+    const char* interned = intern_state_name(state, name);
+    return state_map_erase_matching<StateEntry>(state->state_map,
+        [interned](const StateEntry* entry) {
+            return entry->key.name && (entry->key.name == interned ||
+                strcmp(entry->key.name, interned) == 0);
+        }, [](StateEntry*) {});
 }
 
 static uint32_t state_map_set_bool_no_assert(DocState* state, void* node,
@@ -3193,15 +3233,9 @@ uint32_t view_state_prune_orphans(DocState* state) {
 
     DomDocument* doc = state->owner_store->document;
     DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
-    uint32_t removed = 0;
     uint32_t owner_changes = doc_state_prune_stale_transient_owners(state, root);
-    bool found_orphan = true;
-    while (found_orphan) {
-        found_orphan = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->view_state_map, &iter, &item)) {
-            ViewStateEntry* entry = (ViewStateEntry*)item;
+    uint32_t removed = state_map_erase_matching<ViewStateEntry>(state->view_state_map,
+        [&](ViewStateEntry* entry) {
             uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
             View* key_live = view_state_entry_resolve_view(state, entry);
             View* state_live = key_live;
@@ -3217,15 +3251,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
                 invalid_live_kind = !elem || (!elem->form && !is_form_control(elem));
             }
             if (!entry->state || !key_live || !state_live || invalid_live_kind) {
-                ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };
-                if (entry->kind == VIEW_STATE_FORM_CONTROL) {
-                    form_control_clear_text_value_cache(key_live, entry->state);
-                }
-                view_state_release_payload(entry->state);
-                hashmap_delete(state->view_state_map, &query);
-                removed++;
-                found_orphan = true;
-                break;
+                return true;
             }
             if (entry->kind == VIEW_STATE_MEDIA) {
                 MediaViewState* media = &entry->state->data.media;
@@ -3249,8 +3275,13 @@ uint32_t view_state_prune_orphans(DocState* state) {
                     }
                 }
             }
-        }
-    }
+            return false;
+        }, [&](ViewStateEntry* entry) {
+            if (entry->kind == VIEW_STATE_FORM_CONTROL) {
+                form_control_clear_text_value_cache(view_state_entry_resolve_view(state, entry), entry->state);
+            }
+            view_state_release_payload(entry->state);
+        });
 
     if (removed > 0 || owner_changes > 0) {
         state->is_dirty = true;
@@ -3265,28 +3296,12 @@ uint32_t view_state_prune_orphans(DocState* state) {
 static uint32_t state_map_prune_orphans(DocState* state, DomNode* root) {
     if (!state || !state->state_map || !root) return 0;
 
-    uint32_t removed = 0;
-    bool found_orphan = true;
-    while (found_orphan) {
-        found_orphan = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->state_map, &iter, &item)) {
-            StateEntry* entry = (StateEntry*)item;
-            if (!entry || state_store_tree_contains_node(root, entry->key.node)) {
-                continue;
-            }
-            // DOM mutation fallback keeps the DOM tree as the identity source;
-            // only state attached to disconnected nodes is invalid after reflow.
-            StateEntry query = { .key = { entry->key.node, entry->key.name } };
-            if (hashmap_delete(state->state_map, &query)) {
-                removed++;
-                found_orphan = true;
-                break;
-            }
-        }
-    }
-    return removed;
+    // DOM identity remains authoritative; connected nodes keep their values.
+    DomDocument* doc = state->owner_store ? state->owner_store->document : nullptr;
+    return state_map_erase_matching<StateEntry>(state->state_map,
+        [doc, root](const StateEntry* entry) {
+            return !state_store_tree_contains_node(doc, root, entry->key.node);
+        }, [](StateEntry*) {});
 }
 
 uint32_t state_store_prune_after_reflow(DocState* state) {

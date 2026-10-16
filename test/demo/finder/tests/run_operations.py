@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import uuid
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[4]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -21,6 +22,10 @@ FOLDER = WORK / "files"
 (FOLDER / "second.txt").write_text("second content\n")
 (FOLDER / "occupied.txt").write_text("source must survive collision\n")
 (FOLDER / "Target/occupied.txt").write_text("destination must survive collision\n")
+ARCHIVE = FOLDER / "Archive # ü.ZIP"
+with zipfile.ZipFile(ARCHIVE, "w", zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("Folder.zip/note # ü.txt", "member content ü #")
+    archive.write(ROOT / "test/input/image/sample.png", "pixel.png")
 
 
 def event(kind, **fields):
@@ -86,7 +91,9 @@ events = [
     drag(row("alpha.txt"), row("Target")),
     check("document.querySelector('[data-name=\"alpha.txt\"]')===null && document.getElementById('error-text').textContent===''"),
     event("dblclick", target={"selector": row("Target")}), click(row("alpha.txt")),
-    event("assert_text", target={"selector": "#preview-body pre"}, contains="alpha content ü #"),
+    event("switch_frame", selector="#preview-document"),
+    event("assert_text", target={"selector": "body"}, contains="alpha content ü #"),
+    event("switch_frame"),
     click("#back"), click("#list"),
     click(row("Source")), click("#actions"), click("#menu-move"), type_value(str(FOLDER / "Source/Subfolder")), key("enter"),
     check("document.getElementById('operation-error').textContent.length>0 && document.querySelector('[data-name=\"Source\"]')!==null"), key("escape"),
@@ -121,6 +128,26 @@ events = [
     check("document.querySelector('[data-focused=true]').getAttribute('data-name')==='~'"),
     rename(), type_value(".created"), key("enter"),
     check("document.getElementById('finder').getAttribute('data-hidden')==='true' && document.querySelector('[data-focused=true]').getAttribute('data-name')==='.created'"),
+    # ZIP members stay captured/read-only while the outer file keeps normal operations.
+    *go(FOLDER), click(row(ARCHIVE.name)), click(row("Folder.zip")), click(row("note # ü.txt")),
+    event("assert_text", target={"selector": "#preview-body pre"}, equals="member content ü #"),
+    # the drag helper requires a draggable source; raw pointer input tests a blocked gesture.
+    event("mouse_down", target={"selector": row("note # ü.txt"), "offset_x":10, "offset_y":12}),
+    event("mouse_move", target={"selector": row("note # ü.txt"), "offset_x":150, "offset_y":12}),
+    event("mouse_up", target={"selector": row("note # ü.txt"), "offset_x":150, "offset_y":12}),
+    check("document.getElementById('finder').getAttribute('data-dragging')==='false' && document.getElementById('error-text').textContent===''"),
+    drag("#column-0 " + row("occupied.txt"), row("Folder.zip")),
+    drag("#column-0 " + row("occupied.txt"), "#column-2 .column-list", offset_x=180, offset_y=300),
+    drag("#column-0 " + row("occupied.txt"), '#breadcrumbs [data-location$=".ZIP"]'),
+    check("document.querySelector('#column-0 [data-name=\"occupied.txt\"]')!==null && document.getElementById('error-text').textContent===''"),
+    click("#column-1 " + row("pixel.png")),
+    check("document.querySelector('#preview-body img').naturalWidth>0 && document.querySelector('#preview-body img').getAttribute('src').startsWith('data:image/png;base64,')"),
+    click("#column-0 " + row(ARCHIVE.name), button=1), click("#menu-rename"), type_value("Renamed.zip"), key("enter"),
+    check("document.querySelector('[data-name=\"Renamed.zip\"]')!==null"),
+    drag(row("Renamed.zip"), row("Target")), click(row("Target")), click(row("Renamed.zip")),
+    check("document.querySelector('[data-name=\"Folder.zip\"]')!==null && document.querySelector('[data-name=\"pixel.png\"]')!==null"),
+    click("#column-1 " + row("Renamed.zip"), button=1), click("#menu-delete"), click("#operation-confirm"),
+    check("document.querySelector('[data-name=\"Renamed.zip\"]')===null"),
     event("capture_surface", source="page", file=str((WORK / "operations.png").relative_to(ROOT))),
     event("window_close"), event("assert_window_closed", closed=True),
 ]
@@ -142,4 +169,6 @@ assert (FOLDER / "occupied.txt").read_text() == "source must survive collision\n
 assert (FOLDER / "Renamed Source/Subfolder/keep.txt").read_text() == "nested content survives moves\n"
 assert (FOLDER / ".created").read_bytes() == b""
 assert not (FOLDER / "Target/second.txt").exists()
+assert not ARCHIVE.exists() and not (FOLDER / "Target/Renamed.zip").exists()
+assert not list(FOLDER.rglob("note # ü.txt")) and not list(FOLDER.rglob("pixel.png"))
 print(f"Finder operations: {outcome['assertions']['passed']} UI assertions and filesystem checks passed ({WORK})")

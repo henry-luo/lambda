@@ -4,6 +4,7 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/event.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
@@ -11,6 +12,9 @@
 #include "../lib/tagged.hpp"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
+ArrayList* build_view_stack(EventContext* context, View* target);
+void fire_events(EventContext* context, ArrayList* stack);
+void update_hover_state(EventContext* context, View* target);
 
 TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
     EXPECT_TRUE(is_space(0x000A));
@@ -208,6 +212,68 @@ protected:
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
 };
+
+TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    DomElement* grid = dom_find_element_by_id(document->root->as_element(), "grid");
+    ASSERT_NE(grid, nullptr);
+    const float widths[] = {500.0f, 320.0f, 640.0f};
+    for (float width : widths) {
+        ui.viewport_width = ui.window_width = width;
+        layout_html_doc(&ui, document, true);
+        EXPECT_FLOAT_EQ(grid->width, width);
+        float bottom = 0.0f;
+        for (DomNode* child = grid->first_child; child; child = child->next_sibling) {
+            if (child->is_element()) bottom = max(bottom, child->y + child->height);
+        }
+        EXPECT_NEAR(grid->height, bottom + grid->boundary()->padding.bottom, 0.5f) << width;
+    }
+}
+
+TEST_F(RadiantTextQuery, FilenameGlyphsKeepTheirInheritedPointerCursor) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    struct CursorCase { const char* id; CssEnum cursor; };
+    const CursorCase cases[] = {{"label", CSS_VALUE_POINTER}, {"ordinary", CSS_VALUE_TEXT},
+        {"crosshair", CSS_VALUE_CROSSHAIR}, {"explicit", CSS_VALUE_TEXT}};
+    for (const CursorCase& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        DomNode* text = element->first_child;
+        ASSERT_NE(text, nullptr);
+        if (entry.cursor == CSS_VALUE_POINTER) {
+            EXPECT_EQ(element->inl()->cursor, CSS_VALUE_POINTER) << "label before hover";
+            EXPECT_EQ(element->parent->as_element()->inl()->cursor, CSS_VALUE_POINTER) << "button before hover";
+        }
+        EventContext context = {};
+        context.ui_context = &ui;
+        context.target_document = document;
+        context.event.type = RDT_EVENT_MOUSE_MOVE;
+        context.new_cursor = CSS_VALUE_AUTO;
+        update_hover_state(&context, static_cast<View*>(text));
+        ArrayList* stack = build_view_stack(&context, static_cast<View*>(text));
+        fire_events(&context, stack);
+        arraylist_free(stack);
+        EXPECT_EQ(context.new_cursor, entry.cursor) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ComputedGapLonghandsProjectTheirWinningShorthand) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    struct GapCase { const char* id; const char* row; const char* column; };
+    const GapCase cases[] = {{"grid", "22px", "10px"}, {"gap-one", "8px", "8px"},
+        {"gap-axis", "4px", "9px"}, {"gap-later", "6px", "7px"}};
+    for (const GapCase& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        char value[64];
+        ASSERT_TRUE(css_prop_serialize_computed(element, CSS_PROPERTY_ROW_GAP, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, entry.row) << entry.id;
+        ASSERT_TRUE(css_prop_serialize_computed(element, CSS_PROPERTY_COLUMN_GAP, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, entry.column) << entry.id;
+    }
+}
 
 TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
     ASSERT_NE(load("test/html/layout_preserved_whitespace.html"), nullptr);

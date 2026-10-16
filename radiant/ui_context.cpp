@@ -404,8 +404,41 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
+struct DeferredDocumentDestroy {
+    lam::Own<DomDocument> document;
+    DeferredDocumentDestroy* next;
+};
+static thread_local DeferredDocumentDestroy* deferred_documents;
+static thread_local bool draining_documents;
+
+void radiant_defer_document_destroy(DomDocument* doc) {
+    if (!doc) return;
+    for (DeferredDocumentDestroy* pending = deferred_documents; pending; pending = pending->next)
+        if (pending->document.get() == doc) return;
+    auto* pending = (DeferredDocumentDestroy*)mem_calloc(1, sizeof(DeferredDocumentDestroy), MEM_CAT_DOM);
+    if (!pending) { log_error("document-retire: could not retain deferred document"); return; }
+    pending->document = lam::own(doc);
+    pending->next = deferred_documents;
+    deferred_documents = pending;
+}
+
+bool radiant_drain_document_destruction() {
+    if (draining_documents || (context && context->execution_depth != 0)) return false;
+    bool released = deferred_documents != nullptr;
+    draining_documents = true;
+    while (deferred_documents) {
+        DeferredDocumentDestroy* pending = deferred_documents;
+        deferred_documents = pending->next;
+        free_document(pending->document.get());
+        mem_free(pending);
+    }
+    draining_documents = false;
+    return released;
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
+    radiant_drain_document_destruction();
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).

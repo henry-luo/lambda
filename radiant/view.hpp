@@ -4638,3 +4638,6 @@ void loader_runtime_finish_document(DomDocument* doc, Runtime* loader);
 // load diagnostic; a successful load clears it.
 const char* lambda_document_load_diagnostic(void);
 void free_document(DomDocument* doc);
+// D5.4.1: detached iframe ownership is released only after dispatch frames return.
+void radiant_defer_document_destroy(DomDocument* doc);
+bool radiant_drain_document_destruction();

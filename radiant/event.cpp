@@ -12263,14 +12263,17 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     ViewBlock* block = lam::view_require_block(iframe_view);
     if (!block) return false;
     if (!block->embed && !block->ensure_embed(owner->view_tree)) return false;
+    LayoutContentBox viewport = layout_content_box(block);
+    const char* source = iframe->get_attribute("srcdoc");
+    if (!source) source = iframe->get_attribute("src");
+    // async and navigated documents need the same resize tracking as synchronous iframe loads.
+    if (!layout_iframe_track_source(new_doc, source, viewport.width, viewport.height)) return false;
     if (block->scroller && block->scroll_mut()->pane) {
         block->scroll()->pane->reset();
         block->content_width = 0.0f;
         block->content_height = 0.0f;
     }
 
-    int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
-    int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
     DomDocument* old_doc = block->embedp()->doc;
     if (uicon->font_ctx) {
         // Glyph-cache keys retain raw document FontHandle addresses; clear
@@ -12283,20 +12286,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     new_doc->viewport.output_scale = 1.0f;
     ui_context_sync_document_raster_scale(uicon, new_doc);
 
-    if (new_doc->html_root) {
-        DomDocument* saved_doc = uicon->document;
-        float saved_viewport_width = uicon->viewport_width;
-        float saved_viewport_height = uicon->viewport_height;
-        uicon->document = lam::up(new_doc);
-        uicon->viewport_width = (float)css_vw;
-        uicon->viewport_height = (float)css_vh;
-        process_document_font_faces(uicon, new_doc);
-        layout_html_doc(uicon, new_doc, false);
-        radiant_dispatch_lambda_body_load(uicon, new_doc);
-        uicon->document = lam::up(saved_doc);
-        uicon->viewport_width = saved_viewport_width;
-        uicon->viewport_height = saved_viewport_height;
-    }
+    layout_iframe_embedded_doc(uicon, new_doc, viewport.width, viewport.height);
     if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
         update_scroller(block, block->content_width, block->content_height);
     }
