@@ -15,16 +15,18 @@ pub let images = image.images
 pub let selected_image = image.selected
 pub let select_image = image.select_image
 pub let resize_image = image.resize_image
+pub let move_image = image.move_image
+pub let image_move_transaction = image.move_transaction
 pub fn image_html(entry) => html.inline_html([entry.node])
 
 pub let color_properties = {color:"color",highlight:"background-color"}
-pub let default_colors = {color:"#38352f",highlight:"#fff09b"}
+pub let default_colors = {color:"#000000",highlight:"#fff09b"}
 pub fn clipboard_command(id) => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
 pub fn color_value(editor,kind) => inline_format.char_value(editor,color_properties[kind],default_colors[kind])
 pub fn format_color(editor,kind,value) map^ {
     let chosen = lower(trim(string(value)))
     if (color_properties[kind] is null) raise error("Unknown color style.")
-    else if (chosen!="" and not component.hex_color(chosen)) raise error("Use a six-digit hex color, such as #c4483f.")
+    else if (chosen!="" and not component.hex_color(chosen)) raise error("Use a six-digit hex color, such as #ff0000.")
     else edit_apply(editor,inline_format.transaction(editor,
         (marks)=>inline_format.styled_marks(marks,color_properties[kind],chosen)))
 }

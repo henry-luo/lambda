@@ -4,6 +4,7 @@ import .mod_step
 import .mod_source_pos
 import .mod_transaction
 import .mod_editor
+import commands: .mod_commands
 
 fn image_node(n) => is_node(n) and contains(['img','image'],n.tag)
 pub fn images(doc) => [for (entry in descendants(doc) where image_node(entry.node)) entry]
@@ -23,4 +24,11 @@ pub fn resize_image(editor,path,width,height) map^ {
     else if (not natural and not (width is number and height is number and width>=16 and width<=4096 and height>=1 and height<=16384))
         raise error("Image width must be between 16 and 4096 pixels.")
     else edit_apply(editor,resize_transaction(tx_set_selection(tx_begin(editor.doc,editor.selection),node_selection(path)),path,width,height))
+}
+
+pub fn move_transaction(editor,path,target) => if (not image_node(node_at(editor.doc,path))) null
+    else commands.cmd_move_inline_node(editor,path,target)
+pub fn move_image(editor,path,target) {
+    let tx = move_transaction(editor,path,target)
+    if (tx==null) editor else edit_apply(editor,tx)
 }

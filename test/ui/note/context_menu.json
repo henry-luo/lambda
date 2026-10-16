@@ -34,7 +34,7 @@
     {"type":"click","target":{"selector":"#context-color"}},
     {"type":"assert_count","target":{"selector":"#color-picker"},"count":1},
     {"type":"click","target":{"selector":"#color-blue"}},
-    {"type":"assert_style","target":{"selector":"#edit-surface span[style]"},"property":"color","equals":"rgb(53, 110, 181)"},
+    {"type":"assert_style","target":{"selector":"#edit-surface span[style]"},"property":"color","equals":"rgb(0, 0, 255)"},
     {"type":"click","target":{"selector":"#edit-surface p","offset_x":25,"offset_y":10},"button":1},
     {"type":"key_press","key":"down"},
     {"type":"assert_focus","target":{"selector":"#context-cut"}},

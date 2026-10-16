@@ -35,10 +35,10 @@ pub fn button(id,action,label,graphic=null,params={},pressed=false,disabled=fals
 
 let marks = [{id:"bold",label:"Bold",graphic:"bold",mark:'strong'},
     {id:"italic",label:"Italic",graphic:"italic",mark:'em'},{id:"underline",label:"Underline",graphic:"underline",mark:'u'}]
-let text_colors = [{id:"graphite",label:"Graphite",value:"#38352f"},{id:"gray",label:"Gray",value:"#8a8175"},
-    {id:"red",label:"Red",value:"#c4483f"},{id:"orange",label:"Orange",value:"#d27625"},{id:"gold",label:"Gold",value:"#aa800e"},
-    {id:"green",label:"Green",value:"#33785b"},{id:"teal",label:"Teal",value:"#277e87"},{id:"blue",label:"Blue",value:"#356eb5"},
-    {id:"purple",label:"Purple",value:"#835ba8"},{id:"pink",label:"Pink",value:"#bb527c"}]
+let text_colors = [{id:"black",label:"Black",value:"#000000"},{id:"gray",label:"Gray",value:"#808080"},
+    {id:"red",label:"Red",value:"#ff0000"},{id:"orange",label:"Orange",value:"#ff8000"},{id:"yellow",label:"Yellow",value:"#ffff00"},
+    {id:"green",label:"Green",value:"#00ff00"},{id:"cyan",label:"Cyan",value:"#00ffff"},{id:"blue",label:"Blue",value:"#0000ff"},
+    {id:"purple",label:"Purple",value:"#8000ff"},{id:"magenta",label:"Magenta",value:"#ff00ff"}]
 let highlight_colors = [{id:"yellow",label:"Yellow",value:"#fff09b"},{id:"peach",label:"Peach",value:"#ffd5ad"},
     {id:"pink",label:"Pink",value:"#ffd1df"},{id:"lavender",label:"Lavender",value:"#e3d6fa"},
     {id:"blue",label:"Blue",value:"#cce7fa"},{id:"green",label:"Green",value:"#ccebd6"}]

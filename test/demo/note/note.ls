@@ -20,6 +20,7 @@ edit <notes_app> state st:app.initial() {
         ui.menus(st);ui.dialog(st)
     >
 }
+on note_image_position(evt) { images.position(st.editor,evt.node or evt.target) }
 on beforeinput() { return 'pass' }
 on editaction(evt) {
     let image = model.selected_image(st.editor)
@@ -89,7 +90,7 @@ on click(evt) {
     return 'prevent-default'
 }
 on contextmenu(evt) {
-    if (st.dialog!=null or dom.closest(evt.target,"#edit-surface,.note-row")==null) { return 'pass' }
+    if (st.dialog!=null or dom.closest(evt.target,"#edit-surface,.note-row,#image-tools")==null) { return 'pass' }
     let image = images.hit(st.editor,evt.target)
     if (image!=null) { st = {*:st,editor:model.select_image(st.editor,image)} }
     st = app.open_context(st,evt)

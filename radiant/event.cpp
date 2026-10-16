@@ -1108,7 +1108,10 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
 
             float score = -1.0f;
             int offset = rect->start_index;
-            if (rect_y <= event->y && event->y < rect_bottom && event->x >= rect_right) {
+            if (rect_y <= event->y && event->y < rect_bottom && event->x < rect_x) {
+                // marker/leading-margin clicks belong to this line before vertical-gap snapping.
+                score = rect_x - event->x;
+            } else if (rect_y <= event->y && event->y < rect_bottom && event->x >= rect_right) {
                 score = event->x - rect_right;
                 offset = rect->start_index + max(rect->length, 0);
             } else if (include_vertical_gap && event->y >= rect_bottom) {
@@ -2535,9 +2538,12 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("text", evcon->paste_text);
     }
 
+    // captured pointer gestures need the hit position rather than their selection anchor.
     bool event_uses_hit_source_pos = evcon &&
         (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
          strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0 ||
+         strcmp(event_name, "pointerdown") == 0 || strcmp(event_name, "pointermove") == 0 ||
+         strcmp(event_name, "pointerup") == 0 ||
          strcmp(event_name, "mousepress") == 0);
 
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
@@ -2614,7 +2620,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     if (event_uses_hit_source_pos && doc && doc->view_tree) {
         float event_x = 0.0f, event_y = 0.0f;
         bool has_mouse_pos = false;
-        if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
+        if (strncmp(event_name, "pointer", 7) == 0) {
+            event_x = evcon->viewport_pointer_x;
+            event_y = evcon->viewport_pointer_y;
+            has_mouse_pos = true;
+        } else if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
             event_x = evcon->event.mouse_position.x;
             event_y = evcon->event.mouse_position.y;
             has_mouse_pos = true;
@@ -9274,6 +9284,10 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
     };
+    // pointer transport can have no compatibility mouse event (touch/pen); project its own point.
+    RdtLogicalPoint saved_pointer = {evcon->viewport_pointer_x, evcon->viewport_pointer_y};
+    evcon->viewport_pointer_x = (float)client_x;
+    evcon->viewport_pointer_y = (float)client_y;
     NativePointerCapture* capture=native_pointer_capture(event_context_target_document(evcon),true);
     if(capture) {
         if(!strcmp(type,"pointerdown")) capture->active=true;
@@ -9290,6 +9304,8 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
             native_resize_end(capture);
         }
     }
+    evcon->viewport_pointer_x = saved_pointer.x;
+    evcon->viewport_pointer_y = saved_pointer.y;
     return prevented;
 }
 

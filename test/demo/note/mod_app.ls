@@ -14,7 +14,7 @@ pub fn initial() => {*:model.initial(sample.notebook()),menu:"",context:null,pic
 pub pn open_context(st,evt,x=null,y=null) {
     if (st.dialog!=null) { return st }
     let row = dom.closest(evt.target,".note-row")
-    let surface = dom.closest(evt.target,"#edit-surface")
+    let surface = dom.closest(evt.target,"#edit-surface,#image-tools")
     if (row==null and surface==null) { return st }
     // a context-menu hit names a pointer position, not a replacement for the existing text range.
     let has_range = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
@@ -35,6 +35,9 @@ pub pn finish(st,node,restore=false) {
     dom.set_close_guard(node,model.dirty(st))
     dom.set_window_title(node,(if (model.dirty(st)) "● " else "") ++ "Notes")
     controller.restore(st.editor,restore and st.dialog==null and st.selected!="")
+    // a model move rebuilds the image tools; measure their replacement after the outer commit.
+    if (model.selected_image(st.editor)!=null)
+        dom.request_frame(dom.get_element_by_id(dom.root_node(node),"notes"),"note_image_position")
 }
 fn file_dialog(kind,path="") => {kind:kind,title:if (kind=="save") "Save Notebook" else "Open Notebook",
     message:if (kind=="save") "Keep all your notes in a local .note.json notebook." else "Choose a local .note.json notebook.",
@@ -111,6 +114,11 @@ pub pn command(st,id,params,node) {
         let next = model.resize_image(st.editor,params.path,params.width,params.height) ^ { return {*:st,status:^.message} }
         controller.focus(node)
         return {*:model.update_editor(st,next,stamp()),menu:"",status:"Image resized"}
+    }
+    if (id=="image.move") {
+        let next = model.move_image(st.editor,params.path,params.target)
+        controller.focus(node)
+        return if (next==st.editor) st else {*:model.update_editor(st,next,stamp()),menu:"",status:"Image moved"}
     }
     if (id=="note.select") { return {*:model.select(st,params.id),menu:""} }
     if (id=="folder.select") { return {*:model.scope(st,params.folder),menu:""} }

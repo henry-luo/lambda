@@ -557,6 +557,17 @@ fn insert_inline_nodes_select_first(st, inline_nodes) {
       }
     }
   }
+  else if (sel_collapsed(sel) and is_node(node_at(st.doc,sel.anchor.path)) and
+           block_allows_inline(st,node_at(st.doc,sel.anchor.path).tag)) {
+    // atomic insertion also accepts child boundaries, including empty inline containers.
+    let path = sel.anchor.path
+    let index = sel.anchor.offset
+    let parent = node_at(st.doc,path)
+    if (index<0 or index>len(parent.content)) null else {
+      let tx = tx_step(tx_begin(st.doc,sel),step_replace(path,index,index,inline_nodes))
+      tx_set_selection(tx,node_selection([*path,index]))
+    }
+  }
   else if (sel_top_block_range(sel)) {
     let span = cross_block_text_span_parts(st)
     if (span == null) { null }
@@ -828,6 +839,26 @@ pub fn cmd_move_node(st, source_path, target_parent_path, target_index) {
       let tx2 = tx_step(tx1, step_replace(target_parent_path, insert_index, insert_index, [moved]))
       tx_set_selection(tx2, node_selection([*target_parent_path, insert_index]))
     }
+  }
+}
+
+pub fn cmd_move_inline_node(st, source_path, target_pos) {
+  let moved = node_at(st.doc,source_path)
+  let target = if (target_pos==null) null else node_at(st.doc,target_pos.path)
+  let entry = if (is_node(moved)) state_schema(st)[moved.tag] else null
+  let limit = if (is_text(target)) len(target.text) else if (is_node(target) and block_allows_inline(st,target.tag)) len(target.content) else -1
+  if (entry==null or entry.role!='inline' or len(source_path)==0 or target_pos==null or
+      path_is_prefix(source_path,target_pos.path) or not (target_pos.offset is int) or
+      target_pos.offset<0 or target_pos.offset>limit) null
+  else {
+    let parent = parent_path(source_path)
+    let index = last_index(source_path)
+    let tx1 = tx_step(tx_begin(st.doc,st.selection),step_replace(parent,index,index+1,[]))
+    // map the destination through removal before splitting its marked text leaf.
+    let destination = tx_map_pos(tx1,target_pos)
+    let tx2 = insert_inline_nodes_select_first({*:st,doc:tx1.doc_after,selection:caret(destination)},[moved])
+    if (tx2==null or tx2.doc_after==st.doc) null
+    else tx_set_selection(tx_apply_steps(tx1,tx2.steps,0,len(tx2.steps)),tx2.sel_after)
   }
 }
 
