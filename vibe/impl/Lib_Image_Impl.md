@@ -114,8 +114,9 @@ Both generated AOM profiles set `CONFIG_AV1_ENCODER=0` and retain
 `CONFIG_AV1_DECODER=1` and high-bit-depth decoding. ARM64 retains runtime CPU
 dispatch. libavif defines only `AVIF_CODEC_AOM_DECODE`; its encode macro is
 absent because the upstream adapter tests whether that macro is defined.
-The libaom/libavif file rules use `-Os`, while other codecs retain their speed
-optimization. The normal build still uses the existing static image archive.
+The original decoder-only profile used `-Os` file rules for libaom/libavif.
+The subsequent size profile below applies size optimization to the whole
+image target. The normal build uses the existing static image archive.
 
 The common registry advertises AVIF as readable and not writable. Its existing
 read-only dispatch returns `codec_unavailable` for AVIF output, preserving the
@@ -142,6 +143,49 @@ Build recipes have since been deleted entirely rather than relocated. Licenses,
 patent notices, copyright attributions, and provenance records remain, including
 JPEG's required `README.ijg`. No formal ruling changes are introduced
 (**D7.1.1–D7.1.3**, **D7.1.6–D7.1.7v6**).
+
+### Size-optimized image and reduced TIFF profile (2026-10-16)
+
+The user authorized implementation of the image build optimization and explicit
+JPEG12-in-TIFF exclusion. `lambda-image-codecs` now requests `optimize: Size`;
+the generated Clang release flags use `-Os`. The redundant libaom/libavif-only
+file rule is removed. Per-source SIMD flags, runtime CPU dispatch, LTO, and
+dead stripping remain enabled.
+
+JSON excludes `tif_jpeg_12.c`, `tif_luv.c`, `tif_pixarlog.c`, `tif_next.c`, and
+`tif_thunder.c`, and omits their enabling feature definitions. The image target
+has 398 ARM64 or 333 macOS x86_64 translation units, with 32 TIFF sources.
+All codec objects and the archive were rebuilt to prevent stale ar members.
+Ordinary 8-bit TIFF JPEG, Deflate, LZW, PackBits, and CCITT Fax remain enabled.
+
+JPEG12-in-TIFF serves specialist GeoTIFF workflows, but Lambda's existing
+RGBA strip/tile path rejects 12-bit samples. The public TIFF writer emits
+8-bit Deflate. The wrapper now reports `unsupported_feature` before pixel
+allocation for JPEG12; metadata probing remains available. This keeps the
+codec mechanism in `lib` (**D7.1.2v2**) and makes the unsupported subset
+explicit through rich checked-channel diagnostics (**S7.4.4**).
+
+The stored 32 by 24 JPEG12 grayscale fixture was generated using the original
+libtiff 4.7.1/libjpeg-turbo 3.1.2 backend. It successfully reads as packed
+12-bit scanlines in that backend and is rejected by its RGBA reader. A new
+image GTest checks ordinary 8-bit JPEG strips/tiles, metadata for this fixture,
+and the explicit pixel-decode error. The full image suite passes 29/29; the
+Lambda image golden and rendered gallery PNG remain byte-identical. All 23
+GIF player tests, the Premake generator self-test, and the 274-symbol
+host-export check pass.
+
+The macOS ARM64 release decreases from 25,853,448 to 25,242,584 bytes
+(24.66 to 24.07 MiB), saving 610,864 bytes (0.58 MiB). Five alternating release
+benchmark trials with eight iterations per operation on a deterministic
+768 by 512 RGB image show median after/before times from 0.999x to 1.043x
+across PNG/JPEG/WebP/TIFF encode, decode, and thumbnails. Encoded sizes and
+decoded checksums match. This is one synthetic workload; Linux/Windows and
+full engine aggregates were not run for this build-only profile.
+
+The full inventory, GeoTIFF references, measurements, and remaining AOM/JPEG
+source-specialization candidates are in [the image build review](../lib/Lib_Image.c).
+Local implementation and performance evidence is under
+`temp/image-opt-implementation/`.
 
 ## Finder thumbnail integration (2026-10-15)
 

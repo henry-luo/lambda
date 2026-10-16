@@ -137,6 +137,9 @@ structured errors/warnings, padded channel layouts and alpha conversion,
 EXIF/AVIF pixel orientation, native ownership, and allocation-failure cleanup. The
 AVIF backend is decoder-only; stored fixtures retain alpha, 10-bit and all 12
 rotation/mirror checks, and encoding requests must report `codec_unavailable`.
+TIFF coverage includes ordinary 8-bit JPEG strips/tiles and a stored JPEG12
+fixture whose metadata remains readable while pixel decoding returns
+`unsupported_feature` under the reduced TIFF build.
 The `image_io_formats.ls`/`.txt` pair exercises the Lambda `load`/`save` options;
 `test_gif_player_gtest.exe` retains the animation/disposal gate.
 

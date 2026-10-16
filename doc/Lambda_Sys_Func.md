@@ -1937,6 +1937,11 @@ animated WebP/AVIF, HDR tone mapping, CMYK JPEG conversion, and
 ICC color conversion are outside this implementation. Decoding preserves
 supported SDR samples, with high-depth input reduced to RGBA8. TIFF writing is
 single-page DEFLATE; ICO writing uses one PNG entry.
+TIFF reading retains uncompressed, Deflate, LZW, PackBits, CCITT Fax, and
+ordinary 8-bit JPEG compression. JPEG12-in-TIFF reports `unsupported_feature`;
+PixarLog, LogLuv, NeXT, and ThunderScan compression are excluded from the
+bundled build. JPEG12 is used by specialist GeoTIFF workflows; the current
+RGBA8 image pipeline does not decode it.
 
 File acquisition and atomic output publication remain in `lambda-io`
 (**D7.1.2v2**, **D7.1.3**); the byte codec core has no Radiant dependency.
