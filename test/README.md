@@ -144,6 +144,14 @@ fixture whose metadata remains readable while pixel decoding returns
 The `image_io_formats.ls`/`.txt` pair exercises the Lambda `load`/`save` options;
 `test_gif_player_gtest.exe` retains the animation/disposal gate.
 
+CSS Text atomic no-break fixtures use explicitly labelled `.standards.<platform>.json`
+controls for the seven browser captures that disagree with CSS Text 3 §5.5.
+The original Chromium captures remain available. Controls retain strict geometry
+and text comparison, record their stylesheet/specification, and reject a changed
+HTML source by SHA-256. Regenerate full and compact controls together with
+`node utils/capture_layout_reference_controls.js test/css/atomic_no_break_reference_controls.json`;
+run `node test/test_layout_reference_controls.js` to check the oracle contract.
+
 ## 4. Script-driven harnesses
 
 | Harness | Fixture dirs | Discovery | Expected output | Adding a test |

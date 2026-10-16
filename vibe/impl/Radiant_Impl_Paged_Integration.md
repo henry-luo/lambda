@@ -2399,3 +2399,32 @@ remain. Evidence: temp/view_reuse_goal/first_only_master/ and
 temp/view_reuse_goal/only_master_analysis/. Completed prototypes are preserved in
 verified lossless archives. Next: trace recorded and live containing widths in
 the six-paragraph narrow-terminal case before changing pagination feedback.
+
+### CSS Text atomic no-break reference correction (2026-10-16)
+
+The seven atomic-wrap failures recorded above were Chromium compatibility
+comparisons, not regressions against the user's selected CSS Text 3 §5.5 rule.
+Current Chromium 152 and installed Firefox both wrap these fixtures against
+their WPT assertions. Radiant renders each intended 100×100 green square with
+no red. Its green mask matches the pinned WPT reference; full raster equality
+is not asserted because a fractional antialiased edge differs by one pixel row.
+
+The companion layout harness now supports explicitly labelled standards
+controls while retaining the original browser captures and comparison thresholds.
+For these seven single unbreakable groups, independent Chromium captures with
+`div { white-space: nowrap }` supply the geometry required by CSS Text 3 §5.5.
+References record the control stylesheet, specification, reason, browser and
+original HTML SHA-256; source changes or missing provenance reject the control.
+Compact references retain that provenance. The checked-in manifest and
+`utils/capture_layout_reference_controls.js` regenerate both forms together.
+The controls are macOS captures; other platforms need their own qualification.
+
+The full unchanged 980-case CSS Text selection passes with 884 successful,
+96 partial and no failures or skips. All seven corrected cases have 100%
+element, span and text scores; the other 973 result records are identical and
+all 81 original atomic browser-reference files retain their hashes. Reference
+contract checks cover source invalidation, missing metadata, compact provenance,
+platform precedence, legacy fallback and rejection of incorrect geometry.
+No engine behavior changed. This harness/fixture correction does not requalify
+the earlier paged-media or global aggregate limits. Evidence:
+`temp/css_text_failures/qualification.json` and `wpt_pixel_validation.json`.
