@@ -311,6 +311,63 @@ Final-build checks: `temp/draw-connect/ui-qualified-{interp,auto,jit}.log`,
 `temp/draw-connect/dtna-source-qualified.log`; main-app replay:
 `temp/draw-connect/app-created.json`.
 
+## Continuous native pointer delivery
+
+Milestone: connectors must advance during sustained mouse movement, before
+release or an input pause. The demo already updates on `pointermove`; native
+GLFW cursor callbacks synchronously execute every handler while polling the
+platform queue, and painting follows that poll. When handlers take longer than
+incoming motion intervals, dispatch can consume the entire turn. Retain the
+latest native motion sample while collecting input, then dispatch it before
+the frame's normal script/layout/paint work. Flush pending motion before ordered
+button, keyboard, scroll and focus events so release and cancellation see the
+latest position (**S12.1.3, D7.4.6, D4.5.1v4**).
+
+Acceptance cases: consecutive motion bursts advance before release, a quick
+release retains the last endpoint, Escape still cancels, and hover/relative
+motion keep the latest coordinates. Scope is native input batching; drawing
+transactions and pointer capture remain package-owned. Verification budget:
+focused input-batch regressions, a held-drag pixel/geometry replay on a release
+host, the Draw UI suite in all tiers and required Radiant qualification.
+
+The native window now queues the latest cursor sample in `RdtInputBatch` rather
+than running page handlers inside every GLFW cursor callback. The host flushes
+it immediately after polling and before a refresh. Ordered input flushes it
+first, and mouse-button bookkeeping follows that flush. Focus/close callbacks
+also flush; window teardown discards unprocessed motion. Reentrant callbacks
+cannot lose a newer sample because a flush consumes its sample before dispatch.
+Relative movement still derives from the last delivered position in the shared
+event dispatcher; coalescing does not truncate or clamp virtual coordinates.
+No third-party code, drawing transaction or formal ruling changed.
+
+All 33 animation/input tests pass. The new batch regressions deliver 40,000
+positions over four frame boundaries as four latest-position updates, all before
+release. They also verify release/keyboard/scroll ordering, negative/fractional
+virtual coordinates and reentrant motion. `live_motion.json` passes 21 assertions
+with zero input/event delay: successive new and edited connector previews paint
+while capture remains active, old endpoint ink clears, history stays unchanged
+until commit, and Escape restores the endpoint. Pixel assertions sample an
+already painted surface. The native-window variant removes `render_pending`
+and screenshot events and also passes all 21 assertions without forced paint.
+All 16 Draw UI fixtures pass in interpreter, auto and JIT modes; the layout
+integer-cast lint passes and the main executable is rebuilt.
+
+The existing pointer-handler microbenchmark bypasses the native window poll,
+so it cannot measure this scheduling fix. No display-frame-rate comparison is
+claimed. Artifacts: `temp/draw-motion/animation-final.log`,
+`temp/draw-motion/ui-{interp,auto,jit}.log`,
+`temp/draw-motion/live-{motion,gui-result}.json`,
+`temp/draw-motion/live-gui.json` and `temp/draw/live-{creation,endpoint}.png`.
+
+The rebuilt Radiant aggregate completed: 5,648 passes, 183 failures, 158 partial
+passes and one skip. Its 51 UI, 55 view-reuse and 38 CSS-syntax failing case names
+match the recorded predecessor exactly; layout/render category counts are also
+unchanged. The existing WPT input-event test again hit its two-minute idle
+timeout. Native view (205), DOM UI (160), page-load (109), animation/input (33)
+and state-store (25) suites pass. These aggregate failures remain qualification
+limits, with no newly failing named case. Evidence:
+`temp/draw-motion/radiant-baseline.log` and its sibling result directory.
+
 ## Remaining feature extensions
 
 The initial profile supports one page and one editable layer, plain multiline

@@ -11,9 +11,97 @@
 #include <cmath>
 
 #include "../radiant/view.hpp"
+#include "../radiant/input_batch.hpp"
 
 // Stub for dirty_mark_rect (defined in state_store.cpp, not linked in this test)
 void dirty_mark_rect(DirtyTracker*, float, float, float, float) {}
+
+struct InputBatchProbe {
+    RdtEvent events[16];
+    unsigned count;
+    RdtInputBatch* reenter;
+};
+
+static void record_batched_input(void* data, RdtEvent* event) {
+    auto* probe = (InputBatchProbe*)data;
+    ASSERT_LT(probe->count, 16u);
+    probe->events[probe->count++] = *event;
+    if (probe->reenter) {
+        RdtInputBatch* batch = probe->reenter;
+        probe->reenter = nullptr;
+        RdtEvent next = *event;
+        next.mouse_position.x += 1.0f;
+        rdt_input_batch_submit(batch, &next, record_batched_input, probe);
+    }
+}
+
+TEST(NativeInputBatchTest, ContinuousMotionAdvancesAtEveryFrameBeforeRelease) {
+    RdtInputBatch batch = {};
+    InputBatchProbe probe = {};
+    RdtEvent event = {};
+    event.type = RDT_EVENT_MOUSE_DOWN;
+    rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+    for (unsigned frame = 0; frame < 4; frame++) {
+        for (unsigned sample = 0; sample < 10000; sample++) {
+            event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
+            event.mouse_position.x = (float)(frame * 10000 + sample);
+            event.mouse_position.y = (float)frame;
+            event.timestamp = event.mouse_position.x / 1000.0;
+            rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+        }
+        // an input burst cannot monopolize script dispatch; each frame sees its latest position.
+        ASSERT_EQ(probe.count, frame + 1);
+        ASSERT_TRUE(rdt_input_batch_flush(&batch, record_batched_input, &probe));
+        EXPECT_FLOAT_EQ(probe.events[frame + 1].mouse_position.x, (float)(frame * 10000 + 9999));
+        EXPECT_FLOAT_EQ(probe.events[frame + 1].mouse_position.y, (float)frame);
+        EXPECT_DOUBLE_EQ(probe.events[frame + 1].timestamp, event.timestamp);
+    }
+    event.type = RDT_EVENT_MOUSE_UP;
+    rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+    ASSERT_EQ(probe.count, 6u);
+    EXPECT_EQ(probe.events[5].type, RDT_EVENT_MOUSE_UP);
+    EXPECT_FALSE(rdt_input_batch_flush(&batch, record_batched_input, &probe));
+}
+
+TEST(NativeInputBatchTest, MotionPrecedesReleaseCancellationAndScroll) {
+    EventType boundaries[] = {RDT_EVENT_MOUSE_UP, RDT_EVENT_KEY_DOWN, RDT_EVENT_SCROLL};
+    for (EventType boundary : boundaries) {
+        RdtInputBatch batch = {};
+        InputBatchProbe probe = {};
+        RdtEvent event = {};
+        event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
+        event.mouse_position.x = 10.0f;
+        rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+        event.mouse_position.x = -20.25f;
+        event.mouse_position.y = 100000.5f;
+        rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+        event.type = boundary;
+        rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+        ASSERT_EQ(probe.count, 2u);
+        EXPECT_EQ(probe.events[0].type, RDT_EVENT_MOUSE_MOVE);
+        EXPECT_FLOAT_EQ(probe.events[0].mouse_position.x, -20.25f);
+        EXPECT_FLOAT_EQ(probe.events[0].mouse_position.y, 100000.5f);
+        EXPECT_EQ(probe.events[1].type, boundary);
+        EXPECT_FALSE(batch.pending_motion);
+    }
+}
+
+TEST(NativeInputBatchTest, ReentrantMotionSurvivesTheCurrentFlush) {
+    RdtInputBatch batch = {};
+    InputBatchProbe probe = {};
+    RdtEvent event = {};
+    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
+    event.mouse_position.x = 10.0f;
+    probe.reenter = &batch;
+    rdt_input_batch_submit(&batch, &event, record_batched_input, &probe);
+    ASSERT_TRUE(rdt_input_batch_flush(&batch, record_batched_input, &probe));
+    ASSERT_EQ(probe.count, 1u);
+    EXPECT_TRUE(batch.pending_motion);
+    ASSERT_TRUE(rdt_input_batch_flush(&batch, record_batched_input, &probe));
+    ASSERT_EQ(probe.count, 2u);
+    EXPECT_FLOAT_EQ(probe.events[1].mouse_position.x, 11.0f);
+    EXPECT_FALSE(batch.pending_motion);
+}
 
 // ============================================================================
 // Timing Function Tests
