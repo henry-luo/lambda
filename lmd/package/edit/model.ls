@@ -40,6 +40,16 @@ pub let view_attr = 'edit view'
 // The text of a model node (text leaves, concatenated).
 pub fn node_plain_text(n) => doc_text(n)
 
+pub let surface_block_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th', 'pre']
+
+// split/delete may leave no leaf: a presentation-only placeholder keeps the node caret on a line.
+pub fn surface_children(n, project) {
+  let tag = n.tag
+  // autoformat and Enter can create a list item whose inline content is empty.
+  if (len(n.content) == 0 and tag is symbol and (tag == 'li' or contains(surface_block_tags, tag))) ["\u200B"]
+  else [for (child in n.content) project(child)]
+}
+
 // The tag of the node at a model path, or null.
 pub fn node_tag_at(doc, path) {
   let n = node_at(doc, path)

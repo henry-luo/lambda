@@ -585,6 +585,34 @@ TEST_F(SourcePosBridgeRoundTrip, FullRoundTripText) {
     source_pos_free(&pos);
 }
 
+TEST_F(SourcePosBridgeRoundTrip, GeneratedBeforeContentDoesNotEnterSourceTextPaths) {
+    DomElement* before = make_element();
+    before->tag_name = lam::up("::before");
+    DomText* glyph = make_text("check", 5);
+    ASSERT_TRUE(before->append_child(glyph));
+    ASSERT_TRUE(para->insert_before(before, hello));
+
+    DomBoundary original{hello, 2};
+    SourcePosC pos;
+    ASSERT_TRUE(source_pos_from_dom_boundary(&original, &pos));
+    ASSERT_EQ(pos.path.depth, 2);
+    EXPECT_EQ(pos.path.indices[1], 0);
+    DomBoundary restored{nullptr, 0};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &pos, &restored));
+    EXPECT_EQ(restored.node, original.node);
+    EXPECT_EQ(restored.offset, original.offset);
+
+    // a text-leaf projection can record the wrapper itself at the leaf path.
+    render_map_record_path(para_item, tref, pos.path.indices, pos.path.depth);
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &pos, &restored));
+    EXPECT_EQ(restored.node, original.node);
+    EXPECT_EQ(restored.offset, original.offset);
+    source_pos_free(&pos);
+    ASSERT_TRUE(para->remove_child(before));
+    delete glyph;
+    delete before;
+}
+
 TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {
     // SourcePos with a path that no element registered.
     SourcePosC pos;

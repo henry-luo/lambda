@@ -146,7 +146,7 @@ fn render_node(n, kids) {
 // Model nodes and text leaves are maps; the edit package applies no other maps.
 view map {
   if (~.kind == 'text') render_text_leaf(~)
-  else if (~.kind == 'node') render_node(~, [for (c in ~.content) apply(c)])
+  else if (~.kind == 'node') render_node(~, surface_children(~, (child) => apply(child)))
   else ""
 }
 

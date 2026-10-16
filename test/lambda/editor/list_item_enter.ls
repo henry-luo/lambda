@@ -48,3 +48,17 @@ let d6 = node('doc', [node('list', [node('list_item', [node('paragraph', [])])])
 let tx6 = cmd_split_block(st_md(d6, text_selection(pos([0,0,0],0), pos([0,0,0],0))))
 "t6_count:"; len(tx6.doc_after.content)
 "t6_is_para:"; tx6.doc_after.content[0].tag == 'paragraph'
+
+// 7. HTML pasted/toolbar items wrap their text in a paragraph; Enter still creates a new item.
+let d7 = node('doc', [node('ul', [node('li', [node('p', [text("one")])])])])
+let tx7 = cmd_split_block(st(d7, text_selection(pos([0,0,0,0],3), pos([0,0,0,0],3))))
+"t7_items:"; len(tx7.doc_after.content[0].content)
+"t7_keeps_text:"; doc_text(node_at(tx7.doc_after,[0,0])) == "one"
+"t7_empty_item:"; node_at(tx7.doc_after,[0,1]) == node('li',[])
+"t7_caret:"; tx7.sel_after == text_selection(pos([0,1],0),pos([0,1],0))
+
+// 8. splitting midway carries the remaining paragraph text into the next item.
+let tx8 = cmd_split_block(st(d7, text_selection(pos([0,0,0,0],1), pos([0,0,0,0],1))))
+"t8_items:"; len(tx8.doc_after.content[0].content)
+"t8_text:"; [doc_text(node_at(tx8.doc_after,[0,0])),doc_text(node_at(tx8.doc_after,[0,1]))]
+"t8_caret:"; tx8.sel_after == text_selection(pos([0,1,0,0],0),pos([0,1,0,0],0))

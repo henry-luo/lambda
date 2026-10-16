@@ -235,15 +235,17 @@ static const SourcePathC* path_table_get(Item source_item,
 
 extern "C" {
 
-static bool is_generated_marker_node(DomNode* node) {
-    return node && node->node_type == DOM_NODE_ELEMENT && node->view_type == RDT_VIEW_MARKER;
+static bool is_generated_content_node(DomNode* node) {
+    // CSS-generated boxes have no child slot or text position in the editor model.
+    return dom_is_generated_pseudo_node(node) ||
+        (node && node->node_type == DOM_NODE_ELEMENT && node->view_type == RDT_VIEW_MARKER);
 }
 
 static int source_child_index(DomNode* node) {
     if (!node) return -1;
     int index = 0;
     for (DomNode* sib = node->prev_sibling; sib; sib = sib->prev_sibling) {
-        if (!is_generated_marker_node(sib)) index++;
+        if (!is_generated_content_node(sib)) index++;
     }
     return index;
 }
@@ -252,7 +254,7 @@ static DomNode* source_child_at(DomElement* de, int target_idx) {
     if (!de || target_idx < 0) return NULL;
     int idx = 0;
     for (DomNode* c = de->first_child; c; c = c->next_sibling) {
-        if (is_generated_marker_node(c)) continue;
+        if (is_generated_content_node(c)) continue;
         if (idx == target_idx) return c;
         idx++;
     }
@@ -405,7 +407,7 @@ static bool path_equals_prefix(const SourcePathC* path, int prefix_len,
 }
 
 static DomText* first_text_descendant(DomNode* node) {
-    if (!node) return NULL;
+    if (!node || is_generated_content_node(node)) return NULL;
     if (node->node_type == DOM_NODE_TEXT) return lam::dom_require_text(node);
     if (node->node_type != DOM_NODE_ELEMENT) return NULL;
     DomElement* el = lam::dom_require_element(node);

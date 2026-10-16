@@ -2093,7 +2093,13 @@ fn split_block_path_for_leaf_at(doc, path) {
   let parent = parent_path(path)
   let n = node_at(doc, parent)
   if (n != null and is_node(n) and split_inline_wrapper_tag(n.tag)) { split_block_path_for_leaf_at(doc, parent) }
-  else { parent }
+  else {
+    let container_path = parent_path(parent)
+    let container = node_at(doc, container_path)
+    // HTML lists may wrap their text in a paragraph; Enter must split the item, not that wrapper.
+    if (is_node(n) and n.tag == 'p' and is_node(container) and container.tag == 'li') { container_path }
+    else { parent }
+  }
 }
 
 fn split_nonempty_node(n, content) =>

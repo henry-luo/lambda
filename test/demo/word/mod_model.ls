@@ -8,6 +8,7 @@ import lambda.editor.mod_editor
 import commands: lambda.editor.mod_commands
 import decorations: lambda.editor.mod_decorations
 import html: lambda.edit.html
+import rendering: lambda.edit.model
 import document: .mod_document
 import page: .mod_page
 import review: .mod_review
@@ -82,7 +83,7 @@ pub fn plain_text(n) => if (is_text(n)) n.text else if (not is_node(n)) ""
         else if (n.tag == 'tr') "\t" else "")
 pub fn word_count(doc) => len([for (s in split(replace(replace(replace(plain_text(doc),"\n"," "),"\t"," "),"\r"," ")," ") where s != "") s])
 
-let text_blocks = ['p','h1','h2','h3','h4','h5','h6','td','th','pre']
+let text_blocks = rendering.surface_block_tags
 pub fn blocks(n,path=[]) => if (not is_node(n)) []
     else if (contains(text_blocks,n.tag)) [{path:path,node:n}]
     else [for (i,child in n.content) for (entry in blocks(child,[*path,i])) entry]

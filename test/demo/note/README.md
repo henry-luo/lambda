@@ -25,6 +25,10 @@ The checklist button converts the current paragraph/list to tasks; click a
 task's circle to toggle it. Checkbox presses preserve the current text caret
 or range; text clicks place the caret. Tables, native typing,
 selection, clipboard and composition use the shared `lambda.editor` controller.
+Repeated spaces remain visible; Enter creates paragraphs, including empty ones,
+and Shift+Enter inserts line breaks within a paragraph.
+Typing `- ` or `1. ` starts a list. Enter continues the list; Enter in an empty
+item returns to body text.
 Each note keeps its own undo/redo history while the notebook is open.
 
 | Shortcut | Action |
@@ -78,4 +82,8 @@ uses mouse drags, Shift-arrow ranges and physical typing, checking that native
 and DOM selections survive reactive redraws and formatting-menu changes
 (**D7.2.5**). The checkbox replay checks that activation leaves the caret in
 editable text, preserves ranges and supports subsequent typing and undo.
+The whitespace replay uses physical typing to verify repeated spaces, consecutive
+empty paragraphs and consecutive soft line breaks.
+The list-caret replay checks bullet/numbered marker autoformat, Enter continuation
+in inline and paragraph-wrapped items, empty-item exit, and checklist continuation.
 Captures and results are written under `temp/note/`.
