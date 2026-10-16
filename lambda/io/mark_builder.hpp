@@ -204,6 +204,9 @@ public:
      */
     Item createArray();
     lam::ItemOf<LMD_TYPE_ARRAY> createArrayTyped();
+    // dense numeric storage belongs entirely to the Input arena (D4.1.2).
+    Item createNumericArray(ArrayNumElemType type, int rank, const int64_t* dimensions,
+        const void* samples = nullptr);
 
     /**
      * Create primitive Items

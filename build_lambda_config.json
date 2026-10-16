@@ -519,6 +519,8 @@
       "source_files": [
         "build_temp/image-config/aom_build_config.c",
         "lib/image/giflib/dgif_lib.c",
+        "lib/image/giflib/egif_lib.c",
+        "lib/image/giflib/gif_hash.c",
         "lib/image/giflib/gif_err.c",
         "lib/image/giflib/gifalloc.c",
         "lib/image/giflib/openbsd-reallocarray.c",

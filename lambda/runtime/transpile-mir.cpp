@@ -30424,8 +30424,33 @@ static TypeParam* mir_dynamic_call_var_param(TypeFunc* signature, int position) 
     return param && param->is_var_param ? param : NULL;
 }
 
-static bool mir_dynamic_call_var_position(TypeFunc* signature, int position) {
-    return mir_dynamic_call_var_param(signature, position) != NULL;
+// boxed Lambda edges share the same borrow preparation and final home transport.
+static int mir_prepare_boxed_var_argument(MirTranspiler* mt, TypeParam* parameter, AstNode* argument) {
+    if (!parameter || !parameter->is_var_param || !argument) return -1;
+    MirVarEntry* root = mir_direct_root_binding(mt, argument);
+    if (root && root->cow_marked && mir_root_may_need_cow(root))
+        (void)mir_prepare_cow_root(mt, root);
+    return mir_borrow_var_place_argument(mt, argument);
+}
+
+static void mir_transport_boxed_var_argument(MirTranspiler* mt, int position, TypeParam* parameter,
+        AstNode* argument, MIR_reg_t value, MirVarHome* homes, int* count) {
+    if (!parameter || !parameter->is_var_param || !argument) return;
+    MirVarEntry* root = mir_direct_root_binding(mt, argument);
+    Type* contract = parameter->contract_type ? parameter->contract_type : parameter->full_type;
+    MirVarHomeKind kind = MIR_VAR_HOME_UNTYPED;
+    if (parameter->full_type) {
+        if (lambda_array_contract_element(contract)) kind = MIR_VAR_HOME_TYPED_ARRAY;
+        else if (!mir_typed_var_home_kind(root, &kind)) return;
+    }
+    if (kind == MIR_VAR_HOME_TYPED_LANE) {
+        int slot = create_gc_root_slot(mt, value);
+        if (slot < 0) return;
+        mir_emit_slot_home_transport(mt, position, slot, value);
+        mir_note_var_home(homes, count, root, slot, kind, root->full_type ? root->full_type : contract);
+    } else if (mir_emit_var_home_transport(mt, position, root, value, true)) {
+        mir_note_var_home(homes, count, root, root->root_slot, kind, contract);
+    }
 }
 
 // ============================================================================
@@ -31496,16 +31521,8 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
         AstNode* position_arg = injected ? injected : call_node->argument;
         for (int i = 0; position_arg && i < LAMBDA_MAX_FUNCTION_ARGS;
                 i++, position_arg = mir_call_next_argument(call_node, position_arg, injected)) {
-            if (!mir_dynamic_call_var_position(dyn_var_signature, i)) continue;
-            MirVarEntry* borrow_root = mir_direct_root_binding(mt, position_arg);
-            if (borrow_root && borrow_root->cow_marked &&
-                    mir_root_may_need_cow(borrow_root)) {
-                (void)mir_prepare_cow_root(mt, borrow_root);
-            }
-            // a place argument (`vec_add(arr.vals, x)` across satellite
-            // images) passed by value left `vals` shared: the callee's push
-            // detached a private copy and the caller's container never saw it
-            dyn_place_leaf_slots[i] = mir_borrow_var_place_argument(mt, position_arg);
+            dyn_place_leaf_slots[i] = mir_prepare_boxed_var_argument(mt,
+                mir_dynamic_call_var_param(dyn_var_signature, i), position_arg);
         }
     }
     auto emit_dyn_var_transports = [&](MIR_reg_t const* boxed_args, int count) {
@@ -31513,30 +31530,9 @@ static MIR_reg_t emit_dynamic_call_item(MirTranspiler* mt, AstCallNode* call_nod
         AstNode* position_arg = injected ? injected : call_node->argument;
         for (int i = 0; i < count && position_arg && i < LAMBDA_MAX_FUNCTION_ARGS;
                 i++, position_arg = mir_call_next_argument(call_node, position_arg, injected)) {
-            TypeParam* var_param = mir_dynamic_call_var_param(dyn_var_signature, i);
-            if (!var_param) continue;
-            MirVarEntry* borrow_root = mir_direct_root_binding(mt, position_arg);
-            Type* contract = var_param->contract_type ? var_param->contract_type
-                : var_param->full_type;
-            MirVarHomeKind kind = MIR_VAR_HOME_UNTYPED;
-            if (!var_param->full_type) {
-                kind = MIR_VAR_HOME_UNTYPED;
-            } else if (lambda_array_contract_element(contract)) {
-                kind = MIR_VAR_HOME_TYPED_ARRAY;
-            } else if (!mir_typed_var_home_kind(borrow_root, &kind)) {
-                continue;
-            }
-            if (kind == MIR_VAR_HOME_TYPED_LANE) {
-                // root the boxed argument as the home (see MirVarHomeKind)
-                int slot = create_gc_root_slot(mt, boxed_args[i]);
-                if (slot < 0) continue;
-                mir_emit_slot_home_transport(mt, i, slot, boxed_args[i]);
-                mir_note_var_home(dyn_homes, &dyn_home_count, borrow_root, slot, kind,
-                    borrow_root->full_type ? borrow_root->full_type : contract);
-            } else if (mir_emit_var_home_transport(mt, i, borrow_root, boxed_args[i], true)) {
-                mir_note_var_home(dyn_homes, &dyn_home_count, borrow_root,
-                    borrow_root->root_slot, kind, contract);
-            }
+            mir_transport_boxed_var_argument(mt, i,
+                mir_dynamic_call_var_param(dyn_var_signature, i), position_arg,
+                boxed_args[i], dyn_homes, &dyn_home_count);
         }
     };
     // P1.4: the dynamic path remains C-mediated because a C prototype has no
@@ -32889,6 +32885,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 expected_params = call_fn_type->param_count;
             }
 
+            MirVarHome imported_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
+            int imported_home_count = 0;
+            int imported_place_slots[LAMBDA_MAX_FUNCTION_ARGS];
+            TypeParam* imported_parameter = call_fn_type ? call_fn_type->param : nullptr;
+            for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+                imported_place_slots[i] = mir_prepare_boxed_var_argument(mt, imported_parameter, resolved_args[i]);
+                if (imported_parameter) imported_parameter = imported_parameter->next;
+            }
+
             // Box all args to Items
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
             MIR_var_t arg_vars[LAMBDA_MAX_FUNCTION_ARGS];
@@ -32897,7 +32902,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             int ai = 0;
             for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 if (resolved_args[i]) {
-                    MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
+                    MIR_reg_t val = imported_place_slots[i] >= 0
+                        ? load_gc_root_slot(mt, imported_place_slots[i], "import_borrow_leaf")
+                        : transpile_box_item(mt, resolved_args[i]);
                     arg_root_slots[i] = create_gc_root_slot(mt, val);
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
                 } else {
@@ -32929,6 +32936,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_reg_t live_arg = load_gc_root_slot(mt, arg_root_slots[i], "call_arg");
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, live_arg);
                 }
+            }
+
+            // S9.1.3: publish after evaluating every argument, then reload after the call.
+            imported_parameter = call_fn_type ? call_fn_type->param : nullptr;
+            for (int i = 0; i < ai; i++) {
+                if (arg_root_slots[i] >= 0)
+                    mir_transport_boxed_var_argument(mt, i, imported_parameter, resolved_args[i],
+                        arg_ops[i].u.reg, imported_homes, &imported_home_count);
+                if (imported_parameter) imported_parameter = imported_parameter->next;
             }
 
             // Create proto and import for the cross-module call
@@ -33015,6 +33031,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 em_emit_borrowed_call(&mt->em, fn_import_name->str,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             }
+
+            mir_emit_var_home_reload(mt, imported_homes, imported_home_count);
 
             // Import calls return boxed Items. A typed string caller uses a
             // raw String* (for example, fn_len_s), so unbox text here just as
