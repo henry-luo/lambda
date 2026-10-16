@@ -851,6 +851,7 @@ void js_performance_frame_clock_begin(double monotonic_ms);
 void js_performance_frame_clock_end(void);
 double js_performance_time_origin_ms(void);
 Item js_date_now(void);
+double js_date_number_to_double(Item value);
 Item js_date_now_string(void);
 Item js_date_new(void);
 Item js_date_new_from(Item value);
@@ -867,6 +868,8 @@ typedef struct JsDateOps {
     Item (*store)(Item, double);
     Item (*error)(bool, const char*);
 } JsDateOps;
+Item js_date_get_time_value(Item receiver, bool* found);
+Item js_date_store_time_value(Item receiver, double milliseconds);
 double js_date_time_clip(double value);
 double js_date_components_time(double* parts, bool local, bool relative_year);
 Item js_date_parse_text(String* text);
@@ -1345,6 +1348,9 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
 Item js_get_global_this(void);
+// the writer installs a lazy own slot; each engine keeps its ordinary storage policy.
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item), bool constructors);
+bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);

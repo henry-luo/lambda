@@ -95,6 +95,118 @@ TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, HostPerformanceAndDateShareVirtualAndFrameClocks) {
+    ASSERT_FALSE(item_is_error(run("performance.timeOrigin>1e12")));
+    double start = js_performance_monotonic_now_ms();
+    js_performance_virtual_clock_set(true, start);
+    Item result = run(R"JS(
+        var clockStart=performance.now(), dateStart=Date.now(), clockOrigin=performance.timeOrigin;
+        Math.abs(clockOrigin+clockStart-dateStart)<1 && new Date().getTime()===dateStart
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    js_performance_virtual_clock_set(true, start + 250);
+    result = run(R"JS(
+        gc(); Math.abs(performance.now()-clockStart-250)<1e-6 &&
+        Date.now()-dateStart===250 && new Date().getTime()===Date.now() &&
+        Date()===(new Date()).toString() && performance.timeOrigin===clockOrigin
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    js_performance_frame_clock_begin(start + 500);
+    result = run("Math.abs(performance.now()-clockStart-500)<1e-6 && Date.now()-dateStart===500");
+    js_performance_frame_clock_end();
+    EXPECT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("Math.abs(performance.now()-clockStart-250)<1e-6 && Date.now()-dateStart===250");
+    js_performance_virtual_clock_set(false, 0);
+    EXPECT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, ArrayKeyAndEntryIteratorsReuseSequenceStorage) {
+    Item result = run(R"JS(
+        let values=[5e-324,,3],keys=values.keys(),entries=values.entries();
+        let first=entries.next().value;
+        values[0]=7;gc();
+        let second=entries.next().value;
+        values.push(4);
+        let ok=keys[Symbol.iterator]()===keys&&first[0]===0&&first[1]===5e-324&&
+            second[0]===1&&second[1]===undefined&&[...keys].join(',')==='0,1,2,3'&&
+            entries.next().value[1]===3&&entries.next().value[1]===4&&entries.next().done;
+        values.push(5);
+        ok&&entries.next().done&&Array.prototype.keys.length===0&&Array.prototype.entries.name==='entries'&&
+            !Object.getOwnPropertyDescriptor(Array.prototype,'entries').enumerable
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostAndMvpDatesSharePrivateValueStorage) {
+    ASSERT_FALSE(item_is_error(run("globalThis.Date")));
+    RootFrame roots(2);
+    Rooted<Item> host_date(roots, js_date_new_from(flt2it(123.9))), value(roots, ItemNull);
+    ASSERT_FALSE(item_is_error(host_date.get()));
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_make_string("hostDate"), host_date.get(), 0)));
+    Item result = run(R"JS(
+        let copy=new Date(hostDate),bad=0;
+        Object.freeze(hostDate); hostDate.setTime(456);
+        for(let value of [{__time__:123},Object.create(Date.prototype),new Proxy(hostDate,{})]) {
+            try { Date.prototype.getTime.call(value); } catch(e) { bad+=e instanceof TypeError; }
+        }
+        gc();
+        hostDate instanceof Date&&hostDate.getTime()===456&&copy.getTime()===123&&bad===3&&
+        Reflect.ownKeys(hostDate).length===0&&hostDate.toISOString()==='1970-01-01T00:00:00.456Z';
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    value.set(run("class Clock extends Date{};Object.freeze(new Clock(789))"));
+    ASSERT_FALSE(item_is_error(value.get()));
+    heap_gc_collect();
+    EXPECT_EQ(it2d(js_date_method(value.get(), 0)), 789);
+    Item stored = js_date_setter(value.get(), 20, flt2it(321), ItemError, ItemError, ItemError);
+    ASSERT_FALSE(item_is_error(stored));
+    EXPECT_EQ(it2d(stored), 321);
+    EXPECT_EQ(it2d(js_date_method(value.get(), 0)), 321);
+    host_date.set(js_date_new_from(value.get()));
+    EXPECT_EQ(it2d(js_date_method(host_date.get(), 0)), 321);
+}
+
+TEST_F(JsFormalMir, SharedDateKernelsRejectPublicAndProxyBrands) {
+    ASSERT_FALSE(item_is_error(run("Date")));
+    RootFrame roots(1);
+    Rooted<Item> value(roots, ItemNull);
+    const char* sources[] = {"({__time__:0})", "Object.create(Date.prototype)",
+        "new Proxy(new Date(0),{})"};
+    for (const char* source : sources) {
+        value.set(run(source));
+        ASSERT_FALSE(item_is_error(value.get()));
+        Item result = js_date_method(value.get(), 0);
+        ASSERT_TRUE(item_is_error(result));
+        char message[128];
+        js_error_lane_format(result, message, sizeof(message));
+        EXPECT_NE(strstr(message, "TypeError"), nullptr);
+    }
+}
+
+TEST_F(JsFormalMir, ArrayKeyAndEntryIteratorsKeepGenericAccessOrder) {
+    Item result = run(R"JS(
+        let events='',source={get length(){events+='l';return 2},get 0(){events+='v';gc();return 9}};
+        let keys=Array.prototype.keys.call(source),entries=Array.prototype.entries.call(source);
+        let ok=events===''&&keys.next().value===0&&events==='l';
+        let first=entries.next().value;
+        ok=ok&&first[0]===0&&first[1]===9&&events==='llv';
+        let text=Array.prototype.entries.call('\uD83D\uDE00');
+        let a=text.next().value,b=text.next().value;
+        let caught=0;
+        for(let method of [Array.prototype.keys,Array.prototype.entries])
+            for(let value of [null,undefined])try{method.call(value)}catch(e){if(e instanceof TypeError)caught++}
+        ok&&a[0]===0&&a[1]==='\uD83D'&&b[0]===1&&b[1]==='\uDE00'&&text.next().done&&caught===4
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, ModuleCodeReuseKeepsClosuresClassesAndCachesRealmLocal) {
     const char* path = "temp/js-formal-mir-code-cache.mjs";
     const char* source = "let count=0;export function check(){"
@@ -197,6 +309,178 @@ TEST_F(JsFormalMir, PublicHostReadsTheActiveGlobalAndLexicalEnvironment) {
     EXPECT_EQ(js_global_binding_exists_after_with_lookup(key), 1);
     EXPECT_EQ(js_get_key_default(js_get_global_this(), key).item, ITEM_JS_UNDEFINED);
     EXPECT_EQ(js_get_global_property(js_name_item("absentHostName")).item, ITEM_JS_UNDEFINED);
+}
+
+TEST_F(JsFormalMir, NativeArrayCallablesUseThePublishedAbi) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    RootFrame roots(3);
+    Rooted<Item> array(roots, js_array_new(0)), method(roots, ItemNull), constructor(roots, ItemNull);
+    method.set(js_new_native_this_span_function([](Item receiver, Item* args, int count) -> Item {
+        RootFrame roots(2);
+        Rooted<Item> owner(roots, receiver), value(roots, count ? args[0] : ItemNull);
+        heap_gc_collect();
+        return count ? value.get() : owner.get();
+    }));
+    constructor.set(js_new_native_constructor([]() -> Item { return js_new_object(); }));
+    js_array_push(array.get(), method.get());
+    js_array_push(array.get(), constructor.get());
+    js_set_key_cstr(array.get(), "method", method.get());
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_name_item("nativeArray"), array.get(), 0)));
+    Item result = run(R"JS(
+        let receiver={keep:17},values=[5e-324,9007199254740991,'kept'],ok=true;
+        for(let value of values) {
+            let saved=nativeArray[0](value);gc();ok=ok&&saved===value;
+        }
+        let ctor=nativeArray[1], instance=new ctor();
+        ok&&nativeArray.method()===nativeArray&&nativeArray[0]()===nativeArray&&
+        Reflect.apply(nativeArray[0],receiver,[])===receiver&&
+        Function.prototype.call.call(nativeArray[0],receiver)===receiver&&
+        Function.prototype.bind.call(nativeArray[0],receiver)()===receiver&&
+        instance instanceof ctor&&Reflect.construct(ctor,[]) instanceof ctor;
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostArrayCompanionPreservesPrototypeAndDescriptors) {
+    ASSERT_FALSE(item_is_error(run("globalThis.hostArrayPrototype={get inherited(){return this[0]+1},"
+        "[Symbol.toStringTag]:'HostSequence'}")));
+    RootFrame roots(2);
+    Rooted<Item> array(roots, js_array_new(1)), prototype(roots,
+        js_get_global_property(js_name_item("hostArrayPrototype")));
+    js_elements_set_int(array.get(), 0, Item{.item = i2it(41)});
+    js_set_prototype(array.get(), prototype.get());
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_name_item("hostArray"), array.get(), 0)));
+    Item result = run(R"JS(
+        let before=Object.getPrototypeOf(hostArray)===hostArrayPrototype&&hostArray.inherited===42&&
+            ('inherited' in hostArray)&&!hostArray.hasOwnProperty('inherited')&&
+            Object.prototype.toString.call(hostArray)==='[object HostSequence]';
+        Object.defineProperty(hostArray,'answer',{get(){gc();return this[0]+2},configurable:true});
+        let descriptor=Object.getOwnPropertyDescriptor(hostArray,'answer');
+        gc();before&&hostArray.answer===43&&descriptor.get.call(hostArray)===43&&
+            Reflect.ownKeys(hostArray).includes('answer')&&delete hostArray.answer&&
+            !('answer' in hostArray);
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NativeCallablePropertiesRetainIdentityAndDescriptors) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    RootFrame roots(3);
+    Rooted<Item> host(roots, js_new_native_function([]() -> Item {
+        heap_gc_collect(); return Item{.item = i2it(42)};
+    })), method(roots, js_new_native_this_span_function(
+        [](Item receiver, Item*, int) -> Item { heap_gc_collect(); return receiver; })),
+        key(roots, js_name_item("hostCallable"));
+    js_set_key_cstr(host.get(), "self", host.get());
+    js_set_key_cstr(host.get(), "method", method.get());
+    ASSERT_FALSE(item_is_error(js_set_global_property(key.get(), host.get(), 0)));
+    Item result = run("hostCallable===hostCallable.self && hostCallable.method()===hostCallable && "
+        "Object.getOwnPropertyDescriptor(hostCallable,'method').value===hostCallable.method && "
+        "Object.keys(hostCallable).join(',')==='self,method' && hostCallable()===42 && "
+        "hostCallable.call===Function.prototype.call && Object.getPrototypeOf(hostCallable)===Function.prototype");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("Object.defineProperty(hostCallable,'answer',{get(){gc();return 42},configurable:true});"
+        "hostCallable.answer===42 && delete hostCallable.answer && !('answer' in hostCallable)");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    js_set_key_cstr(host.get(), "late", Item{.item = i2it(7)});
+    result = run("hostCallable.late===7 && Reflect.set(hostCallable,'late',9) && hostCallable.late===9");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    EXPECT_EQ(it2d(js_get_key_cstr(host.get(), "late")), 9);
+}
+
+TEST_F(JsFormalMir, NativeObjectsKeepAccessorsAndMvpCallbacks) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    RootFrame roots(2);
+    Rooted<Item> object(roots, js_new_object()), key(roots, js_name_item("hostObject"));
+    js_set_key_cstr(object.get(), "value", Item{.item = i2it(40)});
+    ASSERT_FALSE(item_is_error(js_set_global_property(key.get(), object.get(), 0)));
+    Item result = run("Object.defineProperty(hostObject,'twice',{get(){gc();return this.value*2},enumerable:true});"
+        "hostObject.value+=2;Object.values(hostObject).join(',')==='42,84' && "
+        "Object.entries(hostObject)[1][1]===84 && Reflect.ownKeys(hostObject).length===2");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("let derived=Object.create(hostObject);derived.value=21;"
+        "derived.twice===42 && ('twice' in derived) && !('absent' in derived)");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("Object.preventExtensions(hostObject);!Object.isExtensible(hostObject) && "
+        "!Reflect.set(hostObject,'newValue',1) && hostObject.value===42 && Object.getPrototypeOf(hostObject)===Object.prototype");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    EXPECT_EQ(it2d(js_get_key_cstr(object.get(), "value")), 42);
+}
+
+TEST_F(JsFormalMir, SharedHostReadsMvpCallablePropertiesByAbi) {
+    Item value = run("function PublicConstructor(){};PublicConstructor.prototype.answer=42;"
+        "Object.defineProperty(PublicConstructor,'observed',{get(){gc();return this.prototype}});"
+        "PublicConstructor");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    RootFrame roots(3);
+    Rooted<Item> function(roots, value), prototype(roots, js_get_key_cstr(function.get(), "prototype")),
+        observed(roots, js_get_key_cstr(function.get(), "observed"));
+    ASSERT_EQ(get_type_id(prototype.get()), LMD_TYPE_MAP);
+    EXPECT_EQ(observed.get().item, prototype.get().item);
+    EXPECT_EQ(it2d(js_get_key_cstr(prototype.get(), "answer")), 42);
+    EXPECT_EQ(it2d(js_get_key_cstr(function.get(), "length")), 0);
+    EXPECT_EQ(js_get_key_cstr(function.get(), "absent").item, ITEM_JS_UNDEFINED);
+}
+
+TEST_F(JsFormalMir, SharedHostNamespacesAreLazyAndUseTheActiveRealm) {
+    Item result = run("let arrayCtor=Array;let namespace=Intl;"
+        "let collator=new Intl.Collator('en');let desc=Object.getOwnPropertyDescriptor(globalThis,'Intl');"
+        "namespace===Intl && desc.value===namespace && !desc.enumerable && desc.writable && desc.configurable && "
+        "collator.compare('a','b')<0 && Object.getPrototypeOf(Intl.Collator)===Function.prototype && "
+        "arrayCtor===Array");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("delete globalThis.Intl;typeof Intl==='undefined'");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, SharedBufferGlobalPublishesNativeStatics) {
+    Item result = run("let bytesCtor=Uint8Array;let b=Buffer.from([1,2,3]);gc();"
+        "Buffer.isBuffer(b) && b.length===3 && b[1]===2 && b.toString('hex')==='010203' && "
+        "Buffer.from===Object.getOwnPropertyDescriptor(Buffer,'from').value && bytesCtor===Uint8Array && "
+        "new Uint8Array([7])[0]===7 && Object.getOwnPropertyDescriptor(globalThis,'Buffer').enumerable===false");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, HostConstructorCatalogAndErrorNamesUseActiveRealm) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    RootFrame roots(2);
+    Rooted<Item> fail_type(roots, js_new_native_function([]() -> Item {
+        return js_throw_type_error("host receiver");
+    })), fail_named(roots, js_new_native_function([]() -> Item {
+        RootFrame roots(1);
+        Rooted<Item> error(roots, js_new_named_error("TypeError", "host state"));
+        // renaming an error cannot change its native class identity.
+        js_set_key_cstr(error.get(), "name", js_name_item("InvalidStateError"));
+        return js_throw_value(error.get());
+    }));
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_name_item("failType"), fail_type.get(), 0)));
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_name_item("failNamed"), fail_named.get(), 0)));
+    Item result = run("let event=new MouseEvent('probe');let typed=false,named=false;"
+        "try{failType()}catch(e){gc();typed=e instanceof TypeError && e.name==='TypeError' && e.message==='host receiver'}"
+        "try{failNamed()}catch(e){gc();named=e instanceof TypeError && e.name==='InvalidStateError' && e.message==='host state'}"
+        "event.type==='probe' && event instanceof Event && event instanceof MouseEvent && typed && named");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, PreparedHostGlobalsMoveIntoTheMvpRealm) {
+    EvalContext* owner = NULL;
+    bool reusing = false;
+    ASSERT_TRUE(js_prepare_eval_context(&runtime, true, &owner, &reusing));
+    ASSERT_TRUE(js_runtime_state_ensure_input(owner));
+    RootFrame roots(2);
+    Rooted<Item> original(roots, js_get_global_this()),
+        function(roots, js_new_native_function([]() -> Item { heap_gc_collect(); return Item{.item = i2it(42)}; }));
+    js_set_key_cstr(original.get(), "preparedHost", function.get());
+    js_set_key_cstr(original.get(), "preparedValue", Item{.item = i2it(7)});
+    js_mark_non_writable(original.get(), js_name_item("preparedValue"));
+    js_runtime_state.dom.default_view = original.get();
+    Item result = run("let event=new Event('probe');gc();"
+        "window===globalThis && self===globalThis && top===globalThis && parent===globalThis && "
+        "preparedHost()===42 && preparedValue===7 && !Object.getOwnPropertyDescriptor(globalThis,'preparedValue').writable && "
+        "event.type==='probe' && typeof Object==='function'");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    EXPECT_NE(original.get().item, js_get_global_this().item);
+    EXPECT_EQ(js_runtime_state.dom.default_view.item, js_get_global_this().item);
 }
 
 TEST_F(JsFormalMir, PublicStructuredCloneUsesSharedKernelAndRealmCarriers) {
@@ -10417,6 +10701,61 @@ TEST_F(JsMvpLmd, CompactEntryGuardedCallsPreserveSemantics) {
         ASSERT_NE(source, nullptr);
         boolean(source->str); strbuf_free(source);
     }
+}
+
+TEST_F(JsFormalMir, CompactEntrySharedInvocationPreservesCallState) {
+    const char* cases[][3] = {
+        {"let events='',receiver={get run(){events+='g';return function(v){return this===receiver&&v===3}}},ok=true;",
+         "ok=ok&&receiver.run((events+='a',gc(),3));", "ok&&events==='gaga'"},
+        {"let receiver={run(v){return v}},ok=true;",
+         "let saved=receiver.run(5e-324);gc();ok=ok&&saved===5e-324;", "ok"},
+        {"let receiver={run:new Proxy(function(v){return this.x+v},{apply(t,r,a){gc();return Reflect.apply(t,r,a)}}),x:4},total=0;",
+         "total+=receiver.run(3);", "total===14"},
+        {"let receiver={run:Array.prototype.slice},source=[1,2,3],ok=true;",
+         "ok=ok&&receiver.run.call(source,1)[0]===2&&Math.max(1,4,2)===4;", "ok"},
+        {"let effects='',receiver={run:1},caught=0;",
+         "try{receiver.run((effects+='a',3))}catch(e){if(e instanceof TypeError)caught++}",
+         "effects==='aa'&&caught===2"},
+        {"let token={x:7},receiver={run(){gc();throw token}},caught=0;",
+         "try{receiver.run()}catch(e){if(e===token&&e.x===7)caught++}", "caught===2"},
+    };
+    for (const auto& probe : cases) {
+        StrBuf* source = mvp_compact_entry_source(probe[0], probe[1], probe[2]);
+        ASSERT_NE(source, nullptr);
+        StrBuf* block = strbuf_new();
+        ASSERT_NE(block, nullptr);
+        strbuf_append_format(block, "{%s}", source->str);
+        Item result = run(block->str);
+        strbuf_free(block); strbuf_free(source);
+        ASSERT_FALSE(item_is_error(result));
+        EXPECT_EQ(result.item, ITEM_TRUE);
+    }
+}
+
+TEST_F(JsMvpLmd, CompactEntryBoundsInvocationGrowth) {
+    size_t lines[2] = {}, calls[2] = {};
+    for (int i = 0; i < 2; i++) {
+        StrBuf* body = strbuf_new();
+        ASSERT_NE(body, nullptr);
+        for (int j = 0; j < (i ? 96 : 16); j++) strbuf_append_str(body, "receiver.run(3);");
+        StrBuf* source = mvp_compact_entry_source("let receiver=builder('return {run(v){return v}}')();",
+            body->str, "scratch===1");
+        strbuf_free(body);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+        char* mir = dump("temp/mvp_lmd_compact_call_size.mir");
+        ASSERT_NE(mir, nullptr);
+        const char* entry = strstr(mir, "mvp_lmd_program:\tfunc");
+        ASSERT_NE(entry, nullptr);
+        const char* end = strstr(entry, "\tendfunc");
+        ASSERT_NE(end, nullptr);
+        for (const char* at = entry; at < end; at++) if (*at == '\n') lines[i]++;
+        for (const char* at = entry; (at = strstr(at, ", mvp_lmd_class_invoke,")) && at < end; at++) calls[i]++;
+        mem_free(mir);
+    }
+    EXPECT_GE(calls[1], calls[0] + 80u);
+    // later generic calls share ABI dispatch rather than clone its control flow.
+    EXPECT_LT(lines[1] - lines[0], 80u * 220u);
 }
 
 TEST_F(JsMvpLmd, CompactEntryBoundsGuardedInlineGrowth) {

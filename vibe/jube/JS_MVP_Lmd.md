@@ -1956,6 +1956,27 @@ The RegExp migration follow-up reuses shared match-state and streaming
 replacement kernels, with precise state owned by each MVP realm (D5.3,
 D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
 timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
-capsule teardown. Latest focused gates: 727 MVP units, 61 forced-GC checks,
-and 198/205 isolated Script cases pass; the seven failures are AUTO publication.
-Whole-suite and performance acceptance remain open.
+capsule teardown.
+
+The host integration follow-up reuses shared descriptors, exotic operations,
+lazy global catalogs and native callable identities across the MVP boundary
+(D6.2.2v2, D8.1.3v25). It preserves Lambda nominal shapes during descriptor
+mutation (D3.4), rebinds prepared Window/document roots (D5.3), and installs
+Array keys/entries through the existing iterator kernel. Large open script
+entries share generic call dispatch after the existing emission budget, fixing
+`dom_module_props` compilation. Broader library compilation remains open.
+
+The next host-boundary checkpoint shares private DateValue storage between
+native DOM and MVP Date operations, admits native callables carried by host
+arrays through their existing ABI bridge, and preserves host array prototypes
+and native callable home realms (D3.4, D5.3/D5.4, D6.2.2v2). Performance and Date
+now reuse the host's existing virtual/frame clock and time origin.
+
+**Latest verification:** 743/743 MVP units, 76/76 focused forced-GC checks,
+25/25 selected DOM/Intl fixtures and 583/583 canonical Date cases. Script
+integration remains 198/205, with seven AUTO publication failures. The earlier
+complete isolated formal fixture diagnostic records 461/507 passes, 41 failures
+and five outer timeouts; later focused fixes are not added to that aggregate.
+Exact pins and unresolved host/environment/library cases are in the
+implementation plan. Full baseline closure and performance acceptance remain
+open; benchmark timing stays deferred.

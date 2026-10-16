@@ -222,9 +222,16 @@ Item mvp_lmd_proxy_invoke(Item owner, Item actual_receiver, Item* args, int64_t 
     return item_is_error(result) || !construct || mvp_lmd_is_object(result) ? result : mvp_lmd_fail(LMD_MVP_TYPE, 0);
 }
 Item mvp_lmd_proxy_project(Item owner, int64_t projection) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, owner);
+    Item keys = mvp_lmd_proxy_property(owner, ItemNull, ItemNull, owner, LMD_PROXY_KEYS);
+    return mvp_lmd_project_keys(object.get(), keys, projection);
+}
+Item mvp_lmd_project_keys(Item owner, Item own_keys, int64_t projection) {
     RootFrame roots(6);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, owner), keys(roots, mvp_lmd_proxy_property(owner, ItemNull, ItemNull, owner, LMD_PROXY_KEYS));
+    Rooted<Item> object(roots, owner), keys(roots, own_keys);
     Rooted<Item> result(roots, ItemNull), key(roots, ItemNull), value(roots, ItemNull), pair(roots, ItemNull);
     if (item_is_error(keys.get()) || projection == 5) return keys.get();
     result.set(mvp_lmd_array_new(0));

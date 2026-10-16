@@ -28,10 +28,9 @@ static const char* host_utf8_bytes(String* value, size_t* size, char** owned) {
     return *owned;
 }
 
-static Item host_clock(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Item, Item) {
-    MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
-    // d2it tags a pointer; the shared scalar publisher owns this numeric result.
-    return push_d((pn_clock() - state->origin) * 1000.0);
+static Item host_clock(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
+    // DOM frames, timers and native callbacks share the realm's clock origin.
+    return js_performance_now();
 }
 
 static Item host_output(Item self, Item* arguments, uint64_t count, bool line, FILE* stream = NULL) {
@@ -271,6 +270,9 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
                 mvp_lmd_native_function(program, state, binding.entry, binding.arity, binding.key));
             if (item_is_error(result)) return result;
         }
+        result = mvp_lmd_named_set(state->values[LMD_HOST_PERFORMANCE], "timeOrigin",
+            push_d(js_performance_time_origin_ms()));
+        if (item_is_error(result)) return result;
         static const MvpLmdConsoleLabelBinding labels[] = {
             {"count", js_console_count_fn}, {"countReset", js_console_countReset_fn},
             {"time", js_console_time_fn}, {"timeEnd", js_console_timeEnd_fn},
@@ -319,6 +321,5 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
             ((MvpLmdCallable*)state->timers[i].function)->non_constructible = true;
         }
     }
-    state->origin = pn_clock();
     return result;
 }

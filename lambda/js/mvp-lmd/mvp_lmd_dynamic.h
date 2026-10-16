@@ -16,6 +16,14 @@ Item mvp_lmd_dynamic_function_kind(MvpLmdProgram*, Item*, uint64_t,
     Item new_target, MvpLmdDynamicFunctionKind);
 Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram*, Item);
 Item mvp_lmd_dynamic_unwrap_function(Item);
+enum MvpLmdForeignOperation {
+    LMD_FOREIGN_GET_PROTOTYPE = 32, LMD_FOREIGN_SET_PROTOTYPE,
+    LMD_FOREIGN_EXTENSIBLE, LMD_FOREIGN_PREVENT,
+    LMD_FOREIGN_DESCRIPTOR, LMD_FOREIGN_DEFINE, LMD_FOREIGN_PROJECT
+};
+// false means this is not foreign storage; completion preserves false versus throw.
+bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
+    int operation, Item* completion, JsPropertyDescriptor* descriptor = NULL);
 // Returns undefined for an ordinary MVP callable; dynamic bodies keep their
 // exact retained source independently of the original MIR unit's source span.
 Item mvp_lmd_dynamic_function_source(Item);

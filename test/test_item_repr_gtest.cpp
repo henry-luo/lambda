@@ -868,6 +868,28 @@ TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {
         {.item = s2it(after_flag)})), 123456);
 }
 
+TEST_F(RuntimeShapeTransition, PrivateMapClonePreservesNominalAndCanDetachSnapshot) {
+    Map* map = make_transition_map();
+    ASSERT_NE(map, nullptr);
+    TypeMap* original = (TypeMap*)map->type;
+    TypeNominal nominal = {};
+    original->nominal = &nominal;
+    original->is_nominal = true;
+    TypeMap* first = map_clone_typemap_for_mutation(map, pool, true);
+    ASSERT_NE(first, nullptr);
+    EXPECT_NE(first, original);
+    EXPECT_EQ(first->nominal, &nominal);
+    EXPECT_TRUE(first->is_nominal);
+    EXPECT_EQ(map_clone_typemap_for_mutation(map, pool), first);
+    TypeMap* second = map_clone_typemap_for_mutation(map, pool, true);
+    ASSERT_NE(second, nullptr);
+    EXPECT_NE(second, first);
+    EXPECT_EQ(second->nominal, &nominal);
+    EXPECT_TRUE(second->is_nominal);
+    EXPECT_NE(second->shape, first->shape);
+    EXPECT_EQ(lambda_int_item_value(map_get(map, {.item = s2it(after_flag)})), 123456);
+}
+
 TEST_F(RuntimeShapeTransition, VMapMutationStabilizesWideValues) {
     Item vmap_item = vmap_new();
     ASSERT_EQ(get_type_id(vmap_item), LMD_TYPE_VMAP);

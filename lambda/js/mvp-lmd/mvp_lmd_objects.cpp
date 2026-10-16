@@ -1,4 +1,5 @@
 #include "mvp_lmd_runtime.h"
+#include "mvp_lmd_dynamic.h"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
@@ -657,6 +658,12 @@ extern "C" Item mvp_lmd_define_property(Item owner, Item name, Item descriptor) 
     return item_is_error(status) ? status : status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : object.get();
 }
 Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescriptor* descriptor) {
+    if (mvp_lmd_foreign_candidate(owner)) {
+        Item foreign;
+        JsPropertyDescriptor converted = *descriptor;
+        if (mvp_lmd_foreign_property(owner, name, ItemNull, owner,
+                LMD_FOREIGN_DEFINE, &foreign, &converted)) return foreign;
+    }
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
         return js_module_namespace_define(owner, name, descriptor);
     double numeric; int index;
@@ -889,6 +896,9 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
     return object.get();
 }
 Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descriptor) {
+    Item foreign;
+    if (mvp_lmd_foreign_candidate(owner) && mvp_lmd_foreign_property(owner, name,
+            ItemNull, owner, LMD_FOREIGN_DESCRIPTOR, &foreign, descriptor)) return foreign;
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
         return js_module_namespace_get_own(owner, name, descriptor);
     double numeric; int index;
@@ -934,6 +944,14 @@ Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descr
             value = mvp_lmd_array_own_item(owner.array, index);
         else return Item{.item = ITEM_FALSE};
     } else return Item{.item = ITEM_FALSE};
+    if (value.item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, owner), key(roots, name);
+        Item resolved;
+        if (!js_resolve_lazy_global(object.get(), key.get(), &resolved)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        return item_is_error(resolved) ? resolved : mvp_lmd_get_own_property(object.get(), key.get(), descriptor);
+    }
     JsPropertyDescriptor converted = {};
     converted.flags = JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE |
         (flags & JSPD_IS_ACCESSOR ? JS_PD_HAS_GET | JS_PD_HAS_SET : JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE);
@@ -949,6 +967,9 @@ Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descr
     return Item{.item = ITEM_TRUE};
 }
 Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, MvpLmdPropertyCache* cache) {
+    Item foreign;
+    if (mvp_lmd_foreign_candidate(owner) && mvp_lmd_foreign_property(owner, name,
+            value, receiver, LMD_PROP_SET, &foreign)) return foreign;
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
         return Item{.item = ITEM_FALSE};
     if (lambda_stack_is_exhausted(context->stack_limit)) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
@@ -1074,7 +1095,7 @@ extern "C" Item mvp_lmd_object_integrity(Item owner, int64_t operation) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     bool arguments = state && state->arguments_key && get_type_id(owner) == LMD_TYPE_MAP &&
         typemap_hash_lookup_key((TypeMap*)owner.map->type, state->arguments_key);
-    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments || js_is_typed_array(owner) ||
+    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments || js_is_typed_array(owner) || mvp_lmd_foreign_candidate(owner) ||
             (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))) {
         Rooted<Item> keys(roots, mvp_lmd_object_project(object.get(), 5));
         Rooted<Item> descriptor(roots, ItemNull), attributes(roots, ItemNull);
@@ -1401,6 +1422,14 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     return result.get();
 }
 extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
+    if (mvp_lmd_foreign_candidate(owner)) {
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, owner);
+        Item keys;
+        if (mvp_lmd_foreign_property(object.get(), ItemNull, ItemNull, object.get(), LMD_FOREIGN_PROJECT, &keys))
+            return mvp_lmd_project_keys(object.get(), keys, projection);
+    }
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
         return js_module_namespace_project(owner, projection);
     if (mvp_lmd_is_proxy(owner)) return mvp_lmd_proxy_project(owner, projection);

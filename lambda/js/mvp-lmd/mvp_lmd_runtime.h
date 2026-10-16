@@ -29,7 +29,6 @@ struct MvpLmdHostState {
     Item* values;                // execution-registered roots; borrowed by host callables
     Item* timers;                // optional timer functions in separately registered program slots
     Item* global;                // borrowed registered global receiver cell
-    double origin;
     FILE* output;
 };
 Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
@@ -83,12 +82,32 @@ struct MvpLmdCallable : Function {
     bool custom_new_target;    // native constructor implements GetPrototypeFromConstructor
     uint8_t home_slot;          // one-based traced closure slot: literal home Map or enclosing method Function
     bool native_source;        // native extension retains its original name independently of own properties
+    bool foreign_properties;  // native wrapper forwards its target's property capabilities
     MvpLmdClass* properties;     // lazy ordinary-function own/prototype storage
 };
 static_assert(sizeof(MvpLmdCallable) == sizeof(Function) + 4 * sizeof(void*),
     "the optional home slot must fit the existing callable padding");
 typedef Item (*MvpLmdNativeEntry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 struct MvpLmdNativeCallable : MvpLmdCallable { void* state; NameRef source_name; };
+// foreign storage already declares its owner; ordinary MVP shapes need no extra flag.
+static inline bool mvp_lmd_foreign_candidate(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_MAP) {
+        TypeMap* shape = (TypeMap*)value.map->type;
+        return shape && shape->js_meta && !shape->nominal && value.map->map_kind != MAP_KIND_PROXY;
+    }
+    if (type == LMD_TYPE_ARRAY) {
+        // host arrays carry their prototype/descriptor owner in the existing
+        // companion map; MVP arrays keep their ordinary shape dispatch.
+        Map* properties = js_array_props(value.array);
+        TypeMap* shape = properties ? (TypeMap*)properties->type : NULL;
+        return shape && shape->js_meta && !shape->nominal;
+    }
+    if (type == LMD_TYPE_FUNC) return value.function->entry_abi == FN_ENTRY_ABI_JS_FUNCTION ||
+        (value.function->entry_abi == FN_ENTRY_ABI_MVP_LMD && value.function->requires_runtime_context &&
+            ((MvpLmdCallable*)value.function)->foreign_properties);
+    return is_virtual_container_type_id(type);
+}
 Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
     const char* name = NULL);
 Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags = -1);
@@ -147,7 +166,6 @@ struct MvpLmdLibraryState {
     NameRef extensibility_key;
     bool mutable_prototypes;
     bool date_observed;
-    NameRef date_key;           // private DateValue slot, owned by the shared Map layout
     MvpLmdClass date;
     MvpLmdClass regexp;
     MvpLmdClass* regexp_iterator; // optional observable RegExp String Iterator family
@@ -249,6 +267,7 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
     uint64_t count, int skip = 0, MvpLmdNativeEntry entry = nullptr,
     Item target = Item{.item = ITEM_JS_UNDEFINED});
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program);
+MvpLmdProgram* mvp_lmd_program_for_global(MvpLmdProgram* program, Item global);
 uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program);
 Item mvp_lmd_dynamic_import(MvpLmdProgram* program, Item specifier, const char* reference);
 Item mvp_lmd_create_realm(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
@@ -298,6 +317,7 @@ Item mvp_lmd_proxy_property(Item owner, Item key, Item value, Item receiver, int
 Item mvp_lmd_proxy_invoke(Item owner, Item receiver, Item* args, int64_t count, Item target);
 Item mvp_lmd_proxy_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_proxy_project(Item owner, int64_t projection);
+Item mvp_lmd_project_keys(Item owner, Item keys, int64_t projection);
 bool mvp_lmd_descriptor_compatible(bool extensible, const JsPropertyDescriptor* update, const JsPropertyDescriptor* current);
 extern "C" bool js_promise_is(Item promise);
 struct JsSourceModuleRecord;
@@ -305,7 +325,7 @@ JsSourceModuleRecord* js_module_namespace_record(Item object);
 static inline bool mvp_lmd_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM ||
-        (type == LMD_TYPE_VMAP && (js_promise_is(value) || js_module_namespace_record(value)));
+        is_virtual_container_type_id(type);
 }
 Map* mvp_lmd_property_map(Item object, bool writing = false, bool numeric_attributes = false);
 Item mvp_lmd_array_own_item(Array* array, int64_t index);

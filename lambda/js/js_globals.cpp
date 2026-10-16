@@ -123,6 +123,15 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
 static Item js_publish_lazy_global(Item object, Item key, Item value) {
     JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     if (item_is_error(value_root.get())) return value_root.get();
+    if (js_runtime_state.formal_mir_owner && object.item == mvp_lmd_dynamic_global_this(NULL).item) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library();
+        value_root.set(mvp_lmd_dynamic_wrap_function(library->object.program, value_root.get()));
+        if (item_is_error(value_root.get())) return value_root.get();
+        // the marker has already passed declaration admission. Replace its
+        // storage directly, without recursively observing its lazy descriptor.
+        if (!map_shape_set(object_root.get().map, key_root.get().get_string(), value_root.get())) return ItemError;
+        return value_root.get();
+    }
     // publish through storage: OrdinarySet would read the marker's descriptor
     // and recursively resolve it before the complete object is installed.
     JS_ASSIGN_OR_RETURN(stored, js_define_own_key_storage(object_root.get(),
@@ -130,26 +139,29 @@ static Item js_publish_lazy_global(Item object, Item key, Item value) {
     return value_root.get();
 }
 
-static void js_install_lazy_host_globals(Item global) {
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item), bool constructors) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, global), key(roots, ItemNull);
+    auto install = [&](const char* name, size_t length) -> Item {
+        key.set(js_name_item(name, length));
+        return writer(object.get(), key.get());
+    };
+    if (constructors) for (int i = 0; i < js_builtin_global_count(); i++) {
+        const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+        if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
+                !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
+        Item status = install(spec->name, spec->len);
+        if (item_is_error(status)) return status;
+    }
     for (size_t i = 0;
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
             i++) {
         const JsLazyGlobalSpec* spec = &js_lazy_host_globals[i];
         if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
-        Item key = (Item){.item = s2it(
-            heap_create_name(spec->name, spec->name_length))};
-        js_set_key_default(global, key,
-            (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
-        js_mark_non_enumerable(global, key);
+        Item status = install(spec->name, spec->name_length);
+        if (item_is_error(status)) return status;
     }
-}
-
-bool js_host_object_has_property(Item object, Item key, Item* out) {
-    if (jube_member_has(object, key, out)) return true;
-    return false;
-}
-
-static void js_install_jube_global_namespaces(Item global) {
     int module_count = jube_static_module_count();
     for (int i = 0; i < module_count; i++) {
         const JubeModuleDef* module = jube_static_module_at(i);
@@ -160,14 +172,18 @@ static void js_install_jube_global_namespaces(Item global) {
             if (!global_def || !global_def->build) continue;
             const char* name = global_def->name;
             if (!name || !name[0]) continue;
-            Item key = js_name_item(name, strlen(name));
             // Keep Jube globals as ordinary writable data properties while
             // deferring module activation until the property is actually read.
-            js_set_key_default(global, key,
-                (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
-            js_mark_non_enumerable(global, key);
+            Item status = install(name, strlen(name));
+            if (item_is_error(status)) return status;
         }
     }
+    return ItemNull;
+}
+
+bool js_host_object_has_property(Item object, Item key, Item* out) {
+    if (jube_member_has(object, key, out)) return true;
+    return false;
 }
 
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
@@ -1504,7 +1520,7 @@ extern "C" double js_date_time_clip(double value) {
     return clipped + 0.0;
 }
 
-static double js_date_number_to_double(Item value) {
+extern "C" double js_date_number_to_double(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_FLOAT) return it2d(value);
     if (type == LMD_TYPE_INT) return (double)it2i(value);
@@ -1798,34 +1814,45 @@ static void js_date_set_instance_prototype(Item obj) {
     }
 }
 
-static Item js_date_get_time_value(Item date_obj, bool* found) {
+extern "C" Item js_date_get_time_value(Item date_obj, bool* found) {
     if (found) *found = false;
     if (get_type_id(date_obj) != LMD_TYPE_MAP) return ItemNull;
-    return js_map_shape_lookup_ext(date_obj.map, "__time__", 8, found);
+    NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_DATE);
+    ShapeEntry* field = key ? typemap_hash_lookup_key((TypeMap*)date_obj.map->type, key) : NULL;
+    if (found) *found = field != NULL;
+    return field ? map_shape_field_to_item(date_obj.map->data, field) : ItemNull;
+}
+
+extern "C" Item js_date_store_time_value(Item receiver, double milliseconds) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, receiver);
+    NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_DATE);
+    // Date's internal slot is shared by both engines and stays writable when
+    // the public object is frozen. Public names cannot forge this private key.
+    Item value = push_d(milliseconds);
+    if (!key || get_type_id(object.get()) != LMD_TYPE_MAP) return ItemError;
+    TypeMap* shape = (TypeMap*)object.get().map->type;
+    if (shape->js_meta) {
+        // metadata-bearing native maps use the existing JS storage admission.
+        JS_ASSIGN_OR_RETURN(stored, js_define_own_key_storage(object.get(), Item{.item = s2it(key)}, value));
+    } else if (!map_shape_set(object.get().map, key, value)) return ItemError;
+    return push_d(milliseconds);
 }
 
 static const JsDateOps js_date_default_ops = {
-    js_to_number, js_date_get_time_value,
-    [](Item owner, double ms) {
-        RootFrame roots(1);
-        if (!roots.valid()) return ItemError;
-        Rooted<Item> object(roots, owner);
-        Item key = js_name_item("__time__");
-        Item value = push_d(ms);
-        Item result = js_set_key_default(object.get(), key, value);
-        return item_is_error(result) ? result : push_d(ms);
-    },
+    js_to_number, js_date_get_time_value, js_date_store_time_value,
     [](bool range, const char* message) {
         return range ? js_throw_range_error(message) : js_throw_type_error(message);
     }
 };
 
 extern "C" Item js_date_new(void) {
-    RootFrame roots(2);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
     Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_DATE));
     Item time_val = js_date_now();
-    Rooted<Item> key_root(roots, js_name_item("__time__"));
-    js_set_key_default(object_root.get(), key_root.get(), time_val);
+    JS_ASSIGN_OR_RETURN(stored, js_date_store_time_value(object_root.get(), js_date_number_to_double(time_val)));
     js_date_set_instance_prototype(object_root.get());
     return object_root.get();
 }
@@ -1839,19 +1866,14 @@ extern "C" Item js_date_now_string(void) {
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
     JS_ROOTS(roots,
-        object_root, js_new_object_with_class(JS_CLASS_DATE),
         value_root, value,
-        key_root, js_name_item("__time__"));
+        object_root, js_new_object_with_class(JS_CLASS_DATE));
     TypeId tid = get_type_id(value_root.get());
 
     // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
+    Item stored = ItemNull;
     auto store_time = [&](double ms) {
-        ms = js_date_time_clip(ms);
-        static double date_buf[16];
-        static int date_idx = 0;
-        double* fp = &date_buf[date_idx++ % 16];
-        *fp = ms;
-        js_set_key_default(object_root.get(), key_root.get(), lambda_float_ptr_to_item(fp));
+        stored = js_date_store_time_value(object_root.get(), js_date_time_clip(ms));
     };
 
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
@@ -1949,6 +1971,7 @@ extern "C" Item js_date_new_from(Item value) {
         else store_time(NAN);
     }
 date_done:
+    if (item_is_error(stored)) return stored;
     js_date_set_instance_prototype(object_root.get());
     return object_root.get();
 }
@@ -7914,10 +7937,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 10 && strncmp(name, "__sealed__", 10) == 0) ||
         (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
         (name_len == 12 && strncmp(name, "__is_proto__", 12) == 0) ||
-        // Math and Date keep their native state in ordinary map slots; those
-        // implementation slots must not enter Object.keys or descriptor enumeration.
+        // Math keeps its native state in an ordinary map slot; that
+        // implementation slot must not enter Object.keys or descriptor enumeration.
         (name_len == 11 && strncmp(name, "__is_math__", 11) == 0) ||
-        (name_len == 8 && strncmp(name, "__time__", 8) == 0) ||
         (name_len == 18 && strncmp(name, "__weakref_target__", 18) == 0) ||
         (name_len == 14 && strncmp(name, "__fr_cleanup__", 14) == 0) ||
         (name_len == 12 && strncmp(name, "__fr_cells__", 12) == 0)) {
@@ -9907,8 +9929,7 @@ extern "C" Item js_is_constructor(Item fn) {
         return js_throw_value(js_new_error_with_name(err_name, err_msg));
     }
 
-    JsFunctionLayout* jfn = (JsFunctionLayout*)fn.function;
-    return (Item){.item = jfn && jfn->construct ? ITEM_TRUE : ITEM_FALSE};
+    return (Item){.item = js_has_construct_capability(fn) ? ITEM_TRUE : ITEM_FALSE};
 }
 
 static Item js_test262_is_primitive(Item value) {
@@ -12495,7 +12516,8 @@ JS_FORWARD_EXPRESSION(int, js_is_window_event_global_property, (Item object, Ite
         js_global_this_obj.item != 0 && object.item == js_global_this_obj.item &&
         js_key_is_event_name(key))
 JS_FORWARD_EXPRESSION(int, js_is_global_this_object_value, (Item object),
-    js_global_this_obj.item != 0 && object.item == js_global_this_obj.item)
+    js_runtime_state.formal_mir_owner ? object.item == mvp_lmd_dynamic_global_this(NULL).item :
+        js_global_this_obj.item != 0 && object.item == js_global_this_obj.item)
 
 extern "C" Item js_get_window_event_global_value(void) {
     js_window_event_ensure_rooted();
@@ -13635,13 +13657,15 @@ extern "C" Item js_get_global_this() {
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
         // startup budget (D6.2.2v2).
-        js_install_lazy_host_globals(js_global_this_obj);
+        js_install_host_namespace_slots(js_global_this_obj, [](Item global, Item key) -> Item {
+            JS_ROOTS(roots, object, global, name, key);
+            Item stored = js_set_key_default(object.get(), name.get(), (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
+            if (!item_is_error(stored)) js_mark_non_enumerable(object.get(), name.get());
+            return stored;
+        }, false);
         // D6.2.2v2: the retired direct-global lowering used to fabricate this
         // namespace; generic global Get now requires the real realm property.
         js_set_key_cstr(js_global_this_obj, "$262", js_get_262_object_value());
-        // Install lazy slots after the eager JS globals. A Jube session is
-        // created only when one of these slots or a module specifier is read.
-        js_install_jube_global_namespaces(js_global_this_obj);
         // Global function names, arity, and installation policy come from the catalog.
         for (int i = 0; i < js_builtin_global_count(); i++) {
             const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);

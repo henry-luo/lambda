@@ -360,7 +360,13 @@ bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
-    if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
+    if (!m || m->map_kind != MAP_KIND_PLAIN) return;
+    TypeMap* shape = (TypeMap*)m->type;
+    // MVP descriptor flags live on Lambda shape transitions. A host attribute
+    // write must not reclassify that nominal storage as a legacy JS map.
+    if (shape && shape->nominal && (shape->nominal->extension == &mvp_lmd_plain_extension ||
+            shape->nominal->extension == &mvp_lmd_class_extension)) return;
+    m->map_kind = MAP_KIND_DESC;
 }
 JS_FORWARD_STATIC_EXPRESSION(Item, js_runtime_make_string_item, (const char* str, int len), ((Item){.item = s2it(heap_strcpy((char*)str, len))}))
 
@@ -1380,6 +1386,9 @@ extern "C" bool js_has_call_capability(Item target) {
     TypeId type = get_type_id(target);
     if (type == LMD_TYPE_FUNC) {
         Function* lambda_fn = target.function;
+        // D6.2.2v2: MVP has no JsFunction tail; use its published entry ABI.
+        if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD))
+            return lambda_fn->ptr != NULL;
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
@@ -5144,6 +5153,12 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (receiver_root.get().item == 0) receiver_root.set(object);
     receiver = receiver_root.get();
     TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) {
+        // D6.2.2v2: host callers must not read the legacy callable tail.
+        key_root.set(mvp_lmd_property_key(key));
+        return item_is_error(key_root.get()) ? key_root.get() :
+            mvp_lmd_property_with_receiver(object, key_root.get(), ItemNull, LMD_PROP_GET, receiver);
+    }
     if (type == LMD_TYPE_ERROR || js_is_resting_error(object)) {
         if (!js_key_is_symbol(key)) {
             JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
@@ -8218,6 +8233,8 @@ static bool js_is_constructor_internal(Item callee) {
     }
     TypeId type = get_type_id(callee);
     if (type != LMD_TYPE_FUNC) return false;
+    if (function_has_abi(callee.function, FN_ENTRY_ABI_MVP_LMD))
+        return mvp_lmd_is_constructor(callee);
     JsFunction* fn = (JsFunction*)callee.function;
     // Capability finalization is the sole authority; observable names, broad
     // syntax flags, and catalog metadata cannot change IsConstructor.

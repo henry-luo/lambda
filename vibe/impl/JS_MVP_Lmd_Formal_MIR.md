@@ -75,6 +75,20 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `host27`, existing DOM/Intl fixture gates | 25/25 pass | Date/FileList input round trips and both animation-clock fixtures; unchanged goldens |
+| `host27`, release MVP units | 743/743 pass | Shared Date storage/clocks, native array callables, host array descriptors and home-realm dispatch |
+| `host27`, focused normal and forced/poisoned GC | 76/76 each | Includes native Date mutation, virtual/frame clocks, callback ABI admission and child-realm Promise jobs |
+| `host24`, shared Item/shape suite | 40/40 pass | Private pinned test executable |
+| `host27`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Seven known AUTO publication cases remain |
+| `host27`, canonical Date Test262 slice | 583/583 pass | Shared private DateValue storage and clock; formal MIR entry, unchanged metadata/source |
+| `host24`, complete isolated formal fixture diagnostic | 461/507 pass; 41 fail; 5 outer timeouts | Unchanged runner, one selected case per process, two workers and a 180-second outer diagnostic limit; separate from whole-batch validation |
+| `host19`, canonical Array keys/entries slice | 24/24 pass | Shared sequence iterator kernel; formal MIR entry |
+| `host19`, existing DOM/Intl fixture gates | 22/22 pass | Includes `dom_module_props`, native constructor/prototype identity, Array iterators and attribute nodes; unchanged goldens |
+| `host19`, release MVP units | 738/738 pass | Host-property bridge, generic-call expansion and sequence iterator installation |
+| `host19`, focused normal and forced/poisoned GC | 71/71 each | Includes native callbacks, renamed errors, imported globals and iterator scalar ownership |
+| `host19`, shared Item/shape suite | 40/40 pass | Private map clones preserve nominal identity and support forced snapshot detachment |
+| `host19`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Seven known AUTO publication cases remain |
+| `host24`, canonical property/Function Test262 slice | 1,758/1,775 pass; 17 fail; no timeouts/crashes | Every outcome matches `host19`; the 17 failures predate the host-boundary changes |
 | `regexp2`, release MVP units | 727/727 pass | Three new RegExp state/realm/recompile checks |
 | `regexp2`, focused normal and forced/poisoned GC | 61/61 each | Includes UTF-16 captures, child realms and retained dynamic source |
 | `regexp2`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Wide-subject RegExp case fixed; seven AUTO publication cases remain |
@@ -134,9 +148,12 @@ This does not clear the aggregate gate or the real host/promotion gaps.
    callable ABI cannot publish MVP entries. Explicit AUTO still interprets
    supported units and routes whole-unit capability misses to MVP. Per-function
    MVP promotion remains unimplemented.
-3. **Host API integration.** DOM/Web, Intl, CommonJS, process events and object
-   timer handles need shared service adapters. The full fixture failures are
-   retained; no legacy retry or test-harness exclusion hides these gaps.
+3. **Host API integration.** Native callable/object properties, lazy host
+   namespaces and prepared globals now use the shared services through the
+   adapter described below. DOM/Web integration, CommonJS, process events and
+   object timer handles still need broader validation or adapters. The full
+   fixture failures are retained; no legacy retry or test-harness exclusion
+   hides these gaps.
 4. **Language/environment gaps.** Direct eval inside MIR `with` and independent
    agents remain open. RegExp legacy match reads and the wide-subject replacement
    integration failure are repaired in `regexp2` below; broader conformance is
@@ -375,3 +392,155 @@ Unicode property/string cases and `Unified_Ideograph` (timeout) remain open.
 This is a selected-slice comparison, not a whole Test262 recount or a claim
 that timing is stable. Raw runs and `regexp-comparison.json` preserve both
 the initial outcomes and their replays. Benchmark timing remains deferred.
+
+### Host property and global integration
+
+The formal entry now imports already prepared host globals into the active MVP
+realm and reuses the shared lazy namespace catalog for Intl, Buffer and other
+host services (D8.1.3v25). Existing MVP intrinsics retain their identity. Window
+aliases are rebound to the active global; lazy values are resolved once into
+that global. Document/UI bindings are installed at the formal entry before the
+first unit is instantiated.
+
+Native wrappers retain their underlying callable in a precise closure slot.
+`mvp_lmd_foreign_property` delegates descriptors, mutation, prototypes and
+enumeration to the existing shared property/exotic operations. Callable ABI,
+existing nominal metadata and host virtual-container identity select this
+boundary; ordinary MVP containers gain no `is_normal` flag. Shared host reads
+of MVP functions dispatch by ABI instead of interpreting the legacy function
+tail (D6.2.2v2). `mvp_lmd_project_keys` extracts the existing proxy projection
+loop for reuse. Other new adapters are `js_install_host_namespace_slots` and
+`mvp_lmd_import_host_globals`.
+
+Buffer initialization exposed an unrelated assumption at the same boundary:
+the legacy descriptor clone dropped MVP nominal identity, and descriptor
+promotion changed the map's storage kind. Descriptor mutation now reuses
+Lambda's `map_clone_typemap_for_mutation`, with an optional forced detach for
+snapshots, and preserves MVP nominal/storage identity. Attribute transitions
+reuse `type_tree_reflag_field` (D3.4); no second clone implementation remains.
+
+Native constructor reads now materialize lazy `name`/`length`/`prototype`
+descriptors before interpreting a miss. Inherited property walks continue
+through foreign storage with the original receiver. `branch_virtual_object`
+admits host virtual carriers at generated reads, writes and sloppy receiver
+entry. Shared errors retain their native class while preserving a separately
+mutable public `name`. Prepared Window import also rebinds the document's
+precise `defaultView` root; rebinding only global alias properties left this
+readonly host getter pointing at the retired staging global (D5.3).
+
+Array `keys` and `entries` now use the existing sequence iterator carrier,
+projection and stepping kernels. Their installation reuses the shared builtin
+catalog. Collection projections retain their branded admission; generic Array
+methods apply ToObject, preserve live length and inherited reads, and retain
+entry scalar values across allocation. No new iterator carrier/helper is added.
+
+The `host14` whole fixture run was interrupted after a stalled DOM compilation
+and oversized library compilation; its raw log and interruption record are
+retained. It is not a completed aggregate. The earlier `diagnostics1`
+365/507 result remains the last completed whole-batch fixture checkpoint.
+The later `host24` isolated diagnostic completes the same 507-case population
+with 461 passes, 41 failures and five outer timeouts; individual GTest selection
+is checked to contain exactly one test. Focused gains are not added to either
+aggregate. Additional host global installation,
+CommonJS and AUTO publication remain open, along with
+the broader conformance and performance gates.
+
+### Bound generic call expansion at public entries
+
+The stalled `dom_module_props` run was sampled in MIR register allocation,
+before guest execution, with about 22 GiB of resident memory. Its finalized
+entry contained 245,667 MIR instructions; root analysis visited 99,101 basic
+blocks. Generic calls still duplicated callable admission, native/foreign
+dispatch and intrinsic-token fallbacks after the existing compact-property
+budget had been reached.
+
+Large open entries now capture actual callable properties and reuse
+`mvp_lmd_class_invoke` after that same emission budget, with the existing
+argument-root span and pending scalar-result handling (D6.2.2v2, D5.2.1v3,
+D5.3). Closed-unit lowering, small entries, function bodies, specialized calls
+and dynamic-source interpretation keep their existing policies. No new runtime
+helper or vendor change is involved. The finalized DOM entry falls to 162,584
+instructions and 57,703 analysis blocks; the unchanged fixture completes and
+passes its golden on `host19` after the `defaultView` repair.
+
+Synthetic coverage checks getter/argument order, receiver identity, proxies,
+native calls, thrown identity, wide scalar ownership and bounded emitted-code
+growth. These are compile-growth and correctness results, not benchmark timing
+or a no-regression performance claim. Benchmark timing remains deferred.
+
+### Shared Date and native array boundaries
+
+Native DOM Date construction and MVP Date methods now share the same private
+DateValue shape key (D3.4). The existing `js_date_get_time_value` is promoted;
+the announced `js_date_store_time_value` reuses ordinary map shape storage or
+the existing native descriptor storage path. Both Date operation policies use
+these kernels. Freezing the public object does not freeze its internal value;
+public `__time__` fields, inherited Date prototypes and proxies cannot forge
+the Date brand. Native Date construction roots its input before allocation and
+uses destination-owned scalar storage instead of a static numeric ring
+(D5.3/D5.4). The DOM `valueAsDate` setter validates through the shared kernel.
+
+Host arrays can expose native functions directly in elements or own methods,
+without going through a foreign property read. Generic invocation now checks
+the published callable ABI before reading an MVP tail and reuses the existing
+identity-cached native bridge (D6.2.2v2). Array companion metadata selects the
+existing foreign descriptor/prototype service; this restores FileList methods,
+branding and inherited accessors without a new container flag. Ordinary MVP
+array storage and closed direct calls retain their dispatch policy.
+
+The announced `mvp_lmd_program_for_global` resolves a native callable's existing
+home global to a retained MVP realm. Native wrappers and Promise job policy use
+that owner when available; prepared host globals that predate MVP retain the
+existing caller policy. This fixes a native-callable admission failure that
+otherwise poisoned child-realm Promise jobs (D8.1.3v25, D5.3). The focused and
+forced-GC gates above include those child-realm cases. The real DOM Date setter
+probe also checks frozen Dates, subclasses, invalid Dates, and rejected forged
+or proxy receivers. These are correctness results; performance remains deferred.
+
+The AUTO audit confirms that existing promotion admission permits calls, global
+reads and top-level bindings. Publishing an isolated function into a fresh MVP
+realm would lose those environments. The gate remains disabled until a shared
+realm/environment publication adapter is implemented; enabling the old switch
+would also reactivate the legacy loop compiler (D8.1.3v25).
+
+### Shared host clocks
+
+The broader formal fixture run exposed a separate clock domain in MVP:
+`performance.now()` subtracted a private execution origin and Date read wall
+time directly. Native animation frames advance the shared virtual clock, so
+MVP callbacks observed neither that advance nor the native frame timestamp's
+origin. MVP now reuses `js_performance_now`, `js_performance_time_origin_ms`
+and `js_date_now`, including no-argument Date construction and the Date function
+call. Its private host origin is removed. The existing Date numeric reader is
+promoted for reuse; no new clock kernel or helper is introduced. This keeps
+native callbacks and the formal engine on the same existing runtime state
+(D5.3, D8.1.3v25). The focused check advances virtual and frame clocks explicitly,
+collects between reads, and verifies Date construction and stable timeOrigin.
+
+Release pin `host27` has SHA-256
+`b6dfb1285ae3f54f40ac936dc4276e0345d9bc78a5b541b0e2a062f16acb100c`.
+All 2,941 production input fingerprints stayed unchanged during its build and
+the final source check. Its verification is recorded in the table above.
+`host24` and the duplicate-include cleanup pin `host25` have identical CLI
+bytes; their property/Function outcomes match `host19` case for case.
+
+### Remaining activated fixture failures
+
+The isolated `host24` diagnostic retains every raw failure under
+`temp/js_formal_mir_20261016/host24/fixtures-isolated/`. The later clock pin
+passes `dom_console_perf` and `dom_raf_clock`; those two results are not folded
+into the earlier aggregate. Other failures include standalone Storage/media/
+clipboard globals, host constructors and codecs, Lambda callable/module
+interop, Promise/environment behavior, timer handles/string handlers, and
+browser-library execution. Some expectations encode legacy behavior, including
+CSS string conversion and large JSON integer representation; those goldens
+remain unchanged pending semantic review.
+
+Five library cases reach the outer diagnostic limit: `dom_jquery_lib`,
+`lib_ajv`, `lib_bn`, `lib_lodash`, and `lib_ramda`. Their confirmed child process
+groups were terminated explicitly after the harness timeout; cleanup records
+are retained. A Ramda sample reports a `42.6G` physical footprint. Its stripped
+addresses are not symbolicated, so the exact compilation bottleneck remains
+unproven. The existing large-entry emission repair does not establish bounded
+compilation for all libraries. This diagnostic is not benchmark timing or
+whole-baseline closure; shared baseline and performance gates remain open.

@@ -91,7 +91,7 @@ ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
                                  ShapeEntry* prev_entry);
 
 // D3.4.3v5: detach a shared shape into its explicit mutation owner's pool.
-TypeMap* map_clone_typemap_for_mutation(Map* map, Pool* pool);
+TypeMap* map_clone_typemap_for_mutation(Map* map, Pool* pool, bool force = false);
 TypeElmt* elmt_clone_type_for_mutation(Element* element, Pool* pool, bool force = false);
 
 // A new entry with `like`'s identity (name, id, key kind, namespace) at a new

@@ -3,6 +3,8 @@
 #include "../js_interp_env.h"
 #include "../js_function.hpp"
 #include "../js_props.h"
+#include "../js_object_meta.h"
+#include "../js_host_hooks.h"
 #include "../js_runtime_state.hpp"
 #include "../../runtime/ast-core.hpp"
 #include "../../runtime/context_capsule.h"
@@ -497,6 +499,139 @@ Item mvp_lmd_dynamic_unwrap_function(Item function) {
         return function;
     return ((Item*)function.function->closure_env)[0];
 }
+bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
+        int operation, Item* completion, JsPropertyDescriptor* descriptor) {
+    if (!mvp_lmd_foreign_candidate(owner)) return false;
+    if (is_virtual_container_type_id(get_type_id(owner)) && !js_host_object_type(owner)) return false;
+    *completion = ItemError;
+    RootFrame roots(8);
+    if (!roots.valid()) return true;
+    uint64_t home = 0, descriptor_home = 0;
+    Rooted<Item> object(roots, mvp_lmd_dynamic_unwrap_function(owner)), name(roots, key),
+        argument(roots, lambda_item_adopt_scalar_home(value, &home)),
+        target(roots, mvp_lmd_dynamic_unwrap_function(receiver)), result(roots, ItemNull),
+        getter(roots, descriptor ? descriptor->getter : ItemNull),
+        setter(roots, descriptor ? descriptor->setter : ItemNull),
+        data(roots, descriptor ? lambda_item_adopt_scalar_home(descriptor->value, &descriptor_home) : ItemNull);
+    MvpLmdLibraryState* library = mvp_lmd_program_library();
+    if (!library) return true;
+    MvpLmdProgram* program = library->object.program;
+    auto expose = [&](Item input) -> Item {
+        if (!mvp_lmd_is_object(input)) return input;
+        // host prototypes use the active realm's intrinsic identity. Only
+        // already materialized shared identities are inspected here.
+        const JsClassId classes[] = {JS_CLASS_OBJECT, JS_CLASS_FUNCTION, JS_CLASS_ARRAY};
+        const int slots[] = {LMD_LIBRARY_OBJECT_PROTOTYPE, LMD_LIBRARY_FUNCTION_PROTOTYPE,
+            LMD_LIBRARY_ARRAY_PROTOTYPE};
+        for (int i = 0; i < 3; i++) {
+            Item* existing = js_realm_slot_existing(&js_runtime_state.realm_slots,
+                (JsRealmSlotId)(JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE + classes[i]));
+            if (existing && existing->item == input.item) return library->values[slots[i]];
+        }
+        return mvp_lmd_dynamic_wrap_function(program, input);
+    };
+    JsPropertyLane lane = js_property_lane_for_canonical_key(name.get());
+    switch (operation) {
+    case LMD_PROP_GET: case LMD_PROP_CALLEE: {
+        Item found = ItemNull;
+        bool ready = js_dispatch_property_op(JS_EXOTIC_GET, object.get(), lane, name.get(),
+            target.get(), ItemNull, ItemNull, false, &found);
+        if (!ready) {
+            JsOwnGetStatus status = js_ordinary_get_own(object.get(), name.get(), target.get(), &found);
+            ready = status == JS_OWN_READY;
+            if (!ready && status == JS_OWN_NOT_FOUND && get_type_id(object.get()) == LMD_TYPE_FUNC) {
+                // native constructors lazily publish name/length/prototype through
+                // the shared descriptor kernel; an unmaterialized slot is not absent.
+                result.set(js_object_get_own_property_descriptor(object.get(), name.get()));
+                if (item_is_error(result.get())) break;
+                if (result.get().item != ITEM_JS_UNDEFINED) {
+                    result.set(js_get_key_core(object.get(), name.get(), target.get()));
+                    break;
+                }
+            }
+        }
+        if (ready) {
+            result.set(found);
+        } else {
+            result.set(expose(js_get_prototype_of(object.get())));
+            if (!item_is_error(result.get())) result.set(result.get().item == ITEM_NULL
+                ? make_js_undefined() : mvp_lmd_property_with_receiver(result.get(), name.get(),
+                    ItemNull, LMD_PROP_GET, receiver));
+        }
+        break;
+    }
+    case LMD_PROP_SET:
+        result.set(js_reflect_set(object.get(), name.get(), argument.get(), target.get())); break;
+    case LMD_PROP_DELETE:
+        result.set(js_delete(object.get(), lane, name.get())); break;
+    case LMD_PROP_HAS: {
+        Item found = ItemNull;
+        if (js_dispatch_property_op(JS_EXOTIC_HAS_PROPERTY, object.get(), lane, name.get(),
+                target.get(), ItemNull, ItemNull, false, &found)) result.set(found);
+        else {
+            result.set(js_object_get_own_property_descriptor(object.get(), name.get()));
+            if (!item_is_error(result.get()) && result.get().item != ITEM_JS_UNDEFINED) result.set(Item{.item = ITEM_TRUE});
+            else if (!item_is_error(result.get())) {
+                result.set(expose(js_get_prototype_of(object.get())));
+                if (!item_is_error(result.get())) result.set(result.get().item == ITEM_NULL ? Item{.item = ITEM_FALSE} :
+                    mvp_lmd_property_with_receiver(result.get(), name.get(), ItemNull, LMD_PROP_HAS, receiver));
+            }
+        }
+        break;
+    }
+    case LMD_PROP_OWN: case LMD_FOREIGN_DESCRIPTOR:
+        result.set(js_object_get_own_property_descriptor(object.get(), name.get()));
+        if (!item_is_error(result.get())) {
+            bool present = result.get().item != ITEM_JS_UNDEFINED;
+            if (present && descriptor) {
+                JsPropertyDescriptor converted = {};
+                Item status = js_descriptor_from_object(result.get(), &converted);
+                if (item_is_error(status)) { result.set(status); break; }
+                data.set(lambda_item_adopt_scalar_home(converted.value, &home));
+                getter.set(converted.getter); setter.set(converted.setter);
+                data.set(expose(data.get())); getter.set(expose(getter.get())); setter.set(expose(setter.get()));
+                if (item_is_error(data.get()) || item_is_error(getter.get()) || item_is_error(setter.get())) {
+                    result.set(ItemError); break;
+                }
+                converted.value = data.get(); converted.getter = getter.get(); converted.setter = setter.get();
+                *descriptor = converted;
+                // descriptor data must survive this helper's local scalar home.
+                if (converted.flags & JS_PD_HAS_VALUE) descriptor->value = js_retain_scalar(converted.value);
+            }
+            result.set(Item{.item = b2it(present)});
+        }
+        break;
+    case LMD_FOREIGN_DEFINE: {
+        JsPropertyDescriptor converted = *descriptor;
+        converted.value = data.get(); converted.getter = getter.get(); converted.setter = setter.get();
+        result.set(mvp_lmd_descriptor_object(&converted));
+        if (!item_is_error(result.get())) result.set(js_reflect_define_property(object.get(), name.get(), result.get()));
+        break;
+    }
+    case LMD_FOREIGN_GET_PROTOTYPE:
+        result.set(js_get_prototype_of(object.get())); break;
+    case LMD_FOREIGN_SET_PROTOTYPE:
+        result.set(js_reflect_set_prototype_of(object.get(), mvp_lmd_dynamic_unwrap_function(argument.get()))); break;
+    case LMD_FOREIGN_EXTENSIBLE:
+        result.set(js_reflect_is_extensible(object.get())); break;
+    case LMD_FOREIGN_PREVENT:
+        result.set(js_reflect_prevent_extensions(object.get())); break;
+    case LMD_FOREIGN_PROJECT:
+        // key enumeration stays in the shared descriptor/exotic implementation;
+        // value projection below uses the same membrane as an ordinary Get.
+        result.set(js_reflect_own_keys(object.get()));
+        if (!item_is_error(result.get())) for (int64_t i = 0; i < result.get().array->length; i++) {
+            data.set(mvp_lmd_property_key(result.get().array->items[i]));
+            if (item_is_error(data.get())) { result.set(data.get()); break; }
+            Item stored = mvp_lmd_array_store(result.get(), i, data.get());
+            if (item_is_error(stored)) { result.set(stored); break; }
+        }
+        break;
+    default: return true;
+    }
+    *completion = item_is_error(result.get()) ? result.get() : expose(result.get());
+    return true;
+}
 Item mvp_lmd_dynamic_function_source(Item function) {
     Item underlying = mvp_lmd_dynamic_unwrap_function(function);
     if (underlying.item != function.item && get_type_id(underlying) == LMD_TYPE_FUNC &&
@@ -517,6 +652,10 @@ Item mvp_lmd_dynamic_function_source(Item function) {
 Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
     if (get_type_id(function) != LMD_TYPE_FUNC ||
             !function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION)) return function;
+    // native jobs and array slots can enter without a property membrane. Their
+    // existing home global, not the current caller, determines a known realm.
+    MvpLmdProgram* home = mvp_lmd_program_for_global(program, ((JsFunction*)function.function)->home_global);
+    if (home) program = home;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, function), wrapper(roots, ItemNull), length(roots, ItemNull);
@@ -582,6 +721,7 @@ Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function) {
     } else if (!map_shape_set(internal->properties_map.map, state->wrapper_key, wrapper.get())) {
         return dynamic_fail(LMD_MVP_MEMORY);
     }
+    callable->foreign_properties = !ast;
     return wrapper.get();
 }
 static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
@@ -598,7 +738,7 @@ static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t 
         return dynamic_fail(LMD_MVP_CAPABILITY);
     RootFrame roots(1);
     Rooted<Item> result(roots, target.item == ITEM_JS_UNDEFINED
-        ? js_call_function(underlying, receiver, args, (int)count)
+        ? js_call_function(underlying, mvp_lmd_dynamic_unwrap_function(receiver), args, (int)count)
         : js_construct_value(underlying, args, (int)count,
             mvp_lmd_dynamic_unwrap_function(target), NULL, true));
     return item_is_error(result.get()) ? result.get() : mvp_lmd_dynamic_wrap_function(program, result.get());

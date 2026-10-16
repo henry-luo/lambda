@@ -2086,11 +2086,11 @@ RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out)
         return 1;
     } else if (v.item == ITEM_NULL) {
         radiant_dom_input_commit_live_value(elem, "");
-    } else if (radiant_host_api->script->class_id(v) != JS_CLASS_DATE) {
-        *out = radiant_dom_throw_named_error("TypeError", "valueAsDate requires a Date or null");
-        return 1;
     } else {
+        // the shared Date operation validates the private slot for either JS
+        // engine; MVP nominal Dates do not carry the legacy class-id metadata.
         Item time = radiant_host_api->script->date_method(v, 0);
+        if (item_is_error(time)) { *out = time; return 1; }
         double number = radiant_host_api->script->get_number(time);
         char formatted[128];
         if (!isfinite(number)) {
