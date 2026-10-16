@@ -250,7 +250,7 @@ fn edge_statement(value, st, env, scope, owner, directed, strict) {
   }
 }
 
-fn scope_role(id) => if (starts_with(lower(id), "cluster")) "cluster" else "scope"
+fn scope_role(id) => if (starts_with(lower(id), "cluster") ^ { false }) "cluster" else "scope"
 
 fn walk_statement(value, st, env, scope, owner, directed, strict) {
   let tag = model.tag(value);

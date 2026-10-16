@@ -304,7 +304,7 @@ fn encoded(records, encoding) => if (encoding == null) records else [for (row in
     map([for (channel, definition in encoding) (channel, if (definition is fn) definition(row)
         else parse.channel_value(definition, row))])]
 
-fn chronology(kind) => contains(["calendar","numeric","cosmological","ordinal"],c.text(kind)) or false
+fn chronology(kind) => contains(["calendar","numeric","cosmological","ordinal"],c.text(kind)) ^ { false }
 fn scale_record(value, index, language) {
     let raw=config(value,"scale");
     let key=if (raw is error) raw else c.id(c.option(raw,"id",if (index==0) "time" else null));

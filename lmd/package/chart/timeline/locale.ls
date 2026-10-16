@@ -66,7 +66,7 @@ pub fn language(value = "en-US") {
     let code=lower(split(replace(string(value),"_","-"),"-")[0]);
     if (contains(["en","zh","fr","ar"],code)) code else "en"
 }
-pub fn direction(value) => if (contains(["ar","fa","he","ur"],lower(split(replace(string(value),"_","-"),"-")[0]))) "rtl" else "ltr"
+pub fn direction(value) => if (contains(["ar","fa","he","ur"],lower(split(replace(string(value),"_","-"),"-")[0])) ^ { false }) "rtl" else "ltr"
 pub fn message(value, key, fallback) => if (translations[language(value)][key]!=null) translations[language(value)][key] else fallback
 pub fn era(value, kind) => era_names[language(value)][kind]
 pub fn plural(locale, count) {

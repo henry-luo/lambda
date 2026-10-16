@@ -49,7 +49,7 @@ chained.source.message
 chained.source.source.message
 chained.source.source.source.message
 
-// ===== Error chain is falsy =====
+// ===== Error condition preserves the chain (S3.5) =====
 if (e5) "truthy" else "falsy"
 
 // ===== Or default on deep chain =====

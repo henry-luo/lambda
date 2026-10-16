@@ -38,9 +38,9 @@ let wide_bad = wide(false) ^ { ^ }
 "or-recovery";
 // the int error case is the one that regressed historically: the native
 // numeric operand path must not consume the error lane before `or` contains it
-[half(6.0) or 99.0, half(-6.0) or 99.0];
-[twice(3) or 99, twice(-3) or 99];
-[wide(true) or 7i64, wide(false) or 7i64]
+[(half(6.0) ^ { null }) or 99.0, (half(-6.0) ^ { null }) or 99.0];
+[(twice(3) ^ { null }) or 99, (twice(-3) ^ { null }) or 99];
+[(wide(true) ^ { null }) or 7i64, (wide(false) ^ { null }) or 7i64]
 "arithmetic on a recovered value";
-(half(10.0) or 0.0) + 1.0;
-(twice(-2) or 10) + 1
+((half(10.0) ^ { null }) or 0.0) + 1.0;
+((twice(-2) ^ { null }) or 10) + 1

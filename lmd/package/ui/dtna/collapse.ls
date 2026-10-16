@@ -32,7 +32,7 @@ view dtna_collapse: <dtna.collapse> state current:c.option(c.props(~),"default_a
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-collapse]")
     if (target == null or c.props(~).disabled or dom.get_state(target,"disabled")) { return 'pass' }
-    let index = int(dom.get_attribute(target,"data-dtna-collapse")) or 0
+    let index = (int(dom.get_attribute(target,"data-dtna-collapse")) ^ { null }) or 0
     let key = c.props(~).items[index].key
     let next = collection.toggle(active(~,current),key,not c.props(~).accordion)
     current = next
@@ -42,7 +42,7 @@ on click(evt) {
 on keydown(evt) {
     let target = interaction.target(~,evt,"[data-dtna-collapse]")
     if (target == null or c.props(~).disabled or not contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) { return 'pass' }
-    let index = int(dom.get_attribute(target,"data-dtna-collapse")) or 0
+    let index = (int(dom.get_attribute(target,"data-dtna-collapse")) ^ { null }) or 0
     let key = collection.move(c.props(~).items,c.props(~).items[index].key,evt.key)
     let indices = [for (i,item in c.props(~).items where item.key == key) i]
     if (len(indices) == 1) { interaction.focus(~,evt,"[data-dtna-collapse='" ++ string(indices[0]) ++ "']") }

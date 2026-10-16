@@ -168,10 +168,10 @@ fn story_card(spec, snapshot, item, outgoing) =>
 
 pub fn status(spec, snapshot = null) {
     let resource=snapshot.resources.source;
-    let problem=if (snapshot.presentation_error!=null) snapshot.presentation_error else resource.error;
+    let problem=if (not (snapshot.presentation_error is null)) snapshot.presentation_error else resource.error;
     let loading=spec.source.url!=null and (resource==null or resource.status=="pending");
     let empty=len(layout.visible(spec,snapshot).events)==0;
-    let kind=if (problem!=null) "error" else if (loading) "loading" else if (empty) "empty" else null;
+    let kind=if (not (problem is null)) "error" else if (loading) "loading" else if (empty) "empty" else null;
     let fallback=if (kind=="error") c.message(spec,"source_error","The timeline could not be loaded.")
         else if (kind=="loading") c.message(spec,"loading","Loading timeline…") else c.message(spec,"empty","No events to display.");
     let authored=spec[kind];

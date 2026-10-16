@@ -22,11 +22,11 @@ let disabled = ui.render(ui.tag({href:"#target",disabled:true,color:'red',closab
     ["uncontrolled selection",(ui.render(ui.checkable_tag({default_checked:true})^))["aria-checked"] == "true"],
     ["controlled hidden",(ui.render(ui.tag({visible:false},"Hidden")^)).hidden == ""],
     ["initial hidden",(ui.render(ui.tag({default_visible:false},"Hidden")^)).hidden == ""],
-    ["invalid controlled pairs",(ui.checkable_tag({checked:false,default_checked:true}) or null) == null and (ui.tag({visible:true,default_visible:true}) or null) == null],
-    ["invalid flags",(ui.tag({visible:null}) or null) == null and (ui.checkable_tag({checked:1}) or null) == null],
-    ["unknown props",(ui.tag({unknown:true}) or null) == null and (ui.checkable_tag({closable:true}) or null) == null],
-    ["color diagnostic",(ui.tag({color:"red;opacity:0"}) or null) == null and (ui.tag({color:"rebeccapurple"}) or null) == null],
+    ["invalid controlled pairs",((ui.checkable_tag({checked:false,default_checked:true}) ^ { null }) or null) == null and ((ui.tag({visible:true,default_visible:true}) ^ { null }) or null) == null],
+    ["invalid flags",((ui.tag({visible:null}) ^ { null }) or null) == null and ((ui.checkable_tag({checked:1}) ^ { null }) or null) == null],
+    ["unknown props",((ui.tag({unknown:true}) ^ { null }) or null) == null and ((ui.checkable_tag({closable:true}) ^ { null }) or null) == null],
+    ["color diagnostic",((ui.tag({color:"red;opacity:0"}) ^ { null }) or null) == null and ((ui.tag({color:"rebeccapurple"}) ^ { null }) or null) == null],
     ["solid CSS color",contains((ui.render(ui.tag({color:"rebeccapurple",variant:'solid'})^)).style,"background-color:rebeccapurple;")],
-    ["invalid variant",(ui.tag({variant:'primary'}) or null) == null],
+    ["invalid variant",((ui.tag({variant:'primary'}) ^ { null }) or null) == null],
     ["grayscale lightness",colors.color_lightness("#000000",0.95)^ == "#f2f2f2" and colors.color_lightness("#ffffff",0.95)^ == "#f2f2f2"]
 ]

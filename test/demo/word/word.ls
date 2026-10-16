@@ -68,7 +68,7 @@ on beforeinput() { return 'pass' }
 on editaction(evt) {
     let run = controller.handle(st.editor,evt,st.read_only)
     if (st.read_only or evt.input_type=="copy") { return run.result }
-    st = {*:st,editor:model.clean(run.editor),status:if (run.result.failure != null) "This edit is unavailable here." else "Writing"}
+    st = {*:st,editor:model.clean(run.editor),status:if (not (run.result.failure is null)) "This edit is unavailable here." else "Writing"}
     dom.set_close_guard(evt.target,session.is_dirty(st.file_state,st.editor.doc))
     return run.result
 }

@@ -169,11 +169,13 @@ true
 "no book titled SICP"
 λ> float("free") is error
 true
-λ> float("free") or 0.0
+λ> float("free") ^ { 0.0 }
 0
 ```
 
-Errors are falsy, so `or` replaces one with a default. An error prints as just `error`; its `message` field says what went wrong.
+Errors have no truth value (S3.1v2). A handler supplies an explicit default;
+`or`, logical operations, and `if` preserve an encountered error (S3.4–S3.5).
+An error prints as just `error`; its `message` field says what went wrong.
 
 ## Returning Errors
 
@@ -188,7 +190,7 @@ fn parse_price(s: string) float | error {
 
 let prices = ["37.90", "12", "free", "-5"]
 prices |> parse_price(~)
-prices |> (parse_price(~) or 0.0)
+prices |> (parse_price(~) ^ { 0.0 })
 prices |: parse_price(~) is error
 ```
 
@@ -202,7 +204,7 @@ lambda soft.ls
 ["free", "-5"]
 ```
 
-Such an error is ordinary data: it can sit in an array, and the caller may test it with `is error`, replace it with `or`, or pass it along. That suits bulk data, where a few bad rows should not stop the rest.
+Such an error is ordinary data: it can sit in an array, and the caller may test it with `is error`, recover it with `^ { … }`, or pass it along. That suits bulk data, where a few bad rows should not stop the rest.
 
 ## Raising Errors
 
@@ -267,10 +269,10 @@ lambda ignored.ls
 ```
 
 ```text partial
-ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: use 'parse_price(...)^' to propagate, handle with 'parse_price(...) ^ { ... }', or recover with 'parse_price(...) or default'
+ignored.ls:8:1: error[E228]: error from 'parse_price' must be handled: use 'parse_price(...)^' to propagate, or handle with 'parse_price(...) ^ { ... }'
 ```
 
-The message lists the ways to engage the error: propagate it with `^`, handle it with `^ { … }`, or replace it with `or` (S7.5.1). A typed binding counts too: `let r: float | error = parse_price(s)` accepts the error as data. Built-ins that can fail follow the same rule, which is why reading a file is written `input("books.json")^`.
+The message lists the ways to engage the error: propagate it with `^` or handle it with `^ { … }` (S7.5.1v2); `or` does not engage the channel (S7.5.3v2). A typed binding counts too: `let r: float | error = parse_price(s)` accepts the error as data. Built-ins that can fail follow the same rule, which is why reading a file is written `input("books.json")^`.
 
 ## Branching and Wrapping
 
@@ -311,7 +313,7 @@ lambda report.ls
 - `(x) => …` is an anonymous function. Functions are values: closures capture snapshots, and higher-order functions take functions as arguments.
 - `xs.sort()` calls a built-in method-style, and functions may call themselves.
 - An `fn` is pure and cannot call a `pn` (E224).
-- Errors are values: `error("…")` makes one, `is error` tests for one, `or` supplies a default, and a `T | error` function returns them as data.
+- Errors are values: `error("…")` makes one, `is error` tests for one, `^ { … }` supplies an error default, and a `T | error` function returns them as data.
 - A `T^` function `raise`s errors its callers must engage: `^` propagates, `^ { … }` handles with `^.message` and `^.code`, `^ { … } ~ { … }` branches, and ignoring the error is compile error E228.
 - `error("…", ^)` wraps an error with context.
 

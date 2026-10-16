@@ -208,7 +208,7 @@ the error possibility. Channel-agnostic forms are allowed:
 | `F() ^ { error_arm } ~ { value_arm }` | Branch immediately; `^` is the error and `~` the non-error result | ✅ |
 | `let a: T \| error = F()` | Receive the outcome as an explicit union | ✅ |
 | `let a: T^ = F()` | Same, in the enforcing spelling | ✅ |
-| `F() or default` | Explicitly consume a falsy error | ✅ |
+| `F() or default` | Defaults ordinary falsy values; preserves errors | ❌ |
 | `match (F()) { case error: ... }` | Explicitly branch on the error | ✅ |
 | `P() ^ { … ^ … }` where `P` is a `pn` | Handle a procedure error and continue | ✅ |
 | `F()^` | Propagate error, discard value | ✅ |
@@ -365,7 +365,7 @@ fault boundary and delivered to the durable handler state.
 
 | Form | Catches | Error accessible? |
 |------|---------|-------------------|
-| `e or default` | any falsy: error, `null`, `false`, `""` | no |
+| `e or default` | `null`, `false`, `""`; errors pass through | no |
 | `e ^ { … ^ … }` | errors only | yes, as `^` |
 | `e ^ { error_arm } ~ { value_arm }` | explicit error/non-error split | yes, as `^`; value as `~` |
 | statement `pn_call() ^ { … ^ … }` | procedure-call errors; success discarded | yes, as `^` |
@@ -415,7 +415,7 @@ function 'wrapper' may return error from call to 'render': argument 1 ('title') 
 ```
 
 Use `title: string` when the wrapper accepts strings, or handle the argument's
-error before calling. Alternatively, recover with `render(title) or "fallback"`,
+error before calling. Alternatively, recover with `render(title) ^ { "fallback" }`,
 declare `string | error` to return errors as data, or declare `string^` and
 propagate with `render(title)^` (S7.4.1–S7.4.2, S7.5.3, S7.6).
 
@@ -581,40 +581,39 @@ let data = input("file.json") ^ { raise error("failed to load", ^) }
 
 ## Error Truthiness and Defaults
 
-Error values are **falsy** in Lambda. This means:
-
-- `if (err)` treats errors the same as `null` or `false` — the condition is **not** entered.
-- Use `err is error` (not bare `err`) to check for errors in conditions.
-
-Because errors are falsy, the `or` operator provides a natural **default value** pattern:
+Errors have **no truth value** (**S3.1v2, S3.4–S3.5**). When a logical
+operation needs to inspect an error, the result is that same error, with its
+diagnostic payload intact. `if (err) a else b` returns `err` and evaluates
+neither arm. This yields an expression value; it does not return from the
+enclosing function.
 
 ```lambda
-// If divide returns an error, fall through to 0
-let safe_result = divide(10, x) or 0
-
-// Want the diagnostic as well? Use the handler — `or` cannot see why it failed
-pn main() {
-    let value = parse(input) ^ {
-        print("Warning: " ++ ^.message)
-        default_value
-    }
-}
+let err = error("bad input");
+[err or 0, not err, if (err) 1 else 2]   // [error, error, error]
 ```
 
-Note that `nan` is **truthy**, so `a div b or 0` does *not* rescue a zero
-divisor — guard the divisor or test `is nan`. Falsiness marks absence,
-negation, and failure; poison numbers are none of those.
+`or` defaults only `null`, `false`, and `""`. Use an explicit handler to
+recover an error (**S7.5.3v2**):
 
-### Why Errors Are Falsy
+```lambda
+int("bad") ^ { 0 };                   // 0
+(int("bad") ^ { null }) or 10         // 10: recover errors and ordinary falsy values
+```
 
-| Pattern | With falsy errors | With truthy errors |
-|---------|-------------------|--------------------|
-| `err or default` | ✅ Falls through to default | ❌ Returns the error |
-| `if (err is error)` | ✅ Explicit error check | — |
-| `if (err)` | Treats error like null | Would enter the branch |
+An unevaluated operand contributes no error: `true or error("unused")` is
+`true`, and `false and error("unused")` is `false`. Classify a value with
+`err is error` or `match`; ordinary `==`, `!=`, and magnitude comparisons
+preserve error operands (**S5.1.1v2, S6.1.2v2**). Deep equality applies the
+same rule to visited content and stops at a decisive mismatch:
 
-Falsy errors enable the `or` default idiom and prevent accidental use of error
-values as truthy conditions.
+```lambda
+let err = error("bad input");
+[[err] == [err], [1, err] == [2, err]]  // [error, false]
+```
+
+Total sorting retains its separate order (**S6.2**). Errors in collection
+comparison consumers and element-wise masks remain subject to the pending
+policies in **SO50**.
 
 ### Pitfall: Bare `error` Is the Type, Not an Error Value
 
@@ -622,7 +621,7 @@ Types are first-class values in Lambda, and the bare identifier `error` in expre
 
 ```lambda
 error or 0          // → error   (the TYPE — truthy, so `or` selects it)
-error("msg") or 0   // → 0       (an error VALUE — falsy, rescued by `or`)
+error("msg") or 0   // → error   (the error VALUE is preserved)
 
 error is error      // → false!  (the type is a type, not an error value)
 error("msg") is error  // → true (values classify normally)
@@ -731,6 +730,6 @@ pn main() {
 | Branch on outcome | `e ^ { error_arm } ~ { value_arm }` | Bind the error to `^` or the non-error result to `~` |
 | Handle procedure statement | `pn_call() ^ { … ^ … }` | Handle a procedure error and continue; may suspend |
 | Check for error | `x is error` | Test if a value is an error |
-| Default on error | `expr or default` | Errors are falsy, fall through to default |
+| Default on error | `expr ^ { default }` | Explicitly recover a returned or raised error |
 
 Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`^` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.

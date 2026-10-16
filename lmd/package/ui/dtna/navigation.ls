@@ -49,7 +49,7 @@ fn choices(node, active) {
 }
 pn clicked(node, evt) {
     let target = interaction.target(node, evt, "[data-dtna-choice]")
-    let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) or null);
+    let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) ^ { null });
     if (index == null or c.props(node).disabled or c.props(node).items[index].disabled) null else c.props(node).items[index].key
 }
 pn focus_choice(node, evt, key) {
@@ -164,7 +164,7 @@ pn pagination_event(node, evt, paging, event_kind) {
     if (target == null or dom.get_state(target,"disabled")) { return paging }
     let simple = dom.has_attribute(target,"data-dtna-page-simple")
     if ((event_kind == 'blur' and not simple) or (event_kind == 'keydown' and evt.key != "Enter" and not (simple and contains(["ArrowUp","ArrowDown"],evt.key)))) { return paging }
-    let requested = int(if (event_kind == 'click') dom.get_attribute(target,"data-dtna-page") else dom.get_state(target,"value")) or null
+    let requested = int(if (event_kind == 'click') dom.get_attribute(target,"data-dtna-page") else dom.get_state(target,"value")) ^ { null }
     let old_size = pagination_size(node,paging)
     let old_page = pagination_current(node,paging)
     if (not (requested is int) or (requested < 1 and not simple)) {
@@ -234,7 +234,7 @@ view dtna_steps: <dtna.steps> state current:c.option(c.props(~),"default_current
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-step]")
     if (target == null or c.props(~).disabled or dom.get_state(target,"disabled")) { return 'pass' }
-    let index = int(dom.get_attribute(target,"data-dtna-step")) or null
+    let index = int(dom.get_attribute(target,"data-dtna-step")) ^ { null }
     if (index == null or index == c.option(c.props(~),"current",current)) { return 'pass' }
     current = index
     emit("ui_change",c.action(~,'step',index))

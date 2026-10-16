@@ -76,7 +76,7 @@ fn heading_node(schema, level, kids) =>
   else if (html_schema_mode(schema) and level == 3) { node('h3', kids) }
   else { node_attrs('heading', [{name: 'level', value: level}], kids) }
 
-fn image_node(schema, n) =>
+fn image_node(schema, n) map | error =>
   node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])
 
 // HTML input is dynamically shaped, so node construction reports malformed
@@ -86,7 +86,7 @@ fn link_node(schema, n) map | error =>
     convert_inline_schema(schema, n))
 
 fn blockquote_node(schema, n) map | error => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
-fn code_block_node(schema, n) => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
+fn code_block_node(schema, n) map | error => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
 fn table_node(schema, n) map | error => node('table', normalize_table_children(schema, convert_children_schema(schema, n)))
 fn table_section_node(schema, tag, n) map | error => node(tag, convert_children_schema(schema, n))
 fn table_row_node(schema, n) map | error => node('tr', convert_children_schema(schema, n))

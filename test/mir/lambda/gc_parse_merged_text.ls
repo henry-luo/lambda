@@ -17,11 +17,11 @@ fn runs(doc) {
 // allocation between the parse and the first read of its text
 fn churn(n) => len([for (i in 1 to n) {a: i, b: "x"}])
 
-let emphasis = parse("Inline *x* and **y** then `z`.\n", {type: 'markdown', sourcepos: true}) or null
+let emphasis = parse("Inline *x* and **y** then `z`.\n", {type: 'markdown', sourcepos: true}) ^ { null }
 let c1 = churn(20000);
 runs(emphasis);
 
-let math = parse("Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n", {type: 'markdown', sourcepos: true}) or null
+let math = parse("Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n", {type: 'markdown', sourcepos: true}) ^ { null }
 let c2 = churn(20000);
 runs(math);
 

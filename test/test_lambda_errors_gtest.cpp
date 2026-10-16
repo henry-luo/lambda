@@ -341,7 +341,17 @@ TEST(TypeContractMetadataTest, RemovesAndNormalizesErrorAndNullConstituents) {
     pool_destroy(pool);
 }
 
-TEST(TypeContractMetadataTest, OrNarrowingRetainsTheCleanInternalTop) {
+TEST(TypeContractMetadataTest, ComparisonChecksCompactContainerDescriptorsSafely) {
+    // Generic container descriptors have no nested/shape payload (D3.3.3).
+    Type* types[] = {&TYPE_ARRAY, &TYPE_LIST, &TYPE_MAP, &TYPE_OBJECT, &TYPE_ELMT};
+    for (Type* type : types) {
+        EXPECT_FALSE(lambda_type_comparison_may_error(type, true, false));
+        EXPECT_TRUE(lambda_type_comparison_may_error(type, true, true));
+        EXPECT_FALSE(lambda_type_comparison_may_error(type, false, true));
+    }
+}
+
+TEST(TypeContractMetadataTest, OrNarrowingRetainsErrorInTheInternalTop) {
     const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
         "test/lambda/type_or_narrowing.ls", NULL};
     ShellOptions options = {0};
@@ -350,10 +360,9 @@ TEST(TypeContractMetadataTest, OrNarrowingRetainsTheCleanInternalTop) {
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
-    // An explicit-any source remains dynamically open. `or` removes its
-    // error/null cases without collapsing the result back to true any.
+    // S7.5.3v2: an explicit-any source loses null, while errors remain possible.
     EXPECT_NE(strstr(result.stdout_buf,
-        "<AST_NODE_BINARY <op \"or\"> <value_type \"any \\\\ {error, null}\">"),
+        "<AST_NODE_BINARY <op \"or\"> <value_type \"any \\\\ null\">"),
         nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
         "<AST_NODE_BINARY <op \"or\"> <value_type \"int\">"), nullptr);
@@ -2392,6 +2401,21 @@ TEST_F(NegativeScriptTest, SemanticError_TypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/type_mismatch.ls");
 }
 
+TEST_F(NegativeScriptTest, ErrorOperatorsRetainReturnAndAcknowledgmentObligations) {
+    const char* paths[] = {
+        "test/lambda/negative/semantic/error_if_return.ls",
+        "test/lambda/negative/semantic/error_not_return.ls",
+        "test/lambda/negative/semantic/error_or_return.ls",
+        "test/lambda/negative/semantic/error_eq_return.ls",
+    };
+    for (const char* path : paths) {
+        ExpectRejectedOnEveryTier(path, false,
+            "error[E208]: function 'rejected' may return error from call to 'int'");
+    }
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/error_or_unhandled_channel.ls",
+        false, "error[E228]: error from 'risky' must be handled");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
     ScriptResult result = run_lambda_script(
         "test/lambda/negative/semantic/implicit_fn_error_return.ls");
@@ -2445,7 +2469,7 @@ TEST_F(NegativeScriptTest, SemanticError_ReturnErrorIdentifiesUncontainedOrigin)
         "test/lambda/negative/semantic/implicit_fn_error_origin.ls");
     EXPECT_NE(result.exit_code, 0) << result.output;
     EXPECT_NE(strstr(result.output.c_str(),
-        ":5:58: error[E208]: function 'branches' may return error from call to 'first': "
+        ":5:59: error[E208]: function 'branches' may return error from call to 'first': "
         "call result has type int | error"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'handled'"), nullptr) << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'second'"), nullptr) << result.output;

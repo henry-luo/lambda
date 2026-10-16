@@ -11,6 +11,6 @@ let default=parse(source,{type:'xml',flavor:'strict'})^;
  xml("<a>  <b/>  </a>",true)^[0][0]=="  ",
  len(xml("<a>  <b/>  </a>",false)^[0])==1,
  xml("<a><![CDATA[ two ]]></a>",true)^[0][0]==" two ",
- (parse("<a/>",{type:'xml',flavor:'strict',preserve_whitespace:1}) or "invalid")=="invalid",
- (xml("<a>&undeclared;</a>",true) or "invalid")=="invalid"
+ ((parse("<a/>",{type:'xml',flavor:'strict',preserve_whitespace:1}) ^ { null }) or "invalid")=="invalid",
+ ((xml("<a>&undeclared;</a>",true) ^ { null }) or "invalid")=="invalid"
 ]

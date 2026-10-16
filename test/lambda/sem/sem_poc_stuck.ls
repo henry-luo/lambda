@@ -108,9 +108,8 @@ run(<iff <lit v:null> <lit v:1> <lit v:2>>) == (if (null) 1 else 2);
 // program's `raise`; the term has an error value on both sides, and the
 // model's stuckness partition is unchanged by it.
 (raw(run(<add <lit v:1> <lit v:"str">>)) is error) and ((1 + "str") is error);
-// and an error is a value the program goes on computing with (S7.9.3): it is
-// falsy (S3.1), `or` rescues it (S7.5.3), and arithmetic on it stays an error
-run(<orr <add <lit v:1> <lit v:"str">> <lit v:7>>) == ((1 + "str") or 7);
+// S3.4/S7.5.3v2: logical defaulting preserves an error; classify both outcomes.
+(raw(run(<orr <add <lit v:1> <lit v:"str">> <lit v:7>>)) is error) and (((1 + "str") or 7) is error);
 (raw(run(<add <add <lit v:1> <lit v:"str">> <lit v:1>>)) is error) and (((1 + "str") + 1) is error);
 
 // ===== the partition is exhaustive for the modelled grammar =====

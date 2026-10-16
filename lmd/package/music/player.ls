@@ -73,10 +73,10 @@ pn status(owner,text,mode) {
     let style=status_style(mode)
     if (dom.get_attribute(label,"style")!=style) dom.set_attribute(label,"style",style)
 }
-fn control_value(owner,control) => (if (control=="mute" or control=="solo")
+fn control_value(owner,control) => ((if (control=="mute" or control=="solo")
     float(sum([for (input_node in dom.query_selector_all(owner,"input[data-control="++control++"]") where dom.get_state(input_node,"checked"))
         int(dom.get_attribute(input_node,"data-mask"))]) or 0) else
-    float(dom.get_state(dom.query_selector(owner,"[data-control="++control++"]"),"value"))) or -1.0
+    float(dom.get_state(dom.query_selector(owner,"[data-control="++control++"]"),"value"))) ^ { null }) or -1.0
 pn highlight(owner,session_value,active) {
     let control=dom.query_selector(owner,".music-highlight")
     let color=if (control==null) "red" else dom.get_attribute(control,"data-color") or "red"

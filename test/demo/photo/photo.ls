@@ -135,7 +135,7 @@ on photo_frame(evt) {
                 dom.set_attribute(evt.target,"data-export-process_us",string(done.elapsed_us))
                 dom.set_attribute(evt.target,"data-export-encode_us",string(done.encode_us))
                 dom.set_attribute(evt.target,"data-export-compose_us",string(int((clock()-began)*1000000)))
-                if (problem==null) {
+                if (problem is null) {
                     present.message(evt.target,"Saved PNG · " ++ string(done.width) ++ " × " ++ string(done.height) ++ " · " ++ request.target)
                     if (session.source.identity==request.source.identity and model.current(session.hist)==request.before) {
                         session=replace_recipe(session,request.recipe)
@@ -151,7 +151,7 @@ on photo_frame(evt) {
         }
     }
     present.paint(evt.target,session) ^ { problem=^.message } ~ { session=~ }
-    if (problem!=null) {
+    if (not (problem is null)) {
         present.message(evt.target,problem,true)
         radiant.image_job(evt.target,{action:"cancel",channel:"preview"})
         session={*:session,job:0,token:0}
@@ -186,7 +186,7 @@ on click(evt) {
     } else if (action != null) {
         var problem = null
         command(owner,session,dom.get_attribute(action,"data-action")) ^ { problem = ^.message } ~ { session = ~ }
-        if (problem != null) present.message(owner,problem,true)
+        if (not (problem is null)) present.message(owner,problem,true)
     } else { return 'pass' }
     session = present.schedule(owner,session)
     return 'handled'

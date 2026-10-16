@@ -10,9 +10,9 @@
 import .mod_sem_poc_kernel
 import .mod_sem_poc_ingest
 
-let dump = input("test/lambda/sem/closure.ast.mark", 'mark') or null
+let dump = input("test/lambda/sem/closure.ast.mark", 'mark') ^ { null }
 let term = normalize(dump) ^ { <unsupported kind: "normalize", why: string(^)> }
-let golden = input("test/lambda/closure.txt", 'mark') or null
+let golden = input("test/lambda/closure.txt", 'mark') ^ { null }
 
 // how many lowered nodes fell outside the modelled core
 fn unsupported_in(t) => if (type(t) != element) 0

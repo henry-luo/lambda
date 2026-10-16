@@ -19,6 +19,6 @@ let rendered = [for (variant in variants) ui.render(ui.icon(variant)^)];
     ["group attributes",name(content(group)[0]) == 'g' and content(group)[0]["fill-opacity"] == ".88"],
     ["legacy alias",ui.render(ui.icon({name:"chevron-down"})^).viewBox == ui.render(ui.icon({name:"down"})^).viewBox],
     ["spinner",contains(ui.render(ui.icon({name:"loading"})^).class,"dtna-icon-spin") and contains(ui.render(ui.icon({name:"sync",spin:true})^).class,"dtna-icon-spin")],
-    ["invalid catalog choices",(ui.icon({name:"missing"}) or null) == null and (ui.icon({theme:'missing'}) or null) == null and (ui.icon({name:"check",theme:'two-tone'}) or null) == null],
-    ["invalid icon props",(ui.icon({rotate:inf}) or null) == null and (ui.icon({spin:1}) or null) == null and (ui.icon({width:0}) or null) == null and (ui.icon({primary_color:"red;fill:none"}) or null) == null]
+    ["invalid catalog choices",((ui.icon({name:"missing"}) ^ { null }) or null) == null and ((ui.icon({theme:'missing'}) ^ { null }) or null) == null and ((ui.icon({name:"check",theme:'two-tone'}) ^ { null }) or null) == null],
+    ["invalid icon props",((ui.icon({rotate:inf}) ^ { null }) or null) == null and ((ui.icon({spin:1}) ^ { null }) or null) == null and ((ui.icon({width:0}) ^ { null }) or null) == null and ((ui.icon({primary_color:"red;fill:none"}) ^ { null }) or null) == null]
 ]

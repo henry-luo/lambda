@@ -13,7 +13,7 @@ let rows = content(timeline);
     ["custom marker",content(content(content(rows[1])[0])[0])[0] == "!"],
     ["horizontal layout",contains(horizontal.class,"dtna-timeline-horizontal")],
     ["empty timeline",len(content(ui.render(ui.timeline()^))) == 0],
-    ["invalid timeline",(ui.timeline({items:1}) or null) == null and (ui.timeline({items:[{loading:1}]}) or null) == null and (ui.timeline({items:[{placement:'middle'}]}) or null) == null and (ui.timeline({items:[{bad:1}]}) or null) == null],
+    ["invalid timeline",((ui.timeline({items:1}) ^ { null }) or null) == null and ((ui.timeline({items:[{loading:1}]}) ^ { null }) or null) == null and ((ui.timeline({items:[{placement:'middle'}]}) ^ { null }) or null) == null and ((ui.timeline({items:[{bad:1}]}) ^ { null }) or null) == null],
     ["exact large decimal",statistic.number_parts("-12345678901234567890.98765",{precision:2}) == {whole:"-12,345,678,901,234,567,890",fraction:".98"}],
     ["pad precision",statistic.number_parts(42,{precision:3}) == {whole:"42",fraction:".000"}],
     ["custom separators",statistic.number_parts("123456.789",{precision:2,group_separator:" ",decimal_separator:","}) == {whole:"123 456",fraction:",78"}],
@@ -21,5 +21,5 @@ let rows = content(timeline);
     ["statistic title preserves zero",content(content(value)[0])[0] == "0"],
     ["statistic loading",loading["aria-busy"] == "true" and content(loading)[0].class == "dtna-statistic-placeholder"],
     ["statistic callback",content(content(content(custom)[0])[0])[0] == "#42"],
-    ["invalid statistic",(ui.statistic({precision:-1}) or null) == null and (ui.statistic({precision:101}) or null) == null and (ui.statistic({formatter:1}) or null) == null and (ui.statistic({loading:1}) or null) == null and (ui.statistic({group_separator:1}) or null) == null]
+    ["invalid statistic",((ui.statistic({precision:-1}) ^ { null }) or null) == null and ((ui.statistic({precision:101}) ^ { null }) or null) == null and ((ui.statistic({formatter:1}) ^ { null }) or null) == null and ((ui.statistic({loading:1}) ^ { null }) or null) == null and ((ui.statistic({group_separator:1}) ^ { null }) or null) == null]
 ]

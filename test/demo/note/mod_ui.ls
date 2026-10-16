@@ -150,7 +150,7 @@ pub fn dialog(st) {
             <h2 d.title><p d.message or "">
             if (contains(["folder","save","open"],d.kind)) apply(<control.input id:"dialog-value",label:if (d.kind=="folder") "Folder name" else "Notebook path",
                 value:d.value or "",placeholder:if (d.kind=="folder") "Folder name" else "path/to/Notebook.note.json",on_change:{action:"dialog.value"}>) else null;
-            if (d.error!="" and d.error!=null) <p class:"dialog-error",role:"alert",d.error> else null;
+            if (d.error!="" and not (d.error is null)) <p class:"dialog-error",role:"alert",d.error> else null;
             <div class:"dialog-buttons",button("dialog-cancel","dialog.cancel","Cancel",null,{},false,false,"dialog-button");
                 if (d.kind=="unsaved") button("dialog-discard","dialog.discard","Don't Save",null,{},false,false,"dialog-button") else null;
                 button("dialog-confirm","dialog.confirm",d.confirm or "Save",null,{},false,false,"dialog-button primary")>

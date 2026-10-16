@@ -18,7 +18,7 @@ pn piped_ret(m: any) int { return m |> len }
 fn member(r) { let n = len(r.x); [n, "reached"] }
 fn slot(xs) { let s = string(xs[1]); [s, "reached"] }
 // rescued, handled, and propagated on request
-fn rescued(m: any) { let n = len(m) or 0; [n, "reached"] }
+fn rescued(m: any) { let n = len(m) ^ { 0 }; [n, "reached"] }
 fn handled(m: any) { len(m) ^ { 0 - 1 } }
 fn propagated(m: any) { let p = split(m, ",")^; [p, "reached"] }
 fn propagated_pipe(m: any) { let p = (m |> split(","))^; [p, "reached"] }
@@ -27,7 +27,7 @@ fn untyped(m) { let n = len(m); [n, "reached"] }
 // a typed-array argument's error is the call's value too (S7.7.3)
 pn scale(v: float[], s: float) float[] { return [v[0] * s, v[1] * s] }
 pn add(a: float[], b: float[]) float[] { return [a[0] + b[0]] }
-pn arr_arg(x: float[]) { let r = add(scale(x, 2.0), [1.0]) or [0.0]; [r, "reached"] }
+pn arr_arg(x: float[]) { let outcome = add(scale(x, 2.0), [1.0]); let r = outcome ^ { [0.0] }; [r, "reached"] }
 pn main() {
     let e = mk(1)
     print([direct(mk(0)), direct(e)])
@@ -48,9 +48,9 @@ pn main() {
     print("\n")
     print([handled(mk(0)), handled(e)])
     print("\n")
-    print([propagated(mk(0)), propagated(e) or "propagated"])
+    print([propagated(mk(0)), propagated(e) ^ { "propagated" }])
     print("\n")
-    print([propagated_pipe(mk(0)), propagated_pipe(e) or "propagated"])
+    print([propagated_pipe(mk(0)), propagated_pipe(e) ^ { "propagated" }])
     print("\n")
     print([untyped(mk(0)), untyped(e)])
     print("\n")

@@ -22,7 +22,7 @@ pub fn plain_text(item) string {
 
 // Membership that answers false for a malformed collection, so predicates
 // built on it stay total.
-pub fn member(xs, x) bool => contains(xs, x) or false
+pub fn member(xs, x) bool => contains(xs, x) ^ { false }
 
 // Order records by a string key; a malformed input sorts as empty.
 pub fn sorted_by_name(xs) any => sort(xs, (x) => string(x.name)) or []

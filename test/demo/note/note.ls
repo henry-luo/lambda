@@ -20,7 +20,7 @@ edit <notes_app> state st:app.initial() {
 on beforeinput() { return 'pass' }
 on editaction(evt) {
     let run = controller.handle(st.editor,evt,st.dialog!=null or st.selected=="" or model.current(st).deleted)
-    if (run.result.failure==null and evt.input_type!="copy") {
+    if (run.result.failure is null and evt.input_type!="copy") {
         st = model.update_editor(st,run.editor,app.stamp())
         app.finish(st,evt.target)
     }

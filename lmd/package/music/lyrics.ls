@@ -31,9 +31,11 @@ pub fn warnings(node,event_id) array => [for (x in c.named(node,"lyric"))
     *c.names(x,["text","syllabic","elision","extend","end-line","end-paragraph","footnote","level"],event_id)]
 
 pub fn lanes(parts) map {
+    // S7.5.3v2: textual verse labels recover conversion failure before numeric ranking.
     let entries=[for (p in parts,m in p.measures,e in m.events,l in e.lyrics where l.visible)
         {key:line_key(e,l),staff:p.id++"/"++string(e.staff)++"/"++l.placement,
-         number:l.number,order:if (c.is_integer(float(l.number))) float(l.number) else 1000000.0}]
+         number:l.number,order:(let ordinal=float(l.number) ^ { null },
+             if (c.is_integer(ordinal)) ordinal else 1000000.0)}]
     let unique_entries=[for (key in unique([for (e in entries) e.key])) [for (e in entries where e.key==key) e][0]]
     let ordered=sort(unique_entries,(e)=>e.order);
     map([for (staff in unique([for (e in ordered) e.staff]),i,e in [for (x in ordered where x.staff==staff) x]) (e.key,i)])

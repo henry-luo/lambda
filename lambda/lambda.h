@@ -2943,6 +2943,11 @@ extern "C" {
     Item op_or(Bool a, Bool b);
 
     Bool fn_eq(Item a, Item b);
+    // language operators retain the original error; Bool adapters serve native predicates
+    Item fn_eq_value(Item a, Item b);
+    Item fn_ne_value(Item a, Item b);
+    Item fn_not_value(Item a);
+    Item fn_ref_eq_value(Item a, Item b);
     Bool fn_eq_strict(Item a, Item b);
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);

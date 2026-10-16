@@ -32,7 +32,7 @@ let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/set
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) or false
+  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) ^ { false }
 fn archive_input_format(extension) => if (extension == "7z") '7z'
   else if (extension == "rar") 'rar'
   else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
@@ -55,12 +55,12 @@ fn absolute_file_path(path) => if (starts_with(path, "/") or path[1] == ":") pat
 // the mounted directory-row components.
 let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT) ^ { [] }
 
-fn path_is_open(open_paths, path) => contains(open_paths, path) or false
+fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
-// An empty-space hit targets the row; absent event classes discharge to false (S7.9.2-3).
+// An empty-space hit targets the row; absent event classes recover to false (S7.6).
 fn event_hits_row(evt, hit_class) =>
-  (contains(evt["target_class"], hit_class ++ " ") or
-   contains(evt["target_parent_class"], hit_class ++ " ")) or false
+  (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or
+  (contains(evt["target_parent_class"], hit_class ++ " ") ^ { false })
 
 // A tree-wide redraw needs the expansion currently owned by individual rows.
 pn visible_open_paths(target) {
@@ -172,9 +172,9 @@ fn is_docx_document(extension) => lower(extension) == "docx"
 fn is_epub_document(extension) => lower(extension) == "epub"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
-fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
+fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) ^ { false }
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
-fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) or false
+fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) ^ { false }
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
@@ -933,7 +933,7 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
             apply(docx_view.preview(~.docx_data))>
         } else if (is_epub_document(~.file["extension"])) {
           <section id:"epub-preview", class:"epub-preview",
-            if (~.file.ebook.error != null) <p class:"preview-error", ~.file.ebook.error>
+            if (not (~.file.ebook.error is null)) <p class:"preview-error", ~.file.ebook.error>
             else ebook_reader.reader(~.file.ebook)^>
         } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
@@ -959,9 +959,9 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
       } else {
         // ZIP bytes are not document source; expose the converter's escaped HTML instead.
         let source = if (is_docx_document(~.file["extension"])) {
-          if (~.docx_data.error != null) ~.docx_data.error else ~.docx_data.html
+          if (not (~.docx_data.error is null)) ~.docx_data.error else ~.docx_data.html
         } else if (is_epub_document(~.file["extension"])) {
-          if (~.file.ebook.error != null) ~.file.ebook.error else parse(~.file.ebook.resources[~.file.ebook.package], 'text')^
+          if (not (~.file.ebook.error is null)) ~.file.ebook.error else parse(~.file.ebook.resources[~.file.ebook.package], 'text')^
         } else selected_source(~.file);
         <section class:"source-tab-panel"
         , <pre id:"source-preview", class:"source-preview", source>

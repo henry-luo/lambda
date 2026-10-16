@@ -8,7 +8,7 @@
         { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
         { "pattern": "bne\tL" },
         { "pattern": "eq\t{{r}}, %p1, {{r}}" },
-        { "pattern": "call\tfn_eq_p, fn_eq" }
+        { "pattern": "call\tfn_eq_value_p, fn_eq_value" }
       ]
     },
     {
@@ -17,7 +17,7 @@
         { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
         { "pattern": "bne\tL" },
         { "pattern": "ne\t{{r}}, %p1, {{r}}" },
-        { "pattern": "call\tfn_ne_p, fn_ne" }
+        { "pattern": "call\tfn_ne_value_p, fn_ne_value" }
       ]
     }
   ]

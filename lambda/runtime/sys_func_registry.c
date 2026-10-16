@@ -2097,6 +2097,10 @@ JitImport jit_runtime_imports[] = {
     {"fn_pos", FPTR(fn_pos)},
     {"fn_neg", FPTR(fn_neg)},
     {"fn_eq", FPTR(fn_eq)},
+    {"fn_eq_value", FPTR(fn_eq_value)},
+    {"fn_ne_value", FPTR(fn_ne_value)},
+    {"fn_not_value", FPTR(fn_not_value)},
+    {"fn_ref_eq_value", FPTR(fn_ref_eq_value)},
     {"fn_ne", FPTR(fn_ne)},
     // PTH32/PTH40/PTH45v2: the reference forms. MIR Direct emits a boxed call
     // to each, the same helper the T0 interpreter calls (rule 13).

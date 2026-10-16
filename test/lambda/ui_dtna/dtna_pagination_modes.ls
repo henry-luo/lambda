@@ -12,6 +12,6 @@ let empty = ui.render(ui.pagination({total:0,show_total:(total,bounds)=>string(b
     ["localized total",content(content(ui.render(ui.pagination({total:52,show_total:true,locale:'zh-CN'})^))[0])[0] == "共 52 条"],
     ["single page hidden",ui.render(ui.pagination({total:10,hide_on_single_page:true})^) == null and ui.render(ui.pagination({total:0,hide_on_single_page:true})^) == null],
     ["multiple pages visible",name(ui.render(ui.pagination({total:11,hide_on_single_page:true})^)) == 'nav'],
-    ["invalid simple",(ui.pagination({simple:1}) or null) == null and (ui.pagination({simple:{read_only:1}}) or null) == null and (ui.pagination({simple:{unknown:true}}) or null) == null],
-    ["invalid total option",(ui.pagination({show_total:"Total"}) or null) == null and (ui.pagination({hide_on_single_page:1}) or null) == null]
+    ["invalid simple",((ui.pagination({simple:1}) ^ { null }) or null) == null and ((ui.pagination({simple:{read_only:1}}) ^ { null }) or null) == null and ((ui.pagination({simple:{unknown:true}}) ^ { null }) or null) == null],
+    ["invalid total option",((ui.pagination({show_total:"Total"}) ^ { null }) or null) == null and ((ui.pagination({hide_on_single_page:1}) ^ { null }) or null) == null]
 ]

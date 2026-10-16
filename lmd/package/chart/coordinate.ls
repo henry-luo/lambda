@@ -14,7 +14,7 @@ import axis:.axis
 import collision:.collision
 
 pub fn enabled(options) => options is string or (options != null and len(parse.attributes(options)) > 0)
-fn pair(value) => (value is array and len(value) == 2 and all(value |> util.finite_number(~))) or false
+fn pair(value) => (value is array and len(value) == 2 and (all(value |> util.finite_number(~)) ^ { false })) or false
 fn value(options, key, fallback) => if (options[key] != null) options[key] else fallback
 
 fn transform_error(step) {

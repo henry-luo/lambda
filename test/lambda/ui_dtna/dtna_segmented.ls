@@ -15,10 +15,10 @@ let hidden = [for (child in content(rendered) where child is element and name(ch
     ["native form entry",len(hidden) == 1 and hidden[0].name == "choice" and hidden[0].value == "1"],
     ["disabled form omission",'disabled' at [for (child in content(ui.render(ui.segmented({id:"off",items:items,name:"ignored",disabled:true})^)) where child is element and name(child) == 'input') child][0]],
     ["typed controlled value",(ui.segmented({id:"typed",items:items,value:3})^).value is int],
-    ["invalid size",(ui.segmented({id:"bad",items:items,size:'huge'}) or null) == null],
-    ["invalid shape",(ui.segmented({id:"bad",items:items,shape:'square'}) or null) == null],
-    ["invalid block",(ui.segmented({id:"bad",items:items,block:1}) or null) == null],
-    ["invalid name",(ui.segmented({id:"bad",items:items,name:1}) or null) == null],
-    ["invalid orientation",(ui.segmented({id:"bad",items:items,orientation:'diagonal'}) or null) == null],
-    ["controlled/default conflict",(ui.segmented({id:"bad",items:items,value:1,default_value:3}) or null) == null]
+    ["invalid size",((ui.segmented({id:"bad",items:items,size:'huge'}) ^ { null }) or null) == null],
+    ["invalid shape",((ui.segmented({id:"bad",items:items,shape:'square'}) ^ { null }) or null) == null],
+    ["invalid block",((ui.segmented({id:"bad",items:items,block:1}) ^ { null }) or null) == null],
+    ["invalid name",((ui.segmented({id:"bad",items:items,name:1}) ^ { null }) or null) == null],
+    ["invalid orientation",((ui.segmented({id:"bad",items:items,orientation:'diagonal'}) ^ { null }) or null) == null],
+    ["controlled/default conflict",((ui.segmented({id:"bad",items:items,value:1,default_value:3}) ^ { null }) or null) == null]
 ]

@@ -11,7 +11,7 @@ import geometry: .geometry
 import mhchem: .mhchem
 
 pub fn render(ast, options) map | error {
-    if (ast.error != null) error("math: " ++ string(ast.error))
+    if (not (ast.error is null)) error("math: " ++ string(ast.error))
     else if (options.font_size != null and (not (options.font_size is number) or options.font_size <= 0 or
         options.font_size - options.font_size != 0))
         error("math: font_size must be finite positive CSS pixels")
@@ -436,7 +436,7 @@ fn text_baseline(c) number | error {
     else amount * font.UNITS * c.size
 }
 
-fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""))) or false
+fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""))) ^ { false }
 
 // nicefrac.sty's slanted fraction: a script-size numerator raised half an x-height,
 // a slash kerned in by 0.1em and 0.15em, and a script-size denominator lowered a

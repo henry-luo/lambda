@@ -9,9 +9,9 @@ let partial = tree.toggle_check(rows,full.checked_keys,1);
  [for (row in tree.visible(rows,['root'])) row.key],full,partial,
  tree.toggle_check(rows,partial.checked_keys,1),tree.checks(rows,['root'],true),
  tree.toggle_check(rows,full.checked_keys,'disabled'),tree.checks(rows,['isolated']),
- (ui.tree({id:"ok",items:items,checkable:true}) or null) != null,
- (ui.tree({id:"bad",items:[{key:1,children:[{key:1}]}]}) or null) == null,
- (ui.tree({id:"bad",items:[{key:1,children:"bad"}]}) or null) == null,
- (ui.tree({id:"bad",items:items,checked_keys:['unknown']}) or null) == null,
- (ui.tree({id:"bad",items:items,selected_keys:[1,2]}) or null) == null,
- (ui.tree({id:"bad",items:items,check_strictly:1}) or null) == null]
+ ((ui.tree({id:"ok",items:items,checkable:true}) ^ { null }) or null) != null,
+ ((ui.tree({id:"bad",items:[{key:1,children:[{key:1}]}]}) ^ { null }) or null) == null,
+ ((ui.tree({id:"bad",items:[{key:1,children:"bad"}]}) ^ { null }) or null) == null,
+ ((ui.tree({id:"bad",items:items,checked_keys:['unknown']}) ^ { null }) or null) == null,
+ ((ui.tree({id:"bad",items:items,selected_keys:[1,2]}) ^ { null }) or null) == null,
+ ((ui.tree({id:"bad",items:items,check_strictly:1}) ^ { null }) or null) == null]

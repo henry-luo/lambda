@@ -399,7 +399,7 @@ pub fn execute(editor,id,params={}) map^ {
         let payload = {*:params,mark:s.mark,value:true,
             kind:if (id == "para.numbering") 'ordered' else 'bullet'}
         let run = edit_handle_request(editor,edit_request_from_toolbar(s.input,payload))
-        if (run.result.failure != null) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
+        if (not (run.result.failure is null)) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
         else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,table_transaction(run.transaction))
         else run.editor
     }

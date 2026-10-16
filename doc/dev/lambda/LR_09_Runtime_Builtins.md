@@ -44,9 +44,19 @@ Keeping this state thread-local (rather than passing a context pointer into ever
 
 ### 3.1 Comparison
 
-Equality is structural and recursive. `fn_eq` (`:1266`) forwards to `fn_eq_depth` (`:1074`), which dispatches per-container to `list_eq` (`:903`), `array_num_eq` (`:915`), `map_eq` (`:939`), `element_eq` (`:988`), and `vmap_eq` (`:1015`), each recursing through `fn_eq_depth` on their elements. `fn_eq` returns a raw `Bool`, not a boxed Item, so callers (e.g. the membership scans at `:1654`–`:1736`) compare against `BOOL_TRUE` directly.
+Equality is structural and recursive (**S5.1.1v2, S5.1.5**).
+`fn_eq_value` and `fn_ne_value` return an Item: a Boolean on success, or the
+original encountered error. `EqualityContext` carries that error through the
+recursive kernels. Sequence equality visits increasing indexes and stops on
+false or error; shared containers cannot skip the walk. Native classification
+clients retain `fn_eq`/`fn_ne` Bool adapters. Error-result policies for
+collection consumers remain pending under **SO50**.
 
-Ordered comparison has a two-tier shape. The public wrappers `fn_lt`/`fn_gt`/`fn_le`/`fn_ge` (`:1391`–`:1417`) return an **Item**: if either operand is an `ArrayNum`, they dispatch to the vectorized `vec_cmp` ([LR_05](LR_05_Strings_and_Vectors.md)) producing an element-wise boolean mask, with op codes LT=2, LE=3, GT=4, GE=5 (operator minus `OPERATOR_EQ`); otherwise they fall through to the scalar `fn_lt_scalar` (`:1279`) / `fn_gt_scalar` (`:1333`) and box the resulting `Bool`. `fn_le` is implemented as `!(a > b)` and `fn_ge` as `!(a < b)` via the scalar helpers (`:1408`, `:1415`). The scalar comparators handle numbers by promotion, datetimes via `datetime_compare`, and strings/symbols via byte-wise `strcmp` — a path that diverges from the casefold-Unicode comparators in `utf_string.cpp` ([LR09-3](../../../vibe/Lambda_Issue_Ledger.md), [LR_05](LR_05_Strings_and_Vectors.md)).
+Magnitude comparisons `fn_lt`/`fn_gt`/`fn_le`/`fn_ge` are scalar and return
+Items (**S6.1.1–S6.1.2v2**). They preserve a direct error before applying
+null absorption, exact numeric comparison, datetime comparison, or string
+magnitude. Keyword element-wise comparisons use `vec_cmp` separately
+(**S10.2.2v2**); total sorting uses `total_cmp` (**S6.2**).
 
 ### 3.2 Indexing & member access
 

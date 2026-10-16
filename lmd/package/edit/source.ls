@@ -322,7 +322,8 @@ fn model_selection(b, top, hs, ssel) =>
 // ---------------------------------------------------------------------------
 
 fn caret(p) => {anchor: p, head: p, goal: null}
-fn collapsed(sel) => buf.pos_cmp(sel.anchor, sel.head) == 0
+// S7.7.3: selection endpoints are position maps, not error-capable arguments.
+fn collapsed(sel: {anchor: map, head: map}) => buf.pos_cmp(sel.anchor, sel.head) == 0
 fn sel_from(sel) => buf.pos_min(sel.anchor, sel.head)
 fn sel_to(sel) => buf.pos_max(sel.anchor, sel.head)
 
@@ -895,7 +896,7 @@ pn rich_view(session, b) {
   let format = session.rich_format
   let text = buf.to_text(b)
   let loaded = format.import_text(text) ^ { {error: ^.message} }
-  if (loaded.error != null) { return {status: "Cannot show the " ++ format.name ++ " view: " ++ loaded.error} }
+  if (not (loaded.error is null)) { return {status: "Cannot show the " ++ format.name ++ " view: " ++ loaded.error} }
   let mismatch = format.check_roundtrip(loaded.doc, loaded.envelope)
   if (mismatch != null) {
     return {status: "The " ++ format.name ++ " view cannot keep this text exactly: " ++ mismatch}

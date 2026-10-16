@@ -4,7 +4,8 @@
 
 // Test 1: basic 2-arg cmd with echo
 pn test_echo() {
-    var r = cmd("echo", "hello") or "fail"
+    let outcome: any | error = cmd("echo", "hello")
+    var r = (outcome ^ { null }) or "fail"
     r
 }
 
@@ -16,7 +17,8 @@ pn test_one_arg() {
 
 // Test 3: trailing newline should be trimmed
 pn test_newline_trim() {
-    var r = cmd("echo", "trimmed") or "fail"
+    let outcome: any | error = cmd("echo", "trimmed")
+    var r = (outcome ^ { null }) or "fail"
     r ++ "|"
 }
 
@@ -34,7 +36,8 @@ pn test_bad_cmd() {
 
 // Test 6: multi-word output preserved
 pn test_multi_word() {
-    var r = cmd("echo", "one two three") or "fail"
+    let outcome: any | error = cmd("echo", "one two three")
+    var r = (outcome ^ { null }) or "fail"
     r
 }
 

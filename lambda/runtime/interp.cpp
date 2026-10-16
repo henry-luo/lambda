@@ -1546,7 +1546,7 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     operand_slot.set(operand_value);
     Item operand = operand_slot.get();
     switch (node->op) {
-    case OPERATOR_NOT:      return (Item){.item = b2it(fn_not(operand))};
+    case OPERATOR_NOT:      return fn_not_value(operand);
     case OPERATOR_NEG:      return fn_neg(operand);
     case OPERATOR_POS:      return fn_pos(operand);
     // PTH32/PTH40: one forcing helper and one address-of helper, shared with
@@ -1571,15 +1571,12 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     // `and`/`or` short-circuit before the right operand is evaluated (S10.2.3);
     // truthiness is by tag through the shipped helper (S3.1/S3.2).
     if (node->op == OPERATOR_AND || node->op == OPERATOR_OR) {
-        // Short-circuit, then let the helper decide (S10.2.3). The early exit
-        // is only taken where fn_and/fn_or would return the left operand
-        // anyway, so containment stays the helper's call: an error is *falsy*
-        // (is_truthy), which is what makes `int("x") or 7` yield 7 rather than
-        // propagating — checking for an error here would break that.
+        // S3.4: an error has no truth value and skips the right operand.
         Item left_value = eval_expr(f, node->left);
         if (interp_frame_pending(f)) return left_value;
         Scratch lhs(f);
         lhs.set(left_value);
+        if (item_is_error(lhs.get())) return lhs.get();
         Bool truth = is_truthy(lhs.get());
         if (node->op == OPERATOR_AND ? truth == BOOL_FALSE : truth == BOOL_TRUE) {
             return lhs.get();
@@ -1639,8 +1636,8 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_MOD:       return fn_mod(left, right);
     case OPERATOR_POW:       return fn_pow(left, right);
     case OPERATOR_JOIN:      return fn_join(left, right);
-    case OPERATOR_EQ:        return (Item){.item = b2it(fn_eq(left, right))};
-    case OPERATOR_NE:        return (Item){.item = b2it(fn_ne(left, right))};
+    case OPERATOR_EQ:        return fn_eq_value(left, right);
+    case OPERATOR_NE:        return fn_ne_value(left, right);
     case OPERATOR_LT:        return fn_lt(left, right);
     case OPERATOR_LE:        return fn_le(left, right);
     case OPERATOR_GT:        return fn_gt(left, right);
@@ -1650,7 +1647,7 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_INTERSECT: return fn_intersect(left, right);
     case OPERATOR_EXCLUDE:   return fn_exclude(left, right);
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
-    case OPERATOR_REF_EQ:    return (Item){.item = b2it(fn_ref_eq(left, right))};
+    case OPERATOR_REF_EQ:    return fn_ref_eq_value(left, right);
     case OPERATOR_SUBTYPE:   return (Item){.item = b2it(fn_subtype(left, right))};
     // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
     // the parsed `nan` on the right is a marker, not a compared value.
@@ -3432,7 +3429,7 @@ static Item eval_that_proviso(InterpFrame* f, AstBinaryNode* node) {
         parent_slot.home(), root_slot.home());
     Item held = eval_expr(f, node->right);
     if (interp_frame_pending(f)) return held;
-    return is_truthy(held) ? subject.get() : ItemNull;
+    return is_truthy(held) == BOOL_TRUE ? subject.get() : ItemNull;
 }
 
 // Mirrors transpile_pipe: `a |> b` maps b over a's members with `~`/`~#` bound,
@@ -3531,7 +3528,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
             Array* result = (Array*)(uintptr_t)out.get().item;   // re-read: may collect
             if (!result) break;
             if (node->op == OPERATOR_FILTER) {
-                if (is_truthy(produced)) array_push(result, item_slot.get());
+                if (is_truthy(produced) == BOOL_TRUE) array_push(result, item_slot.get());
             } else {
                 array_push(result, produced);
             }
@@ -3596,7 +3593,7 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
     if (fc->node->where) {
         Item where = eval_expr(f, fc->node->where);
         if (interp_frame_pending(f)) return false;
-        if (!is_truthy(where)) *keep = false;
+        if (is_truthy(where) != BOOL_TRUE) *keep = false;
     }
     return true;
 }
@@ -4571,7 +4568,9 @@ static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destinat
         AstIfNode* branch = (AstIfNode*)value;
         Item condition = eval_expr(f, branch->cond);
         if (interp_frame_pending(f)) return interp_signal_payload(f);
-        return interp_emit_output(f, is_truthy(condition) ? branch->then : branch->otherwise, destination);
+        if (item_is_error(condition)) return condition;
+        return interp_emit_output(f, is_truthy(condition) == BOOL_TRUE
+            ? branch->then : branch->otherwise, destination);
     }
     RootFrame roots(1);
     Rooted<Item> result(roots, ItemNull);
@@ -5884,9 +5883,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         Item cond = eval_expr(f, branch->cond);
-        // `if` belongs to the truthy error family: an error condition is
-        // false, not an ordinary value-family propagation edge (S7.6).
-        if (is_truthy(cond)) return eval_expr(f, branch->then);
+        // S3.5: a condition error is the expression value, not a function return.
+        if (interp_frame_pending(f) || item_is_error(cond)) return cond;
+        if (is_truthy(cond) == BOOL_TRUE) return eval_expr(f, branch->then);
         if (branch->otherwise) return eval_expr(f, branch->otherwise);
         return ItemNull;
     }

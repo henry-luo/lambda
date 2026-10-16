@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v68.0.0 (2026-10-16)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v68.0.1 (2026-10-16)
 
 | ID | Line | Title |
 |---|---|---|
@@ -78,11 +78,11 @@ in full — including lines too long for a viewer — run
 | S2.6.5 | 450 | Content stays normalized under mutation |
 | S2.6.6v3* | 457 | An explicitly PDF-formatted file selects a byte-output destination |
 | **§S3** | 489 | *Truthiness* |
-| S3.1v2* | 491 | The falsy set is exactly **`null` · `false` · `""`** |
-| S3.2v2* | 496 | Truth classification is decidable from the type tag alone |
-| S3.3v3* | 501 | Consequences to teach: truthy-0 keeps `or` a safe coalescing operator (no `??` needed); |
-| S3.4* | 510 | Logical evaluation preserves an encountered error |
-| S3.5* | 517 | An `if` expression evaluates its condition once |
+| S3.1v2 | 491 | The falsy set is exactly **`null` · `false` · `""`** |
+| S3.2v2 | 496 | Truth classification is decidable from the type tag alone |
+| S3.3v3 | 501 | Consequences to teach: truthy-0 keeps `or` a safe coalescing operator (no `??` needed); |
+| S3.4 | 510 | Logical evaluation preserves an encountered error |
+| S3.5 | 517 | An `if` expression evaluates its condition once |
 | **§S4** | 526 | *Numerics* |
 | **§S4.1** | 540 | *The `int` type (v5: int53, total)* |
 | S4.1.1 | 545 | The `int` domain is **{n ∈ ℤ : \|n\| ≤ 2⁵³−1} plus the three closure points `inf`/`-inf`/`nan`**, carried … |
@@ -123,8 +123,8 @@ in full — including lines too long for a viewer — run
 | S4.9.1 | 672 | Numeric FFI is **type-directed, never value-directed** |
 | **§S5** | 681 | *Equality* |
 | **§S5.1** | 683 | *Error-preserving deep value equality* |
-| S5.1.1v2* | 685 | `==` is deep, structural, value-based equality |
-| S5.1.2v2* | 691 | NaN is unequal; errors propagate |
+| S5.1.1v2 | 685 | `==` is deep, structural, value-based equality |
+| S5.1.2v2 | 691 | NaN is unequal; errors propagate |
 | S5.1.3 | 696 | Structural recursion is depth-limited; |
 | S5.1.4v3* | 699 | `==` is the only **value** equality and compares content alone |
 | S5.1.5* | 711 | Container equality recursively compares content and short-circuits |
@@ -145,7 +145,7 @@ in full — including lines too long for a viewer — run
 | **§S6** | 779 | *Ordering and Sort* |
 | **§S6.1** | 781 | *Two relations, by design* |
 | S6.1.1 | 785 | The comparison operators `< <= > >=` answer magnitude questions only |
-| S6.1.2v2* | 791 | An error operand to `< <= > >=` propagates unchanged, including against null or nan |
+| S6.1.2v2 | 791 | An error operand to `< <= > >=` propagates unchanged, including against null or nan |
 | **§S6.2** | 796 | *The Lambda total order* |
 | S6.2.1 | 798 | `sort` and `order by` use the separate total order:* |
 | S6.2.2v3 | 806 | The total order **totally refines `==`** |
@@ -171,16 +171,16 @@ in full — including lines too long for a viewer — run
 | S7.4.5 | 904 | System `fn` failures are values, never `T^E`: *absence in / no answer → `null`* (or `""` for string results); |
 | S7.4.6 | 912 | `raise v` with a non-error `v` is shorthand for `raise error(v)`: the constructor (S7.4.4) decides the code … |
 | **§S7.5** | 917 | *Acknowledgment* |
-| S7.5.1v2* | 919 | A call carrying a `^` channel must engage the error at the **immediate expression**, through exactly one of: … |
+| S7.5.1v2 | 919 | A call carrying a `^` channel must engage the error at the **immediate expression**, through exactly one of: … |
 | S7.5.2 | 926 | `any` never acknowledges (it admits error but engages nothing); |
-| S7.5.3v2* | 929 | `a or b` defaults only `null`, `false`, and `""`; |
+| S7.5.3v2 | 929 | `a or b` defaults only `null`, `false`, and `""`; |
 | **§S7.6** | 936 | *Discharge: the handler and postfix `^`* |
 | S7.6.1v4* | 938 | `e ^ { … ^ … }` handles the error locally and is channel-agnostic |
 | S7.6.2v3 | 969 | The handler is the left-associative postfix-primary form `primary ^ { error_body }`, optionally followed … |
 | S7.6.3v2 | 983 | Postfix `e^` propagates |
 | S7.6.4 | 994 | `?` is not propagation |
 | S7.6.5v2 | 997 | The retired forms `let a^err = e` and prefix `^err` / `if (^err)` do not exist (why: the TE-13/TE-16 record); |
-| S7.6.6v3* | 1003 | Division of labor: `or` defaults ordinary falsy values and preserves errors; |
+| S7.6.6v3 | 1003 | Division of labor: `or` defaults ordinary falsy values and preserves errors; |
 | S7.6.7v4 | 1009 | A statement-position procedure handler `pn_call() ^ { error_body }` may protect a possibly-suspending call |
 | **§S7.7** | 1019 | *Containment: the declaration-boundary skip* |
 | S7.7.1* | 1024 | Skip is a **declaration-boundary mechanism only** |
@@ -189,13 +189,13 @@ in full — including lines too long for a viewer — run
 | S7.7.4* | 1038 | Reassignment to a declared `var` carries a diagnostic obligation, in three tiers: compile error where the RHS … |
 | S7.7.5* | 1044 | In a `for`, the skip target is the **iteration body**, not the loop: per-item skip keeps the batch alive; |
 | S7.7.6* | 1050 | Edge sites: element/field stores report via S7.7.4's tiers (containers are not scoped away |
-| S7.7.7v2* | 1055 | Recovery belongs in the initializer: `let a: T = e ^ { … }` |
+| S7.7.7v2 | 1055 | Recovery belongs in the initializer: `let a: T = e ^ { … }` |
 | **§S7.8** | 1059 | *Containers and errors* |
 | S7.8.1* | 1061 | Acceptance is read from the **destination contract**, never from syntactic position |
 | S7.8.2 | 1071 | Both spellings are visible in source: `[ f(x) ^ { 0 } for x in xs ]` → `int[]`, lane preserved; |
 | **§S7.9** | 1078 | *What an error participates in* |
 | S7.9.1 | 1083 | Type family participates |
-| S7.9.2v3* | 1085 | Logical evaluation and comparisons propagate |
+| S7.9.2v3 | 1085 | Logical evaluation and comparisons propagate |
 | S7.9.3 | 1092 | Value family propagates |
 | S7.9.4 | 1098 | Containment is not participation |
 | **§S7.10** | 1103 | *The sys-func return contract* |

@@ -1834,20 +1834,20 @@ pub fn cmd_lift_blockquote(st) {
 
 fn table_supported(st) => state_schema(st).table != null
 
-fn make_table_cells(cols, cell_tag, i, acc) {
+fn make_table_cells(cols: int, cell_tag: symbol, i: int, acc: array) array {
   if (i >= cols) { acc }
   else { make_table_cells(cols, cell_tag, i + 1, [*acc, node(cell_tag, [text("")])]) }
 }
 
-fn make_table_row(cols, header) =>
+fn make_table_row(cols: int, header: bool) =>
   node('tr', make_table_cells(cols, if (header) { 'th' } else { 'td' }, 0, []))
 
-fn make_table_rows(rows, cols, header, i, acc) {
+fn make_table_rows(rows: int, cols: int, header: bool, i: int, acc: array) array {
   if (i >= rows) { acc }
   else { make_table_rows(rows, cols, header, i + 1, [*acc, make_table_row(cols, header and i == 0)]) }
 }
 
-fn make_table_node(rows, cols, header) =>
+fn make_table_node(rows: int, cols: int, header: bool) =>
   node('table', make_table_rows(rows, cols, header, 0, []))
 
 fn insert_block_after_selection(st, block) {

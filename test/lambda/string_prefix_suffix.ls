@@ -47,7 +47,7 @@ ends_with("hello", "hello")
 "===== starts_with in if-condition ====="
 
 // critical: starts_with returning false must be falsy in if
-fn check_prefix(s, prefix) {
+fn check_prefix(s: string, prefix: string) {
     if (starts_with(s, prefix)) "yes" else "no"
 }
 
@@ -65,7 +65,7 @@ check_prefix("lib/main.cpp", "src/")
 
 "===== ends_with in if-condition ====="
 
-fn check_suffix(s, suffix) {
+fn check_suffix(s: string, suffix: string) {
     if (ends_with(s, suffix)) "yes" else "no"
 }
 
@@ -83,7 +83,7 @@ check_suffix("main.cpp", ".c")
 
 "===== contains in if-condition ====="
 
-fn check_contains(s, sub) {
+fn check_contains(s: string, sub: string) {
     if (contains(s, sub)) "yes" else "no"
 }
 

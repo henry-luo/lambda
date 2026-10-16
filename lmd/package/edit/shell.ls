@@ -128,7 +128,7 @@ fn selection_ends(selection) {
 
 fn writes_view_only(session, doc, selection, input_type) =>
   (any([for (p in selection_ends(selection)) view_only_part(session, doc, p) != null]) and
-   not member(unit_families, edit_action_family(input_type))) or false
+   not member(unit_families, edit_action_family(input_type))) ^ { false }
 
 // A deletion from inside one view-only part removes the whole part: the
 // action is retargeted to the part as a node selection.
@@ -266,7 +266,7 @@ on editaction(evt) {
                 if (session.format.surface == 'rich_text') session.format.schema_preset else null)
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
-  if (run.result.failure != null) { status = "Could not apply " ++ evt.input_type ++ "." }
+  if (not (run.result.failure is null)) { status = "Could not apply " ++ evt.input_type ++ "." }
   files.sync_window(evt.target, session, editor.doc)
   return run.result
 }
@@ -336,7 +336,7 @@ on edit_cmd(req) {
                        else item.input_type
       let run = run_request(editor, input_type, item.payload)
       editor = run.editor
-      if (run.result.failure != null) { status = "Could not apply " ++ item.title ++ "." }
+      if (not (run.result.failure is null)) { status = "Could not apply " ++ item.title ++ "." }
       else { status = "" }
       files.sync_window(req.node, session, editor.doc)
     }
