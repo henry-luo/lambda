@@ -75,6 +75,20 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `host45`, release MVP units | 756/756 pass | Includes retained loose-equality coercion and preparation of function enumeration storage |
+| `host45`, focused normal and forced/poisoned GC | 89/89 each | Includes coercion reentry, original throw identity, and unread inherited accessors |
+| `host45`, selected host fixtures | 45/45 pass | Same original fixtures and goldens as `host44` |
+| `host45`, canonical property/Function/Date/Array iterator slice | 2,382/2,382 pass | All 17 formerly failing cases in this slice repaired; unchanged sources/metadata/harness, formal MIR, no stripped mode |
+| `host45`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Seven known AUTO publication cases |
+| `host45`, replay of previously failing small fixtures | 24/32 pass; 8 fail | Same selected population and failures as `host42`; separate from a complete recount |
+| `host44`, release MVP units | 754/754 pass | Includes shared static-method source spans and native IdentifierName validation |
+| `host44`, focused normal and forced/poisoned GC | 87/87 each | Includes private iterator caches, lazy host overrides and nested/escaped CommonJS require |
+| `host44`, selected host fixtures | 45/45 pass | Includes the original dynamic-call and native-function source fixtures; unchanged goldens |
+| `host44`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Only the seven known AUTO publication cases |
+| `host42`, selected host fixtures | 44/44 pass | Native timers/strings, host families, host subclasses, virtual collections and source-relative CommonJS; unchanged goldens |
+| `host42`, isolated Script integration | 198/205 pass; 7 fail; no timeouts | Seven known AUTO publication cases; AST CommonJS regression repaired |
+| `host42`, canonical property/Function/Date/Array iterator slice | 2,365/2,382 pass; 17 fail; no timeouts/crashes | Same pre-existing property/Function failures as `host24`; later source-span repairs are recorded below |
+| `host42`, replay of previously failing small fixtures | 24/32 pass; 8 fail | Selected replay, separate from the complete isolated fixture diagnostic |
 | `host27`, existing DOM/Intl fixture gates | 25/25 pass | Date/FileList input round trips and both animation-clock fixtures; unchanged goldens |
 | `host27`, release MVP units | 743/743 pass | Shared Date storage/clocks, native array callables, host array descriptors and home-realm dispatch |
 | `host27`, focused normal and forced/poisoned GC | 76/76 each | Includes native Date mutation, virtual/frame clocks, callback ABI admission and child-realm Promise jobs |
@@ -150,8 +164,9 @@ This does not clear the aggregate gate or the real host/promotion gaps.
    MVP promotion remains unimplemented.
 3. **Host API integration.** Native callable/object properties, lazy host
    namespaces and prepared globals now use the shared services through the
-   adapter described below. DOM/Web integration, CommonJS, process events and
-   object timer handles still need broader validation or adapters. The full
+   adapter described below. Additional DOM/Web integration, CommonJS and process events still need
+   broader validation or adapters. Public timer handles and DOM string handlers
+   now use the shared event loop, as described below. The full
    fixture failures are retained; no legacy retry or test-harness exclusion
    hides these gaps.
 4. **Language/environment gaps.** Direct eval inside MIR `with` and independent
@@ -544,3 +559,145 @@ addresses are not symbolicated, so the exact compilation bottleneck remains
 unproven. The existing large-entry emission repair does not establish bounded
 compilation for all libraries. This diagnostic is not benchmark timing or
 whole-baseline closure; shared baseline and performance gates remain open.
+
+
+### Lazy host families and native property ownership
+
+The public MVP realm now exposes the shared host catalog lazily, including
+Storage, media, codecs, streams, Headers/Response, clipboard, Window messaging
+and catalog functions such as `fetch`. The existing eager AST bootstrap and
+the lazy formal engine use the same family installers. Only an owned marker
+may be replaced: deleted globals, user replacements and descriptor attributes
+survive sibling materialization, including after `preventExtensions`
+(D8.1.3v25, D6.2.2v2, D3.4.3v5).
+
+Native property reads, Set, descriptor definitions, own-key reflection and
+prototype walks derive ownership from the existing Function ABI and nominal
+extension metadata. They enter the existing MVP kernels for MVP storage;
+ordinary storage gains no `is_normal` flag. Shared reflection converts
+canonical Symbol keys back to their observable identities. Native typed arrays
+and host iterators use the active MVP realm's intrinsic prototype identities
+(D3.4.4v4, D3.4.7, D6.2.2v2).
+
+A lazy descriptor read can publish an entire host family and relocate Map
+storage. `DefineOwnProperty` now refreshes its shape entry and rooted descriptor
+operands after that publication, before deciding compatibility or writing.
+Native iterator caching previously appended to the shared MVP iterator shape:
+the first iterator succeeded, but a fresh iterator read an empty cached `next`
+slot. Native writes now retain MVP shape ownership, and iterator caches use an
+unforgeable private key through the existing private-slot operations. Caching
+preserves the next-method snapshot without exposing keys or invoking guest
+cache properties, proxy traps or extensibility checks (D3.4.3v5, D5.3/D5.4).
+
+Public Runtime timers reuse native Timeout handles, coercion and cancellation;
+standalone benchmark hosts retain numeric handles. DOM string handlers reuse
+the shared scheduling/coercion policy and execute classic source through the
+retained AST interpreter in the active realm. Timeout construction precisely
+roots each unpublished handle and method. Window messaging/listeners use the
+existing DOM EventTarget service; they no longer require an initialized Radiant
+script API (D5.3/D5.4, D8.1.3v25).
+
+Source classes can extend native host constructor wrappers through their
+existing construct/newTarget protocol. Lambda nominal ancestry is retained
+separately from mutable JS constructor/prototype links; native factories keep
+their physical brands. Internal Blob creation materializes the shared private
+prototype before the public binding is read and preserves user overrides
+(D2.6.9v3, D3.4, D6.2.2v2).
+
+New helpers announced before coding: `js_install_host_global_group`,
+`js_materialize_host_global_group`, `mvp_lmd_import_host_property`,
+`mvp_lmd_owns_properties`, `js_ensure_host_global_family`, and
+`js_iterator_next_cache`. Existing `js_timer_normalize_handler` and
+`js_module_create_require` were promoted for reuse. No vendor, Test262 runner,
+metadata, golden or baseline changes hide integration failures.
+
+The `host36` checkpoint passes 751/751 MVP units, 84/84 focused checks normally
+and with forced/poisoned GC, and all 42 selected host fixtures. Its canonical
+property/Function slice records 1,758/1,775 passing, with exactly the same 17
+failures as `host24`. These selected results do not revise the earlier complete
+fixture diagnostic or establish whole-baseline/performance acceptance.
+The callable census reports 38 builtin semantic switch cases on both HEAD
+and this candidate; the pre-existing ratchet failure is retained. The exception
+catalog reports zero violations.
+
+
+The host follow-up also routes `for…in` on native virtual collections through
+the existing foreign own-key, descriptor and prototype operations. The ordinary
+MVP no-callback proof excludes those objects; iteration and live-key checks
+otherwise retain the same algorithm (D3.4.7, D6.2.2v2).
+
+`createRequire` now retains its filename in the shared native closure layout;
+`js_require_at` reuses the existing document/file resolver and loader policy.
+CommonJS metadata publishes a per-module require function and the wrapper
+captures it, so nested and escaped requires keep their source directory and
+cache identity. `mvp_lmd_program_reference` exposes the retained unit reference
+for the public lazy binding. These two helpers were announced before coding.
+The original `dynamic_adapter_span` fixture then exposed a separate planning
+bug: an early single-host intrinsic allocated the host span without assigning
+its siblings' slot indices. Public realm planning now indexes the complete
+span before global publication (D5.3, D6.2.2v2, D8.1.3v25).
+
+
+The retained AST does not receive the new formal-only lazy require binding;
+its existing unbound-identifier resolver remains active. The integrated
+Script check caught that interaction and now returns to its prior 198/205
+result on `host42`. The same pin passes 753/753 MVP units, 86/86 focused normal
+and forced/poisoned-GC checks, all 44 selected host fixtures, and 24/32 previously
+failing small fixtures. Its 2,382-case canonical property/Function/Date/Array
+iterator slice records 2,365 passing and the same 17 pre-existing failures,
+with no crashes or timeouts. Source hashes and exact commands are retained
+under `temp/js_formal_mir_20261016/host42/`.
+
+The remaining small replay failures are two agent-state entries, the two
+Lambda-source import cases, custom-element construction, direct eval with
+object environments, and the CSS/large-JSON legacy contract cases. This is a
+selected replay, not a new complete fixture or Test262 recount. Large-library
+compilation/execution, AUTO publication, frontend overlays, the Unicode target,
+full baseline closure and performance acceptance remain open.
+
+The static method Function-source follow-up reuses `js_function_source_span`,
+the same semantic helper used by the retained interpreter. MVP previously
+copied the class member's whole span, including `static` and leading comments.
+Class constructors still expose their complete class source; other functions
+share the existing method-span policy. No new helper is introduced
+(D6.2.2v2, D8.1.3v25).
+
+
+`host43` passes all 12 formerly failing static-method source cases; its complete
+80-case canonical Function-toString slice records 79 passing and one native
+source failure. That final failure reports `function $&() { [native code] }`
+for the RegExp `$&` getter. The existing `js_regexp_name_is_identifier` helper
+is promoted for shared NativeFunction source validation. Valid constructor
+names retain their text; names that cannot form an IdentifierName use the
+existing anonymous native-function spelling, without changing `.name` or
+property identity (D6.2.2v2).
+
+
+Final runtime pin `host44` has SHA-256
+`2af5b05da20fd6d286f010c4882e7ff26df8ef6bc8dec3cb813f7097a591ea6b`.
+Its 2,941 production input fingerprints and verification input hashes remain
+unchanged. The latest runtime gates are recorded at the top of the table.
+The earlier `host40` Script diagnostic briefly added an AST CommonJS failure;
+`host42` and `host44` restore that case through the formal-only binding policy.
+No benchmark timing was run.
+
+
+`host44` records 2,378/2,382 passing in the same canonical slice: all 13
+Function-source failures are repaired, leaving two boxed loose-equality and two
+function-enumeration admission failures. Their follow-up exposes the existing
+retained-interpreter binary operation as `mvp_lmd_dynamic_binary` and uses it
+only after primitive, nullish and object-identity equality paths. The MIR
+import declares reentry and precise Item operands. Function enumeration calls
+the existing callable preparation helper before reading its own storage;
+non-enumerable inherited accessors remain unread (D5.3/D5.4, D6.2.2v2,
+D8.1.3v25). The helper promotion was announced before coding.
+
+
+Latest release pin `host45` has SHA-256
+`b1b1f255a852d0bc937318724d837bc2a1ace758829b94055d7cdd3086c48d6c`.
+Its 2,941 production fingerprints and verification input hashes remain
+unchanged. All 2,382 cases in the selected canonical slice pass, including
+all four final admission failures; normal/forced-GC, runtime fixture and
+isolated Script results are recorded in the table. Full Lambda/Test262/JS
+baseline closure, the remaining host/environment/library work and performance
+acceptance remain open. Benchmark timing remains deferred.

@@ -3,6 +3,7 @@
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_host_hooks.h"
 #include "../js_source_module.hpp"
 #include "../js_typed_array.h"
 #include "../../runtime/lambda-root-frame.hpp"
@@ -751,6 +752,23 @@ Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescript
     // fresh dense arrays have no attribute shape for the shared accessor installer to clone.
     if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
     ShapeEntry* old = map->type ? own_field(map, key.get().get_string()) : NULL;
+    JsPropertyDescriptor current = {};
+    Item current_status = {.item = ITEM_FALSE};
+    if (old) {
+        TypeMap* previous_type = (TypeMap*)map->type;
+        current_status = mvp_lmd_get_own_property(object.get(), key.get(), &current);
+        if (item_is_error(current_status)) return current_status;
+        Map* live = mvp_lmd_property_map(object.get());
+        // lazy descriptor publication can relocate storage and change field offsets.
+        if (live != map || live->type != previous_type) {
+            map = live;
+            old = map && map->type ? own_field(map, key.get().get_string()) : NULL;
+        }
+        converted.value = Item{.item = *values[2]};
+        converted.getter = getter.get(); converted.setter = setter.get();
+        if (!mvp_lmd_descriptor_compatible(true, &converted,
+                current_status.item == ITEM_TRUE ? &current : NULL)) return Item{.item = ITEM_FALSE};
+    }
     if (!old) {
         Item allowed = mvp_lmd_object_extensible(owner, false);
         if (item_is_error(allowed)) return allowed;
@@ -767,13 +785,6 @@ Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescript
         if (mvp_lmd_truthy(Item{.item = *values[indices[i]]})) flags &= ~bits[i]; else flags |= bits[i];
     }
     Item value = {.item = *values[2]};
-    if (old) {
-        JsPropertyDescriptor current = {};
-        Item status = mvp_lmd_get_own_property(object.get(), key.get(), &current);
-        if (item_is_error(status)) return status;
-        if (!mvp_lmd_descriptor_compatible(true, &converted, status.item == ITEM_TRUE ? &current : NULL))
-            return Item{.item = ITEM_FALSE};
-    }
     auto finish = [&]() -> Item {
         Item cell = mvp_lmd_arguments_cell(object.get(), key.get().get_string());
         if (get_type_id(cell) == LMD_TYPE_ARRAY) {
@@ -1339,7 +1350,8 @@ static bool for_in_own_keys_suffice(Item owner) {
     for (bool ancestor = false;; ancestor = true) {
         TypeId kind = get_type_id(owner);
         // this proof cannot prepare a function or invoke a proxy while inspecting links.
-        if ((kind != LMD_TYPE_MAP && kind != LMD_TYPE_ARRAY) || mvp_lmd_is_proxy(owner)) return false;
+        if ((kind != LMD_TYPE_MAP && kind != LMD_TYPE_ARRAY) || mvp_lmd_is_proxy(owner) ||
+                mvp_lmd_foreign_candidate(owner)) return false;
         Map* map = mvp_lmd_property_map(owner);
         if (!map) return false;
         if (ancestor) {
@@ -1387,10 +1399,16 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     }
     TypeId type = get_type_id(owner);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC &&
-            !(type == LMD_TYPE_VMAP && js_promise_is(owner))) return result.get();
+            !(type == LMD_TYPE_VMAP && js_promise_is(owner)) &&
+            !(is_virtual_container_type_id(type) && js_host_object_type(owner))) return result.get();
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     bool statics = type == LMD_TYPE_FUNC;
-    if (statics) {
+    if (statics && !mvp_lmd_foreign_candidate(owner)) {
+        if (!cls) {
+            Item ready = mvp_lmd_function_prepare(object.get());
+            if (item_is_error(ready)) return ready;
+            cls = mvp_lmd_class_record(object.get());
+        }
         if (!cls) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         object.set(mvp_lmd_class_values(cls)[2]);
     }

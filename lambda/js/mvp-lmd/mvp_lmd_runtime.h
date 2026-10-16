@@ -30,6 +30,7 @@ struct MvpLmdHostState {
     Item* timers;                // optional timer functions in separately registered program slots
     Item* global;                // borrowed registered global receiver cell
     FILE* output;
+    bool native_timers;
 };
 Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
     TypeMap* shape, const MvpLmdHost* host);
@@ -107,6 +108,19 @@ static inline bool mvp_lmd_foreign_candidate(Item value) {
         (value.function->entry_abi == FN_ENTRY_ABI_MVP_LMD && value.function->requires_runtime_context &&
             ((MvpLmdCallable*)value.function)->foreign_properties);
     return is_virtual_container_type_id(type);
+}
+extern const TypeNominalExtension mvp_lmd_plain_extension;
+extern const TypeNominalExtension mvp_lmd_class_extension;
+// native ingress must follow the owner's ABI/shape instead of casting its private tail.
+static inline bool mvp_lmd_owns_properties(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_FUNC) return function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD);
+    if (type == LMD_TYPE_MAP) {
+        TypeNominal* nominal = ((TypeMap*)value.map->type)->nominal;
+        return nominal && (nominal->extension == &mvp_lmd_plain_extension ||
+            nominal->extension == &mvp_lmd_class_extension);
+    }
+    return type == LMD_TYPE_ARRAY && !mvp_lmd_foreign_candidate(value);
 }
 Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
     const char* name = NULL);
@@ -225,7 +239,7 @@ enum MvpLmdInternalName {
     LMD_INTERNAL_REGEXP_SOURCE, LMD_INTERNAL_REGEXP_FLAGS,
     LMD_INTERNAL_REGEXP_ITERATOR, LMD_INTERNAL_REGEXP_ITERATOR_STRING,
     LMD_INTERNAL_REGEXP_ITERATOR_GLOBAL, LMD_INTERNAL_REGEXP_ITERATOR_UNICODE,
-    LMD_INTERNAL_REGEXP_ITERATOR_DONE, LMD_INTERNAL_NAME_COUNT
+    LMD_INTERNAL_REGEXP_ITERATOR_DONE, LMD_INTERNAL_ITERATOR_NEXT, LMD_INTERNAL_NAME_COUNT
 };
 NameRef mvp_lmd_internal_name(MvpLmdInternalName name);
 extern __thread MvpLmdLibraryState* mvp_lmd_foreign_library;
@@ -275,6 +289,7 @@ Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program);
 Item mvp_lmd_constructor_prototype(Item target, Item intrinsic);
 Item mvp_lmd_host_task(Item callback, Item receiver, Item arguments);
 MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program = NULL);
+const char* mvp_lmd_program_reference(MvpLmdProgram* program);
 struct MvpLmdBuiltinMethod { const char* name; TypeId owner; int id; uint8_t arity = 1; };
 extern const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[];
 extern const int mvp_lmd_builtin_method_count;
@@ -334,8 +349,6 @@ extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item val
 Item mvp_lmd_object_create(MvpLmdProgram* program, Item prototype);
 Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback);
 Item mvp_lmd_box_primitive(Item value, Item prototype = Item{.item = ITEM_JS_UNDEFINED});
-extern const TypeNominalExtension mvp_lmd_plain_extension;
-extern const TypeNominalExtension mvp_lmd_class_extension;
 MvpLmdClass* mvp_lmd_class_record(Item owner);
 enum MvpLmdFailure { LMD_MVP_CAPABILITY, LMD_MVP_REFERENCE, LMD_MVP_TYPE,
     LMD_MVP_RANGE, LMD_MVP_MEMORY, LMD_MVP_SYNTAX };

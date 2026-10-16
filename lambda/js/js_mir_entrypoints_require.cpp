@@ -2224,6 +2224,11 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (get_type_id(module) != LMD_TYPE_MAP) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, module), path(roots, filename), bound_require(roots, js_module_create_require(filename));
+    JS_RETURN_IF_ERROR(bound_require.get());
+    JS_RETURN_IF_ERROR(js_set_key_cstr(owner.get(), "require", bound_require.get()));
     js_set_key_default(module, js_cjs_key("id", (int)strlen("id")), filename);
     js_set_key_default(module, js_cjs_key("filename", (int)strlen("filename")), filename);
     js_set_key_default(module, js_cjs_key("loaded", (int)strlen("loaded")), (Item){.item = ITEM_FALSE});
@@ -2336,7 +2341,8 @@ static char* js_wrap_cjs_source_with_suffix(const char* source,
         "var module = __cjs_module__;\n"
         "var __filename = \"%s\";\n"
         "var __dirname = \"%.*s\";\n"
-        "__lambda_cjs_enter(__cjs_module__, __filename);\n";
+        "__lambda_cjs_enter(__cjs_module__, __filename);\n"
+        "var require = module.require;\n";
     size_t src_len = strlen(source);
     size_t prefix_size = strlen(prefix_fmt) + strlen(filename_buf) + dir_len + 64;
     size_t total = prefix_size + src_len + strlen(suffix) + 1;
@@ -2363,6 +2369,23 @@ static char* js_wrap_cjs_source_for_ast(const char* source, const char* filename
         "\n__lambda_cjs_complete(__cjs_module__);\n"
         "__lambda_cjs_leave(__cjs_module__);\n"
         "__cjs_module__.exports;\n");
+}
+
+extern "C" Item js_require_at(Item specifier, const char* reference) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, specifier);
+    if (!reference || reference[0] == '<' || get_type_id(source.get()) != LMD_TYPE_STRING)
+        return js_require(source.get());
+    Item builtin = js_module_get_builtin(source.get());
+    if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
+    String* text = source.get().get_string();
+    char resolved[2048];
+    // use the same document/file resolution and resource policy as ES module requests.
+    js_resolve_script_module_path(js_current_runtime(), reference, text->chars, text->len,
+        resolved, sizeof(resolved));
+    source.set(js_name_item(resolved));
+    return item_is_error(source.get()) ? source.get() : js_require(source.get());
 }
 
 extern "C" Item js_require(Item specifier) {

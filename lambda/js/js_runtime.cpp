@@ -11,6 +11,7 @@
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_router_scanner.h"
+#include "js_regexp_compile.h"
 #include "js_state_guards.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
@@ -819,7 +820,8 @@ static inline Item js_native_function_source_item() {
 }
 
 Item js_named_native_function_source_item(const String* name) {
-    if (!name || name->len == 0) return js_native_function_source_item();
+    // names such as RegExp's $& accessor cannot appear as NativeFunction identifiers.
+    if (!name || !js_regexp_name_is_identifier(name->chars, name->len)) return js_native_function_source_item();
     // Native constructor source must retain its callable identity: libraries
     // compare this text to distinguish Object, DataView, and other builtins.
     StrBuf* source = strbuf_new_cap((size_t)name->len + JS_NATIVE_FUNCTION_SOURCE_LEN);
@@ -5153,7 +5155,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (receiver_root.get().item == 0) receiver_root.set(object);
     receiver = receiver_root.get();
     TypeId type = get_type_id(object);
-    if (type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) {
+    if ((type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) ||
+            (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
         // D6.2.2v2: host callers must not read the legacy callable tail.
         key_root.set(mvp_lmd_property_key(key));
         return item_is_error(key_root.get()) ? key_root.get() :
@@ -27771,6 +27774,8 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+        return mvp_lmd_get_prototype(object);
     if (get_type_id(object) == LMD_TYPE_ERROR || js_is_resting_error(object)) {
         // LambdaError stores ordinary properties in a side map. A custom
         // NewTarget prototype must win over the intrinsic class fallback;
@@ -27850,6 +27855,8 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_object_get_prototype_chain(Item object) {
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+        return mvp_lmd_get_prototype(object);
     TypeId object_type = get_type_id(object);
     if (is_virtual_container_type_id(object_type) && js_host_object_type(object)) {
         // Host virtual containers have no ordinary __proto__ slot; prototype-chain reads
@@ -27918,6 +27925,14 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
     proto_root.set(js_object_get_prototype_chain(object_root.get()));
     while (proto_root.get().item != ItemNull.item) {
         Item proto = proto_root.get();
+        if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(proto)) {
+            // the MVP chain owns both accessor receivers and its terminal absence.
+            if (out_found) *out_found = true;
+            property_root.set(mvp_lmd_property_key(property_root.get()));
+            return item_is_error(property_root.get()) ? property_root.get() :
+                mvp_lmd_property_with_receiver(proto_root.get(), property_root.get(),
+                    ItemNull, LMD_PROP_GET, receiver_root.get());
+        }
         TypeId pt = get_type_id(proto);
         if (pt == LMD_TYPE_FUNC) {
             JsFunction* proto_fn = (JsFunction*)proto.function;
@@ -29054,6 +29069,9 @@ static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
 }
 
 extern "C" Item js_get_iterator_proto() {
+    MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
+    if (library && library->iterator_base_values &&
+            get_type_id(library->iterator_base_values[1]) == LMD_TYPE_MAP) return library->iterator_base_values[1];
     if (!js_iterator_state_ensure_roots()) return ItemNull;
     if (js_iterator_proto_cache.item != 0 &&
         get_type_id(js_iterator_proto_cache) == LMD_TYPE_MAP) {
@@ -29184,8 +29202,30 @@ Item js_check_array_sym_iterator() {
 }
 
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
-static Item js_iterator_cache_next_method(Item iterator) {
-    JS_ROOTS(roots, iterator_root, iterator, next_root, ItemNull);
+static Item js_iterator_next_cache(Item iterator, Item next, bool write) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, iterator), method(roots, next);
+    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(owner.get())) {
+        NameRef name = mvp_lmd_internal_name(LMD_INTERNAL_ITERATOR_NEXT);
+        if (!name) return ItemError;
+        Item key = {.item = s2it(name)};
+        Item present = mvp_lmd_private_element(owner.get(), key, ItemNull, LMD_PRIVATE_HAS);
+        if (item_is_error(present)) return present;
+        // engine-owned state bypasses guest extensibility, getters and proxy traps.
+        return !write && present.item == ITEM_FALSE ? make_js_undefined() :
+            mvp_lmd_private_element(owner.get(), key, method.get(), !write ? LMD_PRIVATE_GET :
+                present.item == ITEM_TRUE ? LMD_PRIVATE_SET : LMD_PRIVATE_ADD);
+    }
+    if (write) return js_set_name_key(owner.get(), "__iter_next__", 13, method.get());
+    bool found = false;
+    Item value = get_type_id(owner.get()) == LMD_TYPE_MAP
+        ? js_map_shape_lookup(owner.get().map, "__iter_next__", 13, &found) : ItemNull;
+    return found ? value : make_js_undefined();
+}
+
+static Item js_iterator_cache_next_method(Item iterator, Item supplied = ItemError) {
+    JS_ROOTS(roots, iterator_root, iterator, next_root, supplied);
     // A freshly returned iterator may have no published owner yet; keep it
     // exact while property lookup and cache publication can trigger GC.
     iterator = iterator_root.get();
@@ -29202,12 +29242,13 @@ static Item js_iterator_cache_next_method(Item iterator) {
         // hot-reload test262 batches as TypedArray construction failures.
         return ItemNull;
     }
-    next_root.set(js_get_key_cstr(iterator_root.get(), "next"));
+    if (next_root.get().item == ITEM_ERROR)
+        next_root.set(js_get_key_cstr(iterator_root.get(), "next"));
     if (item_is_error(next_root.get())) return next_root.get();
     if (!js_is_callable(next_root.get())) {
         return js_throw_type_error("iterator next is not a function");
     }
-    Item set_result = js_set_name_key(iterator_root.get(), "__iter_next__", 13, next_root.get());
+    Item set_result = js_iterator_next_cache(iterator_root.get(), next_root.get(), true);
     return item_is_error(set_result) ? set_result : ItemNull;
 }
 
@@ -29298,8 +29339,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
         Item next_fn = js_get_key_default(iterable, (Item){.item = s2it(next_key)});
         if (js_is_callable(next_fn)) {
             if (cache_next) {
-                Item cache_key = js_name_item("__iter_next__", 13);
-                JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(iterable, cache_key, next_fn));
+                JS_RETURN_IF_ERROR(js_iterator_cache_next_method(iterable, next_fn));
             }
             return iterable;
         }
@@ -29624,11 +29664,9 @@ extern "C" Item js_iterator_step(Item iterator) {
 
     // Generic iterator: call .next()
     if (get_type_id(iterator_root.get()) == LMD_TYPE_MAP || get_type_id(iterator_root.get()) == LMD_TYPE_ELEMENT) {
-        bool found_cached = false;
-        if (get_type_id(iterator_root.get()) == LMD_TYPE_MAP) {
-            next_fn_root.set(js_map_shape_lookup(iterator_root.get().map, "__iter_next__", 13, &found_cached));
-        }
-        if (!found_cached) {
+        next_fn_root.set(js_iterator_next_cache(iterator_root.get(), ItemNull, false));
+        if (item_is_error(next_fn_root.get())) return next_fn_root.get();
+        if (next_fn_root.get().item == ITEM_JS_UNDEFINED) {
             source_root.set(js_name_item("next", 4));
             next_fn_root.set(js_get_key_default(iterator_root.get(), source_root.get()));
             if (item_is_error(next_fn_root.get())) return next_fn_root.get();
@@ -33345,9 +33383,18 @@ extern "C" Item js_module_is_builtin(Item id) {
 }
 
 extern "C" Item js_module_create_require(Item filename) {
-    // createRequire(filename) — returns a require function bound to that path
-    // For simplicity, return the global js_require function
-    return js_new_native_function(js_require);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, filename);
+    Item* environment = js_alloc_env(1);
+    if (!environment) return ItemError;
+    environment[0] = source.get();
+    // captured paths remain live for requires called after their source unit returns.
+    return js_new_native_closure([](Item env_item, Item specifier) -> Item {
+        Item filename = ((Item*)(uintptr_t)env_item.item)[0];
+        return js_require_at(specifier, get_type_id(filename) == LMD_TYPE_STRING
+            ? filename.get_string()->chars : NULL);
+    }, 1, environment, 1);
 }
 
 // =============================================================================

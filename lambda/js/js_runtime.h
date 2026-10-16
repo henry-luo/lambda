@@ -1349,7 +1349,8 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 // globalThis / global object
 Item js_get_global_this(void);
 // the writer installs a lazy own slot; each engine keeps its ordinary storage policy.
-Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item), bool constructors);
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors);
+Item js_ensure_host_global_family(const char* name);
 bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
@@ -1833,6 +1834,8 @@ Item js_get_import_meta();
  * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
  */
 Item js_require(Item specifier);
+Item js_require_at(Item specifier, const char* reference);
+Item js_module_create_require(Item filename);
 Item js_dynamic_import(Item specifier);
 Item js_dynamic_import_at(Item specifier, const char* reference);
 Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj, Item result_promise);

@@ -20,6 +20,7 @@ struct MvpLmdHost {
     const char* const* argv;
     FILE* output;
     bool test262 = false;       // require the real $DONE completion flag for async jobs
+    bool native_timers = false; // public hosts expose the shared Timeout objects
 };
 
 struct MvpLmdOptions {
