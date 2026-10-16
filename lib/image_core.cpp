@@ -35,10 +35,11 @@ static const ImageCodec image_codecs[] = {
      image_webp_probe,
      image_webp_decode,
      image_webp_encode},
-    {{"avif", "image/avif", true, true, false, false, false},
+    // the bundled AV1 backend is decoder-only.
+    {{"avif", "image/avif", true, false, false, false, false},
      image_avif_probe,
      image_avif_decode,
-     image_avif_encode},
+     NULL},
     {{"bmp", "image/bmp", true, true, false, false, false},
      image_bitmap_probe,
      image_bitmap_decode,

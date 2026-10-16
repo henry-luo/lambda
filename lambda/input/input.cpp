@@ -342,11 +342,11 @@ static ShapeEntry* clone_shape_chain_for_transition(TypeAlloc alloc, TypeMap* pa
 // generic map writers append ShapeEntry nodes, so detach before mutating a
 // shared shape; otherwise one object can leak fields or slot metadata into
 // sibling objects and cause order-dependent Node baseline regressions.
-TypeMap* map_clone_typemap_for_mutation(Map* mp, Pool* pool) {
+TypeMap* map_clone_typemap_for_mutation(Map* mp, Pool* pool, bool force) {
     if (!mp || !pool) return NULL;
     TypeMap* tm = (TypeMap*)mp->type;
     if (!tm) return NULL;
-    if (tm->is_private_clone) return tm;
+    if (tm->is_private_clone && !force) return tm;
 
     TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!clone) return NULL;

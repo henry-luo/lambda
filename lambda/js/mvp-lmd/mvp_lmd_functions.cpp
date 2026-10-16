@@ -7,6 +7,7 @@
 #include "../js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_function.hpp"
 #include "../../input/input.hpp"
 #include "../../../lib/mem.h"
 #include <math.h>
@@ -20,6 +21,12 @@ Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program) {
             if (!data || data->revoked) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             function.item = data->target;
             continue;
+        }
+        if (get_type_id(function) == LMD_TYPE_FUNC && function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION)) {
+            MvpLmdLibraryState* library = mvp_lmd_program_library();
+            *program = library ? mvp_lmd_program_for_global(library->object.program,
+                ((JsFunction*)function.function)->home_global) : NULL;
+            return ItemNull;
         }
         if (get_type_id(function) != LMD_TYPE_FUNC ||
                 function.function->entry_abi != FN_ENTRY_ABI_MVP_LMD ||

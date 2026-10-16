@@ -6,6 +6,9 @@
 extern "C" {
 #endif
 
+// shared IdentifierName validation also serves native function source spelling.
+bool js_regexp_name_is_identifier(const char* name, int name_len);
+
 typedef struct JsRegExpCompileInfo {
     bool has_indices;
     bool global;

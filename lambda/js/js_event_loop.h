@@ -83,6 +83,9 @@ int  js_animation_frame_drain(int max_frames);
 // =============================================================================
 
 // numeric handles share the existing timer/resource owner without foreign nominal objects.
+// hosts can retain their source evaluator and coercion policy for HTML string handlers.
+Item js_timer_normalize_handler(Item handler, Item (*to_string)(Item),
+    Item (*source_task)(Item, void*), void* source_owner);
 Item js_schedule_timer(Item callback, Item delay, Item args_array,
     bool has_args, bool is_interval, bool numeric_handle);
 Item js_setTimeout(Item callback, Item delay);

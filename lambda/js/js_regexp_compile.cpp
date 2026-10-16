@@ -183,7 +183,7 @@ static bool js_regexp_same_name(const JsRegExpNameRef* a, const char* b, int b_l
     return a && a->len == b_len && memcmp(a->name, b, b_len) == 0;
 }
 
-static bool js_regexp_name_is_identifier(const char* name, int name_len) {
+bool js_regexp_name_is_identifier(const char* name, int name_len) {
     if (!name || name_len <= 0) return false;
 
     int i = 0;

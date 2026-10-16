@@ -462,6 +462,12 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     int kind = error->code == ERR_TYPE_MISMATCH ? LMD_ERROR_TYPE :
         error->code == ERR_UNDEFINED_VARIABLE ? LMD_ERROR_REFERENCE :
         (error->code == ERR_INDEX_OUT_OF_BOUNDS || error->code == ERR_STACK_OVERFLOW) ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
+    String* host_name = get_type_id(Item{.item = error->js_name_item}) == LMD_TYPE_STRING
+        ? Item{.item = error->js_name_item}.get_string() : NULL;
+    const char* host_class = js_class_to_name((JsClass)error->js_class_id);
+    if (host_class) for (int i = 0; i < LMD_ERROR_COUNT; i++) {
+        if (!strcmp(host_class, mvp_lmd_error_names[i])) { kind = i; break; }
+    }
     if (!state->errors) return carrier;
     const char* message = error->code == ERR_STACK_OVERFLOW
         ? "Maximum call stack size exceeded" : error->message ? error->message : "";
@@ -473,6 +479,13 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     object.set(error_construct(context, cls->program, &argument, 1,
         mvp_lmd_class_values(cls)[0], ItemNull, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(object.get())) return object.get();
+    // shared host errors carry their JS class/name independently of the Lambda code.
+    if (host_name && ((error->js_own_flags & JS_ERROR_OWN_NAME) ||
+            host_name->len != strlen(mvp_lmd_error_names[kind]) ||
+            memcmp(host_name->chars, mvp_lmd_error_names[kind], host_name->len))) {
+        Item status = mvp_lmd_named_set(object.get(), "name", Item{.item = error->js_name_item}, JSPD_NON_ENUMERABLE);
+        if (item_is_error(status)) return status;
+    }
     // Preserve Error identity if the same carrier crosses another catch boundary.
     if (!error->is_static) error->thrown_value_item = object.get().item;
     return object.get();
@@ -695,29 +708,17 @@ static Item json_stringify(Context*, MvpLmdProgram*, Item* args, uint64_t count,
 }
 
 static Item date_now(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
-    return push_d((double)datetime_now_ms());
+    return push_d(js_date_number_to_double(js_date_now()));
 }
 static const JsDateOps date_ops = {
     [](Item value) { return mvp_lmd_primitive_to_number(value); },
-    [](Item owner, bool* found) {
-        MvpLmdLibraryState* state = mvp_lmd_program_library();
-        ShapeEntry* field = state && state->date_key && get_type_id(owner) == LMD_TYPE_MAP && !mvp_lmd_is_proxy(owner)
-            ? typemap_hash_lookup_key((TypeMap*)owner.map->type, state->date_key) : NULL;
-        *found = field != NULL;
-        return field ? map_shape_field_to_item(owner.map->data, field) : ItemNull;
-    },
-    [](Item owner, double ms) {
-        // internal slots remain writable on frozen Dates and cannot be forged by public properties.
-        Item value = push_d(ms);
-        return map_shape_set(owner.map, mvp_lmd_program_library()->date_key, value)
-            ? push_d(ms) : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    },
+    js_date_get_time_value, js_date_store_time_value,
     [](bool range, const char*) { return mvp_lmd_fail(range ? LMD_MVP_RANGE : LMD_MVP_TYPE, 0); }
 };
 
 static Item date_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
     if (target.item == ITEM_JS_UNDEFINED) {
-        double now = (double)datetime_now_ms();
+        double now = js_date_number_to_double(js_date_now());
         // the shared formatter needs a branded receiver; the constructor call ignores all arguments.
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
@@ -733,7 +734,8 @@ static Item date_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count,
     uint64_t homes[7] = {};
     for (uint64_t i = 0; i < count && i < 7; i++) inputs[i].set(lambda_item_adopt_scalar_home(args[i], &homes[i]));
     Rooted<Item> actual_target(roots, target), prototype(roots, ItemNull), object(roots, ItemNull);
-    double value = (double)datetime_now_ms();
+    // no-argument construction follows the same host frame clock as Date.now().
+    double value = count ? NAN : js_date_number_to_double(js_date_now());
     if (count == 1) {
         bool branded = false;
         Item stored = date_ops.read(inputs[0].get(), &branded);
@@ -828,8 +830,6 @@ static Item date_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, It
 
 Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!state->date_observed) return ItemNull;
-    state->date_key = mvp_lmd_internal_name(LMD_INTERNAL_DATE);
-    if (!state->date_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     ((MvpLmdCallable*)state->date.values[0].function)->custom_new_target = true;
     Item result = mvp_lmd_named_set(state->date.values[1], "constructor", state->date.values[0], JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;

@@ -62,7 +62,7 @@ without a full-page pixel allocation or a second libpng error path.
 | `lib/image/giflib` | 5.2.2 | GIF read/compositing |
 | `lib/image/libwebp` | 1.6.0 | WebP read/write |
 | `lib/image/libavif` | 1.3.0 | AVIF container/color conversion |
-| `lib/image/libaom` | 3.12.1 | One AV1 decode/encode backend |
+| `lib/image/libaom` | 3.12.1 | One decoder-only AV1 backend |
 | `lib/image/libtiff` | 4.7.1 | TIFF read/write |
 | `lib/image/libnsbmp` | 0.1.7 | BMP/ICO DIB reading |
 
@@ -100,11 +100,92 @@ SSE2/SSE4.1, with portable JPEG and AV1 routines; that profile's runtime
 performance has not been measured. Minimal AVIF libyuv scaling remains as a
 required internal fallback. All eight formats and the thumbnail APIs remain.
 
+### Decoder-only AVIF profile (2026-10-16)
+
+The byte codec remains context-free in `lib`, as required by **D7.1.2v2**.
+The reduced profile is declared in `build_lambda_config.json`; no additional
+dependency or upstream source edit is required. The pinned libaom 3.12.1 decoder source lists were independently
+checked against upstream configuration: 125 files on ARM64, including 56 ARM
+SIMD files, and 68 portable files for the generic profile. Removing 158
+encoder-side libaom files and libavif's writer reduces the complete ARM64 image
+target from 562 to 403 translation units.
+
+Both generated AOM profiles set `CONFIG_AV1_ENCODER=0` and retain
+`CONFIG_AV1_DECODER=1` and high-bit-depth decoding. ARM64 retains runtime CPU
+dispatch. libavif defines only `AVIF_CODEC_AOM_DECODE`; its encode macro is
+absent because the upstream adapter tests whether that macro is defined.
+The original decoder-only profile used `-Os` file rules for libaom/libavif.
+The subsequent size profile below applies size optimization to the whole
+image target. The normal build uses the existing static image archive.
+
+The common registry advertises AVIF as readable and not writable. Its existing
+read-only dispatch returns `codec_unavailable` for AVIF output, preserving the
+ordinary codec-error channel (**S7.4.4**). The unused native AVIF writer and
+libavif writer translation unit are excluded. Stored lossless AVIF fixtures
+retain alpha, 10-bit input, and all 12 rotation/mirror cases without linking an
+encoder into tests. Thumbnail fallback and chunked-reader coverage still
+include AVIF.
+
+The original image suite passed 27/27 before the change; the decoder-only suite
+passes 28/28. The Lambda image I/O fixture matches its updated golden, and the
+Premake generator self-test passes. The macOS ARM64 release decreases from
+30,052,632 to 25,853,448 bytes (28.66 to 24.66 MiB), saving 4,199,184 bytes
+(4.00 MiB). The eight-format gallery renders to a byte-identical PNG before
+and after the change. A minimal static libaom/libavif decoder executable is
+1,243,640 bytes (1.19 MiB) and produces the same sample pixels as the measured
+dav1d decoder; its only dynamic dependency is the macOS system library.
+The generic source list was checked against upstream, but Linux
+and Windows binaries have not been built for this change. Evidence is under
+`temp/aom-decode-only/`.
+
 The earlier source cleanup removed 805 files / roughly 17 MB from `lib/image/`.
 Build recipes have since been deleted entirely rather than relocated. Licenses,
 patent notices, copyright attributions, and provenance records remain, including
 JPEG's required `README.ijg`. No formal ruling changes are introduced
 (**D7.1.1–D7.1.3**, **D7.1.6–D7.1.7v6**).
+
+### Size-optimized image and reduced TIFF profile (2026-10-16)
+
+The user authorized implementation of the image build optimization and explicit
+JPEG12-in-TIFF exclusion. `lambda-image-codecs` now requests `optimize: Size`;
+the generated Clang release flags use `-Os`. The redundant libaom/libavif-only
+file rule is removed. Per-source SIMD flags, runtime CPU dispatch, LTO, and
+dead stripping remain enabled.
+
+JSON excludes `tif_jpeg_12.c`, `tif_luv.c`, `tif_pixarlog.c`, `tif_next.c`, and
+`tif_thunder.c`, and omits their enabling feature definitions. The image target
+has 398 ARM64 or 333 macOS x86_64 translation units, with 32 TIFF sources.
+All codec objects and the archive were rebuilt to prevent stale ar members.
+Ordinary 8-bit TIFF JPEG, Deflate, LZW, PackBits, and CCITT Fax remain enabled.
+
+JPEG12-in-TIFF serves specialist GeoTIFF workflows, but Lambda's existing
+RGBA strip/tile path rejects 12-bit samples. The public TIFF writer emits
+8-bit Deflate. The wrapper now reports `unsupported_feature` before pixel
+allocation for JPEG12; metadata probing remains available. This keeps the
+codec mechanism in `lib` (**D7.1.2v2**) and makes the unsupported subset
+explicit through rich checked-channel diagnostics (**S7.4.4**).
+
+The stored 32 by 24 JPEG12 grayscale fixture was generated using the original
+libtiff 4.7.1/libjpeg-turbo 3.1.2 backend. It successfully reads as packed
+12-bit scanlines in that backend and is rejected by its RGBA reader. A new
+image GTest checks ordinary 8-bit JPEG strips/tiles, metadata for this fixture,
+and the explicit pixel-decode error. The full image suite passes 29/29; the
+Lambda image golden and rendered gallery PNG remain byte-identical. All 23
+GIF player tests, the Premake generator self-test, and the 274-symbol
+host-export check pass.
+
+The macOS ARM64 release decreases from 25,853,448 to 25,242,584 bytes
+(24.66 to 24.07 MiB), saving 610,864 bytes (0.58 MiB). Five alternating release
+benchmark trials with eight iterations per operation on a deterministic
+768 by 512 RGB image show median after/before times from 0.999x to 1.043x
+across PNG/JPEG/WebP/TIFF encode, decode, and thumbnails. Encoded sizes and
+decoded checksums match. This is one synthetic workload; Linux/Windows and
+full engine aggregates were not run for this build-only profile.
+
+The full inventory, GeoTIFF references, measurements, and remaining AOM/JPEG
+source-specialization candidates are in [the image build review](../lib/Lib_Image.c).
+Local implementation and performance evidence is under
+`temp/image-opt-implementation/`.
 
 ## Finder thumbnail integration (2026-10-15)
 
@@ -164,7 +245,7 @@ Host load affects these timings; no timing threshold is imposed on UI tests.
 | JPEG | 8-bit baseline/progressive gray/RGB, EXIF; write gray/RGB with explicit alpha background | Reported native scaling factors; progressive coefficients still require source-size storage |
 | GIF | First display frame or composited selected frames; legacy all-frame timing/disposal/loops; read-only | Noninterlaced first frame reduced by rows; interlace/selected-frame full fallback |
 | WebP | Lossy/lossless/alpha stills; write lossy/lossless | Native output scaling; lossless history/alpha require source-size planes |
-| AVIF | SDR stills/alpha, irot/imir, high-depth quantization; write libaom YUV444 | Full AV1 planes and common resize; strict shrinking rejected |
+| AVIF | SDR stills/alpha, irot/imir, high-depth quantization; read-only | Full AV1 planes and common resize; strict shrinking rejected |
 | BMP | Upstream Windows palette/RGB/bitfield/RLE variants; write uncompressed 24-bit with explicit alpha background | Full upstream bitmap then common resize |
 | TIFF | Classic/BigTIFF, explicit pages, strips/tiles, gray/palette/RGB/RGBA; write single-page DEFLATE | Compatible direct reduced-image SubIFDs, else strip/tile reduction |
 | ICO | Validated PNG/DIB entries and AND masks; write one PNG entry | Smallest sufficient matching-aspect entry, then shared PNG/DIB decode |

@@ -862,23 +862,13 @@ void* jm_get_last_deferred_mir_ctx() {
     return js_code_store_last_context(js_module_code_store);
 }
 
-static bool jm_path_has_lambda_ext(const char* path) {
-    int len = path ? (int)strlen(path) : 0;
-    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
-}
-
 static bool jm_path_has_known_js_ext(const char* path) {
     int len = path ? (int)strlen(path) : 0;
     return (len >= 3 && strcmp(path + len - 3, ".js") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
            (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
-           jm_path_has_lambda_ext(path);
-}
-
-bool jm_path_is_lambda_source(const char* path) {
-    int len = path ? (int)strlen(path) : 0;
-    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
+           jm_path_is_lambda_source(path);
 }
 
 static bool jm_module_specifier_is_url_path(const char* specifier, int spec_len) {
@@ -4632,31 +4622,16 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                     continue;
                 }
 
-                // Register placeholder namespace to guard against circular imports
-                Item placeholder_ns = js_new_object();
-                js_module_register(spec_item, placeholder_ns);
-
                 // Detect cross-language import: .ls extension → Lambda module
                 bool is_lambda_module = jm_path_is_lambda_source(resolved);
 
                 if (is_lambda_module) {
-                    // Cross-language import: JS importing a Lambda module
-                    log_info("js-mir: cross-language import of Lambda module '%s'", resolved);
-                    runtime->js_runtime_used = true;
-                    Script* lambda_script = load_script_mir_direct(runtime, resolved, NULL, true);
-                    if (lambda_script && lambda_script->jit_context) {
-                        // Build namespace object from Lambda's pub declarations
-                        Item ns = module_build_lambda_namespace(lambda_script);
-                        // Register in JS module system (replaces placeholder)
-                        js_module_register(spec_item, ns);
-                        // Register in unified module registry
-                        module_register_for_runtime(
-                            runtime, resolved, "lambda", ns, lambda_script->jit_context);
-                        log_info("js-mir: Lambda module '%s' loaded as JS namespace", resolved);
-                    } else {
-                        log_error("js-mir: failed to compile Lambda module '%s'", resolved);
-                    }
+                    Item loaded = js_load_lambda_module(runtime, resolved);
+                    if (item_is_error(loaded)) return false;
                 } else {
+                    // publish JS cycle placeholders before loading the body.
+                    Item placeholder_ns = js_new_object();
+                    js_module_register(spec_item, placeholder_ns);
                     // Same-language import: read and compile JS module
                     if (!runtime->ast_prebuild_only &&
                             (runtime->js_ast_backend || js_execution_auto_requested())) {

@@ -1956,6 +1956,63 @@ The RegExp migration follow-up reuses shared match-state and streaming
 replacement kernels, with precise state owned by each MVP realm (D5.3,
 D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
 timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
-capsule teardown. Latest focused gates: 727 MVP units, 61 forced-GC checks,
-and 198/205 isolated Script cases pass; the seven failures are AUTO publication.
-Whole-suite and performance acceptance remain open.
+capsule teardown.
+
+The host integration follow-up reuses shared descriptors, exotic operations,
+lazy global catalogs and native callable identities across the MVP boundary
+(D6.2.2v2, D8.1.3v25). It preserves Lambda nominal shapes during descriptor
+mutation (D3.4), rebinds prepared Window/document roots (D5.3), and installs
+Array keys/entries through the existing iterator kernel. Large open script
+entries share generic call dispatch after the existing emission budget, fixing
+`dom_module_props` compilation. Broader library compilation remains open.
+
+The next host-boundary checkpoint shares private DateValue storage between
+native DOM and MVP Date operations, admits native callables carried by host
+arrays through their existing ABI bridge, and preserves host array prototypes
+and native callable home realms (D3.4, D5.3/D5.4, D6.2.2v2). Performance and Date
+now reuse the host's existing virtual/frame clock and time origin.
+
+The public host follow-up shares lazy host-family installers, native Timeout
+handles and classic string-handler execution through the retained interpreter
+(**D8.1.3v25, D5.3/D5.4**). Native property/descriptor operations and prototype
+walks use existing ABI/nominal ownership; shared iterator caches are private and
+unforgeable (**D3.4.3v5, D6.2.2v2**). Host subclasses reuse native construction,
+virtual collection `for…in` reuses foreign descriptors, and source-relative
+CommonJS require shares the existing resolver, cache and native closure layout.
+The retained AST keeps its existing implicit require policy.
+
+Function-source reflection now reuses the retained interpreter's method-span
+helper and the shared IdentifierName validator. Static methods omit their
+class-only prefix; native names that cannot form an identifier use anonymous
+native-function syntax (**D6.2.2v2, D8.1.3v25**).
+
+Lambda-source imports now reuse the existing Lambda loader, canonical module
+registry, precise export slabs and procedure-to-Promise scheduler. JS namespace
+imports keep the existing module exotic while the native Lambda namespace
+stays intact (**D5.3/D5.4.3, D7.2.1, D8.1.3v25**). Native callable adapters
+preserve Core Function layout, packed Lambda maps share field reads, and
+Lambda VMaps/native errors reuse their existing carrier reads. Custom-element
+constructors use ABI-aware private associations; shared call/construct entry
+points recognize default MVP classes (**D3.4.7, D6.2.2v2**).
+
+Direct eval within `with` now shares interleaved object and lexical environment
+records with the retained interpreter. Parameters and blocks shadow captured
+objects; escaped closures retain their object, unscopables and call receiver.
+Eval vars and Annex B publication target the existing variable record
+(**D5.3, D8.1.3v21, D8.1.3v25**). Units without the eval bridge keep their
+existing MIR path.
+
+**Latest verification:** `host60` passes 767/767 MVP units and 100/100 focused
+checks normally and with forced/poisoned GC. Its CLI is byte-identical to
+`host59`, which passes all 51 selected host fixtures and both original eval/
+with fixtures with forced/poisoned GC and explicit AST. Script integration
+remains 198/205, with seven known AUTO publication failures; the separate
+small-fixture replay improves to 28/32. The final pin passes all 3,764 selected
+canonical cases on formal MIR, including 650 eval/with cases; those 650 also
+pass explicit AST. There are no unresolved records in either canonical run.
+This is not a whole-suite recount.
+The implementation plan records exact pins and remaining work. The earlier
+complete isolated fixture diagnostic remains 461/507 passes, 41 failures and
+five outer timeouts; focused fixes are not added to that aggregate. Full
+baseline closure and performance acceptance remain open; benchmark timing
+stays deferred.

@@ -25,6 +25,8 @@ LayoutTableBodyEdge layout_table_source_body_edge(DomElement* table, bool after)
 
 // captions belong to the transparent wrapper, outside the grid's border box.
 RdtLogicalRect layout_table_grid_rect(const ViewTable* table);
+float layout_table_column_visual_x(ViewTable* table, float* widths, float* positions,
+    int first, int span, int columns);
 
 size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);

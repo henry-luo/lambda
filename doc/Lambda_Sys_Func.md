@@ -1922,20 +1922,26 @@ statuses and codec messages appear in the rich image error (**S7.4.4**).
 Allocation exhaustion remains a system fault (**S7.4.3**).
 
 `save(image, path)` retains PNG output regardless of the filename suffix.
-Use a destination map to choose PNG, JPEG, WebP, AVIF, BMP, TIFF, or ICO:
+Use a destination map to choose PNG, JPEG, WebP, BMP, TIFF, or ICO:
 
 ```lambda
 save(image, {path:"preview.webp", format:'webp', quality:85, lossless:false})^
 save(image, {path:"preview.jpg", format:'jpeg', quality:90, background:[255,255,255]})^
 ```
 
-`quality` is 0–100; `lossless` selects the WebP/AVIF mode. PNG, BMP, TIFF,
+`quality` is 0–100; `lossless` selects the WebP mode. PNG, BMP, TIFF,
 and ICO use their declared lossless subsets; JPEG uses its quality setting.
 JPEG/BMP output with nonopaque alpha requires an explicit RGB byte background.
-GIF encoding, animated WebP/AVIF, HDR tone mapping, CMYK JPEG conversion, and
+AVIF is read-only; saving AVIF reports `codec_unavailable`. GIF encoding,
+animated WebP/AVIF, HDR tone mapping, CMYK JPEG conversion, and
 ICC color conversion are outside this implementation. Decoding preserves
 supported SDR samples, with high-depth input reduced to RGBA8. TIFF writing is
 single-page DEFLATE; ICO writing uses one PNG entry.
+TIFF reading retains uncompressed, Deflate, LZW, PackBits, CCITT Fax, and
+ordinary 8-bit JPEG compression. JPEG12-in-TIFF reports `unsupported_feature`;
+PixarLog, LogLuv, NeXT, and ThunderScan compression are excluded from the
+bundled build. JPEG12 is used by specialist GeoTIFF workflows; the current
+RGBA8 image pipeline does not decode it.
 
 File acquisition and atomic output publication remain in `lambda-io`
 (**D7.1.2v2**, **D7.1.3**); the byte codec core has no Radiant dependency.

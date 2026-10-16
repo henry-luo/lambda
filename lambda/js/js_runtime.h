@@ -851,6 +851,7 @@ void js_performance_frame_clock_begin(double monotonic_ms);
 void js_performance_frame_clock_end(void);
 double js_performance_time_origin_ms(void);
 Item js_date_now(void);
+double js_date_number_to_double(Item value);
 Item js_date_now_string(void);
 Item js_date_new(void);
 Item js_date_new_from(Item value);
@@ -867,6 +868,8 @@ typedef struct JsDateOps {
     Item (*store)(Item, double);
     Item (*error)(bool, const char*);
 } JsDateOps;
+Item js_date_get_time_value(Item receiver, bool* found);
+Item js_date_store_time_value(Item receiver, double milliseconds);
 double js_date_time_clip(double value);
 double js_date_components_time(double* parts, bool local, bool relative_year);
 Item js_date_parse_text(String* text);
@@ -1345,6 +1348,10 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
 Item js_get_global_this(void);
+// the writer installs a lazy own slot; each engine keeps its ordinary storage policy.
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors);
+Item js_ensure_host_global_family(const char* name);
+bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
@@ -1417,6 +1424,8 @@ typedef struct JsWithBindingOps {
 } JsWithBindingOps;
 Item js_with_binding_is_visible_with_ops(Item key, Item object, Item unscopables_symbol,
     const JsWithBindingOps* ops);
+Item js_with_binding_is_visible(Item key, Item object);
+Item js_with_get_binding_value(Item object, Item key, bool strict);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
 Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);
@@ -1827,6 +1836,8 @@ Item js_get_import_meta();
  * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
  */
 Item js_require(Item specifier);
+Item js_require_at(Item specifier, const char* reference);
+Item js_module_create_require(Item filename);
 Item js_dynamic_import(Item specifier);
 Item js_dynamic_import_at(Item specifier, const char* reference);
 Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj, Item result_promise);

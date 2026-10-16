@@ -180,7 +180,15 @@ Item mvp_lmd_receiver_identity(Context*, MvpLmdProgram*, Item*, uint64_t, Item, 
 static Item sequence_iterator(Context*, MvpLmdProgram* program, Item*, uint64_t, Item self, Item receiver, Item) {
     int code = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
     int projection = code & 31;
-    return mvp_lmd_sequence_iterator_create(program, receiver, projection, projection != 0, code & 32);
+    // array keys/entries are generic ToObject operations; collection projections
+    // (6..8) retain their branded ordered-map admission.
+    bool ordered = projection >= 6;
+    if (projection && !ordered && !mvp_lmd_is_object(receiver)) {
+        Item object = mvp_lmd_box_primitive(receiver);
+        return item_is_error(object) ? object :
+            mvp_lmd_sequence_iterator_create(program, object, projection, false, false);
+    }
+    return mvp_lmd_sequence_iterator_create(program, receiver, projection, ordered, code & 32);
 }
 extern "C" Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item receiver,
         int projection, bool ordered, bool set) {
@@ -716,6 +724,17 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "values",
         state->values[LMD_LIBRARY_SEQUENCE_ITERATOR], JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
+    const char* sequence_names[] = {"keys", "entries"};
+    for (int i = 0; i < 2; i++) {
+        const JsBuiltinMethodSpec* method = js_builtin_catalog_find(
+            JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, sequence_names[i], strlen(sequence_names[i]));
+        identity.set(mvp_lmd_native_function(program, (void*)(intptr_t)(i + 1),
+            sequence_iterator, method->param_count, method->name));
+        if (item_is_error(identity.get())) return identity.get();
+        result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE],
+            method->name, identity.get(), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
     for (int set = 0; set < 2; set++) {
         int slot = set ? LMD_LIBRARY_SET : LMD_LIBRARY_MAP;
         result = mvp_lmd_library_class_initialize(program, state, set ? &state->set : &state->map,

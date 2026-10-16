@@ -201,6 +201,11 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     Rooted<Item> part_root(roots, ItemNull);
     Rooted<Item> obj_root(roots, ItemNull);
     Rooted<Item> text_root(roots, ItemNull);
+    // internal Response/clipboard factories can precede the public Blob binding read.
+    if (get_type_id(g_blob_proto) != LMD_TYPE_MAP) {
+        Item ready = js_ensure_host_global_family("Blob");
+        if (item_is_error(ready)) return ready;
+    }
     StrBuf* sb = strbuf_new();
     if (get_type_id(parts_root.get()) == LMD_TYPE_ARRAY) {
         int64_t n = js_array_length(parts_root.get());

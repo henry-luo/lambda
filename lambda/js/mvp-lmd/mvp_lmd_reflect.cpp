@@ -12,13 +12,17 @@ bool mvp_lmd_is_callable(Item value) {
         JsProxyData* data = js_get_proxy_data(value);
         return data && data->callable;
     }
-    return get_type_id(value) == LMD_TYPE_FUNC && value.function->entry_abi == FN_ENTRY_ABI_MVP_LMD;
+    if (get_type_id(value) != LMD_TYPE_FUNC) return false;
+    return value.function->entry_abi == FN_ENTRY_ABI_MVP_LMD ||
+        (function_has_abi(value.function, FN_ENTRY_ABI_JS_FUNCTION) && js_has_call_capability(value));
 }
 bool mvp_lmd_is_constructor(Item value) {
     if (mvp_lmd_is_proxy(value)) {
         JsProxyData* data = js_get_proxy_data(value);
         return data && data->constructable;
     }
+    if (get_type_id(value) == LMD_TYPE_FUNC && function_has_abi(value.function, FN_ENTRY_ABI_JS_FUNCTION))
+        return js_is_constructor(value).item == ITEM_TRUE;
     if (!mvp_lmd_is_callable(value) || !value.function->requires_runtime_context) return false;
     MvpLmdCallable* callable = (MvpLmdCallable*)value.function;
     if (callable->non_constructible) return false;
