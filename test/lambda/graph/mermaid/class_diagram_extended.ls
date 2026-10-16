@@ -18,7 +18,6 @@ let nodes = model.nodes(source)
 let edges = model.edges(source)
 let normalized = normalize.normalize(source)
 let html = transform.to_html(source)
-let installed = transform.install()
 let rendered = transform.render_scene(source, 1000, 800)
 
 {
@@ -49,7 +48,7 @@ let rendered = transform.render_scene(source, 1000, 800)
       [node.id, model.tag(model.content_element(node))]]],
   html: [for (node in model.nodes(html))
     [node["data-node-id"], model.tag(node[0])]],
-  render: [installed, len(children(rendered.scene, "node")),
+  render: [rendered.svg is string, len(children(rendered.scene, "node")),
     len(children(rendered.scene, "edge")), len(children(rendered.scene, "annotation")),
     contains(rendered.svg, "Repository&lt;List&lt;Entity&gt;&gt;"),
     contains(rendered.svg, "Caches entities"), contains(rendered.svg, "Repository contract")]

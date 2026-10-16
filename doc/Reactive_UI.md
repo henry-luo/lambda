@@ -62,6 +62,14 @@ Options: `{mode: "edit"}` makes `edit` templates eligible; `{template: "name"}` 
 
 ### Event Handlers
 
+Reading model/state properties or calling a native DOM getter/query does not
+require a handler: these reads are `fn` (**D7.4.6**). Calls that change focus,
+scroll, native editing state, or dispatch events are `pn` and belong in a
+handler (**S12.1.1v3**, **S12.1.3**). An explicitly `pn` package wrapper also
+requires procedural context, even if its body only reads properties.
+See [DOM reads and procedural calls](Lambda_Func.md#dom-reads-and-procedural-calls)
+for signatures and examples.
+
 `on <event>(evt) { … }` blocks follow the body. The handler runs as a procedure with `~` bound to the matched item and `evt` to the event:
 
 | `evt` field | Meaning |

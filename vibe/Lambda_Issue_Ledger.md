@@ -1065,6 +1065,21 @@ A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), a
 <a id="lr10-19"></a>**LR10-19 · `raise` in a `T | error` function compiles, against S7.4.2 · OPEN (found 2026-10-07, std test triage)**
 S7.4.2 licenses `raise` only in `T^` / `T^E` functions and makes `raise` in a `T | error` function a compile error. `fn g(n: int) int | error { if (n > 0) { raise error("x") } else { n } }` compiles and `g(0)` prints `0`. In a plain `int` function the script is rejected, but by E208 about the `error()` call (`may return error from call to 'error'`) rather than by the raise rule. Parked test: `test/std/negative/_raise_in_pure_fn.ls`.
 
+<a id="lr10-20"></a>**LR10-20 · Unsupported TikZ dimensions can fault while propagating their error · OPEN (reproduced 2026-10-16 on acf4924f7 plus local automatic-layout changes)**
+
+While migrating the generated-paint clipping fixture to the automatic TikZ
+layout path (**D7.5.3v2**), a named node with
+`[fill=blue,minimum width=200px,minimum height=200px]` reports runtime error 318
+(`unsupported TikZ dimension: 200px`) and then exits 139 on the auto tier.
+TikZ accepts TeX dimensions, so rejection is expected; a process fault during
+ordinary propagation is not (**S7.6.2v2 / S7.11.1v2**). The owning failure stage
+has not been isolated. Preserved reproducer and verification workspace:
+`temp/automatic-layouts/unsupported-tikz-px.ls` and
+`temp/automatic-layouts/isolated/lambda.exe`; diagnostics:
+`temp/automatic-layouts/generated-clip-debug.err` and the isolated `log.txt`.
+The clipping fixture uses supported `6cm` dimensions and retains all three
+pixel assertions; unsupported-dimension propagation remains separate debt.
+
 ## 11. Mark data API (LR_11)
 
 <a id="lr11-1"></a>**LR11-1 · Reader traversal is stubbed · OPEN**

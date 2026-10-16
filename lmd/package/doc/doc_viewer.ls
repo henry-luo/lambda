@@ -63,7 +63,7 @@ fn event_hits_row(evt, hit_class) =>
   (contains(evt["target_parent_class"], hit_class ++ " ") ^ { false })
 
 // A tree-wide redraw needs the expansion currently owned by individual rows.
-pn visible_open_paths(target) {
+fn visible_open_paths(target) {
   let rows = dom.query_selector_all(dom.root_node(target), ".tree-entry");
   [for (row in rows where dom.get_attribute(row, "data-tree-open") == "true")
     dom.get_attribute(row, "data-tree-path")]

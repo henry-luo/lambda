@@ -1841,6 +1841,11 @@ TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedAtRuntime) {
         "expected fn, got pn logsq");
 }
 
+TEST_F(NegativeScriptTest, DomMemberCallsPreserveProcedureColour) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/dom_member_calls_pn.ls", true,
+        "error[E224]: cannot call a procedure (pn) from a function (fn): set_attribute");
+}
+
 // S12.1.4v2: a `function` call that is statically a `pn` call is rejected in
 // `fn` context, and a `function` body is checked as an `fn` body.
 TEST_F(NegativeScriptTest, FunctionDeclarationColourIsCheckedStatically) {

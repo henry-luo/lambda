@@ -228,7 +228,6 @@ RADIANT_C_API Item fn_radiant_layout(Item node_item);
 RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item height_item);
 RADIANT_C_API Item fn_radiant_box(Item node_item);
 RADIANT_C_API Item fn_radiant_poc_attr(Item path_item);
-RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item);
 RADIANT_C_API Item fn_radiant_velmt_index(Item velmt_item);
 RADIANT_C_API Item fn_radiant_velmt_tag(Item velmt_item);
 RADIANT_C_API Item fn_radiant_velmt_id(Item velmt_item);

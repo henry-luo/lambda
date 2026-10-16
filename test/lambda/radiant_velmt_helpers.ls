@@ -16,16 +16,8 @@ let child = {
   attrs: {role: "node", rank: "2"}
 }
 
-let ok = radiant.register_layout("smoke", (parent, children, ctx) => {
-  placements: [for (v in children) {
-    index: v.index,
-    x: radiant.velmt_width(v),
-    y: radiant.velmt_height(v)
-  }]
-})
 
 {
-  registered: ok,
   tag: radiant.velmt_tag(child),
   id: radiant.velmt_id(child),
   role: radiant.velmt_attr(child, "role"),

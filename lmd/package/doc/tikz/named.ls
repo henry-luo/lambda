@@ -1,7 +1,6 @@
 // Named TikZ nodes use Radiant's measured-child layout for shape bounds and anchors.
 // Render validates and serializes each child's plan; the pure `scene` places nodes
 // (positioning, calc, anchors) and routes edges from measured label sizes.
-import radiant
 import opts: .options
 import labels: .labels
 import svg: lambda.chart.svg
@@ -396,7 +395,7 @@ fn edge_svg(spec, segments, map_point) {
     >
 }
 
-pn layout(parent, children, ctx) any^ {
+pub fn layout(parent, children, ctx) any^ {
     let specs = [for (child in children) parse(string(child.attrs["data-tikz-spec"]), "json")^]
     let sizes = [for (child in children) [float(child.width) / PX_PER_CM,
         float(child.height) / PX_PER_CM]]
@@ -427,8 +426,8 @@ pn layout(parent, children, ctx) any^ {
              (let corner = map_point([matches[0].x - matches[0].half_w,
                  matches[0].y + matches[0].half_h]),
               {index: index, x: corner[0], y: corner[1], z: 0})
-         else {index: index, x: 0.0, y: 0.0, z: -2})]
-    return {width: width, height: height, placements: placements,
+         else {index: index, x: 0.0, y: 0.0, z: -2})];
+    {width: width, height: height, placements: placements,
         paint_layers: [{z: -1, content: graphic}]}
 }
 
@@ -485,8 +484,7 @@ pub fn render(picture, custom_colors = []) any^ {
         where len([for (earlier in slice(ids, 0, index) where earlier == id) earlier]) > 0) id]
     let valid_ids = if (len(duplicates) > 0)
         raise error("duplicate TikZ node: " ++ duplicates[0]) else true
-    let validated = scene([for (item in items) item.spec], nominal_sizes(items))^
-    let installed = radiant.register_layout("lambda-tikz", layout);
+    let validated = scene([for (item in items) item.spec], nominal_sizes(items))^;
     <span class: "tikz-picture tikz-named-picture",
         'data-radiant-layout': "lambda-tikz",
         style: "position:relative;display:inline-block;vertical-align:bottom;",

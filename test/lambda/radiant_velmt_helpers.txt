@@ -1,5 +1,4 @@
 {
-  registered: true,
   tag: "DIV",
   id: "node-a",
   role: "node",

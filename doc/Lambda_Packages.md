@@ -882,12 +882,11 @@ import transform: lambda.graph.transform
 let g = parse("flowchart LR\n  A[Start] --> B{Check}\n  B -->|yes| C[Done]", {type: 'graph', flavor: 'mermaid'})^
 let html = transform.to_html(g, {theme: "dark"})
 html.class                                   // "lambda-graph lambda-graph-theme-dark"
-let installed = transform.install()          // register the lambda-graph layout with Radiant first
 let svg = transform.render_svg(g, 480, 160)
 type(svg)                                    // string
 ```
 
-`install()` must run before `render_svg`: without the custom layout the nodes are laid out as plain inline boxes and no edges are drawn. Other HTML renderers do not know the `lambda-graph` layout either, so the HTML from `to_html` is meant for Radiant. From the command line:
+Radiant automatically connects the `lambda-graph` layout to the package callback when it encounters the generated HTML (**D7.5.3v2**); no installation call is needed. This also works when serialized HTML is opened in a fresh Radiant process. Other HTML renderers do not implement this layout, so the HTML from `to_html` is meant for Radiant. From the command line:
 
 ```bash
 lambda render flow.mmd -o flow.svg                           # light palette
@@ -902,7 +901,6 @@ lambda render arch.dsl -o containers.svg --view-key Containers   # one Structuri
 
 | Function | Description |
 |----------|-------------|
-| `install()` | Registers the `lambda-graph` custom layout with Radiant; returns `true` |
 | `to_html(graph, opts = null)` | Normalizes a parsed graph and returns the `<graph>` HTML element. Options: `theme` (`"light"` by default; `dark`, `zinc-dark`, `github-dark`, `nord`, `dracula`, `tokyo-night`, `one-dark` and `catppuccin-mocha` select the dark palette), `direction`, `route_mode`, `node_sep`, `rank_sep`, `edge_sep` |
 | `render_svg(graph, width: int, height: int, opts = null)` | Lays out `to_html(graph, opts)` in a viewport of that size and returns SVG markup as a string |
 | `render_scene(graph, width: int, height: int, opts = null)` | Returns `{svg, scene}`, the SVG plus a renderer-neutral scene description |
@@ -1220,6 +1218,52 @@ These packages implement parts of the engine in Lambda. They load automatically 
 
 `lambda.dom.*` implements the user-agent behaviour of HTML documents in Radiant, written as `view` templates with `on` handlers (see [Reactive_UI.md](Reactive_UI.md)): form controls and their state, constraint validation, form submission and `application/x-www-form-urlencoded` encoding, link navigation, sequential focus and `autofocus`, `<details>` and `<summary>`, context menus, keyboard activation, caret movement, scrolling keys, IME composition, ARIA reflection, and the editing of `contenteditable` regions, including `designMode`, `execCommand` and the `queryCommand*` functions. Radiant loads `lambda.dom.dom` once per document, the first time an event reaches an element the package governs, and registers its templates as behaviour templates on the page's elements rather than as the page's own templates. Editing policy belongs to this package, never to native code (D7.2.5).
 
+#### Native DOM API colours
+
+`import dom` exposes the native DOM API used by those behaviour packages and
+applications. Its published signatures distinguish reads (`fn`) from effects
+(`pn`), as required by **D7.4.6**. Reads remain `fn` even when the node can be
+mutated later. Property reads such as `node.id` likewise need no procedural
+context. Both `fn` and `pn` callers can use `fn` APIs; only `pn` callers can
+use `pn` APIs (**S12.1.1v3**).
+
+| Published signature | Behavior |
+|---|---|
+| `fn get_attribute(n: any, name: string) -> string\|null` | Read an attribute. |
+| `fn root_node(n: any) -> any` | Read the containing tree's root. |
+| `fn get_element_by_id(root: any, id: string) -> any` | Find a node; absence is `null`. |
+| `fn query_selector(root: any, selector: string) -> any` | Find the first matching node; absence is `null`. |
+| `fn query_selector_all(root: any, selector: string) -> array` | Return a snapshot of the matching node sequence (**S9.2.2**). |
+| `fn document_selection(doc: any) -> any` | Read the document's selection handle. |
+| `fn selection_boundaries(s: any) -> map` | Read selection endpoints. |
+| `pn set_attribute(n: any, name: string, value: string) -> null` | Write an attribute and run its reflection hooks. |
+| `pn focus_set(n: any, from_keyboard: bool) -> bool` | Move focus. |
+| `pn scroll_into_view(n: any) -> bool` | Change scroll position. |
+| `pn check_validity(form: any) -> bool` | Run validation, which can dispatch `invalid` events. |
+
+These signatures come from [the DOM catalogue](../lambda/dom/dom_api.def),
+which also supplies the native module registration. Its compile-time checks
+require `pn` exactly on `DOM_F_MUTATES` rows. The snapshot rule fixes collection
+membership for iteration; it does not deep-copy each returned DOM node.
+
+Native members preserve the same distinction: `node.get_attribute(name)` is
+`fn`, while `node.set_attribute(name, value)`, `range.set_start(node, offset)`
+and selection writes are `pn`. A member callee resolved at runtime still
+reports E224 when an `fn` attempts to invoke a procedure (**S12.1.1v3**).
+
+The engine-specific DOM helpers follow the same rule (**D7.4.6**):
+
+| Radiant signature | Behavior |
+|---|---|
+| `fn local_point(node: any, x: number, y: number) -> array\|null` | Read the inverse viewport transform. |
+| `fn geomap_snapshot(node: any) -> any` | Copy the last painted map frame. |
+| `fn geomap_query_displayed(node: any, point: array, options: map) -> any` | Query the last painted map frame. |
+| `pn layout(node: dom_node) -> bool` | Update the live document's layout. |
+| `pn free(node: dom_node) -> null` | Release the live document and invalidate its node handles. |
+
+See [DOM reads and procedural calls](Lambda_Func.md#dom-reads-and-procedural-calls)
+for a query helper, a focus helper and an E224 example.
+
 ---
 
 ### 10.4 `doc` — the bundled document viewer
@@ -1273,7 +1317,7 @@ preserve that view's state across parent rerenders (S12.1.1v2, S12.1.3).
 | `fit_bounds(camera, bounds, padding = 0.0)`, `update(camera, event)` | Return a new camera; bounds may cross the dateline |
 | `query_source(model, source_id)`, `query_rendered(model_or_frame, point_or_box, options = {})` | Source features / indexed painted hits, in reverse paint order |
 | `plan(model, viewport = null)`, `render_frame(frame)` | Immutable camera/path/feature/index snapshot / its SVG element |
-| `snapshot(node)`, `query_displayed(node, point_or_box, options = {})` | Procedures reading the last painted native frame (S12.1.3) |
+| `snapshot(node)`, `query_displayed(node, point_or_box, options = {})` | Functions reading the last painted native frame (D7.4.6) |
 | `model(spec, options = {})`, `interactive(spec, options = {})` | A reactive view model / its applied native viewport |
 | `to_svg(model, viewport = null)` | An SVG element from the same native paint compiler (D7.5.3) |
 

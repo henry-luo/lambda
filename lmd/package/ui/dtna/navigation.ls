@@ -47,7 +47,7 @@ fn choices(node, active) {
         if (segmented and c.props(node).name != null) <input type:"hidden",name:c.props(node).name,value:c.text(active),
             *:c.boolean_attr("disabled",c.props(node).disabled)> else null]>
 }
-pn clicked(node, evt) {
+fn clicked(node, evt) {
     let target = interaction.target(node, evt, "[data-dtna-choice]")
     let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) ^ { null });
     if (index == null or c.props(node).disabled or c.props(node).items[index].disabled) null else c.props(node).items[index].key

@@ -10,9 +10,9 @@ the larger proposal. It does not change any formal ruling.
 
 - D7.2.4: the public package is `lambda.map`, with explicit entry
   `lmd/package/map.ls` and private implementation modules beneath `map/`.
-- S12.1.1v2 / S12.1.3: camera calculations, normalization, querying and SVG
-  export are functions; DOM reads, focus and capture in event handlers remain
-  procedural. Interaction state belongs to each reactive view instance.
+- D7.4.6 / S12.1.3: camera calculations, normalization, querying, SVG export
+  and DOM reads are functions; focus and capture remain procedural.
+  Interaction state belongs to each reactive view instance.
 - S7.4.1: invalid package input returns an ordinary error value. Unsupported
   layer types, expressions and properties are rejected explicitly.
 - D4.5.2 / D4.5.1v4: a native frame owns its copied Input, compiled styles,
@@ -270,7 +270,7 @@ MapLibre line property or default. Programs are retained within each frame;
 sharing them across different camera plans is still outstanding.
 
 Native event coordinates use the shared `view_client_to_local` inverse plane
-homography through declared procedural `radiant.local_point` (D7.5.3).
+homography through declared function `radiant.local_point` (D7.4.6, D7.5.3).
 Rotation, perspective and singular transforms have focused tests. Reactive
 state now includes hover, selection and drag suppression. A 3 CSS pixel
 threshold separates a click from dragging; a completed drag suppresses the

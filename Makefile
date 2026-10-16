@@ -1635,10 +1635,10 @@ test-lambda-interp:
 
 # Full-corpus sweep: reports match / fallback / mismatch per script. A mismatch
 # is a T0 bug by definition (SI3); a fallback is uncovered coverage.
-# Sweep, then regenerate BOTH committed lists from that one sweep — they are a
+# Sweep, then regenerate all three committed lists from that one sweep — they are a
 # partition of the corpus and refreshing either alone lets them drift.
 interp-sweep:
-	@python3 test/interp/tier_sweep.py --out temp/sweep_full.tsv
+	@python3 test/interp/tier_sweep.py --out temp/sweep_full.tsv $(ARGS)
 	@python3 test/interp/refresh_lists.py --sweep temp/sweep_full.tsv
 
 # Semantics model as oracle (vibe/Lambda_Semantics_DSL_POC.md §13.1): every

@@ -186,41 +186,32 @@ The custom layout API is a pure placement callback.
 
 ### 6.1 Registration
 
-There are two possible registration models.
+**Automatic package connection (user ruling, 2026-10-16; D7.5.3v2).**
 
-**Static package registration:**
+HTML selects a shipped layout by name. Radiant resolves `lambda-graph` to
+`lambda.graph.transform.layout` and `lambda-tikz` to
+`lambda.doc.tikz.named.layout`; MathML uses its existing namespace/display
+selection and `lambda.doc.math.mathml_layout.layout`. The engine invokes these
+exports through the same retained package bridge. Neither application code nor
+a pure document transform registers a callback. `radiant.register_layout` and
+the graph package's `install()` entry points are removed.
 
-```lambda
-layout.register("graph", graph_layout)
-```
-
-**Document/import registration:**
-
-```lambda
-import radiant/layout
-
-layout.register("graph", fn(parent, children, ctx) {
-  ...
-})
-```
-
-For the MVP, a simple function table is enough. Syntax can come later.
-
-The design contract is that registered callbacks are pure Lambda `fn`s, not `pn`s. However, first-class function values do not currently carry reliable `fn`/`pn` metadata at runtime, so the MVP should not pretend to enforce this at registration. Runtime enforcement is deferred until function values expose a stable procedure/purity bit. Until then, the API documentation and examples should require `fn`, and the layout bridge should still forbid layout-time DOM mutation, measurement flushes, I/O, timers, and other side-effecting host APIs.
-
-Current MVP API:
+Each package exports a pure function:
 
 ```lambda
-import radiant;
-
-radiant.register_layout("graph", (parent, children, ctx) => {
+pub fn layout(parent, children, ctx) {
   placements: [for (child in children) {
-    child: child,
-    x: 0,
-    y: child.index * (radiant.velmt_height(child) + 24)
+    child: child, x: 0, y: child.index * (child.height + 24)
   }]
-})
+}
 ```
+
+The document's evaluator retains imported module state and compiled code.
+Static HTML acquires an evaluator lazily; a synchronous render within Lambda
+uses its active evaluator, avoiding a cross-runtime call under live frames.
+Generated paint retains explicit roots on the owning heap (**D5.3.3**).
+The private native callback table remains an engine/test extension point; it
+is not a DOM API and clearing it cannot disconnect shipped package layouts.
 
 The helper functions currently exported by the `radiant` module are:
 
@@ -386,7 +377,7 @@ layout_flow_node
 2. lay out each child with the existing Radiant layout machinery
 3. normalize each child view to local `(0, 0, width, height)` for the Velmt input
 4. build scoped Velmt handles
-5. call the registered Lambda `fn`
+5. call the automatically resolved package `layout` export
 6. validate returned placements
 7. write final `x, y` back to child views
 8. compute the parent size from CSS explicit sizes or the placed-child containing box
@@ -400,7 +391,7 @@ The current implementation uses the same conceptual flow, with a few concrete br
 2. `layout_custom_apply` collects eligible child views into internal C `RadiantVelmt` snapshots. These snapshots are not the public Lambda Velmt value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass (**D7.4.5v2**).
 3. Each top-level child snapshot normalizes the input box to border-box top-left `(0, 0)` with its resolved `width` and `height`. Nested `children` reads preserve each nested child view's existing local geometry.
 4. Before calling Lambda, the Radiant module starts a pass id, builds host-backed Lambda Velmt values for `parent` and each child, and exposes the child sequence through VArray. Each host object owns an immutable copy of the C snapshot and records the active pass id.
-5. The registered `radiant.register_layout(name, fn)` callback is invoked as `fn(parent, children, ctx)`. The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
+5. The automatically resolved package `layout` export is invoked as `fn(parent, children, ctx)` (**D7.5.3v2**). The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
 6. The callback returns placements. A placement may identify its child either by the Velmt handle in `child` or by an explicit `index`, depending on the result shape accepted by the parser.
 7. While the pass id is still active, Radiant parses the result and maps placements back to the collected child indices. This keeps returned Velmt handles usable for result parsing without allowing them to escape as live layout objects.
 8. Radiant validates duplicate and missing placements, applies `x` and `y` to each child view as border-box top-left coordinates, applies optional positive custom `z`, and clears stale custom `z` overlays when no `z` is returned.
@@ -466,7 +457,7 @@ This matters because Radiant may need to run the callback more than once:
 
 The API must treat repeated execution as normal.
 
-Implementation note: because runtime `Function` values currently do not reliably expose whether they originated from `fn` or `pn`, the first implementation should defer a hard registration-time `fn`/`pn` check. Add that check after first-class function values carry stable metadata. The important MVP invariant is that the host surface available during layout remains side-effect-free.
+Package layout exports are pure `fn`s (**D7.5.3v2 / S12.1.1v3**). There is no application-supplied function registration to validate; new shipped layouts enter through the host package catalogue.
 
 ### 8.6 Caching
 
@@ -483,10 +474,10 @@ The runtime cache should be scoped at least per `DomDocument`, with module/packa
 
 If any key changes, the cached runtime entry is invalidated and rebuilt.
 
-**Compiled function cache.** Registered custom layout `fn`s must be JIT compiled once and retained. `layout_custom_content` should call an already-compiled function handle, not parse/transpile/JIT the function body during layout. The cache entry should hold:
+**Compiled module cache.** Package layout exports reuse the evaluator's normal module cache and tiering (**D7.5.3v2 / D8.1.1v18**). No parallel callback registry or separately rooted function cache is required. The retained module identity includes:
 
 - layout name, for example `graph`
-- compiled function item/handle
+- package module and exported `layout` function
 - owning runtime context
 - source generation
 - declared API version
@@ -604,13 +595,9 @@ This keeps the engine free to cache, replay, and run layout multiple times.
 
 After Lambda custom layout works, expose the same model to LambdaJS:
 
-```js
-RadiantLayout.register("graph", function(parent, children, ctx) {
-  return {
-    placements: children.map(child => ({ child, x: 0, y: 0 }))
-  };
-});
-```
+LambdaJS consumers should select the same shipped layout names through their
+HTML/CSS. Connection remains host work; no JS registration surface is proposed
+(**D7.5.3v2**).
 
 The important part is that JS receives Velmt-like layout children, not live mutable DOM elements. That follows Houdini's spirit and avoids procedural reflow loops.
 
@@ -638,11 +625,10 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 
 ### Phase 3: Lambda callback invocation
 
-- implement custom layout registration - implemented as `radiant.register_layout`
-- document registered callbacks as Lambda `fn` - implemented in this proposal; enforcement deferred
-- defer hard `fn`/`pn` runtime validation until first-class function values expose stable procedure metadata
-- add retained custom-layout runtime cache - partial: callback `Item`s are rooted and reused
-- add JIT compiled layout `fn` cache - partial: registered function handles are retained
+- automatically connect shipped package layout exports — implemented under D7.5.3v2
+- require shipped package `layout` exports to be pure `fn` (**D7.5.3v2**)
+- retain package module state and compiled exports on the document evaluator — implemented; no callback registry roots
+- reuse ordinary package module state and execution tiers for layout exports
 - build scoped Velmt arrays for laid-out children - implemented with host-backed immutable snapshots
 - invoke the callback from `layout_custom_content` - implemented
 - validate returned placements - implemented
@@ -691,3 +677,26 @@ Radiant prelayouts children -> Velmt sized child views -> pure fn returns x/y pl
 ```
 
 Use graph layout as the proving ground. It is complex enough to validate the API, but contained enough to avoid designing a whole browser extension platform in one pass.
+
+## Superseded registration model
+
+~~The MVP exposed `radiant.register_layout(name, callback)` and required graph
+callers to invoke `transform.install()` before rendering.~~ Superseded by the
+2026-10-16 user ruling and **D7.5.3v2**: callback connection is automatic host
+work. The removed model stored rooted function values in per-heap registry slots
+and required a heap-cleanup hook; module-owned exports now supply that lifetime.
+
+~~Earlier alternatives were static package `layout.register("graph", graph_layout)`
+and document/import registration of an inline callback.~~ Both made package
+setup observable to callers and allowed a pure transform to hide a registry
+mutation. The old MVP deferred a registration-time fn/pn check because function
+values lacked stable colour metadata; removing that entry point removes that
+particular validation boundary. The earlier JS sketch was likewise superseded:
+
+```js
+RadiantLayout.register("graph", function(parent, children, ctx) {
+  return {
+    placements: children.map(child => ({ child, x: 0, y: 0 }))
+  };
+});
+```

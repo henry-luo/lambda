@@ -910,7 +910,7 @@ pn rich_view(session, b) {
 
 // The surface's rows, and its width in characters from the measuring span's
 // advance (soft wrap): on mount and whenever the window resizes.
-pn measured(vw, root) {
+fn measured(vw, root) {
   let surface = dom.get_element_by_id(root, "edit-surface")
   let r = if (surface == null) null else dom.bounding_box(surface)
   let probe = dom.get_element_by_id(root, "src-measure")
