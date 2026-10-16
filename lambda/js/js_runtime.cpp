@@ -14,6 +14,7 @@
 #include "js_state_guards.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../core/well_known_lambda_names.h"
 #include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
@@ -113,12 +114,66 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 #define js_async_hooks_key js_runtime_key
 #define js_cc_key js_runtime_key
 
-static String* js_regexp_last_match_string_at(int slot) {
-    if (slot < 0 || slot >= (int)root_vector_count(&js_regexp_last_match.values)) {
+static String* js_regexp_last_match_string_at(JsRegexpLastMatch* state, int slot) {
+    if (slot < 0 || slot >= (int)root_vector_count(&state->values)) {
         return NULL;
     }
-    Item value = *root_vector_at(&js_regexp_last_match.values, slot);
+    Item value = *root_vector_at(&state->values, slot);
     return get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+}
+
+const char* js_regexp_legacy_name(int index) {
+    static const char* names[] = {"input", "$_", "lastMatch", "$&", "lastParen", "$+",
+        "leftContext", "$`", "rightContext", "$'", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"};
+    return index >= 0 && index < (int)(sizeof(names) / sizeof(*names)) ? names[index] : NULL;
+}
+bool js_regexp_legacy_get(JsRegexpLastMatch* state, const char* name, int length, Item* out) {
+    if (length == 2 && name[0] == '$' &&
+        name[1] >= '1' && name[1] <= '9') {
+        int gi = name[1] - '1'; // $1 → index 0
+        String* gs = js_regexp_last_match_string_at(state, gi + 2);
+        *out = gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 5 && strncmp(name, "input", 5) == 0) ||
+        (length == 2 && strncmp(name, "$_", 2) == 0)) {
+        String* s = js_regexp_last_match_string_at(state, 0);
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 9 && strncmp(name, "lastMatch", 9) == 0) ||
+        (length == 2 && strncmp(name, "$&", 2) == 0)) {
+        String* s = js_regexp_last_match_string_at(state, 1);
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 9 && strncmp(name, "lastParen", 9) == 0) ||
+        (length == 2 && strncmp(name, "$+", 2) == 0)) {
+        int gc = state->group_count;
+        String* s = gc > 0
+            ? js_regexp_last_match_string_at(state, gc + 1) : NULL;
+        *out = s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 11 && strncmp(name, "leftContext", 11) == 0) ||
+        (length == 2 && strncmp(name, "$`", 2) == 0)) {
+        String* inp = js_regexp_last_match_string_at(state, 0);
+        if (inp && state->match_start > 0) {
+            *out = state->utf16_offsets ? js_str_substring_utf16(Item{.item = s2it(inp)}, 0, state->match_start)
+                : Item{.item = s2it(heap_strcpy(inp->chars, state->match_start))}; return true;
+        }
+        *out = (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    if ((length == 12 && strncmp(name, "rightContext", 12) == 0) ||
+        (length == 2 && strncmp(name, "$'", 2) == 0)) {
+        String* inp = js_regexp_last_match_string_at(state, 0);
+        if (inp && state->utf16_offsets) {
+            *out = js_str_substring_utf16(Item{.item = s2it(inp)}, state->match_end,
+                js_string_utf16_length(inp)); return true;
+        }
+        if (inp && state->match_end < (int)inp->len) {
+            *out = (Item){.item = s2it(heap_strcpy(inp->chars + state->match_end,
+                (int)inp->len - state->match_end))}; return true;
+        }
+        *out = (Item){.item = s2it(heap_create_name("", 0))}; return true;
+    }
+    return false;
 }
 
 typedef struct JsProxyMapCarrier {
@@ -757,7 +812,7 @@ static inline Item js_native_function_source_item() {
     return js_name_item(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN);
 }
 
-static Item js_named_native_function_source_item(const String* name) {
+Item js_named_native_function_source_item(const String* name) {
     if (!name || name->len == 0) return js_native_function_source_item();
     // Native constructor source must retain its callable identity: libraries
     // compare this text to distinguish Object, DataView, and other builtins.
@@ -5709,49 +5764,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 return js_get_key_core(object_root.get(), key_root.get(),
                     receiver_root.get());
             }
-            // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
-            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP) {
-                if (str_key->len == 2 && str_key->chars[0] == '$' &&
-                    str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
-                    int gi = str_key->chars[1] - '1'; // $1 → index 0
-                    String* gs = js_regexp_last_match_string_at(gi + 2);
-                    return gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 5 && strncmp(str_key->chars, "input", 5) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$_", 2) == 0)) {
-                    String* s = js_regexp_last_match_string_at(0);
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 9 && strncmp(str_key->chars, "lastMatch", 9) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$&", 2) == 0)) {
-                    String* s = js_regexp_last_match_string_at(1);
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 9 && strncmp(str_key->chars, "lastParen", 9) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$+", 2) == 0)) {
-                    int gc = js_regexp_last_match.group_count;
-                    String* s = gc > 0
-                        ? js_regexp_last_match_string_at(gc + 1) : NULL;
-                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 11 && strncmp(str_key->chars, "leftContext", 11) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$`", 2) == 0)) {
-                    String* inp = js_regexp_last_match_string_at(0);
-                    if (inp && js_regexp_last_match.match_start > 0) {
-                        return (Item){.item = s2it(heap_strcpy(inp->chars, js_regexp_last_match.match_start))};
-                    }
-                    return (Item){.item = s2it(heap_create_name("", 0))};
-                }
-                if ((str_key->len == 12 && strncmp(str_key->chars, "rightContext", 12) == 0) ||
-                    (str_key->len == 2 && strncmp(str_key->chars, "$'", 2) == 0)) {
-                    String* inp = js_regexp_last_match_string_at(0);
-                    if (inp && js_regexp_last_match.match_end < (int)inp->len) {
-                        return (Item){.item = s2it(heap_strcpy(inp->chars + js_regexp_last_match.match_end,
-                            (int)inp->len - js_regexp_last_match.match_end))};
-                    }
-                    return (Item){.item = s2it(heap_create_name("", 0))};
-                }
-            }
+            // shared state is selected by the constructor's owning realm.
+            Item legacy;
+            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP &&
+                    js_regexp_legacy_get(&js_regexp_last_match, str_key->chars, str_key->len, &legacy))
+                return legacy;
             // v83: __proto__ for function objects → return Function.prototype
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                 return js_get_prototype_of(object);
@@ -11991,32 +12008,62 @@ Item js_intrinsic_object_to_locale_string_body(Item callee, Item this_value,
     return js_object_to_locale_string_with_ops(this_value, result_home, NULL);
 }
 
+Item js_object_legacy_accessor_with_ops(Item receiver, Item property, Item callback,
+        bool define, bool getter, const JsObjectAccessorOps* supplied) {
+    static const JsObjectAccessorOps defaults = {
+        &js_collection_default_ops, js_to_object, js_to_property_key,
+        [](Item object, Item key, Item callback, bool getter) {
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> descriptor(roots, js_object_create(ItemNull));
+            if (item_is_error(descriptor.get())) return descriptor.get();
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), "configurable", Item{.item = ITEM_TRUE}));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), "enumerable", Item{.item = ITEM_TRUE}));
+            JS_RETURN_IF_ERROR(js_set_key_cstr(descriptor.get(), getter ? "get" : "set", callback));
+            return js_object_define_property(object, key, descriptor.get());
+        },
+        [](Item object, Item key, bool getter, bool* found) {
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> descriptor(roots, js_object_get_own_property_descriptor(object, key));
+            if (item_is_error(descriptor.get())) return descriptor.get();
+            *found = descriptor.get().item != ITEM_NULL && descriptor.get().item != ITEM_JS_UNDEFINED;
+            // descriptor fields are own data: inherited get/set properties cannot turn data into an accessor.
+            return *found ? js_map_own_or(descriptor.get().map, getter ? "get" : "set", 3, make_js_undefined()) : make_js_undefined();
+        }, js_get_prototype_of
+    };
+    const JsObjectAccessorOps* ops = supplied ? supplied : &defaults;
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    uint64_t key_home = 0;
+    Rooted<Item> object(roots, receiver), key(roots, lambda_item_adopt_scalar_home(property, &key_home)),
+        function(roots, callback), descriptor(roots, ItemNull);
+    // js_to_object also serves Object(), whose nullish constructor behavior is different from ToObject.
+    if (js_is_nullish(object.get())) return ops->values->error(false, "Cannot convert undefined or null to object");
+    object.set(ops->to_object(object.get()));
+    if (item_is_error(object.get())) return object.get();
+    if (define && !ops->values->is_callable(function.get()))
+        return ops->values->error(false, "getter/setter must be a function");
+    key.set(ops->key(key.get()));
+    if (item_is_error(key.get())) return key.get();
+    if (define) {
+        Item status = ops->define(object.get(), key.get(), function.get(), getter);
+        return item_is_error(status) ? status : make_js_undefined();
+    }
+    while (object.get().item != ITEM_NULL) {
+        bool found = false;
+        descriptor.set(ops->lookup(object.get(), key.get(), getter, &found));
+        if (item_is_error(descriptor.get())) return descriptor.get();
+        if (found) return descriptor.get();
+        object.set(ops->prototype(object.get()));
+        if (item_is_error(object.get())) return object.get();
+    }
+    return make_js_undefined();
+}
 static Item js_intrinsic_object_define_accessor(Item this_value, Item* args,
         int argc, bool getter) {
-    if (js_is_nullish(this_value)) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    Item property = js_intrinsic_arg(args, argc, 0);
-    Item callback = js_intrinsic_arg(args, argc, 1);
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("getter/setter must be a function");
-    }
-    JS_ASSIGN_OR_RETURN(object, js_to_object(this_value));
-    JS_ASSIGN_OR_RETURN(key, js_to_string(property));
-    JS_ASSIGN_OR_RETURN(desc, js_object_create(ItemNull));
-    Item configurable = js_name_item("configurable", 12);
-    Item enumerable = js_name_item("enumerable", 10);
-    JS_ASSIGN_OR_RETURN(status,
-        js_set_key_default(desc, configurable, (Item){.item = ITEM_TRUE}));
-    status = js_set_key_default(desc, enumerable, (Item){.item = ITEM_TRUE});
-    if (item_is_error(status)) return status;
-    Item accessor_key = js_name_item(
-        getter ? "get" : "set", 3);
-    status = js_set_key_default(desc, accessor_key, callback);
-    if (item_is_error(status)) return status;
-    JS_ASSIGN_OR_RETURN(define_status,
-        js_object_define_property(object, key, desc));
-    return make_js_undefined();
+    return js_object_legacy_accessor_with_ops(this_value, js_intrinsic_arg(args, argc, 0),
+        js_intrinsic_arg(args, argc, 1), true, getter, NULL);
 }
 
 #define JS_OBJECT_ACCESSOR_BODY(body_name, getter) \
@@ -12028,30 +12075,8 @@ JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_setter_body, false)
 
 static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
         int argc, bool getter) {
-    if (js_is_nullish(this_value)) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    JS_ASSIGN_OR_RETURN(key,
-        js_to_string(js_intrinsic_arg(args, argc, 0)));
-    JS_ASSIGN_OR_RETURN(object, js_to_object(this_value));
-    const char* field = getter ? "get" : "set";
-    for (int depth = 0; depth < 64; depth++) {
-        if (object.item == ItemNull.item ||
-            get_type_id(object) == LMD_TYPE_UNDEFINED) break;
-        JS_ASSIGN_OR_RETURN(desc,
-            js_object_get_own_property_descriptor(object, key));
-        if (desc.item != ItemNull.item &&
-            get_type_id(desc) != LMD_TYPE_UNDEFINED) {
-            if (get_type_id(desc) == LMD_TYPE_MAP) {
-                Item value = js_map_own_or(desc.map, field, 3, ItemNull);
-                if (value.item != ItemNull.item) return value;
-            }
-            return make_js_undefined();
-        }
-        JS_ASSIGN_OR_RETURN(next, js_get_prototype_of(object));
-        object = next;
-    }
-    return make_js_undefined();
+    return js_object_legacy_accessor_with_ops(this_value, js_intrinsic_arg(args, argc, 0),
+        make_js_undefined(), false, getter, NULL);
 }
 
 #define JS_OBJECT_LOOKUP_ACCESSOR_BODY(body_name, getter) \
@@ -12769,7 +12794,8 @@ extern "C" Item js_typed_array_static_with_ops(Item constructor, Item* args, int
         return buffer->error(false, "TypedArray.from mapper is not callable");
     if (source.get().item == ITEM_JS_UNDEFINED || get_type_id(source.get()) == LMD_TYPE_NULL)
         return buffer->error(false, "Cannot convert undefined or null to object");
-    bool binary = !ops && get_type_id(source.get()) == LMD_TYPE_BINARY;
+    // Lambda binary ingress is independent of the frontend's object policy.
+    bool binary = get_type_id(source.get()) == LMD_TYPE_BINARY;
     if (!binary) {
         if (ops) {
             collected.set(ops->collect(source.get()));
@@ -12972,21 +12998,8 @@ JS_ATOMICS_OPERATION_BODY(js_intrinsic_atomics_xor_body, JS_ATOMICS_OP_XOR,
 
 Item js_intrinsic_atomics_pause_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-        TypeId type = get_type_id(args[0]);
-        if (type == LMD_TYPE_INT) {
-            return make_js_undefined();
-        }
-        if (type == LMD_TYPE_FLOAT) {
-            double value = it2d(args[0]);
-            if (isfinite(value) && value == trunc(value)) {
-                return make_js_undefined();
-            }
-        }
-        return js_throw_type_error(
-            "Atomics.pause requires an integral Number argument");
-    }
-    return make_js_undefined();
+    return js_atomics_pause_with_ops(argc ? args[0] : make_js_undefined(),
+        &js_buffer_view_default_ops);
 }
 
 #define JS_ATOMICS_SPECIAL_BODY(body_name, expression) \
@@ -14127,27 +14140,6 @@ extern "C" void js_set_class_constructor_parent(Item class_function, Item superc
 
 
 
-// JSCU44: a `with` scope must not leak into a called function. The callee's
-// chain is its own captured env, so entering a call relinks one borrowed frame
-// and leaving restores the caller's head -- no copy, no dynamic root range.
-// The callee releases its own frames at every completion, so leaving frees none.
-struct JsWithActivation {
-    JsWithActivation() = default;
-    JsWithFrame frame = {};
-    JsWithFrame* saved_head = NULL;
-    bool entered = false;
-
-    void enter(Item* captured, int depth) {
-        saved_head = js_with_activation_enter(captured, depth, &frame);
-        entered = true;
-    }
-
-    ~JsWithActivation() { if (entered) js_with_activation_leave(saved_head); }
-
-    JsWithActivation(const JsWithActivation&) = delete;
-    JsWithActivation& operator=(const JsWithActivation&) = delete;
-};
-
 // super() for class-expression superclasses: the class carrier is a function.
 static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
         int argc, uint64_t* result_home) {
@@ -14991,6 +14983,19 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         // values. Do not reinterpret their compact layout as JsFunction; their
         // boxed ABI performs the required signature and result-home handling.
         Function* lambda_fn = func_item.function;
+        if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD)) {
+            // D6.2.2v2: host callbacks retain the MVP layout and caller-owned
+            // arguments/result; never read the larger JsFunction invoke slot.
+            RootFrame roots(2);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> callee(roots, func_item), receiver(roots, this_val);
+            RootSpan owned_args((!args_prerooted && arg_count > 0) ? (size_t)arg_count : 0);
+            if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+                    owned_args, "js-call-mvp")) return ItemError;
+            Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
+                callee.get(), receiver.get(), args, arg_count, make_js_undefined()));
+            return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
+        }
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
                 lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
@@ -15055,10 +15060,29 @@ static Item js_call_export_into(Function* function, Item* args, int arg_count,
     if (!runtime || !function || !result_home) return ItemError;
     if (!js_mir_owner_is_current(runtime, "js-export-bridge")) return ItemError;
     Item callable = {.function = function};
-    Item result = js_call_function_into(callable, make_js_undefined(), args,
+    bool native_bigint = false;
+    if (function_has_abi(function, FN_ENTRY_ABI_MVP_LMD))
+        for (int i = 0; i < arg_count; i++) native_bigint |= js_is_native_bigint_egress(args[i]);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> callee(roots, callable);
+    RootSpan converted(native_bigint ? (size_t)arg_count : 0);
+    if (native_bigint) {
+        // S4.9.1: wide Lambda integers enter JavaScript as exact BigInts.
+        // retain all inputs before a conversion allocates on the shared heap.
+        bool prerooted = false;
+        if (!js_prepare_owned_argument_span(args, arg_count, prerooted, converted, "js-export-bigint")) return ItemError;
+        for (int i = 0; i < arg_count; i++) {
+            args[i] = js_native_bigint_to_bigint(args[i]);
+            if (item_is_error(args[i])) return args[i];
+        }
+    }
+    Item result = js_call_function_into(callee.get(), make_js_undefined(), args,
         arg_count, result_home);
     if (item_is_error(result)) {
-        log_error("js-export-bridge: uncaught error lane");
+        char message[256];
+        js_error_lane_format(result, message, sizeof(message));
+        log_error("js-export-bridge: %s", message);
     }
     return result;
 }
@@ -15356,59 +15380,48 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this,
 #include "js_regexp_compile.h"
 #include "js_bt_regex.h"
 
-// update legacy static state after a successful regex exec
-static void js_regexp_update_last_match(String* input_s,
-    re2::StringPiece* matches, int num_groups) {
-    const char* input_str = input_s ? input_s->chars : "";
-    int input_len = input_s ? (int)input_s->len : 0;
-    RootFrame roots(3);
-    Rooted<Item> input_root(roots, ItemNull);
-    Rooted<Item> match_root(roots, ItemNull);
-    Rooted<Item> group_root(roots, ItemNull);
-    input_root.set((Item){.item = s2it(input_s ? input_s : heap_create_name("", 0))});
-    if (matches[0].data() && input_s && matches[0].data() == input_str &&
-        (int)matches[0].size() == input_len) {
-        match_root.set(input_root.get());
-    } else {
-        match_root.set((Item){.item = s2it(matches[0].data()
-            ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
-            : heap_create_name("", 0))});
-    }
-    js_regexp_last_match.match_start = matches[0].data()
-        ? (int)(matches[0].data() - input_str) : 0;
-    js_regexp_last_match.match_end = js_regexp_last_match.match_start
-        + (matches[0].data() ? (int)matches[0].size() : 0);
-    int gc = num_groups - 1; // exclude group 0 (full match)
-    if (gc < 0) gc = 0;
-    root_vector_clear(&js_regexp_last_match.values);
-    if (!root_vector_push(&js_regexp_last_match.values, input_root.get()) ||
-            !root_vector_push(&js_regexp_last_match.values, match_root.get())) {
-        js_regexp_last_match.group_count = 0;
-        root_vector_clear(&js_regexp_last_match.values);
-        log_error("js-regexp: cannot record legacy match state");
-        return;
-    }
-    js_regexp_last_match.group_count = gc;
-    for (int i = 0; i < gc; i++) {
-        int gi = i + 1; // groups[0] is full match, groups[1] is $1
-        if (gi < num_groups && matches[gi].data()) {
-            if (input_s && matches[gi].data() == input_str &&
-                (int)matches[gi].size() == input_len) {
-                group_root.set(input_root.get());
-            } else {
-                group_root.set((Item){.item = s2it(heap_strcpy(
-                    (char*)matches[gi].data(), (int)matches[gi].size()))});
+// both engines publish through the same rooted carrier; offsets belong to the supplied subject.
+Item js_regexp_update_last_match_spans(JsRegexpLastMatch* state, Item input,
+        const int* starts, const int* ends, int count, bool utf16) {
+    if (!state || count < 1 || starts[0] < 0) return ItemNull;
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, input), value(roots, ItemNull);
+    root_vector_clear(&state->values);
+    state->group_count = 0;
+    if (!root_vector_push(&state->values, source.get())) return ItemError;
+    state->match_start = starts[0]; state->match_end = ends[0];
+    state->utf16_offsets = utf16;
+    for (int i = 0; i < count; i++) {
+        String* text = source.get().get_string();
+        value.set(ItemEmptyString);
+        if (starts[i] >= 0) {
+            if (utf16) value.set(js_str_substring_utf16(source.get(), starts[i], ends[i]));
+            else if (starts[i] == 0 && ends[i] == (int)text->len) value.set(source.get());
+            else {
+                String* piece = heap_strcpy(text->chars + starts[i], ends[i] - starts[i]);
+                value.set(piece ? Item{.item = s2it(piece)} : ItemError);
             }
-        } else {
-            group_root.set((Item){.item = s2it(heap_create_name("", 0))});
         }
-        if (!root_vector_push(&js_regexp_last_match.values, group_root.get())) {
-            js_regexp_last_match.group_count = 0;
-            root_vector_clear(&js_regexp_last_match.values);
-            log_error("js-regexp: cannot grow legacy capture state");
-            return;
+        if (item_is_error(value.get()) || !root_vector_push(&state->values, value.get())) {
+            root_vector_clear(&state->values);
+            return ItemError;
         }
     }
+    state->group_count = count - 1;
+    return ItemNull;
+}
+static void js_regexp_update_last_match(String* input,
+        re2::StringPiece* matches, int count) {
+    JsRegexScratch<int> offsets(count * 2);
+    if (offsets.count != count * 2) return;
+    for (int i = 0; i < count; i++) {
+        offsets.slots[i] = matches[i].data() ? (int)(matches[i].data() - input->chars) : -1;
+        offsets.slots[count + i] = offsets.slots[i] + matches[i].size();
+    }
+    Item status = js_regexp_update_last_match_spans(&js_regexp_last_match,
+        Item{.item = s2it(input)}, offsets.slots, offsets.slots + count, count, false);
+    if (item_is_error(status)) log_error("js-regexp: cannot record legacy match state");
 }
 
 static void js_regexp_update_last_match_span(String* input, int start,
@@ -15417,13 +15430,6 @@ static void js_regexp_update_last_match_span(String* input, int start,
     re2::StringPiece match(input->chars + start, length);
     js_regexp_update_last_match(input, &match, 1);
 }
-
-typedef enum JsRegexSimpleClassKind {
-    JS_REGEX_SIMPLE_CLASS_NONE = 0,
-    JS_REGEX_SIMPLE_CLASS_DIGIT,
-    JS_REGEX_SIMPLE_CLASS_WORD,
-    JS_REGEX_SIMPLE_CLASS_WHITESPACE,
-} JsRegexSimpleClassKind;
 
 // One alias row keeps the RE2 spelling and public ECMAScript spelling of a
 // named capture together. They are one mapping fact, not four parallel arrays.
@@ -15441,11 +15447,7 @@ struct JsRegexData {
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
     int han_all_kind;          // +/-: immutable ^\\p{Script=Han}+$ classifier
-    JsRegexSimpleClassKind simple_class_kind;
-    bool simple_class_negated;
-    bool simple_class_one_or_more;
-    bool simple_class_anchor_start;
-    bool simple_class_anchor_end;
+    JsRegexSimpleClass simple_class;
     JsRegexNameAlias* named_aliases;
     int named_alias_count;
     bool global;              // 'g' flag
@@ -16119,8 +16121,8 @@ static bool js_is_whitespace_cp(uint32_t cp) {
 // `+`. It preserves the ordinary matcher for groups, alternation, case-folded
 // word classes, and multiline anchors while avoiding an RE2 scan of generated
 // all-codepoint inputs.
-static bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
-        JsRegExpCompileInfo* info, JsRegexData* rd) {
+bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
+        const JsRegExpCompileInfo* info, JsRegexSimpleClass* rd) {
     if (!pattern || pattern_len < 2 || !info || !rd) return false;
     int pos = 0;
     bool anchor_start = false;
@@ -16155,11 +16157,11 @@ static bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
             (info->ignore_case && kind == JS_REGEX_SIMPLE_CLASS_WORD)) {
         return false;
     }
-    rd->simple_class_kind = kind;
-    rd->simple_class_negated = negated;
-    rd->simple_class_one_or_more = one_or_more;
-    rd->simple_class_anchor_start = anchor_start;
-    rd->simple_class_anchor_end = anchor_end;
+    rd->kind = kind;
+    rd->negated = negated;
+    rd->one_or_more = one_or_more;
+    rd->anchor_start = anchor_start;
+    rd->anchor_end = anchor_end;
     return true;
 }
 
@@ -16177,19 +16179,18 @@ static bool js_regex_simple_class_contains(JsRegexSimpleClassKind kind, int cp) 
     }
 }
 
-static bool js_regex_simple_class_matches(const JsRegexData* rd, int cp) {
-    bool contains = js_regex_simple_class_contains(rd->simple_class_kind, cp);
-    return rd->simple_class_negated ? !contains : contains;
+static bool js_regex_simple_class_matches(const JsRegexSimpleClass* rd, int cp) {
+    bool contains = js_regex_simple_class_contains(rd->kind, cp);
+    return rd->negated ? !contains : contains;
 }
 
-static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input,
-        int input_len, int start_pos, re2::RE2::Anchor anchor,
-        re2::StringPiece* matches, int num_groups) {
+bool js_regex_match_simple_class(const JsRegexSimpleClass* rd, const char* input,
+        int input_len, int start_pos, bool sticky, int* match_start, int* match_end) {
     if (!rd || !input || start_pos < 0 || start_pos > input_len) return false;
     // `^` anchors to the subject start, not a sticky/global lastIndex.
-    if (rd->simple_class_anchor_start && start_pos != 0) return false;
-    bool must_start = rd->simple_class_anchor_start ||
-        anchor == re2::RE2::ANCHOR_START;
+    if (rd->anchor_start && start_pos != 0) return false;
+    bool must_start = rd->anchor_start ||
+        sticky;
     int candidate = start_pos;
     while (candidate < input_len) {
         int next = candidate;
@@ -16200,7 +16201,7 @@ static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input
             continue;
         }
         int end = next;
-        if (rd->simple_class_one_or_more) {
+        if (rd->one_or_more) {
             while (end < input_len) {
                 int following = end;
                 int following_cp = js_regex_decode_utf8_permissive(input,
@@ -16209,14 +16210,13 @@ static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input
                 end = following;
             }
         }
-        if (rd->simple_class_anchor_end && end != input_len) {
+        if (rd->anchor_end && end != input_len) {
             if (must_start) return false;
             candidate = next;
             continue;
         }
-        if (num_groups > 0) {
-            matches[0] = re2::StringPiece(input + candidate, end - candidate);
-        }
+        *match_start = candidate;
+        *match_end = end;
         return true;
     }
     return false;
@@ -16750,7 +16750,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 // Helper: get the correct number of capturing groups for output.
 static int js_regex_num_groups(JsRegexData* rd) {
     if (rd->special_property_kind != 0) return 1;
-    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
+    if (rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
     if (rd->literal_fast) return 1;
     if (rd->bt) return js_bt_group_count(rd->bt) + 1; // +1 for full match
     return rd->re2->NumberOfCapturingGroups() + 1;
@@ -16772,9 +16772,12 @@ static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* i
                                                start_pos, matches, num_groups) ?
             JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
-    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
-        return js_regex_match_simple_class(rd, input, input_len, start_pos,
-            anchor, matches, num_groups) ? JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
+    if (rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+        int start = 0, end = 0;
+        if (!js_regex_match_simple_class(&rd->simple_class, input, input_len, start_pos,
+                anchor == re2::RE2::ANCHOR_START, &start, &end)) return JS_REGEX_MATCH_NO_MATCH;
+        if (num_groups > 0) matches[0] = re2::StringPiece(input + start, end - start);
+        return JS_REGEX_MATCH_FOUND;
     }
     if (rd->literal_fast) {
         if (start_pos < 0 || start_pos > input_len) return JS_REGEX_MATCH_NO_MATCH;
@@ -17801,7 +17804,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     {
         JsRegexData simple_class = {};
         if (js_regex_detect_simple_class(pattern, pattern_len,
-                &compile_info, &simple_class)) {
+                &compile_info, &simple_class.simple_class)) {
             JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool,
                 sizeof(JsRegexData));
             if (!rd) return ItemError;
@@ -20072,6 +20075,83 @@ static Item js_try_builtin_regexp_match_bulk(Item regex, Item str,
     return match_count == 0 ? ItemNull : results_root.get();
 }
 
+// no observable exec/callback runs here: retain only the final match and stream byte spans.
+Item js_regexp_replace_spans(Item regex, Item str, Item replacement, void* matcher,
+        const JsRegExpOps* values, const JsRegExpReplaceSpanOps* spans) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> regex_root(roots, regex), str_root(roots, str), replacement_root(roots, replacement);
+    String* input = str_root.get().get_string();
+    String* repl = replacement_root.get().get_string();
+    // A replacement with no '$' has no capture/template substitutions. Test
+    // once for the whole guarded builtin loop rather than parsing each match.
+    bool literal_replacement = memchr(repl->chars, '$', repl->len) == NULL;
+
+    Item set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+    if (item_is_error(set_status)) return set_status;
+    StrBuf* output = strbuf_new();
+    if (!output) return ItemError;
+    int position = 0;
+    int copy_position = 0;
+    bool found_match = false;
+    int last_start = -1;
+    int last_length = 0;
+    while (position <= (int)input->len) {
+        int start = 0, end = 0;
+        int match = spans->match(matcher, input->chars, input->len, position, &start, &end);
+        if (match < 0) {
+            strbuf_free(output);
+            Item recorded = spans->record(matcher, str_root.get(), last_start, last_start + last_length);
+            return item_is_error(recorded) ? recorded : spans->failure(match);
+        }
+        if (!match) break;
+        int match_len = end - start;
+        if (start > copy_position) {
+            strbuf_append_str_n(output, input->chars + copy_position,
+                start - copy_position);
+        }
+        Item replacement_status = ItemNull;
+        if (literal_replacement) {
+            strbuf_append_str_n(output, repl->chars, (int)repl->len);
+        } else {
+            replacement_status = js_apply_replacement_from_items(output,
+                repl->chars, (int)repl->len, input->chars, (int)input->len, start,
+                input->chars + start, match_len, NULL, 0,
+                make_js_undefined(), values, str_root.get(), false);
+        }
+        if (item_is_error(replacement_status)) {
+            strbuf_free(output);
+            Item recorded = spans->record(matcher, str_root.get(), start, end);
+            return item_is_error(recorded) ? recorded : replacement_status;
+        }
+        last_start = start;
+        last_length = match_len;
+        found_match = true;
+        copy_position = start + match_len;
+        // matching never moves backward; an empty terminal match is processed once.
+        // stop before adding one past the representable subject length.
+        if (!match_len && copy_position == (int)input->len) break;
+        position = copy_position + (match_len == 0 ? 1 : 0);
+    }
+    if (!found_match) {
+        strbuf_free(output);
+        set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+        return item_is_error(set_status) ? set_status : str_root.get();
+    }
+    if (copy_position <= (int)input->len) {
+        strbuf_append_str_n(output, input->chars + copy_position,
+            (int)input->len - copy_position);
+    }
+    set_status = spans->record(matcher, str_root.get(), last_start, last_start + last_length);
+    if (!item_is_error(set_status))
+        set_status = values->set_last_index(regex_root.get(), Item{.item = i2it(0)});
+    if (item_is_error(set_status)) {
+        strbuf_free(output);
+        return set_status;
+    }
+    return js_strbuf_take_item(output);
+}
+
 static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
         Item replacement, bool* out_admitted) {
     if (out_admitted) *out_admitted = false;
@@ -20091,84 +20171,25 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     if (!input || !repl) return ItemNull;
     // quantified built-in classes are nonempty and keep surrogate pairs in one run;
     // their byte spans support substitution without allocating UTF-16 match records.
-    if (!input->is_ascii && (rd->simple_class_kind == JS_REGEX_SIMPLE_CLASS_NONE ||
-            !rd->simple_class_one_or_more)) return ItemNull;
+    if (!input->is_ascii && (rd->simple_class.kind == JS_REGEX_SIMPLE_CLASS_NONE ||
+            !rd->simple_class.one_or_more)) return ItemNull;
     if (out_admitted) *out_admitted = true;
-    // A replacement with no '$' has no capture/template substitutions. Test
-    // once for the whole guarded builtin loop rather than parsing each match.
-    bool literal_replacement = memchr(repl->chars, '$', repl->len) == NULL;
-
-    Item last_index_key = js_name_item("lastIndex", 9);
-    Item set_status = js_regex_set_lastindex_strict(regex_root.get(),
-        last_index_key, 0);
-    if (item_is_error(set_status)) return set_status;
-    JsRegexScratch<re2::StringPiece> matches_buf(1);
-    if (matches_buf.count != 1 || !matches_buf.slots) return ItemError;
-    StrBuf* output = strbuf_new();
-    if (!output) return ItemError;
-    int position = 0;
-    int copy_position = 0;
-    bool found_match = false;
-    int last_start = -1;
-    int last_length = 0;
-    while (position <= (int)input->len) {
-        re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
-            re2::RE2::UNANCHORED;
-        JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
-            (int)input->len, position, anchor, matches_buf.slots, 1);
-        if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
-            strbuf_free(output);
-            js_regexp_update_last_match_span(input, last_start, last_length);
-            return js_throw_range_error("RegExp match exceeded engine resources");
-        }
-        if (match != JS_REGEX_MATCH_FOUND) break;
-        int start = (int)(matches_buf.slots[0].data() - input->chars);
-        int match_len = (int)matches_buf.slots[0].size();
-        if (start > copy_position) {
-            strbuf_append_str_n(output, input->chars + copy_position,
-                start - copy_position);
-        }
-        Item replacement_status = ItemNull;
-        if (literal_replacement) {
-            strbuf_append_str_n(output, repl->chars, (int)repl->len);
-        } else {
-            replacement_status = js_apply_replacement_from_items(output,
-                repl->chars, (int)repl->len, input->chars, (int)input->len, start,
-                matches_buf.slots[0].data(), match_len, NULL, 0,
-                make_js_undefined(), NULL, str_root.get(), false);
-        }
-        if (item_is_error(replacement_status)) {
-            strbuf_free(output);
-            js_regexp_update_last_match_span(input, last_start, last_length);
-            return replacement_status;
-        }
-        last_start = start;
-        last_length = match_len;
-        found_match = true;
-        copy_position = start + match_len;
-        // matching never moves backward; an empty terminal match is processed once.
-        // stop before adding one past the representable subject length.
-        if (!match_len && copy_position == (int)input->len) break;
-        position = copy_position + (match_len == 0 ? 1 : 0);
-    }
-    if (!found_match) {
-        strbuf_free(output);
-        set_status = js_regex_set_lastindex_strict(regex_root.get(),
-            last_index_key, 0);
-        return item_is_error(set_status) ? set_status : str_root.get();
-    }
-    if (copy_position <= (int)input->len) {
-        strbuf_append_str_n(output, input->chars + copy_position,
-            (int)input->len - copy_position);
-    }
-    js_regexp_update_last_match_span(input, last_start, last_length);
-    set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
-        0);
-    if (item_is_error(set_status)) {
-        strbuf_free(output);
-        return set_status;
-    }
-    return js_strbuf_take_item(output);
+    static const JsRegExpReplaceSpanOps spans = {
+        [](void* opaque, const char* input, int length, int position, int* start, int* end) {
+            auto* data = (JsRegexData*)opaque;
+            re2::StringPiece match;
+            int found = js_regex_match_internal(data, input, length, position,
+                data->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED, &match, 1);
+            if (found > 0) { *start = match.data() - input; *end = *start + match.size(); }
+            return found;
+        },
+        [](void*, Item input, int start, int end) {
+            return js_regexp_update_last_match_spans(&js_regexp_last_match, input, &start, &end, 1, false);
+        },
+        [](int) { return js_throw_range_error("RegExp match exceeded engine resources"); }
+    };
+    return js_regexp_replace_spans(regex_root.get(), str_root.get(), replacement_root.get(),
+        rd, &js_regexp_default_ops, &spans);
 }
 
 // RegExp.prototype[@@match](string) — ES spec §22.2.5.6 (ES2021)
@@ -21959,7 +21980,7 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
 
 // build a named groups object from regex match data (for replace $<name> and callback)
 static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, int num_groups) {
-    if (rd && rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+    if (rd && rd->simple_class.kind != JS_REGEX_SIMPLE_CLASS_NONE) {
         return make_js_undefined();
     }
     if (rd->bt) {
@@ -30471,6 +30492,9 @@ static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item th
     runner_root.set(js_new_native_function(js_promise_thenable_job));
     Item bound_args[3] = {promise_root.get(), thenable_root.get(), then_fn_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), then_fn_root.get()));
     js_microtask_enqueue(thunk_root.get());
 }
 
@@ -30696,6 +30720,9 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
     runner_root.set(js_new_native_function(js_promise_microtask_run));
     Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), handler_root.get()));
     Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
         ? next_root.get() : js_async_hooks_get_current_resource();
     // promise jobs are enqueued while the settling promise is active, so stamp
@@ -30713,6 +30740,9 @@ static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseStat
     runner_root.set(js_new_native_function(js_promise_passthrough_run));
     Item bound_args[3] = {next_root.get(), (Item){.item = i2it((int64_t)state)}, result_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), make_js_undefined()));
     Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
         ? next_root.get() : js_async_hooks_get_current_resource();
     js_promise_enqueue_wrapped_job(thunk_root.get(), resource, domain_root.get());
@@ -31244,6 +31274,7 @@ static Item js_promise_combinator_iterable_with_constructor(
         Item called_arr = ItemNull;
         counter_root.set(js_promise_make_combinator_counter(1, values_name, values_len, 0,
             &values_arr, &called_arr));
+        if (item_is_error(counter_root.get())) return counter_root.get();
         values_root.set(values_arr);
         called_root.set(called_arr);
         js_set_key_cstr(counter_root.get(), "__cap_resolve", resolve_root.get());
@@ -31612,11 +31643,10 @@ static void js_async_drive(Item frame_item, Item input) {
         }
         return;
     }
-    if (get_type_id(ctx->module_specifier) == LMD_TYPE_STRING) {
-        // A parked module body is a pending async evaluation edge for its
-        // async import parents.
-        js_module_mark_has_tla(ctx->module_specifier);
-        js_module_mark_post_await_pending(ctx->module_specifier);
+    if (ctx->module_descriptor) {
+        // a child realm's same-spelled module belongs to its retained descriptor.
+        ctx->module_descriptor->has_tla = true;
+        ctx->module_descriptor->post_await_pending = true;
     }
     // Bind resume/reject to the frame Item itself (JSCU10): the awaited
     // promise's reaction list then retains the activation until it settles.
@@ -31724,7 +31754,8 @@ extern "C" Item js_async_context_create_ast(Item function, Item arguments,
 static ModuleDescriptor* js_module_find(Item specifier);
 
 extern "C" Item js_async_context_create_module_body(ActivationEntry body,
-        void* payload, JsScript* script, uint32_t module_state_id, Item specifier) {
+        void* payload, JsScript* script, uint32_t module_state_id, Item specifier,
+        ModuleDescriptor* descriptor) {
     JS_ROOTS(roots, specifier_root, specifier, frame_root, ItemNull);
     frame_root.set(js_async_context_create_body(body, payload,
         NULL, 0, make_js_undefined(), ItemNull, ItemNull));
@@ -31733,7 +31764,8 @@ extern "C" Item js_async_context_create_module_body(ActivationEntry body,
     ctx->ast_module_script = script;
     ctx->module_specifier = specifier_root.get();
     // Every frontend registers the canonical descriptor before creating its carrier.
-    ModuleDescriptor* module = js_module_find(specifier_root.get());
+    ModuleDescriptor* module = descriptor ? descriptor : js_module_find(specifier_root.get());
+    ctx->module_descriptor = module;
     ctx->module_path = module ? module->path : NULL;
     // A nested import captures the target slab, never the caller's active module.
     ctx->module_state_id = module_state_id;
@@ -31744,7 +31776,7 @@ extern "C" Item js_async_context_create_module(JsScript* script, void* mir_main,
         uint32_t module_state_id, Item specifier) {
     return js_async_context_create_module_body(
         script ? js_interp_module_async_body : js_mir_module_async_body,
-        mir_main, script, module_state_id, specifier);
+        mir_main, script, module_state_id, specifier, NULL);
 }
 
 // Start execution of an async state machine (initial call at state 0)
@@ -32066,7 +32098,11 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                Item* called_out) {
     JS_ROOTS(roots, counter_root, js_new_object(), values_root, ItemNull, called_root, ItemNull);
     js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
-    values_root.set(js_array_new(values_length));
+    // combinator values escape to guest code and belong to the active intrinsic realm.
+    const JsPromiseHostOps* ops = js_promise_host_ops();
+    values_root.set(ops && ops->new_array
+        ? ops->new_array(js_runtime_state.promises.host_context, values_length) : js_array_new(values_length));
+    if (item_is_error(values_root.get())) return values_root.get();
     Item values = values_root.get();
     values.array->length = values_length;
     js_set_key_default(counter_root.get(),
@@ -32211,10 +32247,10 @@ extern "C" void js_tla_enter_module(void) {
 // A module body waiting on static async dependencies keeps its carrier in its
 // descriptor, in both tiers. Start each only after every such dependency has
 // completed; otherwise a live imported binding is observed in its TDZ.
-static void js_tla_drain_ready_modules(void) {
+static void js_tla_drain_ready_modules(Runtime* runtime = NULL) {
+    if (!runtime) runtime = context ? context->runtime : NULL;
     while (1) {
         ModuleDescriptor* best = NULL;
-        Runtime* runtime = context ? context->runtime : NULL;
         for (ModuleDescriptor* m = module_registry_first_for_runtime(runtime);
                 m; m = module_registry_next(m)) {
             auto* source = (JsSourceModuleRecord*)m->source_record;
@@ -32245,11 +32281,12 @@ static void js_tla_drain_ready_modules(void) {
 
 static __thread bool js_tla_ready_drain_scheduled = false;
 
-static Item js_tla_ready_drain_microtask(void) {
-    js_tla_ready_drain_scheduled = false;
+static Item js_tla_ready_drain_microtask(Item callee, Item, Item*, int, uint64_t*) {
+    auto* runtime = (Runtime*)(uintptr_t)js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (!runtime) js_tla_ready_drain_scheduled = false;
     if (g_tla_draining_depth > 0) return make_js_undefined();
     g_tla_draining_depth++;
-    js_tla_drain_ready_modules();
+    js_tla_drain_ready_modules(runtime);
     g_tla_draining_depth--;
     return make_js_undefined();
 }
@@ -32257,24 +32294,32 @@ static Item js_tla_ready_drain_microtask(void) {
 // The completing async frame settles its carrier after it notifies parents.
 // Queue parent execution behind that settlement so dynamic-import reactions
 // preserve the dependency's observable fulfillment order.
-static void js_tla_schedule_ready_drain(void) {
-    if (js_tla_ready_drain_scheduled) return;
+static void js_tla_schedule_ready_drain(Runtime* runtime = NULL) {
+    if (!runtime && js_tla_ready_drain_scheduled) return;
     RootFrame roots(1);
     Rooted<Item> callback_root(roots,
-        js_new_native_function(js_tla_ready_drain_microtask));
+        js_new_native_payload_function(js_tla_ready_drain_microtask, (uint64_t)(uintptr_t)runtime, 0));
     if (item_is_error(callback_root.get())) return;
-    js_tla_ready_drain_scheduled = true;
+    if (!runtime) js_tla_ready_drain_scheduled = true;
     js_microtask_enqueue(callback_root.get());
 }
 
-extern "C" void js_tla_flush_for_dynamic_import(void) {
-    if (g_tla_draining_depth > 0) return;
+extern "C" void js_tla_flush_for_runtime(Runtime* runtime) {
+    if (g_tla_draining_depth > 0) {
+        // another realm's ready work must survive a reentrant completion.
+        if (runtime) js_tla_schedule_ready_drain(runtime);
+        return;
+    }
     // Dynamic import is currently a synchronous loader; finish the imported
     // module's deferred TLA body before resolving its namespace, otherwise an
     // already-settled `await` still exposes an empty export object (D7.2.2).
     g_tla_draining_depth++;
-    js_tla_drain_ready_modules();
+    js_tla_drain_ready_modules(runtime);
     g_tla_draining_depth--;
+}
+
+extern "C" void js_tla_flush_for_dynamic_import(void) {
+    js_tla_flush_for_runtime(NULL);
 }
 
 static void js_tla_drain_post_await_modules(void) {
@@ -33598,118 +33643,216 @@ static Item js_weak_collection_new(bool is_map) {
 JS_FORWARD_ITEM(js_weakmap_new, (void), js_weak_collection_new, (true))
 JS_FORWARD_ITEM(js_weakset_new, (void), js_weak_collection_new, (false))
 
-extern "C" Item js_weakref_new(Item target) {
-    if (!js_can_be_held_weakly(target)) {
-        return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
+struct JsWeakCell {
+    Item target, holdings, token;
+    uint64_t holdings_home;
+    JsWeakCell* next;
+};
+struct JsWeakData {
+    JsWeakData* next;
+    JsWeakData** previous;
+    JsWeakRuntimeState* state;
+    Map* owner;
+    const JsCollectionOps* ops;
+    Item target, callback, empty;
+    JsWeakCell* cells;
+    bool registry, pending;
+};
+struct JsWeakRuntimeState {
+    RootVector kept;
+    JsWeakData* head;
+    bool cleaning;
+};
+struct JsWeakMap { Map base; JsWeakData* weak; };
+
+static JsWeakData* js_weak_data(Item owner) {
+    return get_type_id(owner) == LMD_TYPE_MAP && owner.map && owner.map->map_kind == MAP_KIND_WEAK
+        ? ((JsWeakMap*)owner.map)->weak : NULL;
+}
+static JsWeakRuntimeState* js_weak_state_ensure() {
+    if (!js_active_runtime_state && !js_runtime_state_init(context)) return NULL;
+    JsWeakRuntimeState*& state = js_runtime_state.weak_lifetimes;
+    if (!state) {
+        state = (JsWeakRuntimeState*)mem_calloc(1, sizeof(JsWeakRuntimeState), MEM_CAT_EVAL);
+        if (state) root_vector_init(&state->kept, context, "JS kept weak targets");
     }
-    // exact-root obj (and the borrowed target) across prototype link, class
-    // stamp, key alloc, and property set — an unrooted obj is freed by a
-    // mid-construction GC.
-    RootFrame roots(3);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_WEAK_REF));
-    js_collection_link_prototype(obj_root.get(), "WeakRef", 7);
-    Rooted<Item> target_key_root(roots, js_name_item("__weakref_target__", 18));
-    js_set_key_default(obj_root.get(), target_key_root.get(), target_root.get());
-    return obj_root.get();
+    return state;
+}
+static bool js_weak_keep(JsWeakRuntimeState* state, Item target) {
+    if (!state) return false;
+    for (int64_t i = 0; i < root_vector_count(&state->kept); i++)
+        if (root_vector_at(&state->kept, i)->item == target.item) return true;
+    return root_vector_push(&state->kept, target);
 }
 
-extern "C" Item js_weakref_deref(Item this_val) {
-    if (get_type_id(this_val) != LMD_TYPE_MAP || js_class_id(this_val) != JS_CLASS_WEAK_REF) {
-        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
-    }
-    bool found = false;
-    Item target = js_map_shape_lookup(this_val.map, "__weakref_target__", 18, &found);
-    if (!found) {
-        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
-    }
-    return target;
+Item js_weak_validate_input(bool registry, Item input, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    if (registry ? !ops->is_callable(input) : !ops->weak_key(input))
+        return ops->error(false, registry ? "FinalizationRegistry cleanup callback must be callable" :
+            "WeakRef: target must be an object or unregistered symbol");
+    return ItemNull;
+}
+Item js_weak_create_with_storage(TypeMap* shape, bool registry, Item input, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    JS_RETURN_IF_ERROR(js_weak_validate_input(registry, input, ops));
+    RootFrame roots(2);
+    if (!roots.valid() || !shape) return ItemError;
+    Rooted<Item> held(roots, input), object(roots, ItemNull);
+    JsWeakRuntimeState* state = js_weak_state_ensure();
+    if (!state || (!registry && !js_weak_keep(state, held.get()))) return ItemError;
+    auto* carrier = (JsWeakMap*)heap_calloc(sizeof(JsWeakMap), LMD_TYPE_MAP);
+    if (!carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP; carrier->base.map_kind = MAP_KIND_WEAK;
+    carrier->base.type = shape;
+    object.set(Item{.map = &carrier->base});
+    auto* data = (JsWeakData*)mem_calloc(1, sizeof(JsWeakData), MEM_CAT_EVAL);
+    if (!data) return ItemError;
+    data->registry = registry; data->state = state; data->owner = object.get().map; data->ops = ops;
+    if (registry) data->callback = held.get(); else data->target = held.get();
+    data->next = state->head; data->previous = &state->head;
+    if (data->next) data->next->previous = &data->next;
+    state->head = data; carrier->weak = data;
+    Map* initialized = map_fill_reserve_data(object.get().map);
+    return initialized ? Item{.map = initialized} : ItemError;
 }
 
-extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
-    if (!js_is_callable(cleanup_callback)) {
-        return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
+static void js_weak_target_cleared(uint64_t, void* opaque) {
+    // GC only records work; no guest callback or managed allocation occurs here.
+    ((JsWeakData*)opaque)->pending = true;
+}
+extern "C" void js_weak_map_gc_trace(Map* map, gc_heap_t* gc) {
+    JsWeakData* data = ((JsWeakMap*)map)->weak;
+    if (!data) return;
+    gc_mark_item(gc, data->callback.item);
+    if (!data->registry && data->target.item &&
+            !gc_register_ephemeron(gc, &data->target.item, &data->empty.item, NULL, NULL))
+        gc_mark_item(gc, data->target.item);
+    for (JsWeakCell* cell = data->cells; cell; cell = cell->next) {
+        // holdings are strong even when they indirectly retain the weak target (D5.3).
+        gc_mark_item(gc, cell->holdings.item);
+        if (cell->target.item && !gc_register_ephemeron(gc, &cell->target.item, &data->empty.item,
+                js_weak_target_cleared, data)) gc_mark_item(gc, cell->target.item);
+        if (cell->token.item && !gc_register_ephemeron(gc, &cell->token.item, &data->empty.item,
+                NULL, NULL)) gc_mark_item(gc, cell->token.item);
     }
-    // exact-root obj (and the borrowed callback) across prototype link, class
-    // stamp, two key allocs, the cells array alloc, and two property sets — an
-    // unrooted obj is freed by a mid-construction GC (register() would then be
-    // missing from the collected object).
-    RootFrame roots(4);
-    Rooted<Item> cleanup_root(roots, cleanup_callback);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_FINALIZATION_REGISTRY));
-    js_collection_link_prototype(obj_root.get(), "FinalizationRegistry", 20);
-    Rooted<Item> cb_key_root(roots, js_name_item("__fr_cleanup__", 14));
-    js_set_key_default(obj_root.get(), cb_key_root.get(), cleanup_root.get());
-    Rooted<Item> cells_key_root(roots, js_name_item("__fr_cells__", 12));
-    js_set_key_default(obj_root.get(), cells_key_root.get(), js_array_new(0));
-    return obj_root.get();
+}
+extern "C" void js_weak_map_heap_destroy(Map* map) {
+    JsWeakData* data = ((JsWeakMap*)map)->weak;
+    if (!data) return;
+    if (data->previous) *data->previous = data->next;
+    if (data->next) data->next->previous = data->previous;
+    while (data->cells) { JsWeakCell* cell = data->cells; data->cells = cell->next; mem_free(cell); }
+    ((JsWeakMap*)map)->weak = NULL;
+    mem_free(data);
+}
+void js_weak_state_destroy(JsRuntimeState* owner) {
+    JsWeakRuntimeState* state = owner ? owner->weak_lifetimes : NULL;
+    if (!state) return;
+    for (JsWeakData* data = state->head; data; ) {
+        JsWeakData* next = data->next;
+        // heap finalizers run after the runtime capsule is released.
+        data->state = NULL; data->previous = NULL; data->next = NULL; data = next;
+    }
+    root_vector_destroy(&state->kept);
+    mem_free(state); owner->weak_lifetimes = NULL;
 }
 
-static Item js_finalization_registry_cells(Item registry) {
-    if (get_type_id(registry) != LMD_TYPE_MAP ||
-        js_class_id(registry) != JS_CLASS_FINALIZATION_REGISTRY) {
-        return ItemNull;
+Item js_weak_method_with_ops(int operation, Item receiver, Item* args, int count, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    JsWeakData* data = js_weak_data(receiver);
+    bool deref = operation == JS_BUILTIN_WEAKREF_DEREF;
+    if (!data || data->registry == deref)
+        return ops->error(false, "weak lifetime method called on incompatible receiver");
+    if (deref) {
+        if (!data->target.item) return make_js_undefined();
+        return js_weak_keep(data->state, data->target) ? data->target : ItemError;
     }
-    bool found = false;
-    Item cells = js_map_shape_lookup(registry.map, "__fr_cells__", 12, &found);
-    if (!found || get_type_id(cells) != LMD_TYPE_ARRAY) return ItemNull;
-    return cells;
-}
-
-extern "C" Item js_finalization_registry_register(Item this_val, Item target,
-        Item holdings, Item unregister_token, int argc) {
-    Item cells = js_finalization_registry_cells(this_val);
-    if (cells.item == ItemNull.item) {
-        return js_throw_type_error("FinalizationRegistry.prototype.register called on incompatible receiver");
+    Item target = count ? args[0] : make_js_undefined();
+    if (!ops->weak_key(target)) return ops->error(false, "weak target or unregister token must be an object or unregistered symbol");
+    if (operation == JS_BUILTIN_FINALIZATION_UNREGISTER) {
+        bool removed = false;
+        for (JsWeakCell** link = &data->cells; *link; ) {
+            JsWeakCell* cell = *link;
+            if (cell->token.item != target.item) { link = &cell->next; continue; }
+            *link = cell->next; mem_free(cell); removed = true;
+        }
+        return Item{.item = b2it(removed)};
     }
-    if (!js_can_be_held_weakly(target)) {
-        return js_throw_type_error("FinalizationRegistry target must be an object or unregistered symbol");
-    }
-    if (argc >= 2 && it2b(js_strict_equal(target, holdings))) {
-        return js_throw_type_error("FinalizationRegistry holdings must not be the target");
-    }
-    bool has_token = argc >= 3 && get_type_id(unregister_token) != LMD_TYPE_UNDEFINED;
-    if (has_token && !js_can_be_held_weakly(unregister_token)) {
-        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
-    }
-    Item cell = js_new_object();
-    js_set_key_cstr(cell, "__target__", target);
-    js_set_key_cstr(cell, "__holdings__", argc >= 2 ? holdings : (Item){.item = ITEM_JS_UNDEFINED});
-    js_set_key_cstr(cell, "__active__", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(cell, "__has_token__", (Item){.item = b2it(has_token)});
-    if (has_token) {
-        js_set_key_cstr(cell, "__token__", unregister_token);
-    }
-    js_array_push(cells, cell);
+    Item holdings = count > 1 ? args[1] : make_js_undefined();
+    Item token = count > 2 ? args[2] : make_js_undefined();
+    if (holdings.item == target.item) return ops->error(false, "FinalizationRegistry holdings must not be the target");
+    if (get_type_id(token) != LMD_TYPE_UNDEFINED && !ops->weak_key(token))
+        return ops->error(false, "FinalizationRegistry unregister token must be an object or unregistered symbol");
+    auto* cell = (JsWeakCell*)mem_calloc(1, sizeof(JsWeakCell), MEM_CAT_EVAL);
+    if (!cell) return ItemError;
+    cell->target = target;
+    cell->holdings = lambda_item_adopt_scalar_home(holdings, &cell->holdings_home);
+    if (get_type_id(token) != LMD_TYPE_UNDEFINED) cell->token = token;
+    cell->next = data->cells; data->cells = cell;
     return make_js_undefined();
 }
 
-extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token) {
-    Item cells = js_finalization_registry_cells(this_val);
-    if (cells.item == ItemNull.item) {
-        return js_throw_type_error("FinalizationRegistry.prototype.unregister called on incompatible receiver");
-    }
-    if (!js_can_be_held_weakly(unregister_token)) {
-        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
-    }
-    bool removed = false;
-    JS_ARRAY_FOREACH(cell, cells) {
-        if (get_type_id(cell) != LMD_TYPE_MAP) continue;
-        bool active_found = false;
-        Item active = js_map_shape_lookup(cell.map, "__active__", 10, &active_found);
-        if (active_found && !js_is_truthy(active)) continue;
-        bool has_token_found = false;
-        Item has_token = js_map_shape_lookup(cell.map, "__has_token__", 13, &has_token_found);
-        if (!has_token_found || !js_is_truthy(has_token)) continue;
-        bool token_found = false;
-        Item token = js_map_shape_lookup(cell.map, "__token__", 9, &token_found);
-        if (!token_found) continue;
-        if (it2b(js_strict_equal(token, unregister_token))) {
-            js_set_key_cstr(cell, "__active__", (Item){.item = ITEM_FALSE});
-            removed = true;
+Item js_weak_job_checkpoint() {
+    JsWeakRuntimeState* state = js_active_runtime_state ? js_runtime_state.weak_lifetimes : NULL;
+    if (!state || state->cleaning) return ItemNull;
+    root_vector_clear(&state->kept);
+    RootVector queued = {};
+    root_vector_init(&queued, context, "JS finalization cleanup jobs");
+    // snapshot reachable pending carriers before callbacks can collect or mutate the native list.
+    for (JsWeakData* data = state->head; data; data = data->next) {
+        if (data->pending && !root_vector_push(&queued, Item{.map = data->owner})) {
+            root_vector_destroy(&queued); return ItemError;
         }
     }
-    return (Item){.item = b2it(removed)};
+    RootFrame roots(2);
+    if (!roots.valid()) { root_vector_destroy(&queued); return ItemError; }
+    uint64_t home = 0;
+    Rooted<Item> holding(roots, ItemNull), error(roots, ItemNull);
+    state->cleaning = true;
+    for (int64_t index = 0; index < root_vector_count(&queued); index++) {
+        JsWeakData* data = js_weak_data(*root_vector_at(&queued, index));
+        data->pending = false;
+        for (;;) {
+            JsWeakCell** link = &data->cells;
+            while (*link && (*link)->target.item) link = &(*link)->next;
+            if (!*link) break;
+            JsWeakCell* cell = *link;
+            holding.set(lambda_item_adopt_scalar_home(cell->holdings, &home));
+            *link = cell->next; mem_free(cell);
+            Item argument = holding.get();
+            Item result = data->ops->call(data->callback, make_js_undefined(), &argument, 1);
+            if (item_is_error(result)) { error.set(result); data->pending = true; break; }
+        }
+        root_vector_clear(&state->kept);
+        if (item_is_error(error.get())) break;
+    }
+    state->cleaning = false;
+    root_vector_destroy(&queued);
+    return error.get();
+}
+
+static Item js_weak_new(bool registry, Item input) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, input), object(roots, ItemNull);
+    JS_RETURN_IF_ERROR(js_weak_validate_input(registry, held.get(), NULL));
+    TypeMap* shape = js_object_type_for_class(registry ? JS_CLASS_FINALIZATION_REGISTRY : JS_CLASS_WEAK_REF);
+    object.set(js_weak_create_with_storage(shape, registry, held.get(), NULL));
+    if (item_is_error(object.get())) return object.get();
+    js_collection_link_prototype(object.get(), registry ? "FinalizationRegistry" : "WeakRef", registry ? 20 : 7);
+    return object.get();
+}
+extern "C" Item js_weakref_new(Item target) { return js_weak_new(false, target); }
+extern "C" Item js_finalization_registry_new(Item callback) { return js_weak_new(true, callback); }
+extern "C" Item js_weakref_deref(Item receiver) {
+    return js_weak_method_with_ops(JS_BUILTIN_WEAKREF_DEREF, receiver, NULL, 0, NULL);
+}
+extern "C" Item js_finalization_registry_register(Item receiver, Item target, Item holdings, Item token, int count) {
+    Item args[] = {target, holdings, token};
+    return js_weak_method_with_ops(JS_BUILTIN_FINALIZATION_REGISTER, receiver, args, count, NULL);
+}
+extern "C" Item js_finalization_registry_unregister(Item receiver, Item token) {
+    return js_weak_method_with_ops(JS_BUILTIN_FINALIZATION_UNREGISTER, receiver, &token, 1, NULL);
 }
 
 // new WeakMap(iterable) / new WeakSet(iterable) — validate adder is callable

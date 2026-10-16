@@ -5,6 +5,18 @@
 #include <stdlib.h>
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "utf_simple_casefold.inc"
+
+uint32_t utf8_simple_fold_next(uint32_t codepoint) {
+    size_t lo = 0, hi = sizeof(utf8_simple_fold_cycles) / sizeof(utf8_simple_fold_cycles[0]);
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (utf8_simple_fold_cycles[mid].codepoint < codepoint) lo = mid + 1;
+        else if (utf8_simple_fold_cycles[mid].codepoint > codepoint) hi = mid;
+        else return utf8_simple_fold_cycles[mid].next;
+    }
+    return codepoint;
+}
 
 void init_utf8proc_support(void) {
     // utf8proc is initialized automatically, no setup needed

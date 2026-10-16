@@ -93,7 +93,7 @@ static JsAstNode* js_c_make_enum_number(JsCAstSink* sink, SourceSpan span,
     return (JsAstNode*)literal;
 }
 
-static bool js_c_source_is_module(const char* source, size_t length) {
+bool js_c_source_is_module(const char* source, size_t length) {
     if (!source) return false;
     JsLexer lexer;
     js_lexer_init(&lexer, source, length);

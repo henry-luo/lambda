@@ -535,14 +535,15 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         const char* filename, bool inline_module_source,
         bool test262_native_harness,
         const JsPreambleState* preamble, bool has_preamble,
-        uint64_t* result_home, volatile long* harness_us, bool mvp_lmd) {
+        uint64_t* result_home, volatile long* harness_us, bool mvp_lmd,
+        const char* harness_source, size_t harness_length) {
     if (mvp_lmd) {
         if (has_preamble || ast_harness || test262_native_harness) {
             fputs("MVP_FAILURE admission -\nMVP batch requires a complete source\n", stdout);
             return ItemError;
         }
         MvpLmdHost host = {0, NULL, stdout, true};
-        MvpLmdOptions options = {filename, inline_module_source};
+        MvpLmdOptions options = {filename, inline_module_source, harness_source, harness_length};
         MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, source_len, NULL, &host, &options);
         MvpLmdFailurePhase phase;
         const char* type = NULL;
@@ -2756,7 +2757,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
-            fputs("  --runtime=mvp-lmd      MVP MIR with Lambda arrays, objects, and Map\n", stdout);
+            fputs("  --runtime=mvp-lmd      Explicit MVP MIR selector (MIR is the default)\n", stdout);
             fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
@@ -2864,7 +2865,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                            strcmp(argv[i], "--js-runtime=legacy") == 0) {
-                    // retain the old full-LambdaJS alias for existing scripts.
+                    fputs("legacy JS MIR is retired; use the default MVP MIR engine\n", stderr);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(9);
                 } else if (strncmp(argv[i], "--runtime=", 10) == 0 ||
                            strncmp(argv[i], "--js-runtime=", 13) == 0) {
                     fputs("invalid value for --runtime\n", stderr);
@@ -4820,7 +4823,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool lifecycle_timing = lifecycle_env && lifecycle_env[0] &&
                                 strcmp(lifecycle_env, "0") != 0;
         bool hot_reload = true; // persistent heap between tests (default: on)
-        bool mvp_lmd = false;
+        bool mvp_lmd = !js_ast_interpreter_requested() && !js_execution_auto_requested();
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
@@ -4912,6 +4915,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             if (strncmp(line, "batch-boundary:", 15) == 0) {
                 const char* boundary_id = line + 15;
                 if (mvp_lmd) {
+                    mem_free(saved_harness_src); saved_harness_src = NULL; saved_harness_len = 0;
                     fputs("\x01" "BATCH_MANIFEST_END ", stdout);
                     fputs(boundary_id, stdout); fputc('\n', stdout); fflush(stdout);
                     continue;
@@ -4969,7 +4973,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // Compiles harness source once as preamble; function objects persist as module vars.
             bool harness_includes = strncmp(line, "harness-includes:", 17) == 0;
             if (strncmp(line, "harness:", 8) == 0 || harness_includes) {
-                if (mvp_lmd) { fputs("MVP requires a combined harness/test source\n", stderr); break; }
                 size_t harness_len = (size_t)atol(line + (harness_includes ? 17 : 8));
                 if (harness_len == 0 || harness_len > 10 * 1024 * 1024) continue;
                 char* harness_src = (char*)mem_alloc(harness_len + 1, MEM_CAT_SYSTEM);
@@ -4983,6 +4986,20 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 harness_src[total_read] = '\0';
                 int ch = fgetc(stdin);
                 if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
+
+                if (mvp_lmd) {
+                    if (harness_includes && saved_harness_src) {
+                        char* joined = mem_join3(saved_harness_src, saved_harness_len, "\n", 1,
+                            harness_src, total_read, MEM_CAT_SYSTEM);
+                        mem_free(harness_src);
+                        harness_src = joined;
+                        total_read += saved_harness_len + 1;
+                    }
+                    mem_free(saved_harness_src);
+                    saved_harness_src = harness_src;
+                    saved_harness_len = total_read;
+                    continue;
+                }
 
                 if (harness_includes) {
                     // retained includes own a separate Script so their strict
@@ -5235,7 +5252,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                             js_source, js_source_len, script_exec_path, inline_module_source,
                             test262_native_harness,
                             &preamble, has_preamble, &result_home,
-                            lifecycle_timing ? &harness_us : NULL, mvp_lmd);
+                            lifecycle_timing ? &harness_us : NULL, mvp_lmd, saved_harness_src, saved_harness_len);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -5265,7 +5282,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         js_source, js_source_len, script_exec_path, inline_module_source,
                         test262_native_harness,
                         &preamble, has_preamble, &result_home,
-                        lifecycle_timing ? &harness_us : NULL, mvp_lmd);
+                        lifecycle_timing ? &harness_us : NULL, mvp_lmd, saved_harness_src, saved_harness_len);
                     mir_error_active = 0;
                     if (item_is_error(res)) {
                         batch_error = res;
@@ -5283,7 +5300,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 js_source, js_source_len, script_exec_path, inline_module_source,
                 test262_native_harness,
                 &preamble, has_preamble, &result_home,
-                lifecycle_timing ? &harness_us : NULL, mvp_lmd);
+                lifecycle_timing ? &harness_us : NULL, mvp_lmd, saved_harness_src, saved_harness_len);
             if (item_is_error(res)) {
                 batch_error = res;
                 result = 1;

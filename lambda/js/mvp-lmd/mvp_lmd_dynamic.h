@@ -3,6 +3,8 @@
 
 // Dynamic source executes only through the retained shared AST interpreter.
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram*);
+Item mvp_lmd_eval_script(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+Item mvp_lmd_dynamic_lexical(MvpLmdProgram*, Item key, Item value, int operation, bool* found);
 Item mvp_lmd_dynamic_function(Context*, MvpLmdProgram*, Item*, uint64_t,
     Item self, Item receiver, Item new_target);
 enum MvpLmdDynamicFunctionKind {
@@ -20,9 +22,9 @@ Item mvp_lmd_dynamic_function_source(Item);
 Item mvp_lmd_dynamic_class(MvpLmdProgram*, AstClassNode*, Item base, Item constructor = ItemNull);
 
 // Implemented by the program owner, which owns the actual live global cells.
-Item mvp_lmd_dynamic_global(MvpLmdProgram*, Item key, Item value,
+extern "C" Item mvp_lmd_dynamic_global(MvpLmdProgram*, Item key, Item value,
     int64_t operation, bool strict);
-Item mvp_lmd_dynamic_global_this(MvpLmdProgram*);
+Item mvp_lmd_dynamic_global_this(MvpLmdProgram*, bool required = true);
 
 struct JsScript;
 bool mvp_lmd_dynamic_retain_script(MvpLmdProgram*, JsScript*);

@@ -20,6 +20,22 @@ typedef struct JsRegExpCompileInfo {
     char error[512];
 } JsRegExpCompileInfo;
 
+typedef enum JsRegexSimpleClassKind {
+    JS_REGEX_SIMPLE_CLASS_NONE = 0,
+    JS_REGEX_SIMPLE_CLASS_DIGIT,
+    JS_REGEX_SIMPLE_CLASS_WORD,
+    JS_REGEX_SIMPLE_CLASS_WHITESPACE,
+} JsRegexSimpleClassKind;
+typedef struct JsRegexSimpleClass {
+    JsRegexSimpleClassKind kind;
+    bool negated, one_or_more, anchor_start, anchor_end;
+} JsRegexSimpleClass;
+bool js_regex_detect_simple_class(const char* pattern, int length,
+    const JsRegExpCompileInfo* flags, JsRegexSimpleClass* out);
+// byte spans are valid on wide subjects for quantified built-in classes.
+bool js_regex_match_simple_class(const JsRegexSimpleClass* plan, const char* input,
+    int length, int position, bool sticky, int* start, int* end);
+
 struct StrBuf;
 // decode capture/backreference names only; original pattern bytes remain caller-owned.
 // false is allocation failure; true with null output means unchanged. free output with strbuf_free.

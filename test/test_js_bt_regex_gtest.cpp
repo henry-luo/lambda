@@ -18,6 +18,7 @@
 // this unity-style test must pull that translation unit in as well.
 #include "../lambda/js/js_regex_generated_properties.cpp"
 #include "../lambda/js/js_bt_regex.cpp"
+#include "../lib/strbuf.h"
 
 namespace {
 
@@ -420,6 +421,36 @@ TEST(BtStress, ManyAlternatives) {
     auto r = run_bt(pat.c_str(), "zzz foo7 zzz", F());
     EXPECT_EQ(r.matched, 1);
     EXPECT_EQ(group_str(r, 0), "foo7");
+}
+
+TEST(BtStress, IndexedAlternativesRetainPriorityAndBacktracking) {
+    EXPECT_EQ(run_bt("(?:[ab]|ab|cd|ef|gh|ij|kl|mn)b", "abb", F()).ends[0], 2);
+    EXPECT_EQ(run_bt("(?:ab|[ab]|cd|ef|gh|ij|kl|mn)b", "abb", F()).ends[0], 3);
+    EXPECT_EQ(run_bt("(?:ab|a|cd|ef|gh|ij|kl|mn)b", "ab", F()).ends[0], 2);
+    EXPECT_EQ(run_bt("(?:|ab|cd|ef|gh|ij|kl|mn|op)", "", F()).ends[0], 0);
+    EXPECT_EQ(run_bt("(?:ab|cd|ef|gh|ij|kl|mn|op)", "AB", Fi()).ends[0], 2);
+    EXPECT_EQ(run_bt("(?<=ab|cd|ef|gh|ij|kl|mn|op)c", "abc", F()).starts[0], 2);
+    EXPECT_EQ(run_bt("(?:ab|cd|ef|gh|ij|kl|mn|op)", "zz", F()).matched, 0);
+}
+
+TEST(BtStress, LargeLiteralSetRepeatedWithinResourceBudget) {
+    StrBuf* pattern = strbuf_new();
+    StrBuf* input = strbuf_new();
+    ASSERT_NE(pattern, nullptr);
+    ASSERT_NE(input, nullptr);
+    strbuf_append_str(pattern, "^(?:");
+    for (int i = 0; i < 2500; i++) {
+        if (i) strbuf_append_char(pattern, '|');
+        strbuf_append_format(pattern, "\\u{%x}x", 0x1000 + i);
+        strbuf_append_utf8(input, 0x1000 + i);
+        strbuf_append_char(input, 'x');
+    }
+    strbuf_append_str(pattern, ")+$");
+    auto result = run_bt(pattern->str, input->str, Fu());
+    EXPECT_EQ(result.matched, JS_BT_EXEC_MATCH);
+    EXPECT_EQ(result.ends[0], input->length);
+    strbuf_free(pattern);
+    strbuf_free(input);
 }
 
 TEST(BtStress, DeepNestingCompilesAndMatches) {

@@ -243,17 +243,14 @@ static TypesetStatus paged_style_traits_admit(PagedComposition* composition, con
     if (style->binding_status != VIEW_MODEL_OK)
         return paged_failure(composition, style->binding_status == VIEW_MODEL_OUT_OF_MEMORY ? TYPESET_OUT_OF_MEMORY : TYPESET_INVALID,
             style->source, 0, style->binding_reason);
-    if (style->flow_traits && style->flow_traits->status != VIEW_MODEL_OK)
-        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->flow_traits->reason);
-    if (style->whitespace && style->whitespace->status != VIEW_MODEL_OK)
-        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->whitespace->reason);
-    if (style->image_spec && style->image_spec->status != VIEW_MODEL_OK)
-        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->image_spec->reason);
-    if (style->label_body && style->label_body->status != VIEW_MODEL_OK)
-        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->label_body->reason);
-    if (style->page_query && style->page_query->status != VIEW_MODEL_OK)
-        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->page_query->reason);
-    return TYPESET_OK;
+    TypesetStatus status = TYPESET_OK;
+    auto admit = [&](const auto& value) {
+        if (status == TYPESET_OK && value && value->status != VIEW_MODEL_OK)
+            status = paged_failure(composition, TYPESET_INVALID, style->source, 0, value->reason);
+    };
+    admit(style->flow_traits); admit(style->whitespace); admit(style->image_spec);
+    admit(style->label_body); admit(style->page_query); admit(style->note_binding);
+    return status;
 }
 
 
@@ -849,6 +846,7 @@ struct PagedFragmentainer {
     uint32_t note_count, top_floats, bottom_floats;
     PagedNoteArea* area;       // the footnote area's geometry, resolved on first use
     bool occupied;
+    float alignment;           // publication-only body translation; auxiliary areas retain their slots
 };
 struct PagedFlowLine {
     float top, height;         // in the paragraph's inline frame (BlockContext::advance_y)
@@ -948,6 +946,19 @@ struct PagedFlowState {
     PagedFlowParagraph* last_paragraph;
     PagedFlowParagraph* paragraph; // the open inline run
     ViewBreak pending_break;   // forced break-after of the previous in-flow sibling
+    struct SpaceBox { ViewBlock* box; BlockContext* owner; size_t parent; float top; }* space_boxes;
+    size_t space_box_count, space_box_capacity, space_open;
+    RadiantSpaceSpec* pending_spaces;
+    size_t pending_space_count, pending_space_capacity;
+    struct SpaceGap {
+        ViewBlock* box;
+        PagedFlowParagraph* paragraph;
+        size_t line;
+        RadiantSpaceSpec range;
+        float used;
+        bool after;
+    }* space_gaps;
+    size_t space_gap_count, space_gap_capacity;
     ViewModelCheckpoint* pass; // the pages of the running layout pass
     PagedFlowTable* tables;    // the tables of the pass in flow order
     PagedFlowTable* last_table;
@@ -975,6 +986,10 @@ struct PagedFlowState {
     bool draining;             // the flow ended: new fragmentainers hold only waiting notes
     DomElement* call;          // the footnote call being laid out at its note
     uint32_t outside;          // material laid out outside the flow: the hooks stand aside
+    DomElement* detached_root; // auxiliary layout's independent inline reference frame
+    float detached_width;
+    struct PagedIndentBinding { const ViewCssStyle* owner; float width; }* indents;
+    size_t indent_count, indent_capacity;
     TypesetStatus status;
     uint32_t relaxed_minima, relaxed_avoidance;
 };
@@ -985,10 +1000,22 @@ static TypesetStatus paged_flow_fail(PagedFlowState* state, TypesetStatus status
         state->composer.page ? state->composer.page->page_number : 0, reason);
 }
 
+ViewTree* paged_flow_view_tree(const LayoutContext* lycon) {
+    return lycon->paged->tree;
+}
+
+static ViewCssStyle* paged_source_style(PagedFlowState* state, DomElement* source) {
+    if (state->status != TYPESET_OK || source->is_synthetic()) return nullptr;
+    ViewCssStyle* style = view_css_resolve(state->tree, source);
+    if (!style) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, source, nullptr); return nullptr; }
+    TypesetStatus status = paged_style_traits_admit(state->composition, style);
+    if (status != TYPESET_OK) { state->status = status; return nullptr; }
+    return style;
+}
+
 static TypesetStatus paged_source_traits_admit(PagedFlowState* state, DomElement* source) {
-    if (source->is_synthetic()) return TYPESET_OK;
-    const ViewCssStyle* style = view_css_resolve(state->tree, source);
-    return style ? paged_style_traits_admit(state->composition, style) : TYPESET_OUT_OF_MEMORY;
+    paged_source_style(state, source);
+    return state->status;
 }
 
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
@@ -1026,9 +1053,12 @@ static ViewBreak paged_flow_break_keyword(CssEnum keyword) {
     }
 }
 
-static bool paged_break_is_avoid(ViewBreak value) {
-    return value == VIEW_BREAK_AVOID || value == VIEW_BREAK_AVOID_COLUMN || value == VIEW_BREAK_AVOID_PAGE;
+// later sides win; generic page/column demands still accumulate (CSS Break 3 §4.3).
+static ViewBreak paged_break_combine(ViewBreak earlier, ViewBreak later) {
+    return later >= VIEW_BREAK_LEFT ? later : (earlier > later ? earlier : later);
 }
+
+static ViewBreak paged_flow_box_break(PagedFlowState* state, ViewBlock* box, bool after);
 
 // boxes whose content never breaks: replaced content, flex and grid containers
 // and multicol containers; a box taller than a fragmentainer is sliced by publication
@@ -1048,17 +1078,53 @@ static bool paged_flow_closed(const ViewBlock* block) {
     return paged_flow_atomic(block) || paged_flow_is_table(block);
 }
 
-// break-inside: avoid keeps its content together when a fragmentainer can hold it;
-// otherwise the content breaks as usual and the avoidance is relaxed (CSS Break §4.3)
-static bool paged_flow_avoids_inside(const ViewBlock* block) {
-    const BlockProp* blk = block->blk ? block->block() : nullptr;
-    return blk && (blk->break_inside == CSS_VALUE_AVOID || blk->break_inside == CSS_VALUE_AVOID_PAGE ||
-        blk->break_inside == CSS_VALUE_AVOID_COLUMN);
+enum PagedKeepRelation { PAGED_KEEP_TOGETHER, PAGED_KEEP_NEXT, PAGED_KEEP_PREVIOUS };
+
+static size_t paged_fragmentainer_index(const PagedFlowState* state, float y);
+
+static void paged_keep_combine(RadiantKeepSpec* result, const RadiantKeepSpec& other) {
+    for (size_t scope = 0; scope < 3; scope++)
+        result->scope[scope] = radiant_keep_max(result->scope[scope], other.scope[scope]);
 }
 
-// boxes the flow places whole when they fit a fragmentainer
-static bool paged_flow_monolithic(const ViewBlock* block) {
-    return paged_flow_atomic(block) || paged_flow_avoids_inside(block);
+// preserve the separate domains until the actual break context selects their constraints.
+static RadiantKeepSpec paged_keep_spec(PagedFlowState* state, const ViewBlock* box,
+        PagedKeepRelation relation, bool columns) {
+    RadiantKeepSpec result = {};
+    if (!box) return result;
+    const BlockProp* blk = box->blk ? box->block() : nullptr;
+    ViewBreak css = relation == PAGED_KEEP_TOGETHER
+        ? paged_flow_break_keyword(blk ? blk->break_inside : CSS_VALUE_AUTO)
+        : paged_flow_box_break(state, const_cast<ViewBlock*>(box), relation == PAGED_KEEP_NEXT);
+    if (css == VIEW_BREAK_AVOID || (columns && css == VIEW_BREAK_AVOID_COLUMN)) result.scope[1].kind = RADIANT_KEEP_ALWAYS;
+    if (css == VIEW_BREAK_AVOID || css == VIEW_BREAK_AVOID_PAGE) result.scope[2].kind = RADIANT_KEEP_ALWAYS;
+    const ViewCssStyle* style = !box->is_synthetic() ? paged_source_style(state, const_cast<ViewBlock*>(box)) : nullptr;
+    const RadiantFlowTraits* traits = style ? style->flow_traits.get() : nullptr;
+    if (traits) paged_keep_combine(&result, relation == PAGED_KEEP_TOGETHER ? traits->together :
+        relation == PAGED_KEEP_NEXT ? traits->next : traits->previous);
+    return result;
+}
+
+static bool paged_context_has_columns(const PagedFlowState* state, size_t index) {
+    // continuous editions own an unbounded fragmentainer without a physical page.
+    const ViewPageBox* page = index < state->fragmentainer_count ? state->fragmentainers[index].page : nullptr;
+    return page && page->style && page->style->column_count > 1;
+}
+
+static RadiantKeepSpec paged_inside_keep(PagedFlowState* state, const ViewBlock* block) {
+    size_t index = state->fragmentainer_count ? paged_fragmentainer_index(state, paged_flow_top(const_cast<ViewBlock*>(block))) : 0;
+    bool columns = paged_context_has_columns(state, index);
+    return paged_keep_spec(state, block, PAGED_KEEP_TOGETHER, columns);
+}
+
+// soft avoidance relaxes when a fresh context cannot contain the material (integration §4.1).
+static bool paged_flow_avoids_inside(PagedFlowState* state, const ViewBlock* block) {
+    RadiantKeepSpec keep = paged_inside_keep(state, block);
+    return keep.scope[1].kind != RADIANT_KEEP_AUTO || keep.scope[2].kind != RADIANT_KEEP_AUTO;
+}
+
+static bool paged_flow_monolithic(PagedFlowState* state, const ViewBlock* block) {
+    return paged_flow_atomic(block) || paged_flow_avoids_inside(state, block);
 }
 
 // normal-flow block-level boxes take part in fragmentation; inline-level,
@@ -1128,7 +1194,7 @@ static bool paged_table_body_view(View* view, const ViewBlock* table) {
 static float paged_fragmentainer_reserved(PagedFlowState* state, size_t index);
 static TypesetStatus paged_fragmentainer_append(PagedFlowState* state, bool new_page, bool restart = false);
 static TypesetStatus paged_note_continue(PagedFlowState* state, PagedFlowAnchor* anchor, size_t index);
-static float paged_note_piece_height(PagedFlowAnchor* anchor, float offset, float available);
+static float paged_note_piece_height(PagedFlowState* state, PagedFlowAnchor* anchor, float offset, float available);
 
 // the space fragmentainer `index` keeps free above and below `view`'s content:
 // cloned box edges, the footnotes and page floats placed on it, and around a
@@ -1249,7 +1315,7 @@ static bool paged_anchor_fits(PagedFlowState* state, PagedFlowAnchor* anchor, si
             float capacity = fragmentainer.bottom - content_end - fragmentainer.float_top - fragmentainer.float_bottom -
                 area->margin[0] - area->margin[2] - area->edges[0] - area->edges[2] - fragmentainer.notes;
             if (!alone) capacity = fminf(capacity, limit - area->edges[0] - area->edges[2] - fragmentainer.notes);
-            anchor->height = paged_note_piece_height(anchor, 0.0f, capacity);
+            anchor->height = paged_note_piece_height(state, anchor, 0.0f, capacity);
             if (anchor->height <= 0.0f) return false;
         }
         float content = area->edges[0] + area->edges[2] + fragmentainer.notes + anchor->height;
@@ -1338,11 +1404,12 @@ static uint32_t paged_flow_terminal_page(const PagedFlowState* state, const Radi
 }
 
 static TypesetStatus paged_fragmentainer_append(PagedFlowState* state, bool new_page, bool restart) {
+    if (state->status != TYPESET_OK) return state->status;
     PagedPageCursor* composer = &state->composer;
     bool first = !state->fragmentainer_count;
     bool continuous = state->tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS;
     if (continuous && !first) return paged_flow_fail(state, TYPESET_INVALID, nullptr, "a continuous edition has one fragmentainer");
-    TypesetStatus status;
+    TypesetStatus status = TYPESET_OK;
     if (!first && !new_page && paged_has_next_column(composer)) {
         status = paged_column_select(composer, composer->column_index + 1);
     } else {
@@ -1353,25 +1420,28 @@ static TypesetStatus paged_fragmentainer_append(PagedFlowState* state, bool new_
         if (!first && !continuous && paged_requested_side(composer, request, &wanted) &&
             paged_side(composer, state->tree->model->page_count) != wanted) {
             status = paged_page_create(composer, true);
-            if (status != TYPESET_OK) return status;
         }
-        composer->terminal_page = paged_flow_terminal_page(state, composer->sequence);
-        status = paged_page_create(composer, false);
+        if (status == TYPESET_OK) {
+            composer->terminal_page = paged_flow_terminal_page(state, composer->sequence);
+            status = paged_page_create(composer, false);
+        }
     }
-    if (status != TYPESET_OK) return status;
+    // void layout hooks may discard a return value; publication must still see the failed append.
+    if (status != TYPESET_OK) return paged_flow_fail(state, status, nullptr,
+        status == TYPESET_BUDGET_EXHAUSTED ? "page budget exhausted" : nullptr);
     const RdtLogicalRect& rect = composer->page_style.content_rect;
     if (first) state->run_width = rect.width;
     // width changes are measured on this pass and reflowed before publication settles.
     (void)restart;
     if (!lam::pool_grow_array(state->composition->pool, &state->fragmentainers, &state->fragmentainer_capacity,
-        state->fragmentainer_count + 1, 8)) return TYPESET_OUT_OF_MEMORY;
+        state->fragmentainer_count + 1, 8)) return paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, nullptr, nullptr);
     float top = first ? 0.0f : state->fragmentainers[state->fragmentainer_count - 1].bottom;
     float bottom = continuous ? INFINITY : top + rect.height;
     PagedFragmentainer fragmentainer = {top, bottom, bottom, continuous ? nullptr : composer->page, composer->column_index, rect, nullptr};
     state->fragmentainers[state->fragmentainer_count++] = fragmentainer;
     // automatic notes waiting for a fragmentainer start this one (plan P5)
     if (state->notes_waiting) paged_notes_resume(state, state->fragmentainer_count - 1, top, state->draining);
-    return TYPESET_OK;
+    return state->status;
 }
 
 // the fragmentainer holding flow position y, growing the page table on demand
@@ -1524,13 +1594,6 @@ static bool paged_view_inside(View* view, View* ancestor) {
     return view_geometry_is_descendant(view, ancestor, true);
 }
 
-// does any strut recorded since `since` lie inside `block`?
-static bool paged_struts_inside(const PagedFlowState* state, size_t since, View* block) {
-    for (size_t i = since; i < state->strut_count; i++)
-        if (paged_view_inside(state->struts[i].view, block)) return true;
-    return false;
-}
-
 static ViewBlock* paged_previous_flow_sibling(ViewBlock* block) {
     for (View* previous = block->prev_placed_view(); previous; previous = previous->prev_placed_view()) {
         if (previous->view_type == RDT_VIEW_MARKER) continue;
@@ -1562,29 +1625,122 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
     BlockContext* owner, ViewBlock* root);
 static void paged_table_restore(PagedFlowState* state, PagedFlowTable* record, BlockContext* owner, ViewBlock* root);
 
+static TypesetStatus paged_space_append(PagedFlowState* state, ViewBlock* block, bool after) {
+    const ViewCssStyle* style = paged_source_style(state, block);
+    const RadiantSpaceSpec* space = style && style->flow_traits
+        ? (after ? &style->flow_traits->after : &style->flow_traits->before) : nullptr;
+    if (!space || !space->specified) return state->status;
+    if (!lam::pool_grow_array(state->composition->pool, &state->pending_spaces, &state->pending_space_capacity,
+            state->pending_space_count + 1, 8)) return paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr);
+    state->pending_spaces[state->pending_space_count++] = *space;
+    return TYPESET_OK;
+}
+
+static void paged_space_anchors_shift(PagedFlowState* state, size_t skip, float delta) {
+    for (size_t i = 0; i < state->space_box_count; i++)
+        if (i != skip && state->space_boxes[i].parent == kPagedUnplaced)
+            paged_shift_view(state->space_boxes[i].box, delta);
+}
+
+static void paged_space_shift(PagedFlowState* state, BlockContext* owner,
+        const PagedFlowState::SpaceGap& gap, ViewBlock* root, float delta) {
+    if (gap.after) {
+        gap.box->height += delta; gap.box->content_height += delta;
+        paged_flow_grow(owner, gap.box, false, root, delta);
+    } else paged_shift_flow(state, owner, gap.paragraph, (int)gap.line, gap.box, root, delta); // INT_CAST_OK: paragraph line index
+}
+
+// open ancestors and empty siblings share one space boundary until real material separates it.
+static TypesetStatus paged_space_commit(PagedFlowState* state, BlockContext* owner,
+        PagedFlowParagraph* paragraph = nullptr, size_t line = 0, ViewBlock* closing = nullptr) {
+    size_t first = state->space_open;
+    while (first != kPagedUnplaced && state->space_boxes[first].parent != kPagedUnplaced)
+        first = state->space_boxes[first].parent;
+    ViewBlock* box = first != kPagedUnplaced ? state->space_boxes[first].box : closing;
+    bool after = box && box == closing;
+    if (state->pending_space_count && (box || paragraph)) {
+        float top = box ? paged_flow_top(box) : paged_flow_top(paragraph->block) + paragraph->lines[line].top;
+        if (after) top += box->height - layout_axis_decoration_end(box->bound, LAYOUT_AXIS_Y);
+        // CSS margins position the border box later; they do not make a fresh reference area noninitial.
+        float boundary = first != kPagedUnplaced ? state->space_boxes[first].top : top;
+        size_t index;
+        TypesetStatus status = paged_fragmentainer_at(state, boundary, &index);
+        if (status != TYPESET_OK) return status;
+        RadiantSpaceSpec range = radiant_spaces_resolve(state->pending_spaces, state->pending_space_count,
+            boundary <= state->fragmentainers[index].top + kPagedFlowEpsilon, false);
+        PagedFlowState::SpaceGap gap = {box, box ? nullptr : paragraph, line, range, range.optimum, after};
+        if (range.minimum < range.optimum) {
+            if (!lam::pool_grow_array(state->composition->pool, &state->space_gaps, &state->space_gap_capacity,
+                    state->space_gap_count + 1, 16)) return paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, box, nullptr);
+            state->space_gaps[state->space_gap_count++] = gap;
+        }
+        // only the outermost box moves; descendants already use its coordinate frame.
+        paged_space_shift(state, first != kPagedUnplaced ? state->space_boxes[first].owner : owner, gap, nullptr, range.optimum);
+        paged_space_anchors_shift(state, first, range.optimum);
+        log_debug("[PAGED_SPACE] boundary at %.3f uses %.3f in [%.3f, %.3f]", top, range.optimum, range.minimum, range.maximum);
+    }
+    state->pending_space_count = state->space_box_count = 0;
+    state->space_open = kPagedUnplaced;
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_space_before(PagedFlowState* state, ViewBlock* block, BlockContext* owner) {
+    if (!lam::pool_grow_array(state->composition->pool, &state->space_boxes, &state->space_box_capacity,
+            state->space_box_count + 1, 16)) return paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr);
+    state->space_boxes[state->space_box_count] = {block, owner, state->space_open, paged_flow_top(block)};
+    state->space_open = state->space_box_count++;
+    TypesetStatus status = paged_space_append(state, block, false);
+    if (status != TYPESET_OK) return status;
+    // a border/padding edge or an atomic/definite box separates the spaces outside and inside it.
+    if (layout_box_metrics(block).pad_border_v != 0.0f || paged_flow_atomic(block) ||
+        (block->blk && block->block()->given_height > 0.0f)) return paged_space_commit(state, owner);
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_space_after(PagedFlowState* state, ViewBlock* block, BlockContext* owner) {
+    if (state->space_open != kPagedUnplaced && state->space_boxes[state->space_open].box == block) {
+        if (block->height > 0.0f) {
+            TypesetStatus status = paged_space_commit(state, owner);
+            if (status != TYPESET_OK) return status;
+        } else {
+            // the saved parent context belongs to this layout call and cannot outlive its return.
+            PagedFlowState::SpaceBox& empty = state->space_boxes[state->space_open];
+            empty.owner = nullptr; state->space_open = empty.parent;
+        }
+    }
+    if (layout_axis_decoration_end(block->bound, LAYOUT_AXIS_Y) != 0.0f) {
+        TypesetStatus status = paged_space_commit(state, owner, nullptr, 0, block);
+        if (status != TYPESET_OK) return status;
+    }
+    return paged_space_append(state, block, true);
+}
+
 // shrink earlier native flexible space before adding an avoidable page break (XSL 1.1 §4.3.1).
 static float paged_shrink_preceding_spaces(PagedFlowState* state, BlockContext* owner,
-        ViewBlock* block, size_t index, float needed, ViewBlock* root) {
+        ViewBlock* block, size_t index, float before, float needed, ViewBlock* root) {
     float reduced = 0.0f;
-    for (ViewBlock* previous = paged_previous_flow_sibling(block); previous && needed > kPagedFlowEpsilon;
-            previous = paged_previous_flow_sibling(previous)) {
-        if (paged_fragmentainer_index(state, paged_flow_top(previous)) != index) break;
-        ViewCssStyle* style = view_css_resolve(state->tree, previous);
-        const RadiantSpaceSpec* space = style && style->flow_traits ? &style->flow_traits->after : nullptr;
-        if (!space || !space->specified || !previous->bound || space->minimum >= space->optimum) continue;
-        float available = fmaxf(0.0f, previous->boundary()->margin.bottom - space->minimum);
-        float amount = fminf(needed, available);
+    for (size_t i = state->space_gap_count; i > 0 && needed > kPagedFlowEpsilon; i--) {
+        PagedFlowState::SpaceGap& gap = state->space_gaps[i - 1];
+        float end = gap.box ? paged_flow_top(gap.box) : paged_flow_top(gap.paragraph->block) + gap.paragraph->lines[gap.line].top;
+        if (gap.after) end += gap.box->height - layout_axis_decoration_end(gap.box->bound, LAYOUT_AXIS_Y);
+        // keeps and refits can move a gap after it was recorded; only the current line's earlier spaces can help.
+        if (end > before + kPagedFlowEpsilon || paged_fragmentainer_index(state, end) != index) continue;
+        float amount = fminf(needed, fmaxf(0.0f, gap.used - gap.range.minimum));
         if (amount <= 0.0f) continue;
-        BoundaryProp* boundary = previous->boundary_mut();
-        boundary->margin.bottom -= amount;
-        if (boundary->has_flow_margin) boundary->flow_margin.bottom -= amount;
-        for (View* sibling = previous->next(); sibling; sibling = sibling->next()) {
-            if (sibling->view_type && !(sibling->is_block() && layout_block_is_out_of_flow(lam::view_require_block(sibling))))
-                paged_shift_view(sibling, -amount);
-            if (sibling == block) break;
+        ViewBlock* branch = gap.box ? gap.box : gap.paragraph->block;
+        ViewBlock* enclosing = gap.box ? paged_flow_parent_block(branch) : branch;
+        ViewBlock* closed = gap.box ? branch : nullptr;
+        BlockContext* cursor = nullptr;
+        for (; enclosing; enclosing = paged_flow_parent_block(enclosing)) {
+            if (paged_view_inside(block, enclosing))
+                for (BlockContext* active = owner; active; active = active->parent)
+                    if (active->establishing_element == enclosing) { cursor = active; break; }
+            if (cursor) break;
+            if (enclosing == root) { closed = root; break; }
+            closed = enclosing;
         }
-        BlockContext* cursor = root ? owner : owner ? owner->parent.get() : nullptr;
-        if (cursor) cursor->advance_y -= amount;
+        paged_space_shift(state, cursor, gap, closed, -amount);
+        gap.used -= amount;
         needed -= amount; reduced += amount;
     }
     return reduced;
@@ -1611,6 +1767,84 @@ static TypesetStatus paged_refit(PagedFlowState* state, LayoutContext* lycon, Bl
     return state->status;
 }
 
+// anchors already on the destination are counted in its reservation; only incoming material adds capacity demand.
+static void paged_box_anchor_reservations(PagedFlowState* state, View* box,
+        size_t target, float* within, float* there, bool physical = false) {
+    *within = *there = 0.0f;
+    for (size_t i = 0; i < state->anchors_bound; i++) {
+        const PagedFlowAnchor& anchor = state->anchors[i];
+        View* at = anchor.box ? anchor.box : anchor.paragraph ? (View*)anchor.paragraph->block : nullptr;
+        if (!at || !paged_view_inside(at, box)) continue;
+        *within += anchor.height;
+        if (anchor.fragmentainer == target || (physical && anchor.fragmentainer != kPagedUnplaced &&
+            state->fragmentainers[anchor.fragmentainer].page == state->fragmentainers[target].page)) *there += anchor.height;
+    }
+}
+
+static bool paged_keep_crosses_page(PagedFlowState* state, size_t from, size_t target) {
+    return state->fragmentainers[from].page != state->fragmentainers[target].page;
+}
+
+static RadiantKeepStrength paged_keep_active(const RadiantKeepSpec& keep, bool page_break) {
+    return page_break ? radiant_keep_max(keep.scope[1], keep.scope[2]) : keep.scope[1];
+}
+
+static RadiantKeepStrength paged_boundary_keep_side(PagedFlowState* state, ViewBlock* box,
+        bool after, size_t from, size_t target) {
+    bool columns = paged_context_has_columns(state, from) || paged_context_has_columns(state, target);
+    RadiantKeepSpec keep = paged_keep_spec(state, box, after ? PAGED_KEEP_NEXT : PAGED_KEEP_PREVIOUS, columns);
+    return paged_keep_active(keep, paged_keep_crosses_page(state, from, target));
+}
+
+static RadiantKeepStrength paged_boundary_keep(PagedFlowState* state, ViewBlock* previous,
+        ViewBlock* next, size_t from, size_t target, RadiantKeepSpec* resolved = nullptr) {
+    if (paged_flow_box_break(state, previous, true) >= VIEW_BREAK_COLUMN ||
+        paged_flow_box_break(state, next, false) >= VIEW_BREAK_COLUMN) {
+        if (resolved) *resolved = {};
+        return {};
+    }
+    bool columns = paged_context_has_columns(state, from) || paged_context_has_columns(state, target);
+    RadiantKeepSpec keep = paged_keep_spec(state, previous, PAGED_KEEP_NEXT, columns);
+    paged_keep_combine(&keep, paged_keep_spec(state, next, PAGED_KEEP_PREVIOUS, columns));
+    if (resolved) *resolved = keep;
+    return paged_keep_active(keep, paged_keep_crosses_page(state, from, target));
+}
+
+static size_t paged_keep_context_first(PagedFlowState* state, size_t index, bool physical) {
+    if (physical) while (index && state->fragmentainers[index - 1].page == state->fragmentainers[index].page) index--;
+    return index;
+}
+
+// sheet capacity is the sum of its selected columns, including reservations already placed on that sheet.
+static float paged_keep_capacity(PagedFlowState* state, size_t target, bool physical, float incoming) {
+    const PagedFragmentainer& fragmentainer = state->fragmentainers[target];
+    if (!physical) return fragmentainer.bottom - fragmentainer.top - paged_fragmentainer_reserved(state, target) - incoming;
+    const ViewPageStyle* style = fragmentainer.page->style;
+    float capacity = -incoming;
+    for (uint32_t column = fragmentainer.column; column < style->column_count; column++) {
+        RdtLogicalRect rect = {};
+        if (!view_css_page_column(style, column, &rect)) { state->status = TYPESET_INVALID; return 0.0f; }
+        capacity += rect.height;
+        size_t slot = target + column - fragmentainer.column;
+        if (slot < state->fragmentainer_count && state->fragmentainers[slot].page == fragmentainer.page)
+            capacity -= paged_fragmentainer_reserved(state, slot);
+    }
+    return capacity;
+}
+
+static float paged_undo_struts(PagedFlowState* state, BlockContext* owner, ViewBlock* root, size_t since) {
+    float inner = 0.0f;
+    for (size_t i = state->strut_count; i > since; i--) {
+        PagedStrut strut = state->struts[i - 1];
+        inner += strut.amount;
+        if (strut.table) paged_table_restore(state, strut.table, owner, root);
+        else paged_shift_flow(state, owner, strut.paragraph, strut.line,
+            strut.paragraph ? nullptr : strut.view, root, -strut.amount);
+    }
+    state->strut_count = since;
+    return inner;
+}
+
 // a break landed right before `box`; honour break-before: avoid on the box and
 // break-after: avoid on its previous in-flow siblings by moving that chain to the
 // box's fragmentainer as well. `strut` is the journal index of the break. `owner`
@@ -1621,34 +1855,79 @@ static TypesetStatus paged_refit(PagedFlowState* state, LayoutContext* lycon, Bl
 static TypesetStatus paged_keep_chain(PagedFlowState* state, LayoutContext* lycon, BlockContext* owner,
         ViewBlock* box, size_t strut, bool box_live) {
     if (state->struts[strut].forced) return TYPESET_OK;
+    PagedStrut broke = state->struts[strut];
+    size_t target = broke.fragmentainer;
+    if (!target) return TYPESET_OK;
+    size_t origin = target - 1;
+    RadiantKeepSpec initial = {};
+    ViewBlock* previous_box = paged_previous_flow_sibling(box);
+    if (previous_box) paged_boundary_keep(state, previous_box, box, origin, target, &initial);
+    bool physical = paged_keep_crosses_page(state, origin, target) &&
+        initial.scope[2].kind != RADIANT_KEEP_AUTO && initial.scope[1].kind == RADIANT_KEEP_AUTO;
+    target = paged_keep_context_first(state, target, physical);
+    float end = paged_flow_top(box) + box->height - broke.amount;
+    if (box_live && broke.paragraph && broke.paragraph->count) {
+        const PagedFlowLine& last = broke.paragraph->lines[broke.paragraph->count - 1];
+        end = paged_flow_top(box) + last.top + last.height - broke.amount;
+    }
     ViewBlock* first = box;
-    for (;;) {
-        ViewBlock* previous = paged_previous_flow_sibling(first);
-        if (!previous) break;
-        ViewBreak before = paged_flow_break_keyword(first->blk ? first->block()->break_before : CSS_VALUE_AUTO);
-        ViewBreak after = paged_flow_break_keyword(previous->blk ? previous->block()->break_after : CSS_VALUE_AUTO);
-        if (!paged_break_is_avoid(before) && !paged_break_is_avoid(after)) break;
-        bool movable = !paged_struts_inside(state, 0, previous);
+    size_t replay_since = strut, selected_since = strut;
+    float compacted = 0.0f, leading = 0.0f;
+    RadiantKeepStrength weakest = {0, RADIANT_KEEP_ALWAYS};
+    float within = 0.0f, there = 0.0f;
+    for (ViewBlock* candidate = box; candidate;) {
+        ViewBlock* previous = paged_previous_flow_sibling(candidate);
+        float reserve_top, reserve_bottom, incoming, present;
+        paged_reserve(state, candidate, target, &reserve_top, &reserve_bottom);
+        paged_box_anchor_reservations(state, candidate, target, &incoming, &present, physical);
+        within += incoming; there += present;
+        float capacity = paged_keep_capacity(state, target, physical, within - there);
+        if (!physical) capacity -= reserve_top + reserve_bottom - paged_fragmentainer_reserved(state, target);
+        // internal column struts are removed before a page-only prefix is fitted to its new sheet.
+        float material = end - compacted - (paged_flow_top(candidate) - leading);
+        if (candidate != box && material > capacity + kPagedFlowEpsilon) break;
+        RadiantKeepStrength strength = previous
+            ? paged_boundary_keep(state, previous, candidate, origin, target) : RadiantKeepStrength{};
+        if (state->status != TYPESET_OK) return state->status;
+        if (radiant_keep_compare(strength, weakest) <= 0) {
+            first = candidate; weakest = strength; selected_since = replay_since;
+        }
+        if (!previous || strength.kind == RADIANT_KEEP_AUTO) break;
+        bool movable = true;
+        float inner = 0.0f;
+        leading = 0.0f;
+        for (size_t i = 0; i < strut; i++) {
+            const PagedStrut& old = state->struts[i];
+            if (!paged_view_inside(old.view, previous)) continue;
+            if (!physical || old.forced) { movable = false; break; }
+            replay_since = min(replay_since, i); inner += old.amount;
+            if (old.view == previous && !old.paragraph && !old.table) leading += old.amount;
+        }
         if (movable) {
             size_t index = paged_fragmentainer_index(state, paged_flow_top(previous));
-            // moving a box that starts its fragmentainer would leave the page empty (CSS Break §4.3)
-            movable = paged_flow_top(previous) > state->fragmentainers[index].top + kPagedFlowEpsilon;
+            size_t start = paged_keep_context_first(state, index, physical);
+            // moving a prefix that already starts its context would leave that context empty.
+            movable = paged_flow_top(previous) - leading > state->fragmentainers[start].top + kPagedFlowEpsilon;
         }
-        if (!movable) { state->relaxed_avoidance++; break; }
-        first = previous;
+        if (!movable) break;
+        compacted += inner;
+        candidate = previous;
     }
+    if (weakest.kind != RADIANT_KEEP_AUTO) state->relaxed_avoidance++;
     if (first == box) return TYPESET_OK;
-    PagedStrut broke = state->struts[strut];
-    log_debug("[PAGED_FLOW] keep chain from %s to %s: undo strut %zu (%.3f), box top=%.3f first top=%.3f",
-        first->source_loc(), box->source_loc(), strut, broke.amount, paged_flow_top(box), paged_flow_top(first));
-    size_t target = paged_fragmentainer_index(state, paged_flow_top(box) + (broke.paragraph ? broke.paragraph->lines[broke.line].top : 0.0f));
+    log_debug("[PAGED_FLOW_KEEP] weakest sibling cut before %s: kind=%u value=%d target=%zu",
+        first->source_loc(), weakest.kind, weakest.value, target);
     float page_top = state->fragmentainers[target].top;
     // undo the break before the box, then break before the first kept sibling
     if (broke.paragraph) paged_shift_flow(state, owner, broke.paragraph, broke.line, nullptr, box_live ? nullptr : box, -broke.amount);
     else paged_shift_flow(state, owner, nullptr, -1, box, box, -broke.amount);
     state->strut_count = strut;
-    float delta = page_top - paged_flow_top(first);
     BlockContext* chain_owner = box_live ? owner->parent.get() : owner;
+    if (selected_since < strut) {
+        ViewBlock* parent = paged_flow_parent_block(first);
+        paged_undo_struts(state, chain_owner, parent ? parent : first, selected_since);
+    }
+    float delta = page_top - paged_flow_top(first);
     for (View* sibling = first; sibling; sibling = sibling->next()) {
         if (sibling->view_type && !(sibling->is_block() && layout_block_is_out_of_flow(lam::view_require_block(sibling))))
             paged_shift_view(sibling, delta);
@@ -1687,6 +1966,20 @@ static bool paged_paragraph_starts_block(const PagedFlowParagraph* paragraph, si
     return true;
 }
 
+// forced and automatic line breaks share the same geometry and strut journal.
+static TypesetStatus paged_lines_move(PagedFlowState* state, BlockContext* owner,
+        PagedFlowParagraph* paragraph, size_t first, size_t last, size_t target,
+        float reserve_top, ViewBlock* root, bool forced) {
+    float before = paged_flow_top(paragraph->block) + paragraph->lines[first].top;
+    float strut = fmaxf(0.0f, state->fragmentainers[target].top + reserve_top - before);
+    int line = (int)first; // INT_CAST_OK: paragraph line indices use the layout line counter
+    TypesetStatus status = paged_strut_record(state, paragraph->block, paragraph, line, strut, forced, target, before);
+    if (status != TYPESET_OK) return status;
+    paged_shift_flow(state, owner, paragraph, line, nullptr, root, strut);
+    for (size_t i = first; i <= last; i++) paragraph->lines[i].fragmentainer = target;
+    return TYPESET_OK;
+}
+
 // fit `line` of `paragraph`: a line that would cross its fragmentainer end moves
 // to the next one (with the orphans before it), and a line that already starts a
 // later fragmentainer by position is a break as well, so orphans, keeps and
@@ -1708,7 +2001,7 @@ static TypesetStatus paged_fit_line(PagedFlowState* state, LayoutContext* lycon,
     paged_reserve(state, paragraph->block, index, &reserve_top, &reserve_bottom);
     float excess = top + height + reserve_bottom - fragmentainer->bottom;
     if (excess > kPagedFlowEpsilon && paged_shrink_preceding_spaces(state, owner,
-            paragraph->block, index, excess, root) > 0.0f) {
+            paragraph->block, index, top, excess, root) > 0.0f) {
         block_top = paged_flow_top(paragraph->block); top = block_top + lines[line].top;
     }
     bool starts = top <= fragmentainer->top + reserve_top + kPagedFlowEpsilon;
@@ -1752,13 +2045,9 @@ static TypesetStatus paged_fit_line(PagedFlowState* state, LayoutContext* lycon,
     } else first = line;
     float target_top, target_bottom;
     paged_reserve(state, paragraph->block, target, &target_top, &target_bottom);
-    float strut = state->fragmentainers[target].top + target_top - (block_top + lines[first].top);
-    if (strut < 0.0f) strut = 0.0f;
-    status = paged_strut_record(state, paragraph->block, paragraph, (int)first, strut, false, target, block_top + lines[first].top);
+    status = paged_lines_move(state, owner, paragraph, first, line, target, target_top, root, false);
     if (status != TYPESET_OK) return status;
     size_t recorded = state->strut_count - 1;
-    paged_shift_flow(state, owner, paragraph, (int)first, nullptr, root, strut);
-    for (size_t i = first; i <= line; i++) lines[i].fragmentainer = target;
     // the moved lines take their anchors along: the lines before the line start the
     // target, and when the line's own still do not fit beside it, it moves on
     if (first < line) {
@@ -2027,14 +2316,14 @@ static TypesetStatus paged_geometry_collect(PagedFlowState* state, PagedFlowPara
     return TYPESET_OK;
 }
 
-static void paged_note_break_edge(ViewElement* element, float origin, float lower, float upper, float* edge) {
+static void paged_note_break_edge(PagedFlowState* state, ViewElement* element, float origin, float lower, float upper, float* edge) {
     for (DomNode* node = element->first_child; node; node = node->next_sibling) {
         View* child = (View*)node;
         if (!child->view_type) continue;
         if (child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
             if (layout_block_is_out_of_flow(block)) continue;
-            if (!paged_flow_monolithic(block)) paged_note_break_edge(block, origin + block->y, lower, upper, edge);
+            if (!paged_flow_monolithic(state, block)) paged_note_break_edge(state, block, origin + block->y, lower, upper, edge);
             float bottom = origin + block->y + block->height;
             if (bottom > lower + kPagedFlowEpsilon && bottom <= upper + kPagedFlowEpsilon) *edge = fmaxf(*edge, bottom);
         } else if (child->view_type == RDT_VIEW_TEXT) {
@@ -2043,15 +2332,15 @@ static void paged_note_break_edge(ViewElement* element, float origin, float lowe
                 if (bottom > lower + kPagedFlowEpsilon && bottom <= upper + kPagedFlowEpsilon) *edge = fmaxf(*edge, bottom);
             }
         } else if (child->view_type == RDT_VIEW_INLINE)
-            paged_note_break_edge(lam::view_require_element(child), origin, lower, upper, edge);
+            paged_note_break_edge(state, lam::view_require_element(child), origin, lower, upper, edge);
     }
 }
 
-static float paged_note_piece_height(PagedFlowAnchor* anchor, float offset, float available) {
+static float paged_note_piece_height(PagedFlowState* state, PagedFlowAnchor* anchor, float offset, float available) {
     if (available <= 0.0f) return 0.0f;
     if (anchor->full_height - offset <= available + kPagedFlowEpsilon) return anchor->full_height - offset;
     float edge = offset;
-    paged_note_break_edge((ViewElement*)anchor->element, 0.0f, offset, offset + available, &edge);
+    paged_note_break_edge(state, (ViewElement*)anchor->element, 0.0f, offset, offset + available, &edge);
     return edge - offset;
 }
 
@@ -2072,7 +2361,7 @@ static TypesetStatus paged_note_continue(PagedFlowState* state, PagedFlowAnchor*
         PagedFragmentainer& target = state->fragmentainers[index];
         float capacity = target.rect.height - target.float_top - target.float_bottom - area->margin[0] - area->margin[2] -
             area->edges[0] - area->edges[2] - target.notes;
-        float height = paged_note_piece_height(anchor, offset, capacity);
+        float height = paged_note_piece_height(state, anchor, offset, capacity);
         if (height <= 0.0f) return paged_flow_fail(state, TYPESET_UNPLACEABLE, anchor->element,
             "an indivisible note line or box is taller than its continuation area");
         PagedNotePiece* piece = (PagedNotePiece*)pool_alloc(state->composition->pool, sizeof(PagedNotePiece));
@@ -2110,7 +2399,7 @@ static TypesetStatus paged_fit_box(PagedFlowState* state, LayoutContext* lycon, 
     paged_reserve(state, box, index, &reserve_top, &reserve_bottom);
     if (!isfinite(fragmentainer->bottom) || top + box->height + reserve_bottom <= fragmentainer->bottom + kPagedFlowEpsilon)
         return TYPESET_OK;
-    if (paged_flow_monolithic(box) || paged_flow_closed(box)) {
+    if (paged_flow_monolithic(state, box) || paged_flow_closed(box)) {
         size_t next;
         status = paged_fragmentainer_at(state, fragmentainer->bottom + kPagedFlowEpsilon, &next);
         if (status != TYPESET_OK) return status;
@@ -2153,24 +2442,68 @@ static ViewBreak paged_box_break(const ViewBlock* box, bool after) {
     return paged_flow_break_keyword(blk ? (after ? blk->break_after : blk->break_before) : CSS_VALUE_AUTO);
 }
 
-// the strongest break value at the boundary before items[i]: the values of the
-// rows and groups meeting there combine (CSS Fragmentation 3 §3.1)
+static ViewBreak paged_source_break(PagedFlowState* state, DomElement* element, bool after) {
+    const CssPropertyCode properties[] = {
+        after ? CSS_PROPERTY_BREAK_AFTER : CSS_PROPERTY_BREAK_BEFORE,
+        after ? CSS_PROPERTY_PAGE_BREAK_AFTER : CSS_PROPERTY_PAGE_BREAK_BEFORE, CSS_PROPERTY_ALL};
+    for (; element; element = element->parent_element()) {
+        ViewCssStyle* style = paged_source_style(state, element);
+        if (!style) return VIEW_BREAK_AUTO;
+        const CssDeclaration* declaration = style_tree_get_component_declaration(
+            element->specified_style, properties, sizeof(properties) / sizeof(properties[0]));
+        if (!declaration) return VIEW_BREAK_AUTO;
+        const CssValue* value = view_css_declaration_value(state->tree, style, declaration,
+            after ? "break-after" : "break-before");
+        TypesetStatus status = paged_style_traits_admit(state->composition, style);
+        if (status != TYPESET_OK) { state->status = status; return VIEW_BREAK_AUTO; }
+        if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return VIEW_BREAK_AUTO;
+        if (value->data.keyword == CSS_VALUE_INHERIT) continue;
+        return paged_flow_break_keyword(value->data.keyword);
+    }
+    return VIEW_BREAK_AUTO;
+}
+
+static ViewBreak paged_flow_box_break(PagedFlowState* state, ViewBlock* box, bool after) {
+    ViewBreak value = paged_box_break(box, after);
+    if (!box || !paged_flow_is_table(box)) return value;
+    LayoutTableBodyEdge edge = layout_table_source_body_edge(box, after);
+    // propagation changes the used boundary, never the table's computed break properties.
+    if (edge.group) value = paged_break_combine(value, paged_source_break(state, edge.group, after));
+    if (edge.row) value = paged_break_combine(value, paged_source_break(state, edge.row, after));
+    return value;
+}
+
+// groups precede their descendant rows in flow order on each side of the boundary.
 static ViewBreak paged_table_boundary(const PagedTableItem* items, size_t i) {
     const PagedTableItem& item = items[i];
     const PagedTableItem& previous = items[i - 1];
-    ViewBreak value = paged_box_break(item.view, false);
+    ViewBreak before = paged_box_break(item.view, false);
     ViewBreak after = paged_box_break(previous.view, true);
-    if (after > value) value = after;
     bool rows = item.kind == PAGED_ITEM_ROW && previous.kind == PAGED_ITEM_ROW;
     if (!rows || item.group != previous.group) {
         ViewBreak group = item.kind == PAGED_ITEM_ROW && item.group->view_type == RDT_VIEW_TABLE_ROW_GROUP
             ? paged_box_break(item.group, false) : VIEW_BREAK_AUTO;
-        if (group > value) value = group;
+        before = paged_break_combine(group, before);
         group = previous.kind == PAGED_ITEM_ROW && previous.group->view_type == RDT_VIEW_TABLE_ROW_GROUP
             ? paged_box_break(previous.group, true) : VIEW_BREAK_AUTO;
-        if (group > value) value = group;
+        after = paged_break_combine(group, after);
     }
-    return value;
+    return paged_break_combine(after, before);
+}
+
+static RadiantKeepStrength paged_table_boundary_keep(PagedFlowState* state,
+        const PagedTableItem* items, size_t i, size_t from, size_t target) {
+    if (paged_table_boundary(items, i) >= VIEW_BREAK_COLUMN) return {};
+    const PagedTableItem& item = items[i];
+    const PagedTableItem& previous = items[i - 1];
+    RadiantKeepStrength result = paged_boundary_keep(state, previous.view, item.view, from, target);
+    if (item.group != previous.group) {
+        if (item.group->view_type == RDT_VIEW_TABLE_ROW_GROUP)
+            result = radiant_keep_max(result, paged_boundary_keep_side(state, item.group, false, from, target));
+        if (previous.group->view_type == RDT_VIEW_TABLE_ROW_GROUP)
+            result = radiant_keep_max(result, paged_boundary_keep_side(state, previous.group, true, from, target));
+    }
+    return result;
 }
 
 // the extent of a table item: a row reaches the bottom of its row-spanning cells
@@ -2209,6 +2542,7 @@ static TypesetStatus paged_table_split_cells(PagedFlowState* state, LayoutContex
         int align = cell->td ? cell->td->vertical_align : TableCellProp::CELL_VALIGN_TOP;
         float min_y, max_y;
         if (status != TYPESET_OK || align == TableCellProp::CELL_VALIGN_TOP ||
+            align == TableCellProp::CELL_VALIGN_RELATIVE_BEFORE ||
             !layout_table_cell_content_extent(lycon, cell, -INFINITY, INFINITY, &min_y, &max_y)) return;
         if (!lam::pool_grow_array(state->composition->pool, &record->split, &record->split_capacity, record->split_count + 1, 8)) {
             status = TYPESET_OUT_OF_MEMORY; return;
@@ -2255,6 +2589,7 @@ static TypesetStatus paged_table_collect(PagedFlowState* state, ViewTable* table
     PagedTableItem* items = nullptr;
     *count = 0; *header = *footer = nullptr;
     TypesetStatus status = TYPESET_OK;
+    LayoutTableSectionOrder sections;
     auto append = [&](ViewBlock* view, ViewBlock* group, PagedTableItemKind kind) {
         if (status != TYPESET_OK) return;
         if (!lam::pool_grow_array(state->composition->pool, &items, &capacity, *count + 1, 16)) { status = TYPESET_OUT_OF_MEMORY; return; }
@@ -2266,10 +2601,12 @@ static TypesetStatus paged_table_collect(PagedFlowState* state, ViewTable* table
         if (child->view_type == RDT_VIEW_TABLE_ROW) { append(child, table, PAGED_ITEM_ROW); return; }
         if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) { append(child, nullptr, PAGED_ITEM_CAPTION); return; }
         ViewTableRowGroup* group = static_cast<ViewTableRowGroup*>(child);
-        TableSectionType section = group->get_section_type();
         // the first header and footer groups are the table's furniture (CSS 2.2 §17.2)
-        if (section == TABLE_SECTION_THEAD && !*header) { *header = child; append(child, nullptr, PAGED_ITEM_HEADER); return; }
-        if (section == TABLE_SECTION_TFOOT && !*footer) { *footer = child; append(child, nullptr, PAGED_ITEM_FOOTER); return; }
+        if (!sections.accept_body_group(group)) {
+            if (sections.header == child) { *header = child; append(child, nullptr, PAGED_ITEM_HEADER); }
+            else { *footer = child; append(child, nullptr, PAGED_ITEM_FOOTER); }
+            return;
+        }
         group->each_row_with_block([&](ViewTableRow*, ViewBlock* row) { append(row, child, PAGED_ITEM_ROW); });
     });
     // the items in visual order: the footer group follows the body wherever its source is
@@ -2366,13 +2703,24 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
     record->strut_count = 0; record->split_count = 0;
     float table_reserve_top, table_reserve_bottom;
     paged_reserve(state, block, first, &table_reserve_top, &table_reserve_bottom);
-    if (table_top + block->height + table_reserve_bottom <= start->bottom + kPagedFlowEpsilon) return TYPESET_OK;
+    if (table_top + block->height + table_reserve_bottom <= start->bottom + kPagedFlowEpsilon) {
+        bool forced_boundary = false;
+        for (size_t i = 1; i < count; i++) {
+            if (items[i - 1].kind == PAGED_ITEM_ROW && items[i].kind == PAGED_ITEM_ROW &&
+                paged_table_boundary(items, i) >= VIEW_BREAK_COLUMN) {
+                forced_boundary = true;
+                break;
+            }
+        }
+        // a fitting table still fragments at authored internal row boundaries.
+        if (!forced_boundary) return TYPESET_OK;
+    }
     // the leading part (captions, header, first body rows) stays with the table:
     // when it cannot stay on this fragmentainer the whole table moves (or the
     // whole table, under break-inside: avoid)
     size_t lead = 0;
     while (lead < count && items[lead].kind != PAGED_ITEM_ROW) lead++;
-    float lead_bottom = paged_flow_avoids_inside(block) || lead == count ? table_top + block->height
+    float lead_bottom = paged_flow_avoids_inside(state, block) || lead == count ? table_top + block->height
         : paged_table_item_bottom(items[lead]) + record->footer_size;
     if (lead_bottom + table_reserve_bottom > start->bottom + kPagedFlowEpsilon && table_top > start->top + table_reserve_top + kPagedFlowEpsilon) {
         size_t next;
@@ -2388,7 +2736,7 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
             paged_shift_flow(state, owner, nullptr, -1, block, root, delta);
             table_top += delta; first = record->first = next;
             if (table_top + block->height + next_bottom <= target.bottom + kPagedFlowEpsilon) return TYPESET_OK;
-        } else if (paged_flow_avoids_inside(block)) state->relaxed_avoidance++;
+        } else if (paged_flow_avoids_inside(state, block)) state->relaxed_avoidance++;
     }
     status = paged_table_snapshot(state, record);
     if (status != TYPESET_OK) return status;
@@ -2407,6 +2755,10 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
         float reserve_top, reserve_bottom;
         paged_reserve(state, item.view, index, &reserve_top, &reserve_bottom);
         bool has_content = top > fragmentainer->top + reserve_top + kPagedFlowEpsilon;
+        // a row can reach the next fragmentainer exactly without overflowing; its keep still applies there.
+        bool natural_break = row && i > 0 && items[i - 1].kind == PAGED_ITEM_ROW && index > first &&
+            paged_flow_top(items[i - 1].view) < fragmentainer->top &&
+            top <= fragmentainer->top + reserve_top + kPagedFlowEpsilon;
         ViewBreak boundary = i > 0 ? paged_table_boundary(items, i) : VIEW_BREAK_AUTO;
         size_t target = index;
         float delta = 0.0f;
@@ -2416,7 +2768,7 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
             // furniture of every fragment, so no break separates them from the body
             status = paged_forced_target(state, index, boundary, &target);
             forced = true;
-        } else if (index > first && top < fragmentainer->top + reserve_top - kPagedFlowEpsilon) {
+        } else if (!natural_break && index > first && top < fragmentainer->top + reserve_top - kPagedFlowEpsilon) {
             // a box in the space a continuation keeps for the repeated header moves below it
             target = index;
         } else {
@@ -2426,9 +2778,17 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
             while (row && last + 1 < count && items[last + 1].kind == PAGED_ITEM_ROW && items[last + 1].group == item.group &&
                 paged_flow_top(items[last + 1].view) < bottom - kPagedFlowEpsilon)
                 bottom = fmaxf(bottom, paged_table_item_bottom(items[++last]));
-            if (bottom + reserve_bottom <= fragmentainer->bottom + kPagedFlowEpsilon) { i = last + 1; continue; }
-            size_t next;
-            status = paged_fragmentainer_at(state, fragmentainer->bottom + kPagedFlowEpsilon, &next);
+            if (!natural_break && bottom + reserve_bottom <= fragmentainer->bottom + kPagedFlowEpsilon) { i = last + 1; continue; }
+            bool recorded_break = state->strut_count > journal && state->struts[state->strut_count - 1].view == item.view &&
+                state->struts[state->strut_count - 1].fragmentainer == index;
+            // a rechecked cut has already resolved avoidance; an authored boundary overrides it.
+            if (natural_break && (recorded_break || boundary >= VIEW_BREAK_COLUMN)) { i = last + 1; continue; }
+            size_t origin = natural_break ? index - 1 : index;
+            float origin_top = state->fragmentainers[origin].top;
+            float origin_reserve_top, origin_reserve_bottom;
+            paged_reserve(state, item.view, origin, &origin_reserve_top, &origin_reserve_bottom);
+            size_t next = index;
+            if (!natural_break) status = paged_fragmentainer_at(state, fragmentainer->bottom + kPagedFlowEpsilon, &next);
             if (status != TYPESET_OK) break;
             float next_top, next_bottom;
             paged_reserve(state, item.view, next, &next_top, &next_bottom);
@@ -2438,23 +2798,30 @@ static TypesetStatus paged_table_fragment(PagedFlowState* state, LayoutContext* 
             // (CSS Fragmentation 3 §4.3); a move that would empty its fragmentainer
             // or that a fresh fragmentainer cannot hold is relaxed
             size_t from = i + 1;
-            if (row && item.group->view_type == RDT_VIEW_TABLE_ROW_GROUP && paged_flow_avoids_inside(item.group)) {
+            if (row && item.group->view_type == RDT_VIEW_TABLE_ROW_GROUP && paged_flow_avoids_inside(state, item.group)) {
                 float group_top = paged_flow_top(item.group);
-                if (group_top > fragmentainer->top + reserve_top + kPagedFlowEpsilon && item.group->height <= capacity + kPagedFlowEpsilon) {
+                if (group_top > origin_top + origin_reserve_top + kPagedFlowEpsilon && item.group->height <= capacity + kPagedFlowEpsilon) {
                     from = i;
                     while (from > 0 && items[from - 1].group == item.group) from--;
                 } else state->relaxed_avoidance++;
             }
             if (from > i) {
-                size_t chain = i;
-                while (row && chain > 0 && items[chain - 1].kind == PAGED_ITEM_ROW && paged_break_is_avoid(paged_table_boundary(items, chain)))
-                    chain--;
-                for (; chain <= i; chain++) {
+                RadiantKeepStrength weakest = {0, RADIANT_KEEP_ALWAYS};
+                for (size_t chain = i;; chain--) {
                     float chain_top = paged_flow_top(items[chain].view);
-                    if (chain_top > fragmentainer->top + reserve_top + kPagedFlowEpsilon && bottom - chain_top <= capacity + kPagedFlowEpsilon) break;
-                    if (chain < i) state->relaxed_avoidance++;
+                    if (chain_top <= origin_top + origin_reserve_top + kPagedFlowEpsilon ||
+                        bottom - chain_top > capacity + kPagedFlowEpsilon) break;
+                    RadiantKeepStrength strength = row && chain > 0 && items[chain - 1].kind == PAGED_ITEM_ROW
+                        ? paged_table_boundary_keep(state, items, chain, origin, next) : RadiantKeepStrength{};
+                    if (state->status != TYPESET_OK) return state->status;
+                    if (radiant_keep_compare(strength, weakest) <= 0) { from = chain; weakest = strength; }
+                    if (!chain || strength.kind == RADIANT_KEEP_AUTO) break;
                 }
-                from = chain;
+                if (from <= i && weakest.kind != RADIANT_KEEP_AUTO) state->relaxed_avoidance++;
+            }
+            if (natural_break && from == i && top >= state->fragmentainers[next].top + next_top - kPagedFlowEpsilon) {
+                i = last + 1;
+                continue;
             }
             if (from <= i) {
                 target = next;
@@ -2692,9 +3059,42 @@ static bool paged_counter_named(DomElement* element, CssPropertyCode property, c
     return false;
 }
 
+static bool paged_flow_anchor_kind(PagedFlowState* state, DomElement* element, PagedAnchorKind* kind);
+
+static bool paged_note_context_admit(PagedFlowState* state, DomElement* element) {
+    bool authored = radiant_page_element(element, "note");
+    bool nested = state->outside;
+    for (DomElement* owner = authored ? element->parent_element() : nullptr; owner && !nested; owner = owner->parent_element())
+        nested = radiant_page_element(owner, "note");
+    PagedAnchorKind kind;
+    if ((authored && nested) || (state->outside && element != state->detached_root &&
+        paged_flow_anchor_kind(state, element, &kind) && kind == PAGED_ANCHOR_NOTE)) {
+        paged_flow_fail(state, TYPESET_INVALID, element, "footnotes require the paged body flow");
+        return false;
+    }
+    // an inline binding may never pass through the block admission hook.
+    if (authored && !paged_source_style(state, element)) return false;
+    DisplayValue display = resolve_display_value(element);
+    if (display.outer == CSS_VALUE_NONE || display.outer == CSS_VALUE_CONTENTS ||
+        layout_display_is_inline_level(display.outer) || layout_view_is_out_of_flow(element)) return true;
+    for (DomElement* owner = element; owner; owner = owner->parent_element()) {
+        if (radiant_page_element(owner, "note-call")) {
+            paged_flow_fail(state, TYPESET_INVALID, owner, "note call requires inline material");
+            return false;
+        }
+        if (owner != element) {
+            DisplayValue parent = resolve_display_value(owner);
+            // an atomic inline owns its block descendants; they are not block material in the call's line.
+            if (layout_intrinsic_element_is_atomic_inline(owner) ||
+                (parent.outer != CSS_VALUE_CONTENTS && !layout_display_is_inline_level(parent.outer))) break;
+        }
+    }
+    return true;
+}
+
 void paged_element_enter(LayoutContext* lycon, DomElement* element) {
     PagedFlowState* state = lycon->paged;
-    if (state->status != TYPESET_OK) return;
+    if (state->status != TYPESET_OK || !paged_note_context_admit(state, element)) return;
     // the footnote counter starts at the root unless the root sets it (CSS GCPM 3 §2.6)
     if (element == state->tree->model->document->root && lycon->counter_context &&
         !paged_counter_named(element, CSS_PROPERTY_COUNTER_RESET, "footnote"))
@@ -2840,6 +3240,8 @@ static TypesetStatus paged_folio_capture(PagedFlowState* state, ViewText* text, 
 static float paged_detached_layout(PagedFlowState* state, LayoutContext* lycon, DomElement* element, float width,
         float height = NAN) {
     LayoutContextScope context_scope(lycon); LayoutViewScope view_scope(lycon);
+    auto saved_paged = lycon->paged;
+    lycon->paged = lam::up(state);
     AvailableSpace saved_space = lycon->available_space;
     radiant::RunMode saved_mode = lycon->run_mode;
     auto saved_flex = lycon->flex_container; auto saved_grid = lycon->grid_container;
@@ -2855,10 +3257,14 @@ static float paged_detached_layout(PagedFlowState* state, LayoutContext* lycon, 
     DisplayValue display = resolve_display_value(element);
     if (display.outer != CSS_VALUE_BLOCK && display.outer != CSS_VALUE_LIST_ITEM) display.outer = CSS_VALUE_BLOCK;
     state->outside++;
+    DomElement* saved_root = state->detached_root; float saved_width = state->detached_width;
+    state->detached_root = element; state->detached_width = width;
     layout_block(lycon, element, display);
+    state->detached_root = saved_root; state->detached_width = saved_width;
     state->outside--;
     lycon->available_space = saved_space; lycon->run_mode = saved_mode;
     lycon->flex_container = saved_flex; lycon->grid_container = saved_grid;
+    lycon->paged = saved_paged;
     ViewBlock* view = lam::view_as_block((View*)element);
     if (!view) return 0.0f;
     float margin_bottom = view->bound ? view->boundary()->margin.bottom : 0.0f;
@@ -2900,7 +3306,7 @@ static void paged_note_defaults(DomElement* note) {
 // or `bottom` against its page or column (CSS GCPM 3 §2.2, CSS Page Floats 3 §3);
 // an inline float reference keeps a top or bottom float in the flow
 static bool paged_flow_anchor_kind(PagedFlowState* state, DomElement* element, PagedAnchorKind* kind) {
-    if (state->outside || state->tree->model->environment.presentation != VIEW_PRESENTATION_PAGED) return false;
+    if (state->tree->model->environment.presentation != VIEW_PRESENTATION_PAGED) return false;
     // a native note's body is its footnote; its authored call stays in the line (page_document.hpp)
     if (radiant_page_element(element, "note-body") && radiant_page_element(element->parent_element(), "note")) {
         *kind = PAGED_ANCHOR_NOTE;
@@ -3106,7 +3512,17 @@ static void paged_flow_run_restart(PagedFlowState* state, BlockContext* pa_block
 
 static PagedFlowWidth* paged_flow_width(PagedFlowState* state, ViewBlock* block, bool create) {
     PagedReferenceSession* session = state->composition->references;
-    if (!session || !paged_flow_top_level(state, block)) return nullptr;
+    if (!session) return nullptr;
+    if (!paged_flow_top_level(state, block)) {
+        if (paged_flow_run_holder(state, block)) return nullptr;
+        // auto-width descendants share the page's width change through their containing blocks.
+        ViewBlock* owner = block;
+        while (owner && !paged_flow_run_holder(state, owner)) {
+            if (owner->display.inner != CSS_VALUE_FLOW || (owner->blk && owner->block()->given_width >= 0.0f)) return nullptr;
+            owner = paged_flow_parent_block(owner);
+        }
+        if (!owner) return nullptr;
+    }
     for (size_t i = 0; i < session->width_count; i++)
         if (session->widths[i].source == block) return &session->widths[i];
     if (!create) return nullptr;
@@ -3118,6 +3534,69 @@ static PagedFlowWidth* paged_flow_width(PagedFlowState* state, ViewBlock* block,
     PagedFlowWidth* width = &session->widths[session->width_count++];
     *width = {block, state->run_width};
     return width;
+}
+
+static void paged_reference_inline(LayoutContext* lycon, ViewBlock* block, BlockContext* parent) {
+    PagedFlowState* state = lycon->paged;
+    const ViewCssStyle* style = paged_source_style(state, block);
+    if (!style) return;
+    const RadiantFlowTraits* traits = style->flow_traits;
+    if (!traits) return;
+    // cells and detached regions establish reference areas; ordinary ancestors retain that frame.
+    ViewBlock* area = nullptr;
+    for (ViewBlock* owner = paged_flow_parent_block(block); owner; owner = paged_flow_parent_block(owner)) {
+        if (owner->view_type == RDT_VIEW_TABLE_CELL) { area = owner; break; }
+        if (owner == state->detached_root || paged_flow_run_holder(state, owner)) break;
+    }
+    float width = area ? area->content_width : state->outside ? state->detached_width
+        : parent->paged_reference_width > 0.0f ? parent->paged_reference_width : state->run_width;
+    BoxMetrics area_edges = area ? layout_box_metrics(area) : BoxMetrics{};
+    float left = area_edges.border.left + area_edges.padding.left;
+    View* stop = area ? (View*)area : state->outside && state->detached_root
+        ? state->detached_root->parent_view() : nullptr;
+    float position = view_geometry_ancestor_offset(block, stop, true).x;
+    float indents[2] = {traits->indents[0], traits->indents[1]};
+    for (size_t side = 0; side < 2; side++) if (const CssValue* expression = traits->indent_expressions[side]) {
+        const ViewCssStyle* owner = traits->indent_owners[side];
+        size_t at = 0;
+        while (at < state->indent_count && state->indents[at].owner != owner) at++;
+        bool measuring = layout_context_is_measuring(lycon);
+        if (at == state->indent_count && !measuring) {
+            if (state->indent_count >= state->composition->options.max_nodes ||
+                !lam::pool_grow_array(state->composition->pool, &state->indents, &state->indent_capacity,
+                    state->indent_count + 1, 16)) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
+            state->indents[state->indent_count++] = {owner, width};
+        }
+        float basis = at < state->indent_count ? state->indents[at].width : width;
+        indents[side] = view_css_length(state->tree, owner, expression, CSS_PROPERTY_MARGIN_LEFT, basis, NAN);
+        if (!isfinite(indents[side])) { paged_flow_fail(state, TYPESET_INVALID, block, "reference indents require finite used lengths"); return; }
+    }
+    if (!traits->reference_inline) return;
+    block->ensure_boundary(lycon);
+    BoundaryProp* boundary = block->boundary_mut();
+    if (!boundary) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
+    BoxMetrics edges = layout_box_metrics(block);
+    boundary->margin.left = left + indents[0] - position - edges.border.left - edges.padding.left;
+    boundary->margin.right = parent->content_width - width - boundary->margin.left -
+        edges.pad_border_h + indents[0] + indents[1];
+}
+
+bool paged_line_keep(LayoutContext* lycon, DomNode* node) {
+    for (DomNode* current = node && node->is_element() ? node : node ? node->parent : nullptr;
+            current; current = current->parent) {
+        DomElement* element = current->as_element();
+        if (!element) continue;
+        if (element->is_synthetic()) {
+            if (((View*)element)->is_block()) break;
+            continue;
+        }
+        const ViewCssStyle* style = paged_source_style(lycon->paged, element);
+        if (!style) return false;
+        if (style->flow_traits && style->flow_traits->together.scope[0].kind == RADIANT_KEEP_ALWAYS) return true;
+        // an atomic or block ancestor starts a different inline formatting context.
+        if (style->display.outer != CSS_VALUE_INLINE && style->display.outer != CSS_VALUE_CONTENTS) break;
+    }
+    return false;
 }
 
 void paged_line_start(LayoutContext* lycon, ViewBlock* block) {
@@ -3214,12 +3693,27 @@ static void paged_break_truncate_margin(ViewBlock* block) {
     boundary->margin.top = 0.0f;
 }
 
+// an empty page of the wrong side becomes blank before either a box or an anonymous inline run.
+static TypesetStatus paged_forced_empty_side(PagedFlowState* state, size_t index,
+        ViewBreak request, bool* has_content, DomNode* source) {
+    const PagedFragmentainer& frame = state->fragmentainers[index];
+    ViewPageSide wanted = VIEW_PAGE_RIGHT;
+    if (*has_content || !frame.page || index + 1 != state->fragmentainer_count ||
+        !paged_requested_side(&state->composer, request, &wanted) || frame.page->side == wanted) return TYPESET_OK;
+    TypesetStatus status = paged_empty_page_restyle(&state->composer, true);
+    if (status != TYPESET_OK) return paged_flow_fail(state, status, source, nullptr);
+    paged_fragmentainer_restyle(state, index, true);
+    *has_content = true;
+    return TYPESET_OK;
+}
+
 // the break before `block`: a forced break, a named page or sequence, or previous
 // content that filled its fragmentainer exactly
 static void paged_block_break(PagedFlowState* state, LayoutContext* lycon, ViewBlock* block, BlockContext* pa_block) {
     PagedPageCursor* composer = &state->composer;
-    ViewBreak request = paged_flow_break_keyword(block->blk ? block->block()->break_before : CSS_VALUE_AUTO);
-    if (state->pending_break > request) request = state->pending_break;
+    ViewBreak request = paged_flow_box_break(state, block, false);
+    if (state->status != TYPESET_OK) return;
+    request = paged_break_combine(state->pending_break, request);
     state->pending_break = VIEW_BREAK_AUTO;
     // named pages and page sequences start a page (CSS Paged Media 3 §7.4)
     const RadiantPageSequence* sequence = paged_flow_sequence(state, block);
@@ -3244,14 +3738,7 @@ static void paged_block_break(PagedFlowState* state, LayoutContext* lycon, ViewB
     // the previous content filled its fragmentainer exactly: an unforced break lands before the box
     bool at_top = !forced && index > 0 && !has_content;
     bool last_page = fragmentainer->page && index + 1 == state->fragmentainer_count;
-    ViewPageSide wanted = VIEW_PAGE_RIGHT;
-    if (forced && !has_content && last_page && paged_requested_side(composer, request, &wanted) &&
-        fragmentainer->page->side != wanted) {
-        // an empty page of the wrong side turns blank and the box starts the next page (CSS Break 3 §3.1)
-        if (paged_empty_page_restyle(composer, true) != TYPESET_OK) { paged_flow_fail(state, TYPESET_INVALID, block, nullptr); return; }
-        paged_fragmentainer_restyle(state, index, true);
-        has_content = true;
-    }
+    if (forced && paged_forced_empty_side(state, index, request, &has_content, block) != TYPESET_OK) return;
     if (forced && !has_content) {
         // the page is still empty: a new name or sequence restyles it in place
         if ((changed_name || changed_sequence) && last_page) {
@@ -3336,6 +3823,39 @@ static void paged_box_anchors_break(PagedFlowState* state, ViewBlock* block, Blo
     }
 }
 
+void paged_table_cell_alignment(LayoutContext* lycon, ViewTableCell* cell) {
+    PagedFlowState* state = lycon->paged;
+    const ViewCssStyle* style = paged_source_style(state, cell);
+    if (!style) return;
+    if (style->flow_traits && style->flow_traits->relative_cell_before)
+        cell->td->vertical_align = TableCellProp::CELL_VALIGN_RELATIVE_BEFORE;
+}
+
+bool paged_table_source_admit(LayoutContext* lycon, ViewElement* source) {
+    return !lycon->paged || source->is_synthetic() || paged_source_traits_admit(lycon->paged, source) == TYPESET_OK;
+}
+
+size_t paged_table_grid_limit(LayoutContext* lycon) {
+    return lycon->paged ? lycon->paged->composition->options.max_nodes : SIZE_MAX;
+}
+
+void paged_table_layout_error(LayoutContext* lycon, DomElement* source, TypesetStatus status, const char* reason) {
+    if (lycon->paged) paged_flow_fail(lycon->paged, status, source, reason);
+    else log_error("table-structure-invalid: %s", reason);
+}
+
+float paged_table_column_share(LayoutContext* lycon, ViewElement* column, bool fixed_definite) {
+    PagedFlowState* state = lycon->paged;
+    const ViewCssStyle* style = paged_source_style(state, column);
+    if (!style) return 0.0f;
+    // explicit inheritance and bindings compute at the selected style, not in a raw attribute parser.
+    float weight = style->flow_traits ? style->flow_traits->column_proportion : 0.0f;
+    if (weight > 0.0f && !fixed_definite)
+        paged_flow_fail(state, TYPESET_INVALID, column,
+            "proportional columns require a fixed table with a definite inline extent");
+    return weight;
+}
+
 float paged_label_body_columns(LayoutContext* lycon, ViewTable* table, TableMetadata* metadata, float width) {
     PagedFlowState* state = lycon->paged;
     if (state->status != TYPESET_OK || table->is_synthetic()) return 0.0f;
@@ -3404,7 +3924,11 @@ void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_widt
 
 void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa_block) {
     PagedFlowState* state = lycon->paged;
-    if (state->outside || state->status != TYPESET_OK || !paged_flow_block(block) || !paged_flow_fragmentable(lycon, block)) return;
+    if (state->outside) { paged_reference_inline(lycon, block, pa_block); return; }
+    if (state->status != TYPESET_OK) return;
+    if (!paged_flow_block(block) || !paged_flow_fragmentable(lycon, block)) {
+        paged_reference_inline(lycon, block, pa_block); return;
+    }
     // reject invalid native traits before the CSS workspace approximates them as ordinary layout properties.
     // anonymous table fixups have no DOM identity or authored native traits to admit.
     TypesetStatus admitted = paged_source_traits_admit(state, block);
@@ -3423,6 +3947,7 @@ void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa
     size_t moving = state->anchors_bound < end ? paged_box_anchors(state, block, state->anchors_bound, end - state->anchors_bound) : end;
     if (state->status != TYPESET_OK) return;
     paged_block_break(state, lycon, block, pa_block);
+    if (state->status == TYPESET_OK && paged_space_before(state, block, pa_block) != TYPESET_OK) return;
     if (state->status == TYPESET_OK && paged_flow_top_level(state, block)) {
         PagedFlowWidth* width = paged_flow_width(state, block, true);
         if (width) {
@@ -3434,10 +3959,37 @@ void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa
     }
     // layout_block saved the parent before this hook; children inherit the updated reference, not that stale copy.
     lycon->block.paged_reference_width = pa_block->paged_reference_width;
+    if (!paged_flow_top_level(state, block)) {
+        PagedFlowWidth* width = paged_flow_width(state, block, true);
+        if (width) width->seen_pass = state->composition->references->pass;
+    }
+    paged_reference_inline(lycon, block, pa_block);
     // style resolution preceded the run restart; percentage widths need the new containing block.
     if (block->blk && !isnan(block->block()->given_width_percent))
         layout_store_given_axis(lycon, block, pa_block->content_width * block->block()->given_width_percent * 0.01f, true);
     if (moving < end && state->status == TYPESET_OK) paged_box_anchors_break(state, block, pa_block, moving, end);
+}
+
+// anonymous blocks have no block-before hook: consume the preceding box's break at their first real line.
+static TypesetStatus paged_line_break_before(PagedFlowState* state, BlockContext* owner,
+        PagedFlowParagraph* paragraph, size_t line) {
+    ViewBreak request = state->pending_break;
+    state->pending_break = VIEW_BREAK_AUTO;
+    if (request < VIEW_BREAK_COLUMN || state->tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS)
+        return TYPESET_OK;
+    float top = paged_flow_top(paragraph->block) + paragraph->lines[line].top;
+    size_t index;
+    TypesetStatus status = paged_fragmentainer_at(state, top, &index);
+    if (status != TYPESET_OK) return status;
+    bool has_content = top > state->fragmentainers[index].top + kPagedFlowEpsilon;
+    status = paged_forced_empty_side(state, index, request, &has_content, paragraph->block);
+    if (status != TYPESET_OK || !has_content) return status;
+    size_t target;
+    status = paged_forced_target(state, index, request, &target);
+    if (status != TYPESET_OK) return status;
+    float reserve_top, reserve_bottom;
+    paged_reserve(state, paragraph->block, target, &reserve_top, &reserve_bottom);
+    return paged_lines_move(state, owner, paragraph, line, line, target, reserve_top, nullptr, true);
 }
 
 void paged_line_commit(LayoutContext* lycon, float used_line_height) {
@@ -3455,6 +4007,9 @@ void paged_line_commit(LayoutContext* lycon, float used_line_height) {
     }
     state->anchors_bound = state->anchor_count;
     paragraph->lines[paragraph->count++] = {lycon->block.advance_y, used_line_height, 0, lycon->block.line_number, first, count};
+    TypesetStatus status = paged_line_break_before(state, &lycon->block, paragraph, paragraph->count - 1);
+    if (status != TYPESET_OK) { paged_flow_fail(state, status, block, nullptr); return; }
+    if (paged_space_commit(state, &lycon->block, paragraph, paragraph->count - 1) != TYPESET_OK) return;
     paged_fit_line(state, lycon, &lycon->block, paragraph, paragraph->count - 1, nullptr, true);
     const PagedFlowLine& fitted = paragraph->lines[paragraph->count - 1];
     state->flow_end = fmaxf(state->flow_end, paged_flow_top(block) + fitted.top + fitted.height);
@@ -3468,7 +4023,9 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block) {
     size_t since = (size_t)lycon->depth < state->open_capacity ? state->open_struts[lycon->depth] : state->strut_count;
     if (state->paragraph && state->paragraph->block == block && paged_paragraph_close(state, lycon, owner, block) != TYPESET_OK) return;
     state->paragraph = nullptr;
-    ViewBreak after = paged_flow_break_keyword(block->blk ? block->block()->break_after : CSS_VALUE_AUTO);
+    if (paged_space_after(state, block, owner) != TYPESET_OK) return;
+    ViewBreak after = paged_flow_box_break(state, block, true);
+    if (state->status != TYPESET_OK) return;
     if (paged_flow_is_table(block)) {
         // tables break between rows after layout_table placed them whole
         paged_table_after(state, lycon, block);
@@ -3480,13 +4037,11 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block) {
     float fragmentainer_top = state->fragmentainers[index].top, fragmentainer_bottom = state->fragmentainers[index].bottom;
     // the box ends above the footnotes and page floats placed on its fragmentainer
     float end = fragmentainer_bottom - paged_fragmentainer_reserved(state, index);
-    ViewCssStyle* selected = paged_flow_avoids_inside(block) ? view_css_resolve(state->tree, block) : nullptr;
-    const RadiantFlowTraits* traits = selected ? selected->flow_traits.get() : nullptr;
-    bool page_keep = traits && traits->together.scope[2].kind != RADIANT_KEEP_AUTO &&
-        traits->together.scope[1].kind == RADIANT_KEEP_AUTO;
+    RadiantKeepSpec keep = paged_inside_keep(state, block);
+    bool page_keep = keep.scope[2].kind != RADIANT_KEEP_AUTO && keep.scope[1].kind == RADIANT_KEEP_AUTO;
     bool kept_on_page = page_keep && state->fragmentainers[paged_fragmentainer_index(state,
         bottom - kPagedFlowEpsilon)].page == state->fragmentainers[index].page;
-    if (paged_flow_monolithic(block) && !kept_on_page && isfinite(fragmentainer_bottom) && bottom > end + kPagedFlowEpsilon) {
+    if (paged_flow_monolithic(state, block) && !kept_on_page && isfinite(fragmentainer_bottom) && bottom > end + kPagedFlowEpsilon) {
         // a box that must not break inside moves whole to a fragmentainer it fits;
         // one that starts its fragmentainer or fits none keeps the breaks its
         // content made (browsers slice it)
@@ -3503,40 +4058,18 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block) {
         // the next fragmentainer keeps room for its own material and for the anchors
         // inside the box, which may stand there already
         float within = 0.0f, there = 0.0f;
-        for (size_t i = 0; i < state->anchors_bound; i++) {
-            const PagedFlowAnchor& anchor = state->anchors[i];
-            View* at = anchor.box ? anchor.box : anchor.paragraph ? (View*)anchor.paragraph->block : nullptr;
-            if (!at || !paged_view_inside(at, block)) continue;
-            within += anchor.height;
-            if (anchor.fragmentainer == next) there += anchor.height;
-        }
-        float capacity = state->fragmentainers[next].bottom - state->fragmentainers[next].top -
-            (paged_fragmentainer_reserved(state, next) - there) - within;
-        bool starts = top <= fragmentainer_top + kPagedFlowEpsilon;
-        if (page_keep && state->fragmentainers[next].page && state->fragmentainers[next].page->style) {
-            const ViewPageStyle* style = state->fragmentainers[next].page->style;
-            capacity = -within;
-            for (uint32_t column = 0; column < style->column_count; column++) {
-                RdtLogicalRect rect = {};
-                if (!view_css_page_column(style, column, &rect)) { state->status = TYPESET_INVALID; return; }
-                capacity += rect.height;
-                size_t slot = next + column;
-                if (slot < state->fragmentainer_count && state->fragmentainers[slot].page == state->fragmentainers[next].page)
-                    capacity -= paged_fragmentainer_reserved(state, slot);
-            }
-            starts &= state->fragmentainers[index].column == 0;
-        }
+        paged_box_anchor_reservations(state, block, next, &within, &there, page_keep);
+        float capacity = paged_keep_capacity(state, next, page_keep, within - there);
+        if (state->status != TYPESET_OK) return;
+        bool starts = top <= fragmentainer_top + kPagedFlowEpsilon &&
+            (!page_keep || state->fragmentainers[index].column == 0);
         if (forced_inside) {
             // an authored break inside the box overrides its avoidance (CSS Break §4.3)
         } else if (starts || block->height - inner > capacity + kPagedFlowEpsilon) {
-            if (paged_flow_avoids_inside(block)) state->relaxed_avoidance++;
+            if (paged_flow_avoids_inside(state, block)) state->relaxed_avoidance++;
         } else {
             float resolved_height = block->height, resolved_content_height = block->content_height;
-            for (size_t i = state->strut_count; i > since; i--) {
-                const PagedStrut& strut = state->struts[i - 1];
-                if (strut.table) paged_table_restore(state, strut.table, owner, block);
-                else paged_shift_flow(state, owner, strut.paragraph, strut.line, strut.paragraph ? nullptr : strut.view, block, -strut.amount);
-            }
+            paged_undo_struts(state, owner, block, since);
             // closing a definite-height box already discarded its open line's strut from the used height.
             if (block->blk && block->block()->given_height >= 0.0f) {
                 block->height = resolved_height; block->content_height = resolved_content_height;
@@ -3559,7 +4092,7 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block) {
     float box_bottom = paged_flow_top(block) + block->height;
     size_t last = paged_fragmentainer_index(state, box_bottom - kPagedFlowEpsilon);
     float reserved = paged_fragmentainer_reserved(state, last), last_bottom = state->fragmentainers[last].bottom;
-    if (!paged_flow_monolithic(block) && reserved > 0.0f && isfinite(last_bottom) &&
+    if (!paged_flow_monolithic(state, block) && reserved > 0.0f && isfinite(last_bottom) &&
         box_bottom > last_bottom - reserved + kPagedFlowEpsilon && box_bottom <= last_bottom + kPagedFlowEpsilon) {
         size_t next;
         if (paged_fragmentainer_at(state, last_bottom + kPagedFlowEpsilon, &next) != TYPESET_OK) return;
@@ -3608,6 +4141,7 @@ bool paged_flow_skips_element(LayoutContext* lycon, DomElement* element) {
         return element != state->call;
     const char* running = paged_flow_running_name(element);
     if (running) { paged_flow_running(state, element, running); return true; }
+    if (state->outside) return false;
     PagedAnchorKind kind;
     if (!paged_flow_anchor_kind(state, element, &kind)) return false;
     paged_flow_anchor(state, lycon, element, kind);
@@ -3641,7 +4175,11 @@ bool paged_flow_pass_begin(LayoutContext* lycon) {
     state->paragraphs = state->last_paragraph = state->paragraph = nullptr;
     state->tables = state->last_table = state->table = nullptr;
     state->pending_break = VIEW_BREAK_AUTO;
+    state->pending_space_count = state->space_box_count = state->space_gap_count = 0;
+    state->space_open = kPagedUnplaced;
     state->anchor_count = state->anchors_bound = state->notes_waiting = 0;
+    // condition passes must bind against their newly selected areas, not a speculative predecessor.
+    state->indent_count = 0;
     state->draining = false; state->flow_end = 0.0f;
     // fixed sheets are composed at their own viewports; the document shell owns no flow page.
     state->outside = state->tree->model->css->page_document->fixed_count ? 1 : 0;
@@ -3754,6 +4292,13 @@ static RdtLogicalRect paged_publish_rect(const PagedFragmentainer& fragmentainer
 
 static void paged_flow_background_copy(BackgroundProp* copy, const BackgroundProp* source);
 
+// internal table backgrounds paint under cells; their borders enter the collapsed
+// grid conflict solver rather than painting independent boxes (CSS 2.2 §17.5–17.6).
+static bool paged_table_layer(const ViewBlock* block) {
+    return block->view_type == RDT_VIEW_TABLE_ROW || block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+        block->view_type == RDT_VIEW_TABLE_COLUMN || block->view_type == RDT_VIEW_TABLE_COLUMN_GROUP;
+}
+
 // fragment edges follow box-decoration-break: a sliced box paints its top edge
 // on the first fragment and its bottom edge on the last (CSS Fragmentation 3 §5.3)
 static TypesetStatus paged_publish_boundary(PagedFlowState* state, LayoutViewNode* node, ViewBlock* block, bool first, bool last,
@@ -3768,9 +4313,13 @@ static TypesetStatus paged_publish_boundary(PagedFlowState* state, LayoutViewNod
     Storage* storage = (Storage*)arena_alloc(tree->model->arena, sizeof(Storage));
     if (!storage) return TYPESET_OUT_OF_MEMORY;
     *storage = {};
-    storage->boundary.padding = source->padding;
-    if (source->border) {
-        storage->border = *source->border;
+    bool table_layer = paged_table_layer(block);
+    bool collapsed_table = block->view_type == RDT_VIEW_TABLE && block->tb && block->tb->border_collapse;
+    // the collapsed grid's cells own resolved edge paint; its authored border is only a solver input.
+    const BorderProp* source_border = table_layer || collapsed_table ? nullptr : source->border.get();
+    if (!table_layer && !collapsed_table) storage->boundary.padding = source->padding;
+    if (source_border) {
+        storage->border = *source_border;
         // scalar metadata stays independent; immutable commands retain border-image paint
         storage->border.border_image_type = GRADIENT_NONE;
         storage->border.border_image_linear_gradient = nullptr; storage->border.border_image_url = nullptr;
@@ -3790,14 +4339,15 @@ static TypesetStatus paged_publish_boundary(PagedFlowState* state, LayoutViewNod
             const CollapsedBorder* side = sides[i];
             bool painted = side && side->style != CSS_VALUE_NONE && side->style != CSS_VALUE_HIDDEN && side->color.a;
             storage->border.width.values[i] = painted ? side->width : 0.0f;
-            storage->border.styles[i] = painted ? side->style : CSS_VALUE_NONE;
+            storage->border.styles[i] = side ? side->style : CSS_VALUE_NONE;
             if (painted) storage->border.colors[i] = side->color;
             node->border_outset[i] = painted ? side->width * 0.5f : 0.0f;
         }
         storage->boundary.border = lam::own(&storage->border);
     }
+    if (collapsed_table) storage->boundary.border = lam::own(&storage->border);
     bool clone = block->blk && block->block()->box_decoration_break == CSS_VALUE_CLONE;
-    bool has_border = source->border || collapsed;
+    bool has_border = source_border || collapsed || collapsed_table;
     for (size_t side = 0; side < 2; side++) if (!(side ? last : first)) {
         size_t edge = side * 2;
         if (!radiant_decoration_retain(style, true, side != 0)) storage->boundary.padding.values[edge] = 0.0f;
@@ -3808,8 +4358,9 @@ static TypesetStatus paged_publish_boundary(PagedFlowState* state, LayoutViewNod
     node->computed_boundary = lam::up(&storage->boundary);
     node->paint_box = true;
     BoundaryProp boundary = *source;
-    BorderProp border = source->border ? *source->border : BorderProp{};
-    if (source->border || collapsed) {
+    boundary.border = nullptr;
+    BorderProp border = source_border ? *source_border : BorderProp{};
+    if (has_border) {
         if (collapsed) border = storage->border;
         // retained paint and scalar metadata share the independently selected edge widths.
         border.width = storage->border.width;
@@ -4065,8 +4616,7 @@ static TypesetStatus paged_publish_marker(PagedFlowState* state, ViewSpan* marke
     // the marker text ends at the marker box's end, as the raster painter places it
     TextExtents extents = font_measure_text(font->font_handle, text, (int)length); // INT_CAST_OK: marker text is a short counter string
     run->x = page_x + prop->width - extents.width;
-    const FontMetrics* metrics = font_get_metrics(font->font_handle);
-    run->baseline_y = page_y + (metrics ? metrics->hhea_ascender : prop->ascender);
+    run->baseline_y = render_marker_baseline_y(prop, page_y);
     node->glyph_run = lam::up(run);
     return TYPESET_OK;
 }
@@ -4080,6 +4630,7 @@ struct PagedInlinePaint {
     float x, y;
     const PagedParentMap* parents;
     TypesetStatus status;
+    bool paint;
 };
 
 static bool paged_publish_inline_fragment(void* context, RdtLogicalRect rect, bool first, bool last, float offset, float extent) {
@@ -4091,7 +4642,8 @@ static bool paged_publish_inline_fragment(void* context, RdtLogicalRect rect, bo
     rect.y += fragmentainer.rect.y + input->y - fragmentainer.top;
     LayoutViewNode* node = paged_publish_append(state, paged_publish_parent(state, input->parents, index), input->span, rect);
     if (!node) { input->status = TYPESET_OUT_OF_MEMORY; return false; }
-    node->first_fragment = first; node->last_fragment = last; node->paint_box = true;
+    node->first_fragment = first; node->last_fragment = last; node->paint_box = input->paint;
+    if (!input->paint) return true;
     BoundaryProp boundary = *input->span->boundary();
     BorderProp border = boundary.border ? *boundary.border : BorderProp{};
     bool clone = input->span->blk && input->span->block()->box_decoration_break == CSS_VALUE_CLONE;
@@ -4105,10 +4657,17 @@ static bool paged_publish_inline_fragment(void* context, RdtLogicalRect rect, bo
     return input->status == TYPESET_OK;
 }
 
+enum PagedChildSelection : uint8_t { PAGED_CHILD_ALL, PAGED_CHILD_GRID, PAGED_CHILD_BEFORE, PAGED_CHILD_AFTER };
 static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* parent, float origin_x, float origin_y,
-        const PagedParentMap* parents) {
+        const PagedParentMap* parents, PagedChildSelection selection = PAGED_CHILD_ALL) {
     for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
         View* child = (View*)node;
+        if (selection != PAGED_CHILD_ALL) {
+            ViewBlock* box = lam::view_as_block(child);
+            bool caption = box && table_view_is_caption(box);
+            if (selection == PAGED_CHILD_GRID ? caption : !caption ||
+                table_caption_is_bottom(box) != (selection == PAGED_CHILD_AFTER)) continue;
+        }
         // a display:none subtree or a running element binds its assignments where the walk passes it
         if (!child->view_type && node->is_element()) paged_publish_mark(state, node, true);
         if (!child->view_type || child == state->publish_skip) continue;
@@ -4123,6 +4682,11 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
                 !render_media_image_surface(lam::view_as_block(child)))
                 return paged_flow_fail(state, TYPESET_UNPLACEABLE, node,
                     "image source is unavailable or requires a sampled media producer");
+        }
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN || child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+            size_t first = 0, span = 0;
+            // span-qualified property definitions have no geometric column box to publish.
+            if (!layout_table_column_range(lam::view_require_element(child), &first, &span)) continue;
         }
         if (!state->publishing_fixed && child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
@@ -4153,11 +4717,15 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
         else if (child->view_type == RDT_VIEW_INLINE) {
             bool target = paged_publish_mark(state, node, false);
             ViewSpan* span = lam::view_require_element(child);
-            if (span->bound) {
-                PagedInlinePaint input = {state, span, origin_x, origin_y, parents, TYPESET_OK};
+            PagedInlinePaint input = {state, span, origin_x, origin_y, parents, TYPESET_OK, true};
+            auto publish = [&](bool paint) {
+                input.paint = paint;
                 if (!layout_inline_visit_fragments(span, paged_publish_inline_fragment, &input))
                     status = input.status == TYPESET_OK ? TYPESET_OUT_OF_MEMORY : input.status;
-            }
+            };
+            if (span->bound) publish(true);
+            // empty inlines retain insertion positions independently of any zero-width decoration paint.
+            if (status == TYPESET_OK && span->width == 0.0f && layout_span_children_have_no_line_content(span)) publish(false);
             if (status == TYPESET_OK) status = paged_publish_children(state, lam::view_require_element(child), origin_x, origin_y, parents);
             if (target) state->open_target_count--;
         }
@@ -4183,6 +4751,23 @@ static float paged_strut_slice_end(const PagedFlowState* state, const PagedStrut
     return end;
 }
 
+// the settled break journal includes each table's private row/line breaks.
+static const PagedStrut* paged_slice_break(const PagedFlowState* state, ViewBlock* block,
+        size_t index, const PagedFlowTable** table = nullptr) {
+    if (table) *table = nullptr;
+    for (size_t i = 0; i < state->strut_count; i++) {
+        const PagedStrut& entry = state->struts[i];
+        size_t count = entry.table ? entry.table->strut_count : 1;
+        for (size_t j = 0; j < count; j++) {
+            const PagedStrut& strut = entry.table ? entry.table->struts[j] : entry;
+            if (strut.fragmentainer != index + 1 || !paged_view_inside(strut.view, block)) continue;
+            if (table) *table = entry.table;
+            return &strut;
+        }
+    }
+    return nullptr;
+}
+
 // a box with cloned edges ends its slice on fragmentainer `index` after the content
 // the break left there, plus the cloned bottom edges of the boxes between
 static float paged_clone_slice_end(const PagedFlowState* state, ViewBlock* block, size_t index) {
@@ -4190,17 +4775,8 @@ static float paged_clone_slice_end(const PagedFlowState* state, ViewBlock* block
     float retained_top, retained_bottom;
     paged_box_clone_edges(state, block, &retained_top, &retained_bottom);
     if (retained_top == 0.0f && retained_bottom == 0.0f) return fragmentainer.end;
-    for (size_t i = 0; i < state->strut_count; i++) {
-        const PagedStrut& entry = state->struts[i];
-        // a broken table's entry stands for the breaks its record keeps
-        size_t count = entry.table ? entry.table->strut_count : 1;
-        for (size_t j = 0; j < count; j++) {
-            const PagedStrut& strut = entry.table ? entry.table->struts[j] : entry;
-            if (strut.fragmentainer != index + 1 || !paged_view_inside(strut.view, block)) continue;
-            return fminf(paged_strut_slice_end(state, strut, block, true), fragmentainer.end);
-        }
-    }
-    return fragmentainer.end;
+    const PagedStrut* strut = paged_slice_break(state, block, index);
+    return strut ? fminf(paged_strut_slice_end(state, *strut, block, true), fragmentainer.end) : fragmentainer.end;
 }
 
 // a broken table's body content ends on each fragmentainer it continues from:
@@ -4234,14 +4810,6 @@ static const PagedFlowTable* paged_publish_table_record(const PagedFlowState* st
     for (const PagedFlowTable* record = state->tables; record; record = record->next)
         if (record->table == block) return record->modified ? record : nullptr;
     return nullptr;
-}
-
-// row, row group and column backgrounds paint only under the cells they hold, so
-// the table's background shows in the spacing and where cells are missing (CSS
-// 2.2 §17.5.1); their boxes publish without a background
-static bool paged_table_layer(const ViewBlock* block) {
-    return block->view_type == RDT_VIEW_TABLE_ROW || block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
-        block->view_type == RDT_VIEW_TABLE_COLUMN || block->view_type == RDT_VIEW_TABLE_COLUMN_GROUP;
 }
 
 // the background of one layer box under a cell fragment
@@ -4282,26 +4850,10 @@ static TypesetStatus paged_publish_cell_layers(PagedFlowState* state, LayoutView
     TypesetStatus status = TYPESET_OK;
     for (int pass = 0; pass < 2; pass++) {
         // every column group first, then every column (CSS 2.2 §17.5.1 layers)
-        size_t next = 0;
-        table->each_column_source([&](ViewElement* source) {
-            if (status != TYPESET_OK) return;
-            size_t start = next;
-            if (source->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
-                bool columns = false;
-                radiant_each_table_colgroup_column(source, [&](ViewElement* child) {
-                    size_t span = layout_table_column_span(child);
-                    if (pass == 1 && status == TYPESET_OK && column >= next && column < next + span)
-                        status = paged_publish_cell_layer(state, parent, rect, lam::view_require_block(child));
-                    next += span; columns = true;
-                });
-                if (!columns) next += layout_table_column_span(source);
-                if (pass == 0 && status == TYPESET_OK && column >= start && column < next)
-                    status = paged_publish_cell_layer(state, parent, rect, lam::view_require_block(source));
-            } else {
-                next += layout_table_column_span(source);
-                if (pass == 1 && column >= start && column < next)
-                    status = paged_publish_cell_layer(state, parent, rect, lam::view_require_block(source));
-            }
+        layout_table_each_column(table, [&](ViewElement* source, size_t first, size_t span, bool) {
+            bool column_group = source->view_type == RDT_VIEW_TABLE_COLUMN_GROUP;
+            if (status == TYPESET_OK && column_group == (pass == 0) && column >= first && column - first < span)
+                status = paged_publish_cell_layer(state, parent, rect, lam::view_require_block(source));
         });
     }
     if (status == TYPESET_OK && group && group->view_type == RDT_VIEW_TABLE_ROW_GROUP)
@@ -4317,6 +4869,15 @@ static TypesetStatus paged_publish_cell_range(PagedFlowState* state, LayoutViewN
     if (!range) return TYPESET_OUT_OF_MEMORY;
     *range = {(size_t)(cell->col_index > 0 ? cell->col_index : 0), (size_t)(cell->col_span > 1 ? cell->col_span : 1), false};
     node->table_range = lam::up((const ViewTableRange*)range);
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_publish_column_range(PagedFlowState* state, LayoutViewNode* node, ViewBlock* block) {
+    size_t first = 0, span = 0;
+    if (!layout_table_column_range(block, &first, &span)) return TYPESET_OK;
+    ViewTableRange* range = (ViewTableRange*)arena_alloc(state->tree->model->arena, sizeof(ViewTableRange));
+    if (!range) return TYPESET_OUT_OF_MEMORY;
+    *range = {first, span, false}; node->table_range = lam::up(range);
     return TYPESET_OK;
 }
 
@@ -4405,6 +4966,12 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
     PagedParentMap mine = {first, last - first + 1, nullptr};
     mine.nodes = (LayoutViewNode**)pool_calloc(pool, mine.count * sizeof(LayoutViewNode*));
     if (!mine.nodes) return TYPESET_OUT_OF_MEMORY;
+    bool table = block->view_type == RDT_VIEW_TABLE;
+    PagedParentMap grid_nodes = {first, mine.count, nullptr};
+    if (table) {
+        grid_nodes.nodes = (LayoutViewNode**)pool_calloc(pool, mine.count * sizeof(LayoutViewNode*));
+        if (!grid_nodes.nodes) { pool_free(pool, mine.nodes); return TYPESET_OUT_OF_MEMORY; }
+    }
     TypesetStatus status = TYPESET_OK;
     for (size_t index = first; status == TYPESET_OK && index <= last; index++) {
         const PagedFragmentainer& fragmentainer = state->fragmentainers[index];
@@ -4433,7 +5000,25 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
         node->first_fragment = index == first; node->last_fragment = index == last;
         if (root) state->fragmentainers[index].root = node;
         mine.nodes[index - first] = node;
-        if (block->view_type == RDT_VIEW_TABLE) {
+        if (!table) {
+            RdtLogicalRect complete = {fragmentainer.rect.x + left, fragmentainer.rect.y + top - fragmentainer.top, width, block->height};
+            status = paged_publish_boundary(state, node, block, node->first_fragment, node->last_fragment, !paged_table_layer(block), &complete);
+        }
+        if (status == TYPESET_OK && block->view_type == RDT_VIEW_TABLE_CELL) status = paged_publish_cell_range(state, node, block);
+        if (status == TYPESET_OK && (block->view_type == RDT_VIEW_TABLE_COLUMN || block->view_type == RDT_VIEW_TABLE_COLUMN_GROUP))
+            status = paged_publish_column_range(state, node, block);
+        if (status == TYPESET_OK && block->display.inner == RDT_DISPLAY_REPLACED)
+            status = paged_publish_image(state, node, block, origin_x, origin_y, fragmentainer);
+        if (status == TYPESET_OK && index == first && !root && paged_publish_leaf(block)) status = paged_publish_content(state, index);
+    }
+    if (table) {
+        // captions are wrapper children in visual order; rows and columns belong to the decorated grid.
+        if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, &mine, PAGED_CHILD_BEFORE);
+        for (size_t index = first; status == TYPESET_OK && index <= last; index++) {
+            const PagedFragmentainer& fragmentainer = state->fragmentainers[index];
+            LayoutViewNode* node = mine.nodes[index - first];
+            RdtLogicalRect rect = node->rect;
+            paged_publish_slice(state, block, index, last, top, bottom, record, ends, &slice_top, &slice_bottom);
             // captions belong to the wrapper; only the grid owns table borders and background.
             RdtLogicalRect grid = layout_table_grid_rect(static_cast<ViewTable*>(block));
             float grid_top = top + grid.y, grid_bottom = grid_top + grid.height;
@@ -4443,21 +5028,17 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
                 LayoutViewNode* box = paged_publish_append(state, node, block,
                     {rect.x + grid.x, fragmentainer.rect.y + begin - fragmentainer.top, grid.width, end - begin});
                 if (!box) { status = TYPESET_OUT_OF_MEMORY; break; }
+                grid_nodes.nodes[index - first] = box;
                 box->generated = true;
                 box->first_fragment = begin <= grid_top + kPagedFlowEpsilon;
                 box->last_fragment = end >= grid_bottom - kPagedFlowEpsilon;
                 RdtLogicalRect complete = {rect.x + grid.x, fragmentainer.rect.y + grid_top - fragmentainer.top, grid.width, grid.height};
                 status = paged_publish_boundary(state, box, block, box->first_fragment, box->last_fragment, true, &complete);
             }
-        } else {
-            RdtLogicalRect complete = {fragmentainer.rect.x + left, fragmentainer.rect.y + top - fragmentainer.top, width, block->height};
-            status = paged_publish_boundary(state, node, block, node->first_fragment, node->last_fragment, !paged_table_layer(block), &complete);
         }
-        if (status == TYPESET_OK && block->view_type == RDT_VIEW_TABLE_CELL) status = paged_publish_cell_range(state, node, block);
-        if (status == TYPESET_OK && block->display.inner == RDT_DISPLAY_REPLACED)
-            status = paged_publish_image(state, node, block, origin_x, origin_y, fragmentainer);
-        if (status == TYPESET_OK && index == first && !root && paged_publish_leaf(block)) status = paged_publish_content(state, index);
     }
+    const PagedParentMap* content_parents = table ? &grid_nodes : &mine;
+    PagedChildSelection content_selection = table ? PAGED_CHILD_GRID : PAGED_CHILD_ALL;
     if (record) {
         // the table's grid keeps to its body windows; the header group then
         // repeats at the top of each continuation and the footer group closes
@@ -4469,20 +5050,22 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
         View* saved_skip = state->publish_skip;
         state->publish_table = record; state->publish_ends = ends; state->publish_last = last;
         state->publish_skip = record->footer;
-        if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, &mine);
+        if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, content_parents, content_selection);
         state->publish_table = saved_table; state->publish_ends = saved_ends; state->publish_last = saved_last;
         state->publish_skip = saved_skip;
         ViewFragmentRole saved_role = state->publish_role;
         state->publish_role = VIEW_FRAGMENT_REPEATED_TABLE;
         for (size_t index = record->first + 1; status == TYPESET_OK && record->header && index <= last; index++)
             status = paged_publish_block(state, record->header, left,
-                state->fragmentainers[index].top + record->spacing - record->header->y, &mine, false);
+                state->fragmentainers[index].top + record->spacing - record->header->y, content_parents, false);
         for (size_t index = record->first; status == TYPESET_OK && record->footer && index < last; index++)
             status = paged_publish_block(state, record->footer, left,
-                ends[index - record->first] + record->spacing - record->footer->y, &mine, false);
+                ends[index - record->first] + record->spacing - record->footer->y, content_parents, false);
         state->publish_role = saved_role;
-        if (status == TYPESET_OK && record->footer) status = paged_publish_block(state, record->footer, left, top, &mine, false);
-    } else if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, &mine);
+        if (status == TYPESET_OK && record->footer) status = paged_publish_block(state, record->footer, left, top, content_parents, false);
+    } else if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, content_parents, content_selection);
+    if (table && status == TYPESET_OK) status = paged_publish_children(state, block, left, top, &mine, PAGED_CHILD_AFTER);
+    if (grid_nodes.nodes) pool_free(pool, grid_nodes.nodes);
     pool_free(pool, mine.nodes);
     return status;
 }
@@ -4533,6 +5116,26 @@ static TypesetStatus paged_anchors_finish(PagedFlowState* state) {
 static TypesetStatus paged_publish_anchors(PagedFlowState* state, LayoutContext* lycon);
 static TypesetStatus paged_publish_fixed(PagedFlowState* state, LayoutContext* lycon);
 
+static float paged_body_alignment(const PagedFlowState* state, ViewBlock* root, size_t index) {
+    const PagedFragmentainer& fragmentainer = state->fragmentainers[index];
+    const ViewPageStyle* style = fragmentainer.page ? fragmentainer.page->style.get() : nullptr;
+    const RadiantPageRegion* region = style ? style->body_region.get() : nullptr;
+    if (!region || region->align == RADIANT_REGION_ALIGN_BEFORE) return 0.0f;
+    float end = state->flow_end;
+    const PagedFlowTable* table = nullptr;
+    if (const PagedStrut* strut = paged_slice_break(state, root, index, &table)) {
+        // a forced break's empty tail is not content; closing edges and repeated footers are.
+        end = paged_strut_slice_end(state, *strut, root, true);
+        if (table) {
+            end += table->footer_size;
+            if (strut->line < 0 && (strut->view->view_type == RDT_VIEW_TABLE_ROW ||
+                strut->view->view_type == RDT_VIEW_TABLE_ROW_GROUP)) end -= table->spacing;
+        }
+    }
+    float free = fmaxf(0.0f, fragmentainer.end - fmaxf(fragmentainer.top, end));
+    return free * (region->align == RADIANT_REGION_ALIGN_CENTER ? 0.5f : 1.0f);
+}
+
 static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* lycon) {
     ViewBlock* root = paged_flow_root(state);
     if (!root) return paged_flow_fail(state, TYPESET_INVALID, nullptr, "the page flow produced no root box");
@@ -4544,11 +5147,15 @@ static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* ly
     for (size_t i = 0; i < state->fragmentainer_count; i++) {
         PagedFragmentainer& fragmentainer = state->fragmentainers[i];
         fragmentainer.end = fragmentainer.bottom - paged_fragmentainer_reserved(state, i);
-        fragmentainer.rect.y += fragmentainer.float_top;
+        fragmentainer.alignment = paged_body_alignment(state, root, i);
+        fragmentainer.rect.y += fragmentainer.float_top + fragmentainer.alignment;
     }
     state->pending_count = state->open_target_count = 0; state->content_page = 0;
     state->fixed_boxes = state->last_fixed_box = nullptr;
     TypesetStatus status = paged_publish_block(state, root, 0.0f, 0.0f, nullptr, true);
+    // body alignment must not translate the independently positioned floats and footnote area.
+    for (size_t i = 0; i < state->fragmentainer_count; i++)
+        state->fragmentainers[i].rect.y -= state->fragmentainers[i].alignment;
     // sources after the last content bind to the last page
     const ViewPageBox* last = state->fragmentainer_count ? state->fragmentainers[state->fragmentainer_count - 1].page : nullptr;
     if (status == TYPESET_OK && state->pending_count && last) status = paged_publish_pending(state, last->page_number);
@@ -5038,6 +5645,25 @@ static TypesetStatus paged_flow_terminals(PagedFlowState* state) {
     return TYPESET_OK;
 }
 
+// final conditional spaces vanish; retained spaces still position empty trailing anchors.
+static TypesetStatus paged_space_finish(PagedFlowState* state) {
+    if (!state->pending_space_count) return TYPESET_OK;
+    float top = state->flow_end;
+    size_t index = paged_fragmentainer_index(state, top > 0.0f ? top - kPagedFlowEpsilon : top);
+    RadiantSpaceSpec range = radiant_spaces_resolve(state->pending_spaces, state->pending_space_count,
+        top <= state->fragmentainers[index].top + kPagedFlowEpsilon, true);
+    paged_space_anchors_shift(state, kPagedUnplaced, range.optimum);
+    state->pending_space_count = state->space_box_count = 0; state->space_open = kPagedUnplaced;
+    if (range.optimum == 0.0f) return TYPESET_OK;
+    state->flow_end += range.optimum;
+    ViewBlock* root = paged_flow_root(state);
+    if (root) {
+        root->height = fmaxf(root->height, state->flow_end);
+        root->content_height = fmaxf(root->content_height, state->flow_end);
+    }
+    return paged_fragmentainer_at(state, fmaxf(0.0f, state->flow_end - kPagedFlowEpsilon), &index);
+}
+
 // the page tail once the flow settled: publication, regions, sequence ends,
 // page counters, then each page's margin boxes and static regions
 static TypesetStatus paged_flow_compose_pages(PagedFlowState* state, LayoutContext* lycon) {
@@ -5048,6 +5674,7 @@ static TypesetStatus paged_flow_compose_pages(PagedFlowState* state, LayoutConte
     if (tree->model->css->page_document->fixed_count) return paged_flow_fixed_pages(state, lycon);
     // a document without flow content still has its first page
     if (!state->fragmentainer_count) status = paged_fragmentainer_append(state, true);
+    if (status == TYPESET_OK) status = paged_space_finish(state);
     if (status == TYPESET_OK) status = paged_anchors_finish(state);
     if (status == TYPESET_OK) status = paged_flow_widths_capture(state);
     if (status == TYPESET_OK) status = paged_flow_publish(state, lycon);
@@ -5438,9 +6065,13 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
 TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* options,
                                     PagedLayoutDiagnostic* diagnostic) {
     if (diagnostic) *diagnostic = {};
-    if (!tree || !tree->model || !options || !options->max_pages || !options->max_nodes ||
-        !options->max_depth || !options->max_reference_passes || !options->max_container_passes ||
-        options->first_side > VIEW_PAGE_RIGHT || tree->model->committed) return TYPESET_INVALID;
+    if (!tree || !tree->model || !options || options->first_side > VIEW_PAGE_RIGHT || tree->model->committed)
+        return TYPESET_INVALID;
+    if (!options->max_pages || !options->max_nodes || !options->max_depth ||
+        !options->max_reference_passes || !options->max_container_passes) {
+        if (diagnostic) diagnostic->status = TYPESET_BUDGET_EXHAUSTED;
+        return TYPESET_BUDGET_EXHAUSTED;
+    }
     if (!view_tree_model_source_valid(tree)) return TYPESET_STALE;
     if (tree->model->composition || tree->model->node_count != 1) return TYPESET_INVALID;
     PagedReferenceSession session = {};
@@ -5453,7 +6084,9 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
     size_t visited = 0;
     TypesetStatus status = paged_targets_seed(tree, &session, tree->model->document->root, 0, &visited, options);
     bool settled = false;
+    LayoutContentVisibilityTransaction history = {};
     while (status == TYPESET_OK && !settled) {
+        if (!history.begin(tree)) { status = TYPESET_OUT_OF_MEMORY; break; }
         session.pass++;
         status = paged_layout_pass(tree, options, &session);
         PagedComposition* composition = tree->model->composition;
@@ -5472,6 +6105,7 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
             composition->references = nullptr;
         }
         if (status == TYPESET_OK && !settled) {
+            history.close();
             uint32_t generation = tree->layout_generation;
             tree->reset_retained();
             if (tree->layout_generation == generation || tree->model->node_count != 1) status = TYPESET_OUT_OF_MEMORY;
@@ -5484,6 +6118,7 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
         session.targets = {}; session.pool = nullptr;
     }
     if (status == TYPESET_OK) status = view_tree_model_commit(tree) ? TYPESET_OK : TYPESET_INVALID;
+    if (status == TYPESET_OK) history.close(true);
     if (diagnostic && diagnostic->status == TYPESET_OK) diagnostic->status = status;
     return status;
 }

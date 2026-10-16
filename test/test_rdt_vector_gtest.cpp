@@ -581,18 +581,24 @@ TEST(TextOverflowPaint, SpacingProjectionKeepsComputedAdvancesAndCollapsedByteOf
 }
 
 TEST(TextOverflowPaint, ExportSlicesKeepTheirWhitespaceProcessingContext) {
-    const struct Case { int start; int length; CssEnum white_space; CssEnum transform; const char* expected; } cases[] = {
-        {0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "ab cd"},
-        {0, 7, CSS_VALUE_PRE, CSS_VALUE_NONE, "ab   cd"},
-        {3, 4, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "cd"},
-        {3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
-        {0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
+    const struct Case { const char* source; int start; int length; CssEnum white_space; CssEnum transform; const char* expected; } cases[] = {
+        {"ab   cd", 0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "ab cd"},
+        {"ab   cd", 0, 7, CSS_VALUE_PRE, CSS_VALUE_NONE, "ab   cd"},
+        {"ab   cd", 3, 4, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "cd"},
+        {"ab   cd", 3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
+        {"ab   cd", 0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
+        {"A\nB", 0, 2, CSS_VALUE_PRE, CSS_VALUE_NONE, "A"},
+        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A"},
+        {"A\nB", 0, 2, CSS_VALUE_PRE_LINE, CSS_VALUE_NONE, "A"},
+        {"A\nB", 0, 2, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A"},
+        {"A\nB", 0, 2, CSS_VALUE_NORMAL, CSS_VALUE_NONE, "A "},
     };
     for (const Case& sample : cases) {
         TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
         lam::Temp<char> visible(render_text_create_export_segment(
-            (const unsigned char*)"ab   cd", &slice, sample.transform, false, sample.white_space));
+            (const unsigned char*)sample.source, &slice, sample.transform, false, sample.white_space));
         EXPECT_STREQ(visible.get(), sample.expected);
+        EXPECT_EQ(slice.start_index, sample.start); EXPECT_EQ(slice.length, sample.length);
     }
 }
 

@@ -581,6 +581,11 @@ char* render_text_create_export_segment(const unsigned char* text,
             if (bytes <= 0) bytes = 1;
         }
         if (codepoint == 0x00AD) { src += bytes; continue; }
+        // preserved breaks already positioned the next line; their source bytes produce no glyphs.
+        if ((codepoint == '\n' || codepoint == '\r') && !layout_white_space_collapses_newlines(white_space)) {
+            src += bytes; has_space = false; is_word_start = true;
+            continue;
+        }
         if (is_space(codepoint)) {
             // the source byte range stays intact; only its painted representation collapses.
             if (preserve_spaces || !has_space) *dst++ = preserve_spaces ? *src : ' ';

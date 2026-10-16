@@ -121,13 +121,8 @@ Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     const uint8_t arities[] = {3, 2, 3, 2, 2, 2, 1, 2, 1, 1, 1, 3, 2};
     for (int i = 0; i < 13; i++) {
         Item status = mvp_lmd_named_set(object, names[i], mvp_lmd_native_function(program, (void*)(intptr_t)i,
-            reflect_operation, arities[i]));
+            reflect_operation, arities[i], names[i]), JSPD_NON_ENUMERABLE);
         if (item_is_error(status)) return status;
-        Map* map = object.map;
-        ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, names[i], strlen(names[i]));
-        TypeMap* shape = type_tree_reflag_field(runtime_shape_tree(), (TypeMap*)map->type, field, JSPD_NON_ENUMERABLE);
-        if (!shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        map->type = shape;
     }
     return object;
 }

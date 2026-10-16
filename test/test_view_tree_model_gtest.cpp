@@ -25,6 +25,7 @@
 #include "../lib/file.h"
 #include "../lib/font/font.h"
 #include "../lib/ref_count.h"
+#include "../lib/arraylist.hpp"
 #include <math.h>
 #include <stdio.h>
 
@@ -725,6 +726,13 @@ protected:
         }
         return true;
     }
+    void table_alignment_stylesheet(float page_height) {
+        StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+        // stylesheet() replaces the sheet, so preserve the font/edge control when changing page height.
+        strbuf_append_format(css, "@page { size: 240px %gpx; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
+            "td { padding: 2px; border: 1px solid black; vertical-align: top; font: 10px/12px Arial }", page_height);
+        stylesheet(css->str); strbuf_free(css);
+    }
     DomElement* fixed_table(size_t rows, DomElement** header = nullptr, DomElement** footer = nullptr,
             const char* first_colspan = nullptr) {
         DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0", "table");
@@ -786,6 +794,8 @@ protected:
         return fixture->note && (!floating || fixture->floating) &&
             block(nullptr, floating ? "padding-bottom: 16px" : "padding-bottom: 20px", "div", fixture->moved);
     }
+    void table_edition_mutation(ViewTree* original, DomElement* painted, const char* changed_style,
+        uint32_t page, size_t x, size_t y, ViewTree** retained, ViewTree** changed);
     void reference_width_boundary(size_t chapters, size_t label_offset = 0);
 };
 static LayoutViewNode* source_fragment(ViewTree* tree, DomNode* source, ViewFragmentRole role, bool box, bool last = false);
@@ -797,6 +807,11 @@ static DomNode* authored_child(DomElement* element, bool last);
 static uint32_t snapshot_pixel(const ImageSurface* surface, size_t x, size_t y);
 static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t number);
 static void expect_same_surface_pixels(const ImageSurface* left, const ImageSurface* right);
+static void expect_glyph_line_position(const LayoutViewNode* node, float line_top,
+    float line_height, bool fo_nominal_metrics = false);
+static void expect_source_range_coverage(ViewTree* tree, DomNode* source, size_t expected = 1);
+static void expect_snapshot_rgb(const ImageSurface* surface, size_t x, size_t y,
+    uint8_t red, uint8_t green, uint8_t blue);
 
 static const char* paged_split_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAKCAYAAAC0VX7mAAAAKUlEQVR4Aa3BMQEAAAiAMKR/Z63gwTYLy8OwfEhMYhKTmMQkJjGJSewAawgDEgrHt2EAAAAASUVORK5CYII=";
 
@@ -2454,20 +2469,26 @@ TEST_F(SecondaryViewTest, AtomicWrapUsesTheCommonAncestorAndPreservesUnicodeNoBr
     init_vector_engine();
     stylesheet("@page { size: 100px 160px; margin: 10px } div, p { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
     const char* neighbors[] = {"A", "\xc2\xa0", "\xe2\x81\xa0", "\xe2\x80\x8d", "\xe2\x80\xaf", "\xe2\x80\x87", "\xe2\x80\x91"};
+    for (size_t separated = 0; separated < 2; separated++)
     for (size_t side = 0; side < 2; side++) for (size_t i = 0; i < sizeof(neighbors) / sizeof(neighbors[0]); i++) {
+        SCOPED_TRACE(separated);
         SCOPED_TRACE(side);
         SCOPED_TRACE(i);
         StrBuf* label = strbuf_new(); ASSERT_NE(label, nullptr);
+        if (side && separated) strbuf_append_char(label, ' ');
         if (!side && i) strbuf_append_char(label, 'A');
         strbuf_append_str(label, neighbors[i]);
         if (side && i) strbuf_append_char(label, 'A');
+        if (!side && separated) strbuf_append_char(label, ' ');
         DomElement* body = block(!side ? label->str : nullptr); ASSERT_NE(body, nullptr);
+        ASSERT_NE(block(nullptr, "display: none", "span", body), nullptr);
         DomElement* atom = image("width: 80px; height: 10px; white-space: nowrap", body); ASSERT_NE(atom, nullptr);
+        ASSERT_NE(block(nullptr, "display: none", "span", body), nullptr);
         DomElement* word = side ? block(label->str, nullptr, "span", body) : body;
         strbuf_free(label); ASSERT_NE(word, nullptr);
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         TypesetStatus status = layout_secondary_view(tree, &options, &diagnostic);
-        if (i < 2) {
+        if (i < 2 || separated) {
             ASSERT_EQ(status, TYPESET_OK) << diagnostic.reason;
             LayoutViewNode* text = source_fragment(tree, word->first_child, VIEW_FRAGMENT_BODY, false);
             LayoutViewNode* fragment = source_image_fragment(tree, atom); ASSERT_NE(text, nullptr); ASSERT_NE(fragment, nullptr);
@@ -2496,6 +2517,16 @@ TEST_F(SecondaryViewTest, AtomicWrapUsesTheCommonAncestorAndPreservesUnicodeNoBr
     LayoutViewNode* placed[] = {source_image_fragment(tree, first), source_image_fragment(tree, second)};
     ASSERT_NE(placed[0], nullptr); ASSERT_NE(placed[1], nullptr);
     EXPECT_FLOAT_EQ(placed[0]->rect.y, placed[1]->rect.y); EXPECT_FLOAT_EQ(placed[1]->rect.x, 60.0f);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ASSERT_TRUE(source->DomNode::remove_child(body));
+    // a nowrap wrapper's first child can break against text outside that wrapper.
+    body = block("A"); ASSERT_NE(body, nullptr);
+    nowrap = block(nullptr, "white-space: nowrap", "span", body); ASSERT_NE(nowrap, nullptr);
+    DomElement* atom = image("width: 80px; height: 10px; white-space: normal", nowrap); ASSERT_NE(atom, nullptr);
+    tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
+    LayoutViewNode* text = source_fragment(tree, body->first_child, VIEW_FRAGMENT_BODY, false);
+    LayoutViewNode* fragment = source_image_fragment(tree, atom); ASSERT_NE(text, nullptr); ASSERT_NE(fragment, nullptr);
+    EXPECT_GT(fragment->rect.y, text->rect.y); EXPECT_FLOAT_EQ(fragment->rect.x, 10.0f);
 }
 
 TEST_F(SecondaryViewTest, PagedHtmlDefaultsShareTheDefaultViewElementTable) {
@@ -2589,6 +2620,7 @@ TEST_F(SecondaryViewTest, AtomicWrapCrossesSourceOnlyAnchorsAndTrimsNowrapInline
     ASSERT_NE(block(nullptr, "display: none; string-set: Title 'Hidden'", "span", body), nullptr);
     DomElement* second = image("width: 50px; height: 30px", body); ASSERT_NE(second, nullptr);
     DomElement* text = block("A ", "white-space: nowrap", "span", body); ASSERT_NE(text, nullptr);
+    DomText* source_text = text->first_child->as_text(); ASSERT_NE(source_text, nullptr);
     DomElement* third = image("width: 80px; height: 10px", body); ASSERT_NE(third, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
@@ -2596,10 +2628,20 @@ TEST_F(SecondaryViewTest, AtomicWrapCrossesSourceOnlyAnchorsAndTrimsNowrapInline
     ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr);
     EXPECT_GT(b->rect.y, a->rect.y + 10.0f); EXPECT_GT(c->rect.y, b->rect.y + 30.0f);
     EXPECT_FLOAT_EQ(c->rect.x, 10.0f);
-    ViewNodeState* state = view_tree_node_state(tree, text->first_child, false); ASSERT_NE(state, nullptr);
+    ViewNodeState* state = view_tree_node_state(tree, source_text, false); ASSERT_NE(state, nullptr);
     StrBuf* content = strbuf_new(); ASSERT_NE(content, nullptr);
-    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) append_fragment_text(node, content);
-    EXPECT_STREQ(content->str, "A"); strbuf_free(content);
+    size_t bytes = 0;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+        EXPECT_EQ(node->text_start, bytes); bytes += node->text_length;
+        append_fragment_text(node, content);
+    }
+    EXPECT_EQ(bytes, source_text->length);
+    // text rects retain source separators (§4.5); the consumed gap has no layout width.
+    EXPECT_STREQ(content->str, "A "); strbuf_free(content);
+    EXPECT_STREQ(source_text->text, "A ");
+    LayoutViewNode* painted = source_glyph_text(tree, source_text, "A "); ASSERT_NE(painted, nullptr);
+    const FontBox* font = paint_glyph_run_font(painted->glyph_run); ASSERT_NE(font, nullptr);
+    EXPECT_NEAR(painted->rect.width, font_measure_char(font_box_handle(font), 'A'), 0.01f);
 }
 
 TEST_F(SecondaryViewTest, InlineImagesUseTheBaselineAndClipCoverAndContainInTheirContentBoxes) {
@@ -2708,20 +2750,91 @@ TEST_F(SecondaryViewTest, ImagesMoveWithTheBodyWhenLateNotesAndTopFloatsReplayAK
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-images/image-rollback.pdf"));
 }
 
+static void expect_sliced_image(ViewTree* tree, DomElement* image, float width, float height, float page_height) {
+    ViewNodeState* state = view_tree_node_state(tree, image, false); ASSERT_NE(state, nullptr);
+    size_t expected = (size_t)ceilf(height / page_height), count = 0;
+    EXPECT_EQ(tree->model->page_count, expected);
+    ImageSurface* resource = nullptr;
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->image_box) continue;
+        ASSERT_LT(count, expected); EXPECT_EQ(occurrence_page(node), count + 1);
+        EXPECT_EQ(node->source.address, image); EXPECT_EQ(node->source.expected_id, dom_node_ref(image).expected_id);
+        const RdtLogicalRect& body = tree->model->pages.get()[count]->style->content_rect;
+        float offset = count * page_height, visible = fminf(page_height, height - offset);
+        EXPECT_FLOAT_EQ(node->rect.x, body.x); EXPECT_FLOAT_EQ(node->rect.y, body.y);
+        EXPECT_FLOAT_EQ(node->rect.width, width); EXPECT_FLOAT_EQ(node->rect.height, visible);
+        EXPECT_EQ(node->first_fragment, count == 0); EXPECT_EQ(node->last_fragment, count + 1 == expected);
+        EXPECT_TRUE(node->clip_content); expect_independent_workspace_image(node, image);
+        const PaintImageBox* box = node->image_box;
+        EXPECT_FLOAT_EQ(box->content_rect.x, body.x); EXPECT_FLOAT_EQ(box->content_rect.y, body.y - offset);
+        EXPECT_FLOAT_EQ(box->content_rect.width, width); EXPECT_FLOAT_EQ(box->content_rect.height, height);
+        EXPECT_FLOAT_EQ(box->image_rect.x, body.x); EXPECT_FLOAT_EQ(box->image_rect.y, body.y - offset);
+        EXPECT_FLOAT_EQ(box->image_rect.width, width); EXPECT_FLOAT_EQ(box->image_rect.height, height);
+        if (resource) EXPECT_EQ(box->image.get(), resource); else resource = box->image;
+        count++;
+    }
+    EXPECT_EQ(count, expected);
+}
+
 TEST_F(SecondaryViewTest, OversizedAndDeniedImagesReturnSourceDiagnosticsWithoutFragmentation) {
     init_vector_engine();
     stylesheet("@page { size: 160px 80px; margin: 10px } p { margin: 0 }");
     DomElement* image = this->image("display: block; width: 40px; height: 90px"); ASSERT_NE(image, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
-    EXPECT_EQ(diagnostic.source.expected_id, dom_node_ref(image).expected_id);
-    EXPECT_LT(tree->model->page_count, 3u); EXPECT_FALSE(tree->model->committed);
+    // paged design §1.3.4 slices an oversized replaced box without changing its continuous image coordinates.
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_sliced_image(tree, image, 40.0f, 90.0f, 60.0f);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    ImageSurface* before[2] = {};
+    for (uint32_t page = 1; page <= 2; page++) {
+        before[page - 1] = render_secondary_page_snapshot(retained, page, 1.0f); ASSERT_NE(before[page - 1], nullptr);
+        expect_snapshot_rgb(before[page - 1], 40, 20, 0, 0, 255);
+        expect_snapshot_rgb(before[page - 1], 55, 20, 255, 255, 255);
+    }
+    expect_snapshot_rgb(before[0], 40, 65, 0, 0, 255);
+    expect_snapshot_rgb(before[1], 40, 35, 0, 0, 255); expect_snapshot_rgb(before[1], 40, 45, 255, 255, 255);
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(failed->model->page_count, 0u); EXPECT_FALSE(failed->model->committed);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_sliced_image(recovered, image, 40.0f, 90.0f, 60.0f);
+    expect_same_page_pixels(retained, recovered, 1); expect_same_page_pixels(retained, recovered, 2);
+    doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
     ASSERT_TRUE(image->set_attribute("src", "https://example.test/forbidden.png"));
-    doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY; diagnostic = {};
-    ASSERT_TRUE(view_tree_model_reset(tree));
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
-    EXPECT_EQ(diagnostic.source.expected_id, dom_node_ref(image).expected_id);
+    ViewTree* fallback = secondary();
+    ASSERT_EQ(layout_secondary_view(fallback, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_TRUE(fallback->model->committed); EXPECT_EQ(source_image_fragment(fallback, image), nullptr);
+    LayoutViewNode* placeholder = source_fragment(fallback, image, VIEW_FRAGMENT_BODY, true); ASSERT_NE(placeholder, nullptr);
+    EXPECT_FLOAT_EQ(placeholder->rect.width, 40.0f); EXPECT_FLOAT_EQ(placeholder->rect.height, 60.0f);
+    ImageSurface* empty = render_secondary_page_snapshot(fallback, 1, 1.0f); ASSERT_NE(empty, nullptr);
+    expect_snapshot_rgb(empty, 40, 20, 255, 255, 255); image_surface_destroy(empty);
+
+    // HTML retains its browsing fallback; a native document must diagnose an unavailable graphic (D7.1.2v2).
+    DomElement* native = block(nullptr, nullptr, "r:page-document"); ASSERT_NE(native, nullptr);
+    ASSERT_TRUE(native->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    ASSERT_TRUE(source->DomNode::remove_child(native)); source = native; doc.root = lam::up(native);
+    DomElement* sequence = body_column_sequence("size:160px 80px;margin:10px", nullptr); ASSERT_NE(sequence, nullptr);
+    DomElement* graphic = this->image("display:block;width:40px;height:90px", sequence, "https://example.test/forbidden.png");
+    ASSERT_NE(graphic, nullptr); ViewTree* denied = secondary();
+    EXPECT_EQ(layout_secondary_view(denied, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_EQ(diagnostic.source.expected_id, dom_node_ref(graphic).expected_id);
     EXPECT_STREQ(diagnostic.reason, "image source is unavailable or requires a sampled media producer");
+    EXPECT_EQ(denied->model->page_count, 0u); EXPECT_FALSE(denied->model->committed);
+    ASSERT_TRUE(graphic->set_attribute("src", paged_split_png)); ViewTree* allowed = secondary();
+    ASSERT_EQ(layout_secondary_view(allowed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_sliced_image(allowed, graphic, 40.0f, 90.0f, 60.0f);
+    ASSERT_TRUE(graphic->set_attribute("src", "https://example.test/forbidden.png"));
+    ASSERT_TRUE(graphic->set_attribute("style", "display:none")); ViewTree* hidden = secondary();
+    ASSERT_EQ(layout_secondary_view(hidden, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(source_image_fragment(hidden, graphic), nullptr);
+    image_cache_cleanup(shared_ui());
+    for (uint32_t page = 1; page <= 2; page++) {
+        ImageSurface* after = render_secondary_page_snapshot(retained, page, 1.0f); ASSERT_NE(after, nullptr);
+        expect_same_surface_pixels(before[page - 1], after);
+        image_surface_destroy(before[page - 1]); image_surface_destroy(after);
+    }
 }
 
 TEST_F(SecondaryViewTest, ImagesUseTheSameProducerInFootnotesAndRepeatedRunningFurniture) {
@@ -2794,6 +2907,7 @@ TEST_F(SecondaryViewTest, PagedImagesRemainAtomicWhenTheFollowingPageChangesWidt
 }
 
 TEST_F(SecondaryViewTest, OutsideListMarkersFollowFirstContentAcrossPageRollback) {
+    init_vector_engine();
     stylesheet("@page { size: 160px 56px; margin: 8px } "
         "div, ol, li { margin: 0; font-size: 10px; line-height: 12px; white-space: pre-wrap } "
         "ol { padding-left: 24px } li { orphans: 2; widows: 1 } li::marker { color: blue }");
@@ -2802,6 +2916,7 @@ TEST_F(SecondaryViewTest, OutsideListMarkersFollowFirstContentAcrossPageRollback
     ASSERT_TRUE(list->set_attribute("start", "4"));
     DomElement* first = block("A\nB\nC\nD", nullptr, "li", list); ASSERT_NE(first, nullptr);
     DomElement* second = block("E", nullptr, "li", list); ASSERT_NE(second, nullptr);
+    DomText* first_text = first->first_child->as_text(); ASSERT_NE(first_text, nullptr);
     first->x = 71.0f; first->width = 83.0f;
     ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
     PagedLayoutOptions options = paged_layout_options_default();
@@ -2809,21 +2924,53 @@ TEST_F(SecondaryViewTest, OutsideListMarkersFollowFirstContentAcrossPageRollback
     ViewNodeState* state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr);
     size_t markers = 0;
     for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
-        if (!node->computed_style || node->computed_style->pseudo_element != PSEUDO_ELEMENT_MARKER || !node->glyph_run) continue;
+        if (!node->generated || !node->glyph_run) continue;
         markers++;
-        EXPECT_STREQ(node->glyph_run->text, "4. "); EXPECT_EQ(node->computed_style->color.b, 255);
+        EXPECT_STREQ(node->glyph_run->text, "4. "); EXPECT_EQ(node->glyph_run->color.b, 255);
+        EXPECT_EQ(node->glyph_run->color.r, 0); EXPECT_EQ(node->glyph_run->color.g, 0);
         EXPECT_EQ(occurrence_page(node), 2u);
-        LayoutViewNode* content = source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false);
-        ASSERT_NE(content, nullptr); EXPECT_FLOAT_EQ(node->rect.y, content->rect.y);
+        LayoutViewNode* content = source_fragment(tree, first_text, VIEW_FRAGMENT_BODY, false);
+        ASSERT_NE(content, nullptr); ASSERT_NE(content->glyph_run, nullptr);
+        EXPECT_FLOAT_EQ(node->glyph_run->baseline_y, content->glyph_run->baseline_y);
         EXPECT_LE(node->rect.x + node->rect.width, content->rect.x);
     }
     EXPECT_EQ(markers, 1u);
+    state = view_tree_node_state(tree, first_text, false); ASSERT_NE(state, nullptr); size_t bytes = 0;
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) {
+        EXPECT_EQ(part->text_start, bytes); bytes += part->text_length;
+    }
+    EXPECT_EQ(bytes, first_text->length);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
     append_fragment_text(tree->model->root, text);
     EXPECT_NE(strstr(text->str, "5. "), nullptr); strbuf_free(text);
-    EXPECT_FLOAT_EQ(first->x, 71.0f); EXPECT_FLOAT_EQ(first->width, 83.0f);
+    LayoutViewNode* box = source_fragment(tree, first, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 32.0f); EXPECT_FLOAT_EQ(box->rect.width, 120.0f);
+    ImageSurface* pixels = render_secondary_page_snapshot(tree, 2, 2.0f); ASSERT_NE(pixels, nullptr);
+    LayoutViewNode* content = source_fragment(tree, first_text, VIEW_FRAGMENT_BODY, false); ASSERT_NE(content, nullptr);
+    size_t blue_bottom = 0, black_bottom = 0, blue_pixels = 0, black_pixels = 0;
+    size_t first_line_end = (size_t)ceilf(content->glyph_run->baseline_y * 2.0f);
+    for (size_t y = 0; y < first_line_end; y++) for (size_t x = 0; x < (size_t)pixels->width; x++) {
+        Color color = {snapshot_pixel(pixels, x, y)};
+        // detect hue and neutral coverage without discarding antialiased glyph edges.
+        if (color.b > color.r && color.b > color.g) { blue_bottom = y; blue_pixels++; }
+        if (color.r == color.g && color.g == color.b && color.r < 255) { black_bottom = y; black_pixels++; }
+    }
+    EXPECT_GT(blue_pixels, 0u); EXPECT_GT(black_pixels, 0u);
+    EXPECT_EQ(blue_bottom, black_bottom);
     ASSERT_TRUE(create_dir("temp/paged-media-lists"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-lists/outside.pdf"));
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ViewPageBox* old_page = tree->model->pages.get()[1];
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(first->set_attribute("style", "width:70px"));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_FLOAT_EQ(source_fragment(tree, first, VIEW_FRAGMENT_BODY, true)->rect.width, 70.0f);
+    // integration plan §4.7: layout reuses the DOM workspace; leased published geometry stays independent.
+    EXPECT_EQ(view_tree_page_material(retained, retained->model->pages.get()[1]), old_page);
+    EXPECT_FLOAT_EQ(box->rect.x, 32.0f); EXPECT_FLOAT_EQ(box->rect.width, 120.0f);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 2, 2.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(pixels, after);
+    image_surface_destroy(pixels); image_surface_destroy(after);
 }
 
 TEST_F(SecondaryViewTest, NestedListCountersAndValueHintsRemainInLogicalOrder) {
@@ -2872,6 +3019,7 @@ TEST_F(SecondaryViewTest, InsideListMarkerShorthandAndEmptyItemsUseInlineFlow) {
         "ol { padding-left: 0; list-style: upper-roman inside } .custom::marker { content: 'Note: '; color: red }");
     DomElement* list = block(nullptr, nullptr, "ol"); ASSERT_NE(list, nullptr);
     DomElement* first = block("Alpha", nullptr, "li", list); ASSERT_NE(first, nullptr);
+    DomText* first_text = first->first_child->as_text(); ASSERT_NE(first_text, nullptr);
     DomElement* empty = block(nullptr, nullptr, "li", list); ASSERT_NE(empty, nullptr);
     DomElement* third = block("Beta", nullptr, "li", list); ASSERT_NE(third, nullptr);
     ASSERT_TRUE(third->set_attribute("class", "custom"));
@@ -2879,7 +3027,7 @@ TEST_F(SecondaryViewTest, InsideListMarkerShorthandAndEmptyItemsUseInlineFlow) {
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
     EXPECT_STREQ(text->str, "I. AlphaII. Note: Beta"); strbuf_free(text);
-    LayoutViewNode* content = source_fragment(tree, first->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(content, nullptr);
+    LayoutViewNode* content = source_fragment(tree, first_text, VIEW_FRAGMENT_BODY, false); ASSERT_NE(content, nullptr);
     EXPECT_GT(content->rect.x, tree->model->pages.get()[0]->content_rect.x);
     LayoutViewNode* empty_box = source_fragment(tree, empty, VIEW_FRAGMENT_BODY, true); ASSERT_NE(empty_box, nullptr);
     EXPECT_GT(empty_box->rect.height, 0.0f);
@@ -2913,10 +3061,13 @@ TEST_F(SecondaryViewTest, OutsideListMarkersPreserveLeadingSpaceCollapseAndNeste
     ASSERT_NE(ink, nullptr);
     EXPECT_FLOAT_EQ(ink->rect.x, 8.0f + 40.0f + 12.0f);
     state = view_tree_node_state(tree, item, false); ASSERT_NE(state, nullptr);
+    size_t markers = 0;
     for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) if (node->glyph_run) {
-        EXPECT_STREQ(node->glyph_run->text, "1. "); EXPECT_FLOAT_EQ(node->rect.y, ink->rect.y);
+        markers++; EXPECT_STREQ(node->glyph_run->text, "1. ");
+        EXPECT_FLOAT_EQ(node->glyph_run->baseline_y, ink->glyph_run->baseline_y);
         EXPECT_FLOAT_EQ(node->rect.x + node->rect.width, 8.0f + 40.0f);
     }
+    EXPECT_EQ(markers, 1u);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
     EXPECT_STREQ(text->str, "1. Alpha"); strbuf_free(text);
 }
@@ -3003,24 +3154,74 @@ TEST_F(SecondaryViewTest, ModelRollbackRestoresNestedLinksAndNeverReusesDiscarde
 }
 
 TEST_F(SecondaryViewTest, UnimplementedContextsCannotPublishFlattenedPages) {
-    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0 }");
+    init_vector_engine();
+    stylesheet("@page { size:240px 180px; margin:10px } p,div { margin:0; font:10px/12px Arial }");
+    ASSERT_TRUE(source->set_attribute("style", "position:relative;width:90%;height:60px"));
     DomElement* child = block("context content"); ASSERT_NE(child, nullptr);
-    const char* declarations[] = {"display: flex", "display: grid", "display: inline-block",
-        "display: inline flow-root list-item", "column-count: 2", "column-width: 60px", "position: absolute", "float: left"};
-    PagedLayoutOptions options = paged_layout_options_default();
-    for (const char* declaration : declarations) {
-        ASSERT_TRUE(child->set_attribute("style", declaration));
-        ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
-        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID) << declaration;
-        EXPECT_EQ(diagnostic.source.address, child) << declaration;
-        EXPECT_NE(diagnostic.reason, nullptr) << declaration;
-        EXPECT_FALSE(tree->model->committed) << declaration;
+    // layout may insert a list marker before the authored text; keep its source identity across contexts.
+    DomNode* content = child->first_child;
+    const char* declarations[] = {"display:flex", "display:grid", "display:inline-block",
+        "display:inline flow-root list-item", "column-count:2", "column-width:60px", "position:absolute;left:0;top:0", "float:left"};
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ViewTree* retained[8] = {}; ImageSurface* before[8] = {};
+    auto expect_context = [&](ViewTree* tree, float width, float height, bool marker = false) {
+        LayoutViewNode* box = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_FLOAT_EQ(box->rect.x, 10.0f); EXPECT_FLOAT_EQ(box->rect.y, 10.0f);
+        EXPECT_FLOAT_EQ(box->rect.width, width); EXPECT_FLOAT_EQ(box->rect.height, height);
+        EXPECT_EQ(occurrence_page(box), 1u); expect_source_range_coverage(tree, content);
+        LayoutViewNode* text = source_glyph_text(tree, content, "context content"); ASSERT_NE(text, nullptr);
+        if (marker) EXPECT_GT(text->rect.x, box->rect.x);
+        else EXPECT_FLOAT_EQ(text->rect.x, 10.0f);
+        EXPECT_LE(text->rect.x + text->rect.width, box->rect.x + box->rect.width);
+        expect_glyph_line_position(text, 10.0f, 12.0f);
+    };
+    for (size_t i = 0; i < 8; i++) {
+        SCOPED_TRACE(declarations[i]); StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+        strbuf_append_format(css, "%s;width:180px;height:36px;background:blue;column-gap:20px;vertical-align:top", declarations[i]);
+        ASSERT_TRUE(child->set_attribute("style", css->str)); strbuf_free(css);
+        ViewTree* tree = secondary();
+        // §1.3 / integration §4.1 admit the ordinary formatting contexts through the common drivers.
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u); expect_context(tree, 180.0f, 36.0f, i == 3);
+        if (i < 2) EXPECT_EQ(source_fragment(tree, child, VIEW_FRAGMENT_BODY, true)->display_inner, i ? CSS_VALUE_GRID : CSS_VALUE_FLEX);
+        ViewPreviewOptions preview_options = view_preview_options_default();
+        retained[i] = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained[i], nullptr);
+        before[i] = render_secondary_page_snapshot(retained[i], 1, 1.0f); ASSERT_NE(before[i], nullptr);
+        expect_snapshot_rgb(before[i], 180, 40, 0, 0, 255);
+        expect_snapshot_rgb(before[i], 195, 40, 255, 255, 255); expect_snapshot_rgb(before[i], 15, 50, 255, 255, 255);
     }
-    ASSERT_TRUE(child->set_attribute("style", "display: none; float: left"));
-    ASSERT_TRUE(source->set_attribute("style", "display: grid"));
-    ViewTree* root = secondary(); PagedLayoutDiagnostic diagnostic = {};
-    EXPECT_EQ(layout_secondary_view(root, &options, &diagnostic), TYPESET_INVALID);
-    EXPECT_EQ(diagnostic.source.address, source);
+    ASSERT_TRUE(child->set_attribute("style", "display:none;float:left"));
+    ASSERT_TRUE(source->set_attribute("style", "display:grid;position:relative;height:60px"));
+    ViewTree* hidden = secondary(); ASSERT_EQ(layout_secondary_view(hidden, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(source_fragment(hidden, child, VIEW_FRAGMENT_BODY, true), nullptr);
+    EXPECT_EQ(view_tree_node_state(hidden, content, false), nullptr);
+    ASSERT_TRUE(child->set_attribute("style", "display:block;width:120px;height:48px;background:red"));
+    ViewTree* grid = secondary(); ASSERT_EQ(layout_secondary_view(grid, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_context(grid, 120.0f, 48.0f);
+    EXPECT_EQ(source_fragment(grid, source, VIEW_FRAGMENT_BODY, true)->display_inner, CSS_VALUE_GRID);
+    EXPECT_FLOAT_EQ(source->width, 220.0f); ASSERT_NE(source->blk, nullptr);
+    EXPECT_TRUE(isnan(source->block()->given_width_percent));
+    ImageSurface* current = render_secondary_page_snapshot(grid, 1, 1.0f); ASSERT_NE(current, nullptr);
+    expect_snapshot_rgb(current, 15, 40, 255, 0, 0); expect_snapshot_rgb(current, 135, 40, 255, 255, 255);
+    image_surface_destroy(current);
+    ASSERT_TRUE(source->set_attribute("style", "position:relative"));
+    EXPECT_EQ(resolve_display_value(source).inner, CSS_VALUE_FLOW);
+    ASSERT_NE(block("Next", "break-before:page;height:12px"), nullptr);
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(recovered->model->page_count, 2u); expect_context(recovered, 120.0f, 48.0f);
+    EXPECT_EQ(source->display.inner, CSS_VALUE_FLOW);
+    ASSERT_NE(source->blk, nullptr); EXPECT_FLOAT_EQ(source->block()->given_height, -1.0f);
+    // the root keeps its viewport box while its overflow includes the forced second page.
+    EXPECT_FLOAT_EQ(source->height, 160.0f); EXPECT_FLOAT_EQ(source->content_height, 160.0f + 12.0f);
+    for (size_t i = 0; i < 8; i++) {
+        SCOPED_TRACE(declarations[i]); expect_context(retained[i], 180.0f, 36.0f, i == 3);
+        ImageSurface* after = render_secondary_page_snapshot(retained[i], 1, 1.0f); ASSERT_NE(after, nullptr);
+        expect_same_surface_pixels(before[i], after); image_surface_destroy(before[i]); image_surface_destroy(after);
+    }
 }
 
 TEST_F(SecondaryViewTest, SourceFontShorthandAndBlockBordersBelongToTheSelectedView) {
@@ -3133,10 +3334,12 @@ TEST_F(SecondaryViewTest, FileLoadedGroupedSelectorsRetainTheirFontShorthand) {
 }
 
 TEST_F(SecondaryViewTest, TableCaptionsUseATransparentWrapperOutsideGridDecorations) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
         "td { padding: 0; vertical-align: top } caption, .caption { padding: 2px; border: 1px solid red }");
-    DomElement* table = block(nullptr, "table-layout: fixed; width: 50%; margin: 8px auto; "
-        "border: 2px solid blue; padding: 3px; border-spacing: 0; background: yellow; caption-side: bottom", "table");
+    const char* table_css = "table-layout: fixed; width: 50%; margin: 8px auto; "
+        "border: 2px solid blue; padding: 3px; border-spacing: 0; background: yellow; caption-side: bottom;";
+    DomElement* table = block(nullptr, table_css, "table");
     ASSERT_NE(table, nullptr);
     DomElement* bottom = block("Bottom", "margin-bottom: 7px", "caption", table);
     ASSERT_NE(bottom, nullptr);
@@ -3145,22 +3348,35 @@ TEST_F(SecondaryViewTest, TableCaptionsUseATransparentWrapperOutsideGridDecorati
     ASSERT_NE(top, nullptr);
     DomElement* after = block("After"); ASSERT_NE(after, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    LayoutViewNode* wrapper = source_fragment(tree, table, VIEW_FRAGMENT_BODY, false);
-    LayoutViewNode* grid = source_fragment(tree, table, VIEW_FRAGMENT_BODY, true);
-    LayoutViewNode* above = source_fragment(tree, top, VIEW_FRAGMENT_BODY, true);
-    LayoutViewNode* below = source_fragment(tree, bottom, VIEW_FRAGMENT_BODY, true);
-    ASSERT_NE(wrapper, nullptr); ASSERT_NE(grid, nullptr); ASSERT_NE(above, nullptr); ASSERT_NE(below, nullptr);
-    EXPECT_EQ(above->parent, wrapper); EXPECT_EQ(grid->parent, wrapper); EXPECT_EQ(below->parent, wrapper);
-    EXPECT_EQ(wrapper->first_child, above); EXPECT_EQ(above->next_sibling, grid); EXPECT_EQ(grid->next_sibling, below);
-    EXPECT_FLOAT_EQ(grid->rect.width, 120.0f); EXPECT_FLOAT_EQ(grid->rect.x, 60.0f);
-    EXPECT_FLOAT_EQ(above->rect.width, grid->rect.width); EXPECT_FLOAT_EQ(below->rect.width, grid->rect.width);
-    EXPECT_FLOAT_EQ(above->rect.x, grid->rect.x); EXPECT_FLOAT_EQ(above->rect.y, 18.0f);
-    EXPECT_FLOAT_EQ(grid->rect.y, above->rect.y + above->rect.height);
-    EXPECT_FLOAT_EQ(below->rect.y, grid->rect.y + grid->rect.height);
-    EXPECT_FLOAT_EQ(wrapper->rect.height, above->rect.height + grid->rect.height + below->rect.height + 7.0f);
-    LayoutViewNode* next = source_fragment(tree, after, VIEW_FRAGMENT_BODY, true); ASSERT_NE(next, nullptr);
-    EXPECT_FLOAT_EQ(next->rect.y, wrapper->rect.y + wrapper->rect.height + 8.0f);
+    const struct { const char* css; float edges; } modes[] = {
+        {"", 0.0f}, {"box-sizing:border-box", 0.0f}, {"box-sizing:content-box", 10.0f}};
+    for (const auto& sizing : modes) {
+        SCOPED_TRACE(sizing.css);
+        char css[320]; snprintf(css, sizeof(css), "%s%s", table_css, sizing.css);
+        ASSERT_TRUE(table->set_attribute("style", css)); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* wrapper = source_fragment(tree, table, VIEW_FRAGMENT_BODY, false);
+        LayoutViewNode* grid = source_fragment(tree, table, VIEW_FRAGMENT_BODY, true);
+        LayoutViewNode* above = source_fragment(tree, top, VIEW_FRAGMENT_BODY, true);
+        LayoutViewNode* below = source_fragment(tree, bottom, VIEW_FRAGMENT_BODY, true);
+        ASSERT_NE(wrapper, nullptr); ASSERT_NE(grid, nullptr); ASSERT_NE(above, nullptr); ASSERT_NE(below, nullptr);
+        EXPECT_EQ(above->parent, wrapper); EXPECT_EQ(grid->parent, wrapper); EXPECT_EQ(below->parent, wrapper);
+        EXPECT_EQ(wrapper->first_child, above); EXPECT_EQ(above->next_sibling, grid); EXPECT_EQ(grid->next_sibling, below);
+        // the UA table border-box includes its edges; explicit content-box preserves the original120px grid.
+        float width = 220.0f * 0.5f + sizing.edges;
+        EXPECT_FLOAT_EQ(grid->rect.width, width); EXPECT_FLOAT_EQ(grid->rect.x, 10.0f + (220.0f - width) * 0.5f);
+        EXPECT_FLOAT_EQ(above->rect.width, grid->rect.width); EXPECT_FLOAT_EQ(below->rect.width, grid->rect.width);
+        EXPECT_FLOAT_EQ(above->rect.x, grid->rect.x); EXPECT_FLOAT_EQ(above->rect.y, 18.0f);
+        EXPECT_FLOAT_EQ(grid->rect.y, above->rect.y + above->rect.height);
+        EXPECT_FLOAT_EQ(below->rect.y, grid->rect.y + grid->rect.height);
+        EXPECT_FLOAT_EQ(wrapper->rect.height, above->rect.height + grid->rect.height + below->rect.height + 7.0f);
+        LayoutViewNode* next = source_fragment(tree, after, VIEW_FRAGMENT_BODY, true); ASSERT_NE(next, nullptr);
+        EXPECT_FLOAT_EQ(next->rect.y, wrapper->rect.y + wrapper->rect.height + 8.0f);
+        ImageSurface* pixels = render_secondary_page_snapshot(tree, 1); ASSERT_NE(pixels, nullptr);
+        EXPECT_EQ(snapshot_pixel(pixels, static_cast<size_t>(grid->rect.x), static_cast<size_t>(grid->rect.y + 3.0f)), 0xffff0000u);
+        EXPECT_EQ(snapshot_pixel(pixels, static_cast<size_t>(grid->rect.x + 3.0f), static_cast<size_t>(grid->rect.y + 3.0f)), 0xff00ffffu);
+        image_surface_destroy(pixels);
+    }
     EXPECT_EQ(table->first_child, bottom); EXPECT_EQ(top->parent, table);
 }
 
@@ -3184,6 +3400,7 @@ TEST_F(SecondaryViewTest, CaptionMinimumSizesBothAutomaticAndFixedTableGrids) {
 }
 
 TEST_F(SecondaryViewTest, TableCaptionsOccurOnceAroundRepeatingGroupsAtChangingPageWidths) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 140px; margin: 10px } @page :left { size: 200px 140px } "
         "p { margin: 0; font: 10px/12px Arial } td { padding: 2px; border: 1px solid black; vertical-align: top }");
     DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* table = fixed_table(9, &header, &footer);
@@ -3202,7 +3419,13 @@ TEST_F(SecondaryViewTest, TableCaptionsOccurOnceAroundRepeatingGroupsAtChangingP
     size_t index = 0;
     for (LayoutViewNode* grid = state->first_occurrence; grid; grid = grid->next_occurrence) {
         if (!grid->paint_box) continue;
-        EXPECT_FLOAT_EQ(grid->rect.width, index == 1 ? 180.0f : 220.0f);
+        // integration plan §4.2 keeps one measured table width throughout this flow run.
+        EXPECT_FLOAT_EQ(grid->rect.width, 220.0f);
+        const ViewPageBox* page = tree->model->pages.get()[index];
+        EXPECT_FLOAT_EQ(page->style->content_rect.width, index == 1 ? 180.0f : 220.0f);
+        ImageSurface* pixels = render_secondary_page_snapshot(tree, static_cast<uint32_t>(index + 1)); ASSERT_NE(pixels, nullptr);
+        EXPECT_EQ(pixels->width, index == 1 ? 200 : 240); EXPECT_EQ(pixels->height, 140);
+        image_surface_destroy(pixels);
         EXPECT_EQ(grid->first_fragment, index == 0); EXPECT_EQ(grid->last_fragment, index == 2); index++;
     }
     EXPECT_EQ(index, 3u);
@@ -3412,24 +3635,108 @@ TEST_F(SecondaryViewTest, FixedTablesBreakBetweenRowsAndRepeatSourceGroupsWithou
     }
 }
 
+static void expect_snapshot_rgb(const ImageSurface* surface, size_t x, size_t y,
+    uint8_t red, uint8_t green, uint8_t blue) {
+    Color color = {snapshot_pixel(surface, x, y)};
+    EXPECT_EQ(color.r, red); EXPECT_EQ(color.g, green); EXPECT_EQ(color.b, blue); EXPECT_EQ(color.a, 255);
+}
+
+static void expect_table_papers(ViewTree* tree, size_t count, float height) {
+    ASSERT_EQ(tree->model->page_count, count);
+    for (size_t i = 0; i < count; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i]; ASSERT_NE(page, nullptr);
+        float width = i % 2 ? 200.0f : 240.0f;
+        EXPECT_FLOAT_EQ(page->node.rect.width, width); EXPECT_FLOAT_EQ(page->node.rect.height, height);
+        ASSERT_NE(page->style, nullptr);
+        EXPECT_FLOAT_EQ(page->style->content_rect.width, width - 20.0f);
+    }
+}
+
+static void expect_table_cell_track(ViewTree* tree, DomElement* cell, float x, float width,
+    size_t count = 1, uint32_t first_page = 1, DomNode* content = nullptr, float line_offset = NAN) {
+    ViewNodeState* boxes = view_tree_node_state(tree, cell, false); ASSERT_NE(boxes, nullptr);
+    DomElement* group = nullptr;
+    for (DomNode* ancestor = cell->parent; ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
+        if (ancestor->tag() == MARKUP_NAME_THEAD || ancestor->tag() == MARKUP_NAME_TFOOT) { group = ancestor->as_element(); break; }
+        if (ancestor->tag() == MARKUP_NAME_TABLE) break;
+    }
+    uint32_t natural_page = group && group->tag() == MARKUP_NAME_TFOOT ? tree->model->page_count : 1u;
+    size_t copies = 0;
+    for (LayoutViewNode* box = boxes->first_occurrence; box; box = box->next_occurrence) {
+        if (!box->paint_box) continue;
+        EXPECT_NEAR(box->rect.x, x, 0.01f); EXPECT_NEAR(box->rect.width, width, 0.01f);
+        EXPECT_GT(box->rect.height, 0.0f); EXPECT_EQ(occurrence_page(box), first_page + copies++);
+        EXPECT_EQ(box->role, group && occurrence_page(box) != natural_page ? VIEW_FRAGMENT_REPEATED_TABLE : VIEW_FRAGMENT_BODY);
+    }
+    EXPECT_EQ(copies, count);
+    if (!content) content = cell->first_child;
+    ASSERT_TRUE(content && content->is_text());
+    expect_source_range_coverage(tree, content, group ? count : 1);
+    ViewNodeState* text = view_tree_node_state(tree, content, false); ASSERT_NE(text, nullptr);
+    size_t runs = 0;
+    for (LayoutViewNode* node = text->first_occurrence; node; node = node->next_occurrence) {
+        ASSERT_NE(node->glyph_run, nullptr); ASSERT_NE(node->glyph_run->text, nullptr);
+        EXPECT_GT(node->glyph_run->text_len, 0); EXPECT_GT(node->rect.width, 0.0f);
+        LayoutViewNode* box = node->parent;
+        while (box && (box->source.address != cell || !box->paint_box)) box = box->parent;
+        ASSERT_NE(box, nullptr);
+        EXPECT_GE(node->rect.x, box->rect.x); EXPECT_GE(node->rect.y, box->rect.y);
+        EXPECT_LE(node->rect.x + node->rect.width, box->rect.x + box->rect.width + 0.01f);
+        EXPECT_LE(node->rect.y + node->rect.height, box->rect.y + box->rect.height + 0.01f);
+        EXPECT_GE(occurrence_page(node), first_page); EXPECT_LT(occurrence_page(node), first_page + count);
+        if (!strpbrk((const char*)content->text_data(), "\r\n\t")) {
+            EXPECT_EQ((size_t)node->glyph_run->text_len, node->text_length);
+            EXPECT_EQ(memcmp(node->glyph_run->text, content->text_data() + node->text_start, node->text_length), 0);
+        }
+        if (!isnan(line_offset)) expect_glyph_line_position(node, box->rect.y + line_offset, 12.0f);
+        runs++;
+    }
+    EXPECT_GT(runs, 0u);
+}
+
+void SecondaryViewTest::table_edition_mutation(ViewTree* original, DomElement* painted, const char* changed_style,
+        uint32_t page, size_t x, size_t y, ViewTree** retained, ViewTree** changed) {
+    init_vector_engine(); ASSERT_GT(original->model->page_count, 1u);
+    ViewPreviewOptions preview = view_preview_options_default();
+    *retained = view_tree_page_instances_create(original, nullptr, &preview); ASSERT_NE(*retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(*retained, page, 1.0f); ASSERT_NE(before, nullptr);
+    expect_snapshot_rgb(before, x, y, 0, 0, 255);
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_same_page_pixels(*retained, recovered, page);
+    ASSERT_TRUE(painted->set_attribute("style", changed_style)); *changed = secondary();
+    ASSERT_EQ(layout_secondary_view(*changed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ImageSurface* current = render_secondary_page_snapshot(*changed, page, 1.0f); ASSERT_NE(current, nullptr);
+    expect_snapshot_rgb(current, x, y, 255, 0, 0);
+    ImageSurface* after = render_secondary_page_snapshot(*retained, page, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after);
+    image_surface_destroy(before); image_surface_destroy(current); image_surface_destroy(after);
+}
+
 TEST_F(SecondaryViewTest, FixedTableTracksUseFirstVisualRowAndRemeasureAtChangedPageWidths) {
     stylesheet("@page { size: 240px 140px; margin: 10px } @page :left { size: 200px 140px } "
         "p { margin: 0; font: 10px/12px Arial } td { padding: 2px; border: 1px solid black; vertical-align: top }");
     DomElement* header = nullptr; DomElement* footer = nullptr;
     DomElement* table = fixed_table(9, &header, &footer); ASSERT_NE(table, nullptr);
     DomElement* first = header->first_child->as_element()->first_child->as_element();
-    ASSERT_TRUE(first->set_attribute("style", "width: 25%"));
+    ASSERT_TRUE(first->set_attribute("style", "width:25%;background:blue"));
     DomElement* later = footer->next_sibling->as_element()->first_child->as_element()->first_child->as_element();
-    ASSERT_TRUE(later->set_attribute("style", "width: 1000px"));
+    ASSERT_TRUE(later->set_attribute("style", "width:1000px"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ViewNodeState* state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr);
-    const float expected[] = {61.0f, 51.0f, 61.0f}; size_t page = 0;
-    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence)
-        if (fragment->paint_box) { ASSERT_LT(page, 3u); EXPECT_FLOAT_EQ(fragment->rect.width, expected[page++]); }
-    EXPECT_EQ(page, 3u);
-    ViewNodeState* later_state = view_tree_node_state(tree, later, false); ASSERT_NE(later_state, nullptr);
-    EXPECT_FLOAT_EQ(later_state->first_occurrence->rect.width, 61.0f);
+    expect_table_papers(tree, 3, 140.0f);
+    // integration §4.2 keeps the opening 220px flow width; fixed cell percentages add their 6px edges.
+    expect_table_cell_track(tree, first, 10.0f, 220.0f * 0.25f + 6.0f, 3, 1, nullptr, 3.0f);
+    expect_table_cell_track(tree, later, 10.0f, 61.0f, 1, 1, nullptr, 3.0f);
+    ViewTree* retained = nullptr; ViewTree* changed = nullptr;
+    table_edition_mutation(tree, first, "width:50%;background:red", 2, 15, 26, &retained, &changed);
+    ASSERT_NE(retained, nullptr); ASSERT_NE(changed, nullptr);
+    expect_table_cell_track(retained, first, 10.0f, 61.0f, 3, 1, nullptr, 3.0f);
+    expect_table_cell_track(changed, first, 10.0f, 220.0f * 0.5f + 6.0f, 3, 1, nullptr, 3.0f);
 }
 
 TEST_F(SecondaryViewTest, ImpossibleTableRowRejectsTheEditionWithoutPublishingHeaderOnlyPages) {
@@ -3472,60 +3779,218 @@ TEST_F(SecondaryViewTest, AutoTablePercentTracksRemeasureOnAlternatingPages) {
     stylesheet("@page { size: 240px 140px; margin: 10px } @page :left { size: 200px 140px } "
         "p { margin: 0; font: 10px/12px Arial } td { padding: 2px; border: 1px solid black; vertical-align: top }");
     DomElement* header = nullptr; DomElement* table = fixed_table(9, &header); ASSERT_NE(table, nullptr);
-    ASSERT_TRUE(table->set_attribute("style", "table-layout: auto; width: 100%; border-spacing: 0"));
+    ASSERT_TRUE(table->set_attribute("style", "table-layout:auto;width:100%;border-spacing:0"));
     DomElement* first = header->first_child->as_element()->first_child->as_element();
-    ASSERT_TRUE(first->set_attribute("style", "width: 25%"));
+    ASSERT_TRUE(first->set_attribute("style", "width:25%;background:blue"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 3u);
-    ViewNodeState* state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr);
-    const float expected[] = {55.0f, 45.0f, 55.0f}; size_t page = 0;
-    for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence)
-        if (fragment->paint_box) { ASSERT_LT(page, 3u); EXPECT_FLOAT_EQ(fragment->rect.width, expected[page++]); }
-    EXPECT_EQ(page, 3u);
+    expect_table_papers(tree, 3, 140.0f);
+    expect_table_cell_track(tree, first, 10.0f, 220.0f * 0.25f, 3, 1, nullptr, 3.0f);
+    ViewTree* retained = nullptr; ViewTree* changed = nullptr;
+    table_edition_mutation(tree, first, "width:50%;background:red", 2, 15, 26, &retained, &changed);
+    ASSERT_NE(retained, nullptr); ASSERT_NE(changed, nullptr);
+    expect_table_cell_track(retained, first, 10.0f, 55.0f, 3, 1, nullptr, 3.0f);
+    expect_table_cell_track(changed, first, 10.0f, 110.0f, 3, 1, nullptr, 3.0f);
 }
 
 TEST_F(SecondaryViewTest, AutoTableColumnMinimaOverrideSmallerDeclaredTableAndMaximumWidths) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "width: 20px; max-width: 100px; box-sizing: border-box; padding: 5px; border: 1px solid black; border-spacing: 0", "table");
     ASSERT_NE(table, nullptr); DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
-    DomElement* first = block("A", "width: 70px; min-width: 90px; max-width: 80px; box-sizing: border-box; padding: 2px; border: 1px solid black", "td", row);
-    ASSERT_NE(first, nullptr); ASSERT_NE(block("B", "width: 50px", "td", row), nullptr);
+    DomElement* first = block("A", "width: 70px; min-width: 90px; max-width: 80px; box-sizing: border-box; padding: 2px; border: 1px solid black; background: blue", "td", row);
+    ASSERT_NE(first, nullptr); DomElement* last = block("B", "width: 50px", "td", row); ASSERT_NE(last, nullptr);
+    ASSERT_NE(block("Tail", "break-before: page"), nullptr);
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
-    EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, 152.0f);
-    state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr); EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, 90.0f);
+    ASSERT_EQ(tree->model->page_count, 2u);
+    const ViewCssStyle* style = view_css_resolve(tree, last); ASSERT_NE(style, nullptr);
+    float last_minimum = font_measure_text(style->font.font_handle, "B", 1).width;
+    // a cell width is a preference; the intrinsic minimum, not that preference, forces an undersized grid wider.
+    LayoutViewNode* grid = source_fragment(tree, table, VIEW_FRAGMENT_BODY, true); ASSERT_NE(grid, nullptr);
+    EXPECT_NEAR(grid->rect.width, 90.0f + last_minimum + 12.0f, 0.01f);
+    expect_table_cell_track(tree, first, 16.0f, 90.0f);
+    expect_table_cell_track(tree, last, 106.0f, last_minimum);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(before, nullptr);
+    expect_snapshot_rgb(before, 20, 31, 0, 0, 255);
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_same_page_pixels(retained, recovered, 1);
+    ASSERT_TRUE(first->set_attribute("style", "width: 70px; min-width: 120px; max-width: 80px; box-sizing: border-box; padding: 2px; border: 1px solid black; background: red"));
+    ViewTree* changed = secondary(); ASSERT_EQ(layout_secondary_view(changed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_table_cell_track(changed, first, 16.0f, 120.0f);
+    expect_table_cell_track(changed, last, 136.0f, last_minimum);
+    EXPECT_NEAR(source_fragment(changed, table, VIEW_FRAGMENT_BODY, true)->rect.width, 120.0f + last_minimum + 12.0f, 0.01f);
+    ImageSurface* current = render_secondary_page_snapshot(changed, 1, 1.0f); ASSERT_NE(current, nullptr);
+    expect_snapshot_rgb(current, 20, 31, 255, 0, 0);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after); expect_table_cell_track(retained, first, 16.0f, 90.0f);
+    image_surface_destroy(before); image_surface_destroy(current); image_surface_destroy(after);
 }
 
 TEST_F(SecondaryViewTest, AutoWidthTableClampsPercentageTracksToTheAvailableWidth) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
     DomElement* table = block(nullptr, "border-spacing: 0", "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
-    DomElement* first = block("A", "width: 80%", "td", row); ASSERT_NE(first, nullptr);
-    DomElement* last = block("B", "width: 80%", "td", row); ASSERT_NE(last, nullptr);
+    DomElement* first = block("A", "width: 80%; background: blue", "td", row); ASSERT_NE(first, nullptr);
+    DomElement* last = block("B", "width: 80%; background: red", "td", row); ASSERT_NE(last, nullptr);
+    DomElement* tail = block("Tail", "break-before: page"); ASSERT_NE(tail, nullptr);
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
-    EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, 220.0f);
-    state = view_tree_node_state(tree, first, false); ASSERT_NE(state, nullptr); EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, 176.0f);
-    state = view_tree_node_state(tree, last, false); ASSERT_NE(state, nullptr); EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, 44.0f);
+    const struct { const char* first; const char* last; float first_percent; } cases[] = {
+        {"80%", "80%", 80.0f}, {"60%", "80%", 60.0f},
+        {"80%", "30%", 80.0f}, {"calc(40% + 40%)", "80%", 80.0f}};
+    ViewTree* retained = nullptr; ImageSurface* before = nullptr;
+    float retained_width = 0.0f;
+    for (const auto& test : cases) for (bool rtl : {false, true}) for (bool explicit_width : {false, true}) {
+        SCOPED_TRACE(test.first);
+        SCOPED_TRACE(test.last);
+        SCOPED_TRACE(rtl);
+        SCOPED_TRACE(explicit_width);
+        StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+        strbuf_append_format(css, "border-spacing:0; direction:%s; width:%s", rtl ? "rtl" : "ltr", explicit_width ? "100%" : "auto");
+        ASSERT_TRUE(table->set_attribute("style", css->str)); strbuf_reset(css);
+        strbuf_append_format(css, "width:%s; background:blue", test.first); ASSERT_TRUE(first->set_attribute("style", css->str));
+        strbuf_reset(css); strbuf_append_format(css, "width:%s; background:red", test.last);
+        ASSERT_TRUE(last->set_attribute("style", css->str)); strbuf_free(css);
+        ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u);
+        const ViewCssStyle* first_style = view_css_resolve(tree, first); ASSERT_NE(first_style, nullptr);
+        const ViewCssStyle* last_style = view_css_resolve(tree, last); ASSERT_NE(last_style, nullptr);
+        float first_minimum = font_measure_text(first_style->font.font_handle, "A", 1).width + 2.0f;
+        float last_minimum = font_measure_text(last_style->font.font_handle, "B", 1).width + 2.0f;
+        float first_ratio = test.first_percent / 100.0f, last_ratio = 1.0f - first_ratio;
+        // CSS Tables 3 §3.8.3 caps later intrinsic percentages at the remaining budget, in logical column order.
+        float width = explicit_width ? 220.0f : fmaxf(first_minimum / first_ratio, last_minimum / last_ratio);
+        LayoutViewNode* grid = source_fragment(tree, table, VIEW_FRAGMENT_BODY, true); ASSERT_NE(grid, nullptr);
+        EXPECT_NEAR(grid->rect.width, width, 0.01f);
+        expect_table_cell_track(tree, first, grid->rect.x + (rtl ? width * last_ratio : 0.0f), width * first_ratio);
+        expect_table_cell_track(tree, last, grid->rect.x + (rtl ? 0.0f : width * first_ratio), width * last_ratio);
+        if (!retained) {
+            ViewPreviewOptions preview_options = view_preview_options_default();
+            retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+            retained_width = width;
+            before = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(before, nullptr);
+            expect_snapshot_rgb(before, 15, 23, 0, 0, 255); expect_snapshot_rgb(before, 50, 23, 255, 0, 0);
+        }
+    }
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_NEAR(source_fragment(recovered, table, VIEW_FRAGMENT_BODY, true)->rect.width, 220.0f, 0.01f);
+    expect_table_cell_track(retained, first, 10.0f, retained_width * 0.8f);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after); image_surface_destroy(before); image_surface_destroy(after);
+    ASSERT_TRUE(source->DomNode::remove_child(table)); ASSERT_TRUE(source->DomNode::remove_child(tail));
+    auto expect_tracks = [&](ViewTree* tree, DomElement** cells, const float* widths, bool rtl) {
+        float x = 10.0f + (rtl ? 220.0f : 0.0f);
+        for (size_t i = 0; i < 3; i++) {
+            if (rtl) x -= widths[i];
+            expect_table_cell_track(tree, cells[i], x, widths[i]);
+            if (!rtl) x += widths[i];
+        }
+    };
+    // a span contributes only its remaining percentage to columns without a narrower constraint.
+    for (bool columns : {false, true}) for (bool rtl : {false, true}) {
+        SCOPED_TRACE(columns);
+        SCOPED_TRACE(rtl);
+        table = block(nullptr, rtl ? "width:100%;border-spacing:0;direction:rtl" : "width:100%;border-spacing:0", "table");
+        ASSERT_NE(table, nullptr);
+        if (columns) {
+            ASSERT_NE(block(nullptr, "width:60%", "col", table), nullptr);
+            ASSERT_NE(block(nullptr, nullptr, "col", table), nullptr);
+            ASSERT_NE(block(nullptr, "width:20%", "col", table), nullptr);
+        }
+        row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+        DomElement* span = block("A", "width:80%", "td", row); ASSERT_NE(span, nullptr);
+        ASSERT_TRUE(span->set_attribute("colspan", "2")); ASSERT_NE(block("A", nullptr, "td", row), nullptr);
+        row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+        DomElement* cells[] = {block("A", columns ? nullptr : "width:60%", "td", row),
+            block("A", nullptr, "td", row), block("A", columns ? nullptr : "width:20%", "td", row)};
+        for (DomElement* cell : cells) ASSERT_NE(cell, nullptr);
+        ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_NEAR(source_fragment(tree, table, VIEW_FRAGMENT_BODY, true)->rect.width, 220.0f, 0.01f);
+        const float widths[] = {132.0f, 44.0f, 44.0f}; expect_tracks(tree, cells, widths, rtl);
+        expect_table_cell_track(tree, span, 10.0f + (rtl ? 44.0f : 0.0f), 176.0f);
+        ASSERT_TRUE(source->DomNode::remove_child(table));
+    }
+    // overlapping spans preserve earlier logical-column constraints, regardless of row order.
+    for (bool reverse : {false, true}) for (bool rtl : {false, true}) {
+        SCOPED_TRACE(reverse);
+        SCOPED_TRACE(rtl);
+        table = block(nullptr, rtl ? "width:100%;border-spacing:0;direction:rtl" : "width:100%;border-spacing:0", "table");
+        ASSERT_NE(table, nullptr);
+        DomElement* spans[2] = {};
+        for (size_t i = 0; i < 2; i++) {
+            bool right = (i == 1) != reverse;
+            row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+            if (right) ASSERT_NE(block("A", nullptr, "td", row), nullptr);
+            DomElement* span = block("A", right ? "width:80%" : "width:40%", "td", row); ASSERT_NE(span, nullptr);
+            ASSERT_TRUE(span->set_attribute("colspan", "2")); spans[right ? 1 : 0] = span;
+            if (!right) ASSERT_NE(block("A", nullptr, "td", row), nullptr);
+        }
+        row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+        DomElement* cells[] = {block("A", nullptr, "td", row), block("A", nullptr, "td", row), block("A", nullptr, "td", row)};
+        for (DomElement* cell : cells) ASSERT_NE(cell, nullptr);
+        ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        const float widths[] = {44.0f, 44.0f, 132.0f}; expect_tracks(tree, cells, widths, rtl);
+        expect_table_cell_track(tree, spans[0], 10.0f + (rtl ? 132.0f : 0.0f), 88.0f);
+        expect_table_cell_track(tree, spans[1], 10.0f + (rtl ? 0.0f : 44.0f), 176.0f);
+        ASSERT_TRUE(source->DomNode::remove_child(table));
+    }
+
 }
 
 TEST_F(SecondaryViewTest, AutoTableIntrinsicWidthsRespectNoWrapAndRejectAnImpossibleGrid) {
+    init_vector_engine();
     stylesheet("@page { size: 80px 160px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
     DomElement* table = block(nullptr, "border-spacing: 0", "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
-    DomElement* first = block("AA AA AA AA AA AA", nullptr, "td", row); ASSERT_NE(first, nullptr);
-    ASSERT_NE(block("B", nullptr, "td", row), nullptr);
+    const char* content = "AA AA AA AA AA AA";
+    DomElement* first = block(content, "background: blue", "td", row); ASSERT_NE(first, nullptr);
+    DomElement* last = block("B", nullptr, "td", row); ASSERT_NE(last, nullptr);
+    ASSERT_NE(block("Tail", "break-before: page"), nullptr);
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ViewTree* tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
-    EXPECT_NEAR(state->first_occurrence->rect.width, 60.0f, 0.01f);
-    ASSERT_TRUE(first->set_attribute("style", "white-space: nowrap"));
-    tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
-    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
-    EXPECT_STREQ(diagnostic.reason, "table width exceeds its page region");
+    EXPECT_NEAR(source_fragment(tree, table, VIEW_FRAGMENT_BODY, true)->rect.width, 60.0f, 0.01f);
+    expect_source_range_coverage(tree, first->first_child);
+    ASSERT_TRUE(first->set_attribute("style", "white-space: nowrap; background: blue"));
+    ViewTree* wide = secondary(); ASSERT_EQ(layout_secondary_view(wide, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_TRUE(wide->model->committed); ASSERT_EQ(wide->model->page_count, 2u);
+    const ViewCssStyle* style = view_css_resolve(wide, first); ASSERT_NE(style, nullptr);
+    float first_width = font_measure_text(style->font.font_handle, content, strlen(content)).width + 2.0f;
+    float last_width = font_measure_text(style->font.font_handle, "B", 1).width + 2.0f;
+    // integration §4.1 keeps common-engine overflow; a wide grid does not invalidate an edition.
+    EXPECT_GT(first_width + last_width, 60.0f);
+    EXPECT_NEAR(source_fragment(wide, table, VIEW_FRAGMENT_BODY, true)->rect.width, first_width + last_width, 0.01f);
+    expect_table_cell_track(wide, first, 10.0f, first_width);
+    expect_table_cell_track(wide, last, 10.0f + first_width, last_width);
+    ASSERT_NE(source_glyph_text(wide, first->first_child, content), nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(wide, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(before, nullptr);
+    expect_snapshot_rgb(before, 50, 23, 0, 0, 255);
+    options.max_pages = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_same_page_pixels(retained, recovered, 1);
+    ASSERT_TRUE(first->set_attribute("style", "background: red"));
+    ViewTree* changed = secondary(); ASSERT_EQ(layout_secondary_view(changed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_NEAR(source_fragment(changed, table, VIEW_FRAGMENT_BODY, true)->rect.width, 60.0f, 0.01f);
+    expect_source_range_coverage(changed, first->first_child);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after);
+    expect_table_cell_track(retained, first, 10.0f, first_width);
+    image_surface_destroy(before); image_surface_destroy(after);
 }
 
 TEST_F(SecondaryViewTest, FixedTableWithAutoWidthUsesIntrinsicSizingAndForcedLineBreaks) {
@@ -3683,34 +4148,33 @@ TEST_F(SecondaryViewTest, AutomaticColumnSpansKeepSingleColumnConstraintsAndAcco
 }
 
 TEST_F(SecondaryViewTest, SpanningCellsUseActualTracksOnAlternatingPagesAndRetainTheirEdition) {
-    stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
-        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
+    stylesheet("@page { size:240px 100px; margin:10px } @page :left { size:200px 100px } "
+        "p { margin:0; font:10px/12px Arial } td { vertical-align:top; padding:0 }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
-    DomElement* row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
-    ASSERT_NE(block("A", "width: 25%", "td", row), nullptr);
-    ASSERT_NE(block("B", "width: 25%", "td", row), nullptr); ASSERT_NE(block("C", nullptr, "td", row), nullptr);
+    DomElement* row = block(nullptr, "height:60px", "tr", table); ASSERT_NE(row, nullptr);
+    ASSERT_NE(block("A", "width:25%", "td", row), nullptr); ASSERT_NE(block("B", "width:25%", "td", row), nullptr);
+    ASSERT_NE(block("C", nullptr, "td", row), nullptr);
     DomElement* spanning[2] = {};
     for (DomElement*& cell : spanning) {
-        row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
+        row = block(nullptr, "height:60px", "tr", table); ASSERT_NE(row, nullptr);
         cell = block("A", nullptr, "td", row); ASSERT_NE(cell, nullptr);
         ASSERT_TRUE(cell->set_attribute("colspan", "2")); ASSERT_NE(block("C", nullptr, "td", row), nullptr);
     }
-    ViewTree* retained = nullptr;
-    for (const char* layout : {"table-layout: fixed; width: 100%; border-spacing: 4px 2px",
-            "table-layout: auto; width: 100%; border-spacing: 4px 2px"}) {
+    ViewTree* retained[2] = {}; size_t mode = 0;
+    for (const char* layout : {"table-layout:fixed;width:100%;border-spacing:4px 2px", "table-layout:auto;width:100%;border-spacing:4px 2px"}) {
         SCOPED_TRACE(layout); ASSERT_TRUE(table->set_attribute("style", layout));
+        ASSERT_TRUE(spanning[0]->set_attribute("style", "background:blue"));
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        ASSERT_EQ(tree->model->page_count, 3u);
-        const float widths[] = {86.0f, 106.0f};
-        for (size_t i = 0; i < 2; i++) {
-            LayoutViewNode* cell = source_fragment(tree, spanning[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(cell, nullptr);
-            EXPECT_EQ(occurrence_page(cell), i + 2); EXPECT_FLOAT_EQ(cell->rect.width, widths[i]);
-            EXPECT_FLOAT_EQ(cell->rect.x, 14.0f);
-        }
-        if (!retained) retained = tree;
+        expect_table_papers(tree, 3, 100.0f);
+        float span_width = (220.0f - 4.0f * 4.0f) * 0.5f + 4.0f;
+        for (size_t i = 0; i < 2; i++) expect_table_cell_track(tree, spanning[i], 14.0f, span_width, 1, (uint32_t)i + 2, nullptr, 0.0f);
+        ViewTree* changed = nullptr;
+        table_edition_mutation(tree, spanning[0], "background:red", 2, 20, 60, &retained[mode], &changed);
+        ASSERT_NE(retained[mode], nullptr); ASSERT_NE(changed, nullptr);
+        expect_table_cell_track(changed, spanning[0], 14.0f, span_width, 1, 2, nullptr, 0.0f); mode++;
     }
-    EXPECT_FLOAT_EQ(source_fragment(retained, spanning[0], VIEW_FRAGMENT_BODY, true)->rect.width, 86.0f);
+    for (ViewTree* tree : retained) expect_table_cell_track(tree, spanning[0], 14.0f, 106.0f, 1, 2, nullptr, 0.0f);
 }
 
 TEST_F(SecondaryViewTest, AutomaticSpansApplyShorterConstraintsBeforeEarlierLongerSpans) {
@@ -3900,6 +4364,7 @@ TEST_F(SecondaryViewTest, OverlappingRowSpansAndSpanCoverageBudgetsRejectAtTheir
 }
 
 TEST_F(SecondaryViewTest, SpanningHeaderAndFooterCellsRepeatAndRemeasureOnAlternatingPages) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 120px; margin: 10px } @page :left { size: 200px 120px } "
         "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* header = nullptr; DomElement* footer = nullptr;
@@ -3909,27 +4374,39 @@ TEST_F(SecondaryViewTest, SpanningHeaderAndFooterCellsRepeatAndRemeasureOnAltern
         ASSERT_TRUE(group->first_child->as_element()->first_child->as_element()->set_attribute("style", "width: 50%"));
         ASSERT_NE(block("Second", nullptr, "td", block(nullptr, nullptr, "tr", group)), nullptr);
     }
+    ViewTree* retained[2] = {}; size_t mode = 0;
     for (const char* css : {"width: 100%; table-layout: fixed; border-spacing: 0",
             "width: 100%; table-layout: auto; border-spacing: 0"}) {
         SCOPED_TRACE(css); ASSERT_TRUE(table->set_attribute("style", css));
+        DomElement* head_cell = header->first_child->as_element()->first_child->as_element();
+        ASSERT_TRUE(head_cell->set_attribute("style", "width:50%;background:blue"));
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        ASSERT_EQ(tree->model->page_count, 2u);
+        expect_table_papers(tree, 2, 120.0f);
         for (DomElement* group : {header, footer}) {
             DomElement* cell = group->first_child->as_element()->first_child->as_element();
             ViewNodeState* state = view_tree_node_state(tree, cell, false); ASSERT_NE(state, nullptr);
             size_t page = 0;
             for (LayoutViewNode* box = state->first_occurrence; box; box = box->next_occurrence) if (box->paint_box) {
                 EXPECT_EQ(occurrence_page(box), ++page); EXPECT_FLOAT_EQ(box->rect.height, 24.0f);
-                EXPECT_FLOAT_EQ(box->rect.width, page == 1 ? 110.0f : 90.0f);
-                EXPECT_EQ(box->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+                EXPECT_FLOAT_EQ(box->rect.width, 110.0f);
+                uint32_t natural_page = group == header ? 1u : 2u;
+                ViewFragmentRole role = page == natural_page ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE;
+                EXPECT_EQ(box->role, role);
                 LayoutViewNode* lower = source_fragment(tree, group->last_child->as_element()->first_child,
-                    page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE, true);
+                    role, true);
                 ASSERT_NE(lower, nullptr); EXPECT_FLOAT_EQ(lower->rect.x, box->rect.x + box->rect.width);
             }
             EXPECT_EQ(page, 2u);
+            expect_table_cell_track(tree, cell, 10.0f, 110.0f, 2, 1, nullptr, 0.0f);
+            expect_source_range_coverage(tree, group->last_child->as_element()->first_child->as_element()->first_child, 2);
         }
+        ViewTree* changed = nullptr;
+        table_edition_mutation(tree, head_cell, "width:50%;background:red", 2, 15, 30, &retained[mode], &changed);
+        ASSERT_NE(retained[mode], nullptr); ASSERT_NE(changed, nullptr); mode++;
     }
+    DomElement* cell = header->first_child->as_element()->first_child->as_element();
+    for (ViewTree* tree : retained) expect_table_cell_track(tree, cell, 10.0f, 110.0f, 2, 1, nullptr, 0.0f);
 }
 
 TEST_F(SecondaryViewTest, SpanningCellsPreserveTheFirstRowBaseline) {
@@ -4226,22 +4703,27 @@ TEST_F(SecondaryViewTest, SpacedPercentageTableTracksRemeasureForAlternatingPage
     stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
         "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
+    DomElement* cells[3] = {};
     for (size_t i = 0; i < 3; i++) {
         DomElement* row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
-        DomElement* cell = block("A", "width: 25%", "td", row); ASSERT_NE(cell, nullptr);
+        cells[i] = block("A", "width:25%;background:blue", "td", row); ASSERT_NE(cells[i], nullptr);
         ASSERT_NE(block("B", nullptr, "td", row), nullptr);
     }
     for (const char* layout : {"table-layout: fixed; width: 100%; border-spacing: 4px 2px",
             "table-layout: auto; width: 100%; border-spacing: 4px 2px"}) {
         SCOPED_TRACE(layout); ASSERT_TRUE(table->set_attribute("style", layout));
+        ASSERT_TRUE(cells[1]->set_attribute("style", "width:25%;background:blue"));
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        ASSERT_EQ(tree->model->page_count, 3u);
-        const float widths[] = {52.0f, 42.0f, 52.0f}; size_t page = 0;
-        for (DomNode* row = table->first_child; row; row = row->next_sibling, page++) {
-            LayoutViewNode* cell = view_tree_node_state(tree, row->as_element()->first_child, false)->first_occurrence;
-            EXPECT_FLOAT_EQ(cell->rect.width, widths[page]); EXPECT_FLOAT_EQ(cell->rect.x, 14.0f);
-        }
+        expect_table_papers(tree, 3, 100.0f);
+        // keep authored cell identities: the common fixup inserts an anonymous tbody around these rows.
+        for (size_t i = 0; i < 3; i++)
+            expect_table_cell_track(tree, cells[i], 14.0f, (220.0f - 3.0f * 4.0f) * 0.25f, 1, (uint32_t)i + 1, nullptr, 0.0f);
+        ViewTree* retained = nullptr; ViewTree* changed = nullptr;
+        table_edition_mutation(tree, cells[1], "width:25%;background:red", 2, 20, 60, &retained, &changed);
+        ASSERT_NE(retained, nullptr); ASSERT_NE(changed, nullptr);
+        expect_table_cell_track(retained, cells[1], 14.0f, 52.0f, 1, 2, nullptr, 0.0f);
+        expect_table_cell_track(changed, cells[1], 14.0f, 52.0f, 1, 2, nullptr, 0.0f);
     }
 }
 
@@ -4537,6 +5019,11 @@ TEST(LayoutTableTracks, ProportionalDistributionRetainsBasesAndHandlesLargeWeigh
     float overfull[] = {100.0f, 60.0f}; extent = 120.0f;
     layout_table_distribute_fixed_columns(overfull, 2, &extent, 160.0f, 0, large_weights);
     EXPECT_FLOAT_EQ(extent, 160.0f); EXPECT_FLOAT_EQ(overfull[0], 100.0f); EXPECT_FLOAT_EQ(overfull[1], 60.0f);
+    // unspecified tracks share the remainder with unit weight beside authored proportional tracks.
+    float mixed[] = {20.0f, 0.0f, 0.0f, 0.0f}; const float mixed_weights[] = {0.0f, 2.0f, 2.0f, 0.0f}; extent = 200.0f;
+    layout_table_distribute_fixed_columns(mixed, 4, &extent, 20.0f, 3, mixed_weights);
+    EXPECT_FLOAT_EQ(mixed[0], 20.0f); EXPECT_FLOAT_EQ(mixed[1], 72.0f);
+    EXPECT_FLOAT_EQ(mixed[2], 72.0f); EXPECT_FLOAT_EQ(mixed[3], 36.0f);
 }
 
 TEST_F(SecondaryViewTest, ProportionalColumnsRepeatWeightsAndRemeasureAcrossPageWidths) {
@@ -4557,16 +5044,19 @@ TEST_F(SecondaryViewTest, ProportionalColumnsRepeatWeightsAndRemeasureAcrossPage
     }
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 3u);
+    expect_table_papers(tree, 3, 80.0f);
     for (size_t i = 0; i < 4; i++) {
         ViewNodeState* state = view_tree_node_state(tree, cells[i], false); ASSERT_NE(state, nullptr); size_t boxes = 0;
         for (LayoutViewNode* box = state->first_occurrence; box; box = box->next_occurrence) if (box->paint_box) {
-            uint32_t page = occurrence_page(box); boxes++; float unit = page == 2 ? 28.0f : 36.0f;
+            boxes++; float unit = (220.0f - 5.0f * 4.0f - 20.0f) / 5.0f;
             float width = !i ? 20.0f : i == 3 ? unit : unit * 2.0f;
             float x = !i ? 14.0f : 38.0f + (i - 1) * (unit * 2.0f + 4.0f);
             EXPECT_FLOAT_EQ(box->rect.width, width); EXPECT_FLOAT_EQ(box->rect.x, x);
             EXPECT_LE(box->rect.y + box->rect.height, 70.0f);
         }
         EXPECT_EQ(boxes, 3u);
+        const float widths[] = {20.0f,72.0f,72.0f,36.0f}, positions[] = {14.0f,38.0f,114.0f,190.0f};
+        expect_table_cell_track(tree, cells[i], positions[i], widths[i], 3, 1, cells[i]->first_child_element()->first_child);
     }
     DomText* text = cells[1]->first_child_element()->first_child->as_text(); ASSERT_NE(text, nullptr);
     ViewNodeState* state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr); size_t bytes = 0;
@@ -4574,8 +5064,26 @@ TEST_F(SecondaryViewTest, ProportionalColumnsRepeatWeightsAndRemeasureAcrossPage
     EXPECT_EQ(bytes, text->length); EXPECT_EQ(diagnostic.relaxed_line_minima, 0u);
     ViewPreviewOptions preview = view_preview_options_default(); ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
     ImageSurface* before = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(before, nullptr);
+    EXPECT_EQ(before->width, 200); EXPECT_EQ(before->height, 80);
+    expect_snapshot_rgb(before, 20, 30, 255, 0, 0); expect_snapshot_rgb(before, 60, 30, 0, 0, 255);
+    expect_snapshot_rgb(before, 120, 30, 0, 0, 255); expect_snapshot_rgb(before, 195, 30, 0, 128, 0);
     ASSERT_TRUE(view_tree_model_reset(tree)); options.max_nodes = 1;
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    tree = secondary(); options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_same_page_pixels(retained, tree, 2);
+    ASSERT_TRUE(repeated->set_attribute("r:column-proportion", "1"));
+    ASSERT_TRUE(repeated->set_attribute("style", "background:red"));
+    ViewTree* changed = secondary(); ASSERT_EQ(layout_secondary_view(changed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const float new_widths[] = {20.0f,60.0f,60.0f,60.0f}, old_widths[] = {20.0f,72.0f,72.0f,36.0f};
+    const float old_x[] = {14.0f,38.0f,114.0f,190.0f}, new_x[] = {14.0f,38.0f,102.0f,166.0f};
+    for (size_t i = 0; i < 4; i++) {
+        DomNode* content = cells[i]->first_child_element()->first_child;
+        expect_table_cell_track(changed, cells[i], new_x[i], new_widths[i], 3, 1, content);
+        expect_table_cell_track(retained, cells[i], old_x[i], old_widths[i], 3, 1, content);
+    }
+    ImageSurface* current = render_secondary_page_snapshot(changed, 2, 1.0f); ASSERT_NE(current, nullptr);
+    expect_snapshot_rgb(current, 60, 30, 255, 0, 0); image_surface_destroy(current);
     ImageSurface* after = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(after, nullptr);
     ASSERT_EQ(before->width, after->width); ASSERT_EQ(before->height, after->height);
     expect_same_surface_pixels(before, after);
@@ -4739,6 +5247,36 @@ TEST_F(SecondaryViewTest, FoProportionalColumnsLowerToCommonWeightedTracksAndRej
     EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_STREQ(translated->diagnostic.property, "column-width");
 }
 
+static LayoutViewNode* sole_source_occurrence(ViewTree* tree, DomNode* source) {
+    const ViewNodeState* state = view_tree_node_state(tree, source, false);
+    EXPECT_NE(state, nullptr);
+    if (!state) return nullptr;
+    EXPECT_EQ(state->occurrence_count, 1u);
+    return state->occurrence_count == 1 ? state->first_occurrence.get() : nullptr;
+}
+
+static void expect_no_source_occurrences(ViewTree* tree, DomNode* source) {
+    const ViewNodeState* state = view_tree_node_state(tree, source, false);
+    EXPECT_TRUE(!state || state->occurrence_count == 0);
+}
+
+static void expect_table_uncovered_columns(const LayoutViewNode* row, size_t columns, size_t expected) {
+    // the shared view tree keeps real cells; grid holes are absent tracks, not synthetic DOM boxes (§3.4).
+    lam::ArrayList<bool> covered;
+    for (size_t column = 0; column < columns; column++) ASSERT_TRUE(covered.append(false));
+    for (const LayoutViewNode* box = row->first_child; box; box = box->next_sibling) {
+        const ViewTableRange* range = box->table_range;
+        if (!range || range->missing) continue;
+        ASSERT_LT(range->column, columns); ASSERT_LE(range->span, columns - range->column);
+        for (size_t column = range->column; column < range->column + range->span; column++) {
+            EXPECT_FALSE(covered[column]); covered[column] = true;
+        }
+    }
+    size_t missing = 0;
+    for (size_t column = 0; column < columns; column++) if (!covered[column]) missing++;
+    EXPECT_EQ(missing, expected);
+}
+
 TEST_F(SecondaryViewTest, NumberedColumnsAndCellsPreserveSourceOrderAroundSpansAndMissingSlots) {
     stylesheet("@page{size:240px 100px;margin:10px}p,div{margin:0;font:10px/12px Arial}td{padding:0;vertical-align:top}");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
@@ -4770,13 +5308,12 @@ TEST_F(SecondaryViewTest, NumberedColumnsAndCellsPreserveSourceOrderAroundSpansA
             {wide, 70.0f, 160.0f, 2, 2}, {tall, 10.0f, 20.0f, 0, 1}, {implicit, 30.0f, 40.0f, 1, 1},
             {right, 130.0f, 100.0f, 3, 1}, {middle, 30.0f, 100.0f, 1, 2}, {single, 70.0f, 60.0f, 2, 1}, {group, 10.0f, 120.0f, 0, 3}};
         for (const auto& e : expected) {
-            LayoutViewNode* box = source_fragment(tree, e.source, VIEW_FRAGMENT_BODY, e.source != group); ASSERT_NE(box, nullptr);
+            LayoutViewNode* box = sole_source_occurrence(tree, e.source); ASSERT_NE(box, nullptr);
             EXPECT_FLOAT_EQ(box->rect.x, e.x); EXPECT_FLOAT_EQ(box->rect.width, e.width);
             ASSERT_NE(box->table_range, nullptr); EXPECT_EQ(box->table_range->column, e.column); EXPECT_EQ(box->table_range->span, e.span);
         }
-        LayoutViewNode* row = source_fragment(tree, third, VIEW_FRAGMENT_BODY, true); ASSERT_NE(row, nullptr); size_t missing = 0;
-        for (LayoutViewNode* box = row->first_child; box; box = box->next_sibling) if (box->table_range && box->table_range->missing) missing++;
-        EXPECT_EQ(missing, 3u); EXPECT_EQ(first->first_child_element(), wide); EXPECT_EQ(wide->next_sibling_element(), tall);
+        LayoutViewNode* row = source_fragment(tree, third, VIEW_FRAGMENT_BODY, true); ASSERT_NE(row, nullptr);
+        expect_table_uncovered_columns(row, 4u, 3u); EXPECT_EQ(first->first_child_element(), wide); EXPECT_EQ(wide->next_sibling_element(), tall);
         StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(tree->model->root, text);
         EXPECT_STREQ(text->str, "WideTallNextRightMiddleSingle"); strbuf_free(text);
     }
@@ -4803,7 +5340,10 @@ TEST_F(SecondaryViewTest, NumberedRepeatedColumnsKeepWeightsAndRetainedContinuat
     for (DomElement* cell : {long_cell, left, next, right}) {
         ViewNodeState* state = view_tree_node_state(tree, cell, false); ASSERT_NE(state, nullptr); size_t count = 0;
         for (LayoutViewNode* box = state->first_occurrence; box; box = box->next_occurrence) if (box->paint_box) {
-            float unit = occurrence_page(box) == 2 ? 60.0f : 80.0f; count++;
+            // one measured run keeps its tracks while the physical page width alternates (plan §4.2).
+            float unit = 80.0f; count++;
+            const ViewPageBox* page = tree->model->pages.get()[occurrence_page(box) - 1];
+            EXPECT_FLOAT_EQ(page->style->content_rect.width, occurrence_page(box) == 2 ? 180.0f : 220.0f);
             EXPECT_FLOAT_EQ(box->rect.width, cell == left ? 20.0f : cell == next ? 40.0f : unit);
             EXPECT_FLOAT_EQ(box->rect.x, cell == left ? 10.0f : cell == next ? 30.0f : cell == long_cell ? 70.0f : 70.0f + unit);
         }
@@ -4816,6 +5356,11 @@ TEST_F(SecondaryViewTest, NumberedRepeatedColumnsKeepWeightsAndRetainedContinuat
     EXPECT_EQ(bytes, text->length); EXPECT_EQ(diagnostic.relaxed_line_minima, 0u);
     ViewPreviewOptions preview = view_preview_options_default(); ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
     ImageSurface* before = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(before, nullptr);
+    EXPECT_EQ(before->width, 200); EXPECT_EQ(before->height, 80);
+    EXPECT_EQ(snapshot_pixel(before, 15, 65), 0xff0000ffu);
+    EXPECT_EQ(snapshot_pixel(before, 35, 65), 0xff008000u);
+    EXPECT_EQ(snapshot_pixel(before, 140, 65), 0xffff0000u);
+    EXPECT_EQ(snapshot_pixel(before, 190, 65), 0xffff0000u);
     ASSERT_TRUE(view_tree_model_reset(tree)); options.max_nodes = 3;
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); ImageSurface* after = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(after, nullptr);
@@ -4859,7 +5404,18 @@ TEST_F(SecondaryViewTest, NumberedTablePositionsRejectInvalidValuesOverlapsAndEx
     ASSERT_TRUE(collision->set_attribute("r:column-number", "2")); ASSERT_TRUE(view_tree_model_reset(tree));
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(diagnostic.source.address, collision);
     EXPECT_STREQ(diagnostic.reason, "overlapping table spans require a valid rectangular grid"); EXPECT_EQ(tree->model->page_count, 0u);
-
+    ASSERT_TRUE(collision->set_attribute("r:column-number", "1")); options.max_nodes = 1024;
+    for (const char* number : {"1025", "2147483647"}) {
+        SCOPED_TRACE(number); ASSERT_TRUE(col->set_attribute("r:column-number", number)); ASSERT_TRUE(view_tree_model_reset(tree));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+        EXPECT_EQ(diagnostic.source.address, col); EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+        EXPECT_STREQ(diagnostic.reason, "table column count exceeds the node budget");
+    }
+    ASSERT_TRUE(col->set_attribute("r:column-number", "auto")); ASSERT_TRUE(view_tree_model_reset(tree));
+    options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_FLOAT_EQ(source_fragment(tree, cell, VIEW_FRAGMENT_BODY, true)->rect.x, 120.0f);
+    EXPECT_FLOAT_EQ(source_fragment(tree, collision, VIEW_FRAGMENT_BODY, true)->rect.x, 10.0f);
 }
 
 TEST_F(SecondaryViewTest, NumberedSparseColumnsLeaveAutomaticTracksAndImplicitDeclarationsAtTheirSourceEndpoint) {
@@ -4879,11 +5435,11 @@ TEST_F(SecondaryViewTest, NumberedSparseColumnsLeaveAutomaticTracksAndImplicitDe
     EXPECT_FLOAT_EQ(source_fragment(tree, span, VIEW_FRAGMENT_BODY, true)->rect.width, 90.0f);
     EXPECT_FLOAT_EQ(source_fragment(tree, next, VIEW_FRAGMENT_BODY, true)->rect.x, 190.0f);
     EXPECT_FLOAT_EQ(source_fragment(tree, next, VIEW_FRAGMENT_BODY, true)->rect.width, 20.0f);
-    LayoutViewNode* column = source_fragment(tree, sixth, VIEW_FRAGMENT_BODY, false); ASSERT_NE(column, nullptr);
-    EXPECT_FLOAT_EQ(column->rect.x, 210.0f);
-    LayoutViewNode* fragment = source_fragment(tree, row, VIEW_FRAGMENT_BODY, true); ASSERT_NE(fragment, nullptr); size_t missing = 0;
-    for (LayoutViewNode* box = fragment->first_child; box; box = box->next_sibling) if (box->table_range && box->table_range->missing) missing++;
-    EXPECT_EQ(missing, 3u);
+    LayoutViewNode* column = sole_source_occurrence(tree, sixth); ASSERT_NE(column, nullptr);
+    EXPECT_FLOAT_EQ(column->rect.x, 210.0f); ASSERT_NE(column->table_range, nullptr);
+    EXPECT_EQ(column->table_range->column, 5u); EXPECT_EQ(column->table_range->span, 1u);
+    LayoutViewNode* fragment = source_fragment(tree, row, VIEW_FRAGMENT_BODY, true); ASSERT_NE(fragment, nullptr);
+    expect_table_uncovered_columns(fragment, 6u, 3u);
 
 }
 
@@ -5084,9 +5640,9 @@ TEST_F(SecondaryViewTest, TableGroupForcedBreaksRepeatFurnitureAndDoNotCreateTra
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
         ASSERT_EQ(tree->model->page_count, 3u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
-        ViewNodeState* whitespace = view_tree_node_state(tree, trailing, false); ASSERT_NE(whitespace, nullptr);
-        ASSERT_NE(whitespace->first_occurrence, nullptr); EXPECT_EQ(occurrence_page(whitespace->first_occurrence), 3u);
-        EXPECT_EQ(whitespace->first_occurrence->text_length, 4u); EXPECT_FLOAT_EQ(whitespace->first_occurrence->rect.height, 0.0f);
+        // collapsed source whitespace generates no TextRect in the shared publisher (§3.4/4.5).
+        expect_no_source_occurrences(tree, trailing); EXPECT_EQ(trailing->view_type, RDT_VIEW_NONE);
+        EXPECT_STREQ(trailing->text, "\n  \t");
         size_t page = 0;
         for (DomElement* group : {first, second, third}) {
             page++;
@@ -5106,18 +5662,35 @@ TEST_F(SecondaryViewTest, TableGroupForcedBreaksRepeatFurnitureAndDoNotCreateTra
 TEST_F(SecondaryViewTest, AdjoiningTableGroupBreaksResolveSidednessBeforeInsertingBlankPages) {
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
     DomElement* header = nullptr; DomElement* table = fixed_table(1, &header); ASSERT_NE(table, nullptr);
-    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: left"));
+    DomElement* previous = table->last_child->as_element();
     DomElement* second = block(nullptr, "break-before: right", "tbody", table); ASSERT_TRUE(table_rows(second, 1));
-    for (bool row_override : {false, true}) {
-        ASSERT_TRUE(second->first_child->as_element()->set_attribute("style", row_override ? "break-before: left" : ""));
+    const struct Case { const char* previous_group; const char* previous_row; const char* next_group; const char* next_row; uint32_t pages; } cases[] = {
+        {"break-after:left", "", "break-before:right", "", 3},
+        {"break-after:left", "", "break-before:right", "break-before:left", 2},
+        {"break-after:right", "", "break-before:left", "", 2},
+        {"break-after:right", "break-after:left", "", "", 2},
+        {"break-after:left", "break-after:right", "", "", 3},
+        {"break-after:right", "", "break-before:page", "", 3},
+        {"break-after:page", "", "break-before:column", "", 2},
+        {"break-after:column", "", "break-before:page", "", 2},
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.previous_group);
+        SCOPED_TRACE(item.previous_row);
+        SCOPED_TRACE(item.next_group);
+        SCOPED_TRACE(item.next_row);
+        ASSERT_TRUE(previous->set_attribute("style", item.previous_group));
+        ASSERT_TRUE(previous->first_child->as_element()->set_attribute("style", item.previous_row));
+        ASSERT_TRUE(second->set_attribute("style", item.next_group));
+        ASSERT_TRUE(second->first_child->as_element()->set_attribute("style", item.next_row));
         ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
         ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        EXPECT_EQ(tree->model->page_count, row_override ? 2u : 3u);
+        EXPECT_EQ(tree->model->page_count, item.pages);
         ViewNodeState* state = view_tree_node_state(tree, second->first_child, false); ASSERT_NE(state, nullptr);
-        EXPECT_EQ(occurrence_page(state->first_occurrence), row_override ? 2u : 3u);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), item.pages);
         state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
         EXPECT_EQ(state->occurrence_count, 2u);
-        if (!row_override && tree->model->page_count == 3u) EXPECT_TRUE(tree->model->pages.get()[1]->blank);
+        if (item.pages == 3 && tree->model->page_count == 3u) EXPECT_TRUE(tree->model->pages.get()[1]->blank);
     }
 }
 
@@ -5159,14 +5732,32 @@ TEST_F(SecondaryViewTest, ForcedRowBreaksOverrideTableGroupAvoidanceWithoutRelax
         "td { padding: 2px; border: 1px solid black; vertical-align: top }");
     DomElement* table = fixed_table(4); ASSERT_NE(table, nullptr);
     DomElement* body = table->last_child->as_element(); ASSERT_TRUE(body->set_attribute("style", "break-inside: avoid"));
-    ASSERT_TRUE(body->first_child->next_sibling->as_element()->set_attribute("style", "break-before: page"));
-    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    EXPECT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
-    size_t index = 0;
-    for (DomNode* row = body->first_child; row; row = row->next_sibling) {
-        ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
-        EXPECT_EQ(occurrence_page(state->first_occurrence), index++ ? 2u : 1u);
+    DomElement* first = body->first_child->as_element();
+    DomElement* second = first->next_sibling->as_element();
+    auto expect_rows = [&](ViewTree* edition, bool split) {
+        EXPECT_EQ(edition->model->page_count, split ? 2u : 1u);
+        size_t index = 0;
+        for (DomNode* row = body->first_child; row; row = row->next_sibling) {
+            ViewNodeState* state = view_tree_node_state(edition, row, false); ASSERT_NE(state, nullptr);
+            EXPECT_EQ(state->occurrence_count, 1u);
+            EXPECT_EQ(occurrence_page(state->first_occurrence), split && index++ ? 2u : 1u);
+        }
+    };
+    for (bool after : {false, true}) {
+        ASSERT_TRUE(first->set_attribute("style", after ? "break-after: page" : ""));
+        ASSERT_TRUE(second->set_attribute("style", after ? "" : "break-before: page"));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        expect_rows(tree, true); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ViewPreviewOptions preview = view_preview_options_default();
+        ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+        // removing the break recomposes the workspace while the old edition keeps its row assignments.
+        ASSERT_TRUE(first->set_attribute("style", "")); ASSERT_TRUE(second->set_attribute("style", ""));
+        ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        expect_rows(tree, false); expect_rows(retained, true);
+        EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
     }
 }
 
@@ -5228,18 +5819,44 @@ TEST_F(SecondaryViewTest, TableGroupEdgeKeepsReachAdjoiningOuterBlocks) {
 
 TEST_F(SecondaryViewTest, GroupBreakAfterAndFollowingBlockBeforeShareOneSidedBoundary) {
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
-    DomElement* header = nullptr; DomElement* table = fixed_table(1, &header); ASSERT_NE(table, nullptr);
-    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: left"));
-    DomElement* tail = block("Tail", "break-before: right"); ASSERT_NE(tail, nullptr);
-    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_TRUE(tree->model->pages.get()[1]->blank);
-    ViewNodeState* table_state = view_tree_node_state(tree, table, false); ASSERT_NE(table_state, nullptr);
-    EXPECT_EQ(table_state->occurrence_count, 2u); // wrapper and painted grid
-    ViewNodeState* state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
-    EXPECT_EQ(state->occurrence_count, 1u);
-    state = view_tree_node_state(tree, tail, false); ASSERT_NE(state, nullptr);
-    EXPECT_EQ(occurrence_page(state->first_occurrence), 3u);
+    const struct Case { const char* after; const char* before; uint32_t pages; } cases[] = {
+        {"break-after:left", "break-before:right", 3},
+        {"break-after:right", "break-before:left", 2},
+        {"break-after:recto", "break-before:verso", 2},
+        {"break-after:verso", "break-before:recto", 3},
+        {"break-after:right", "break-before:page", 3},
+    };
+    for (bool table_context : {true, false}) for (const Case& item : cases) {
+        SCOPED_TRACE(table_context);
+        SCOPED_TRACE(item.after);
+        SCOPED_TRACE(item.before);
+        DomElement* header = nullptr;
+        DomElement* leading = table_context ? fixed_table(1, &header) : block("Leading"); ASSERT_NE(leading, nullptr);
+        DomElement* after = table_context ? leading->last_child->as_element() : leading;
+        ASSERT_TRUE(after->set_attribute("style", item.after));
+        DomElement* tail = block("Tail", item.before); ASSERT_NE(tail, nullptr);
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, item.pages);
+        if (item.pages == 3) EXPECT_TRUE(tree->model->pages.get()[1]->blank);
+        ViewNodeState* state = view_tree_node_state(tree, leading, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, table_context ? 2u : 1u); // the table has a wrapper and painted grid
+        if (header) {
+            state = view_tree_node_state(tree, header->first_child, false); ASSERT_NE(state, nullptr);
+            EXPECT_EQ(state->occurrence_count, 1u);
+        }
+        state = view_tree_node_state(tree, tail, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), item.pages);
+        for (uint32_t limit = 1; limit < item.pages; limit++) {
+            ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
+            PagedLayoutOptions limited = options; limited.max_pages = limit;
+            EXPECT_EQ(layout_secondary_view(tree, &limited, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+            EXPECT_EQ(diagnostic.status, TYPESET_BUDGET_EXHAUSTED);
+            EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+        }
+        ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+        ASSERT_TRUE(source->DomNode::remove_child(leading)); ASSERT_TRUE(source->DomNode::remove_child(tail));
+    }
 }
 
 TEST_F(SecondaryViewTest, AdjoiningTablesResolveFirstGroupSidednessAndCloseBeforeAdvancing) {
@@ -5247,33 +5864,107 @@ TEST_F(SecondaryViewTest, AdjoiningTablesResolveFirstGroupSidednessAndCloseBefor
     DomElement* first = fixed_table(1); DomElement* second = fixed_table(1);
     ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
     ASSERT_TRUE(first->last_child->as_element()->set_attribute("style", "break-after: right"));
-    ASSERT_TRUE(second->last_child->as_element()->set_attribute("style", "break-before: left"));
-    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 2u);
-    for (DomElement* table : {first, second}) {
-        ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
-        EXPECT_EQ(state->occurrence_count, 1u);
-        EXPECT_EQ(occurrence_page(state->first_occurrence), table == first ? 1u : 2u);
+    for (const char* before : {"break-before:left", "--edge:left;page-break-before:var(--edge)", "--edge:left;break-before:var(--edge)"}) {
+        SCOPED_TRACE(before);
+        ASSERT_TRUE(second->last_child->as_element()->set_attribute("style", before));
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u);
+        for (DomElement* table : {first, second}) {
+            ViewNodeState* state = view_tree_node_state(tree, table, false); ASSERT_NE(state, nullptr);
+            // the transparent wrapper and its painted grid share this source (integration plan §3.4).
+            EXPECT_EQ(state->occurrence_count, 2u);
+            size_t grids = 0;
+            for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+                EXPECT_EQ(occurrence_page(node), table == first ? 1u : 2u);
+                EXPECT_EQ(node->role, VIEW_FRAGMENT_BODY);
+                if (node->paint_box) { grids++; EXPECT_EQ(node->parent, state->first_occurrence); }
+            }
+            EXPECT_EQ(grids, 1u);
+            ASSERT_NE(table->blk, nullptr);
+            EXPECT_EQ(table->block()->break_before, CSS_VALUE_AUTO);
+            EXPECT_EQ(table->block()->break_after, CSS_VALUE_AUTO);
+        }
     }
 }
 
 TEST_F(SecondaryViewTest, TerminalTableGroupBreakDistinguishesCollapsedAndPreservedWhitespace) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
     DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
-    ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", "break-after: page"));
+    ASSERT_TRUE(table->set_attribute("style", "table-layout:fixed;width:100%;border-spacing:0;background:blue"));
     DomText* trailing = DomText::create_copy("\n", 1, source); ASSERT_NE(trailing, nullptr);
     ASSERT_TRUE(source->DomNode::append_child(trailing));
-    for (bool preserve : {false, true}) {
-        ASSERT_TRUE(source->set_attribute("style", preserve ? "white-space: pre-wrap" : "white-space: normal"));
-        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        EXPECT_EQ(tree->model->page_count, preserve ? 2u : 1u);
-        ViewNodeState* state = view_tree_node_state(tree, trailing, false); ASSERT_NE(state, nullptr);
-        ASSERT_NE(state->first_occurrence, nullptr); EXPECT_EQ(occurrence_page(state->first_occurrence), preserve ? 2u : 1u);
-        EXPECT_FLOAT_EQ(state->first_occurrence->rect.height, preserve ? 12.0f : 0.0f);
-        EXPECT_EQ(state->first_occurrence->text_length, 1u);
+    ViewTree* tree = secondary(); ViewTree* retained = nullptr; ImageSurface* expected = nullptr;
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool columns : {false, true}) {
+        SCOPED_TRACE(columns);
+        if (columns) {
+            DomElement* master = page_master("columns", "size:240px 140px;margin:10px"); ASSERT_NE(master, nullptr);
+            ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+            DomElement* sequence = page_sequence("columns"); ASSERT_NE(sequence, nullptr);
+            ASSERT_TRUE(source->DomNode::remove_child(table)); ASSERT_TRUE(sequence->DomNode::append_child(table));
+            ASSERT_TRUE(source->DomNode::remove_child(trailing)); ASSERT_TRUE(sequence->DomNode::append_child(trailing));
+        }
+        const char* breaks[] = {"page", "left", "right", "column"};
+        for (const char* content : {"\n", "after"}) {
+            SCOPED_TRACE(content);
+            if (strcmp(trailing->text, content)) {
+                DomElement* parent = trailing->parent->as_element(); ASSERT_NE(parent, nullptr);
+                ASSERT_TRUE(parent->DomNode::remove_child(trailing));
+                trailing = DomText::create_copy(content, strlen(content), parent); ASSERT_NE(trailing, nullptr);
+                ASSERT_TRUE(parent->DomNode::append_child(trailing));
+            }
+            for (const char* boundary : breaks) for (bool preserve : {false, true}) {
+                SCOPED_TRACE(boundary);
+                SCOPED_TRACE(preserve);
+                char css[64]; snprintf(css, sizeof(css), "break-after:%s", boundary);
+                ASSERT_TRUE(table->last_child->as_element()->set_attribute("style", css));
+                ASSERT_TRUE(source->set_attribute("style", preserve ? "white-space:pre-wrap" : "white-space:normal"));
+                ASSERT_TRUE(view_tree_model_reset(tree));
+                ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+                bool materialized = preserve || strcmp(content, "\n");
+                uint32_t pages = !materialized || (columns && !strcmp(boundary, "column")) ? 1u : !strcmp(boundary, "right") ? 3u : 2u;
+                EXPECT_EQ(get_white_space_value(trailing), preserve ? CSS_VALUE_PRE_WRAP : CSS_VALUE_NORMAL);
+                ASSERT_NE(source->blk, nullptr);
+                EXPECT_EQ(source->block()->white_space, preserve ? CSS_VALUE_PRE_WRAP : CSS_VALUE_NORMAL);
+                EXPECT_EQ(tree->model->page_count, pages);
+                if (!materialized) {
+                    expect_no_source_occurrences(tree, trailing); EXPECT_EQ(trailing->view_type, RDT_VIEW_NONE);
+                } else {
+                    LayoutViewNode* point = sole_source_occurrence(tree, trailing); ASSERT_NE(point, nullptr);
+                    EXPECT_EQ(occurrence_page(point), pages); EXPECT_EQ(point->text_start, 0u); EXPECT_EQ(point->text_length, strlen(content));
+                    if (!strcmp(content, "\n")) {
+                        EXPECT_EQ(point->glyph_run, nullptr); EXPECT_FLOAT_EQ(point->rect.width, 0.0f);
+                    } else {
+                        ASSERT_NE(point->glyph_run, nullptr); EXPECT_STREQ(point->glyph_run->text, content); EXPECT_GT(point->rect.width, 0.0f);
+                    }
+                    EXPECT_FLOAT_EQ(point->rect.x, columns && !strcmp(boundary, "column") ? 130.0f : 10.0f);
+                    ASSERT_NE(trailing->font, nullptr); FontHandle* font = trailing->font->font_handle;
+                    float ascent = 0.0f, descent = 0.0f; font_get_content_area_split(font, &ascent, &descent);
+                    EXPECT_FLOAT_EQ(point->rect.height, font_get_cell_height(font));
+                    EXPECT_NEAR(point->rect.y, 10.0f + ascent + floorf((12.0f - ascent - descent) * 0.5f) - font_get_rendering_ascender(font), 0.001f);
+                    if (!retained) {
+                        expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+                        EXPECT_EQ(snapshot_pixel(expected, 100, 15), 0xffffe0ccu);
+                        ViewPreviewOptions preview = view_preview_options_default();
+                        retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+                    }
+                    if (pages > 1) {
+                        ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = pages - 1;
+                        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+                        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+                        options = paged_layout_options_default();
+                    }
+                }
+                EXPECT_STREQ(trailing->text, content);
+            }
+        }
     }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels);
+    image_surface_destroy(expected); image_surface_destroy(pixels); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
 }
 
 TEST_F(SecondaryViewTest, TerminalTableGroupBreakRetainsFollowingZeroHeightInsertionAnchors) {
@@ -5344,9 +6035,39 @@ TEST_F(SecondaryViewTest, TableCellMiddleAndBottomAlignContentWithoutMovingCellB
     }
 }
 
+// per-TextRect publication places text directly in its cell; only synthetic copies have repeated roles.
+static void expect_table_group_text_alignment(ViewTree* tree, DomElement* group,
+        const float* line_offsets, size_t columns, bool repeats) {
+    DomElement* row = group->first_child->as_element(); ASSERT_NE(row, nullptr);
+    uint32_t natural_page = group->tag() == MARKUP_NAME_TFOOT ? tree->model->page_count : 1u;
+    size_t column = 0;
+    for (DomNode* cell = row->first_child; cell; cell = cell->next_sibling, column++) {
+        ASSERT_LT(column, columns);
+        DomNode* source_text = cell->as_element()->first_child; ASSERT_TRUE(source_text && source_text->is_text());
+        const ViewNodeState* state = view_tree_node_state(tree, source_text, false); ASSERT_NE(state, nullptr);
+        for (uint32_t page = 1; page <= tree->model->page_count; page++) {
+            size_t copies = 0;
+            for (const LayoutViewNode* text = state->first_occurrence; text; text = text->next_occurrence) {
+                if (occurrence_page(text) != page) continue;
+                copies++;
+                EXPECT_EQ(text->text_start, 0u); EXPECT_EQ(text->text_length, source_text->as_text()->length);
+                ASSERT_NE(text->glyph_run, nullptr);
+                EXPECT_EQ((size_t)text->glyph_run->text_len, source_text->as_text()->length);
+                EXPECT_EQ(memcmp(text->glyph_run->text, source_text->text_data(), source_text->as_text()->length), 0);
+                EXPECT_EQ(text->role, page == natural_page ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+                const LayoutViewNode* box = text->parent; ASSERT_NE(box, nullptr);
+                EXPECT_EQ(box->source.address, cell); EXPECT_TRUE(box->paint_box); EXPECT_FLOAT_EQ(box->rect.height, 42.0f);
+                expect_glyph_line_position(text, box->rect.y + line_offsets[column], 12.0f);
+            }
+            EXPECT_EQ(copies, repeats || page == natural_page ? 1u : 0u);
+        }
+    }
+    EXPECT_EQ(column, columns);
+}
+
 TEST_F(SecondaryViewTest, RepeatedTableFurniturePreservesMiddleAndBottomCellAlignment) {
-    stylesheet("@page { size: 240px 160px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
-        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    init_vector_engine();
+    table_alignment_stylesheet(160.0f);
     DomElement* header = nullptr; DomElement* footer = nullptr;
     DomElement* table = fixed_table(4, &header, &footer); ASSERT_NE(table, nullptr);
     for (DomElement* group : {header, footer}) {
@@ -5357,22 +6078,27 @@ TEST_F(SecondaryViewTest, RepeatedTableFurniturePreservesMiddleAndBottomCellAlig
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(tree->model->page_count, 2u);
-    for (DomElement* group : {header, footer}) {
-        DomElement* row = group->first_child->as_element();
-        for (DomNode* cell = row->first_child; cell; cell = cell->next_sibling) {
-            ViewNodeState* state = view_tree_node_state(tree, cell->as_element()->first_child, false); ASSERT_NE(state, nullptr);
-            size_t bytes[2] = {};
-            for (LayoutViewNode* text = state->first_occurrence; text; text = text->next_occurrence) {
-                uint32_t page = occurrence_page(text); ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
-                EXPECT_EQ(text->text_start, bytes[page - 1]); bytes[page - 1] += text->text_length;
-                EXPECT_EQ(text->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
-                LayoutViewNode* box = text->parent->parent; EXPECT_EQ(box->source.address, cell);
-                EXPECT_FLOAT_EQ(box->rect.height, 42.0f);
-                EXPECT_FLOAT_EQ(text->rect.y - box->rect.y, cell == row->first_child ? 15.0f : 27.0f);
-            }
-            EXPECT_EQ(bytes[0], cell->as_element()->first_child->as_text()->length); EXPECT_EQ(bytes[1], bytes[0]);
-        }
-    }
+    const float line_offsets[] = {15.0f, 27.0f};
+    // the original42px groups exceed140/4, so each appears only in its natural position.
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(tree, group, line_offsets, 2, false);
+    table_alignment_stylesheet(200.0f);
+    ASSERT_TRUE(table_rows(table->last_child->as_element(), 5)); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(tree, group, line_offsets, 2, true);
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 1); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 200, 15), 0xffffe0ccu);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    options = paged_layout_options_default(); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(tree, group, line_offsets, 2, true);
+    expect_same_page_pixels(tree, retained, 1); expect_same_page_pixels(tree, retained, 2);
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
 }
 
 TEST_F(SecondaryViewTest, SplitTableCellsAlignEachSliceAndRetainIndependentSourceCursors) {
@@ -5548,8 +6274,8 @@ TEST_F(SecondaryViewTest, TableCellMarginsDoNotDisplaceAlignedCellsOrFollowingRo
 }
 
 TEST_F(SecondaryViewTest, RepeatedTableFurnitureRetainsItsSharedRowBaseline) {
-    stylesheet("@page { size: 240px 160px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
-        "td { padding: 2px; border: 1px solid black; vertical-align: top }");
+    init_vector_engine();
+    table_alignment_stylesheet(160.0f);
     DomElement* header = nullptr; DomElement* footer = nullptr;
     DomElement* table = fixed_table(7, &header, &footer); ASSERT_NE(table, nullptr);
     for (DomElement* group : {header, footer}) {
@@ -5560,20 +6286,28 @@ TEST_F(SecondaryViewTest, RepeatedTableFurnitureRetainsItsSharedRowBaseline) {
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_GT(tree->model->page_count, 1u);
-    for (DomElement* group : {header, footer}) {
-        DomElement* row = group->first_child->as_element(); float baselines[16] = {};
-        ASSERT_LE(tree->model->page_count, 16u);
-        for (DomNode* cell = row->first_child; cell; cell = cell->next_sibling) {
-            ViewNodeState* state = view_tree_node_state(tree, cell->as_element()->first_child, false); ASSERT_NE(state, nullptr);
-            for (LayoutViewNode* text = state->first_occurrence; text; text = text->next_occurrence) if (text->glyph_run) {
-                uint32_t page = occurrence_page(text); ASSERT_GE(page, 1u); ASSERT_LE(page, tree->model->page_count);
-                if (cell == row->first_child) baselines[page - 1] = text->glyph_run->baseline_y;
-                else EXPECT_FLOAT_EQ(text->glyph_run->baseline_y, baselines[page - 1]);
-                EXPECT_EQ(text->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
-                EXPECT_FLOAT_EQ(text->parent->parent->rect.height, 42.0f);
-            }
-        }
-    }
+    const float line_offsets[] = {15.0f, 15.0f};
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(tree, group, line_offsets, 2, false);
+    table_alignment_stylesheet(200.0f);
+    ASSERT_TRUE(table_rows(table->last_child->as_element(), 2)); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(tree, group, line_offsets, 2, true);
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    // changing one source cell cannot change the old edition's shared baseline or paint payload.
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 200, 15), 0xffffe0ccu);
+    ASSERT_TRUE(header->first_child->as_element()->first_child->as_element()->set_attribute("style", "vertical-align: top"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    DomElement* changed = header->first_child->as_element()->first_child->as_element();
+    LayoutViewNode* changed_box = source_fragment(tree, changed, VIEW_FRAGMENT_BODY, true); ASSERT_NE(changed_box, nullptr);
+    EXPECT_FLOAT_EQ(changed_box->rect.height, 30.0f);
+    expect_glyph_line_position(source_glyph_text(tree, changed->first_child, "Head A"), changed_box->rect.y + 3.0f, 12.0f);
+    for (DomElement* group : {header, footer}) expect_table_group_text_alignment(retained, group, line_offsets, 2, true);
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 2); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
 }
 
 TEST_F(SecondaryViewTest, TableBaselineUsesTheLineStrutRatherThanTheFirstSuperscriptGlyph) {
@@ -5637,6 +6371,7 @@ TEST_F(SecondaryViewTest, SplitTableBaselinesReserveSpaceBeforeConsumingIndepend
 }
 
 TEST_F(SecondaryViewTest, BaselineCellGeometrySurvivesFailedRecompositionAndChangedPageWidths) {
+    init_vector_engine();
     stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
         "p { margin: 0; font: 10px/12px Arial } td { padding: 2px; border: 1px solid black; "
         "vertical-align: baseline; white-space: pre-wrap; orphans: 1; widows: 1 }");
@@ -5648,13 +6383,14 @@ TEST_F(SecondaryViewTest, BaselineCellGeometrySurvivesFailedRecompositionAndChan
     DomElement* img = image("width: 12px; height: 8px", image_cell); ASSERT_NE(img, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 2u);
+    expect_table_papers(tree, 2, 100.0f);
     LayoutViewNode* old_text = view_tree_node_state(tree, a->first_child, false)->first_occurrence;
     LayoutViewNode* old_image = view_tree_node_state(tree, img, false)->first_occurrence;
     ASSERT_NE(old_text->glyph_run, nullptr); ASSERT_NE(old_image->image_box, nullptr);
     float old_baseline = old_text->glyph_run->baseline_y, old_image_y = old_image->rect.y;
     ViewPreviewOptions preview = view_preview_options_default();
     ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(before, nullptr);
     tree->reset_retained(); ASSERT_TRUE(a->set_attribute("style", "padding-top: 26px"));
     options.max_pages = 1;
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
@@ -5669,13 +6405,23 @@ TEST_F(SecondaryViewTest, BaselineCellGeometrySurvivesFailedRecompositionAndChan
     for (LayoutViewNode* text = current; text; text = text->next_occurrence) {
         EXPECT_EQ(text->text_start, bytes); bytes += text->text_length;
         uint32_t page = occurrence_page(text); ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
-        widths[page - 1] = text->parent->parent->rect.width;
+        ASSERT_EQ(text->parent->source.address, a); EXPECT_TRUE(text->parent->paint_box);
+        widths[page - 1] = text->parent->rect.width;
     }
-    EXPECT_EQ(bytes, a->first_child->as_text()->length); EXPECT_GT(widths[0], widths[1]);
+    EXPECT_EQ(bytes, a->first_child->as_text()->length); EXPECT_NEAR(widths[0], 220.0f / 3.0f, 0.01f); EXPECT_NEAR(widths[1], widths[0], 0.01f);
+    expect_source_range_coverage(tree, a->first_child);
+    ImageSurface* pixels = render_secondary_page_snapshot(tree, 2, 1.0f); ASSERT_NE(pixels, nullptr);
+    size_t ink = 0;
+    for (size_t y = 11; y < 70; y++) for (size_t x = 14; x < 24; x++) {
+        Color color = {snapshot_pixel(before, x, y)}; if (color.r < 120 && color.g < 120 && color.b < 120) ink++;
+    }
+    EXPECT_GT(ink, 0u); image_surface_destroy(pixels);
     EXPECT_FLOAT_EQ(old_text->glyph_run->baseline_y, old_baseline);
     EXPECT_FLOAT_EQ(old_image->image_box->content_rect.y, old_image_y);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
     EXPECT_FLOAT_EQ(old_image->image_box->image_rect.y, old_image_y);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 2, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after); image_surface_destroy(before); image_surface_destroy(after);
 }
 
 TEST_F(SecondaryViewTest, UnsupportedRepeatedGroupBreaksAndGroupHeightsAreDiagnosed) {
@@ -5700,7 +6446,7 @@ TEST_F(SecondaryViewTest, PagedColumnWidthsOverrideFirstRowCellsAndFollowEachPag
     DomElement* header = nullptr; DomElement* footer = nullptr;
     DomElement* table = fixed_table(9, &header, &footer); ASSERT_NE(table, nullptr);
     DomElement* group = block(nullptr, "width: 30px; background: yellow", "colgroup", table);
-    DomElement* first = block(nullptr, "width: 25%; margin: 100px; padding: 33px; border: 8px solid red; height: 500px", "col", group);
+    DomElement* first = block(nullptr, "width: 25%; margin: 100px; padding: 33px; border: 8px solid red; height: 500px; background:blue", "col", group);
     DomElement* second = block(nullptr, nullptr, "col", group); ASSERT_NE(second, nullptr);
     ASSERT_TRUE(group->set_attribute("span", "999"));
     DomElement* cell = header->first_child->as_element()->first_child->as_element();
@@ -5708,7 +6454,8 @@ TEST_F(SecondaryViewTest, PagedColumnWidthsOverrideFirstRowCellsAndFollowEachPag
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     ASSERT_EQ(tree->model->page_count, 3u);
-    const float widths[] = {55.0f, 45.0f, 55.0f};
+    expect_table_papers(tree, 3, 140.0f);
+    const float widths[] = {55.0f, 55.0f, 55.0f};
     for (DomElement* source_column : {group, first, second}) {
         ViewNodeState* state = view_tree_node_state(tree, source_column, false); ASSERT_NE(state, nullptr);
         EXPECT_EQ(state->occurrence_count, 3u);
@@ -5725,7 +6472,37 @@ TEST_F(SecondaryViewTest, PagedColumnWidthsOverrideFirstRowCellsAndFollowEachPag
     for (LayoutViewNode* occurrence = view_tree_node_state(tree, cell, false)->first_occurrence; occurrence; occurrence = occurrence->next_occurrence)
         if (occurrence->paint_box) { ASSERT_LT(page, 3u); EXPECT_FLOAT_EQ(occurrence->rect.width, widths[page++]); }
     EXPECT_EQ(page, 3u);
-    EXPECT_EQ(first->blk.get(), nullptr); EXPECT_FLOAT_EQ(source->width, 640.0f);
+    // the DOM now stores the common layout workspace, including column properties (D4.5.1v4).
+    ASSERT_NE(first->blk, nullptr); EXPECT_FLOAT_EQ(first->width, 55.0f); EXPECT_FLOAT_EQ(source->width, 220.0f);
+    expect_table_cell_track(tree, cell, 10.0f, 55.0f, 3);
+    ViewTree* retained = nullptr; ViewTree* changed = nullptr;
+    table_edition_mutation(tree, first,
+        "width:50%;margin:100px;padding:33px;border:8px solid red;height:500px;background:red",
+        2, 15, 44, &retained, &changed);
+    ASSERT_NE(retained, nullptr); ASSERT_NE(changed, nullptr);
+    expect_table_cell_track(retained, cell, 10.0f, 55.0f, 3);
+    expect_table_cell_track(changed, cell, 10.0f, 110.0f, 3);
+    ViewNodeState* old_column = view_tree_node_state(retained, first, false); ASSERT_NE(old_column, nullptr);
+    for (LayoutViewNode* column = old_column->first_occurrence; column; column = column->next_occurrence)
+        EXPECT_FLOAT_EQ(column->rect.width, 55.0f);
+    ViewNodeState* new_column = view_tree_node_state(changed, second, false); ASSERT_NE(new_column, nullptr);
+    for (LayoutViewNode* column = new_column->first_occurrence; column; column = column->next_occurrence) {
+        EXPECT_FLOAT_EQ(column->rect.x, 120.0f); EXPECT_FLOAT_EQ(column->rect.width, 110.0f);
+    }
+    // column declarations still supply collapsed cell edges after separate-mode paint ignores them.
+    ASSERT_TRUE(table->set_attribute("style", "table-layout:fixed;width:100%;border-collapse:collapse"));
+    ViewTree* collapsed = secondary();
+    ASSERT_EQ(layout_secondary_view(collapsed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* edge = source_fragment(collapsed, cell, VIEW_FRAGMENT_BODY, true);
+    ASSERT_NE(edge, nullptr); ASSERT_NE(edge->computed_boundary, nullptr);
+    ASSERT_NE(edge->computed_boundary->border, nullptr);
+    EXPECT_FLOAT_EQ(edge->computed_boundary->border->width.left, 8.0f);
+    EXPECT_FLOAT_EQ(edge->border_outset[3], 4.0f);
+    EXPECT_EQ(edge->computed_boundary->border->left_color.r, 255);
+    EXPECT_EQ(edge->computed_boundary->border->left_color.g, 0);
+    ImageSurface* pixels = render_secondary_page_snapshot(collapsed, 1, 1.0f); ASSERT_NE(pixels, nullptr);
+    expect_snapshot_rgb(pixels, (size_t)(edge->rect.x - 2.0f), (size_t)(edge->rect.y + edge->rect.height * 0.5f), 255, 0, 0);
+    image_surface_destroy(pixels);
 }
 
 TEST_F(SecondaryViewTest, PagedColumnSpansAndAutomaticGroupWidthsConstrainIndividualTracks) {
@@ -5964,23 +6741,45 @@ TEST_F(SecondaryViewTest, UnsupportedTableCellAndGroupPoliciesAreDiagnosed) {
 }
 
 TEST_F(SecondaryViewTest, MissingImagesAndUnsupportedContextsAreDiagnosedButHiddenSubtreesAreSkipped) {
-    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0 }");
-    DomElement* image = block(nullptr, nullptr, "img"); ASSERT_NE(image, nullptr);
-    ASSERT_TRUE(image->set_attribute("src", "missing-image.png"));
+    init_vector_engine();
+    stylesheet("@page { size:240px 180px; margin:10px } p { margin:0 }");
+    DomElement* image = block(nullptr, "display:block;width:40px;height:20px;background:blue", "img"); ASSERT_NE(image, nullptr);
+    ASSERT_TRUE(image->set_attribute("src", "missing-image.png")); doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
     PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ViewTree* tree = secondary();
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
-    EXPECT_STREQ(diagnostic.reason, "image source is unavailable or requires a sampled media producer");
-    EXPECT_EQ(diagnostic.source.address, image);
-    EXPECT_FALSE(tree->model->committed);
-    ASSERT_TRUE(image->set_attribute("style", "display: none"));
-    ASSERT_NE(block("hidden grid", "display: grid", "div", image), nullptr);
-    tree = secondary();
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    DomElement* svg = block(nullptr, nullptr, "svg"); ASSERT_NE(svg, nullptr);
-    tree = secondary();
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
-    EXPECT_EQ(diagnostic.source.address, svg);
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_TRUE(tree->model->committed); EXPECT_EQ(source_image_fragment(tree, image), nullptr);
+    LayoutViewNode* box = source_fragment(tree, image, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 10.0f); EXPECT_FLOAT_EQ(box->rect.y, 10.0f);
+    EXPECT_FLOAT_EQ(box->rect.width, 40.0f); EXPECT_FLOAT_EQ(box->rect.height, 20.0f);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(before, nullptr);
+    expect_snapshot_rgb(before, 15, 15, 0, 0, 255); expect_snapshot_rgb(before, 55, 15, 255, 255, 255);
+    ASSERT_TRUE(image->set_attribute("style", "display:none"));
+    DomElement* hidden_grid = block("hidden grid", "display:grid", "div", image); ASSERT_NE(hidden_grid, nullptr);
+    ViewTree* hidden = secondary(); ASSERT_EQ(layout_secondary_view(hidden, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(source_fragment(hidden, image, VIEW_FRAGMENT_BODY, true), nullptr);
+    EXPECT_EQ(view_tree_node_state(hidden, hidden_grid, false), nullptr);
+    EXPECT_EQ(view_tree_node_state(hidden, hidden_grid->first_child, false), nullptr);
+    // even an empty SVG viewport uses ordinary box layout and CSS painting rather than an admission error (§4.1).
+    DomElement* svg = block(nullptr, "display:block;width:40px;height:20px;background:red", "svg"); ASSERT_NE(svg, nullptr);
+    ASSERT_TRUE(svg->set_attribute("xmlns", "http://www.w3.org/2000/svg"));
+    ViewTree* current = secondary(); ASSERT_EQ(layout_secondary_view(current, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    box = source_fragment(current, svg, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 10.0f); EXPECT_FLOAT_EQ(box->rect.y, 10.0f);
+    EXPECT_FLOAT_EQ(box->rect.width, 40.0f); EXPECT_FLOAT_EQ(box->rect.height, 20.0f);
+    ImageSurface* pixels = render_secondary_page_snapshot(current, 1, 1.0f); ASSERT_NE(pixels, nullptr);
+    expect_snapshot_rgb(pixels, 15, 15, 255, 0, 0); expect_snapshot_rgb(pixels, 55, 15, 255, 255, 255);
+    image_surface_destroy(pixels);
+    options.max_nodes = 1; ViewTree* failed = secondary();
+    EXPECT_EQ(layout_secondary_view(failed, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(failed->model->committed); EXPECT_EQ(failed->model->page_count, 0u);
+    options = paged_layout_options_default(); ViewTree* recovered = secondary();
+    ASSERT_EQ(layout_secondary_view(recovered, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_same_page_pixels(current, recovered, 1);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(after, nullptr);
+    expect_same_surface_pixels(before, after); image_surface_destroy(before); image_surface_destroy(after);
 }
 
 TEST(PagedCssTest, BreakKeywordsAliasesAndLineMinimaValidateBeforeCascade) {
@@ -6130,7 +6929,29 @@ static LayoutViewNode* source_glyph_text(ViewTree* tree, DomNode* source, const 
     return nullptr;
 }
 
-static void expect_source_range_coverage(ViewTree* tree, DomNode* source, size_t expected = 1) {
+// plain, single-font lines publish the font rectangle, not the line allocation (plan §4.5).
+static void expect_glyph_line_position(const LayoutViewNode* node, float line_top,
+        float line_height, bool fo_nominal_metrics) {
+    ASSERT_NE(node, nullptr); ASSERT_NE(node->glyph_run, nullptr);
+    const FontBox* font = paint_glyph_run_font(node->glyph_run);
+    FontHandle* handle = font_box_handle(font); ASSERT_NE(handle, nullptr);
+    float ascent = 0.0f, descent = 0.0f;
+    font_get_content_area_split(handle, &ascent, &descent);
+    float leading = floorf((line_height - ascent - descent) * 0.5f);
+    if (fo_nominal_metrics) {
+        // XSL 1.1 §4.5 uses nominal font geometry and unsnapped half-leading.
+        const FontMetrics* metrics = font_get_metrics(handle); ASSERT_NE(metrics, nullptr);
+        ascent = metrics->typo_ascender; descent = metrics->typo_descender;
+        ASSERT_GT(ascent, 0.0f); ASSERT_GE(descent, 0.0f);
+        leading = (line_height - ascent - descent) * 0.5f;
+    }
+    float baseline = line_top + ascent + leading;
+    EXPECT_NEAR(node->glyph_run->baseline_y, baseline, 0.001f);
+    EXPECT_NEAR(node->rect.y, baseline - font_get_rendering_ascender(handle), 0.001f);
+    EXPECT_FLOAT_EQ(node->rect.height, font_get_cell_height(handle));
+}
+
+static void expect_source_range_coverage(ViewTree* tree, DomNode* source, size_t expected) {
     ASSERT_TRUE(source && source->is_text());
     size_t length = source->as_text()->length;
     const ViewNodeState* state = view_tree_node_state(tree, source, false); ASSERT_NE(state, nullptr);
@@ -6414,6 +7235,12 @@ TEST_F(SecondaryViewTest, RememberedIntrinsicSizesFollowCommittedEditionsAndReta
     EXPECT_EQ(layout_secondary_view(editions[0], &limited, nullptr), TYPESET_BUDGET_EXHAUSTED);
     EXPECT_FALSE(editions[0]->model->committed);
     remembered(editions[0], 120.0f);
+    ASSERT_TRUE(view_tree_model_reset(editions[0])); limited = options; limited.max_nodes = 3;
+    PagedLayoutDiagnostic exhausted = {};
+    EXPECT_EQ(layout_secondary_view(editions[0], &limited, &exhausted), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_STREQ(exhausted.reason, "published fragments exceed the node budget");
+    EXPECT_EQ(editions[0]->model->page_count, 0u);
+    remembered(editions[0], 120.0f); remembered(editions[1], 80.0f);
     ASSERT_TRUE(child->set_attribute("style", "height:120px"));
     ASSERT_TRUE(view_tree_model_reset(editions[0]));
     ASSERT_EQ(compose(editions[0]), TYPESET_OK);
@@ -6424,7 +7251,8 @@ TEST_F(SecondaryViewTest, RememberedIntrinsicSizesFollowCommittedEditionsAndReta
     ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden"));
     ASSERT_EQ(compose(editions[0]), TYPESET_OK);
     EXPECT_FLOAT_EQ(height(editions[0]), 13.0f);
-    EXPECT_FLOAT_EQ(source->height, 91.75f);
+    // integration plan §4.7: the DOM is the last layout's workspace; published editions own their snapshots.
+    EXPECT_FLOAT_EQ(source->height, height(editions[0]));
 }
 
 TEST_F(SecondaryViewTest, CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent) {
@@ -6941,8 +7769,7 @@ TEST_F(SecondaryViewTest, LateRollbackUndoesTopFloatTranslationOfEarlierText) {
     LayoutViewNode* previous = source_fragment(tree, prelude, VIEW_FRAGMENT_BODY, true); ASSERT_NE(previous, nullptr);
     EXPECT_FLOAT_EQ(previous->rect.y, 10); EXPECT_FLOAT_EQ(previous->rect.height, 20);
     LayoutViewNode* text = source_fragment(tree, prelude->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(text, nullptr);
-    // a text rect follows the font's content area inside its line box (plan §4.5)
-    ASSERT_NE(text->glyph_run, nullptr); EXPECT_NEAR(text->rect.y, 10, 0.5f);
+    expect_glyph_line_position(text, 10.0f, 12.0f);
     EXPECT_GT(text->glyph_run->baseline_y, 10); EXPECT_LT(text->glyph_run->baseline_y, 22);
     EXPECT_EQ(occurrence_page(previous), 1u);
     LayoutViewNode* float_box = source_fragment(tree, floating, VIEW_FRAGMENT_FLOAT, true); ASSERT_NE(float_box, nullptr);
@@ -7355,10 +8182,18 @@ TEST_F(SecondaryViewTest, PageContextsResolveOwnVariablesQuotesAndWhitespace) {
     LayoutViewNode* header = tree->model->pages.get()[0]->margin_boxes[CSS_PAGE_TOP_CENTER]; ASSERT_NE(header, nullptr);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(header, text);
     EXPECT_STREQ(text->str, "[Line]Two"); strbuf_free(text);
-    LayoutViewNode* first = header->first_child;
-    LayoutViewNode* last = header->last_child;
+    // detached margin layout publishes its block above the two text rects (integration plan §3.4).
+    LayoutViewNode* first = source_glyph_text(tree, source, "[Line]");
+    LayoutViewNode* last = source_glyph_text(tree, source, "Two");
     ASSERT_NE(first, nullptr); ASSERT_NE(last, nullptr); EXPECT_NE(first, last);
     EXPECT_FLOAT_EQ(last->rect.y - first->rect.y, 10.0f);
+    EXPECT_EQ(first->parent, last->parent);
+    for (LayoutViewNode* run : {first, last}) {
+        EXPECT_EQ(run->role, VIEW_FRAGMENT_MARGIN); EXPECT_TRUE(run->generated);
+        EXPECT_FLOAT_EQ(run->glyph_run->font_size, 10.0f);
+        EXPECT_EQ(run->glyph_run->color.b, 255);
+        EXPECT_EQ(run->glyph_run->color.r, 0); EXPECT_EQ(run->glyph_run->color.g, 0);
+    }
     EXPECT_EQ(header->computed_style->white_space, CSS_VALUE_PRE);
     EXPECT_FLOAT_EQ(header->computed_style->font.font_size, 10.0f);
     LayoutViewNode* box = source_fragment(tree, note, VIEW_FRAGMENT_NOTE, true); ASSERT_NE(box, nullptr);
@@ -9521,9 +10356,9 @@ TEST_F(SecondaryViewTest, SpanQualifiedColumnBindingsSelectExactThenSingleAndRet
     EXPECT_DOUBLE_EQ(retained->padding[0]->data.length.value, 10);
     EXPECT_EQ(view_css_resolve(first, repeated)->color.b, 255); EXPECT_EQ(view_css_resolve(first, single)->color.r, 255);
     EXPECT_EQ(view_css_resolve(first, fallback)->color.r, 255);
-    EXPECT_EQ(source_fragment(first, qualified, VIEW_FRAGMENT_BODY, false), nullptr);
-    EXPECT_EQ(source_fragment(first, group, VIEW_FRAGMENT_BODY, false), nullptr);
-    LayoutViewNode* tracks = source_fragment(first, ordinary, VIEW_FRAGMENT_BODY, false); ASSERT_NE(tracks, nullptr); EXPECT_FLOAT_EQ(tracks->rect.width, 240);
+    expect_no_source_occurrences(first, qualified);
+    expect_no_source_occurrences(first, group);
+    LayoutViewNode* tracks = sole_source_occurrence(first, ordinary); ASSERT_NE(tracks, nullptr); EXPECT_FLOAT_EQ(tracks->rect.width, 240);
     ASSERT_TRUE(group->set_attribute("style", "font-size:30px;color:lime"));
     const ViewCssStyle* changed = view_css_resolve(secondary(), exact); ASSERT_NE(changed, nullptr);
     EXPECT_FLOAT_EQ(changed->font.font_size, 30); EXPECT_EQ(changed->color.g, 255); EXPECT_DOUBLE_EQ(changed->padding[0]->data.length.value, 15);
@@ -9546,9 +10381,9 @@ TEST_F(SecondaryViewTest, SpanQualifiedColumnDeclarationsKeepGridBoundsAndDiagno
     for (size_t i = 0; i < 4; i++) ASSERT_NE(block("X", nullptr, "td", row), nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    LayoutViewNode* track = source_fragment(tree, last, VIEW_FRAGMENT_BODY, false); ASSERT_NE(track, nullptr); EXPECT_FLOAT_EQ(track->rect.width, 40);
+    LayoutViewNode* track = sole_source_occurrence(tree, last); ASSERT_NE(track, nullptr); EXPECT_FLOAT_EQ(track->rect.width, 40);
     ASSERT_NE(track->table_range, nullptr); EXPECT_EQ(track->table_range->column, 3u);
-    EXPECT_EQ(source_fragment(tree, qualified, VIEW_FRAGMENT_BODY, false), nullptr); EXPECT_EQ(source_fragment(tree, remote, VIEW_FRAGMENT_BODY, false), nullptr);
+    expect_no_source_occurrences(tree, qualified); expect_no_source_occurrences(tree, remote);
     DomElement* duplicate = block(nullptr, nullptr, "col", table); ASSERT_NE(duplicate, nullptr);
     ASSERT_TRUE(duplicate->set_attribute("r:column-number", "3")); ASSERT_TRUE(duplicate->set_attribute("r:column-property-span", "2"));
     tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
@@ -9579,8 +10414,8 @@ TEST_F(SecondaryViewTest, SpanQualifiedGroupsResolveChildrenAtFullTrackBudgetAnd
     RadiantTableColumnRange range = {};
     ASSERT_TRUE(radiant_table_column_range(view_css_resolve(tree, ordinary), 0, 16, &range));
     EXPECT_EQ(range.property_span, 1u); EXPECT_EQ(range.next, 16u);
-    EXPECT_EQ(source_fragment(tree, group, VIEW_FRAGMENT_BODY, false), nullptr);
-    EXPECT_EQ(source_fragment(tree, inherited, VIEW_FRAGMENT_BODY, false), nullptr);
+    expect_no_source_occurrences(tree, group);
+    expect_no_source_occurrences(tree, inherited);
 }
 
 TEST_F(SecondaryViewTest, FoSpanQualifiedColumnsRoundCountsIgnoreWidthsAndMatchCellSpans) {
@@ -10409,6 +11244,19 @@ TEST_F(SecondaryViewTest, RelativeCellBeforeAlignsContentEdgesSeparatelyFromBase
     ASSERT_TRUE(cells[0]->set_attribute("r:cell-alignment", "bad")); ASSERT_TRUE(view_tree_model_reset(tree));
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
     EXPECT_STREQ(diagnostic.reason, "cell alignment requires css or relative-before on a table cell"); EXPECT_EQ(tree->model->page_count, 0u);
+    // rowspan height distribution must preserve the content-before alignment already formed with the first row.
+    ASSERT_TRUE(cells[0]->set_attribute("r:cell-alignment", "relative-before"));
+    ASSERT_TRUE(cells[0]->set_attribute("rowspan", "2"));
+    DomElement* next_row = block(nullptr, nullptr, "tr", table); ASSERT_NE(next_row, nullptr);
+    for (size_t i = 0; i < 4; i++) ASSERT_NE(block("Next", nullptr, "td", next_row), nullptr);
+    tree = secondary();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (size_t i = 0; i < 2; i++) {
+        LayoutViewNode* fragment = source_fragment(tree, children[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(fragment, nullptr);
+        EXPECT_FLOAT_EQ(fragment->rect.y, i ? 18.0f : 16.0f);
+        LayoutViewNode* text = source_fragment(tree, children[i]->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(text, nullptr);
+        EXPECT_FLOAT_EQ(text->rect.y, 18.0f);
+    }
 }
 
 TEST_F(SecondaryViewTest, RelativeCellBeforeReservesAlignmentAcrossCellContinuations) {
@@ -10595,27 +11443,70 @@ TEST(RadiantFlowTraits, SpaceResolutionAppliesConditionalRunsForcePrecedenceAndR
 }
 
 TEST_F(SecondaryViewTest, NativeSpaceRangesPackToFitAndRestoreAcrossPageTrials) {
+    init_vector_engine();
     stylesheet("@page { size: 200px 100px; margin: 10px } p, div { margin: 0; font: 10px/20px Arial; white-space: pre-wrap; orphans: 1; widows: 1 }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
-    DomElement* first = block("First"); DomElement* second = block("Second\nThird");
+    DomElement* first = block("First"), *second = block("Second\nThird");
     ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
-    ASSERT_TRUE(first->set_attribute("r:space-after.minimum", "10px"));
-    ASSERT_TRUE(first->set_attribute("r:space-after.optimum", "30px"));
-    ASSERT_TRUE(first->set_attribute("r:space-after.maximum", "40px"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 1u);
-    LayoutViewNode* a = source_fragment(tree, first, VIEW_FRAGMENT_BODY, true), *b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true);
-    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
-    EXPECT_FLOAT_EQ(a->rect.y, 10.0f); EXPECT_FLOAT_EQ(a->rect.height, 20.0f);
-    EXPECT_FLOAT_EQ(b->rect.y, 50.0f); EXPECT_FLOAT_EQ(b->rect.height, 40.0f);
-    ViewCssStyle* style = view_css_resolve(tree, first); ASSERT_NE(style->flow_traits.get(), nullptr);
-    EXPECT_FLOAT_EQ(style->flow_traits->after.minimum, 10.0f); EXPECT_FLOAT_EQ(style->flow_traits->after.optimum, 30.0f);
-    ASSERT_TRUE(second->set_attribute("style", "break-before: page")); ASSERT_TRUE(view_tree_model_reset(tree));
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 2u);
-    b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true); ASSERT_NE(b, nullptr);
-    EXPECT_EQ(occurrence_page(b), 2u); EXPECT_FLOAT_EQ(b->rect.y, 10.0f);
+    for (bool before : {false, true}) {
+        SCOPED_TRACE(before);
+        const char* components[] = {"minimum", "optimum", "maximum"};
+        const char* values[] = {"10px", "30px", "40px"};
+        for (size_t side = 0; side < 2; side++) for (size_t i = 0; i < 3; i++) {
+            char key[64]; snprintf(key, sizeof(key), "r:space-%s.%s", side ? "before" : "after", components[i]);
+            ASSERT_TRUE((side ? second : first)->set_attribute(key, side == before ? values[i] : "0px"));
+        }
+        ASSERT_TRUE(first->set_attribute("style", "background:blue")); ASSERT_TRUE(second->set_attribute("style", "background:red"));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        LayoutViewNode* a = source_fragment(tree, first, VIEW_FRAGMENT_BODY, true), *b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true);
+        ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+        EXPECT_FLOAT_EQ(a->rect.y, 10.0f); EXPECT_FLOAT_EQ(a->rect.height, 20.0f);
+        EXPECT_FLOAT_EQ(b->rect.y, 50.0f); EXPECT_FLOAT_EQ(b->rect.height, 40.0f);
+        ASSERT_NE(a->computed_boundary, nullptr); ASSERT_NE(b->computed_boundary, nullptr);
+        EXPECT_FLOAT_EQ(a->computed_boundary->margin.bottom, 0.0f); EXPECT_FLOAT_EQ(b->computed_boundary->margin.top, 0.0f);
+        expect_source_range_coverage(tree, first->first_child); expect_source_range_coverage(tree, second->first_child);
+        ViewCssStyle* style = view_css_resolve(tree, before ? second : first); ASSERT_NE(style->flow_traits.get(), nullptr);
+        const RadiantSpaceSpec& range = before ? style->flow_traits->before : style->flow_traits->after;
+        EXPECT_FLOAT_EQ(range.minimum, 10.0f); EXPECT_FLOAT_EQ(range.optimum, 30.0f); EXPECT_FLOAT_EQ(range.maximum, 40.0f);
+        ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+        EXPECT_EQ(snapshot_pixel(expected, 100, 15), 0xffff0000u);
+        ViewPreviewOptions preview = view_preview_options_default();
+        ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+        ASSERT_TRUE(second->set_attribute("style", "break-before:page;background:red")); ASSERT_TRUE(view_tree_model_reset(tree));
+        options.max_pages = 1;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+        options = paged_layout_options_default(); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u);
+        b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true); ASSERT_NE(b, nullptr);
+        EXPECT_EQ(occurrence_page(b), 2u); EXPECT_FLOAT_EQ(b->rect.y, 10.0f);
+        ASSERT_TRUE(second->set_attribute("style", "break-before:page;background:red;margin-top:5px"));
+        for (bool retain : {false, true}) {
+            SCOPED_TRACE(retain);
+            ASSERT_TRUE(second->set_attribute("r:space-before.conditionality", retain ? "retain" : "discard"));
+            ASSERT_TRUE(view_tree_model_reset(tree));
+            ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+            ASSERT_EQ(tree->model->page_count, 2u);
+            b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true); ASSERT_NE(b, nullptr);
+            EXPECT_EQ(occurrence_page(b), 2u); EXPECT_FLOAT_EQ(b->rect.y, before && retain ? 45.0f : 15.0f);
+        }
+        ASSERT_TRUE(second->set_attribute("r:space-before.conditionality", "discard"));
+        // native space adds to the collapsed CSS margin; it does not replace or shrink that margin.
+        ASSERT_TRUE(first->set_attribute("style", "background:blue;margin-bottom:7px"));
+        ASSERT_TRUE(second->set_attribute("style", "background:red;margin-top:5px;font:10px/10px Arial"));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        b = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true); ASSERT_NE(b, nullptr);
+        EXPECT_FLOAT_EQ(b->rect.y, 67.0f); EXPECT_FLOAT_EQ(b->rect.height, 20.0f);
+        ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+        expect_same_surface_pixels(expected, pixels);
+        image_surface_destroy(expected); image_surface_destroy(pixels); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+    }
 }
 
 TEST_F(SecondaryViewTest, NativeSpaceStacksPreserveEmptyAncestorsAndNamespaceAliases) {
@@ -10637,45 +11528,208 @@ TEST_F(SecondaryViewTest, NativeSpaceStacksPreserveEmptyAncestorsAndNamespaceAli
     EXPECT_FLOAT_EQ(p->rect.y, 26.0f); EXPECT_FLOAT_EQ(c->rect.y, 26.0f); EXPECT_FLOAT_EQ(p->rect.height, 20.0f);
     EXPECT_FLOAT_EQ(e->rect.y, 58.0f); EXPECT_FLOAT_EQ(l->rect.y, 58.0f);
     EXPECT_EQ(view_css_resolve(tree, last)->flow_traits.get(), nullptr);
+    // decoration separates the parent's before space from its child's and closes the child's after stack.
+    ASSERT_TRUE(parent->set_attribute("style", "border-top:1px solid black;padding-bottom:2px"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    p = sole_source_occurrence(tree, parent); c = sole_source_occurrence(tree, child);
+    e = sole_source_occurrence(tree, empty); l = sole_source_occurrence(tree, last);
+    ASSERT_TRUE(p && c && e && l);
+    EXPECT_FLOAT_EQ(p->rect.y, 24.0f); EXPECT_FLOAT_EQ(p->rect.height, 44.0f);
+    EXPECT_FLOAT_EQ(c->rect.y, 41.0f); EXPECT_FLOAT_EQ(e->rect.y, 75.0f); EXPECT_FLOAT_EQ(l->rect.y, 75.0f);
+    ASSERT_TRUE(child->set_attribute("pub:space-after.minimum", "0px"));
+    ASSERT_TRUE(child->set_attribute("pub:space-after.maximum", "7px"));
+    ASSERT_TRUE(last->set_attribute("style", "font:10px/80px Arial"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    p = sole_source_occurrence(tree, parent); e = sole_source_occurrence(tree, empty); l = sole_source_occurrence(tree, last);
+    ASSERT_TRUE(p && e && l);
+    EXPECT_FLOAT_EQ(p->rect.height, 39.0f); EXPECT_FLOAT_EQ(e->rect.y, 70.0f); EXPECT_FLOAT_EQ(l->rect.y, 70.0f);
+    EXPECT_FLOAT_EQ(l->rect.height, 80.0f); EXPECT_EQ(tree->model->page_count, 1u);
+    ASSERT_TRUE(last->set_attribute("style", ""));
+    DomElement* tail = block(nullptr); ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(last->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    ASSERT_TRUE(last->set_attribute("r:space-after", "12px"));
+    for (bool retain : {false, true}) {
+        SCOPED_TRACE(retain);
+        ASSERT_TRUE(last->set_attribute("r:space-after.conditionality", retain ? "retain" : "discard"));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* point = sole_source_occurrence(tree, tail); ASSERT_NE(point, nullptr);
+        EXPECT_FLOAT_EQ(point->rect.y, retain ? 107.0f : 95.0f); EXPECT_FLOAT_EQ(point->rect.height, 0.0f);
+        EXPECT_EQ(tree->model->page_count, 1u);
+    }
 }
 
 TEST_F(SecondaryViewTest, NativeKeepStrengthsChooseTheWeakestBoundaryAndForcedBreaksOverrideAlways) {
-    stylesheet("@page { size: 200px 80px; margin: 10px } p, div { margin: 0; font: 10px/20px Arial; orphans: 1; widows: 1 }");
+    init_vector_engine();
+    stylesheet("@page { size: 200px 80px; margin: 10px } p, div, td { margin: 0; font: 10px/20px Arial; orphans: 1; widows: 1 } td { padding: 0 }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
-    DomElement* a = block("A"), *b = block("B"), *c = block("C"), *d = block("D");
-    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr); ASSERT_NE(d, nullptr);
-    ASSERT_TRUE(a->set_attribute("r:keep-with-next.within-page", "90"));
-    ASSERT_TRUE(b->set_attribute("r:keep-with-next.within-page", "10"));
-    ASSERT_TRUE(c->set_attribute("r:keep-with-next.within-column", "2147483647"));
-    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    EXPECT_EQ(tree->model->page_count, 2u);
-    EXPECT_EQ(occurrence_page(source_fragment(tree, b, VIEW_FRAGMENT_BODY, true)), 1u);
-    EXPECT_EQ(occurrence_page(source_fragment(tree, c, VIEW_FRAGMENT_BODY, true)), 2u);
-    EXPECT_EQ(view_css_resolve(tree, c)->flow_traits->next.scope[1].value, INT32_MAX);
-    ASSERT_TRUE(b->set_attribute("r:keep-with-next.within-page", "always")); ASSERT_TRUE(c->set_attribute("style", "break-before: page"));
-    ASSERT_TRUE(view_tree_model_reset(tree));
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    EXPECT_EQ(occurrence_page(source_fragment(tree, b, VIEW_FRAGMENT_BODY, true)), 1u);
-    EXPECT_EQ(occurrence_page(source_fragment(tree, c, VIEW_FRAGMENT_BODY, true)), 2u);
+    ASSERT_TRUE(source->set_attribute("style", "--weak: 10"));
+    const char* labels[] = {"A", "B", "C", "D"};
+    const char* styles[] = {"background:blue;break-before:auto;break-after:auto",
+        "background:red;break-before:auto;break-after:auto", "break-before:auto;break-after:auto", "break-before:auto;break-after:auto"};
+    for (bool rows : {false, true}) {
+        SCOPED_TRACE(rows);
+        DomElement* table = rows ? block(nullptr, "table-layout:fixed;width:100%;border-spacing:0", "table") : nullptr;
+        DomElement* parent = rows ? block(nullptr, nullptr, "tbody", table) : source;
+        ASSERT_NE(parent, nullptr);
+        DomElement* boxes[4] = {}; DomNode* texts[4] = {};
+        for (size_t i = 0; i < 4; i++) {
+            boxes[i] = block(rows ? nullptr : labels[i], styles[i], rows ? "tr" : "div", parent); ASSERT_NE(boxes[i], nullptr);
+            DomElement* content = rows ? block(labels[i], nullptr, "td", boxes[i]) : boxes[i]; ASSERT_NE(content, nullptr);
+            texts[i] = content->first_child;
+        }
+        ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        auto reflow = [&]() {
+            ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
+            ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        };
+        auto weights = [&](const char* first, const char* second, const char* third) {
+            ASSERT_TRUE(boxes[0]->set_attribute("r:keep-with-next.within-page", first));
+            ASSERT_TRUE(boxes[1]->set_attribute("r:keep-with-next.within-page", second));
+            ASSERT_TRUE(boxes[2]->set_attribute("r:keep-with-next.within-column", third));
+        };
+        auto expect_split = [&](size_t cut) {
+            ASSERT_EQ(tree->model->page_count, 2u);
+            for (size_t i = 0; i < 4; i++) {
+                LayoutViewNode* glyph = sole_source_occurrence(tree, texts[i]); ASSERT_NE(glyph, nullptr);
+                EXPECT_EQ(glyph, source_glyph_text(tree, texts[i], labels[i]));
+                EXPECT_EQ(glyph->text_start, 0u); EXPECT_EQ(glyph->text_length, 1u);
+                EXPECT_EQ(occurrence_page(glyph), i < cut ? 1u : 2u);
+                EXPECT_FLOAT_EQ(glyph->rect.x, 10.0f);
+                float line_top = 10.0f + 20.0f * static_cast<float>(i < cut ? i : i - cut);
+                if (rows) {
+                    LayoutViewNode* row = source_fragment(tree, boxes[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(row, nullptr);
+                    EXPECT_FLOAT_EQ(row->rect.y, line_top); EXPECT_FLOAT_EQ(row->rect.height, 20.0f);
+                    EXPECT_GE(glyph->rect.y, row->rect.y); EXPECT_LE(glyph->rect.y + glyph->rect.height, row->rect.y + row->rect.height);
+                } else expect_glyph_line_position(glyph, line_top, 20.0f);
+                expect_source_range_coverage(tree, texts[i]);
+            }
+        };
+        weights("90", "10", "2147483647"); reflow(); expect_split(2);
+        EXPECT_EQ(view_css_resolve(tree, boxes[2])->flow_traits->next.scope[1].value, INT32_MAX);
+        ViewPreviewOptions preview = view_preview_options_default();
+        ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+        ImageSurface* expected = render_secondary_page_snapshot(retained, 1); ASSERT_NE(expected, nullptr);
+        EXPECT_EQ(snapshot_pixel(expected, 100, 15), 0xffff0000u); EXPECT_EQ(snapshot_pixel(expected, 100, 35), 0xff0000ffu);
+        for (const char* weak : {"-2147483648", "0", "auto", "var(--weak)", "calc(2 * 5)"}) {
+            SCOPED_TRACE(weak); weights("90", weak, "2147483647"); reflow(); expect_split(2);
+        }
+        weights("-1", "-2147483648", "0"); reflow(); expect_split(2);
+        weights("10", "90", "2147483647"); reflow(); expect_split(1);
+        weights("90", "90", "10"); reflow(); expect_split(3);
+        // always remains a distinct strength above the largest numeric value.
+        weights("always", "2147483647", "2147483647"); reflow(); expect_split(2);
+        weights("2147483647", "always", "2147483647"); reflow(); expect_split(1);
+        ASSERT_TRUE(parent->set_attribute("r:keep-with-next.within-page", "90"));
+        weights("inherit", "auto", "2147483647");
+        ASSERT_TRUE(boxes[2]->set_attribute("r:keep-with-previous.within-page", "10")); reflow(); expect_split(2);
+        EXPECT_EQ(view_css_resolve(tree, boxes[0])->flow_traits->next.scope[2].value, 90);
+        ASSERT_TRUE(boxes[2]->remove_attribute("r:keep-with-previous.within-page"));
+        weights("90", "always", "2147483647");
+        ASSERT_TRUE(boxes[2]->set_attribute("style", "break-before:page")); reflow(); expect_split(2);
+        ASSERT_TRUE(boxes[2]->set_attribute("style", styles[2]));
+        ASSERT_TRUE(boxes[0]->set_attribute("style", "background:blue;break-after:page")); reflow(); expect_split(1);
+        options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+        options = paged_layout_options_default(); reflow(); expect_split(1);
+        ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+        expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+        ASSERT_TRUE(parent->remove_attribute("r:keep-with-next.within-page"));
+        if (rows) { ASSERT_TRUE(source->DomNode::remove_child(table)); }
+        else for (DomElement* box : boxes) ASSERT_TRUE(source->DomNode::remove_child(box));
+    }
 }
 
 TEST_F(SecondaryViewTest, NativeLineKeepsMoveTheCompleteInlineAndPreserveForcedLineBreaks) {
+    init_vector_engine();
     stylesheet("@page { size: 100px 100px; margin: 10px } p, div, span { margin: 0; font: 10px/20px Arial; orphans: 1; widows: 1 }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
-    DomElement* paragraph = block("X X X X X "); DomElement* span = block("Alpha Beta", nullptr, "span", paragraph);
+    DomElement* paragraph = block("X X X X X ", "background: red");
+    DomElement* span = block("Alpha Beta", nullptr, "span", paragraph);
     ASSERT_NE(paragraph, nullptr); ASSERT_NE(span, nullptr);
+    DomNode* prefix_source = paragraph->first_child; DomNode* kept_source = span->first_child;
     ASSERT_TRUE(span->set_attribute("r:keep-together.within-line", "always"));
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    auto reflow = [&]() {
+        ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    };
+    auto expect_kept = [&]() {
+        LayoutViewNode* phrase = sole_source_occurrence(tree, kept_source); ASSERT_NE(phrase, nullptr);
+        EXPECT_EQ(phrase, source_glyph_text(tree, kept_source, "Alpha Beta"));
+        EXPECT_EQ(phrase->text_start, 0u); EXPECT_EQ(phrase->text_length, 10u);
+        expect_source_range_coverage(tree, prefix_source); expect_source_range_coverage(tree, kept_source);
+        LayoutViewNode* prefix = sole_source_occurrence(tree, prefix_source); ASSERT_NE(prefix, nullptr);
+        EXPECT_FLOAT_EQ(phrase->rect.y, prefix->rect.y + 20.0f);
+        expect_glyph_line_position(phrase, 30.0f, 20.0f);
+    };
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ViewNodeState* text = view_tree_node_state(tree, span->first_child, false); ASSERT_NE(text, nullptr);
-    float y = text->first_occurrence->rect.y;
-    for (LayoutViewNode* part = text->first_occurrence; part; part = part->next_occurrence) EXPECT_FLOAT_EQ(part->rect.y, y);
-    ViewNodeState* prefix = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(prefix, nullptr);
-    EXPECT_LT(prefix->first_occurrence->rect.y, y);
-    ASSERT_NE(block(nullptr, nullptr, "br", span), nullptr); ASSERT_NE(block("After", nullptr, "span", span), nullptr);
-    ASSERT_TRUE(view_tree_model_reset(tree));
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    expect_kept();
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 85, 45), 0xff0000ffu);
+    // native auto restores soft wrapping; the owner's hard keep survives descendant CSS and native auto.
+    ASSERT_TRUE(span->set_attribute("r:keep-together.within-line", "auto")); reflow();
+    const ViewNodeState* split = view_tree_node_state(tree, kept_source, false); ASSERT_NE(split, nullptr);
+    ASSERT_EQ(split->occurrence_count, 2u);
+    EXPECT_FLOAT_EQ(split->first_occurrence->rect.y, sole_source_occurrence(tree, prefix_source)->rect.y);
+    EXPECT_GT(split->last_occurrence->rect.y, split->first_occurrence->rect.y);
+    expect_source_range_coverage(tree, kept_source);
+    ASSERT_TRUE(span->set_attribute("r:keep-together.within-line", "always"));
+    DomElement* inner = block(nullptr, "text-wrap-mode: wrap", "span", span); ASSERT_NE(inner, nullptr);
+    ASSERT_TRUE(span->DomNode::remove_child(kept_source)); ASSERT_TRUE(inner->append_child(kept_source));
+    ASSERT_TRUE(inner->set_attribute("r:keep-together.within-line", "auto")); reflow(); expect_kept();
+    ASSERT_TRUE(inner->set_attribute("r:keep-together.within-line", "inherit")); reflow(); expect_kept();
+    EXPECT_EQ(view_css_resolve(tree, inner)->flow_traits->together.scope[0].kind, RADIANT_KEEP_ALWAYS);
+    // ordinary CSS nowrap shares the same separator boundary, including preserved spaces.
+    ASSERT_TRUE(span->set_attribute("r:keep-together.within-line", "auto"));
+    ASSERT_TRUE(inner->set_attribute("r:keep-together.within-line", "auto"));
+    ASSERT_TRUE(inner->set_attribute("style", "white-space: nowrap"));
+    for (const char* mode : {"normal", "pre-wrap", "nowrap"}) {
+        SCOPED_TRACE(mode); StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+        strbuf_append_format(css, "background: red; white-space: %s", mode);
+        ASSERT_TRUE(paragraph->set_attribute("style", css->str)); strbuf_free(css); reflow();
+        LayoutViewNode* phrase = sole_source_occurrence(tree, kept_source); ASSERT_NE(phrase, nullptr);
+        LayoutViewNode* prefix = sole_source_occurrence(tree, prefix_source); ASSERT_NE(prefix, nullptr);
+        EXPECT_FLOAT_EQ(phrase->rect.y, prefix->rect.y + (!strcmp(mode, "nowrap") ? 0.0f : 20.0f));
+        expect_source_range_coverage(tree, kept_source);
+    }
+    ASSERT_TRUE(paragraph->set_attribute("style", "background: red"));
+    ASSERT_TRUE(span->set_attribute("r:keep-together.within-line", "always"));
+    ASSERT_TRUE(inner->set_attribute("style", "text-wrap-mode: wrap"));
+    ASSERT_NE(block(nullptr, nullptr, "br", span), nullptr);
+    DomElement* after = block("After", nullptr, "span", span); ASSERT_NE(after, nullptr);
+    reflow(); expect_kept();
+    LayoutViewNode* forced = source_glyph_text(tree, after->first_child, "After"); ASSERT_NE(forced, nullptr);
+    expect_glyph_line_position(forced, 50.0f, 20.0f); expect_source_range_coverage(tree, after->first_child);
+    DomElement* end = nullptr;
+    for (const char* word : {"Tail", "End"}) {
+        ASSERT_NE(block(nullptr, nullptr, "br", span), nullptr);
+        end = block(word, nullptr, "span", span); ASSERT_NE(end, nullptr);
+    }
+    reflow(); ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* last = source_glyph_text(tree, end->first_child, "End"); ASSERT_NE(last, nullptr);
+    EXPECT_EQ(occurrence_page(last), 2u); expect_source_range_coverage(tree, end->first_child);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    options = paged_layout_options_default(); reflow(); EXPECT_EQ(tree->model->page_count, 2u);
+    // a preserved segment break forces a new line even inside a hard line keep.
+    while (span->first_child) ASSERT_TRUE(span->DomNode::remove_child(span->first_child));
+    DomElement* multiline = block("Alpha\nBeta", "white-space: pre-wrap", "span", span); ASSERT_NE(multiline, nullptr);
+    reflow();
+    LayoutViewNode* alpha = source_glyph_text(tree, multiline->first_child, "Alpha");
+    LayoutViewNode* beta = source_glyph_text(tree, multiline->first_child, "Beta");
+    ASSERT_NE(alpha, nullptr); ASSERT_NE(beta, nullptr);
+    EXPECT_FLOAT_EQ(alpha->rect.y, sole_source_occurrence(tree, prefix_source)->rect.y);
+    EXPECT_FLOAT_EQ(beta->rect.y, alpha->rect.y + 20.0f); expect_source_range_coverage(tree, multiline->first_child);
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
 }
 
 TEST_F(SecondaryViewTest, NativeFlowTraitsInheritComputedValuesAndRejectInvalidComponents) {
@@ -10701,18 +11755,48 @@ TEST_F(SecondaryViewTest, NativeFlowTraitsInheritComputedValuesAndRejectInvalidC
 }
 
 TEST_F(SecondaryViewTest, NativeAlwaysKeepsRejectImpossibleGroupsWithoutPublishingPartialPages) {
+    init_vector_engine();
     stylesheet("@page { size: 200px 80px; margin: 10px } p, div { margin: 0; font: 10px/20px Arial; orphans: 1; widows: 1 }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
-    DomElement* group = block(nullptr); ASSERT_NE(group, nullptr);
-    ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "always"));
-    for (size_t i = 0; i < 4; i++) ASSERT_NE(block("Line", nullptr, "div", group), nullptr);
+    DomElement* group = block(nullptr, "background:blue;break-inside:auto"); ASSERT_NE(group, nullptr);
+    DomElement* lines[4] = {};
+    for (size_t i = 0; i < 4; i++) { lines[i] = block("Line", nullptr, "div", group); ASSERT_NE(lines[i], nullptr); }
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    auto reflow = [&]() { diagnostic = {}; return view_tree_model_reset(tree) && layout_secondary_view(tree, &options, &diagnostic) == TYPESET_OK; };
+    // integration §4.1 slices oversized content; native strength is preserved while the impossible keep relaxes.
+    for (const char* strength : {"always", "7", "-2147483648"}) {
+        SCOPED_TRACE(strength); ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", strength));
+        ASSERT_TRUE(reflow()) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 1u);
+        for (size_t i = 0; i < 4; i++) {
+            LayoutViewNode* line = sole_source_occurrence(tree, lines[i]->first_child); ASSERT_NE(line, nullptr);
+            EXPECT_EQ(line, source_glyph_text(tree, lines[i]->first_child, "Line"));
+            EXPECT_EQ(occurrence_page(line), i < 3 ? 1u : 2u); EXPECT_FLOAT_EQ(line->rect.x, 10.0f);
+            expect_glyph_line_position(line, 10.0f + 20.0f * static_cast<float>(i % 3), 20.0f);
+            expect_source_range_coverage(tree, lines[i]->first_child);
+        }
+        LayoutViewNode* first = source_fragment(tree, group, VIEW_FRAGMENT_BODY, true);
+        LayoutViewNode* last = source_fragment(tree, group, VIEW_FRAGMENT_BODY, true, true);
+        ASSERT_NE(first, nullptr); ASSERT_NE(last, nullptr);
+        EXPECT_FLOAT_EQ(first->rect.height, 60.0f); EXPECT_FLOAT_EQ(last->rect.height, 20.0f);
+    }
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 100, 15), 0xffff0000u); EXPECT_EQ(snapshot_pixel(expected, 100, 35), 0xffffffffu);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
     EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
-    EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
-    ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "7")); ASSERT_TRUE(view_tree_model_reset(tree)); diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    EXPECT_EQ(tree->model->page_count, 2u);
+    options = paged_layout_options_default(); ASSERT_TRUE(reflow()) << diagnostic.reason;
+    expect_same_page_pixels(tree, retained, 1); expect_same_page_pixels(tree, retained, 2);
+    ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "always"));
+    ASSERT_TRUE(group->set_attribute("style", "background:red;break-inside:auto"));
+    ASSERT_TRUE(group->DomNode::remove_child(lines[3])); ASSERT_TRUE(reflow()) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 1u); expect_no_source_occurrences(tree, lines[3]->first_child);
+    expect_source_range_coverage(retained, lines[3]->first_child);
+    ImageSurface* pixels = render_secondary_page_snapshot(tree, 1); ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(snapshot_pixel(pixels, 100, 15), 0xff0000ffu); image_surface_destroy(pixels);
+    pixels = render_secondary_page_snapshot(retained, 2); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
 }
 
 TEST_F(SecondaryViewTest, NativePageMastersUseTheCommonCssCascadeAndMarginContexts) {
@@ -11060,7 +12144,7 @@ TEST_F(SecondaryViewTest, BodyColumnRulesPaintOnlyOccupiedGapsWithoutChangingFra
                 LayoutViewNode* node = source_glyph_text(tree, paragraphs[p]->first_child, text); ASSERT_NE(node, nullptr);
                 EXPECT_EQ(occurrence_page(node), p + 1);
                 EXPECT_FLOAT_EQ(node->rect.x, 10.0f + (line / 4) * 110.0f);
-                EXPECT_FLOAT_EQ(node->rect.y, 10.0f + (line % 4) * 20.0f);
+                expect_glyph_line_position(node, 10.0f + (line % 4) * 20.0f, 20.0f);
             }
         }
         if (!mode) {
@@ -11133,7 +12217,8 @@ TEST_F(SecondaryViewTest, PatternedBodyColumnRulesRetainGeometryShadingAndStroke
         ASSERT_EQ(tree->model->page_count, 1u);
         for (DomElement* element : {a, b}) {
             LayoutViewNode* node = source_glyph_text(tree, element->first_child, element == a ? "A" : "B");
-            ASSERT_NE(node, nullptr); EXPECT_FLOAT_EQ(node->rect.x, element == a ? 10 : 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+            ASSERT_NE(node, nullptr); EXPECT_FLOAT_EQ(node->rect.x, element == a ? 10 : 110);
+            expect_glyph_line_position(node, 10.0f, 20.0f);
         }
         ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
         EXPECT_EQ(snapshot_pixel(expected, 100, 5), 0xffffffffu);
@@ -11241,12 +12326,12 @@ TEST_F(SecondaryViewTest, CommonBodyColumnsContinueDomRangesAndSeparateColumnFro
         LayoutViewNode* node = source_glyph_text(tree, paragraph->first_child, text); ASSERT_NE(node, nullptr) << line;
         EXPECT_EQ(occurrence_page(node), line < 8 ? 1u : 2u);
         EXPECT_FLOAT_EQ(node->rect.x, line >= 4 && line < 8 ? 110.0f : 10.0f);
-        EXPECT_FLOAT_EQ(node->rect.y, 10.0f + line % 4 * 20.0f);
+        expect_glyph_line_position(node, 10.0f + line % 4 * 20.0f, 20.0f);
     }
     LayoutViewNode* node = source_glyph_text(tree, column->first_child, "Column"); ASSERT_NE(node, nullptr);
-    EXPECT_EQ(occurrence_page(node), 2u); EXPECT_FLOAT_EQ(node->rect.x, 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+    EXPECT_EQ(occurrence_page(node), 2u); EXPECT_FLOAT_EQ(node->rect.x, 110); expect_glyph_line_position(node, 10.0f, 20.0f);
     node = source_glyph_text(tree, page_break->first_child, "Page"); ASSERT_NE(node, nullptr);
-    EXPECT_EQ(occurrence_page(node), 3u); EXPECT_FLOAT_EQ(node->rect.x, 10); EXPECT_FLOAT_EQ(node->rect.y, 10);
+    EXPECT_EQ(occurrence_page(node), 3u); EXPECT_FLOAT_EQ(node->rect.x, 10); expect_glyph_line_position(node, 10.0f, 20.0f);
 }
 
 TEST_F(SecondaryViewTest, FoBodyColumnsRefineCountsGapsAndScopedBreaksThroughCommonRegions) {
@@ -11271,10 +12356,12 @@ TEST_F(SecondaryViewTest, FoBodyColumnsRefineCountsGapsAndScopedBreaksThroughCom
     DomElement* page = column->next_sibling->as_element();
     LayoutViewNode* node = source_glyph_text(tree, first->first_child, "First"); ASSERT_NE(node, nullptr);
     EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 10); EXPECT_GT(node->rect.width, 0);
+    expect_glyph_line_position(node, 10.0f, 20.0f, true);
     node = source_glyph_text(tree, column->first_child, "Column"); ASSERT_NE(node, nullptr);
-    EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+    EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 110); expect_glyph_line_position(node, 10.0f, 20.0f, true);
     node = source_glyph_text(tree, page->first_child, "Page"); ASSERT_NE(node, nullptr);
     EXPECT_EQ(occurrence_page(node), 2u); EXPECT_FLOAT_EQ(node->rect.x, 10);
+    expect_glyph_line_position(node, 10.0f, 20.0f, true);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
     DomElement* region = fo->first_child_element()->first_child_element()->first_child_element(); ASSERT_NE(region, nullptr);
     const struct { const char* count; const char* gap; uint32_t expected_count; float expected_gap; } cases[] = {
@@ -11434,6 +12521,7 @@ TEST_F(SecondaryViewTest, ColumnTablesRepeatGroupsWithinOnePhysicalSheetAndKeepE
 }
 
 TEST_F(SecondaryViewTest, DefaultSheetKeepsRewindEarlierColumnsAndPreserveRetainedSourceCoverage) {
+    init_vector_engine();
     stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
     DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
     ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
@@ -11442,89 +12530,135 @@ TEST_F(SecondaryViewTest, DefaultSheetKeepsRewindEarlierColumnsAndPreserveRetain
     DomElement* group = block(nullptr, nullptr, "div", sequence); ASSERT_NE(group, nullptr);
     DomElement* text = block("A\nB\nC\nD\nE\nF\nG", nullptr, "p", group); ASSERT_NE(text, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    for (bool css : {false, true}) {
-        SCOPED_TRACE(css);
-        if (group->get_attribute("r:keep-together.within-page")) group->remove_attribute("r:keep-together.within-page");
-        ASSERT_TRUE(group->set_attribute("style", css ? "break-inside:avoid-page" : "break-inside:auto"));
+    auto reflow = [&]() { diagnostic = {}; return view_tree_model_reset(tree) && layout_secondary_view(tree, &options, &diagnostic) == TYPESET_OK; };
+    for (const char* prefix : {"height:40px", "height:50px"}) for (bool css : {false, true}) {
+        SCOPED_TRACE(prefix);
+        SCOPED_TRACE(css); ASSERT_TRUE(lead->set_attribute("style", prefix));
+        if (group->get_attribute("r:keep-together.within-page")) ASSERT_TRUE(group->remove_attribute("r:keep-together.within-page"));
+        ASSERT_TRUE(group->set_attribute("style", css ? "background:blue;break-inside:avoid-page" : "background:blue;break-inside:auto"));
         if (!css) ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "always"));
-        ASSERT_TRUE(view_tree_model_reset(tree));
-        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
-        LayoutViewNode* first = source_glyph_text(tree, text->first_child, "A"); ASSERT_NE(first, nullptr);
-        LayoutViewNode* last = source_glyph_text(tree, text->first_child, "G"); ASSERT_NE(last, nullptr);
-        EXPECT_EQ(occurrence_page(first), 2u); EXPECT_EQ(occurrence_page(last), 2u);
-        EXPECT_FLOAT_EQ(first->rect.x, 10); EXPECT_FLOAT_EQ(first->rect.y, 10);
-        EXPECT_FLOAT_EQ(last->rect.x, 130); EXPECT_FLOAT_EQ(last->rect.y, 50);
-        expect_source_range_coverage(tree, text->first_child);
+        ASSERT_TRUE(reflow()) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        for (size_t i = 0; i < 7; i++) {
+            char label[] = {(char)('A' + i), 0}; LayoutViewNode* line = source_glyph_text(tree, text->first_child, label); ASSERT_NE(line, nullptr);
+            EXPECT_EQ(occurrence_page(line), 2u); EXPECT_FLOAT_EQ(line->rect.x, i < 4 ? 10.0f : 130.0f);
+            expect_glyph_line_position(line, 10.0f + 20.0f * static_cast<float>(i % 4), 20.0f);
+        }
+        expect_source_range_coverage(tree, text->first_child); expect_source_range_coverage(tree, lead->first_child);
         EXPECT_EQ(view_tree_node_state(tree, group, false)->occurrence_count, 2u);
     }
     ViewPreviewOptions preview = view_preview_options_default();
     ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
-    ASSERT_TRUE(group->set_attribute("style", "break-inside:auto")); tree->reset_retained();
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 60, 15), 0xffff0000u); EXPECT_EQ(snapshot_pixel(expected, 180, 65), 0xffff0000u);
+    EXPECT_EQ(snapshot_pixel(expected, 180, 75), 0xffffffffu);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    ASSERT_TRUE(group->set_attribute("style", "background:red;break-inside:auto")); options = paged_layout_options_default();
+    ASSERT_TRUE(reflow()) << diagnostic.reason;
     EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "A")), 1u);
     EXPECT_EQ(occurrence_page(source_glyph_text(retained, text->first_child, "A")), 2u);
     expect_source_range_coverage(retained, text->first_child);
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 2); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
     ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
 }
 
 TEST_F(SecondaryViewTest, DefaultSheetSiblingKeepsPreferEarlierWeakerBoundariesAndHonorForcedPages) {
+    init_vector_engine();
     stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
     DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
     ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
     DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
-    ASSERT_NE(block("Lead", "height:40px", "div", sequence), nullptr);
+    DomElement* lead = block("Lead", "height:40px", "div", sequence); ASSERT_NE(lead, nullptr);
     DomElement* a = block("A\nB\nC\nD", nullptr, "p", sequence); ASSERT_NE(a, nullptr);
     DomElement* b = block("E\nF\nG", nullptr, "p", sequence); ASSERT_NE(b, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    const struct { const char* css; const char* keep; const char* strength; } cases[] = {
-        {"break-after:auto", "r:keep-with-next.within-page", "always"},
-        {"break-after:auto", "r:keep-with-next.within-page", "5"},
-        {"break-after:avoid-page", nullptr, nullptr}};
-    for (const auto& item : cases) {
-        SCOPED_TRACE(item.css); ASSERT_TRUE(a->set_attribute("style", item.css));
-        if (a->get_attribute("r:keep-with-next.within-page")) a->remove_attribute("r:keep-with-next.within-page");
-        if (item.keep) ASSERT_TRUE(a->set_attribute(item.keep, item.strength));
-        // page keeps also cover an unfinished paragraph; the whole chain fits on a fresh two-column sheet.
+    auto reflow = [&]() { diagnostic = {}; return view_tree_model_reset(tree) && layout_secondary_view(tree, &options, &diagnostic) == TYPESET_OK; };
+    const struct { const char* after; const char* before; const char* strength; bool previous; } cases[] = {
+        {"auto", "auto", "always", false}, {"auto", "auto", "5", false}, {"avoid-page", "auto", nullptr, false},
+        {"auto", "auto", "always", true}, {"auto", "avoid-page", nullptr, true}};
+    for (const char* prefix : {"height:40px", "height:50px"}) for (const auto& item : cases) {
+        SCOPED_TRACE(prefix);
+        SCOPED_TRACE(item.after);
+        SCOPED_TRACE(item.before);
+        SCOPED_TRACE(item.previous);
+        ASSERT_TRUE(lead->set_attribute("style", prefix));
+        for (DomElement* box : {a, b}) for (const char* name : {"r:keep-with-next.within-page", "r:keep-with-previous.within-page"})
+            if (box->get_attribute(name)) ASSERT_TRUE(box->remove_attribute(name));
+        StrBuf* style = strbuf_new(); ASSERT_NE(style, nullptr);
+        strbuf_append_format(style, "background:blue;break-after:%s", item.after); ASSERT_TRUE(a->set_attribute("style", style->str));
+        strbuf_reset(style); strbuf_append_format(style, "background:red;break-before:%s", item.before);
+        ASSERT_TRUE(b->set_attribute("style", style->str)); strbuf_free(style);
+        if (item.strength) ASSERT_TRUE((item.previous ? b : a)->set_attribute(item.previous ? "r:keep-with-previous.within-page" : "r:keep-with-next.within-page", item.strength));
         ASSERT_TRUE(a->set_attribute("r:keep-together.within-page", item.strength ? item.strength : "always"));
         ASSERT_TRUE(b->set_attribute("r:keep-together.within-page", "always"));
-        ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-        EXPECT_EQ(occurrence_page(source_glyph_text(tree, a->first_child, "A")), 2u);
-        EXPECT_EQ(occurrence_page(source_glyph_text(tree, b->first_child, "G")), 2u);
-        EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        ASSERT_TRUE(reflow()) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        for (size_t i = 0; i < 7; i++) {
+            char label[] = {(char)('A' + i), 0}; DomNode* source_text = (i < 4 ? a : b)->first_child;
+            LayoutViewNode* line = source_glyph_text(tree, source_text, label); ASSERT_NE(line, nullptr);
+            EXPECT_EQ(occurrence_page(line), 2u); EXPECT_FLOAT_EQ(line->rect.x, i < 4 ? 10.0f : 130.0f);
+            expect_glyph_line_position(line, 10.0f + 20.0f * static_cast<float>(i % 4), 20.0f);
+        }
         expect_source_range_coverage(tree, a->first_child); expect_source_range_coverage(tree, b->first_child);
     }
-    ASSERT_TRUE(b->set_attribute("style", "break-before:page")); ASSERT_TRUE(view_tree_model_reset(tree));
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 60, 15), 0xffff0000u); EXPECT_EQ(snapshot_pixel(expected, 180, 15), 0xff0000ffu);
+    ASSERT_TRUE(b->set_attribute("style", "background:red;break-before:page")); ASSERT_TRUE(reflow()) << diagnostic.reason;
     EXPECT_EQ(occurrence_page(source_glyph_text(tree, a->first_child, "A")), 1u);
-    EXPECT_EQ(occurrence_page(source_glyph_text(tree, b->first_child, "E")), 2u);
-    EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    LayoutViewNode* first = source_glyph_text(tree, b->first_child, "E"); ASSERT_NE(first, nullptr);
+    EXPECT_EQ(occurrence_page(first), 2u); EXPECT_FLOAT_EQ(first->rect.x, 10.0f); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    options = paged_layout_options_default(); ASSERT_TRUE(reflow()) << diagnostic.reason;
+    expect_source_range_coverage(retained, a->first_child); expect_source_range_coverage(retained, b->first_child);
+    EXPECT_EQ(occurrence_page(source_glyph_text(retained, a->first_child, "A")), 2u);
+    EXPECT_FLOAT_EQ(source_glyph_text(retained, b->first_child, "E")->rect.x, 130.0f);
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 2); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
 }
 
 TEST_F(SecondaryViewTest, DefaultSheetOversizedKeepsRelaxOnlyOnFreshSheetsAndRollBackFailures) {
+    init_vector_engine();
     stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
     DomElement* sequence = body_column_sequence("size:240px 100px;margin:10px", "column-count:2;column-gap:20px"); ASSERT_NE(sequence, nullptr);
     ASSERT_NE(block("Lead\nLead", nullptr, "p", sequence), nullptr);
-    DomElement* group = block(nullptr, "break-inside:avoid-page", "div", sequence); ASSERT_NE(group, nullptr);
+    DomElement* group = block(nullptr, "background:blue;break-inside:avoid-page", "div", sequence); ASSERT_NE(group, nullptr);
     DomElement* text = block("A\nB\nC\nD\nE\nF\nG\nH\nI", nullptr, "p", group); ASSERT_NE(text, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_GT(diagnostic.relaxed_avoidance, 0u);
-    EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "A")), 2u);
-    EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "I")), 3u);
-    expect_source_range_coverage(tree, text->first_child);
+    auto reflow = [&]() { diagnostic = {}; return view_tree_model_reset(tree) && layout_secondary_view(tree, &options, &diagnostic) == TYPESET_OK; };
+    // integration §§4.1/4.4 retire rejection and speculative fresh-sheet policy for oversized content.
+    for (const char* strength : {"auto", "always", "7"}) {
+        SCOPED_TRACE(strength); ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", strength));
+        ASSERT_TRUE(group->set_attribute("style", !strcmp(strength, "auto") ? "background:blue;break-inside:avoid-page" : "background:blue;break-inside:auto"));
+        ASSERT_TRUE(reflow()) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 2u); EXPECT_GT(diagnostic.relaxed_avoidance, 0u);
+        for (size_t i = 0; i < 9; i++) {
+            char label[] = {(char)('A' + i), 0}; LayoutViewNode* line = source_glyph_text(tree, text->first_child, label); ASSERT_NE(line, nullptr);
+            size_t slot = (i + 2) / 4;
+            EXPECT_EQ(occurrence_page(line), slot / 2 + 1); EXPECT_FLOAT_EQ(line->rect.x, slot % 2 ? 130.0f : 10.0f);
+            expect_glyph_line_position(line, 10.0f + 20.0f * static_cast<float>((i + 2) % 4), 20.0f);
+        }
+        expect_source_range_coverage(tree, text->first_child);
+    }
     ViewPreviewOptions preview = view_preview_options_default();
     ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
-    for (bool budget : {false, true}) {
-        SCOPED_TRACE(budget); tree->reset_retained();
-        ASSERT_TRUE(group->set_attribute("style", "break-inside:auto"));
-        ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", budget ? "auto" : "always"));
-        options.max_pages = budget ? 1 : 100;
-        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), budget ? TYPESET_BUDGET_EXHAUSTED : TYPESET_UNPLACEABLE) << diagnostic.reason;
-        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(retained->model->page_count, 3u);
-        expect_source_range_coverage(retained, text->first_child);
-    }
-    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 60, 15), 0xffff0000u); EXPECT_EQ(snapshot_pixel(expected, 60, 75), 0xffffffffu);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    options = paged_layout_options_default(); ASSERT_TRUE(reflow()) << diagnostic.reason;
+    expect_same_page_pixels(tree, retained, 1); expect_same_page_pixels(tree, retained, 2);
+    ASSERT_TRUE(group->set_attribute("style", "background:red;break-inside:auto")); ASSERT_TRUE(reflow()) << diagnostic.reason;
+    ImageSurface* pixels = render_secondary_page_snapshot(tree, 2); ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(snapshot_pixel(pixels, 60, 15), 0xff0000ffu); image_surface_destroy(pixels);
+    pixels = render_secondary_page_snapshot(retained, 2); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels); image_surface_destroy(expected); image_surface_destroy(pixels);
+    expect_source_range_coverage(retained, text->first_child); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
 }
 
 TEST_F(SecondaryViewTest, DefaultSheetEarlyEjectMeasuresWidowsAtTheFollowingSheetsFirstColumn) {
@@ -11545,20 +12679,72 @@ TEST_F(SecondaryViewTest, DefaultSheetEarlyEjectMeasuresWidowsAtTheFollowingShee
 }
 
 TEST_F(SecondaryViewTest, ColumnDisplayAlignmentMovesOnlyTheCurrentRootAfterItsFramesClose) {
+    init_vector_engine();
     stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
     DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
     DomElement* region = page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"); ASSERT_NE(region, nullptr);
-    ASSERT_TRUE(region->set_attribute("display-align", "center"));
     DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
-    DomElement* first = block("A", nullptr, "p", sequence); ASSERT_NE(first, nullptr);
-    DomElement* second = block("B\nC", "break-before:column", "p", sequence); ASSERT_NE(second, nullptr);
+    DomElement* first = block("A", "background:red", "p", sequence); ASSERT_NE(first, nullptr);
+    DomElement* second = block("B\nC", "break-before:column;background:blue", "p", sequence); ASSERT_NE(second, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 1u);
-    LayoutViewNode* a = source_glyph_text(tree, first->first_child, "A"), *b = source_glyph_text(tree, second->first_child, "B");
-    LayoutViewNode* c = source_glyph_text(tree, second->first_child, "C"); ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr);
-    EXPECT_FLOAT_EQ(a->rect.x, 10); EXPECT_FLOAT_EQ(a->rect.y, 40);
-    EXPECT_FLOAT_EQ(b->rect.x, 110); EXPECT_FLOAT_EQ(b->rect.y, 30); EXPECT_FLOAT_EQ(c->rect.y, 50);
+    const char* alignments[] = {"before", "center", "after"};
+    ViewTree* retained = nullptr; ImageSurface* expected = nullptr;
+    DomElement* top = nullptr; DomElement* bottom = nullptr; DomElement* note = nullptr;
+    for (size_t scenario = 0; scenario < 3; scenario++) {
+        SCOPED_TRACE(scenario);
+        bool explicit_columns = scenario != 0;
+        bool auxiliary = scenario == 2;
+        if (scenario == 1) {
+            ASSERT_NE(page_column(region, "80px", "60px"), nullptr);
+            ASSERT_NE(page_column(region, "80px", "80px", "100px"), nullptr);
+        }
+        if (auxiliary) {
+            note = block("Note", "float:footnote;height:10px;font:10px/10px Arial", "span", second);
+            top = block("Top", "float:top;float-reference:page;height:10px", "div", sequence);
+            bottom = block("Bottom", "float:bottom;float-reference:page;height:10px", "div", sequence);
+            ASSERT_NE(note, nullptr); ASSERT_NE(top, nullptr); ASSERT_NE(bottom, nullptr);
+        }
+        for (size_t mode = 0; mode < 3; mode++) {
+            SCOPED_TRACE(alignments[mode]); ASSERT_TRUE(region->set_attribute("display-align", alignments[mode]));
+            ASSERT_TRUE(view_tree_model_reset(tree));
+            ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+            ASSERT_EQ(tree->model->page_count, 1u);
+            LayoutViewNode* a = source_glyph_text(tree, first->first_child, "A"), *b = source_glyph_text(tree, second->first_child, "B");
+            LayoutViewNode* c = source_glyph_text(tree, second->first_child, "C"); ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr);
+            float factor = static_cast<float>(mode) * 0.5f;
+            float first_top = 10.0f + factor * (explicit_columns ? 40.0f : 60.0f);
+            float second_top = auxiliary ? 20.0f + factor * 10.0f : 10.0f + factor * 40.0f;
+            EXPECT_FLOAT_EQ(a->rect.x, 10); expect_glyph_line_position(a, first_top, 20.0f);
+            EXPECT_FLOAT_EQ(b->rect.x, 110); expect_glyph_line_position(b, second_top, 20.0f);
+            expect_glyph_line_position(c, second_top + 20.0f, 20.0f);
+            for (LayoutViewNode* node : {a, b, c}) EXPECT_EQ(occurrence_page(node), 1u);
+            if (auxiliary) {
+                for (DomElement* element : {top, bottom, note}) {
+                    LayoutViewNode* box = source_fragment(tree, element, element == note ? VIEW_FRAGMENT_NOTE : VIEW_FRAGMENT_FLOAT, true);
+                    ASSERT_NE(box, nullptr); EXPECT_EQ(occurrence_page(box), 1u);
+                    EXPECT_FLOAT_EQ(box->rect.x, 110.0f);
+                    EXPECT_FLOAT_EQ(box->rect.y, element == top ? 10.0f : element == bottom ? 70.0f : 80.0f);
+                    EXPECT_FLOAT_EQ(box->rect.height, 10.0f);
+                }
+            }
+            expect_source_range_coverage(tree, first->first_child); expect_source_range_coverage(tree, second->first_child);
+            ImageSurface* pixels = render_secondary_page_snapshot(tree, 1); ASSERT_NE(pixels, nullptr);
+            EXPECT_EQ(snapshot_pixel(pixels, 70, static_cast<size_t>(first_top + 2.0f)), 0xff0000ffu);
+            EXPECT_EQ(snapshot_pixel(pixels, 170, static_cast<size_t>(second_top + 2.0f)), 0xffff0000u);
+            if (!explicit_columns && mode == 1) {
+                ViewPreviewOptions preview = view_preview_options_default();
+                retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+                expected = pixels;
+            } else image_surface_destroy(pixels);
+        }
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_nodes = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels);
+    image_surface_destroy(expected); image_surface_destroy(pixels); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
 }
 
 TEST_F(SecondaryViewTest, ColumnAndPageAvoidanceAndKeepsUseTheirOwnBoundaryDomains) {
@@ -11582,8 +12768,10 @@ TEST_F(SecondaryViewTest, ColumnAndPageAvoidanceAndKeepsUseTheirOwnBoundaryDomai
         ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
         ASSERT_EQ(tree->model->page_count, 1u);
         LayoutViewNode* node = source_glyph_text(tree, a->first_child, "A"); ASSERT_NE(node, nullptr);
-        EXPECT_FLOAT_EQ(node->rect.x, item.x); EXPECT_FLOAT_EQ(node->rect.y, item.x == 10 ? 70 : 10);
+        EXPECT_FLOAT_EQ(node->rect.x, item.x); expect_glyph_line_position(node, item.x == 10 ? 70.0f : 10.0f, 20.0f);
         node = source_glyph_text(tree, b->first_child, "B"); ASSERT_NE(node, nullptr); EXPECT_FLOAT_EQ(node->rect.x, 110);
+        expect_glyph_line_position(node, item.x == 10 ? 10.0f : 30.0f, 20.0f);
+        expect_source_range_coverage(tree, a->first_child); expect_source_range_coverage(tree, b->first_child);
         EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
     }
 }
@@ -12899,7 +14087,14 @@ TEST_F(SecondaryViewTest, SmallerTerminalColumnsRetainRealBodyTailWithoutOscilla
     ImageSurface* expected = render_secondary_page_snapshot(preview, 3); ASSERT_NE(expected, nullptr);
     ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 2;
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
-    EXPECT_EQ(tree->model->page_count, 0u); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    EXPECT_EQ(diagnostic.status, TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed);
+    ASSERT_TRUE(view_tree_model_reset(tree)); options = paged_layout_options_default(); diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    ImageSurface* recovered = render_secondary_page_snapshot(tree, 3); ASSERT_NE(recovered, nullptr);
+    expect_same_surface_pixels(expected, recovered); image_surface_destroy(recovered);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
     ImageSurface* retained = render_secondary_page_snapshot(preview, 3); ASSERT_NE(retained, nullptr);
     expect_same_surface_pixels(expected, retained); image_surface_destroy(expected); image_surface_destroy(retained);
     ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
@@ -13161,19 +14356,35 @@ TEST_F(SecondaryViewTest, NativeAuthoredNoteUsesTheLastCallAreaAndDoesNotGenerat
 
 TEST_F(SecondaryViewTest, NativeAuthoredEmptyCallKeepsAnAnchorAndClassicNotesKeepTheirOwnCounter) {
     stylesheet("@page { size:220px 120px; margin:10px } p, div, span { margin:0; font:10px/12px Arial }");
+    ASSERT_NE(block("Prelude", "height:24px"), nullptr);
     DomElement* paragraph = block("Statement "); ASSERT_NE(paragraph, nullptr);
     DomElement* body = nullptr;
     DomElement* note = authored_note(paragraph, nullptr, "Explicit", nullptr, &body); ASSERT_NE(note, nullptr);
+    DomElement* insertion = block(nullptr, nullptr, "span", paragraph); ASSERT_NE(insertion, nullptr);
+    ASSERT_TRUE(insertion->set_attribute("id", "insertion"));
     DomElement* classic = block("Classic", "float:footnote", "span", paragraph); ASSERT_NE(classic, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     LayoutViewNode* anchor = source_fragment(tree, note, VIEW_FRAGMENT_BODY, false); ASSERT_NE(anchor, nullptr);
     EXPECT_EQ(anchor->glyph_run, nullptr); EXPECT_FLOAT_EQ(anchor->rect.width, 0.0f);
+    LayoutViewNode* point = source_fragment(tree, insertion, VIEW_FRAGMENT_BODY, false); ASSERT_NE(point, nullptr);
+    EXPECT_EQ(point->glyph_run, nullptr); EXPECT_FLOAT_EQ(point->rect.width, 0.0f);
+    EXPECT_FLOAT_EQ(point->rect.x, anchor->rect.x); EXPECT_EQ(occurrence_page(point), 1u);
     LayoutViewNode* call = source_fragment(tree, classic, VIEW_FRAGMENT_BODY, false); ASSERT_NE(call, nullptr);
     ASSERT_NE(call->glyph_run, nullptr); EXPECT_STREQ(call->glyph_run->text, "1");
     LayoutViewNode* note_box = source_fragment(tree, body, VIEW_FRAGMENT_NOTE, true); ASSERT_NE(note_box, nullptr);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(note_box, text);
     EXPECT_STREQ(text->str, "Explicit"); strbuf_free(text);
+    RdtLogicalRect original = point->rect;
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ViewPageBox* old_page = tree->model->pages.get()[0];
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(paragraph->set_attribute("style", "break-before:page"));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* moved = source_fragment(tree, insertion, VIEW_FRAGMENT_BODY, false); ASSERT_NE(moved, nullptr);
+    EXPECT_EQ(occurrence_page(moved), 2u); EXPECT_FLOAT_EQ(moved->rect.width, 0.0f);
+    EXPECT_EQ(view_tree_page_material(retained, retained->model->pages.get()[0]), old_page);
+    EXPECT_EQ(occurrence_page(point), 1u); EXPECT_FLOAT_EQ(point->rect.x, original.x); EXPECT_FLOAT_EQ(point->rect.y, original.y);
 }
 
 TEST_F(SecondaryViewTest, NativeAuthoredNoteAnchorsAfterRetainedWhitespaceAreasFromItsCall) {
@@ -13206,9 +14417,26 @@ TEST_F(SecondaryViewTest, NativeAuthoredNotesDiagnoseInvalidBindingsAndNestedOrB
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
     EXPECT_STREQ(diagnostic.reason, "note call requires inline material"); EXPECT_EQ(diagnostic.source.address, call);
     ASSERT_TRUE(call->DomNode::remove_child(block_call)); ASSERT_TRUE(view_tree_model_reset(tree));
+    // block descendants of an atomic inline stay in that inline's formatting context; hidden blocks make no call areas.
+    DomElement* atomic = block(nullptr, "display:inline-block", "span", call); ASSERT_NE(atomic, nullptr);
+    DomElement* material = block("Atomic", nullptr, "div", atomic); ASSERT_NE(material, nullptr);
+    DomElement* hidden = block("Hidden", "display:none", "div", call); ASSERT_NE(hidden, nullptr);
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_NE(source_glyph_text(tree, material->first_child, "Atomic"), nullptr);
+    EXPECT_EQ(source_fragment(tree, hidden, VIEW_FRAGMENT_BODY, true), nullptr);
+    ASSERT_TRUE(call->DomNode::remove_child(atomic)); ASSERT_TRUE(call->DomNode::remove_child(hidden));
+    ASSERT_TRUE(view_tree_model_reset(tree));
     DomElement* nested = authored_note(body->first_child_element(), "Nested", "Body"); ASSERT_NE(nested, nullptr);
     EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
     EXPECT_STREQ(diagnostic.reason, "footnotes require the paged body flow"); EXPECT_EQ(diagnostic.source.address, nested);
+    ASSERT_TRUE(nested->parent->remove_child(nested)); ASSERT_TRUE(view_tree_model_reset(tree));
+    nested = authored_note(call, "Nested call", "Body"); ASSERT_NE(nested, nullptr);
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_STREQ(diagnostic.reason, "footnotes require the paged body flow"); EXPECT_EQ(diagnostic.source.address, nested);
+    ASSERT_TRUE(call->DomNode::remove_child(nested)); ASSERT_TRUE(view_tree_model_reset(tree));
+    DomElement* classic = block("Nested classic", "float:footnote", "span", body->first_child_element()); ASSERT_NE(classic, nullptr);
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_STREQ(diagnostic.reason, "footnotes require the paged body flow"); EXPECT_EQ(diagnostic.source.address, classic);
 }
 
 TEST_F(SecondaryViewTest, FoAuthoredFootnotesLowerToCommonBindingsAndDiagnoseOriginalNestedSources) {

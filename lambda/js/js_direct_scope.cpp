@@ -158,7 +158,8 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
     case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)pattern;
         if (walk.mode == DIRECT_PATTERN_BIND) {
-            NameEntry* entry = js_scope_lookup_current(walk.tp, id->name);
+            // var bindings still pass through hoisting/conflict checks after lexical predeclaration.
+            NameEntry* entry = walk.kind == JS_VAR_VAR ? NULL : js_scope_lookup_current(walk.tp, id->name);
             if (!entry) entry = js_scope_define(walk.tp, id->name,
                 walk.owner ? walk.owner : pattern, walk.kind);
             id->entry = entry;
@@ -392,6 +393,10 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
 
 static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
     if (!tp || !node) return;
+    if (node->node_type == JS_AST_NODE_LABELED_STATEMENT) {
+        direct_predeclare_one(tp, ((JsLabeledStatementNode*)node)->body);
+        return;
+    }
     if (node->node_type == AST_NODE_EXPORT) {
         direct_predeclare_one(tp, ((JsExportNode*)node)->declaration);
         return;

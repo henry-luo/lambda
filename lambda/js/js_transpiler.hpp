@@ -192,6 +192,7 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
 
+bool js_c_source_is_module(const char* source, size_t length);
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                            JsParseMode mode);
 
@@ -250,8 +251,11 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
 
 // Batch mode preamble support (two-module MIR split)
 struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
+struct MvpLmdCode;
 
 struct JsPreambleState {
+    MvpLmdCode* mvp_code;       // immutable code image; realm metadata is never cached
+    bool mvp_realm;             // declarations belong to the persistent public MVP realm
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
     char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
@@ -415,7 +419,6 @@ Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
 
 // Type conversion functions
-Item js_to_primitive(Item value, const char* hint);
 Item js_to_number(Item value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);

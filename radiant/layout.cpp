@@ -134,8 +134,13 @@ void layout_content_visibility_forget_subtree(DomNode* root) {
     view_geometry_walk_dom_tree(root, content_visibility_forget_node, nullptr);
 }
 
+static ViewTree* content_visibility_view_tree(LayoutContext* lycon) {
+    // geometry uses the DOM workspace; relevance and remembered sizes belong to the selected edition.
+    return lycon && lycon->paged ? paged_flow_view_tree(lycon) : layout_context_view_tree(lycon);
+}
+
 static ContentVisibilityState* content_visibility_state(LayoutContext* lycon, bool create) {
-    ViewTree* tree = layout_context_view_tree(lycon);
+    ViewTree* tree = content_visibility_view_tree(lycon);
     if (!tree) return nullptr;
     if (!tree->content_visibility_state && create) {
         // per-view history survives the loader's replacement of geometry allocators.
@@ -181,6 +186,26 @@ bool layout_content_visibility_clone(ViewTree* destination, const ViewTree* sour
     }
     layout_content_visibility_destroy(destination);
     return false;
+}
+
+bool LayoutContentVisibilityTransaction::begin(ViewTree* target) {
+    if (tree || !target || !target->model) return false;
+    ViewTree staging = {};
+    if (!layout_content_visibility_clone(&staging, target, target->model->document)) return false;
+    tree = lam::up(target); saved = target->content_visibility_state;
+    target->content_visibility_state = staging.content_visibility_state;
+    staging.content_visibility_state = nullptr;
+    return true;
+}
+
+void LayoutContentVisibilityTransaction::close(bool commit) {
+    if (!tree) return;
+    // only a committed edition may replace the last successful rendering update's sizing history.
+    ViewTree discarded = {};
+    discarded.content_visibility_state = commit ? saved : tree->content_visibility_state;
+    if (!commit) tree->content_visibility_state = saved;
+    saved = nullptr; tree = nullptr;
+    layout_content_visibility_destroy(&discarded);
 }
 
 bool layout_content_visibility_is_skipped(LayoutContext* lycon, DomElement* element) {
@@ -275,7 +300,7 @@ static bool content_visibility_relevant(LayoutContext* lycon, ViewBlock* block) 
     float width = lycon->width;
     float height = lycon->height;
     if (width <= 0.0f || height <= 0.0f) return true;
-    ViewTree* tree = layout_context_view_tree(lycon);
+    ViewTree* tree = content_visibility_view_tree(lycon);
     float margin = tree->content_visibility_activation_margin;
     Rect viewport = {-width * margin, -height * margin,
         width * (1.0f + 2.0f * margin), height * (1.0f + 2.0f * margin)};
@@ -319,8 +344,8 @@ static bool content_visibility_measure(DomNode* node, void* context) {
 
 bool layout_content_visibility_settle(LayoutContext* lycon, DomNode* root, bool* changed) {
     if (changed) *changed = false;
-    if (!lycon || !lycon->doc || !lycon->doc->view_tree) return true;
-    ViewTree* tree = lycon->doc->view_tree;
+    ViewTree* tree = content_visibility_view_tree(lycon);
+    if (!lycon || !lycon->doc || !tree) return true;
     ContentVisibilityState* state = tree->content_visibility_state;
     ContentVisibilitySettle pass = {lycon, false};
     if (!view_geometry_walk_dom_tree(root, content_visibility_measure, &pass)) return false;
@@ -997,6 +1022,17 @@ static void reset_position_style_cache(LayoutContext* lycon, ViewSpan* view) {
 static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view) {
     if (!lycon || !view) return;
 
+    if (view->blk) {
+        // removed preferred sizes otherwise survive as authored values, notably on the root's direct layout path.
+        BlockProp* block = view->block_mut();
+        block->given_width = BLOCK_PROP_DEFAULT.given_width;
+        block->given_height = BLOCK_PROP_DEFAULT.given_height;
+        block->given_width_percent = BLOCK_PROP_DEFAULT.given_width_percent;
+        block->given_height_percent = BLOCK_PROP_DEFAULT.given_height_percent;
+        block->given_width_type = BLOCK_PROP_DEFAULT.given_width_type;
+        block->given_height_type = BLOCK_PROP_DEFAULT.given_height_type;
+    }
+
     if (view->scroller) {
         // Retained recascade must discard removed overflow declarations before
         // HTML defaults and the current logical/physical cascade are applied.
@@ -1191,13 +1227,9 @@ bool is_only_whitespace(const char* str) {
 
 static void layout_note_inline_atomic_wrap_opportunity(LayoutContext* lycon,
                                                         DomNode* node) {
-    if (!lycon || !node || !node->parent || !node->parent->is_element()) return;
-    DomElement* parent = node->parent->as_element();
-    CssEnum ws = parent->blk ? parent->block()->white_space : CSS_VALUE_NORMAL;
-    if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
-        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
-        lycon->line.wrap_opportunity_before_nowrap = true;
-    }
+    if (!lycon || !node) return;
+    lycon->line.wrap_opportunity_before_nowrap =
+        layout_atomic_inline_boundary_allows_soft_wrap(lycon, node, false);
 }
 
 static bool layout_marker_has_list_item_trailing_space(LayoutContext* lycon,
@@ -1669,6 +1701,9 @@ bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
             CssDeclaration* declaration = style_tree_get_declaration(
                 ancestor_element->specified_style, CSS_PROPERTY_BORDER_SPACING);
             if (declaration && declaration->value) {
+                // inherited lengths retain the declaring ancestor's font, including through nontable boxes.
+                LayoutFontScope font_scope(lycon);
+                if (ancestor_element->font) setup_font(lycon->ui_context, &lycon->font, ancestor_element->font);
                 LayoutBorderSpacingValue resolved =
                     layout_resolve_border_spacing_value(lycon, declaration->value);
                 if (resolved.resolved) {
@@ -4956,6 +4991,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.parent = lam::up(&saved_block);
 
     ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
+    // the root bypasses flow dispatch; refresh its display before UA defaults and the authored cascade.
+    html->display = resolve_display_value(elmt);
     // the root box is the initial containing block: its origin is the document origin
     html->x = html->y = 0.0f;
     html->width = lycon->block.content_width;
@@ -5314,6 +5351,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 if (strcmp(tag_name, "body") == 0) {
                     body_node = child;
                 }
+            } else if (child->is_text()) {
+                // document fragments can put anonymous inline runs directly in the root box.
+                layout_flow_node(lycon, child);
             }
             child = child->next_sibling;
         }

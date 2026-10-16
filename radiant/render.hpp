@@ -4237,6 +4237,10 @@ int cmd_render_batch(int argc, char** argv);
 struct RasterRenderContext;
 
 void render_marker_view(struct RasterRenderContext* rdcon, ViewSpan* marker);
+inline float render_marker_baseline_y(const MarkerProp* marker, float line_top) {
+    // marker coordinates start at the line box; its computed ascent already includes signed leading.
+    return line_top + marker->ascender;
+}
 bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker,
     float origin_x, float origin_y, FontBox* font);
 bool render_paint_border_image(PaintList* paint, UiContext* ui, BorderProp* border, Rect rect);
