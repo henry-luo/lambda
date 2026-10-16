@@ -1,5 +1,10 @@
 # Lambda — Type Support Design: Enforcement First
 
+> **2026-10-16 ruling; implementation pending:** **S3.1v2–S3.5, S7.5.1v2,
+> S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v2** replace the error-falsy and
+> `or`-rescue decisions. See TE-22. Earlier descriptions of `or` as error
+> handling are historical, not the current rule.
+
 **Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
 firewall, `or`-narrowing, fault channel), tracked in
@@ -2305,6 +2310,63 @@ error operand as it is and otherwise builds `error(v)` and stamps the operand's 
 non-error was removed. Fixture `test/lambda/raise_non_error.ls`, pinned on every tier.
 
 **Spec linkage.** TE-21 → S7.4.6.
+
+### TE-22 — Errors have no truth value (decided 2026-10-16, user)
+
+**Authority:** **S3.1v2–S3.5, S7.5.1v2, S7.5.3v2, S7.6.6v3, S7.7.7v2,
+S7.9.2v2**. This supersedes TE-13/TE-16's `or`-rescue and error-falsy rules.
+The handler and postfix propagation rules themselves are unchanged.
+
+**Decision.** Ordinary defaults and error recovery are different intentions.
+`null`, `false`, and `""` remain falsy. An error is neither truthy nor falsy:
+logical evaluation preserves it, including `if (e) a else b`, which evaluates
+neither branch when `e` is an error. Each required operand is evaluated once;
+unselected operands remain unevaluated. This flows as an expression result under
+**S7.7.1**, rather than adding implicit function returns.
+
+| Expression | Result / evaluation |
+|---|---|
+| `e or fallback`, where `e` is an error | The same error; fallback not evaluated |
+| `e and rhs`, where `e` is an error | The same error; rhs not evaluated |
+| `not e`, where `e` is an error | The same error |
+| `if (e) a else b`, where `e` is an error | The same error; neither arm evaluated |
+| `true or rhs` / `false and rhs` | The left Boolean; rhs not evaluated |
+| `null or fallback` / `false or fallback` / `"" or fallback` | Evaluate fallback once |
+| `e ^ { fallback }` | Explicit error recovery; non-error values pass through |
+
+**Acknowledgment and types.** `or` no longer acknowledges a raised `T^E`
+channel, and its type retains any reachable error alternative. A bare
+`let x = hard_call() or fallback` is no longer an acknowledgment. Use
+`hard_call() ^ { fallback }` to recover, or `hard_call()^ or fallback` to
+propagate and default a successful falsy value. Explicit error-admitting
+destinations and `match` error arms remain valid under **S7.5.1v2**.
+
+**Migration.** Do not mechanically turn every `or` into a handler: a handler
+passes through successful `null`, `false`, and `""`. Where the complete former
+behavior was intended, `(expr ^ { null }) or fallback` explicitly converts the
+error into absence and evaluates the selected fallback once. A fallback error
+remains a fresh error, not another attempt to invoke the same recovery. UI
+attribute conversions (`int(attribute) or 0`) and source-highlight parsing
+(`parse(...) or null`) are concrete sites to review for intent.
+
+**Remaining decisions.** This ruling does not remove first-class error values:
+metadata inspection, `print`, explicit handlers, `e^`, `raise`, and storage in
+error-admitting slots remain meaningful (**S7.4.4, S7.4.6, S7.6, S7.8, S7.9**).
+Equality currently returns false for an error operand, with `!=` its negation
+(**S5.1.1–S5.1.2**); total sort places error values last (**S6.2.1**). Changing
+these requires a separate ruling covering deep equality, grouping and dedup.
+For collection predicates (`where`, `|:`, `that`, quantifiers) and procedural
+loop conditions, the result boundary on predicate failure still needs an
+explicit policy; it must not be inferred from an implementation's Bool ABI.
+
+**Implementation status and acceptance.** Not implemented in this decision-only
+change. The eventual migration must cover interpreter and MIR evaluation,
+shared truth coercions, native Bool lanes, static acknowledgment/type inference,
+diagnostics, docs and package recovery sites together. Acceptance must show
+preserved error payloads, a single condition evaluation, skipped `if` arms and
+short-circuit operands, fresh fallback errors, ordinary falsy defaults, and
+retained error types/obligations on interp, jit and auto. No engine build is
+needed to validate this record.
 
 ## 8. Phasing
 
