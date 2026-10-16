@@ -90,6 +90,8 @@ void radiant_native_resolved(LayoutContext* lycon, DomElement* element);
 bool radiant_table_omits_repeat(DomElement* table, bool footer);
 // the share of a table's remaining width a column takes (XSL proportional-column-width), or 0
 float radiant_table_column_share(DomElement* column);
+uint32_t radiant_table_column_number(DomElement* element);
+uint32_t radiant_table_column_property_span(DomElement* element);
 bool radiant_whitespace_resolve(ViewTree* tree, ViewCssStyle* style);
 RadiantWhitespaceSpec radiant_whitespace_spec(const ViewCssStyle* style);
 
@@ -118,6 +120,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style);
 bool radiant_table_column_proportion(const CssValue* value, float* result);
 struct RadiantTableColumnRange { size_t column, next, repeat, property_span; };
 bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range);
+bool radiant_table_column_range(DomElement* source, size_t next, size_t limit, RadiantTableColumnRange* range);
 bool radiant_decoration_retain(const ViewCssStyle* style, bool padding, bool after);
 bool radiant_text_metrics(const ViewCssStyle* style, float* altitude, float* depth);
 RadiantSpaceSpec radiant_spaces_resolve(const RadiantSpaceSpec* spaces, size_t count, bool start, bool end);

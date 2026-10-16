@@ -891,7 +891,7 @@ static void svg_cb_render_marker(RenderContext* vctx, ViewSpan* marker, float ab
         default: {
             // text markers (decimal, roman, alpha, etc.)
             if (marker_prop->text_content && *marker_prop->text_content) {
-                float baseline_y = render_text_baseline_y(font, y);
+                float baseline_y = render_marker_baseline_y(marker_prop, y);
                 const char* src = marker_prop->text_content;
                 StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);
                 escape_append(escaped, src, strlen(src), ESCAPE_RULES_HTML_TEXT,

@@ -107,6 +107,9 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 }
 
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
+    // the grid has settled since the source-order pass resolved caption percentages against its parent.
+    if (cap->blk && !isnan(cap->block()->given_width_percent))
+        cap->block_mut()->given_width = wrapper_content_width * cap->block()->given_width_percent * 0.01f;
     if (cap->blk && cap->block_mut()->given_width > 0) {
         cap->width = layout_css_size_to_border_box(
             cap->bound, layout_box_sizing(cap), cap->block()->given_width, true);

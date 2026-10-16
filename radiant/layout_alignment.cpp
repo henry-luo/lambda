@@ -216,13 +216,9 @@ float compute_font_baseline_ascender(
         return split_asc;
     }
 
-    TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&fbox));
-    if (typo.valid && typo.use_typo_metrics) {
-        return typo.ascender;
-    }
-
-    const FontMetrics* metrics = font_get_metrics(font_box_handle(&fbox));
-    if (metrics) return metrics->hhea_ascender;
+    // text geometry and glyph paint must use the same platform baseline offset.
+    float ascent = font_get_rendering_ascender(font_box_handle(&fbox));
+    if (ascent > 0.0f) return ascent;
 
     if (font->ascender > 0.0f) return font->ascender;
     if (font->font_size > 0.0f) return font->font_size * 0.8f;

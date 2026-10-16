@@ -195,8 +195,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
                 Color previous_color = rdcon->color;
                 rdcon->color = color;
                 float s = rdcon->raster_scale;
-                const FontMetrics* _mk = font_get_metrics(font_box_handle(marker_font));
-                float ascend = _mk ? (_mk->hhea_ascender * s) : 12.0f;
+                float ascend = render_marker_baseline_y(marker_prop, 0.0f) * s;
                 FontStyleDesc marker_style = font_style_desc_from_prop(marker_font->style);
                 FontHandle* marker_handle = font_box_handle(marker_font);
                 const char* marker_end = marker_prop->text_content +

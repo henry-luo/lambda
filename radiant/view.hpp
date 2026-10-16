@@ -2887,7 +2887,8 @@ struct TableCellProp {
         CELL_VALIGN_TOP = 0,
         CELL_VALIGN_MIDDLE = 1,
         CELL_VALIGN_BOTTOM = 2,
-        CELL_VALIGN_BASELINE = 3
+        CELL_VALIGN_BASELINE = 3,
+        CELL_VALIGN_RELATIVE_BEFORE = 4
     } vertical_align;
 
     // Cell spanning metadata
