@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-15
 
-**Status:** implementation authorized by the user on 2026-10-15. The common native API, Lambda/Radiant migration, eight readers, seven writers, and thumbnail planner are implemented; validation and supported subsets are recorded in [the implementation record](impl/Lib_Image_Impl.md).
+**Status:** implementation authorized by the user on 2026-10-15. The common native API, Lambda/Radiant migration, eight readers, six writers, and thumbnail planner are implemented. The 2026-10-16 decoder-only AVIF profile retires AVIF encoding to reduce native binary size; validation and supported subsets are recorded in [the implementation record](impl/Lib_Image_Impl.md).
 
 **Confirmed source policy (2026-10-15):** the user directs that official codec source be imported under `./lib/image/` and modified directly, following the local-source approach of `lib/re2/`. Separate vendor patch files are not required for this image-library work.
 
@@ -167,7 +167,7 @@ For path output, success includes successful encoding, writing, flushing/closing
 | JPEG | [libjpeg-turbo](https://www.libjpeg-turbo.org/Documentation/Documentation), existing dependency | Baseline/progressive, grayscale/RGB, EXIF orientation; CMYK/YCCK only with an explicitly supported conversion | Move existing JPEG output behind the common encoder; quality/subsampling controls |
 | GIF | [giflib](https://giflib.sourceforge.net/), existing dependency | Still and animated GIF; preserve compositing, disposal, delay, loop behavior | Deferred; capability reports read-only initially |
 | WebP | [libwebp](https://developers.google.com/speed/webp/docs/api), existing dependency | Lossy/lossless/alpha stills; animation is a separate advertised capability | Still lossy/lossless encoding |
-| AVIF | [AOMedia libavif](https://github.com/AOMediaCodec/libavif), with libaom decode/encode | Still SDR images, alpha, container transforms; explicit bit-depth/color handling | Still encoding through libaom |
+| AVIF | [AOMedia libavif](https://github.com/AOMediaCodec/libavif), with decoder-only libaom | Still SDR images, alpha, container transforms; explicit bit-depth/color handling | Read-only; reports `CODEC_UNAVAILABLE` |
 | BMP | [NetSurf libnsbmp](https://www.netsurf-browser.org/projects/libnsbmp/) decoder | Common Windows palette/RGB/bitfield variants; RLE4/RLE8 gated by verified upstream support | Uncompressed 24-bit Windows BMP; header/BGR row layout adapted from the pinned libjpeg-turbo `wrbmp.c` |
 | TIFF | [LibTIFF](https://libtiff.gitlab.io/libtiff/) | Classic TIFF/BigTIFF within quotas; selected pages; strips/tiles; common grayscale/palette/RGB/RGBA compression subsets | Single-page RGB/RGBA TIFF with a small explicit compression set initially |
 | ICO | libnsbmp for DIB payloads; existing libpng adapter for PNG payloads | Bounded icon directory, size selection, DIB XOR/AND masks and PNG entries | Single-entry ICO container glue around the shared upstream PNG encoder |
@@ -176,9 +176,9 @@ NetSurf's library is a C decoder for both BMP and ICO under the MIT license. The
 
 libnsbmp supplies decoding. BMP writing adapts the uncompressed header and BGR row layout of libjpeg-turbo’s IJG writer, retaining its notices. ICO writing adds the small directory wrapper around shared PNG output; no new compression codec is implemented.
 
-libavif exposes a C API and supports selectable AV1 codec dependencies. The implementation uses libaom 3.12.1 for both decoding and encoding to retain one AV1 backend; no comparative performance claim is made. Keep additional AV1 backends disabled. Its optional libyuv acceleration is a measured build choice, not a second image API. [libavif build documentation](https://github.com/AOMediaCodec/libavif/blob/main/README.md)
+libavif exposes a C API and supports selectable AV1 codec dependencies. The implementation uses decoder-only libaom 3.12.1 to retain one AV1 backend with a smaller native binary; no comparative performance claim is made. `build_lambda_config.json` selects the upstream decoder source closure, disables `CONFIG_AV1_ENCODER`, and enables only libavif's AOM decoding adapter. Keep additional AV1 backends disabled. Its optional libyuv acceleration is a measured build choice, not a second image API. [libavif build documentation](https://github.com/AOMediaCodec/libavif/blob/main/README.md)
 
-Read support for all eight formats is a required milestone. Write support is tracked independently: preserve existing PNG/JPEG output, then add WebP, AVIF, BMP, TIFF, and ICO. GIF encoding and new animation encoders are deferred. A single `image_encode` interface can report unsupported operations without every format having identical capabilities.
+Read support for all eight formats is a required milestone. Write support is tracked independently: preserve existing PNG/JPEG output, then add WebP, BMP, TIFF, and ICO. AVIF and GIF encoding and new animation encoders are deferred. A single `image_encode` interface can report unsupported operations without every format having identical capabilities.
 
 ### 5.2 Format-specific boundaries
 
@@ -298,7 +298,7 @@ The following was the adoption plan. Current completion and verification evidenc
 1. **Common core and diagnostics:** import the existing four upstream codec bases under `./lib/image/`, record their versions/licenses, modify the source directly to use shared types/readers/sinks/diagnostics, and migrate the existing formats while preserving output. Move resource entry points to their proper provider. Do not leave a `lib` shim forwarding upward into Lambda (**D7.1.3**); memory compatibility wrappers may remain within `lib` temporarily.
 2. **Thumbnail planner:** share file/memory JPEG and PNG paths, add WebP scaling and final bounded resize, expose strategy/fallback, and preserve Radiant's at-least mode. Establish honest per-format performance baselines.
 3. **New readers:** import the BMP/ICO, TIFF, and AVIF implementations and required codec dependencies under `./lib/image/`, adapt their source directly, and integrate documented feature subsets with matching file/memory diagnostics. Reading all eight formats completes the format-expansion milestone.
-4. **Common writers and cleanup:** migrate all existing PNG/JPEG writers; add WebP/AVIF/BMP/TIFF/ICO output using the locally adapted upstream implementations and common sink. Remove superseded paths and unused sourced features after callers migrate. Verify builds use the intended local source and preserve required license notices. Report binary/dependency changes and actual duplication removed, rather than reducing lines by reformatting.
+4. **Common writers and cleanup:** migrate all existing PNG/JPEG writers; add WebP/BMP/TIFF/ICO output using the locally adapted upstream implementations and common sink. Keep AVIF read-only to bound the native codec footprint. Remove superseded paths and unused sourced features after callers migrate. Verify builds use the intended local source and preserve required license notices. Report binary/dependency changes and actual duplication removed, rather than reducing lines by reformatting.
 
 Validation must cover:
 

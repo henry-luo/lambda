@@ -97,8 +97,6 @@ ImageStatus image_tiff_encode(ImageOperation *, const ImagePixelView *, const Im
 ImageStatus image_avif_probe(ImageOperation *, const ImageSource *, ImageInfo *);
 ImageStatus image_avif_decode(ImageOperation *, const ImageSource *, const ImageDecodeOptions *,
                               ImageDecoded *);
-ImageStatus image_avif_encode(ImageOperation *, const ImagePixelView *, const ImageEncodeOptions *,
-                              const ImageSink *);
 ImageStatus image_gif_probe(ImageOperation *, const ImageSource *, ImageInfo *);
 ImageStatus image_gif_decode(ImageOperation *, const ImageSource *, const ImageDecodeOptions *,
                              ImageDecoded *);
