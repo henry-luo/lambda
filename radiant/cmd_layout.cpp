@@ -2802,6 +2802,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
     {".jpg", load_image_layout_file}, {".jpeg", load_image_layout_file},
     {".gif", load_image_layout_file},
+    {".psd", nullptr, "psd"},
     {".json", load_text_doc}, {".yaml", load_text_doc},
     {".yml", load_text_doc}, {".toml", load_text_doc},
     {".txt", load_text_doc}, {".csv", load_text_doc},

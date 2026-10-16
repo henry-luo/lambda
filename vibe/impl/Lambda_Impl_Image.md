@@ -112,3 +112,45 @@ Local evidence: `temp/image_native_tests.log`, `temp/image_focused_gtest.log`,
 The shared checkout contains unrelated ongoing edits; this implementation
 preserves them and does not assert that the aggregate failures were proven
 present in a clean baseline.
+
+## PSD viewer follow-up — 2026-10-16
+
+The package's PSD I/O initially had no connection to the CLI/window format
+admission lists or document-loader router. The reported `view ...psd` command
+therefore failed before reaching the image decoder.
+
+The finite fix admits `.psd` case-insensitively and registers the stateless
+`lambda.doc.image` transform (**D7.2.4v3**). It reads through `lambda.image`
+and presents a fresh composition as an in-memory PNG in the existing image
+document DOM. It also reaches the shared `layout`/`render` document route.
+Unsupported rendering features remain checked; no merged-preview fallback
+silently replaces editable content.
+
+Acceptance cases: the supplied sunset PSD opens; the permanent masked/grouped
+fixture shows its red/blue/red layers despite a deliberately stale green
+merged preview; uppercase `.PSD` works; malformed PSD fails; neighboring PNG,
+JPEG and SVG viewers keep working. Verification uses the new package golden,
+headless pixel/geometry assertions and the required Lambda/Radiant gates.
+Focused verification passes: seven native viewer cases (PSD, PNG, JPEG, GIF,
+SVG and XHTML parity), 27 image-related Lambda goldens, and the new package
+fixture under forced GC. The PSD's seven DOM/geometry/pixel assertions pass
+both normally and under forced GC. Uppercase input succeeds; malformed input
+returns nonzero. `layout` succeeds, and native `render` produces the expected
+fixture pixels and an 800 × 500 sunset export identical to its package preview.
+
+`make test-radiant-baseline` was attempted but stopped during linking:
+`test_map_gtest` and `test_scene3d_unit_gtest` cannot resolve
+`radiant_clipboard_mac_init` from the ongoing clipboard changes in this shared
+checkout. This is a qualification limit; the PSD fix does not change those
+sources or their build configuration. Logs are in
+`temp/image_samples/view_{focused_native,focused_lambda,psd,radiant_baseline}.log`.
+
+`make test-lambda-baseline` completed: Input **2,112/2,112** and runtime
+**5,188/5,397** pass. The script runner is **1,606/1,607**, with
+`binary_js_bridge` its only failure; every image fixture, including
+`proc_image_view`, passes. The aggregate also reports JS emission/ownership/
+optimization/regex failures, three JS stress references, and a PDF binary-schema
+interpreter crash. The shared checkout has concurrent edits, so these totals
+are qualification evidence rather than a clean-baseline attribution. Full log:
+`temp/image_samples/view_lambda_baseline.log`. No unrelated tests or budgets
+were changed by this fix.

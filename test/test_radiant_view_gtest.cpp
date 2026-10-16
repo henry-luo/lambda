@@ -100,6 +100,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "test/html/xhtml_names_events.json", true},
     {"RadiantViewTest.LoadsHtmlWithMatchingXhtmlNames", "html_xhtml_names", "test/html/xhtml_names.html",
      "test/html/xhtml_names_events.json", true},
+    {"RadiantViewTest.LoadsPsdLayersAsHeadlessView", "psd_layers", "test/input/image/layered.psd",
+     "test/html/psd_image_events.json", true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -877,10 +879,14 @@ TEST(RadiantViewTest, LoadsHtmlAsHeadlessView) {
 }
 
 TEST(RadiantViewTest, LoadsXhtmlWithHtmlNames) {
-    test_radiant_view_expect_case(g_radiant_view_case_count - 2);
+    test_radiant_view_expect_case(g_radiant_view_case_count - 3);
 }
 
 TEST(RadiantViewTest, LoadsHtmlWithMatchingXhtmlNames) {
+    test_radiant_view_expect_case(g_radiant_view_case_count - 2);
+}
+
+TEST(RadiantViewTest, LoadsPsdLayersAsHeadlessView) {
     test_radiant_view_expect_case(g_radiant_view_case_count - 1);
 }
 

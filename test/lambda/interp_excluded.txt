@@ -28,6 +28,7 @@ test/lambda/proc/cow_rmw_branch_store_back.ls	node:AST_NODE_MEMBER_ASSIGN_STAM
 test/lambda/proc/cow_var_nullable_record_typed_handle.ls	node:AST_NODE_MEMBER_ASSIGN_STAM
 test/lambda/proc/image_output.ls	node:AST_NODE_INDEX_EXPR
 test/lambda/proc/image_raster_snapshots.ls	node:AST_NODE_INDEX_EXPR
+test/lambda/proc/image_view.ls	node:AST_NODE_IMPORT
 test/lambda/proc/map_external_parent.ls	node:AST_NODE_INDEX_ASSIGN_STAM
 test/lambda/proc/map_index_write_after_copy.ls	node:AST_NODE_INDEX_ASSIGN_STAM
 test/lambda/proc/map_runtime_shape_tree.ls	node:AST_NODE_INDEX_ASSIGN_STAM

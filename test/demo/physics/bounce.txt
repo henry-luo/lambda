@@ -10,24 +10,25 @@
   <body
     <main
       <header class: "page-header",
-        <div
+        <div class: "header-meta",
           <p class: "eyebrow",
             "LAMBDA PHYSICS / PLAYGROUND">
+          <a class: "edition", href: "index.ls",
+            "FOUR EXPERIMENTS · 3D">>
+        <div class: "title-row",
           <h1
-            "Bounce lab">>
-        <a class: "edition", href: "index.ls",
-          "FOUR EXPERIMENTS · 3D">>
-      <nav class: "navigation", aria-label: "Physics demonstrations",
-        <a href: "index.ls", class: "",
-          "All experiments">
-        <a href: "domino.ls", class: "",
-          "Domino circuit">
-        <a href: "salvage.ls", class: "",
-          "Salvage bay">
-        <a href: "sorter.ls", class: "",
-          "Marble sorter">
-        <a href: "bounce.ls", class: "active",
-          "Bounce lab">>
+            "Bounce lab">
+          <nav class: "navigation", aria-label: "Physics demonstrations",
+            <a href: "index.ls", class: "",
+              "All">
+            <a href: "domino.ls", class: "",
+              "Domino circuit">
+            <a href: "salvage.ls", class: "",
+              "Salvage bay">
+            <a href: "sorter.ls", class: "",
+              "Marble sorter">
+            <a href: "bounce.ls", class: "active",
+              "Bounce lab">>>>
       <p class: "intro",
         "Five identical balls fall from the same height. Only restitution changes, from an inelastic landing to an almost elastic bounce. Compare the motion with the measured height curves below.">
       <div class: "toolbar", role: "group", aria-label: "Simulation controls",

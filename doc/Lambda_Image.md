@@ -53,6 +53,12 @@ and use postfix `^`; callers can catch failures with `expr ^ { handler }`.
 Unknown options fail (**S17.8.1**); arbitrary layer properties are document
 data rather than codec options.
 
+`./lambda.exe view picture.psd` opens a supported PSD as an image document.
+The `lambda.doc.image` adapter renders the current layers and masks through
+`lambda.image` and embeds an in-memory PNG; it does not depend on the file's
+merged preview. Unsupported composition/color features retain the package's
+strict error behavior. The same document route supports `layout` and `render`.
+
 | Functions | Behavior |
 |---|---|
 | `blank(options)`, `from_array(samples, options={})` | Construct independent Raster storage. Blank dimensions are positive integers; normalized fill components are in `[0,1]`. Arrays must be `u8` of rank two or three. |
