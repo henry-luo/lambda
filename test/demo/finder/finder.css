@@ -26,6 +26,18 @@ svg { flex-shrink: 0; vertical-align: middle; }
 .navigation, .toolbar-actions, .segmented { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .tool { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 5px; color: #77818d; padding: 6px; }
 .tool:hover { background: #e8ecf1; }
+.file { user-select: none; }
+.drop-target { background: #dceefc !important; box-shadow: inset 0 0 0 2px #65a5d8; }
+#finder[data-dragging="true"] .file { cursor: grabbing; }
+.context-menu { position: fixed; z-index: 25; width: 205px; max-width: calc(100vw - 12px); padding: 5px; background: #fff; border: 1px solid #dce3ec; border-radius: 8px; box-shadow: 0 8px 28px rgba(32,47,65,.18); }
+.menu-item { display: block; width: 100%; padding: 8px 10px; border-radius: 4px; text-align: left; font-size: 12px; }
+.menu-item:hover, .menu-item:focus-visible { background: #e7f0fa; }
+.menu-item:disabled { opacity: .4; }
+.danger-text { color: #b64743; }
+.operation-overlay { z-index: 30; }
+#operation-value { display: block; width: 100%; padding: 11px; border-radius: 6px; border: 1px solid #cbd7e3; background: #fff; }
+button.danger { background: #bd514a; border-color: #bd514a; color: #fff; }
+button.danger:hover { background: #a9423b; }
 .folder-heading { flex: 1; min-width: 85px; }
 h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-heading p { margin: 0; font-size: 10px; color: #98a1ac; white-space: nowrap; }
@@ -52,6 +64,22 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .browser { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 /* flex sizes the viewport; parent measurement need not traverse the file grid. */
 #files { contain: size layout; flex: 1; min-height: 0; overflow: auto; outline-offset: -3px; }
+/* each column scrolls vertically while the shared viewport follows the open branch horizontally. */
+#finder[data-mode="columns"] #files { display: flex; overflow-y: hidden; }
+.columns { display: flex; width: max-content; min-width: 100%; flex-shrink: 0; }
+.file-column { display: flex; flex-direction: column; width: 230px; flex-shrink: 0; border-right: 1px solid #e8edf2; }
+.column-heading { margin: 0; padding: 12px 14px; border-bottom: 1px solid #eef0f3; background: #fafbfc; color: #7d8c9d; font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.column-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 5px; }
+.column-rows .file { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 32px; padding: 4px 7px; border-radius: 4px; text-align: left; }
+.column-rows .file-graphic { width: 24px; height: 24px; }
+.column-rows .file-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.column-rows .file-date, .column-rows .file-size, .column-rows .file-kind { display: none; }
+.column-rows .file[data-trail="true"] { background: #edf1f5; }
+.column-rows .file[data-trail="true"] .file-name { color: #62768b; }
+.folder-chevron { color: #98a8b7; font-size: 18px; line-height: 1; }
+.column-list .empty { padding: 45px 12px; }
+.column-list .empty h2 { font-size: 14px; }
+.column-list .empty p { font-size: 11px; line-height: 1.6; }
 .icon-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 22px 10px; align-content: start; padding: 30px 22px; }
 .file { min-width: 0; border-radius: 7px; font-size: 12px; }
 .icon-grid .file { display: flex; flex-direction: column; align-items: center; padding: 12px 5px 10px; gap: 8px; }
