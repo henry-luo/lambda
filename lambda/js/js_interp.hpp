@@ -107,7 +107,8 @@ enum JsInterpHostOperation {
     JS_INTERP_HOST_GET, JS_INTERP_HOST_HAS, JS_INTERP_HOST_SET,
     JS_INTERP_HOST_DELETE, JS_INTERP_HOST_DECLARE, JS_INTERP_HOST_CHECK_DECLARE,
     JS_INTERP_HOST_HAS_LEXICAL, JS_INTERP_HOST_CHECK_DECLARE_FUNCTION,
-    JS_INTERP_HOST_DECLARE_FUNCTION
+    JS_INTERP_HOST_DECLARE_FUNCTION, JS_INTERP_HOST_CHECK_DECLARE_LEXICAL,
+    JS_INTERP_HOST_SCRIPT = 0x100
 };
 enum JsInterpHostError {
     JS_INTERP_HOST_CAPABILITY, JS_INTERP_HOST_REFERENCE, JS_INTERP_HOST_TYPE,
@@ -162,6 +163,7 @@ struct JsInterpHostOps {
     Item (*for_in_keys)(Item);
     Item (*for_in_key_is_live)(Item, Item key);
     Item (*regexp_literal)(void*, Item pattern, Item flags);
+    Item (*dynamic_import)(void*, Item specifier, const char* reference);
 };
 // The caller owns these exact roots for the duration of a host operation.
 // Escaped functions retain env, never this activation-local descriptor.
@@ -212,8 +214,11 @@ public:
     JsInterpHostScope(const JsInterpHostScope&) = delete;
     JsInterpHostScope& operator=(const JsInterpHostScope&) = delete;
 };
+struct JsInterpEnv;
 Item js_interp_execute_host_source(const JsInterpHostOps*, const char*, size_t,
-    const char* filename, bool indirect_eval);
+    const char* filename, bool indirect_eval, JsInterpEnv** script_environment = NULL);
+Item js_interp_host_global_lexical(const JsInterpHostOps*, JsInterpEnv*,
+    Item key, Item value, int operation, bool* found);
 Item js_interp_call_host_function(const JsInterpHostOps*, Item wrapper,
     JsFunction*, Item receiver, Item*, int, Item new_target);
 

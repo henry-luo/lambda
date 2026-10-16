@@ -1040,6 +1040,7 @@ enum MapKind {
     MAP_KIND_ASYNC_FRAME = 17, // JSCU10: suspended async activation (internal, no property face)
     MAP_KIND_GENERATOR   = 18, // JSCU9: generator carrier with suspended native state
     MAP_KIND_ORDERED     = 19, // shared ordered Item entries plus a native ordinal index
+    MAP_KIND_WEAK        = 20, // WeakRef/FinalizationRegistry with native weak slots
 };
 
 #define CONTAINER_FLAG_STATIC (1u << 4)

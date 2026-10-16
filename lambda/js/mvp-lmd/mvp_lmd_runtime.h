@@ -10,6 +10,8 @@ extern const JsBufferViewOps mvp_lmd_buffer_ops;
 struct JsCollectionOps;
 struct JsCollectionStorageOps;
 extern const JsCollectionOps mvp_lmd_collection_ops;
+struct MvpLmdWeakFamily { const char* name; int prototype_owner; };
+extern const MvpLmdWeakFamily mvp_lmd_weak_families[4];
 extern const JsCollectionStorageOps mvp_lmd_collection_storage_ops;
 struct AstClassNode;
 struct JsTemplateLiteralNode;
@@ -162,6 +164,7 @@ struct MvpLmdLibraryState {
     MvpLmdClass map;
     MvpLmdClass set;
     MvpLmdClass* weak_collections; // optional shared native ephemeron carriers
+    int weak_class_count;
     Item* weak_values;
     MvpLmdClass* errors;        // optional nominal families; values live in registered program slots
     Item* error_values;
@@ -187,6 +190,28 @@ struct MvpLmdLibraryState {
     int abort_kind;             // one-based non-JS failure, retained across finally completions
     int64_t abort_site;
     MvpLmdPropertyCache prototype_links; // immutable shape fields only; prototype values stay live
+    Item* atomics_value;        // optional namespace in a registered program slot
+    MvpLmdLibraryState* default_realm; // unstamped native arrays belong to this realm
+};
+enum MvpLmdInternalName {
+    LMD_INTERNAL_PROTOTYPE, LMD_INTERNAL_EXTENSIBLE, LMD_INTERNAL_PRIMITIVE,
+    LMD_INTERNAL_DATE, LMD_INTERNAL_ERROR, LMD_INTERNAL_ARGUMENTS,
+    LMD_INTERNAL_REGEXP_SOURCE, LMD_INTERNAL_REGEXP_FLAGS,
+    LMD_INTERNAL_REGEXP_ITERATOR, LMD_INTERNAL_REGEXP_ITERATOR_STRING,
+    LMD_INTERNAL_REGEXP_ITERATOR_GLOBAL, LMD_INTERNAL_REGEXP_ITERATOR_UNICODE,
+    LMD_INTERNAL_REGEXP_ITERATOR_DONE, LMD_INTERNAL_NAME_COUNT
+};
+NameRef mvp_lmd_internal_name(MvpLmdInternalName name);
+extern __thread MvpLmdLibraryState* mvp_lmd_foreign_library;
+class MvpLmdRealmScope {
+    MvpLmdLibraryState* previous;
+    MvpLmdLibraryState* foreign;
+    MvpLmdLibraryState* current;
+    void* previous_promise_context = NULL;
+public:
+    explicit MvpLmdRealmScope(MvpLmdProgram* program);
+    ~MvpLmdRealmScope();
+    Item complete(Item result);
 };
 Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
@@ -215,6 +240,11 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
     uint64_t count, int skip = 0, MvpLmdNativeEntry entry = nullptr,
     Item target = Item{.item = ITEM_JS_UNDEFINED});
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program);
+uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program);
+Item mvp_lmd_create_realm(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program);
+Item mvp_lmd_constructor_prototype(Item target, Item intrinsic);
+Item mvp_lmd_host_task(Item callback, Item receiver, Item arguments);
 MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program = NULL);
 struct MvpLmdBuiltinMethod { const char* name; TypeId owner; int id; uint8_t arity = 1; };
 extern const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[];
@@ -375,9 +405,12 @@ int64_t mvp_lmd_string_key(String* string, int64_t typed = 0);
 Item mvp_lmd_array_store(Item array, uint32_t index, Item value);
 int64_t mvp_lmd_array_indices_use_own_storage(Item array);
 Item mvp_lmd_array_new(int64_t length);
+Item mvp_lmd_array_adopt_realm(Item value);
 Item mvp_lmd_array_flatten(Item source, double depth, int64_t length = -1, Item* mapping = nullptr);
 Item mvp_lmd_array_to_string(Item source, Item separator, int64_t library_objects = 1);
 Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item flags);
+struct MvpLmdRegExp;
+MvpLmdRegExp* mvp_lmd_regexp_record(Item value, MvpLmdLibraryState* state);
 Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item source, Item pattern,
     Item replacement, int64_t replace);
 Item mvp_lmd_array_resize(Item owner, int64_t length);

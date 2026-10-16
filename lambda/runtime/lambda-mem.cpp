@@ -247,9 +247,13 @@ static JsDataView* gc_dataview_from_map(Map* map) {
     return js_get_dataview_ptr_from_map(map);
 }
 
+extern "C" void js_weak_map_gc_trace(Map* map, gc_heap_t* gc);
+extern "C" void js_weak_map_heap_destroy(Map* map);
+
 static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
+    if (map->map_kind == MAP_KIND_WEAK) { js_weak_map_gc_trace(map, gc); return; }
     js_generator_map_gc_trace(map, gc);
     js_async_frame_map_gc_trace(map, gc);
     js_collection_map_gc_trace(map, gc);
@@ -296,6 +300,7 @@ extern "C" void js_async_frame_map_heap_destroy(Map* map);
 
 static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
+    if (map->map_kind == MAP_KIND_WEAK) { js_weak_map_heap_destroy(map); return; }
     // JS collections keep their native HashMap in a pool-owned side record; the
     // heap finalizer must release it before the pool record disappears.
     js_collection_map_heap_destroy(map, seen_native);

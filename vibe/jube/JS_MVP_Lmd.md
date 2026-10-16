@@ -1841,8 +1841,9 @@ Evidence, controls and remaining gaps are recorded in
 required mode, with no new benchmark regression. Complete remaining syntax,
 RegExp, library/JSON, Atomics/agent, weak-reference and host/environment gaps.
 Existing classes, async/modules, SharedArrayBuffer, proxies and sparse arrays
-receive targeted semantic repairs. The archived 37,445-pass whole score stays
-separate from later selected gains until a complete current-build recount.
+receive targeted semantic repairs. Whole-population counts stay separate
+from later selected gains; the intermediate recount below is not the latest
+source's score.
 
 Reuse untyped Lambda and shared JS algorithms first (**D1.3v3**), preserving
 shared shapes and precise ownership (**D3.4.3v5–D3.4.8**, **D5.2–D5.3**).
@@ -1857,7 +1858,7 @@ RegExp validation. Interpreted regex literals use MVP's native constructor.
 Unicode simple folding reuses the repository's UCD data through a shared core
 helper; forward/lookbehind backreferences handle differing UTF-8 widths.
 
-Latest pinned validation: **677/677** MVP units, ten focused forced-GC checks,
+Earlier phase pin validation: **677/677** MVP units, ten focused forced-GC checks,
 **786/786** library canonical cases and **772/772** additional strict variants.
 RegExp reaches **1,649/1,721** canonical cases and **1,647/1,719** additional
 strict variants (**339 recovered, zero lost**); canonical LJS passes 1,650.
@@ -1876,3 +1877,49 @@ open in the implementation plan.
 Corpus audit found that the standard LJS baseline uses stored Unicode 16 tests,
 while canonical sources require Unicode 17. Keep these source contracts and
 their results separate; shared Unicode-data gaps are recorded in the plan.
+
+The next increment adds shared WeakRef/FinalizationRegistry lifetime storage,
+collector ephemerons, job-scoped kept targets and rooted cleanup callbacks
+(**D1.3v3**, **D5.2–D5.3**). `$262.evalScript` now uses persistent Script lexical
+environments in the retained interpreter, with global declaration attributes
+and live binding access from MVP (**D8.1.3v24**). Atomic read/modify/write,
+isLockFree and pause reuse the shared typed-array kernels and builtin catalog;
+buffer addresses are reacquired after coercion callbacks can resize/detach.
+
+Private pin `a0d493c7b25d870a3b1f5a7236cece7776e434ebb71d2292040dcf2b497df2bd`
+passes **685/685** MVP units, **18/18** focused forced/poisoned-GC checks,
+**158/158** non-waiter atomic cases and **436/436** affected canonical LJS
+controls. These checks precede the later hosted-realm and asynchronous-waiter
+increments; agent scheduling and the Unicode target decision remain open. Full recount and current
+performance acceptance are reported separately in the implementation plan;
+these selected checks do not establish full parity or close historical gaps.
+
+Distinct hosted realms now retain intrinsic/global identities across calls,
+suspension, Function-family interpretation and Promise jobs. Constructor
+prototype fallback, Array species and native brands reuse the shared ownership
+and nominal model (**D3.4.3v5–D3.4.8**, **D5.2–D5.3**, **D8.1.3v24**).
+The realm pin passes **690/690** units and **23/23** focused forced/poisoned-GC
+checks. The subsequent increment adds shared real-time `waitAsync`/`notify`
+waiters with backing-store/byte-offset identity and precise storage roots.
+That pin passes **696/696** units, **29/29** focused forced-GC checks and the
+**40,261/40,261** LJS baseline. Synchronous wait validation and actual deadlines
+now reuse the same adapter; independent agents and cross-agent wakeup still
+need implementation. Child-realm module graphs and Unicode 16/17 selection
+remain open.
+
+The latest pin passes **699/699** units, **32/32** focused forced-GC checks,
+**370/449** selected canonical cases and **345/424** additional strict variants.
+It recovers 33 cases in each mode with no lost selected passes; all 79 remaining
+cases require agents. Same-pin LJS controls pass **449/449** and its stored-body
+baseline passes **40,261/40,261** without retries.
+The integrated Lambda gate remains open: its PDF checker lacks Pillow, and
+the broad GC sweep timed out in music layout after 298 completed cases. All
+JavaScript groups pass; the implementation plan preserves the exact failures.
+
+The complete intermediate recount on the atomic-storage pin records
+**39,266/40,261 (97.53%)** all-required passes without observed instability,
+with **995** remaining IDs. Nine additional IDs pass only after isolated replay
+and remain marked unstable. This audit predates realms and waiters; selected
+later gains must not be added to it. Its readonly-global assignment crashes
+are fixed in compiler analysis. Detailed provenance and current verification
+are in the implementation plan. No current performance claim is made.

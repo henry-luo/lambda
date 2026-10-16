@@ -390,10 +390,24 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index) {
     if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED && js_array_sparse_get(array, index, &value)) return value;
     return index < container_dense_capacity(array) ? array->items[index] : Item{.item = ITEM_JS_DELETED_SENTINEL};
 }
+Item mvp_lmd_array_adopt_realm(Item value) {
+    if (item_is_error(value)) return value;
+    // host initialization can allocate private arrays before the realm's slots exist.
+    if (mvp_lmd_foreign_library && mvp_lmd_foreign_library->values) {
+        Item prototype = mvp_lmd_foreign_library->values[LMD_LIBRARY_ARRAY_PROTOTYPE];
+        if (mvp_lmd_is_object(prototype)) {
+            Item linked = mvp_lmd_set_prototype(value, prototype);
+            if (item_is_error(linked)) return linked;
+        }
+    }
+    return value;
+}
 extern "C" Item mvp_lmd_array_new(int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     Array* result = array();
     if (!result) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item linked = mvp_lmd_array_adopt_realm(Item{.array = result});
+    if (item_is_error(linked)) return linked;
     // empty arrays need no handoff buffer; both growth helpers own precise roots during allocation.
     if (!length) return Item{.array = result};
     if (js_array_should_keep_length_sparse(result, length)) {

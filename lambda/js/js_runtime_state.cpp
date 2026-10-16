@@ -26,6 +26,7 @@ __thread JsRuntimeState* js_active_runtime_state = NULL;
 typedef struct JsAmbient {
     JsRuntimeState* state;
     const JsInterpHostOps* interpreter_host;
+    void* promise_context;
     JsCallActivation* current_activation;
     // Set only for a fresh activation: keep the resumer's chain on the first
     // switch in. A saved NULL chain is the base activation, not "inherit".
@@ -49,6 +50,7 @@ static void js_ambient_init(void* storage) {
     ambient->interpreter_host = js_interp_host;
     if (!state) return;
     ambient->inherit_call_chain = true;
+    ambient->promise_context = state->promises.host_context;
     ambient->strict_mode = state->strict_mode;
     Item* active_namespace = js_module_active_namespace_peek();
     ambient->active_namespace = active_namespace ? *active_namespace : ItemNull;
@@ -61,6 +63,7 @@ static void js_ambient_save(void* storage) {
     ambient->interpreter_host = js_interp_host;
     ambient->inherit_call_chain = false;
     if (!state) return;
+    ambient->promise_context = state->promises.host_context;
     ambient->current_activation = state->execution.current_activation;
     ambient->with_head = state->with_head;
     Item* active_namespace = js_module_active_namespace_peek();
@@ -79,6 +82,7 @@ static void js_ambient_load(const void* storage) {
     js_active_runtime_state = state;
     js_interp_host = ambient->interpreter_host;
     if (!state) return;
+    state->promises.host_context = ambient->promise_context;
     if (!ambient->inherit_call_chain) {
         state->execution.current_activation = ambient->current_activation;
     }
@@ -766,6 +770,7 @@ void js_runtime_state_destroy_context(void) {
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);
     js_atomics_destroy_context(state);
+    js_weak_state_destroy(state);
     jm_compile_recovery_state_destroy_context(state);
     js_runtime_prototype_snapshot_destroy_context(state);
     js_runtime_regex_cache_destroy_context(state);
@@ -1442,6 +1447,8 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // prototype snapshot can restore mutations in that same realm; full heap
     // teardown must leave the pointer cleared (D6.2.2v2).
     Input* retained_input = js_input;
+    // batch realms cannot retain the preceding job's weak targets or cleanup records.
+    js_weak_state_destroy(&js_runtime_state);
     js_reset_heap_bound_runtime_state(full_reset);
     if (!full_reset) js_input = retained_input;
     js_reset_cached_realm_objects();

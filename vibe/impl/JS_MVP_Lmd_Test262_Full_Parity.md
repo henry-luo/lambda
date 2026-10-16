@@ -11,8 +11,9 @@ negative phase/type expectations, deadlines and baseline exclusions. This
 continues the [parity plan](JS_MVP_Lmd_Test262_Parity.md) and
 [90-percent plan](JS_MVP_Lmd_Test262_90.md), without resetting their open gates.
 
-The latest completed whole audit remains archived pin38: 37,445/40,261
-all-required passes, 2,816 unresolved IDs. The later pin46 selected record
+The latest completed whole audit is the intermediate atomic-storage pin in
+§7: **39,266/40,261** all-required passes without observed instability.
+Archived pin38 recorded 37,445/40,261 passes, 2,816 unresolved IDs. The later pin46 selected record
 passes 587 of those IDs, including all 103 archived SharedArrayBuffer failures.
 These different-build counts are not additive. Entry source is clean HEAD
 `614fbc5d9f76e520a75df3acae153101f35d0127`; its 1,454 production input hashes
@@ -327,7 +328,7 @@ has been applied to conceal the regression. Diagnostic samples/disassembly:
 `temp/mvp_full_parity_20261015/delete-profile21/`. Captures and complete tables:
 `temp/mvp_full_parity_20261015/REPORT21.md`.
 
-### Remaining host and lifetime audit
+### Host and lifetime audit at round21
 
 The P5/P6 implementation must reuse sound shared storage and collector seams
 (**D1.3v3**, **D5.2–D5.3**), not infer completion from LJS's API presence:
@@ -347,5 +348,227 @@ The P5/P6 implementation must reuse sound shared storage and collector seams
   lexical declarations are private to that evaluation. Hosted realm creation
   also needs distinct intrinsic identities and callable ownership.
 
-These packages remain unimplemented in this increment. The Unicode 16 versus
+These packages remained unimplemented at round21. The Unicode 16 versus
 17 target decision is pending separately; it does not redefine these gaps.
+
+## 7. Lifetime, Script, realm and atomic-storage continuation
+
+Continuation entry is clean merge `b4d41669380056e53243dd084cb0a9044a6611b7`.
+The private release control is
+`0b1d4341cdb2162b1a8e183a5428275d28ac4b3ef03905c3a4866d63455c15f8`;
+2,941 production inputs remained unchanged during its build. Captures are in
+`temp/mvp_full_parity_next_20261016/`. This entry is distinct from round21's
+older phase control and does not erase its outstanding performance gaps.
+
+### P6: shared weak lifetime storage
+
+WeakRef and FinalizationRegistry now share a native Lambda Map carrier with
+an ordinary shape/property face. `MAP_KIND_WEAK` selects its payload; there is
+no new TypeId or ordinary-container flag. Both JS front ends use the same
+validation, registration, dereference and unregister algorithms (**D1.3v3**).
+
+The collector traces callbacks and holdings strongly, registers targets and
+unregister tokens as per-collection ephemerons, and records pending cleanup
+without invoking guest code. WeakRef construction/dereference retain their
+targets in a job-scoped RootVector. An outer microtask checkpoint releases
+that set and invokes pending cleanup with rooted carriers and destination-owned
+scalar holdings. Nested synchronous calls cannot clear the set. Native records
+unlink on collection and detach before runtime destruction; batch reset drops
+the preceding realm's state (**D5.2–D5.3**).
+
+Announced shared helpers: `js_weak_validate_input`,
+`js_weak_create_with_storage`, `js_weak_method_with_ops`,
+`js_weak_job_checkpoint`, and native tracing/destruction hooks. The MVP adapter
+extends the existing weak-family constructor/prototype loop. Programs that do
+not use these facilities allocate no weak lifetime state.
+
+### P2/P5: Script declarations through the retained interpreter
+
+`$262.evalScript` now selects a Script role on the existing hosted AST executor
+(**D8.1.3v24**). Its GC-owned lexical environments persist across calls, retain
+TDZ/const rules and expose live bindings to subsequent interpreted and MVP
+code. Ordinary indirect eval still has private lexical declarations. Script
+var/function creation uses the required global-property attributes and checks
+all declarations before publishing the new lexical environment.
+
+The shared `js_interp_host_global_lexical` helper and MVP's
+`mvp_lmd_dynamic_lexical` adapter reuse existing lexical-slot ownership.
+`mvp_lmd_eval_script` is the host entry. Global-object binding resolution now
+uses the declaring environment, including references from later Scripts and
+closures. Annex B companions remain var bindings; their block publishes the
+function value without rewriting existing property attributes.
+
+### P5: atomic storage operations
+
+MVP's Atomics namespace uses the shared built-in catalog for method names,
+arity and descriptors. Its read/modify/write operations reuse the existing
+sequentially consistent native atomic kernel with `JsBufferViewOps` supplying
+frontend coercion/errors (**D1.3v3**). The new
+`js_atomics_operation_with_ops`, `js_atomics_is_lock_free_with_ops` and
+`js_atomics_pause_with_ops` entries are shared adapters, not a second typed
+array representation. Programs with no observable Atomics namespace retain
+their existing compiler path.
+
+The kernel roots arguments and adopts converted scalar results before later
+callbacks. It snapshots the initial length for index validation, then
+revalidates bounds and acquires the current buffer address after all
+coercions; a callback may detach, shrink or replace storage (**D5.2–D5.3**;
+ECMA-262 §25.4.3.4, RevalidateAtomicAccess). Atomic writes also enter the
+existing storage-write preparation path. Huge `isLockFree` arguments are
+compared without an overflowing native integer cast. These fixes apply to
+both frontends. The existing LJS synchronous-agent adjustments remain confined
+to its legacy entry and are not used by the MVP adapter.
+
+### P5: distinct hosted realms
+
+`$262.createRealm` now retains a separate intrinsic/global owner in the existing
+MVP execution. Runtime slots use the execution's existing precise roots;
+callee entry, generator/async suspension and Promise jobs restore their owning
+realm (**D5.2–D5.3**, **D5.4.2–D5.4.4**). Internal native brands share canonical
+private names within the execution; guest class-private names remain distinct.
+Eval and Function-family bodies still use the shared AST interpreter
+(**D8.1.3v24**).
+
+`mvp_lmd_function_realm` unwraps bound and proxy targets;
+`mvp_lmd_constructor_prototype` reuses intrinsic slots for the
+GetPrototypeFromConstructor fallback. Array species ignores a foreign intrinsic
+Array before reading `@@species`. The existing RegExp brand reader is shared
+with object stringification. `mvp_lmd_array_adopt_realm` preserves the realm of
+arrays returned by Lambda-backed Object/Map/string operations; the optional
+Promise array factory applies the same rule to combinator results. Ordinary
+root-realm arrays retain the existing implicit-prototype representation.
+
+Private pin
+`61147f6dafe7b5018873d6b37ef41176967741c511e7875b3bbd1a93476fc92b`
+passes **690/690** units and **23/23** focused checks with forced collection and
+freed-memory poisoning. An earlier realm pin passes all **13/13** frozen
+canonical hosted-realm cases. These are selected results, not a complete
+current-build recount. Cross-realm subclass admission now retains Lambda
+nominal ancestry for parents owned by the same execution
+(**D3.4.3v5–D3.4.8**); its latest validation is recorded separately below.
+
+### P5: waiters and deadlines
+
+The shared `js_atomics_wait_with_ops` and
+`js_atomics_notify_with_ops` entries reuse typed-array validation, numeric
+conversion, waiter records, Promise settlement and the existing event loop
+(**D1.3v3**). This path uses actual monotonic deadlines and matches the backing
+store plus **byte offset**, including aliases with different element widths.
+Waiter-owned precise roots retain storage and timer handles; settlement clears
+those roots and cancels the timer. Reusing a completed native row must preserve
+FIFO waiter order (**D5.2–D5.3**).
+
+MVP constructs the public result with its ordinary object shape and the active
+realm's Promise prototype. The legacy LJS agent simulation remains separate;
+its synthetic values and report rewrites are not used by these entries.
+The wait adapter also handles synchronous `Atomics.wait`: it reuses argument
+validation/coercion and waiter registration, checks CanBlock before returning
+a value-mismatch result, and waits against the actual monotonic deadline.
+The calling agent's timers and Promise jobs remain blocked. Finite fractional
+timeouts cannot return early. Cross-agent notification still requires the
+independent scheduler below; `$262.agent` remains explicitly unsupported.
+
+The completed asynchronous-waiter pin
+`2b045f9abc3bc85a4f8ac57e307ccbf5864759a5e71ae3c66d9937721f56d43b`
+passes **696/696** units, **29/29** focused forced/poisoned-GC checks,
+**337/449** selected canonical and **312/424** additional strict cases.
+Its 112 remaining selected failures involve blocking waits or agents.
+Same-pin LJS controls pass **449/449**, and the standard stored-body LJS
+baseline passes **40,261/40,261** with no retries or regressions.
+Synchronous-wait validation is recorded separately on the later pin.
+
+### P0/P2: complete intermediate recount and readonly globals
+
+The immutable intermediate pin
+`a0d493c7b25d870a3b1f5a7236cece7776e434ebb71d2292040dcf2b497df2bd`
+completed all **40,261 canonical** and **37,098 additional strict** records.
+Missing batch records were executed individually with unchanged deadlines.
+The qualified result is **39,266/40,261 (97.53%)**; **995** IDs remain failed
+or unstable. Nine more IDs pass all required modes after isolated replay but
+remain excluded from that qualified count because of observed crashes/timeouts.
+Raw records and qualification are preserved in `recount.json` and
+`recount-qualified.json` under this continuation's capture directory.
+
+This intermediate residual contains **310 negative phase/type mismatches**,
+**173 Atomics cases**, **71 Unicode-property cases**, and **441 other
+failed/unstable IDs**. The negative cases include async/generator rest-parameter
+and yield restrictions, class heritage and identifier grammar. These need
+shared early-error repairs; runtime rejection cannot satisfy a parse-negative
+contract. The later selected Atomics results below supersede only their own
+cohort, without changing this whole-audit inventory.
+
+Against archived pin38, the qualified comparison recovers **1,830** IDs and
+loses **nine**. Six losses are deterministic readonly-global assignment
+crashes. Compiler type-flow analysis dereferenced a lexical declaration record
+for intrinsic constants, which have no such record. The fix distinguishes
+intrinsics before applying lexical and integer-loop write rules. Existing
+sloppy-ignore/strict-TypeError execution semantics remain authoritative;
+assignment RHS effects and shadowed local bindings are covered by unit tests.
+The other three losses involve observed instability and require separate
+latest-pin evidence. Repair pin
+`9da9a529184c307efe35ed2a78e72812ba1a6b33eabcbc5d052f257ad6c8e1b9`
+passes all **nine canonical** and **three required strict** loss replays.
+Selected recovery checks do not rewrite this audit.
+
+### Current source validation
+
+Release pin
+`129175648dc615d090badf7872ad802ade1e6bacc4d28ec5373e78b0b9e8031f`
+includes the readonly-global and synchronous-wait changes. All **2,941**
+production input hashes stayed fixed during the build. It passes **699/699**
+MVP units and **32/32** focused checks with forced collection and freed-memory
+poisoning. Selected coverage is **370/449 canonical**, **345/424 additional
+strict**: **33 gains and zero lost passes in each mode** versus the preceding
+asynchronous-waiter pin. All remaining **79** cases stop at unsupported agent
+operations; no selected crashes, timeouts or missing records remain.
+Same-pin LJS controls pass **449/449**, and its stored-body baseline passes
+**40,261/40,261**, with no retries or regressions. The exception-catalog gate
+passes. These are correctness checks, not benchmark timing or a latest-source
+whole-population score.
+
+The integrated `make test-lambda-baseline` gate is **not green**. Its runner
+reports **7,234/7,236** including the **2,112/2,112** input gate, but represents
+the unfinished GC suite as one timeout record. All JavaScript groups pass,
+including **699/699** MVP cases. The two failures are:
+
+- `BinarySchemaTest.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`:
+  `test/pdf_output_check.py` cannot import Pillow (`ModuleNotFoundError: PIL`).
+- `test_mir_gc_stress_gtest`: **298 cases complete** before the existing
+  360-second idle deadline stops `regression_music_layout` in `interp-forced`.
+  That case's forced-JIT and randomized-GC modes completed successfully. This
+  timeout is unresolved; it is not a passing stress gate or an established
+  regression attribution. No deadline or expected result was changed.
+
+The current aggregate count therefore cannot be compared as a complete
+population with earlier baseline totals. Exact logs/JSON are preserved in
+`blocking1/gate-artifacts/`, with hashes and `blocking1-closeout.json` beside
+the other captures. All 2,941 production input hashes still match the pin.
+
+### Outstanding structural work
+
+Real agent scheduling and cross-agent blocking-wait wakeup remain open. Lambda's precise-rooted
+Activation stacks are the suspension seam, but each agent also needs its own
+job queue, kept-alive weak targets and runtime owner. Hosted realms currently
+share one agent and must not be repurposed as independent agents. Broadcast
+must share backing storage without sharing ordinary object identities.
+SharedArrayBuffer growth and waiter/job teardown need integrated agent tests.
+Child-realm dynamic imports also remain explicitly unsupported until they own
+a module graph.
+
+The agent implementation must separate runtime-state creation/destruction
+from whole-EvalContext capsule teardown, preserving agent ownership across
+Activation and timer callbacks. SharedArrayBuffer broadcasts need distinct
+realm-local carriers retaining the same backing handle, including growth;
+copying the handle would break identity, while sharing its pointer without an
+owner would double-free it. Blocking waiter records must remain owned until
+their suspended consumer resumes. Interpreter loop/Atomics scheduling points
+must let actual agents progress without fabricating loads or reports. These
+are unfinished implementation requirements, not features exposed by this pin.
+
+The current Unicode 16 tables are unchanged. Choosing the frozen Unicode 16
+contract or upgrading the shared runtime and target to Unicode 17 remains a
+user decision. The complete recount above predates the realm, waiter and
+readonly-global increments. Its result must not
+be presented as a current-build score or combined with selected later gains.
+Canonical sources, expected outcomes and deadlines are unchanged. Performance
+has not been measured in this continuation; earlier regressions remain open.

@@ -11,6 +11,65 @@
 #include "../../../lib/mem.h"
 #include <math.h>
 
+Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program) {
+    *program = NULL;
+    // bound targets and proxy targets are immutable; this walk invokes no guest getters.
+    for (;;) {
+        if (mvp_lmd_is_proxy(function)) {
+            JsProxyData* data = js_get_proxy_data(function);
+            if (!data || data->revoked) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            function.item = data->target;
+            continue;
+        }
+        if (get_type_id(function) != LMD_TYPE_FUNC ||
+                function.function->entry_abi != FN_ENTRY_ABI_MVP_LMD ||
+                !function.function->requires_runtime_context || function.function->runtime_context != context)
+            return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (function.function->ptr == (fn_ptr)mvp_lmd_function_bound) {
+            function = ((Item*)function.function->closure_env)[0];
+            continue;
+        }
+        *program = mvp_lmd_program_realm(((MvpLmdCallable*)function.function)->program);
+        return ItemNull;
+    }
+}
+
+Item mvp_lmd_constructor_prototype(Item target, Item intrinsic) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> constructor(roots, target), fallback(roots, intrinsic);
+    Item prototype = mvp_lmd_property_with_receiver(constructor.get(), js_name_item("prototype", 9),
+        ItemNull, LMD_PROP_GET, constructor.get());
+    if (item_is_error(prototype) || mvp_lmd_is_object(prototype)) return prototype;
+    MvpLmdProgram* program = NULL;
+    Item found = mvp_lmd_function_realm(constructor.get(), &program);
+    if (item_is_error(found)) return found;
+    MvpLmdLibraryState* source = mvp_lmd_program_library();
+    MvpLmdLibraryState* destination = mvp_lmd_program_library(program);
+    if (source == destination) return fallback.get();
+    if (!source || !destination) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    // intrinsic slots retain identity even when guest global bindings or prototype properties change.
+    struct Slots { Item* source; Item* destination; int count; };
+    const Slots slots[] = {
+        {source->values, destination->values, LMD_LIBRARY_COUNT},
+        {source->error_values, destination->error_values, LMD_ERROR_COUNT * 3},
+        {source->primitive_values, destination->primitive_values, LMD_PRIMITIVE_COUNT * 3},
+        {source->buffer_values, destination->buffer_values, 6},
+        {source->shared_buffer_values, destination->shared_buffer_values, 3},
+        {source->typed_values, destination->typed_values, 13 * 3},
+        {source->promise_values, destination->promise_values, 3},
+        {source->weak_values, destination->weak_values,
+            source->weak_class_count < destination->weak_class_count ? source->weak_class_count * 3 : destination->weak_class_count * 3},
+        {source->async_function_values, destination->async_function_values, 3},
+        {source->async_generator_values, destination->async_generator_values, 5},
+        {source->generator_function_values, destination->generator_function_values, 2}
+    };
+    for (const Slots& block : slots) if (block.source && block.destination)
+        for (int i = 0; i < block.count; i++)
+            if (block.source[i].item == fallback.get().item) return block.destination[i];
+    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+}
+
 extern "C" Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t operation) {
     static const JsWithBindingOps ops = {
         [](Item object, Item name) { return mvp_lmd_property_with_receiver(object, name, ItemNull, LMD_PROP_HAS, object); },
@@ -71,9 +130,12 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
         span.items()[i] = lambda_item_adopt_scalar_home(value, &homes[i]);
     }
     MvpLmdCallable* callable = (MvpLmdCallable*)callee.get().function;
-    Item result = entry ? entry(context, callable->program, span.items(), first + count,
-        callee.get(), self.get(), Item{.item = ITEM_JS_UNDEFINED}) :
-        mvp_lmd_class_invoke(callee.get(), self.get(), span.items(), first + count, new_target.get());
+    Item result;
+    if (entry) {
+        MvpLmdRealmScope realm(callable->program);
+        result = realm.complete(entry(context, callable->program, span.items(), first + count,
+            callee.get(), self.get(), Item{.item = ITEM_JS_UNDEFINED}));
+    } else result = mvp_lmd_class_invoke(callee.get(), self.get(), span.items(), first + count, new_target.get());
     result = lambda_item_resolve_pending_slot(result);
     bool number = get_type_id(result) == LMD_TYPE_FLOAT;
     double scalar = number ? it2d(result) : 0;
@@ -185,7 +247,7 @@ extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t coun
     object.set(mvp_lmd_object_new(state->object_shape, 0));
     if (item_is_error(object.get())) return object.get();
     if (!state->arguments_key)
-        state->arguments_key = name_pool_create_unique_private(context->name_pool, {"MVP [[ParameterMap]]", 20});
+        state->arguments_key = mvp_lmd_internal_name(LMD_INTERNAL_ARGUMENTS);
     if (!state->arguments_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (get_type_id(mapping.get()) != LMD_TYPE_ARRAY) mapping.set(mvp_lmd_array_new(0));
     if (item_is_error(mapping.get())) return mapping.get();

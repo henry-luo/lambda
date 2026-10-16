@@ -906,6 +906,11 @@ Item js_object_legacy_accessor_with_ops(Item receiver, Item property, Item callb
 Item js_collection_create_with_storage(struct TypeMap* shape, Pool* pool, int kind, bool weak);
 bool js_collection_has_brand(Item object, int kind, bool weak);
 bool js_can_be_held_weakly(Item key);
+Item js_weak_validate_input(bool registry, Item input, const JsCollectionOps* ops);
+Item js_weak_create_with_storage(struct TypeMap* shape, bool registry, Item input, const JsCollectionOps* ops);
+Item js_weak_method_with_ops(int operation, Item receiver, Item* args, int count, const JsCollectionOps* ops);
+// host job boundary only: release kept targets and run pending native cleanup jobs.
+Item js_weak_job_checkpoint(void);
 Item js_collection_add_entries_with_ops(Item collection, Item iterable, bool is_map,
     const JsCollectionOps* ops);
 Item js_collection_method_with_ops(Item object, int method, Item arg1, Item arg2,
@@ -1536,8 +1541,8 @@ Item js_iterator_collect_rest(Item iterator);
 // v14: Promise Runtime
 // =============================================================================
 
-// Frontend policy is fixed for one EvalContext. Native Promise jobs retain that
-// owner through the existing realm queue; ordinary LJS uses the null policy.
+// Frontend policy is fixed for one EvalContext. Its active realm owner follows
+// calls and suspension; queued jobs retain their realm through wrap_job.
 typedef struct JsPromiseHostOps {
     Item (*get)(void*, Item, Item, Item);
     bool (*callable)(void*, Item);
@@ -1553,6 +1558,8 @@ typedef struct JsPromiseHostOps {
     Item (*error)(void*, const char*, Item, Item);
     Item (*error_payload)(void*, Item);
     Item (*expose_function)(void*, Item);
+    Item (*wrap_job)(void*, Item job, Item handler);
+    Item (*new_array)(void*, int64_t length);
 } JsPromiseHostOps;
 void js_promise_set_host_ops(const JsPromiseHostOps* ops, void* host_context);
 Item js_promise_property_storage(Item promise, bool create);

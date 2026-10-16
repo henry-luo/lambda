@@ -1146,6 +1146,8 @@ static bool js_interp_script_is_bridged_eval(const JsScript* script) {
 }
 
 static JsInterpEvalVars js_interp_eval_vars(const JsScript* script) {
+    if (js_interp_host && script && !script->is_module && !script->is_eval_script)
+        return JS_INTERP_EVAL_VARS_GLOBAL;
     if (js_interp_host) return !script || !script->is_eval_script || script->strict_mode
         ? JS_INTERP_EVAL_VARS_PRIVATE : js_interp_script_is_linked_eval(script)
             ? JS_INTERP_EVAL_VARS_LINKED : JS_INTERP_EVAL_VARS_GLOBAL;
@@ -1553,6 +1555,14 @@ static bool js_interp_entry_in_slab(const JsInterpFrame* frame, const NameEntry*
         !js_interp_script_is_linked_eval(frame->script);
 }
 
+static bool js_interp_host_global_binding(const JsInterpFrame* frame, const NameEntry* entry) {
+    if (!js_interp_host || !entry || entry->is_lexical) return false;
+    JsInterpEnv* owner = js_interp_find_env(frame->env, entry->scope);
+    return (owner && owner->binding_role == JS_INTERP_ENV_GLOBAL_OBJECT) ||
+        (entry->scope == frame->script->global_scope &&
+         js_interp_eval_vars(frame->script) == JS_INTERP_EVAL_VARS_GLOBAL);
+}
+
 // GetValue on a binding the static scope graph resolved: the implicit
 // `arguments`, vars direct eval added, a MIR caller's eval journal, an import,
 // a global, then its slab or environment slot.
@@ -1583,8 +1593,7 @@ static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
         // are built, after an earlier identifier node captured no static entry.
         entry = js_interp_find_binding(frame, unresolved_name);
     }
-    if (js_interp_host && entry && entry->scope == frame->script->global_scope &&
-            js_interp_eval_vars(frame->script) == JS_INTERP_EVAL_VARS_GLOBAL && !entry->is_lexical) {
+    if (js_interp_host_global_binding(frame, entry)) {
         return js_interp_host_global(js_interp_name_key(entry->name), ItemNull, JS_INTERP_HOST_GET);
     }
     JsInterpModuleBinding* imported = js_interp_import_binding(frame->script,
@@ -1651,12 +1660,13 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
-    if (js_interp_host && (!entry || (entry->scope == frame->script->global_scope &&
-            !entry->is_lexical && js_interp_eval_vars(frame->script) == JS_INTERP_EVAL_VARS_GLOBAL))) {
+    if (js_interp_host && (!entry || js_interp_host_global_binding(frame, entry))) {
         int operation = !initialize ? JS_INTERP_HOST_SET
             : get_type_id(value) == LMD_TYPE_UNDEFINED ? JS_INTERP_HOST_DECLARE
             : entry && entry->node && entry->node->node_type == AST_NODE_FUNC
                 ? JS_INTERP_HOST_DECLARE_FUNCTION : JS_INTERP_HOST_SET;
+        if (!frame->script->is_module && !frame->script->is_eval_script)
+            operation |= JS_INTERP_HOST_SCRIPT;
         return js_interp_host_global(key, value, operation, frame->strict);
     }
     if (!entry) {
@@ -2893,6 +2903,8 @@ static void js_interp_set_script_role(JsScript* script, bool is_module,
 // The function object a scope entry's declaration instantiates, if any. A
 // function expression's own name is its one closure, not a fresh function.
 static JsFunctionNode* js_interp_declared_function(NameEntry* entry, NameScope* scope) {
+    // Annex B creates a var companion; the block publishes its function only when evaluated.
+    if (entry && entry->is_annex_b_companion) return NULL;
     AstNode* node = entry ? entry->node : NULL;
     if (!node || (node->node_type != AST_NODE_FUNC &&
             node->node_type != AST_NODE_FUNC_EXPR &&
@@ -2903,7 +2915,13 @@ static JsFunctionNode* js_interp_declared_function(NameEntry* entry, NameScope* 
     return function;
 }
 
-static Item js_interp_host_check_global_declarations(NameScope* scope) {
+static Item js_interp_host_check_global_declarations(NameScope* scope, bool script = false) {
+    if (script) for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
+        if (!entry->name || !entry->is_lexical) continue;
+        Item checked = js_interp_host_global(js_interp_name_key(entry->name), ItemNull,
+            JS_INTERP_HOST_CHECK_DECLARE_LEXICAL);
+        if (item_is_error(checked)) return checked;
+    }
     // lexical conflicts precede function checks, which precede ordinary var checks.
     for (int phase = 0; phase < 3; phase++) {
         for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
@@ -3550,8 +3568,11 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         // Dynamic import performs ToString inside its Promise capability. In
         // particular, a coercion error rejects the returned promise instead
         // of escaping the import expression synchronously.
-        value_root.set(js_dynamic_import_at(value_root.get(),
-            js_interp_script_origin(frame->script)));
+        value_root.set(js_interp_host && js_interp_host->dynamic_import
+            ? js_interp_host->dynamic_import(js_interp_host->state, value_root.get(),
+                js_interp_script_origin(frame->script))
+            : js_dynamic_import_at(value_root.get(), js_interp_script_origin(frame->script)));
+        if (item_is_error(value_root.get())) JS_INTERP_CALL_RETURN(js_interp_throw(value_root.get()));
         JS_INTERP_CALL_RETURN(js_interp_normal(value_root.get()));
     }
     if (super_call) {
@@ -7359,17 +7380,46 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
     return script;
 }
 
+Item js_interp_host_global_lexical(const JsInterpHostOps* ops, JsInterpEnv* environments,
+        Item key, Item value, int operation, bool* found) {
+    *found = false;
+    if (get_type_id(key) != LMD_TYPE_STRING) return ItemNull;
+    JsInterpHostScope profile(ops);
+    operation &= ~JS_INTERP_HOST_SCRIPT;
+    for (JsInterpEnv* env = environments; env; env = env->outer) {
+        NameEntry* entry = js_interp_env_find_name(env, key.get_string());
+        if (!entry) continue;
+        // Script var names participate in lexical declaration checks; reads remain live global properties.
+        if (!entry->is_lexical && operation != JS_INTERP_HOST_CHECK_DECLARE_LEXICAL) continue;
+        *found = true;
+        if (operation == JS_INTERP_HOST_HAS || operation == JS_INTERP_HOST_HAS_LEXICAL)
+            return Item{.item = ITEM_TRUE};
+        if (operation == JS_INTERP_HOST_DELETE) return Item{.item = ITEM_FALSE};
+        if (operation == JS_INTERP_HOST_CHECK_DECLARE && value.item == ITEM_TRUE)
+            return Item{.item = ITEM_FALSE};
+        if (operation != JS_INTERP_HOST_GET && operation != JS_INTERP_HOST_SET)
+            return ops->fail(JS_INTERP_HOST_SYNTAX);
+        Item current = js_interp_binding_slot_read(env, entry);
+        if (current.item == ITEM_JS_TDZ) return ops->fail(JS_INTERP_HOST_REFERENCE);
+        if (operation == JS_INTERP_HOST_GET) return current;
+        if (entry->is_const) return ops->fail(JS_INTERP_HOST_TYPE);
+        return js_interp_binding_slot_store(env, entry, value);
+    }
+    return ItemNull;
+}
+
 Item js_interp_execute_host_source(const JsInterpHostOps* ops, const char* source,
-        size_t length, const char* filename, bool indirect_eval) {
+        size_t length, const char* filename, bool indirect_eval, JsInterpEnv** script_environment) {
     if (!ops || !context || !context->heap || !source) return ItemError;
     JsInterpHostScope profile(ops);
     Item failure = ItemNull;
     JsScript* script = js_interp_prepare_host_script(ops, source, length, filename, false, &failure);
     if (!script) return failure;
-    script->is_module = true;
+    script->is_module = script_environment == NULL;
     script->is_eval_script = indirect_eval;
     script->is_direct_eval = false;
-    JsInterpEnvRoot environment(js_interp_env_create(script->global_scope, NULL));
+    JsInterpEnvRoot environment(js_interp_env_create(script->global_scope,
+        script_environment ? *script_environment : NULL));
     if (!environment.env || !environment.registered) return ops->fail(JS_INTERP_HOST_MEMORY);
     RootFrame roots(4);
     Rooted<Item> receiver(roots, ops->global_this(ops->state));
@@ -7379,12 +7429,19 @@ Item js_interp_execute_host_source(const JsInterpHostOps* ops, const char* sourc
     JsInterpFrame frame = {script, environment.env, receiver.home(), target.home(),
         home.home(), script->strict_mode, NULL, 0, NULL, false};
     frame.completion_home = completion.home();
-    if (indirect_eval && !script->strict_mode) {
-        Item checked = js_interp_host_check_global_declarations(script->global_scope);
+    if (script_environment || (indirect_eval && !script->strict_mode)) {
+        Item checked = js_interp_host_check_global_declarations(script->global_scope, script_environment != NULL);
         if (item_is_error(checked)) return checked;
     }
+    if (script_environment) environment.env->binding_role = JS_INTERP_ENV_GLOBAL_OBJECT;
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame, script->global_scope);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    if (script_environment) {
+        // transfer the exact root only after all declaration checks; an abrupt body retains its TDZ bindings.
+        if (*script_environment) heap_unregister_gc_object_root(*script_environment);
+        *script_environment = environment.env;
+        environment.registered = false;
+    }
     JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);
     return result.kind == JS_INTERP_NORMAL ? completion.get() : result.value;
 }

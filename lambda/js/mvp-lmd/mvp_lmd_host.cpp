@@ -164,6 +164,16 @@ static Item host_task_call(Item environment) {
     // the existing forwarding path snapshots arguments before callbacks can collect their backing storage.
     return mvp_lmd_function_forward(callback.get(), receiver.get(), arguments.get(), NULL, 0);
 }
+Item mvp_lmd_host_task(Item callback, Item receiver, Item arguments) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> function(roots, callback), self(roots, receiver), inputs(roots, arguments);
+    Item* environment = js_alloc_env(4);
+    if (!environment) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    environment[0] = function.get(); environment[1] = self.get(); environment[2] = inputs.get();
+    environment[3] = Item{.item = i2it(lambda_active_module_state_id())};
+    return js_new_native_closure(host_task_call, 0, environment, 4);
+}
 
 static Item host_schedule(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item, Item) {
@@ -188,13 +198,8 @@ static Item host_schedule(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         delay.set(js_retain_scalar(delay.get()));
         if (item_is_error(delay.get())) return delay.get();
     }
-    Item* environment = js_alloc_env(4);
-    if (!environment) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    environment[0] = callback.get();
-    environment[1] = microtask ? Item{.item = ITEM_JS_UNDEFINED} : *state->global;
-    environment[2] = arguments.get();
-    environment[3] = Item{.item = i2it(lambda_active_module_state_id())};
-    thunk.set(js_new_native_closure(host_task_call, 0, environment, 4));
+    thunk.set(mvp_lmd_host_task(callback.get(), microtask ? Item{.item = ITEM_JS_UNDEFINED} : *state->global,
+        arguments.get()));
     if (item_is_error(thunk.get())) return thunk.get();
     if (microtask) {
         js_microtask_enqueue(thunk.get());

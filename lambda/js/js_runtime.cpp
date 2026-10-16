@@ -12980,21 +12980,8 @@ JS_ATOMICS_OPERATION_BODY(js_intrinsic_atomics_xor_body, JS_ATOMICS_OP_XOR,
 
 Item js_intrinsic_atomics_pause_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-        TypeId type = get_type_id(args[0]);
-        if (type == LMD_TYPE_INT) {
-            return make_js_undefined();
-        }
-        if (type == LMD_TYPE_FLOAT) {
-            double value = it2d(args[0]);
-            if (isfinite(value) && value == trunc(value)) {
-                return make_js_undefined();
-            }
-        }
-        return js_throw_type_error(
-            "Atomics.pause requires an integral Number argument");
-    }
-    return make_js_undefined();
+    return js_atomics_pause_with_ops(argc ? args[0] : make_js_undefined(),
+        &js_buffer_view_default_ops);
 }
 
 #define JS_ATOMICS_SPECIAL_BODY(body_name, expression) \
@@ -30479,6 +30466,9 @@ static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item th
     runner_root.set(js_new_native_function(js_promise_thenable_job));
     Item bound_args[3] = {promise_root.get(), thenable_root.get(), then_fn_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), then_fn_root.get()));
     js_microtask_enqueue(thunk_root.get());
 }
 
@@ -30704,6 +30694,9 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
     runner_root.set(js_new_native_function(js_promise_microtask_run));
     Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), handler_root.get()));
     Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
         ? next_root.get() : js_async_hooks_get_current_resource();
     // promise jobs are enqueued while the settling promise is active, so stamp
@@ -30721,6 +30714,9 @@ static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseStat
     runner_root.set(js_new_native_function(js_promise_passthrough_run));
     Item bound_args[3] = {next_root.get(), (Item){.item = i2it((int64_t)state)}, result_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    if (js_promise_host_ops() && js_promise_host_ops()->wrap_job)
+        thunk_root.set(js_promise_host_ops()->wrap_job(js_runtime_state.promises.host_context,
+            thunk_root.get(), make_js_undefined()));
     Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
         ? next_root.get() : js_async_hooks_get_current_resource();
     js_promise_enqueue_wrapped_job(thunk_root.get(), resource, domain_root.get());
@@ -31252,6 +31248,7 @@ static Item js_promise_combinator_iterable_with_constructor(
         Item called_arr = ItemNull;
         counter_root.set(js_promise_make_combinator_counter(1, values_name, values_len, 0,
             &values_arr, &called_arr));
+        if (item_is_error(counter_root.get())) return counter_root.get();
         values_root.set(values_arr);
         called_root.set(called_arr);
         js_set_key_cstr(counter_root.get(), "__cap_resolve", resolve_root.get());
@@ -32074,7 +32071,11 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                Item* called_out) {
     JS_ROOTS(roots, counter_root, js_new_object(), values_root, ItemNull, called_root, ItemNull);
     js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
-    values_root.set(js_array_new(values_length));
+    // combinator values escape to guest code and belong to the active intrinsic realm.
+    const JsPromiseHostOps* ops = js_promise_host_ops();
+    values_root.set(ops && ops->new_array
+        ? ops->new_array(js_runtime_state.promises.host_context, values_length) : js_array_new(values_length));
+    if (item_is_error(values_root.get())) return values_root.get();
     Item values = values_root.get();
     values.array->length = values_length;
     js_set_key_default(counter_root.get(),
@@ -33606,118 +33607,216 @@ static Item js_weak_collection_new(bool is_map) {
 JS_FORWARD_ITEM(js_weakmap_new, (void), js_weak_collection_new, (true))
 JS_FORWARD_ITEM(js_weakset_new, (void), js_weak_collection_new, (false))
 
-extern "C" Item js_weakref_new(Item target) {
-    if (!js_can_be_held_weakly(target)) {
-        return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
+struct JsWeakCell {
+    Item target, holdings, token;
+    uint64_t holdings_home;
+    JsWeakCell* next;
+};
+struct JsWeakData {
+    JsWeakData* next;
+    JsWeakData** previous;
+    JsWeakRuntimeState* state;
+    Map* owner;
+    const JsCollectionOps* ops;
+    Item target, callback, empty;
+    JsWeakCell* cells;
+    bool registry, pending;
+};
+struct JsWeakRuntimeState {
+    RootVector kept;
+    JsWeakData* head;
+    bool cleaning;
+};
+struct JsWeakMap { Map base; JsWeakData* weak; };
+
+static JsWeakData* js_weak_data(Item owner) {
+    return get_type_id(owner) == LMD_TYPE_MAP && owner.map && owner.map->map_kind == MAP_KIND_WEAK
+        ? ((JsWeakMap*)owner.map)->weak : NULL;
+}
+static JsWeakRuntimeState* js_weak_state_ensure() {
+    if (!js_active_runtime_state && !js_runtime_state_init(context)) return NULL;
+    JsWeakRuntimeState*& state = js_runtime_state.weak_lifetimes;
+    if (!state) {
+        state = (JsWeakRuntimeState*)mem_calloc(1, sizeof(JsWeakRuntimeState), MEM_CAT_EVAL);
+        if (state) root_vector_init(&state->kept, context, "JS kept weak targets");
     }
-    // exact-root obj (and the borrowed target) across prototype link, class
-    // stamp, key alloc, and property set — an unrooted obj is freed by a
-    // mid-construction GC.
-    RootFrame roots(3);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_WEAK_REF));
-    js_collection_link_prototype(obj_root.get(), "WeakRef", 7);
-    Rooted<Item> target_key_root(roots, js_name_item("__weakref_target__", 18));
-    js_set_key_default(obj_root.get(), target_key_root.get(), target_root.get());
-    return obj_root.get();
+    return state;
+}
+static bool js_weak_keep(JsWeakRuntimeState* state, Item target) {
+    if (!state) return false;
+    for (int64_t i = 0; i < root_vector_count(&state->kept); i++)
+        if (root_vector_at(&state->kept, i)->item == target.item) return true;
+    return root_vector_push(&state->kept, target);
 }
 
-extern "C" Item js_weakref_deref(Item this_val) {
-    if (get_type_id(this_val) != LMD_TYPE_MAP || js_class_id(this_val) != JS_CLASS_WEAK_REF) {
-        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
-    }
-    bool found = false;
-    Item target = js_map_shape_lookup(this_val.map, "__weakref_target__", 18, &found);
-    if (!found) {
-        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
-    }
-    return target;
+Item js_weak_validate_input(bool registry, Item input, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    if (registry ? !ops->is_callable(input) : !ops->weak_key(input))
+        return ops->error(false, registry ? "FinalizationRegistry cleanup callback must be callable" :
+            "WeakRef: target must be an object or unregistered symbol");
+    return ItemNull;
+}
+Item js_weak_create_with_storage(TypeMap* shape, bool registry, Item input, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    JS_RETURN_IF_ERROR(js_weak_validate_input(registry, input, ops));
+    RootFrame roots(2);
+    if (!roots.valid() || !shape) return ItemError;
+    Rooted<Item> held(roots, input), object(roots, ItemNull);
+    JsWeakRuntimeState* state = js_weak_state_ensure();
+    if (!state || (!registry && !js_weak_keep(state, held.get()))) return ItemError;
+    auto* carrier = (JsWeakMap*)heap_calloc(sizeof(JsWeakMap), LMD_TYPE_MAP);
+    if (!carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP; carrier->base.map_kind = MAP_KIND_WEAK;
+    carrier->base.type = shape;
+    object.set(Item{.map = &carrier->base});
+    auto* data = (JsWeakData*)mem_calloc(1, sizeof(JsWeakData), MEM_CAT_EVAL);
+    if (!data) return ItemError;
+    data->registry = registry; data->state = state; data->owner = object.get().map; data->ops = ops;
+    if (registry) data->callback = held.get(); else data->target = held.get();
+    data->next = state->head; data->previous = &state->head;
+    if (data->next) data->next->previous = &data->next;
+    state->head = data; carrier->weak = data;
+    Map* initialized = map_fill_reserve_data(object.get().map);
+    return initialized ? Item{.map = initialized} : ItemError;
 }
 
-extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
-    if (!js_is_callable(cleanup_callback)) {
-        return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
+static void js_weak_target_cleared(uint64_t, void* opaque) {
+    // GC only records work; no guest callback or managed allocation occurs here.
+    ((JsWeakData*)opaque)->pending = true;
+}
+extern "C" void js_weak_map_gc_trace(Map* map, gc_heap_t* gc) {
+    JsWeakData* data = ((JsWeakMap*)map)->weak;
+    if (!data) return;
+    gc_mark_item(gc, data->callback.item);
+    if (!data->registry && data->target.item &&
+            !gc_register_ephemeron(gc, &data->target.item, &data->empty.item, NULL, NULL))
+        gc_mark_item(gc, data->target.item);
+    for (JsWeakCell* cell = data->cells; cell; cell = cell->next) {
+        // holdings are strong even when they indirectly retain the weak target (D5.3).
+        gc_mark_item(gc, cell->holdings.item);
+        if (cell->target.item && !gc_register_ephemeron(gc, &cell->target.item, &data->empty.item,
+                js_weak_target_cleared, data)) gc_mark_item(gc, cell->target.item);
+        if (cell->token.item && !gc_register_ephemeron(gc, &cell->token.item, &data->empty.item,
+                NULL, NULL)) gc_mark_item(gc, cell->token.item);
     }
-    // exact-root obj (and the borrowed callback) across prototype link, class
-    // stamp, two key allocs, the cells array alloc, and two property sets — an
-    // unrooted obj is freed by a mid-construction GC (register() would then be
-    // missing from the collected object).
-    RootFrame roots(4);
-    Rooted<Item> cleanup_root(roots, cleanup_callback);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_FINALIZATION_REGISTRY));
-    js_collection_link_prototype(obj_root.get(), "FinalizationRegistry", 20);
-    Rooted<Item> cb_key_root(roots, js_name_item("__fr_cleanup__", 14));
-    js_set_key_default(obj_root.get(), cb_key_root.get(), cleanup_root.get());
-    Rooted<Item> cells_key_root(roots, js_name_item("__fr_cells__", 12));
-    js_set_key_default(obj_root.get(), cells_key_root.get(), js_array_new(0));
-    return obj_root.get();
+}
+extern "C" void js_weak_map_heap_destroy(Map* map) {
+    JsWeakData* data = ((JsWeakMap*)map)->weak;
+    if (!data) return;
+    if (data->previous) *data->previous = data->next;
+    if (data->next) data->next->previous = data->previous;
+    while (data->cells) { JsWeakCell* cell = data->cells; data->cells = cell->next; mem_free(cell); }
+    ((JsWeakMap*)map)->weak = NULL;
+    mem_free(data);
+}
+void js_weak_state_destroy(JsRuntimeState* owner) {
+    JsWeakRuntimeState* state = owner ? owner->weak_lifetimes : NULL;
+    if (!state) return;
+    for (JsWeakData* data = state->head; data; ) {
+        JsWeakData* next = data->next;
+        // heap finalizers run after the runtime capsule is released.
+        data->state = NULL; data->previous = NULL; data->next = NULL; data = next;
+    }
+    root_vector_destroy(&state->kept);
+    mem_free(state); owner->weak_lifetimes = NULL;
 }
 
-static Item js_finalization_registry_cells(Item registry) {
-    if (get_type_id(registry) != LMD_TYPE_MAP ||
-        js_class_id(registry) != JS_CLASS_FINALIZATION_REGISTRY) {
-        return ItemNull;
+Item js_weak_method_with_ops(int operation, Item receiver, Item* args, int count, const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    JsWeakData* data = js_weak_data(receiver);
+    bool deref = operation == JS_BUILTIN_WEAKREF_DEREF;
+    if (!data || data->registry == deref)
+        return ops->error(false, "weak lifetime method called on incompatible receiver");
+    if (deref) {
+        if (!data->target.item) return make_js_undefined();
+        return js_weak_keep(data->state, data->target) ? data->target : ItemError;
     }
-    bool found = false;
-    Item cells = js_map_shape_lookup(registry.map, "__fr_cells__", 12, &found);
-    if (!found || get_type_id(cells) != LMD_TYPE_ARRAY) return ItemNull;
-    return cells;
-}
-
-extern "C" Item js_finalization_registry_register(Item this_val, Item target,
-        Item holdings, Item unregister_token, int argc) {
-    Item cells = js_finalization_registry_cells(this_val);
-    if (cells.item == ItemNull.item) {
-        return js_throw_type_error("FinalizationRegistry.prototype.register called on incompatible receiver");
+    Item target = count ? args[0] : make_js_undefined();
+    if (!ops->weak_key(target)) return ops->error(false, "weak target or unregister token must be an object or unregistered symbol");
+    if (operation == JS_BUILTIN_FINALIZATION_UNREGISTER) {
+        bool removed = false;
+        for (JsWeakCell** link = &data->cells; *link; ) {
+            JsWeakCell* cell = *link;
+            if (cell->token.item != target.item) { link = &cell->next; continue; }
+            *link = cell->next; mem_free(cell); removed = true;
+        }
+        return Item{.item = b2it(removed)};
     }
-    if (!js_can_be_held_weakly(target)) {
-        return js_throw_type_error("FinalizationRegistry target must be an object or unregistered symbol");
-    }
-    if (argc >= 2 && it2b(js_strict_equal(target, holdings))) {
-        return js_throw_type_error("FinalizationRegistry holdings must not be the target");
-    }
-    bool has_token = argc >= 3 && get_type_id(unregister_token) != LMD_TYPE_UNDEFINED;
-    if (has_token && !js_can_be_held_weakly(unregister_token)) {
-        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
-    }
-    Item cell = js_new_object();
-    js_set_key_cstr(cell, "__target__", target);
-    js_set_key_cstr(cell, "__holdings__", argc >= 2 ? holdings : (Item){.item = ITEM_JS_UNDEFINED});
-    js_set_key_cstr(cell, "__active__", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(cell, "__has_token__", (Item){.item = b2it(has_token)});
-    if (has_token) {
-        js_set_key_cstr(cell, "__token__", unregister_token);
-    }
-    js_array_push(cells, cell);
+    Item holdings = count > 1 ? args[1] : make_js_undefined();
+    Item token = count > 2 ? args[2] : make_js_undefined();
+    if (holdings.item == target.item) return ops->error(false, "FinalizationRegistry holdings must not be the target");
+    if (get_type_id(token) != LMD_TYPE_UNDEFINED && !ops->weak_key(token))
+        return ops->error(false, "FinalizationRegistry unregister token must be an object or unregistered symbol");
+    auto* cell = (JsWeakCell*)mem_calloc(1, sizeof(JsWeakCell), MEM_CAT_EVAL);
+    if (!cell) return ItemError;
+    cell->target = target;
+    cell->holdings = lambda_item_adopt_scalar_home(holdings, &cell->holdings_home);
+    if (get_type_id(token) != LMD_TYPE_UNDEFINED) cell->token = token;
+    cell->next = data->cells; data->cells = cell;
     return make_js_undefined();
 }
 
-extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token) {
-    Item cells = js_finalization_registry_cells(this_val);
-    if (cells.item == ItemNull.item) {
-        return js_throw_type_error("FinalizationRegistry.prototype.unregister called on incompatible receiver");
-    }
-    if (!js_can_be_held_weakly(unregister_token)) {
-        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
-    }
-    bool removed = false;
-    JS_ARRAY_FOREACH(cell, cells) {
-        if (get_type_id(cell) != LMD_TYPE_MAP) continue;
-        bool active_found = false;
-        Item active = js_map_shape_lookup(cell.map, "__active__", 10, &active_found);
-        if (active_found && !js_is_truthy(active)) continue;
-        bool has_token_found = false;
-        Item has_token = js_map_shape_lookup(cell.map, "__has_token__", 13, &has_token_found);
-        if (!has_token_found || !js_is_truthy(has_token)) continue;
-        bool token_found = false;
-        Item token = js_map_shape_lookup(cell.map, "__token__", 9, &token_found);
-        if (!token_found) continue;
-        if (it2b(js_strict_equal(token, unregister_token))) {
-            js_set_key_cstr(cell, "__active__", (Item){.item = ITEM_FALSE});
-            removed = true;
+Item js_weak_job_checkpoint() {
+    JsWeakRuntimeState* state = js_active_runtime_state ? js_runtime_state.weak_lifetimes : NULL;
+    if (!state || state->cleaning) return ItemNull;
+    root_vector_clear(&state->kept);
+    RootVector queued = {};
+    root_vector_init(&queued, context, "JS finalization cleanup jobs");
+    // snapshot reachable pending carriers before callbacks can collect or mutate the native list.
+    for (JsWeakData* data = state->head; data; data = data->next) {
+        if (data->pending && !root_vector_push(&queued, Item{.map = data->owner})) {
+            root_vector_destroy(&queued); return ItemError;
         }
     }
-    return (Item){.item = b2it(removed)};
+    RootFrame roots(2);
+    if (!roots.valid()) { root_vector_destroy(&queued); return ItemError; }
+    uint64_t home = 0;
+    Rooted<Item> holding(roots, ItemNull), error(roots, ItemNull);
+    state->cleaning = true;
+    for (int64_t index = 0; index < root_vector_count(&queued); index++) {
+        JsWeakData* data = js_weak_data(*root_vector_at(&queued, index));
+        data->pending = false;
+        for (;;) {
+            JsWeakCell** link = &data->cells;
+            while (*link && (*link)->target.item) link = &(*link)->next;
+            if (!*link) break;
+            JsWeakCell* cell = *link;
+            holding.set(lambda_item_adopt_scalar_home(cell->holdings, &home));
+            *link = cell->next; mem_free(cell);
+            Item argument = holding.get();
+            Item result = data->ops->call(data->callback, make_js_undefined(), &argument, 1);
+            if (item_is_error(result)) { error.set(result); data->pending = true; break; }
+        }
+        root_vector_clear(&state->kept);
+        if (item_is_error(error.get())) break;
+    }
+    state->cleaning = false;
+    root_vector_destroy(&queued);
+    return error.get();
+}
+
+static Item js_weak_new(bool registry, Item input) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, input), object(roots, ItemNull);
+    JS_RETURN_IF_ERROR(js_weak_validate_input(registry, held.get(), NULL));
+    TypeMap* shape = js_object_type_for_class(registry ? JS_CLASS_FINALIZATION_REGISTRY : JS_CLASS_WEAK_REF);
+    object.set(js_weak_create_with_storage(shape, registry, held.get(), NULL));
+    if (item_is_error(object.get())) return object.get();
+    js_collection_link_prototype(object.get(), registry ? "FinalizationRegistry" : "WeakRef", registry ? 20 : 7);
+    return object.get();
+}
+extern "C" Item js_weakref_new(Item target) { return js_weak_new(false, target); }
+extern "C" Item js_finalization_registry_new(Item callback) { return js_weak_new(true, callback); }
+extern "C" Item js_weakref_deref(Item receiver) {
+    return js_weak_method_with_ops(JS_BUILTIN_WEAKREF_DEREF, receiver, NULL, 0, NULL);
+}
+extern "C" Item js_finalization_registry_register(Item receiver, Item target, Item holdings, Item token, int count) {
+    Item args[] = {target, holdings, token};
+    return js_weak_method_with_ops(JS_BUILTIN_FINALIZATION_REGISTER, receiver, args, count, NULL);
+}
+extern "C" Item js_finalization_registry_unregister(Item receiver, Item token) {
+    return js_weak_method_with_ops(JS_BUILTIN_FINALIZATION_UNREGISTER, receiver, &token, 1, NULL);
 }
 
 // new WeakMap(iterable) / new WeakSet(iterable) — validate adder is callable

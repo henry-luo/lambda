@@ -63,11 +63,14 @@ Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library
         // immutable shapes also make cached absence safe; values are read from the current owner.
         if (link) return map_shape_field_to_item(map->data, link);
     }
-    if (kind == LMD_TYPE_ARRAY) return library ? library->values[
-        object.item == library->values[LMD_LIBRARY_ARRAY_PROTOTYPE].item
-        ? LMD_LIBRARY_OBJECT_PROTOTYPE : LMD_LIBRARY_ARRAY_PROTOTYPE] : ItemNull;
+    if (kind == LMD_TYPE_ARRAY) {
+        if (library && library->default_realm) library = library->default_realm;
+        return library ? library->values[object.item == library->values[LMD_LIBRARY_ARRAY_PROTOTYPE].item
+            ? LMD_LIBRARY_OBJECT_PROTOTYPE : LMD_LIBRARY_ARRAY_PROTOTYPE] : ItemNull;
+    }
     MvpLmdClass* cls = mvp_lmd_class_record(object);
     if (!cls) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    library = mvp_lmd_program_library(cls->program);
     Item* values = mvp_lmd_class_values(cls);
     bool statics = kind == LMD_TYPE_FUNC || object.item == values[2].item;
     if (!statics && object.item != values[1].item) return values[1];
@@ -613,13 +616,9 @@ Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback) {
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, new_target), prototype(roots, ItemNull), object(roots, ItemNull);
-    String* key = heap_create_name("prototype", 9);
-    if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    prototype.set(mvp_lmd_property_with_receiver(target.get(), Item{.item = s2it(key)},
-        ItemNull, LMD_PROP_GET, target.get()));
+    prototype.set(mvp_lmd_constructor_prototype(target.get(),
+        mvp_lmd_program_library(fallback->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]));
     if (item_is_error(prototype.get())) return prototype.get();
-    if (!mvp_lmd_is_object(prototype.get()))
-        prototype.set(mvp_lmd_program_library(fallback->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
     MvpLmdClass* actual = mvp_lmd_class_record(target.get());
     // a source subclass can still require its native base's physical carrier.
     // ordinary construction keeps its live prototype without claiming that ancestry.
@@ -656,6 +655,8 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context ||
             function->runtime_context != context) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     MvpLmdCallable* fn = (MvpLmdCallable*)function;
+    MvpLmdRealmScope realm(fn->program);
+    auto invoke = [&]() -> Item {
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
@@ -702,10 +703,9 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
                 RootFrame observed(1);
                 if (!observed.valid()) return ItemError;
                 Rooted<Item> prototype(observed, ItemNull);
-                Item key = {.item = s2it(heap_create_name("prototype", 9))};
-                prototype.set(mvp_lmd_property_with_receiver(target.get(), key, ItemNull, LMD_PROP_GET, target.get()));
+                prototype.set(mvp_lmd_constructor_prototype(target.get(),
+                    mvp_lmd_program_library(fn->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]));
                 if (item_is_error(prototype.get())) return prototype.get();
-                if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_program_library(fn->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
                 Item linked = mvp_lmd_set_prototype(self.get(), prototype.get());
                 if (item_is_error(linked)) return linked;
             }
@@ -739,8 +739,9 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     }
     // the caller roots the borrowed argument span; each MIR activation owns its receiver roots.
     typedef Item (*Entry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
-    Item result = ((Entry)fn->ptr)(context, fn->program, arguments, (uint64_t)argc,
-        held.get(), self.get(), target.get());
+    MvpLmdRealmScope body_realm(fn->program);
+    Item result = body_realm.complete(((Entry)fn->ptr)(context, fn->program, arguments, (uint64_t)argc,
+        held.get(), self.get(), target.get()));
     result = lambda_item_resolve_pending_slot(result);
     if (item_is_error(result)) return result;
     if (!fn->constructor && !fn->native_constructor && target.get().item != ITEM_JS_UNDEFINED)
@@ -750,6 +751,8 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             typemap_is_shared_shape((TypeMap*)result.map->type))
         reusable->allocation_shape = (TypeMap*)result.map->type;
     return result;
+    };
+    return realm.complete(invoke());
 }
 extern "C" Item mvp_lmd_instanceof(Item value, Item constructor, int64_t ordinary) {
     MvpLmdLibraryState* state = ordinary == 2 ? NULL : mvp_lmd_program_library();

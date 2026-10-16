@@ -33,6 +33,7 @@ struct DomDocument;
 struct DomElement;
 struct UiContext;
 struct JsAtomicsRuntimeState;
+struct JsWeakRuntimeState;
 struct JsPrototypeSnapshotState;
 struct JsMirCompileRecoveryState;
 struct JsPromiseHostOps;
@@ -892,7 +893,10 @@ struct JsRuntimeState {
 
     // The event-loop queues share their three fixed, context-owned Item homes.
     RootVector event_loop_queue_roots = {};
+    JsWeakRuntimeState* weak_lifetimes = NULL; // allocated only on first weak lifetime carrier
 };
+
+void js_weak_state_destroy(JsRuntimeState* state);
 
 // This derived TLS cache is initialized once after the eval thread acquires
 // its context. It must stay paired with `context` until thread teardown.

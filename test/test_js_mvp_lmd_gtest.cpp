@@ -1,6 +1,7 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
 #include "lambda/js/js_interp.hpp"
+#include "lambda/js/js_event_loop.h"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
@@ -65,6 +66,296 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, FullParityReadonlyGlobalAssignments) {
+    boolean("let n=0;let a=(undefined=++n),b=(NaN=++n),c=(Infinity=++n);a===1&&b===2&&c===3&&undefined===void 0&&Number.isNaN(NaN)&&Infinity===1/0");
+    boolean("undefined++;NaN+=3;Infinity--;undefined===void 0&&Number.isNaN(NaN)&&Infinity===1/0");
+    boolean("let n=0;[undefined,NaN,Infinity]=[++n,++n,++n];({x:undefined}={x:++n});n===4&&undefined===void 0&&Number.isNaN(NaN)&&Infinity===1/0");
+    boolean("let n=0;while(n<3){NaN=n++;Infinity--}n===3&&Number.isNaN(NaN)&&Infinity===1/0");
+    boolean("function f(undefined,NaN,Infinity){undefined++;NaN+=2;[Infinity]=[5];return undefined+NaN+Infinity}f(1,2,3)===11");
+    boolean("'use strict';let n=0,caught=0;try{undefined=++n}catch(e){if(e instanceof TypeError)caught++}try{NaN=++n}catch(e){if(e instanceof TypeError)caught++}try{Infinity=++n}catch(e){if(e instanceof TypeError)caught++}n===3&&caught===3");
+    boolean("'use strict';let caught=0;try{NaN++}catch(e){if(e instanceof TypeError)caught++}try{[undefined]=[1]}catch(e){if(e instanceof TypeError)caught++}try{({x:Infinity}={x:1})}catch(e){if(e instanceof TypeError)caught++}caught===3");
+}
+TEST_F(JsMvpLmd, FullParityAtomicStorageAndCoercion) {
+    boolean("let a=new Int8Array(2);Atomics.store(a,1,-128);let old=Atomics.add(a,1,-1);old===-128&&Atomics.load(a,1)===127");
+    boolean("let a=new Uint32Array(1);Atomics.store(a,0,4294967295);Atomics.add(a,0,2)===4294967295&&a[0]===1&&Atomics.compareExchange(a,0,1,7)===1&&Atomics.exchange(a,0,2)===7&&Atomics.sub(a,0,1)===2");
+    boolean("let a=new Int32Array(new SharedArrayBuffer(8)),b=new Int32Array(a.buffer,4);Atomics.store(b,0,0);Atomics.load(a,1)===0&&Atomics.compareExchange(b,0,1,9)===0&&Atomics.load(a,1)===0");
+    boolean("let a=new Uint8Array(1);Atomics.store(a,0,15);Atomics.and(a,0,6)===15&&Atomics.or(a,0,8)===6&&Atomics.xor(a,0,7)===14&&a[0]===9");
+    boolean("let a=new BigInt64Array(1);Atomics.store(a,0,9223372036854775808n)===9223372036854775808n&&Atomics.add(a,0,1n)===-9223372036854775808n&&a[0]===-9223372036854775807n");
+    boolean("let a=new Int8Array(1),order='';let old=Atomics.compareExchange(a,{valueOf(){order+='i';return 0}},{valueOf(){order+='e';return 0}},{valueOf(){order+='r';return 3}});old===0&&a[0]===3&&order==='ier'");
+    boolean("let a=new Int8Array(1);Object.is(Atomics.store(a,0,-0),0)&&Atomics.store(a,0,257.75)===257&&a[0]===1");
+    error("Atomics.add(new Float64Array(1),0,1)", "TypeError");
+    error("Atomics.load(new Int32Array(1),1)", "RangeError");
+    error("Atomics.store(new BigInt64Array(1),0,1)", "TypeError");
+    error("Atomics.store(new Int32Array(1),0,1n)", "TypeError");
+}
+TEST_F(JsMvpLmd, FullParityAtomicBufferRevalidation) {
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b);let failed=false;try{Atomics.add(a,1,{valueOf(){b.resize(4);return 1}})}catch(e){failed=e instanceof RangeError}failed&&a[0]===0");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b,0,2);let failed=false;try{Atomics.load(a,{valueOf(){b.resize(4);return 0}})}catch(e){failed=e instanceof TypeError}failed");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b);let old=Atomics.add(a,1,{valueOf(){b.resize(16);return 7}});old===0&&a[1]===7&&a.length===4");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b),seen=false;try{Atomics.load(a,{valueOf(){b.resize(16);return 3}})}catch(e){seen=e instanceof RangeError}seen");
+    boolean("let b=new ArrayBuffer(8),a=new Int32Array(b),order='';try{Atomics.compareExchange(a,0,{valueOf(){b.transfer();order+='e';return 0}},{valueOf(){order+='r';return 1}})}catch(e){order+=e instanceof TypeError?'t':'x'}order==='ert'");
+}
+TEST_F(JsMvpLmd, FullParityAtomicNamespace) {
+    boolean("Object.getPrototypeOf(Atomics)===Object.prototype&&Object.prototype.toString.call(Atomics)==='[object Atomics]'&&Atomics.compareExchange.length===4&&Atomics.load.name==='load'&&!Object.getOwnPropertyDescriptor(Atomics,'load').enumerable&&Atomics.load.prototype===undefined");
+    boolean("Atomics.isLockFree({valueOf(){return 4.5}})&&!Atomics.isLockFree(1e300)&&!Atomics.isLockFree(NaN)&&Atomics.pause(-2)===undefined&&Atomics.pause()===undefined");
+    error("Atomics.pause({valueOf(){return 1}})", "TypeError");
+    error("Atomics.pause(1.5)", "TypeError");
+    error("new Atomics.add()", "TypeError");
+}
+TEST_F(JsMvpLmd, FullParityAtomicBlockingValidationAndDeadline) {
+    boolean("let a=new Int32Array(new SharedArrayBuffer(8)),order='';let r=Atomics.wait(a,{valueOf(){order+='i';return 0}},{valueOf(){order+='v';return 1}},{valueOf(){order+='t';return 0}});order==='ivt'&&r==='not-equal'");
+    boolean("let a=new BigInt64Array(new SharedArrayBuffer(8));Atomics.wait(a,0,0n,-1)==='timed-out'&&Atomics.wait(a,0,1n)==='not-equal'");
+    error("Atomics.wait(new Int32Array(1),0,0,0)", "TypeError");
+    error("Atomics.wait(new Uint32Array(new SharedArrayBuffer(4)),0,0,0)", "TypeError");
+    error("Atomics.wait(new BigInt64Array(new SharedArrayBuffer(8)),0,0,0)", "TypeError");
+    error("Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,Symbol())", "TypeError");
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item result = run("let a=new Int32Array(new SharedArrayBuffer(4)),events=[];Promise.resolve().then(()=>events.push('promise'));setTimeout(()=>events.push('timer'),0);let before=performance.now();let status=Atomics.wait(a,0,0,2.5);events.push(status==='timed-out'&&performance.now()-before>=2.5&&events.length===0);events", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    ASSERT_EQ(result.array->length, 3);
+    EXPECT_EQ(result.array->items[0].item, ITEM_TRUE);
+}
+TEST_F(JsMvpLmd, FullParityAtomicCannotSuspendValidationOrder) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item result = run("globalThis.__lambda_can_block=false;let a=new Int32Array(new SharedArrayBuffer(4)),n=0,order='';try{Atomics.wait(a,{valueOf(){order+='i';return 0}},{valueOf(){order+='v';return 1}},{valueOf(){order+='t';return 0}})}catch(e){if(e instanceof TypeError)n++}try{Atomics.wait(a,1,0,0)}catch(e){if(e instanceof RangeError)n++}try{Atomics.wait(a,0,{valueOf(){throw 7}},0)}catch(e){if(e===7)n++}n===3&&order==='ivt'&&!Atomics.waitAsync(a,0,0,0).async", &host);
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+TEST_F(JsMvpLmd, FullParityAtomicAsyncValidationAndCoercion) {
+    boolean("let a=new Int32Array(new SharedArrayBuffer(8)),order='';let r=Atomics.waitAsync(a,{valueOf(){order+='i';return 0}},{valueOf(){order+='v';return 1}},{valueOf(){order+='t';return 0}});order==='ivt'&&!r.async&&r.value==='not-equal'&&Object.getPrototypeOf(r)===Object.prototype&&Object.keys(r).join(',')==='async,value'");
+    boolean("let a=new BigInt64Array(new SharedArrayBuffer(8));let r=Atomics.waitAsync(a,0,0n,-1);!r.async&&r.value==='timed-out'&&Atomics.notify(a,0)===0");
+    boolean("let b=new SharedArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b),caught=false;try{Atomics.waitAsync(a,{valueOf(){b.grow(16);return 3}},0,0)}catch(e){caught=e instanceof RangeError}caught&&a.length===4");
+    boolean("let b=new SharedArrayBuffer(8,{maxByteLength:16}),a=new Int32Array(b);let r=Atomics.waitAsync(a,1,{valueOf(){b.grow(16);return 1}},0);r.value==='not-equal'&&a.length===4");
+    boolean("let order='',a=new Int32Array(1);Atomics.notify(a,{valueOf(){order+='i';return 0}},{valueOf(){order+='c';return 1}})===0&&order==='ic'");
+    error("Atomics.waitAsync(new Int32Array(1),0,0,0)", "TypeError");
+    error("Atomics.waitAsync(new Uint32Array(new SharedArrayBuffer(4)),0,0,0)", "TypeError");
+    error("Atomics.waitAsync(new BigInt64Array(new SharedArrayBuffer(8)),0,0,0)", "TypeError");
+    error("Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)),0,0,Symbol())", "TypeError");
+    error("Atomics.notify(new Int32Array(new SharedArrayBuffer(4)),0,1n)", "TypeError");
+}
+TEST_F(JsMvpLmd, FullParityAtomicAsyncNotifyAndLifetime) {
+    const char* sources[] = {
+        "let a=new Int32Array(new SharedArrayBuffer(8)),b=new Int32Array(a.buffer,4),out=[];let r=Atomics.waitAsync(b,0,0);out.push(r.async&&r.value instanceof Promise);r.value.then(v=>out.push(v==='ok'));out.push(Atomics.notify(a,0)===0&&Atomics.notify(a,1)===1&&Atomics.notify(b,0)===0);out",
+        "let b=new SharedArrayBuffer(16),a=new Int32Array(b),c=new BigInt64Array(b,8),out=[];let r=Atomics.waitAsync(c,0,0n);out.push(r.async);r.value.then(v=>out.push(v==='ok'));out.push(Atomics.notify(a,2)===1);out",
+        "let a=new Int32Array(new SharedArrayBuffer(4)),out=[],order='';let p=Atomics.waitAsync(a,0,0).value,q=Atomics.waitAsync(a,0,0).value;p.then(()=>order+='p');q.then(()=>order+='q');out.push(Atomics.notify(a,0,1)===1);let r=Atomics.waitAsync(a,0,0).value;r.then(()=>{order+='r';out.push(order==='pqr')});out.push(Atomics.notify(a,0,1)===1);Atomics.notify(a,0);out",
+        "let a=new Int32Array(new SharedArrayBuffer(4)),out=[];let p=Atomics.waitAsync(a,0,0,1000000).value;p.then(v=>out.push(v==='ok'));out.push(Atomics.notify(a,0,0)===0);out.push(Atomics.notify(a,0,1)===1);out"
+    };
+    for (const char* source : sources) {
+        Item result = run(source);
+        ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY) << source;
+        ASSERT_EQ(result.array->length, 3) << source;
+        for (int i = 0; i < 3; i++) EXPECT_EQ(result.array->items[i].item, ITEM_TRUE) << source << i;
+    }
+}
+TEST_F(JsMvpLmd, FullParityAtomicAsyncDeadlineWithoutHostTimers) {
+    Item result = run("let a=new Int32Array(new SharedArrayBuffer(4)),out=[];let r=Atomics.waitAsync(a,0,0,0.25);out.push(r.async);r.value.then(v=>out.push(v==='timed-out'));out");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    ASSERT_EQ(result.array->length, 2);
+    EXPECT_EQ(result.array->items[0].item, ITEM_TRUE);
+    EXPECT_EQ(result.array->items[1].item, ITEM_TRUE);
+}
+TEST_F(JsMvpLmd, FullParityAtomicCoercionOwnsBorrowedScalar) {
+    Item array = run("new Int32Array(new SharedArrayBuffer(4))");
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, array);
+    double borrowed = 0;
+    static double* callback_home;
+    callback_home = &borrowed;
+    JsBufferViewOps ops = mvp_lmd_buffer_ops;
+    ops.number = [](Item value) {
+        // model a native callback overwriting the caller's transient scalar result home.
+        if (get_type_id(value) == LMD_TYPE_INT) *callback_home = 7;
+        return value;
+    };
+    bool asynchronous = false;
+    Item result = js_atomics_wait_with_ops(owner.get(), Item{.item = i2it(0)},
+        Item{.item = d2it(&borrowed)}, Item{.item = i2it(0)}, &ops, true, true, &asynchronous);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_STRING);
+    EXPECT_FALSE(asynchronous);
+    EXPECT_STREQ(result.get_string()->chars, "timed-out");
+    borrowed = 3;
+    result = js_atomics_operation_with_ops(JS_ATOMICS_OP_STORE, owner.get(), Item{.item = i2it(0)},
+        Item{.item = d2it(&borrowed)}, ItemNull, &ops);
+    callback_home = NULL;
+    ASSERT_TRUE(get_type_id(result) == LMD_TYPE_INT || get_type_id(result) == LMD_TYPE_FLOAT);
+    EXPECT_DOUBLE_EQ(it2d(result), 3);
+}
+TEST_F(JsMvpLmd, FullParityAtomicAsyncTimeoutAndRealm) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item result = run("let g=$262.createRealm().global,a=new Int32Array(new SharedArrayBuffer(4)),out=[];let r=g.Atomics.waitAsync(a,0,0,1);out.push(Object.getPrototypeOf(r)===g.Object.prototype&&Object.getPrototypeOf(r.value)===g.Promise.prototype);r.value.then(v=>{out.push(v==='timed-out');out.push(Atomics.notify(a,0)===0)});out", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    ASSERT_EQ(result.array->length, 3);
+    for (int i = 0; i < 3; i++) EXPECT_EQ(result.array->items[i].item, ITEM_TRUE) << i;
+}
+TEST_F(JsMvpLmd, FullParityWeakLifetimeConstructorsAndBrands) {
+    boolean("let o={},w=new WeakRef(o);w.deref()===o&&Object.getPrototypeOf(w)===WeakRef.prototype&&Object.keys(w).length===0&&Object.prototype.toString.call(w)==='[object WeakRef]'");
+    boolean("let r=new FinalizationRegistry(function(){}),o={},t={};r.register(o,3,t);r.register(o,4,t);r.unregister(t)&&!r.unregister(t)&&Object.keys(r).length===0&&Object.prototype.toString.call(r)==='[object FinalizationRegistry]'");
+    boolean("class W extends WeakRef{}class F extends FinalizationRegistry{}let o={},w=new W(o),r=new F(()=>{});w instanceof W&&w instanceof WeakRef&&w.deref()===o&&r instanceof F&&r instanceof FinalizationRegistry");
+    boolean("let n=0,C=new Proxy(function(){},{get(t,k){if(k==='prototype'){n++;throw 9}return t[k]}}),ok=0;try{Reflect.construct(WeakRef,[1],C)}catch(e){if(e instanceof TypeError)ok++}try{Reflect.construct(FinalizationRegistry,[1],C)}catch(e){if(e instanceof TypeError)ok++}n===0&&ok===2");
+    boolean("let o={},w=new WeakRef(o);for(let i=0;i<2000;i++)({i});w.deref()===o");
+    error("WeakRef({})", "TypeError");
+    error("FinalizationRegistry(()=>{})", "TypeError");
+    error("WeakRef.prototype.deref.call(Object.create(WeakRef.prototype))", "TypeError");
+    error("FinalizationRegistry.prototype.register.call({}, {}, 1)", "TypeError");
+    error("let r=new FinalizationRegistry(()=>{}),o={};r.register(o,o)", "TypeError");
+    error("new WeakRef(Symbol.for('registered'))", "TypeError");
+    boolean("let s=Symbol(),w=new WeakRef(s);w.deref()===s");
+}
+TEST_F(JsMvpLmd, FullParityWeakRefCollectionAndKeptObjects) {
+    Item result = run("new WeakRef({value:7})");
+    RootFrame roots(2);
+    ASSERT_TRUE(roots.valid());
+    auto deref = [](Item value) { return js_weak_method_with_ops(JS_BUILTIN_WEAKREF_DEREF, value, NULL, 0, NULL); };
+    Rooted<Item> owner(roots, result), target(roots, deref(result));
+    ASSERT_EQ(get_type_id(target.get()), LMD_TYPE_MAP);
+    target.set(ItemNull);
+    {
+        JsOwnedCallActivation nested_call;
+        ASSERT_FALSE(item_is_error(js_microtask_flush_result()));
+        heap_gc_collect();
+        EXPECT_EQ(get_type_id(deref(owner.get())), LMD_TYPE_MAP);
+    }
+    // deref keeps the target alive until the next host job checkpoint.
+    heap_gc_collect();
+    EXPECT_EQ(get_type_id(deref(owner.get())), LMD_TYPE_MAP);
+    ASSERT_FALSE(item_is_error(js_weak_job_checkpoint()));
+    heap_gc_collect();
+    EXPECT_EQ(get_type_id(deref(owner.get())), LMD_TYPE_UNDEFINED);
+}
+TEST_F(JsMvpLmd, FullParityFinalizationCleanupAndScalarOwnership) {
+    Item result = run("let values=[];let r=new FinalizationRegistry(v=>values.push(v));let o={};r.register(o,5e-324);let w=new WeakRef(o);o=null;[r,values,w]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, result);
+    heap_gc_collect();
+    EXPECT_EQ(owner.get().array->items[1].array->length, 0);
+    ASSERT_FALSE(item_is_error(js_weak_job_checkpoint()));
+    ASSERT_EQ(owner.get().array->items[1].array->length, 1);
+    EXPECT_EQ(owner.get().array->items[1].array->items[0].get_double(), 5e-324);
+    heap_gc_collect();
+    ASSERT_FALSE(item_is_error(js_weak_job_checkpoint()));
+    EXPECT_EQ(owner.get().array->items[1].array->length, 1);
+}
+TEST_F(JsMvpLmd, FullParityFinalizationUnregisterAndStrongHoldings) {
+    Item result = run("let values=[],token={};let r=new FinalizationRegistry(v=>values.push(v));r.register({},1,token);r.unregister(token);function add(){let o={};r.register(o,{o})}add();[r,values]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, result);
+    heap_gc_collect();
+    ASSERT_FALSE(item_is_error(js_weak_job_checkpoint()));
+    EXPECT_EQ(owner.get().array->items[1].array->length, 0);
+}
+TEST_F(JsMvpLmd, FullParityHostScriptPersistentDeclarations) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "$262.evalScript('let later=1;const fixed=7;class C{}');$262.evalScript('later+=2');later===3&&fixed===7&&typeof C==='function'&&!Object.hasOwn(globalThis,'later')&&!(delete later)",
+        "$262.evalScript('var scriptVar=4;function scriptFn(){return scriptVar}');let d=Object.getOwnPropertyDescriptor(globalThis,'scriptVar');!d.configurable&&d.writable&&d.enumerable&&scriptFn()===4&&$262.evalScript('scriptVar')===4",
+        "$262.evalScript('let x=5');let n=0;try{$262.evalScript('var leak;let x')}catch(e){if(e instanceof SyntaxError)n++}try{(0,eval)('var x')}catch(e){if(e instanceof SyntaxError)n++}n===2&&typeof leak==='undefined'&&x===5",
+        "$262.evalScript('let x=1;function read(){return x}');x=5;read()===5&&$262.evalScript('x')===5",
+        "let seen=0;try{$262.evalScript('throw 9;let forever')}catch(e){if(e===9)seen++}try{typeof forever}catch(e){if(e instanceof ReferenceError)seen++}seen===2",
+        "$262.evalScript('\"use strict\";var strictVar=7;let strictLex=8');strictVar===7&&strictLex===8&&!Object.getOwnPropertyDescriptor(globalThis,'strictVar').configurable",
+        "$262.evalScript('const fixed=7');let yes=false;try{fixed=8}catch(e){yes=e instanceof TypeError}yes&&fixed===7",
+        "$262.evalScript('let outer=2');$262.evalScript('$262.evalScript(\"let inner=3\");outer+=inner');outer===5&&inner===3",
+        "(0,eval)('let privateLex=3');$262.evalScript('let privateLex=4');privateLex===4",
+        "Object.defineProperty(globalThis,'f',{value:7,writable:true,configurable:true});$262.evalScript('{function f(){return 8}}');let d=Object.getOwnPropertyDescriptor(globalThis,'f');f()===8&&!d.enumerable&&d.configurable"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        ASSERT_EQ(value.item, ITEM_TRUE) << source;
+    }
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmIdentity) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let r=$262.createRealm(),g=r.global;g!==globalThis&&g.globalThis===g&&g.Object!==Object&&g.Array!==Array&&g.TypeError!==TypeError&&g.Function!==Function&&g.Symbol.for('shared')===Symbol.for('shared')",
+        "let r=$262.createRealm();r.evalScript('var realmVar=4;let realmLex=5');r.evalScript('realmLex+=2');r.global.realmVar===4&&r.evalScript('realmLex')===7&&typeof realmVar==='undefined'&&typeof realmLex==='undefined'&&!Object.hasOwn(r.global,'realmLex')",
+        "let rootArray=[],r=$262.createRealm(),g=r.global,a=r.evalScript('[1,2]');Object.getPrototypeOf(rootArray)===Array.prototype&&g.Object.getPrototypeOf(rootArray)===Array.prototype&&Object.getPrototypeOf(a)===g.Array.prototype&&Object.getPrototypeOf(g.Object.prototype)===null&&Object.getPrototypeOf(g.Function.prototype)===g.Object.prototype",
+        "let r=$262.createRealm(),g=r.global,f=g.Function('return this');f()===g&&Object.getPrototypeOf(f)===g.Function.prototype&&Object.getPrototypeOf(f.prototype)===g.Object.prototype",
+        "let r=$262.createRealm(),g=r.global;g.Object.preventExtensions(g.Object.prototype);!Object.isExtensible(g.Object.prototype)&&Object.isExtensible(Object.prototype)",
+        "let r=$262.createRealm(),g=r.global,n=new g.Number(7),d=new g.Date(9),re=new g.RegExp('x','g');Number.prototype.valueOf.call(n)===7&&Date.prototype.getTime.call(d)===9&&RegExp.prototype.exec.call(re,'x')[0]==='x'"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+    }
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmErrorsAndSuspension) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let r=$262.createRealm(),g=r.global,ok=false;try{g.Object.defineProperty(null,'x',{})}catch(e){ok=e instanceof g.TypeError&&!(e instanceof TypeError)}ok",
+        "let r=$262.createRealm(),g=r.global,f=g.Function('return class {#x=1;read(o){return o.#x}}'),C=f(),D=f(),ok=false;try{new C().read(new D())}catch(e){ok=e instanceof g.TypeError&&!(e instanceof TypeError)}ok&&new C().read(new C())===1",
+        "let r=$262.createRealm(),g=r.global;r.global.callback=()=>{throw new TypeError('caller')};let ok=false;try{g.Function('callback()')()}catch(e){ok=e instanceof TypeError&&!(e instanceof g.TypeError)}ok",
+        "let r=$262.createRealm(),g=r.global,f=r.evalScript('(function*(){yield [];return []})'),it=f();Object.getPrototypeOf(it.next().value)===g.Array.prototype&&Object.getPrototypeOf(it.next().value)===g.Array.prototype&&Object.getPrototypeOf([])===Array.prototype",
+        "let r=$262.createRealm(),g=r.global,f=r.evalScript('(function*(){yield 1;throw new TypeError()})'),it=f();it.next();let ok=false;try{it.next()}catch(e){ok=e instanceof g.TypeError&&!(e instanceof TypeError)}ok"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+    }
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmPromises) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let r=$262.createRealm(),g=r.global,out=[false,false];let p=r.evalScript('(async function(){await 0;return []})')();out[0]=Object.getPrototypeOf(p)===g.Promise.prototype;p.then(a=>{out[1]=Object.getPrototypeOf(a)===g.Array.prototype});out",
+        "let r=$262.createRealm(),g=r.global,out=[false,false];out[0]=Object.getPrototypeOf(Promise.resolve())===Promise.prototype;g.Promise.resolve(1).then(g.Function('return []')).then(a=>{out[1]=Object.getPrototypeOf(a)===g.Array.prototype});out",
+        "let r=$262.createRealm(),g=r.global,out=[false,false];g.out=out;Promise.resolve().then(g.Function('out[0]=Object.getPrototypeOf(Promise.resolve())===Promise.prototype')).then(()=>{out[1]=Object.getPrototypeOf(Promise.resolve())===Promise.prototype});out",
+        "let out=[false,false];(async function(){await 0;let r=$262.createRealm();out[0]=r.global.Array!==Array;out[1]=Object.getPrototypeOf(r.evalScript('[]'))===r.global.Array.prototype})();out"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY) << source;
+        ASSERT_EQ(value.array->length, 2) << source;
+        EXPECT_EQ(value.array->items[0].item, ITEM_TRUE) << source;
+        EXPECT_EQ(value.array->items[1].item, ITEM_TRUE) << source;
+    }
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmConstructorFallback) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let g=$262.createRealm().global,F=g.Function();F.prototype=null;let names=['Object','Array','Number','String','Boolean','Date','RegExp','Map','Set','WeakMap','WeakSet','Error','TypeError','ArrayBuffer','SharedArrayBuffer','Uint8Array','BigInt64Array'];let ok=true;for(let name of names){let a=Reflect.construct(globalThis[name],[],F);ok=ok&&Object.getPrototypeOf(a)===g[name].prototype}ok",
+        "let g=$262.createRealm().global,F=g.Function();F.prototype=1;let args=[{},()=>{},()=>{}],names=['WeakRef','FinalizationRegistry','Promise'];let ok=true;for(let i=0;i<names.length;i++)ok=ok&&Object.getPrototypeOf(Reflect.construct(globalThis[names[i]],[args[i]],F))===g[names[i]].prototype;ok",
+        "let g=$262.createRealm().global,F=g.Function(),B=F.bind(null),P=new Proxy(F,{});F.prototype=null;Object.defineProperty(B,'prototype',{value:null});Object.getPrototypeOf(Reflect.construct(Number,[],B))===g.Number.prototype&&Object.getPrototypeOf(Reflect.construct(Date,[],P))===g.Date.prototype",
+        "let g=$262.createRealm().global,F=g.Function();F.prototype=null;let texts=['function(){}','function*(){}','async function(){}','async function*(){}'],ok=true;for(let t of texts){let C=eval('('+t+').constructor'),P=g.eval('('+t+').constructor.prototype');ok=ok&&Object.getPrototypeOf(Reflect.construct(C,[],F))===P}ok",
+        "let g=$262.createRealm().global,a=new g.Array(1),seen=0;Object.defineProperty(g.Array,Symbol.species,{get(){seen++;throw 7}});let b=Array.prototype.slice.call(a);seen===0&&Object.getPrototypeOf(b)===Array.prototype&&Object.getPrototypeOf(g.Array.prototype.slice.call([]))===g.Array.prototype"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+    }
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmBuiltinArrays) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let g=$262.createRealm().global,o={x:1};let a=g.Object.keys(o),b=g.Object.values(o),c=g.Object.entries(o),d=g.Reflect.ownKeys(o);[a,b,c,c[0],d].every(v=>Object.getPrototypeOf(v)===g.Array.prototype)",
+        "let g=$262.createRealm().global,s=g.String.prototype.split;let a=s.call('a,b',','),b=s.call('a,b',',',1),c=s.call('ab',''),d=s.call('abc',undefined);[a,b,c,d].every(v=>Object.getPrototypeOf(v)===g.Array.prototype)",
+        "let g=$262.createRealm().global,m=new g.Map([[1,2]]),s=new g.Set([1]);Object.getPrototypeOf(m.entries().next().value)===g.Array.prototype&&Object.getPrototypeOf(s.entries().next().value)===g.Array.prototype",
+        "let g=$262.createRealm().global,re=new g.RegExp('x');Object.prototype.toString.call(re)==='[object RegExp]'&&g.Object.prototype.toString.call(/x/)==='[object RegExp]'",
+        "class A extends Array{}class B extends A{}let a=new B(2);Array.isArray(a)&&a.length===2&&a instanceof B&&Object.getPrototypeOf(a)===B.prototype"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+    }
+    Item result = run("let g=$262.createRealm().global,out=[false,false,false];g.Promise.all([1,2]).then(a=>out[0]=Object.getPrototypeOf(a)===g.Array.prototype);g.Promise.allSettled([1]).then(a=>out[1]=Object.getPrototypeOf(a)===g.Array.prototype&&Object.getPrototypeOf(a[0])===g.Object.prototype);g.Promise.any([]).catch(e=>out[2]=Object.getPrototypeOf(e.errors)===g.Array.prototype);out", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    ASSERT_EQ(result.array->length, 3);
+    for (int i = 0; i < 3; i++) EXPECT_EQ(result.array->items[i].item, ITEM_TRUE) << i;
+}
+TEST_F(JsMvpLmd, FullParityHostedRealmInheritance) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    const char* sources[] = {
+        "let g=$262.createRealm().global;class A extends g.Array{}class B extends A{}let a=new B(2);Array.isArray(a)&&a.length===2&&a instanceof B&&a instanceof g.Array&&Object.getPrototypeOf(a)===B.prototype&&Object.getPrototypeOf(A)===g.Array",
+        "let r=$262.createRealm(),g=r.global,C=r.evalScript('(class {#x=7;m(){return this.#x}array(){return []}})');class D extends C{}let d=new D();d.m()===7&&d instanceof C&&d instanceof D&&Object.getPrototypeOf(d.array())===g.Array.prototype",
+        "let g=$262.createRealm().global;class D extends g.Date{}class T extends g.Uint16Array{}class E extends g.TypeError{}let d=new D(7),t=new T([2,3]),e=new E('x');d.getTime()===7&&d instanceof D&&t[1]===3&&t instanceof T&&e instanceof E&&e instanceof g.TypeError&&!(e instanceof TypeError)",
+        "let r=$262.createRealm(),g=r.global;r.global.C=class {m(){return []}};let D=r.evalScript('(class extends C {own(){return []}})'),d=new D();Object.getPrototypeOf(d.m())===Array.prototype&&Object.getPrototypeOf(d.own())===g.Array.prototype"
+    };
+    for (const char* source : sources) {
+        Item value = run(source, &host);
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+    }
+}
 TEST_F(JsMvpLmd, TypedArrayConstructorsAndStorage) {
     boolean("let constructors=[Int8Array,Uint8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,Uint8ClampedArray,Float16Array];let ok=true;for(let C of constructors){let a=new C([1,2,3]);ok=ok&&a.length===3&&a[1]===2&&a.byteLength===3*C.BYTES_PER_ELEMENT&&a.buffer.byteLength===a.byteLength&&Object.getPrototypeOf(a)===C.prototype}ok");
     boolean("let a=new Int8Array([255,128,-129]),b=new Uint8ClampedArray([-1,1.5,2.5,300,NaN]);a[0]===-1&&a[1]===-128&&a[2]===127&&b[0]===0&&b[1]===2&&b[2]===2&&b[3]===255&&b[4]===0");
@@ -363,7 +654,9 @@ TEST_F(JsMvpLmd, BufferViewSliceSpeciesAndDetachment) {
     )JS", &host);
     ASSERT_EQ(get_type_id(value), LMD_TYPE_BOOL);
     EXPECT_EQ(value.item, ITEM_TRUE);
-    const char* unsupported = "let host=$262;try{host['evalScript']('1')}catch(e){}";
+    value = run("let host=$262;host['evalScript']('1')===1", &host);
+    EXPECT_EQ(value.item, ITEM_TRUE);
+    const char* unsupported = "let host=$262;try{host['agent']}catch(e){}";
     mvp_lmd_destroy(execution);
     execution = mvp_lmd_execute(unsupported, strlen(unsupported), NULL, &host);
     ASSERT_NE(mvp_lmd_diagnostic(execution), nullptr);

@@ -27,6 +27,7 @@ struct MvpLmdDynamic {
     NameRef wrapper_key;
     NameRef source_key;
     JsInterpHostOps ops;
+    JsInterpEnv* script_environment;
 };
 static constexpr uint32_t MVP_LMD_DYNAMIC_OWNER = 0x4d564459;
 static Item dynamic_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
@@ -399,10 +400,13 @@ static bool dynamic_retain_script(void* opaque, JsScript* script) {
 }
 static void dynamic_release(void* opaque) {
     MvpLmdDynamic* state = (MvpLmdDynamic*)opaque;
+    if (state->script_environment) heap_unregister_gc_object_root(state->script_environment);
+    state->script_environment = NULL;
     root_vector_clear(&state->functions);
 }
 static void dynamic_destroy(void* opaque) {
     MvpLmdDynamic* state = (MvpLmdDynamic*)opaque;
+    dynamic_release(state);
     root_vector_destroy(&state->functions);
     mem_free(state);
 }
@@ -427,7 +431,7 @@ static bool dynamic_is_derived_constructor(Item function) {
 static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
     if (!context) return NULL;
     program = mvp_lmd_program_realm(program);
-    MvpLmdDynamic* state = (MvpLmdDynamic*)context_capsule_extension(context, MVP_LMD_DYNAMIC_OWNER, 0);
+    MvpLmdDynamic* state = (MvpLmdDynamic*)context_capsule_extension(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program));
     if (state) return state->program == program ? state : NULL;
     state = (MvpLmdDynamic*)mem_calloc(1, sizeof(MvpLmdDynamic), MEM_CAT_EVAL);
     if (!state) return NULL;
@@ -455,13 +459,38 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
         [](void* opaque, Item pattern, Item flags) {
             MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
             return mvp_lmd_regexp_new(mvp_lmd_program_library(owner), pattern, flags);
+        },
+        [](void* opaque, Item specifier, const char* reference) {
+            // a hosted realm must not acquire the parent realm's module namespace.
+            MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
+            return mvp_lmd_program_realm_key(owner) ? dynamic_fail(LMD_MVP_CAPABILITY)
+                : js_dynamic_import_at(specifier, reference);
         }};
     static const ContextCapsuleOps capsule = {"js-mvp-dynamic", CONTEXT_CAPSULE_LIFETIME_REALM,
         sizeof(MvpLmdDynamic), NULL, dynamic_release, dynamic_destroy};
-    if (!context_capsule_extension_install(context, MVP_LMD_DYNAMIC_OWNER, 0, state, &capsule)) {
+    if (!context_capsule_extension_install(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program), state, &capsule)) {
         dynamic_destroy(state); return NULL;
     }
     return state;
+}
+
+Item mvp_lmd_dynamic_lexical(MvpLmdProgram* program, Item key, Item value, int operation, bool* found) {
+    auto* state = (MvpLmdDynamic*)context_capsule_extension(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program));
+    *found = false;
+    return state && state->program == mvp_lmd_program_realm(program)
+        ? js_interp_host_global_lexical(&state->ops, state->script_environment, key, value, operation, found)
+        : ItemNull;
+}
+Item mvp_lmd_eval_script(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item, Item, Item) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, mvp_lmd_primitive_to_string(count ? args[0] : make_js_undefined()));
+    if (item_is_error(source.get())) return source.get();
+    MvpLmdDynamic* state = dynamic_state(program);
+    if (!state) return dynamic_fail(LMD_MVP_MEMORY);
+    String* text = source.get().get_string();
+    return js_interp_execute_host_source(&state->ops, text->chars, text->len,
+        "<$262.evalScript>", false, &state->script_environment);
 }
 
 Item mvp_lmd_dynamic_unwrap_function(Item function) {
@@ -478,8 +507,10 @@ Item mvp_lmd_dynamic_function_source(Item function) {
         String* source = js_fn_source_text((JsFunction*)underlying.function);
         return source ? Item{.item = s2it(source)} : Item{.item = ITEM_JS_UNDEFINED};
     }
-    MvpLmdDynamic* state = context ? (MvpLmdDynamic*)context_capsule_extension(
-        context, MVP_LMD_DYNAMIC_OWNER, 0) : NULL;
+    MvpLmdProgram* program = get_type_id(function) == LMD_TYPE_FUNC &&
+        function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) ? ((MvpLmdCallable*)function.function)->program : NULL;
+    MvpLmdDynamic* state = context && program ? (MvpLmdDynamic*)context_capsule_extension(
+        context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program)) : NULL;
     Map* properties = state ? mvp_lmd_property_map(function, false) : NULL;
     ShapeEntry* field = properties && properties->type
         ? typemap_hash_lookup_key((TypeMap*)properties->type, state->source_key) : NULL;
@@ -629,8 +660,11 @@ Item mvp_lmd_dynamic_function_kind(MvpLmdProgram* program, Item* args, uint64_t 
     Rooted<Item> new_target(roots, target), result(roots, js_new_function_from_string_with_ops(args,
         (int)count, prefixes[kind][0], prefixes[kind][1], &ops));
     if (item_is_error(result.get()) || target.item == ITEM_JS_UNDEFINED) return result.get();
-    Item prototype = mvp_lmd_property_with_receiver(new_target.get(),
-        Item{.item = s2it(heap_create_name("prototype", 9))}, ItemNull, LMD_PROP_GET, new_target.get());
+    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+    Item intrinsic = kind == LMD_DYNAMIC_FUNCTION ? library->values[LMD_LIBRARY_FUNCTION_PROTOTYPE] :
+        kind == LMD_DYNAMIC_GENERATOR ? library->generator_function_values[1] :
+        kind == LMD_DYNAMIC_ASYNC_FUNCTION ? library->async_function_values[1] : library->async_generator_values[4];
+    Item prototype = mvp_lmd_constructor_prototype(new_target.get(), intrinsic);
     if (item_is_error(prototype)) return prototype;
     if (mvp_lmd_is_object(prototype)) {
         Item linked = mvp_lmd_set_prototype(result.get(), prototype);

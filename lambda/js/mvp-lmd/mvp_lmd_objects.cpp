@@ -151,7 +151,8 @@ Map* mvp_lmd_property_map(Item owner, bool writing, bool numeric_attributes) {
         (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED ||
          map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR ||
          map->map_kind == MAP_KIND_ARRAYBUFFER || map->map_kind == MAP_KIND_DATAVIEW ||
-         map->map_kind == MAP_KIND_TYPED_ARRAY || map->map_kind == MAP_KIND_COLLECTION) ? map : NULL;
+         map->map_kind == MAP_KIND_TYPED_ARRAY || map->map_kind == MAP_KIND_COLLECTION ||
+         map->map_kind == MAP_KIND_WEAK) ? map : NULL;
 }
 bool mvp_lmd_typed_array_index(Item owner, Item key, double* index) {
     if (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_TYPED_ARRAY) return false;
@@ -1304,7 +1305,7 @@ extern "C" Item mvp_lmd_map_entry(Item owner, int64_t cursor, int64_t projection
     Item first = store(pair.get(), 0, map->entries->items[cursor]);
     if (get_type_id(first) == LMD_TYPE_ERROR) return first;
     return get_type_id(store(pair.get(), 1, map->entries->items[cursor + 1])) == LMD_TYPE_ERROR
-        ? ItemError : Item{.array = pair.get()};
+        ? ItemError : mvp_lmd_array_adopt_realm(Item{.array = pair.get()});
 }
 struct ProjectionField { ShapeEntry* field; uint32_t index; int64_t order; NameRef key; };
 static int projection_order(const void* a, const void* b) {
@@ -1508,13 +1509,14 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
             if (get_type_id(written) == LMD_TYPE_ERROR) return written;
             written = store(pair.get(), 1, value.get());
             if (get_type_id(written) == LMD_TYPE_ERROR) return written;
-            value.set(Item{.array = pair.get()});
+            value.set(mvp_lmd_array_adopt_realm(Item{.array = pair.get()}));
+            if (item_is_error(value.get())) return value.get();
         }
         Item written = store(result.get(), result.get()->length, value.get());
         if (get_type_id(written) == LMD_TYPE_ERROR) return written;
     }
     if (fields) pool_free(context->pool, fields);
-    return Item{.array = result.get()};
+    return mvp_lmd_array_adopt_realm(Item{.array = result.get()});
 }
 extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign, Item excluded) {
     TypeId type = get_type_id(source);
