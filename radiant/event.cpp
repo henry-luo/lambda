@@ -3113,6 +3113,9 @@ static void event_context_stage_model_selection(EventContext* evcon,
                                                 Item selection,
                                                 uint64_t model_revision) {
     if (!evcon || get_type_id(selection) == LMD_TYPE_NULL) return;
+    // an outer handler can finish after a newer nested edit; retain that edit's completion.
+    if (evcon->model_edit_selection_pending &&
+        model_revision < evcon->model_edit_revision) return;
     if (evcon->dom_event_root_lifetime && !evcon->model_edit_selection_root_gc) {
         Runtime* runtime = dom_document_script_runtime(doc);
         if (runtime && runtime_heap(runtime) && runtime_heap(runtime)->gc) {

@@ -20,7 +20,11 @@ confirmation. Search applies to the selected folder; **All Notes** searches
 every live note. Arrow keys navigate the focused note list; Enter opens its
 editor. Escape clears search and dismisses a popover.
 
-**Aa** offers titles, headings, body text, bold, italic, underline and bullets.
+**Aa** offers titles, headings, body text and bullets. Bold, italic and underline
+have their own toolbar buttons. The text-color and highlighter buttons open
+palettes with preset swatches, custom `#RRGGBB` colors and a reset option. Styles
+apply to the selection or to subsequent typing at the caret, and support undo.
+Opening a picker preserves the text selection, including while editing its hex field.
 The checklist button converts the current paragraph/list to tasks; click a
 task's circle to toggle it. Checkbox presses preserve the current text caret
 or range; text clicks place the caret. Tables, native typing,
@@ -30,6 +34,11 @@ and Shift+Enter inserts line breaks within a paragraph.
 Typing `- ` or `1. ` starts a list. Enter continues the list; Enter in an empty
 item returns to body text.
 Each note keeps its own undo/redo history while the notebook is open.
+
+Right-click selected text for undo/redo, cut/copy/paste, select all and formatting.
+Right-click a note for pinning, moving, deletion or restoration. Menus stay within
+the window, support arrow-key navigation, and dismiss with Escape or an outside click.
+Cmd/Ctrl+Shift+M opens the text context menu from the editor, matching Finder's menu shortcut.
 
 | Shortcut | Action |
 | --- | --- |
@@ -86,4 +95,6 @@ The whitespace replay uses physical typing to verify repeated spaces, consecutiv
 empty paragraphs and consecutive soft line breaks.
 The list-caret replay checks bullet/numbered marker autoformat, Enter continuation
 in inline and paragraph-wrapped items, empty-item exit, and checklist continuation.
+The color and context-menu replays cover selection preservation, direct toolbar
+marks, custom colors, highlights, clipboard edits, keyboard navigation and menu bounds.
 Captures and results are written under `temp/note/`.

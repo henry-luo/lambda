@@ -52,3 +52,21 @@ let task = m.checklist(m.open_editor(node('doc',[m.paragraph("Bring coffee")])))
 task.doc.content[0].tag=='ul'
 attrs_get(task.doc.content[0].content[0].attrs,'checked')==false
 edit_exec(task,edit_cmd_history_undo()).doc==node('doc',[m.paragraph("Bring coffee")])
+
+// character styles preserve backward ranges, other marks, undo and future typing.
+let colored_base = m.open_editor(node('doc',[node('p',[text_marked("Color Notes",[{name:'strong',value:true}])])]))
+let colored_range = edit_set_selection(colored_base,text_selection(pos([0,0],5),pos([0,0],0)))
+let colored = m.format_color(colored_range,"color","#C4483F")^;
+m.color_value(colored,"color")=="#c4483f"
+colored.selection==text_selection(pos([0,0],5),pos([0,0],0))
+has_mark(node_at(colored.doc,[0,0]).marks,'strong')
+let highlighted = m.format_color(colored,"highlight","#fff09b")^;
+m.color_value(highlighted,"color")=="#c4483f" and m.color_value(highlighted,"highlight")=="#fff09b"
+edit_exec(highlighted,edit_cmd_history_undo()).doc==colored.doc
+let automatic = m.format_color(highlighted,"color","")^;
+m.color_value(automatic,"color")==m.default_colors.color and m.color_value(automatic,"highlight")=="#fff09b";
+(m.format_color(colored,"color","#bad") ^ { null })==null
+let pending_color = m.format_color(m.open_editor(m.blank()),"color","#356eb5")^;
+pending_color.doc==m.blank()
+let colored_typing = edit_exec(pending_color,edit_cmd_insert_text("Blue"));
+doc_text(colored_typing.doc)=="Blue" and m.color_value(colored_typing,"color")=="#356eb5"

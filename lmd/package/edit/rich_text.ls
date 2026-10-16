@@ -10,15 +10,23 @@
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import .model
+import inline_format: lambda.editor.mod_inline_format
+import component: lambda.ui.core.component
 
 // An empty leaf still needs a caret box: a zero-width space holds the line.
 fn leaf_text(leaf) => if (leaf.text == "") "​" else leaf.text
 
 // Marks, innermost first, as the surface nests them around a leaf. The
-// document's own mark attributes (a span's class) are not projected.
+// only color declarations from span marks are projected; imported classes stay inert.
 let leaf_marks = ['code', 'sub', 'sup', 'del', 's', 'u', 'span', 'em', 'i', 'strong', 'b']
 
-fn mark_element(mark, child) {
+fn color_style(marks) {
+  let css = inline_format.span_css(marks)
+  join([for (key in ["color", "background-color"], let value = inline_format.css_get(css, key)
+    where value is string and component.css_color(value)) key ++ ": " ++ value], "; ")
+}
+
+fn mark_element(mark, marks, child) {
   if (mark == 'code') <code child>
   else if (mark == 'sub') <sub child>
   else if (mark == 'sup') <sup child>
@@ -26,12 +34,12 @@ fn mark_element(mark, child) {
   else if (mark == 'u') <u child>
   else if (mark == 'em' or mark == 'i') <em child>
   else if (mark == 'strong' or mark == 'b') <strong child>
-  else <span child>
+  else <span style: color_style(marks), child>
 }
 
 fn wrap_leaf(marks, i, child) =>
   if (i >= len(leaf_marks)) child
-  else wrap_leaf(marks, i + 1, if (has_mark(marks, leaf_marks[i])) mark_element(leaf_marks[i], child) else child)
+  else wrap_leaf(marks, i + 1, if (has_mark(marks, leaf_marks[i])) mark_element(leaf_marks[i], marks, child) else child)
 
 // A source-surface leaf carries its highlight class (source.ls, CED15).
 fn render_text_leaf(leaf) =>

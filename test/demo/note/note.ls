@@ -36,7 +36,15 @@ on selectionchange(evt) {
 }
 on note_command(req) {
     let previous = st.selected
-    st = app.command(app.adopt(st,req.event),req.id,req.params,req.node)
+    st = app.adopt(st,req.event)
+    if (st.menu=="context") { st = {*:st,menu:""} }
+    if (starts_with(req.id,"clipboard.")) {
+        app.finish(st,req.node,true)
+        controller.focus(req.node)
+        dom.keyboard_command(controller.surface(req.node),model.clipboard_command(req.id))
+        return 'handled'
+    }
+    st = app.command(st,req.id,req.params,req.node)
     // toolbar view changes redraw the same note and need its selection completion too.
     app.finish(st,req.node,st.selected==previous or req.id=="note.new")
     if (req.id=="note.select" or req.id=="folder.select")
@@ -47,14 +55,28 @@ on control_change(req) {
     app.finish(st,req.node)
 }
 on mousedown(evt) {
+    if (evt.button==1 and dom.closest(evt.target,"#edit-surface")!=null) { return 'prevent-default' }
     // checkbox presses must cancel native caret placement before the generated check glyph is hit.
     return if (evt.button==0 and ui.task_hit(st,evt)!=null) 'prevent-default' else 'pass'
 }
 on click(evt) {
+    if (evt.button!=null and evt.button!=0) { return 'pass' }
     let path = ui.task_hit(st,evt)
-    if (path==null) { return 'pass' }
+    if (path==null) {
+        if (st.menu!="" and dom.closest(evt.target,".popover,.editor-tools")==null) {
+            st = {*:app.adopt(st,evt),menu:""}
+            app.finish(st,evt.target,true)
+        }
+        return 'pass'
+    }
     // a checkbox activation preserves the editor bookmark instead of adopting a marker hit position.
     st = app.command(st,"edit.task",{path:path},evt.target)
+    app.finish(st,evt.target,true)
+    return 'prevent-default'
+}
+on contextmenu(evt) {
+    if (st.dialog!=null or dom.closest(evt.target,"#edit-surface,.note-row")==null) { return 'pass' }
+    st = app.open_context(st,evt)
     app.finish(st,evt.target,true)
     return 'prevent-default'
 }
@@ -75,6 +97,32 @@ on keydown(evt) {
             return 'prevent-default'
         }
         return 'pass'
+    }
+    if (st.menu=="context" and contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) {
+        let menu = dom.get_element_by_id(dom.root_node(evt.target),"note-context-menu")
+        let buttons = dom.query_selector_all(menu,"button:not([disabled])")
+        let at = [for (i,button in buttons where button==evt.target) i][0] or 0
+        let next = if (evt.key=="Home") 0 else if (evt.key=="End") len(buttons)-1
+            else (at+len(buttons)+(if (evt.key=="ArrowUp") -1 else 1))%len(buttons)
+        dom.focus_set(buttons[next],false)
+        return 'prevent-default'
+    }
+    if (st.menu=="context" and evt.key=="Tab") {
+        st = {*:st,menu:""}
+        controller.focus(evt.target)
+        app.finish(st,evt.target,true)
+        return 'prevent-default'
+    }
+    if (app.primary(evt) and evt.shiftKey and key=="m" and dom.closest(evt.target,"#edit-surface,.note-row")!=null) {
+        let box = dom.bounding_box(evt.target)
+        st = app.open_context(st,evt,box.x+20,box.y+20)
+        app.finish(st,evt.target,true)
+        return 'prevent-default'
+    }
+    if ((st.menu=="color" or st.menu=="highlight") and evt.key=="Enter" and controller.is_control(evt.target)) {
+        st = app.command(st,"picker.apply",{},evt.target)
+        app.finish(st,evt.target,true)
+        return 'prevent-default'
     }
     if (app.primary(evt) and key=="f") {
         dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target),"search"),false)
@@ -98,8 +146,10 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (evt.key=="Escape") {
+        let popup = st.menu!=""
         st = model.reconcile({*:st,menu:"",query:""})
-        app.finish(st,evt.target,not control)
+        if (popup) { controller.focus(evt.target) }
+        app.finish(st,evt.target,popup or not control)
         return 'prevent-default'
     }
     if (dom.closest(evt.target,"#note-list")!=null) {
