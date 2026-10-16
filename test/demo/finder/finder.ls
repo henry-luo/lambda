@@ -125,6 +125,7 @@ pn publish(owner,st) {
         dom.style_set_property(node(owner,"context-menu"),"top",string(next.menu.y) ++ "px")
     }
     show(owner,"operation-dialog",next.operation != null,"flex")
+    show(owner,"move-picker",next.operation.action == "move")
     if (next.operation != null) {
         let action = next.operation.action
         let titles = {'new-file':"New File",'new-folder':"New Folder",rename:"Rename",move:"Move to Folder",delete:"Delete Permanently"}
@@ -139,6 +140,12 @@ pn publish(owner,st) {
         text(owner,"operation-confirm",if (action == "delete") "Delete Permanently" else if (action == "rename") "Rename" else if (action == "move") "Move" else "Create")
         attr(node(owner,"operation-confirm"),"class",if (action == "delete") "danger" else "primary")
         show(owner,"operation-field",action != "delete")
+        if (action == "move") {
+            let picker = next.operation.picker
+            region(owner,"destination-breadcrumbs",if (picker == null) "" else format(ui.breadcrumb(picker,true),'html'))
+            region(owner,"destination-folders",format(ui.destination_folders(picker),'html'))
+            disabled(owner,"destination-parent",picker == null or picker.path == "/")
+        }
     }
     region(owner,"preview-body",format(ui.preview(next),'html'))
     if (next.look) {
@@ -166,7 +173,18 @@ pn begin_operation(owner,st,action) map^ {
     let value = if (action == "rename") model.basename(st.selected[0]) else if (action == "move") model.parent(st.path)
         else if (action == "new-folder") "New Folder" else "Untitled.txt"
     dom.set_state(node(owner,"operation-value"),"value",value)
-    return {*:st,operation:{action:action,folder:st.path,paths:st.selected},menu:null,error:""}
+    var next = {*:st,operation:{action:action,folder:st.path,paths:st.selected,picker:null},menu:null,error:""}
+    if (action == "move") {
+        browse_destination(owner,next,value) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
+    }
+    return next
+}
+pn browse_destination(owner,st,value) map^ {
+    let path = model.absolute(value,st.operation.folder,HOME)
+    let picker = files.read_destination(path,st.operation.paths)^
+    // read first so an inaccessible folder keeps the previous browser and typed path available.
+    dom.set_state(node(owner,"operation-value"),"value",path)
+    return {*:st,operation:{*:st.operation,picker:picker},error:""}
 }
 pn perform_files(owner,st,request) map^ {
     let result = files.perform(request)^
@@ -194,9 +212,15 @@ pn open_menu(owner,st,target,x,y) {
     dom.focus_set(dom.query_selector(node(owner,"context-menu"),"button:not([disabled])"),false)
     return next
 }
-pn command(owner,st,action) map^ {
+pn command(owner,st,action,destination=null) map^ {
     if (contains(["new-file","new-folder","rename","move","delete"],action)) { return begin_operation(owner,st,action)^ }
     if (action == "operation-cancel") { return {*:st,operation:null,error:""} }
+    if (starts_with(action,"destination-") and st.operation.action == "move") {
+        let value = if (action == "destination-folder") destination else if (action == "destination-parent") model.parent(st.operation.picker.path)
+            else if (action == "destination-home") HOME else if (action == "destination-current") st.operation.folder
+            else dom.get_state(node(owner,"operation-value"),"value")
+        return browse_destination(owner,st,value)^
+    }
     if (action == "operation-confirm" and st.operation != null) {
         let operation = st.operation
         let value = dom.get_state(node(owner,"operation-value"),"value")
@@ -239,11 +263,11 @@ pn command(owner,st,action) map^ {
     if (action == "all") { return {*:st,selected:[for (e in model.visible(st)) e.path],focus:model.visible(st)[0].path or "",preview_data:null} }
     return st
 }
-pn dispatch(owner,st,action) {
+pn dispatch(owner,st,action,destination=null) {
     // S7.6.7v4: procedure handlers are statements; capture each selected arm explicitly.
     let current = if (action == "actions") st else {*:st,menu:null}
     var result = current
-    command(owner,current,action) ^ { result = {*:current,error:^.message} } ~ { result = ~ }
+    command(owner,current,action,destination) ^ { result = {*:current,error:^.message} } ~ { result = ~ }
     let next = publish(owner,result)
     if (next.operation != null and st.operation == null) dom.focus_set(node(owner,if (next.operation.action == "delete") "operation-cancel" else "operation-value"),false)
     else if (st.operation != null and next.operation == null) dom.focus_set(node(owner,"files"),false)
@@ -334,6 +358,12 @@ on click(evt) {
     let path = dom.get_attribute(button,"data-path")
     let location = dom.get_attribute(button,"data-location")
     let action = dom.get_attribute(button,"data-action")
+    let destination = dom.get_attribute(button,"data-destination")
+    if (session.operation.action == "move" and destination != null) {
+        session = dispatch(owner,session,"destination-folder",destination)
+        dom.focus_set(node(owner,"destination-folders"),false)
+        return 'handled'
+    }
     if (session.menu != null and dom.closest(button,"#context-menu") == null and action != "actions") { session = {*:session,menu:null} }
     if (path != null) {
         if (session.mode == "columns" and path == session.path and not (evt.metaKey or evt.ctrlKey or evt.shiftKey)) {
@@ -387,12 +417,17 @@ on keydown(evt) {
         }
         if ((session.dialog or session.operation != null) and key == "Enter" and
             not contains(["cancel","operation-cancel"],dom.get_attribute(evt.target,"data-action"))) {
+            // folder-browser buttons activate navigation through their ordinary click, never a move.
+            if (session.operation.action == "move" and dom.closest(evt.target,"#move-picker") != null) { return 'pass' }
             session = dispatch(owner,session,if (session.operation != null) "operation-confirm" else "go-confirm")
             return 'prevent-default'
         }
         if (key == "Tab") {
             // a delete confirmation has no text control, even if its previously laid-out input still has cached geometry.
-            let controls = dom.query_selector_all(node(owner,modal),if (session.operation.action == "delete") "button" else "button,input")
+            let selector = if (session.operation.action == "delete") "#operation-cancel,#operation-confirm"
+                else if (session.operation.action == "move") "button:not([disabled]),input"
+                else if (session.operation != null) "#operation-value,#operation-cancel,#operation-confirm" else "button,input"
+            let controls = dom.query_selector_all(node(owner,modal),selector)
             let at = model.position([for (c in controls) c],evt.target)
             let next = if (evt.shiftKey) (at+len(controls)-1)%len(controls) else (at+1)%len(controls)
             dom.focus_set(controls[next],false)

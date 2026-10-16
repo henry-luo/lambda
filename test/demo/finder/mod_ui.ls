@@ -68,10 +68,16 @@ pub fn column(st,index) => <section id:"column-" ++ string(index),class:"file-co
     <div id:"column-files-" ++ string(index),class:"column-list",role:"group",'aria-label':st.columns[index].path,
         column_files(st,index)>>
 pub fn files(st) => if (st.mode == "columns") <div class:"columns",*[for (i,c in st.columns) column(st,i)]> else file_rows(st)
-pub fn breadcrumb(st) => <nav 'aria-label':"Folder path",class:"crumbs",
+pub fn breadcrumb(st,destination=false) => <nav 'aria-label':if (destination) "Destination folder path" else "Folder path",class:"crumbs",
     *[for (i,c in model.crumbs(st.path)) <span
         (if (i>0) <span class:"crumb-separator","›"> else null);
-        <button type:"button",'data-location':c.path,title:c.path,c.name>>]>
+        <button type:"button",*:(if (destination) {'data-destination':c.path} else {'data-location':c.path}),title:c.path,c.name>>]>
+pub fn destination_folders(picker) => if (picker == null) <div class:"destination-empty","Enter a folder path and choose Browse.">
+    else if (len(picker.entries)==0) <div class:"destination-empty","This folder has no subfolders.">
+    else [for (entry in picker.entries) <button type:"button",class:"destination-folder",'data-destination':entry.path,
+        title:if (entry.blocked) "An item cannot be moved into itself or its contents." else entry.path,
+        *:(if (entry.blocked) {disabled:""} else {}),
+        (icon("folder"));<span entry.name><span class:"folder-chevron",'aria-hidden':"true","›">>]
 fn metadata(entry) => <dl class:"metadata",
     *[for (key,value in {Kind:entry.kind,Size:if (entry.dir) "—" else model.size_label(entry.size),Modified:entry.modified,Where:model.parent(entry.path)})
         <div <dt string(key)><dd value>>]>
@@ -146,6 +152,14 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
         <div class:"go-card",<h2 id:"operation-title">;<p id:"operation-description">;
             <div id:"operation-field",<label 'for':"operation-value",id:"operation-label","Name">
                 <input id:"operation-value",type:"text",autocomplete:"off">>;
+            <div id:"move-picker",class:"folder-picker",style:"display:none",role:"group",'aria-label':"Destination folder browser",
+                <div class:"destination-toolbar",
+                    <button id:"destination-parent",type:"button",class:"text-tool",'data-action':"destination-parent",'aria-label':"Parent destination folder",(icon("up"))>;
+                    <button type:"button",class:"text-tool",'data-action':"destination-home","Home">;
+                    <button id:"destination-current",type:"button",class:"text-tool",'data-action':"destination-current","Current folder">;
+                    <button id:"destination-browse",type:"button",class:"text-tool",'data-action':"destination-browse","Browse path">>;
+                <div id:"destination-breadcrumbs",class:"destination-breadcrumbs">;
+                <div id:"destination-folders",class:"destination-folders",tabindex:"0",'aria-label':"Subfolders">>;
             <p id:"operation-error",class:"dialog-error",role:"alert">;
             <div class:"dialog-actions",<button id:"operation-cancel",type:"button",'data-action':"operation-cancel","Cancel">
                 <button id:"operation-confirm",type:"button",class:"primary",'data-action':"operation-confirm","Create">>>>;

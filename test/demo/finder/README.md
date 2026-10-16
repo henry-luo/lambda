@@ -56,7 +56,12 @@ Drag files or folders onto a folder row, a column background, a breadcrumb or
 a sidebar destination to move them. Dragging a selected item moves the current
 selection together; dragging an unselected item moves just that item. A drop
 target highlights while dragging. **Move to…** provides the same operation
-through a destination-path dialog. Escape cancels a drag before the drop.
+through a destination dialog with a path input and folder browser. Open folders
+in the browser or use its breadcrumbs, Parent, Home and Current folder controls;
+the path input follows the browsed destination. **Browse path** opens a typed path.
+The selector lists folders and disables the items being moved and their contents.
+Browsing leaves the file selection unchanged; **Move** confirms the operation.
+Escape cancels a drag before the drop.
 Moves use atomic filesystem renames and
 currently require source and destination to be on the same filesystem.
 Moving an open ancestor updates the displayed branch and navigation paths.
@@ -155,6 +160,9 @@ and poisoning, and covers file replacement, invalidation, errors, cancellation
 and closure. The Python replay creates a real scrolling folder under `temp/`
 and checks offscreen release, Unicode/fragment-like filenames, EXIF rotation and
 refresh. Captures are written under `temp/finder/`.
+
+`column_context_menu.json` right-clicks filename text, icons and folder chevrons,
+including a scrolled branch, and checks visible menus and the Rename target.
 
 The operation replay creates a unique disposable directory under
 `temp/finder/operations/`, then uses real native mouse drags and keyboard input

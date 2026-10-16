@@ -8,6 +8,11 @@ pub fn read_folder(path) array^ {
             modified_raw:p.modified,
             modified:if (p.modified == null) "" else format(p.modified,"YYYY-MM-DD HH:mm"),kind:model.kind(ext,dir)})]
 }
+pub fn read_destination(path,excluded=[]) map^ {
+    let entries = read_folder(path)^;
+    {path:path,entries:[for (e in entries where e.dir order by lower(e.name))
+        {*:e,blocked:len([for (source in excluded where model.inside(e.path,source)) source])>0}]}
+}
 pub fn preview(entry) map^ {
     if (entry == null) {kind:"empty"}
     else if (entry.dir) {kind:"folder"}

@@ -14034,7 +14034,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
-            state && evcon.target && evcon.target->is_element()) {
+            state && evcon.target) {
+            // text hits use the mouse dispatcher's existing nearest-element promotion.
             bool prevented = radiant_dispatch_button_mouse_event(
                 &evcon, evcon.target, "contextmenu", btn_event->x,
                 btn_event->y, btn_event, 0, 0);

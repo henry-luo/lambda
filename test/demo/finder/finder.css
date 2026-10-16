@@ -35,9 +35,19 @@ svg { flex-shrink: 0; vertical-align: middle; }
 .menu-item:disabled { opacity: .4; }
 .danger-text { color: #b64743; }
 .operation-overlay { z-index: 30; }
+.operation-overlay .go-card { max-height: calc(100vh - 48px); overflow-y: auto; }
 #operation-value { display: block; width: 100%; padding: 11px; border-radius: 6px; border: 1px solid #cbd7e3; background: #fff; }
-button.danger { background: #bd514a; border-color: #bd514a; color: #fff; }
-button.danger:hover { background: #a9423b; }
+.folder-picker { margin-top: 14px; border: 1px solid #d9e1e9; border-radius: 6px; overflow: hidden; background: #fff; }
+.destination-toolbar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: #f2f6fa; border-bottom: 1px solid #e4e9ef; }
+.destination-toolbar .text-tool { color: #405d79; }
+.destination-toolbar button:last-child { margin-left: auto; }
+.destination-breadcrumbs { padding: 4px 8px; overflow-x: auto; border-bottom: 1px solid #e4e9ef; }
+.destination-folders { height: 200px; max-height: 30vh; overflow-y: auto; padding: 4px; }
+.destination-folder { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border-radius: 4px; text-align: left; }
+.destination-folder svg { color: #5d9ed0; }
+.destination-folder .folder-chevron { margin-left: auto; color: #8b9aa7; }
+.destination-folder:hover, .destination-folder:focus-visible { background: #e7f0fa; }
+.destination-empty { padding: 24px 12px; color: #7d8c9d; font-size: 12px; }
 .folder-heading { flex: 1; min-width: 85px; }
 h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-heading p { margin: 0; font-size: 10px; color: #98a1ac; white-space: nowrap; }
@@ -153,6 +163,9 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .dialog-actions button, .primary { border: 1px solid #d9e1e9; border-radius: 6px; padding: 7px 18px; background: #fff; font-size: 12px; }
 button.primary { background: #438ed4; border-color: #438ed4; color: #fff; }
 button.primary:hover { background: #337dbf; }
+/* action colors follow the shared dialog background, which has equal specificity. */
+button.danger { background: #bd514a; border-color: #bd514a; color: #fff; }
+button.danger:hover { background: #a9423b; }
 .look-card { width: 780px; max-width: 100%; max-height: 90vh; background: #fcfdfe; border: 1px solid #e0e6ed; border-radius: 12px; box-shadow: 0 20px 70px rgba(32,47,65,.22); overflow: auto; }
 .look-card > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e6ebf0; }
 .look-card > header h2 { margin: 0; font-size: 13px; font-weight: 500; color: #7a8a9c; }
