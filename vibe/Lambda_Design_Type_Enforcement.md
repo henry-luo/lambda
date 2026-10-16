@@ -1,9 +1,10 @@
 # Lambda — Type Support Design: Enforcement First
 
 > **2026-10-16 ruling; implementation pending:** **S3.1v2–S3.5, S7.5.1v2,
-> S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v2** replace the error-falsy and
+> S7.5.3v2, S7.6.6v3, S7.7.7v2, S7.9.2v3** replace the error-falsy and
 > `or`-rescue decisions. See TE-22. Earlier descriptions of `or` as error
-> handling are historical, not the current rule.
+> handling are historical, not the current rule. The same-day comparison
+> extension is recorded in C8.8 / **S5.1.1v2–S5.1.5**; total sorting is retained.
 
 **Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
@@ -2314,7 +2315,7 @@ non-error was removed. Fixture `test/lambda/raise_non_error.ls`, pinned on every
 ### TE-22 — Errors have no truth value (decided 2026-10-16, user)
 
 **Authority:** **S3.1v2–S3.5, S7.5.1v2, S7.5.3v2, S7.6.6v3, S7.7.7v2,
-S7.9.2v2**. This supersedes TE-13/TE-16's `or`-rescue and error-falsy rules.
+S7.9.2v3**. This supersedes TE-13/TE-16's `or`-rescue and error-falsy rules.
 The handler and postfix propagation rules themselves are unchanged.
 
 **Decision.** Ordinary defaults and error recovery are different intentions.
@@ -2349,12 +2350,17 @@ remains a fresh error, not another attempt to invoke the same recovery. UI
 attribute conversions (`int(attribute) or 0`) and source-highlight parsing
 (`parse(...) or null`) are concrete sites to review for intent.
 
-**Remaining decisions.** This ruling does not remove first-class error values:
+**Comparison follow-up and remaining decisions.** This ruling does not remove first-class error values:
 metadata inspection, `print`, explicit handlers, `e^`, `raise`, and storage in
 error-admitting slots remain meaningful (**S7.4.4, S7.4.6, S7.6, S7.8, S7.9**).
-Equality currently returns false for an error operand, with `!=` its negation
-(**S5.1.1–S5.1.2**); total sort places error values last (**S6.2.1**). Changing
-these requires a separate ruling covering deep equality, grouping and dedup.
+The same-day USER follow-up
+[C8.8](Lambda_Semantics_Formal2.md#c88-comparisons-preserve-errors-recursively-2026-10-16-user)
+changes equality and all value comparisons to preserve encountered errors,
+including recursively compared container content (**S5.1.1v2–S5.1.5**).
+A decisive mismatch short-circuits: `[1,e] == [2,e]` is false, whereas
+`[e] == [e]` is `e`. Sorting explicitly retains **S6.2.1–S6.2.3**. Grouping,
+dedup and other equality consumers must not coerce a failed comparison to
+false; their error result boundaries and other comparison details are **SO50**.
 For collection predicates (`where`, `|:`, `that`, quantifiers) and procedural
 loop conditions, the result boundary on predicate failure still needs an
 explicit policy; it must not be inferred from an implementation's Bool ABI.
@@ -2523,8 +2529,11 @@ semantics.
    `code`, `message`, expected type, actual type/value summary, boundary/source location, and
    validator path when applicable. Boundary failure is cold; preserving the diagnostic
    contract takes precedence over allocation avoidance.
-5. **Value-domain semantics of error values — RESOLVED 2026-07-29: already fully specified in
-   `Lambda_Formal_Semantics.md`.** Checked against the doc: **equality** (§5.1) — `nan` and
+5. **Value-domain semantics of error values — historical 2026-07-29 record.**
+   The equality and singleton-error-group decisions below are superseded by
+   **S5.1.1v2–S5.1.5 / S5.6.1v2**, recorded in C8.8 (2026-10-16); total sort
+   is retained. Then checked against `Lambda_Formal_Semantics.md`:
+   **equality** (§5.1) — `nan` and
    `error` are the two designed poison carve-outs, never equal to anything including
    themselves (`error == error → false`, mirroring nan; so `a(b) == 5` on an errored `a` is
    `false`, and the rationale explicitly weighs the swallow-vs-spread trade: totality keeps

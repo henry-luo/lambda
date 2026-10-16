@@ -618,10 +618,12 @@ branch. Simply making errors truthy was rejected: it would make a failed
 condition enter the successful branch. The tag-based classification invariant
 is retained as **S3.2v2 / SI9v2**, with an error outcome alongside true and false.
 
-**Scope.** This decision settles logical operators and `if` expressions. Existing
-error equality (**S5.1.1–S5.1.2**), total ordering (**S6.2.1**), and collection
-predicate result policy require separate consideration; they are not silently
-changed here. Metadata inspection, printing, explicit handling/propagation and
+**Scope.** This decision settles logical operators and `if` expressions. The
+same-day follow-up [C8.8](Lambda_Semantics_Formal2.md#c88-comparisons-preserve-errors-recursively-2026-10-16-user)
+adopts error-preserving comparisons, including recursive container equality
+with decisive-mismatch short-circuiting (**S5.1.1v2–S5.1.5**), and explicitly
+retains total sorting (**S6.2**). Collection-predicate result policy remains
+open. Metadata inspection, printing, explicit handling/propagation and
 container retention remain available (**S7.4.4, S7.6, S7.9.1, S7.9.3–S7.9.4**).
 The acknowledgment, migration and acceptance cases are recorded in
 [TE-22](Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user).
