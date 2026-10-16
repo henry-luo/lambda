@@ -529,50 +529,24 @@
         "lib/image/libaom/aom/src/aom_integer.c",
         "lib/image/libaom/aom_dsp/aom_convolve.c",
         "lib/image/libaom/aom_dsp/aom_dsp_rtcd.c",
-        "lib/image/libaom/aom_dsp/avg.c",
         "lib/image/libaom/aom_dsp/binary_codes_reader.c",
-        "lib/image/libaom/aom_dsp/binary_codes_writer.c",
         "lib/image/libaom/aom_dsp/bitreader.c",
         "lib/image/libaom/aom_dsp/bitreader_buffer.c",
-        "lib/image/libaom/aom_dsp/bitwriter.c",
         "lib/image/libaom/aom_dsp/bitwriter_buffer.c",
         "lib/image/libaom/aom_dsp/blend_a64_hmask.c",
         "lib/image/libaom/aom_dsp/blend_a64_mask.c",
         "lib/image/libaom/aom_dsp/blend_a64_vmask.c",
-        "lib/image/libaom/aom_dsp/blk_sse_sum.c",
         "lib/image/libaom/aom_dsp/entcode.c",
         "lib/image/libaom/aom_dsp/entdec.c",
-        "lib/image/libaom/aom_dsp/entenc.c",
-        "lib/image/libaom/aom_dsp/fft.c",
-        "lib/image/libaom/aom_dsp/flow_estimation/corner_detect.c",
-        "lib/image/libaom/aom_dsp/flow_estimation/corner_match.c",
-        "lib/image/libaom/aom_dsp/flow_estimation/disflow.c",
-        "lib/image/libaom/aom_dsp/flow_estimation/flow_estimation.c",
-        "lib/image/libaom/aom_dsp/flow_estimation/ransac.c",
-        "lib/image/libaom/aom_dsp/fwd_txfm.c",
-        "lib/image/libaom/aom_dsp/grain_table.c",
         "lib/image/libaom/aom_dsp/intrapred.c",
         "lib/image/libaom/aom_dsp/loopfilter.c",
-        "lib/image/libaom/aom_dsp/noise_model.c",
-        "lib/image/libaom/aom_dsp/noise_util.c",
         "lib/image/libaom/aom_dsp/odintrin.c",
-        "lib/image/libaom/aom_dsp/psnr.c",
-        "lib/image/libaom/aom_dsp/pyramid.c",
-        "lib/image/libaom/aom_dsp/quantize.c",
-        "lib/image/libaom/aom_dsp/sad.c",
-        "lib/image/libaom/aom_dsp/sad_av1.c",
-        "lib/image/libaom/aom_dsp/sse.c",
-        "lib/image/libaom/aom_dsp/ssim.c",
-        "lib/image/libaom/aom_dsp/subtract.c",
-        "lib/image/libaom/aom_dsp/sum_squares.c",
-        "lib/image/libaom/aom_dsp/variance.c",
         "lib/image/libaom/aom_mem/aom_mem.c",
         "lib/image/libaom/aom_scale/aom_scale_rtcd.c",
         "lib/image/libaom/aom_scale/generic/yv12config.c",
         "lib/image/libaom/aom_scale/generic/yv12extend.c",
         "lib/image/libaom/aom_util/aom_thread.c",
         "lib/image/libaom/av1/arg_defs.c",
-        "lib/image/libaom/av1/av1_cx_iface.c",
         "lib/image/libaom/av1/av1_dx_iface.c",
         "lib/image/libaom/av1/common/alloccommon.c",
         "lib/image/libaom/av1/common/av1_inv_txfm1d.c",
@@ -615,75 +589,7 @@
         "lib/image/libaom/av1/decoder/detokenize.c",
         "lib/image/libaom/av1/decoder/grain_synthesis.c",
         "lib/image/libaom/av1/decoder/obu.c",
-        "lib/image/libaom/av1/encoder/allintra_vis.c",
-        "lib/image/libaom/av1/encoder/aq_complexity.c",
-        "lib/image/libaom/av1/encoder/aq_cyclicrefresh.c",
-        "lib/image/libaom/av1/encoder/aq_variance.c",
-        "lib/image/libaom/av1/encoder/av1_fwd_txfm1d.c",
-        "lib/image/libaom/av1/encoder/av1_fwd_txfm2d.c",
-        "lib/image/libaom/av1/encoder/av1_noise_estimate.c",
-        "lib/image/libaom/av1/encoder/av1_quantize.c",
-        "lib/image/libaom/av1/encoder/bitstream.c",
-        "lib/image/libaom/av1/encoder/cnn.c",
-        "lib/image/libaom/av1/encoder/compound_type.c",
-        "lib/image/libaom/av1/encoder/context_tree.c",
-        "lib/image/libaom/av1/encoder/cost.c",
-        "lib/image/libaom/av1/encoder/dwt.c",
-        "lib/image/libaom/av1/encoder/encode_strategy.c",
-        "lib/image/libaom/av1/encoder/encodeframe.c",
-        "lib/image/libaom/av1/encoder/encodeframe_utils.c",
-        "lib/image/libaom/av1/encoder/encodemb.c",
-        "lib/image/libaom/av1/encoder/encodemv.c",
-        "lib/image/libaom/av1/encoder/encoder.c",
-        "lib/image/libaom/av1/encoder/encoder_utils.c",
-        "lib/image/libaom/av1/encoder/encodetxb.c",
-        "lib/image/libaom/av1/encoder/ethread.c",
-        "lib/image/libaom/av1/encoder/extend.c",
-        "lib/image/libaom/av1/encoder/external_partition.c",
-        "lib/image/libaom/av1/encoder/firstpass.c",
-        "lib/image/libaom/av1/encoder/global_motion.c",
-        "lib/image/libaom/av1/encoder/global_motion_facade.c",
-        "lib/image/libaom/av1/encoder/gop_structure.c",
-        "lib/image/libaom/av1/encoder/hash.c",
-        "lib/image/libaom/av1/encoder/hash_motion.c",
-        "lib/image/libaom/av1/encoder/hybrid_fwd_txfm.c",
-        "lib/image/libaom/av1/encoder/interp_search.c",
-        "lib/image/libaom/av1/encoder/intra_mode_search.c",
-        "lib/image/libaom/av1/encoder/level.c",
-        "lib/image/libaom/av1/encoder/lookahead.c",
-        "lib/image/libaom/av1/encoder/mcomp.c",
-        "lib/image/libaom/av1/encoder/ml.c",
-        "lib/image/libaom/av1/encoder/motion_search_facade.c",
-        "lib/image/libaom/av1/encoder/mv_prec.c",
-        "lib/image/libaom/av1/encoder/nonrd_opt.c",
-        "lib/image/libaom/av1/encoder/nonrd_pickmode.c",
-        "lib/image/libaom/av1/encoder/palette.c",
-        "lib/image/libaom/av1/encoder/partition_search.c",
-        "lib/image/libaom/av1/encoder/partition_strategy.c",
-        "lib/image/libaom/av1/encoder/pass2_strategy.c",
-        "lib/image/libaom/av1/encoder/pickcdef.c",
-        "lib/image/libaom/av1/encoder/picklpf.c",
-        "lib/image/libaom/av1/encoder/pickrst.c",
-        "lib/image/libaom/av1/encoder/ratectrl.c",
-        "lib/image/libaom/av1/encoder/rd.c",
-        "lib/image/libaom/av1/encoder/rdopt.c",
-        "lib/image/libaom/av1/encoder/reconinter_enc.c",
-        "lib/image/libaom/av1/encoder/segmentation.c",
-        "lib/image/libaom/av1/encoder/speed_features.c",
-        "lib/image/libaom/av1/encoder/superres_scale.c",
-        "lib/image/libaom/av1/encoder/svc_layercontext.c",
-        "lib/image/libaom/av1/encoder/temporal_filter.c",
-        "lib/image/libaom/av1/encoder/tokenize.c",
-        "lib/image/libaom/av1/encoder/tpl_model.c",
-        "lib/image/libaom/av1/encoder/tx_search.c",
-        "lib/image/libaom/av1/encoder/txb_rdopt.c",
-        "lib/image/libaom/av1/encoder/var_based_part.c",
-        "lib/image/libaom/av1/encoder/wedge_utils.c",
         "lib/image/libaom/common/args_helper.c",
-        "lib/image/libaom/third_party/fastfeat/fast.c",
-        "lib/image/libaom/third_party/fastfeat/fast_9.c",
-        "lib/image/libaom/third_party/fastfeat/nonmax.c",
-        "lib/image/libaom/third_party/vector/vector.c",
         "lib/image/libavif/src/alpha.c",
         "lib/image/libavif/src/avif.c",
         "lib/image/libavif/src/codec_aom.c",
@@ -704,7 +610,6 @@
         "lib/image/libavif/src/scale.c",
         "lib/image/libavif/src/stream.c",
         "lib/image/libavif/src/utils.c",
-        "lib/image/libavif/src/write.c",
         "lib/image/libavif/third_party/libyuv/source/planar_functions.c",
         "lib/image/libavif/third_party/libyuv/source/row_common.c",
         "lib/image/libavif/third_party/libyuv/source/scale.c",
@@ -975,7 +880,6 @@
           "defines": [
             "AVIF_CODEC_AOM=1",
             "AVIF_STATIC",
-            "AVIF_CODEC_AOM_ENCODE=1",
             "AVIF_CODEC_AOM_DECODE=1"
           ]
         },
@@ -990,54 +894,6 @@
         {
           "files": [
             "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/sad_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/sadxd_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/sse_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/sum_squares_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/variance_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon_dotprod.c"
           ],
           "build_options": [
             "-march=armv8.2-a+dotprod"
@@ -1069,62 +925,6 @@
         },
         {
           "files": [
-            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/avg_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/sum_squares_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/highbd_sse_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/aom_dsp/arm/highbd_variance_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/av1/encoder/arm/hash_arm_crc32.c"
-          ],
-          "build_options": [
-            "-march=armv8-a+crc"
-          ]
-        },
-        {
-          "files": [
             "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_dotprod.c"
           ],
           "build_options": [
@@ -1150,14 +950,6 @@
         {
           "files": [
             "lib/image/libaom/av1/common/arm/resize_neon_dotprod.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon_dotprod.c"
           ],
           "build_options": [
             "-march=armv8.2-a+dotprod"
@@ -1221,38 +1013,6 @@
         },
         {
           "files": [
-            "lib/image/libaom/av1/encoder/arm/av1_error_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/av1/encoder/arm/pickrst_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/av1/encoder/arm/wedge_utils_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
-            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_sve.c"
-          ],
-          "build_options": [
-            "-march=armv8.2-a+dotprod+i8mm+sve"
-          ]
-        },
-        {
-          "files": [
             "lib/image/libaom/av1/common/arm/convolve_sve2.c"
           ],
           "build_options": [
@@ -1282,6 +1042,15 @@
           "build_options": [
             "-msse4.1"
           ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/**.c",
+            "lib/image/libavif/**.c"
+          ],
+          "build_options": [
+            "-Os"
+          ]
         }
       ],
       "source_sets": [
@@ -1297,56 +1066,16 @@
             "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon.c",
             "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c",
             "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_i8mm.c",
-            "lib/image/libaom/aom_dsp/arm/avg_neon.c",
-            "lib/image/libaom/aom_dsp/arm/avg_pred_neon.c",
-            "lib/image/libaom/aom_dsp/arm/avg_sve.c",
             "lib/image/libaom/aom_dsp/arm/blend_a64_mask_neon.c",
-            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_neon.c",
-            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_sve.c",
-            "lib/image/libaom/aom_dsp/arm/fwd_txfm_neon.c",
-            "lib/image/libaom/aom_dsp/arm/hadamard_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_avg_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_avg_pred_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_hmask_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_mask_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_vmask_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_convolve8_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_convolve8_sve.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_hadamard_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_intrapred_neon.c",
             "lib/image/libaom/aom_dsp/arm/highbd_loopfilter_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_masked_sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_obmc_sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_obmc_variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_quantize_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_sadxd_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_sse_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_sse_sve.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_subpel_variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/arm/highbd_variance_sve.c",
             "lib/image/libaom/aom_dsp/arm/intrapred_neon.c",
             "lib/image/libaom/aom_dsp/arm/loopfilter_neon.c",
-            "lib/image/libaom/aom_dsp/arm/masked_sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/obmc_sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/obmc_variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sad_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sad_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/arm/sadxd_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sadxd_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/arm/sse_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sse_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/arm/subpel_variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/subtract_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sum_squares_neon.c",
-            "lib/image/libaom/aom_dsp/arm/sum_squares_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/arm/sum_squares_sve.c",
-            "lib/image/libaom/aom_dsp/arm/variance_neon.c",
-            "lib/image/libaom/aom_dsp/arm/variance_neon_dotprod.c",
-            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_neon.c",
-            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_sve.c",
             "lib/image/libaom/aom_ports/aarch64_cpudetect.c",
             "lib/image/libaom/av1/common/arm/av1_convolve_horiz_rs_neon.c",
             "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon.c",
@@ -1387,30 +1116,6 @@
             "lib/image/libaom/av1/common/arm/warp_plane_neon_i8mm.c",
             "lib/image/libaom/av1/common/arm/warp_plane_sve.c",
             "lib/image/libaom/av1/common/arm/wiener_convolve_neon.c",
-            "lib/image/libaom/av1/encoder/arm/av1_error_neon.c",
-            "lib/image/libaom/av1/encoder/arm/av1_error_sve.c",
-            "lib/image/libaom/av1/encoder/arm/av1_fwd_txfm2d_neon.c",
-            "lib/image/libaom/av1/encoder/arm/av1_highbd_quantize_neon.c",
-            "lib/image/libaom/av1/encoder/arm/av1_k_means_neon.c",
-            "lib/image/libaom/av1/encoder/arm/cnn_neon.c",
-            "lib/image/libaom/av1/encoder/arm/encodetxb_neon.c",
-            "lib/image/libaom/av1/encoder/arm/hash_arm_crc32.c",
-            "lib/image/libaom/av1/encoder/arm/highbd_fwd_txfm_neon.c",
-            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_neon.c",
-            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_sve.c",
-            "lib/image/libaom/av1/encoder/arm/highbd_rdopt_neon.c",
-            "lib/image/libaom/av1/encoder/arm/highbd_temporal_filter_neon.c",
-            "lib/image/libaom/av1/encoder/arm/hybrid_fwd_txfm_neon.c",
-            "lib/image/libaom/av1/encoder/arm/ml_neon.c",
-            "lib/image/libaom/av1/encoder/arm/pickrst_neon.c",
-            "lib/image/libaom/av1/encoder/arm/pickrst_sve.c",
-            "lib/image/libaom/av1/encoder/arm/quantize_neon.c",
-            "lib/image/libaom/av1/encoder/arm/rdopt_neon.c",
-            "lib/image/libaom/av1/encoder/arm/reconinter_enc_neon.c",
-            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon.c",
-            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon_dotprod.c",
-            "lib/image/libaom/av1/encoder/arm/wedge_utils_neon.c",
-            "lib/image/libaom/av1/encoder/arm/wedge_utils_sve.c",
             "lib/image/libjpeg-turbo/simd/arm/aarch64/jchuff-neon.c",
             "lib/image/libjpeg-turbo/simd/arm/aarch64/jsimd.c",
             "lib/image/libjpeg-turbo/simd/arm/jccolor-neon.c",
@@ -7982,7 +7687,7 @@
           "CONFIG_ACCOUNTING": "0",
           "CONFIG_ANALYZER": "0",
           "CONFIG_AV1_DECODER": "1",
-          "CONFIG_AV1_ENCODER": "1",
+          "CONFIG_AV1_ENCODER": "0",
           "CONFIG_AV1_HIGHBITDEPTH": "1",
           "CONFIG_AV1_TEMPORAL_DENOISING": "0",
           "CONFIG_BIG_ENDIAN": "0",
@@ -7996,7 +7701,7 @@
           "CONFIG_CWG_C013": "0",
           "CONFIG_CWG_E050": "0",
           "CONFIG_DEBUG": "0",
-          "CONFIG_DENOISE": "1",
+          "CONFIG_DENOISE": "0",
           "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
           "CONFIG_ENTROPY_STATS": "0",
           "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
@@ -8105,7 +7810,7 @@
           "CONFIG_ACCOUNTING": "0",
           "CONFIG_ANALYZER": "0",
           "CONFIG_AV1_DECODER": "1",
-          "CONFIG_AV1_ENCODER": "1",
+          "CONFIG_AV1_ENCODER": "0",
           "CONFIG_AV1_HIGHBITDEPTH": "1",
           "CONFIG_AV1_TEMPORAL_DENOISING": "0",
           "CONFIG_BIG_ENDIAN": "0",
@@ -8119,7 +7824,7 @@
           "CONFIG_CWG_C013": "0",
           "CONFIG_CWG_E050": "0",
           "CONFIG_DEBUG": "0",
-          "CONFIG_DENOISE": "1",
+          "CONFIG_DENOISE": "0",
           "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
           "CONFIG_ENTROPY_STATS": "0",
           "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
@@ -8217,7 +7922,7 @@
         "path": "build_temp/image-config/aom_build_config.c",
         "lines": [
           "#include \"aom/aom_codec.h\"",
-          "const char *aom_codec_build_config(void) { return \"Lambda build_lambda_config.json: still AV1 encode/decode\"; }"
+          "const char *aom_codec_build_config(void) { return \"Lambda build_lambda_config.json: AV1 decoder only\"; }"
         ]
       }
     ],

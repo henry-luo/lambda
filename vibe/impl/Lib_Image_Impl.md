@@ -62,7 +62,7 @@ without a full-page pixel allocation or a second libpng error path.
 | `lib/image/giflib` | 5.2.2 | GIF read/compositing |
 | `lib/image/libwebp` | 1.6.0 | WebP read/write |
 | `lib/image/libavif` | 1.3.0 | AVIF container/color conversion |
-| `lib/image/libaom` | 3.12.1 | One AV1 decode/encode backend |
+| `lib/image/libaom` | 3.12.1 | One decoder-only AV1 backend |
 | `lib/image/libtiff` | 4.7.1 | TIFF read/write |
 | `lib/image/libnsbmp` | 0.1.7 | BMP/ICO DIB reading |
 
@@ -99,6 +99,43 @@ and AOM's per-file SIMD/runtime dispatch. x86_64 selects PNG SSE2 and WebP
 SSE2/SSE4.1, with portable JPEG and AV1 routines; that profile's runtime
 performance has not been measured. Minimal AVIF libyuv scaling remains as a
 required internal fallback. All eight formats and the thumbnail APIs remain.
+
+### Decoder-only AVIF profile (2026-10-16)
+
+The byte codec remains context-free in `lib`, as required by **D7.1.2v2**.
+The reduced profile is declared in `build_lambda_config.json`; no additional
+dependency or upstream source edit is required. The pinned libaom 3.12.1 decoder source lists were independently
+checked against upstream configuration: 125 files on ARM64, including 56 ARM
+SIMD files, and 68 portable files for the generic profile. Removing 158
+encoder-side libaom files and libavif's writer reduces the complete ARM64 image
+target from 562 to 403 translation units.
+
+Both generated AOM profiles set `CONFIG_AV1_ENCODER=0` and retain
+`CONFIG_AV1_DECODER=1` and high-bit-depth decoding. ARM64 retains runtime CPU
+dispatch. libavif defines only `AVIF_CODEC_AOM_DECODE`; its encode macro is
+absent because the upstream adapter tests whether that macro is defined.
+The libaom/libavif file rules use `-Os`, while other codecs retain their speed
+optimization. The normal build still uses the existing static image archive.
+
+The common registry advertises AVIF as readable and not writable. Its existing
+read-only dispatch returns `codec_unavailable` for AVIF output, preserving the
+ordinary codec-error channel (**S7.4.4**). The unused native AVIF writer and
+libavif writer translation unit are excluded. Stored lossless AVIF fixtures
+retain alpha, 10-bit input, and all 12 rotation/mirror cases without linking an
+encoder into tests. Thumbnail fallback and chunked-reader coverage still
+include AVIF.
+
+The original image suite passed 27/27 before the change; the decoder-only suite
+passes 28/28. The Lambda image I/O fixture matches its updated golden, and the
+Premake generator self-test passes. The macOS ARM64 release decreases from
+30,052,632 to 25,853,448 bytes (28.66 to 24.66 MiB), saving 4,199,184 bytes
+(4.00 MiB). The eight-format gallery renders to a byte-identical PNG before
+and after the change. A minimal static libaom/libavif decoder executable is
+1,243,640 bytes (1.19 MiB) and produces the same sample pixels as the measured
+dav1d decoder; its only dynamic dependency is the macOS system library.
+The generic source list was checked against upstream, but Linux
+and Windows binaries have not been built for this change. Evidence is under
+`temp/aom-decode-only/`.
 
 The earlier source cleanup removed 805 files / roughly 17 MB from `lib/image/`.
 Build recipes have since been deleted entirely rather than relocated. Licenses,
@@ -164,7 +201,7 @@ Host load affects these timings; no timing threshold is imposed on UI tests.
 | JPEG | 8-bit baseline/progressive gray/RGB, EXIF; write gray/RGB with explicit alpha background | Reported native scaling factors; progressive coefficients still require source-size storage |
 | GIF | First display frame or composited selected frames; legacy all-frame timing/disposal/loops; read-only | Noninterlaced first frame reduced by rows; interlace/selected-frame full fallback |
 | WebP | Lossy/lossless/alpha stills; write lossy/lossless | Native output scaling; lossless history/alpha require source-size planes |
-| AVIF | SDR stills/alpha, irot/imir, high-depth quantization; write libaom YUV444 | Full AV1 planes and common resize; strict shrinking rejected |
+| AVIF | SDR stills/alpha, irot/imir, high-depth quantization; read-only | Full AV1 planes and common resize; strict shrinking rejected |
 | BMP | Upstream Windows palette/RGB/bitfield/RLE variants; write uncompressed 24-bit with explicit alpha background | Full upstream bitmap then common resize |
 | TIFF | Classic/BigTIFF, explicit pages, strips/tiles, gray/palette/RGB/RGBA; write single-page DEFLATE | Compatible direct reduced-image SubIFDs, else strip/tile reduction |
 | ICO | Validated PNG/DIB entries and AND masks; write one PNG entry | Smallest sufficient matching-aspect entry, then shared PNG/DIB decode |
