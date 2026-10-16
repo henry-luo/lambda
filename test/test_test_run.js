@@ -174,7 +174,7 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
 try {
     check('Radiant inventory includes every baseline phase', () => {
         const selected = new Set(inventory.map(t => t.baseName));
-        for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_view_reuse_gtest',
+        for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
             'test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest',
             'test_page_load_gtest', 'test_radiant_view_gtest', 'test_layout_fuzzy_gtest',
             'test_wpt_css_syntax_gtest', 'test_wpt_input_events_gtest',
@@ -182,6 +182,16 @@ try {
             assert.ok(selected.has(name), name);
         }
         assert.ok(!selected.has('test_scene3d_gtest'));
+        assert.ok(!selected.has('test_view_reuse_gtest'));
+        const paged = inventory.find(t => t.baseName === 'test_paged_media_gtest');
+        assert.equal(paged.buildTarget, 'test_paged_media_gtest');
+        assert.deepEqual(paged.runnerArgs, []);
+        const extended = JSON.parse(invoke(['--target=extended', '--list']).stdout);
+        const reuse = extended.find(t => t.baseName === 'test_view_reuse_gtest');
+        assert.ok(reuse);
+        assert.equal(reuse.buildTarget, 'test_view_reuse_gtest');
+        assert.deepEqual(reuse.runnerArgs, []);
+        assert.ok(!extended.some(t => t.baseName === 'test_view_reuse_extended_gtest'));
         assert.equal(selected.size, inventory.length);
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
@@ -201,7 +211,7 @@ try {
         assert.equal(actual.filter(t => t === 'test_ui_automation_gtest').length, 1);
     });
     check('All selected suites reach the shared report', () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest', 'test_map_gtest']);
+        const { child, summary } = runSelected(['test_paged_media_gtest', 'test_map_gtest']);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.total_passed, 8);
         assert.equal(summary.total_failed, 0);
@@ -212,17 +222,17 @@ try {
     });
     for (const scenario of ['exit', 'crash', 'no-json', 'invalid-json', 'missing', 'empty', 'timeout']) {
         check(`${scenario} fails the report and allows the next suite to run`, () => {
-            const { child, summary } = runSelected(['test_view_reuse_gtest', 'test_map_gtest'], scenario);
+            const { child, summary } = runSelected(['test_paged_media_gtest', 'test_map_gtest'], scenario);
             assert.equal(child.status, 1, child.stderr);
             assert.equal(summary.total_failed, 1);
             assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
-            assert.ok(summary.failed_test_names.some(t => t.includes('test_view_reuse_gtest')));
+            assert.ok(summary.failed_test_names.some(t => t.includes('test_paged_media_gtest')));
         });
     }
     for (const mode of ['open', 'write']) check(`A log ${mode} ENOSPC fails the suite and allows the next suite to run`, () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest', 'test_map_gtest'], 'log-io', [], {
+        const { child, summary } = runSelected(['test_paged_media_gtest', 'test_map_gtest'], 'log-io', [], {
             NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,
-            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+            FAKE_LOG_FAULT_PATH: 'test_paged_media_gtest.log',
         });
         assert.equal(child.status, 1, child.stderr);
         assert.ok(!child.stderr.includes("Unhandled 'error' event"));
@@ -231,9 +241,9 @@ try {
         assert.ok(summary.failed_test_names.some(t => t.includes('log write failed: ENOSPC')));
     });
     check('A log flush ENOSPC overrides passing JSON after the child exits', () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'log-flush', [], {
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'log-flush', [], {
             NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'write', FAKE_LOG_FAULT_DELAY: '100',
-            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+            FAKE_LOG_FAULT_PATH: 'test_paged_media_gtest.log',
         });
         assert.equal(child.status, 1, child.stderr);
         assert.equal(summary.total_failed, 1);
@@ -241,12 +251,12 @@ try {
     });
     check('A slow log sink bounds buffering and retains both output pipes', () => {
         const trace = path.join(fixture, 'log-buffer-size');
-        const { child, output } = runSelected(['test_view_reuse_gtest'], 'flood', [], {
+        const { child, output } = runSelected(['test_paged_media_gtest'], 'flood', [], {
             NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'slow',
-            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log', FAKE_LOG_BUFFER_TRACE: trace,
+            FAKE_LOG_FAULT_PATH: 'test_paged_media_gtest.log', FAKE_LOG_BUFFER_TRACE: trace,
         });
         assert.equal(child.status, 0, child.stderr);
-        const log = fs.readFileSync(path.join(output, 'test_view_reuse_gtest.log'), 'utf8');
+        const log = fs.readFileSync(path.join(output, 'test_paged_media_gtest.log'), 'utf8');
         assert.equal(log.split('o').length - 1, 1024 * 1024);
         assert.equal(log.split('e').length - 1, 1024 * 1024);
         assert.ok(Number(fs.readFileSync(trace, 'utf8')) <= 256 * 1024);
@@ -274,13 +284,13 @@ try {
         assert.equal(fs.readdirSync(directory).length, 4);
     });
     check('Skipped cases are excluded from passing counts', () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'skip');
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'skip');
         assert.equal(child.status, 0);
         assert.equal(summary.total_passed, 3);
         assert.equal(summary.total_skipped, 1);
     });
     check('Parallel view subprocess timings and phases reach the shared report', () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'launches');
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'launches');
         assert.equal(child.status, 0, child.stderr);
         const result = summary.level2_c_tests[0];
         assert.equal(result.top_slow_tests[0].duration_ms, 125.5);
@@ -402,7 +412,7 @@ try {
         assert.deepEqual(phases.summary.level2_c_tests[0].launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
     });
     check('Raw output still saves the final summary', () => {
-        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'exit', ['--raw']);
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'exit', ['--raw']);
         assert.equal(child.status, 1);
         assert.equal(summary.total_failed, 1);
     });
@@ -416,7 +426,7 @@ try {
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline', 'view', 'dom'].entries()) {
+        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
             const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
             assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
         }

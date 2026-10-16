@@ -2431,6 +2431,7 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     float justification_spacing;  // CSS-pixel expansion selected by the owning line
     int start_index, length;  // start and length of the text in the style node
+    int trailing_whitespace_bytes; // line-end suppression keeps source ownership in length
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
     int line_number;  // block-local line index assigned when this rect enters inline flow
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
@@ -2439,9 +2440,14 @@ typedef struct TextRect {
     lam::Own<TextRect> next;
 } TextRect;
 
-inline void text_rect_painted_source_range(const TextRect* rect, int* start, int* length) {
+inline void text_rect_source_range(const TextRect* rect, int* start, int* length) {
     *start = rect->start_index - rect->hyphenated_leading_bytes;
     *length = rect->length + rect->hyphenated_leading_bytes - rect->hyphenated_trailing_bytes;
+}
+
+inline void text_rect_painted_source_range(const TextRect* rect, int* start, int* length) {
+    text_rect_source_range(rect, start, length);
+    *length = *length > rect->trailing_whitespace_bytes ? *length - rect->trailing_whitespace_bytes : 0;
 }
 
 // tier-2: view-pool, rebuilt each relayout

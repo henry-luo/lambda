@@ -896,30 +896,31 @@ static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) 
     pseudo_append_child(pseudo_elem, static_cast<DomNode*>(text_node));
 }
 
+static void pseudo_update_text(DomDocument* doc, DomText* text_node, const char* content) {
+    // unchanged generated text must not grow document-owned string storage on every layout.
+    if (text_node->text && strcmp(text_node->text, content) == 0) return;
+    String* text_string = dom_document_create_string(doc, content, strlen(content));
+    if (text_string) {
+        dom_text_adopt_document_string(text_node, doc, text_string);
+        text_node->rect = nullptr;
+    }
+}
+
 // the text of a synthetic box: its first text child takes `content`, added when missing
 static void pseudo_set_text(DomElement* pseudo_element, const char* content) {
     DomNode* first = pseudo_element->first_child;
     if (first && first->is_text()) {
-        DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
-        // unchanged generated text must not grow document-owned string storage on every layout.
-        if (text_node->text && strcmp(text_node->text, content) == 0) return;
-        size_t content_len = strlen(content);
-        String* text_string = dom_document_create_string(
-            pseudo_element->doc, content, content_len);
-        if (text_string) {
-            dom_text_adopt_document_string(
-                text_node, pseudo_element->doc, text_string);
-            text_node->rect = nullptr;
-        }
+        pseudo_update_text(pseudo_element->doc, lam::dom_as<DOM_NODE_TEXT>(first), content);
     } else if (content[0]) {
         pseudo_append_text_child(pseudo_element, content);
     }
 }
 
 static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* pseudo_elem,
-                                             const CssDeclaration* content_decl, const char* raw_url) {
+                                             const CssDeclaration* content_decl, const char* raw_url,
+                                             DomElement* retained = nullptr) {
     if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
-    DomElement* img_elem = DomElement::create(pseudo_elem->doc, "img", nullptr);
+    DomElement* img_elem = retained ? retained : DomElement::create(pseudo_elem->doc, "img", nullptr);
     if (!img_elem) return nullptr;
     if (!img_elem->embed) {
         img_elem->ensure_embed(lycon);
@@ -927,12 +928,14 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     if (!img_elem->embed) return nullptr;
     char* resolved_url = resolve_css_resource_url(lycon, content_decl, raw_url);
     if (!resolved_url) return nullptr;
+    // intrinsic/used layout revalidates images from their source, independently of temporary embed slots.
+    if (!img_elem->set_attribute("src", resolved_url)) return nullptr;
     img_elem->embed->img = lam::up(load_document_image(lycon->doc, lycon->ui_context, resolved_url));
     return img_elem;
 }
 
 static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement* parent,
-                                                DomElement* pseudo_elem, bool is_before) {
+                                                DomElement* pseudo_elem, bool is_before, bool refresh = false) {
     if (!lycon || !parent || !pseudo_elem) return false;
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (!pseudo_styles) return false;
@@ -942,7 +945,24 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
     StrBuf* text_buf = strbuf_new_cap(64);
     if (!text_buf) return false;
     bool appended_any = false;
+    DomNode* retained = refresh ? pseudo_elem->first_child.get() : nullptr;
+    if (refresh) { pseudo_elem->first_child = nullptr; pseudo_elem->last_child = nullptr; }
+    auto take_child = [&](const char* tag) -> DomNode* {
+        DomNode* child = retained;
+        if (child) retained = child->next_sibling;
+        bool matches = child && (tag ? child->is_element() && child->as_element()->tag_name &&
+            strcmp(child->as_element()->tag_name, tag) == 0 : child->is_text());
+        return matches ? child : nullptr;
+    };
+    auto flush_text = [&]() {
+        if (!text_buf->length) return;
+        DomNode* child = take_child(nullptr);
+        if (child) { pseudo_update_text(pseudo_elem->doc, child->as_text(), text_buf->str); pseudo_append_child(pseudo_elem, child); }
+        else pseudo_append_text_child(pseudo_elem, text_buf->str);
+        strbuf_reset(text_buf); appended_any = true;
+    };
     int open_quote_count = 0;
+    int* quote_depth = refresh && lycon->counter_context ? &lycon->counter_context->quote_depth : &open_quote_count;
     int item_count = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.count : 1;
     for (int i = 0; i < item_count; i++) {
         CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
@@ -950,29 +970,46 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
         CssImageChoice content_image = {};
         bool has_content_image = css_content_replacement_image(item, lycon, &content_image);
         if (has_content_image) {
-            if (text_buf->length > 0) {
-                pseudo_append_text_child(pseudo_elem, text_buf->str);
-                text_buf->length = 0;
-                if (text_buf->str) text_buf->str[0] = '\0';
-                appended_any = true;
-            }
-            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url);
+            flush_text();
+            DomNode* retained_image = take_child("img");
+            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url,
+                retained_image ? retained_image->as_element() : nullptr);
             if (img_elem) {
                 img_elem->embed->content_image_resolution = layout_css_image_density(
                     img_elem->embedp()->img, content_image.resolution);
                 pseudo_append_child(pseudo_elem, static_cast<DomNode*>(img_elem));
                 appended_any = true;
             }
+        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, "leader")) {
+            flush_text();
+            const CssFunction* function = item->data.function;
+            const CssValue* argument = function->arg_count == 1 ? function->args[0] : nullptr;
+            const char* name = css_value_identifier_name(argument);
+            const char* pattern = argument && argument->type == CSS_VALUE_TYPE_STRING ? argument->data.string :
+                name && str_ieq_cstr(name, "dotted") ? "." : name && str_ieq_cstr(name, "solid") ? "_" :
+                name && str_ieq_cstr(name, "space") ? " " : nullptr;
+            if (!pattern) continue;
+            // CSS Content 3 §2.5: ignore pattern linefeeds before ordinary whitespace collapsing.
+            bool whitespace = false;
+            for (size_t at = 0; pattern[at]; at++) if (pattern[at] != '\n' && pattern[at] != '\r')
+                whitespace = strbuf_append_collapsed_ascii_whitespace(text_buf, pattern + at, 1, true, whitespace);
+            if (!text_buf->length) continue;
+            DomNode* child = take_child("::leader");
+            DomElement* leader = child ? child->as_element() : DomElement::create(pseudo_elem->doc, "::leader", nullptr);
+            if (leader) {
+                if (!child) leader->set_attribute("style", "white-space:pre");
+                leader->display = {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+                pseudo_set_text(leader, text_buf->str);
+                pseudo_append_child(pseudo_elem, leader); appended_any = true;
+            }
+            strbuf_reset(text_buf);
         } else {
             // Append into the retained builder; unscoped scratch cannot live inside an inline trial.
-            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf,
+            dom_element_append_content(parent, item, lycon->counter_context, quote_depth, text_buf,
                 lycon->paged ? paged_content_function : nullptr, lycon);
         }
     }
-    if (text_buf->length > 0) {
-        pseudo_append_text_child(pseudo_elem, text_buf->str);
-        appended_any = true;
-    }
+    flush_text();
     strbuf_free(text_buf);
     return appended_any;
 }
@@ -1271,6 +1308,17 @@ static void refresh_pseudo_element_style(DomElement* parent,
     pseudo->display = resolve_display_value(pseudo);
 }
 
+static bool pseudo_content_has_function(StyleTree* style, const char* name) {
+    const CssDeclaration* declaration = style ? style_tree_get_declaration(style, CSS_PROPERTY_CONTENT) : nullptr;
+    const CssValue* value = declaration ? declaration->value : nullptr;
+    int count = value && value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    for (int i = 0; value && i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[i] : value;
+        if (item && item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, name)) return true;
+    }
+    return false;
+}
+
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before,
                                           FontProp* parent_font) {
@@ -1300,20 +1348,8 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER,
             parent_font);
     }
-    bool has_counter_content = false;
-    if (pseudo_styles) {
-        CssDeclaration* content_decl = style_tree_get_declaration(pseudo_styles, CSS_PROPERTY_CONTENT);
-        CssValue* content_value = content_decl ? content_decl->value : nullptr;
-        int item_count = (content_value && content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.count : 1;
-        for (int i = 0; content_value && i < item_count; i++) {
-            CssValue* item = (content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.values[i] : content_value;
-            if (item && item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function && item->data.function->name &&
-                (strcmp(item->data.function->name, "counter") == 0 || strcmp(item->data.function->name, "counters") == 0)) {
-                has_counter_content = true;
-                break;
-            }
-        }
-    }
+    bool has_counter_content = pseudo_content_has_function(pseudo_styles, "counter") ||
+        pseudo_content_has_function(pseudo_styles, "counters");
     bool materialized_children = has_counter_content ? false :
         pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
     if (!materialized_children && ((content && *content) || has_counter_content)) {
@@ -1401,6 +1437,11 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     DomElement* origin = lam::dom_as<DOM_NODE_ELEMENT>(pseudo_element->parent);
     StyleTree* style = origin->pseudo_style(kind);
     if (apply_counters) apply_pseudo_counter_ops(lycon, style);
+    // leaders remain inline fill boxes when counter/reference values are refreshed.
+    if (pseudo_content_has_function(style, "leader")) {
+        pseudo_materialize_content_children(lycon, origin, pseudo_element, pseudo == PSEUDO_ELEMENT_BEFORE, true);
+        return;
+    }
     const char* content = nullptr;
     if (pseudo == PSEUDO_ELEMENT_FOOTNOTE_CALL || pseudo == PSEUDO_ELEMENT_FOOTNOTE_MARKER) {
         // CSS GCPM 3 §2.3: a call or marker without content shows its note's footnote

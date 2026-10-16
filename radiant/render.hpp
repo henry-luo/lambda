@@ -4764,19 +4764,22 @@ public:
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* block);
 CssEnum render_text_inherited_transform(ViewText* text_view);
+struct RadiantWhitespaceSpec;
 bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint, float* advance);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
                                         bool include_ellipsis,
-                                        CssEnum white_space = CSS_VALUE_PRE);
+                                        CssEnum white_space = CSS_VALUE_PRE,
+                                        const RadiantWhitespaceSpec* whitespace = nullptr);
 // fill the glyph run of one text rect painted at the containing block origin
 // (block_x, block_y) with `font` and `color`; returns the export text the run
 // borrows (caller owns it; null when the rect paints nothing)
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
                                  float block_x, float block_y, PaintGlyphRun* run,
-                                 bool reverse_clusters = false, const char** logical_text = nullptr);
+                                 bool reverse_clusters = false, const char** logical_text = nullptr,
+                                 const RadiantWhitespaceSpec* whitespace = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

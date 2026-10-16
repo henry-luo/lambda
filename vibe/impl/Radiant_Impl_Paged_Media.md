@@ -64,9 +64,9 @@ P1 supplies geometry/presentation mechanisms for P6. P2–P4 now compose actual 
 Logs and artifacts belong under `temp/paged-media-impl/`. Regenerate build files from `build_lambda_config.json` through `make generate-premake`; never edit Lua manually.
 
 ```sh
-make -C build/premake config=debug_native test_view_reuse_gtest -j8
-./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*'
-./test/test_view_reuse_gtest.exe
+make -C build/premake config=debug_native test_paged_media_gtest -j8
+./test/test_paged_media_gtest.exe --gtest_filter='SecondaryViewTest.*'
+./test/test_paged_media_gtest.exe
 make lint ARGS='--rule ^no-int-cast-radiant$'
 make test-radiant-baseline
 make test-lambda-baseline

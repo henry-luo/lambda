@@ -438,6 +438,14 @@ bool radiant_whitespace_resolve(ViewTree* tree, ViewCssStyle* style) {
     return true;
 }
 
+const RadiantWhitespaceSpec* radiant_text_whitespace(ViewTree* tree, DomNode* source) {
+    if (!tree || !tree->model || !source) return nullptr;
+    DomElement* owner = source->is_element() ? source->as_element()
+        : source->parent ? source->parent->as_element() : nullptr;
+    ViewCssStyle* style = owner ? view_css_resolve(tree, owner) : nullptr;
+    return style ? style->whitespace.get() : nullptr;
+}
+
 static const char* flow_table_omit_names[] = {"table-omit-header-at-break", "table-omit-footer-at-break"};
 
 static const char* flow_space_names[] = {"space-before", "space-after"};
@@ -1635,7 +1643,8 @@ static bool page_master_programs_compile(RadiantPageDocument* program, DomElemen
 }
 
 const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,
-        uint32_t ordinal, uint32_t folio, bool blank, bool terminal) {
+        uint32_t ordinal, uint32_t folio, bool blank, bool terminal, bool* selected_only) {
+    if (selected_only) *selected_only = false;
     if (!sequence || !sequence->master_program || !ordinal) return nullptr;
     uint32_t offset = ordinal - 1;
     for (const RadiantMasterRun* run = sequence->master_program->runs; run; run = run->next) {
@@ -1647,11 +1656,19 @@ const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* seq
                 (rule->position == RADIANT_MASTER_REST && !first && !terminal);
             bool parity = rule->parity == RADIANT_PARITY_ANY || (rule->parity == RADIANT_PARITY_ODD ? folio % 2 : !(folio % 2));
             bool blanks = rule->blank == RADIANT_BLANK_ANY || (rule->blank == RADIANT_BLANK_ONLY ? blank : !blank);
-            if (position && parity && blanks) return rule->master;
+            if (position && parity && blanks) {
+                if (selected_only) *selected_only = rule->position == RADIANT_MASTER_ONLY;
+                return rule->master;
+            }
         }
         return nullptr;
     }
     return nullptr;
+}
+
+const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,
+        uint32_t ordinal, uint32_t folio, bool blank, bool terminal) {
+    return radiant_page_master_select(sequence, ordinal, folio, blank, terminal, nullptr);
 }
 
 RadiantPageDocument* radiant_page_document_compile(ViewTree* tree, CssEngine* engine, Pool* pool) {

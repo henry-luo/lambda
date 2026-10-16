@@ -4668,12 +4668,11 @@
             "icon": "\ud83d\udcd0"
           },
           {
-            "source": "test/test_view_reuse_gtest.cpp",
+            "source": "test/test_paged_media_gtest.cpp",
             "additional_sources": [
-              "test/test_view_tree_model_gtest.cpp",
               "lib/test_font_path_gtest.cpp"
             ],
-            "name": "View Reuse Tests",
+            "name": "Paged Media Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4704,11 +4703,8 @@
                 "WebKit"
               ]
             },
-            "binary": "test_view_reuse_gtest.exe",
-            "icon": "\u267b\ufe0f",
-            "runner_args": [
-              "--gtest_filter=SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*"
-            ]
+            "binary": "test_paged_media_gtest.exe",
+            "icon": "\u267b\ufe0f"
           },
           {
             "source": "test/test_css_cascade_memory_gtest.cpp",
@@ -7199,19 +7195,41 @@
           },
           {
             "source": "test/test_view_reuse_gtest.cpp",
-            "name": "Extended View Reuse Tests",
-            "runner_only": true,
-            "runner_name": "test_view_reuse_extended_gtest",
-            "runner_args": [
-              "--gtest_filter=*-SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*"
+            "additional_sources": [],
+            "name": "View Reuse Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
             ],
-            "binary": "test_view_reuse_gtest.exe",
             "libraries": [
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
-            "icon": "\u267b\ufe0f"
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_view_reuse_gtest.exe",
+            "icon": "\u267b\ufe0f",
+            "parallel": false
           },
           {
             "source": "test/test_ui_automation_gtest.cpp",

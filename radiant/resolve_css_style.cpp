@@ -9024,6 +9024,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum valign_value = value->data.keyword;
+                // CSS 2.2 §10.8: initial and non-inherited unset resolve before table-cell alignment.
+                if (valign_value == CSS_VALUE_INITIAL || valign_value == CSS_VALUE_UNSET)
+                    valign_value = CSS_VALUE_BASELINE;
                 if (valign_value == CSS_VALUE_INHERIT) {
                     DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
                     ViewBlock* parent_view = lam::view_as_block(parent);
