@@ -5237,18 +5237,19 @@ int form_control_get_selected_index(DocState* state, View* view) {
 }
 
 void form_control_set_selected_index(DocState* state, View* view, int index) {
-    ViewBlock* block = form_block_for_view(view);
-    if (!block) return;
+    // hidden controls retain selection state even when layout releases their box and form properties.
+    FormControlProp* form = form_prop_for_view(view);
+    ViewState* view_state = form_view_state_get(state, view);
+    if (!form && !view_state) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_SELECTED_INDEX, view);
 
-    FormControlProp* form = block->form;
-    form->state_ref = state;
+    if (form) form->state_ref = state;
 
-    // Clamp to valid range: -1 (none) or 0 to option_count-1
+    // the DOM setter has normalized the index when no layout-owned option count is available.
     if (index < -1) index = -1;
-    if (index >= form->option_count) index = form->option_count - 1;
+    if (form && index >= form->option_count) index = form->option_count - 1;
 
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (!view_state) view_state = form_view_state_get_or_create(state, view, form);
     int old_index = view_state ? view_state->data.form.selected_index : form_default_selected_index_from_tree(view);
     if (view_state) {
         if (old_index == index) return;

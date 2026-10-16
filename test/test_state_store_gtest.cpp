@@ -439,6 +439,29 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     live->form = orphan->form = nullptr;
 }
 
+TEST_F(StateStoreDomMutationTest, HiddenSelectUpdatesRetainedSelectionWithoutLayoutBox) {
+    FormControlProp form{};
+    form.control_type = FORM_CONTROL_SELECT;
+    form.option_count = 3;
+    live->tag_name = lam::up("select");
+    live->tag_id = MARKUP_NAME_SELECT;
+    live->form = lam::view_prop(&form);
+    form_control_set_selected_index(state(), live, 0);
+    ASSERT_EQ(form_control_get_selected_index(state(), live), 0);
+
+    // display:none removes the layout box while the control and its state remain alive.
+    live->view_type = RDT_VIEW_NONE;
+    form_control_set_selected_index(state(), live, 2);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 2);
+    live->form = nullptr;
+    form_control_set_selected_index(state(), live, 1);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 1);
+    live->view_type = RDT_VIEW_BLOCK;
+    live->form = lam::view_prop(&form);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 1);
+    live->form = nullptr;
+}
+
 struct MediaLifetimeProbe { unsigned released, paused; };
 
 TEST_F(StateStoreDomMutationTest, RebuiltEventOwnerTransfersLeaseOnlyForSameIdentity) {

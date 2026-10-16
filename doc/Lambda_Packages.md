@@ -66,6 +66,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
+| `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
 
@@ -1204,7 +1205,7 @@ openapi.validate_params(spec, "/pets", "get", {}).errors[0].message    // "requi
 
 ## 10. Engine Packages: edit, editor, dom, doc
 
-These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their API follows the engine: it is not stable, and scripts should not depend on it.
+These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their internal APIs follow the engine. The `lambda.editor.draw` facade in §10.2.1 is available to applications; other internal interfaces remain unstable.
 
 ### 10.1 `edit` — the `lambda edit` application
 
@@ -1213,6 +1214,19 @@ These packages implement parts of the engine in Lambda. They load automatically 
 ### 10.2 `editor` — the editing model
 
 `lambda.editor.*` is the rich-text editing model: documents as plain node trees (`mod_doc`), schemas for Markdown, strict CommonMark, an HTML subset and drawings (`mod_md_schema`, `mod_doc_schema`, `mod_drawing_schema`), invertible steps and transactions (`mod_step`, `mod_transaction`), undo history (`mod_history`), editing commands (`mod_commands`), paste handling, decorations and collaboration primitives (`mod_collab`). `lambda.editor.mod_editor` is the facade: `edit_open(doc, schema, selection)` creates an editor value, `edit_exec(editor, command)` applies a command built by an `edit_cmd_*` constructor such as `edit_cmd_insert_text(text)` or `edit_cmd_history_undo()`, and `edit_mount` binds the editor to a Radiant surface. Its modules are usually imported without an alias (`import lambda.editor.mod_editor`). The `edit` package uses it for every format it opens.
+
+### 10.2.1 `editor.draw` — vertices and edges
+
+`lambda.editor.draw` builds identified vertices and edges, queries connectivity,
+validates connections, applies shared editor transactions, and exports SVG.
+It supports twelve built-in shapes, declarative custom polygon descriptors,
+transformed named ports, straight/orthogonal/curved routes, waypoints, custom
+line/cubic paths, loops and parallel edges, plus version-4 archives with legacy
+v1–v3 reading. `lambda.editor.draw.view.surface(document, {id, width, height})`
+provides an independent retained canvas. The Draw demo reuses the package while
+keeping its application shell and reading existing v1–v3 files. Package ownership follows
+**D7.2.4v3**, with pure model edits and procedural presentation under
+**S1.4, S12.1.3**. See the [API and support boundary](../lmd/package/editor/draw/README.md).
 
 ### 10.3 `dom` — browser behaviour for HTML
 
