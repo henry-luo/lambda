@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "js_mir_internal.hpp"
+#include "mvp-lmd/mvp_lmd.h"
 #include "../jube/jube_interface.h"
 #include "../input/input.hpp"
 
@@ -66,7 +67,7 @@ static InputScriptRequest js_mir_lease_request(bool preamble_mode,
     request.backend = "mir";
     request.execution_mode = preamble_mode ? "preamble" : "classic";
     request.ast_abi = 1;
-    request.compiler_abi = 1;
+    request.compiler_abi = 2;
     request.interface_abi = js_mir_lease_preamble_abi_hash(preamble);
     request.dependency_digest = jube_interface_registry_digest();
     request.optimize_level = g_js_mir_optimize_level;
@@ -106,6 +107,7 @@ static size_t js_mir_lease_artifact_bytes(const void* value) {
     size_t bytes = sizeof(JsPreambleState) +
         (size_t)(state->entry_count > 0 ? state->entry_count : 0) *
         sizeof(JsModuleConstEntry) + state->module_property_bytes_size;
+    bytes += mvp_lmd_code_bytes(state->mvp_code);
     if (state->source_buffer) bytes += strlen(state->source_buffer) + 1;
     return bytes;
 }
@@ -257,14 +259,16 @@ const JsPreambleState* js_mir_lease_session_adopt(
         js_mir_lease_artifact_bytes,
     };
     if (!js_mir_lease_hold_scope(session, scope)) {
-        js_mir_lease_destroy_artifact(retained);
+        // ownership moves only after publication; the caller still owns
+        // compiled_state when adoption fails.
+        mem_free(retained);
         input_script_cache_close_scope(scope);
         return nullptr;
     }
     bool published = input_script_cache_publish_mir(lease, retained, &ops);
     if (!published) {
         arraylist_remove(session->held_scopes, session->held_scopes->length - 1);
-        js_mir_lease_destroy_artifact(retained);
+        mem_free(retained);
         input_script_cache_close_scope(scope);
         return nullptr;
     }
@@ -295,14 +299,14 @@ const JsPreambleState* js_mir_lease_session_adopt_build(
     };
     InputCacheScope* scope = build->scope;
     if (!js_mir_lease_hold_scope(session, scope)) {
-        js_mir_lease_destroy_artifact(retained);
+        mem_free(retained);
         return nullptr;
     }
     build->scope = nullptr;
     if (!input_script_cache_publish_mir(build->lease, retained, &ops)) {
         arraylist_remove(session->held_scopes, session->held_scopes->length - 1);
         build->scope = scope;
-        js_mir_lease_destroy_artifact(retained);
+        mem_free(retained);
         return nullptr;
     }
     memset(compiled_state, 0, sizeof(*compiled_state));
@@ -334,7 +338,7 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.backend = "mir";
     request.execution_mode = "module";
     request.ast_abi = 1;
-    request.compiler_abi = 1;
+    request.compiler_abi = 2;
     request.interface_abi = jube_interface_registry_digest();
     request.dependency_digest = jube_interface_registry_digest();
     request.optimize_level = g_js_mir_optimize_level;
@@ -364,6 +368,7 @@ static size_t js_module_mir_cache_artifact_bytes(const void* value) {
     size_t bytes = sizeof(JsModuleMirArtifact) +
         (size_t)(image->entry_count > 0 ? image->entry_count : 0) *
         sizeof(JsModuleConstEntry) + image->module_property_bytes_size;
+    bytes += mvp_lmd_code_bytes(image->mvp_code);
     if (image->source_buffer) bytes += strlen(image->source_buffer) + 1;
     bytes += (size_t)(artifact->static_dependency_count > 0
         ? artifact->static_dependency_count : 0) * sizeof(char*);

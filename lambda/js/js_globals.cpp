@@ -28,6 +28,8 @@
 #include "../dom/dom_canvas.h"
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
+#include "js_interp.hpp"
+#include "mvp-lmd/mvp_lmd_dynamic.h"
 
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
@@ -2448,6 +2450,11 @@ extern "C" void js_store_process_argv(int argc, const char** argv) {
     js_process_argv_raw = argv;
 }
 
+extern "C" const char* const* js_process_bootstrap_arguments(int* argc) {
+    if (argc) *argc = js_process_argc_raw;
+    return js_process_argv_raw;
+}
+
 extern "C" void js_store_process_exec_argv(int argc, const char** argv) {
     js_process_exec_argc_raw = argc;
     js_process_exec_argv_raw = argv;
@@ -3197,7 +3204,8 @@ static bool js_message_port_transfer_list_has_marked(Item transfer_list);
 static Item js_message_port_clone_for_transfer(Item port);
 extern "C" Item js_message_port_new(void);
 
-static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth) {
+static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth,
+        const JsStructuredCloneOps* ops = NULL) {
     if (depth > 100) return value; // prevent infinite recursion
     TypeId tid = get_type_id(value);
 
@@ -3215,14 +3223,18 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     if (js_is_js_array(value_root.get())) {
         int64_t len = js_array_length(value_root.get());
         // append into an empty array; js_array_new(len) would prepend len holes.
-        result_root.set(js_array_new(0));
+        result_root.set(ops ? ops->arrays->create(0) : js_array_new(0));
+        JS_RETURN_IF_ERROR(result_root.get());
         for (int64_t i = 0; i < len; i++) {
-            element_root.set(js_elements_get_int(value_root.get(), i));
+            element_root.set(ops ? ops->arrays->index(value_root.get(), i, ItemNull, JS_ARRAY_INDEX_GET)
+                : js_elements_get_int(value_root.get(), i));
             JS_RETURN_IF_ERROR(element_root.get());
             element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1));
+                transfer_root.get(), depth + 1, ops));
             JS_RETURN_IF_ERROR(element_root.get());
-            JS_RETURN_IF_ERROR(js_array_push(result_root.get(), element_root.get()));
+            JS_RETURN_IF_ERROR(ops ? ops->arrays->index(result_root.get(), i,
+                element_root.get(), JS_ARRAY_INDEX_CREATE)
+                : js_array_push(result_root.get(), element_root.get()));
         }
         return result_root.get();
     }
@@ -3232,7 +3244,9 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value_root.get());
         if (!ab || js_arraybuffer_detached(ab)) return value_root.get();
         int byte_length = js_arraybuffer_length(ab);
-        result_root.set(js_arraybuffer_new(byte_length));
+        result_root.set(ops ? ops->typed_arrays->buffer->construct(make_js_undefined(), byte_length, false)
+            : js_arraybuffer_new(byte_length));
+        JS_RETURN_IF_ERROR(result_root.get());
         ab = js_get_arraybuffer_ptr_item(value_root.get());
         JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(result_root.get());
         const uint8_t* source = js_arraybuffer_data_const(ab);
@@ -3259,11 +3273,14 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         int len = js_typed_array_length(value_root.get());
         int byte_length = js_typed_array_byte_length(value_root.get());
         const void* src_data = js_typed_array_current_data_ptr(value_root.get());
-        if (ta && src_data && byte_length > 0) {
-            result_root.set(js_typed_array_new(ta->element_type, len));
+        if (ta && (src_data || byte_length == 0)) {
+            Item length = {.item = i2it(len)};
+            result_root.set(ops ? ops->typed_arrays->construct(ta->element_type,
+                make_js_undefined(), &length, 1) : js_typed_array_new(ta->element_type, len));
+            JS_RETURN_IF_ERROR(result_root.get());
             src_data = js_typed_array_current_data_ptr(value_root.get());
             void* dst_data = js_typed_array_prepare_write_ptr(result_root.get());
-            if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
+            if (dst_data && src_data && byte_length > 0) memcpy(dst_data, src_data, (size_t)byte_length);
             return result_root.get();
         }
         return value_root.get();
@@ -3273,19 +3290,21 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
         // key enumeration, getters and recursive child clones can collect;
         // unpublished destinations need exact roots until stored (D5.4.1).
-        result_root.set(js_new_object());
-        keys_root.set(js_object_keys(value_root.get()));
+        result_root.set(ops ? ops->object() : js_new_object());
+        JS_RETURN_IF_ERROR(result_root.get());
+        keys_root.set(ops ? ops->keys(value_root.get()) : js_object_keys(value_root.get()));
         JS_RETURN_IF_ERROR(keys_root.get());
         int64_t count = js_array_length(keys_root.get());
         for (int64_t index = 0; index < count; index++) {
             key_root.set(js_elements_get_int(keys_root.get(), index));
-            element_root.set(js_get_key_default(value_root.get(), key_root.get()));
+            element_root.set(ops ? ops->get(value_root.get(), key_root.get())
+                : js_get_key_default(value_root.get(), key_root.get()));
             JS_RETURN_IF_ERROR(element_root.get());
             element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1));
+                transfer_root.get(), depth + 1, ops));
             JS_RETURN_IF_ERROR(element_root.get());
-            JS_RETURN_IF_ERROR(js_set_key_default(result_root.get(),
-                key_root.get(), element_root.get()));
+            JS_RETURN_IF_ERROR(ops ? ops->create(result_root.get(), key_root.get(), element_root.get())
+                : js_set_key_default(result_root.get(), key_root.get(), element_root.get()));
         }
         return result_root.get();
     }
@@ -3301,6 +3320,9 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
 }
 JS_FORWARD_STATIC_ITEM(structured_clone_impl, (Item value, int depth), structured_clone_transfer_impl, (value, ItemNull, depth))
 JS_FORWARD_ITEM(js_structuredClone, (Item value), structured_clone_impl, (value, 0))
+extern "C" Item js_structured_clone_with_ops(Item value, const JsStructuredCloneOps* ops) {
+    return structured_clone_transfer_impl(value, ItemNull, 0, ops);
+}
 
 // =============================================================================
 // Global Functions
@@ -8796,59 +8818,38 @@ JS_FORWARD_ITEM(js_object_entries, (Item object), js_object_values_or_entries, (
 // Object.fromEntries(iterable) — create object from [key, value] pairs
 // =============================================================================
 
-static bool js_object_from_entries_entry_is_object(Item entry) {
-    TypeId tid = get_type_id(entry);
-    return tid == LMD_TYPE_MAP || js_is_js_array(entry) ||
-           tid == LMD_TYPE_FUNC || tid == LMD_TYPE_ELEMENT;
-}
-
-static Item js_object_from_entries_close_preserve_exception(Item iterator, Item original) {
-    Item close_result = js_iterator_close(iterator);
-    (void)close_result;
-    return js_throw_value(original);
-}
-
-extern "C" Item js_object_from_entries(Item iterable) {
-    Item result = js_new_object();
-
-    JS_ASSIGN_OR_RETURN(iterator, js_get_iterator(iterable));
-
-    Item key0 = js_name_item("0", 1);
-    Item key1 = js_name_item("1", 1);
-
+Item js_object_from_entries_with_ops(Item iterable, const JsGroupByOps* properties,
+        const JsCollectionOps* supplied) {
+    const JsCollectionOps* ops = supplied ? supplied : &js_collection_default_ops;
+    RootFrame roots(6);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> input(roots, iterable), result(roots, properties->create()), iterator(roots, ItemNull),
+        entry(roots, ItemNull), key(roots, ItemNull), value(roots, ItemNull);
+    if (item_is_error(result.get())) return result.get();
+    iterator.set(ops->iterator(input.get()));
+    if (item_is_error(iterator.get())) return iterator.get();
+    uint64_t homes[2] = {};
     while (true) {
-        JS_ASSIGN_OR_RETURN(entry, js_iterator_step(iterator));
-        if (entry.item == JS_ITER_DONE_SENTINEL) break;
-
-        if (!js_object_from_entries_entry_is_object(entry)) {
-            Item tn = js_name_item("TypeError");
-            Item msg = js_name_item("Iterator value is not an entry object");
-            Item error = js_new_error_with_name(tn, msg);
-            Item close_result = js_object_from_entries_close_preserve_exception(iterator, error);
-            return close_result;
-        }
-
-        Item key = js_get_key_default(entry, key0);
-        if (item_is_error(key)) {
-            return js_object_from_entries_close_preserve_exception(iterator, key);
-        }
-
-        Item val = js_get_key_default(entry, key1);
-        if (item_is_error(val)) {
-            return js_object_from_entries_close_preserve_exception(iterator, val);
-        }
-
-        Item prop_key = js_to_property_key(key);
-        if (item_is_error(prop_key)) {
-            return js_object_from_entries_close_preserve_exception(iterator, prop_key);
-        }
-
-        Item define_result = js_create_data_property(result, prop_key, val);
-        if (item_is_error(define_result)) {
-            return js_object_from_entries_close_preserve_exception(iterator, define_result);
-        }
+        entry.set(ops->step(iterator.get()));
+        if (item_is_error(entry.get())) return entry.get();
+        if (entry.get().item == JS_ITER_DONE_SENTINEL) return result.get();
+        if (!ops->is_object(entry.get()))
+            return ops->close(iterator.get(), ops->error(false, "Iterator value is not an entry object"));
+        key.set(lambda_item_adopt_scalar_home(ops->get(entry.get(), "0"), &homes[0]));
+        if (item_is_error(key.get())) return ops->close(iterator.get(), key.get());
+        value.set(lambda_item_adopt_scalar_home(ops->get(entry.get(), "1"), &homes[1]));
+        if (item_is_error(value.get())) return ops->close(iterator.get(), value.get());
+        key.set(properties->key_of(key.get()));
+        if (item_is_error(key.get())) return ops->close(iterator.get(), key.get());
+        Item status = properties->put(result.get(), key.get(), value.get());
+        if (item_is_error(status)) return ops->close(iterator.get(), status);
     }
-    return result;
+}
+extern "C" Item js_object_from_entries(Item iterable) {
+    static const JsGroupByOps properties = {
+        NULL, js_create_data_property, js_to_property_key, js_new_object, NULL, NULL
+    };
+    return js_object_from_entries_with_ops(iterable, &properties, NULL);
 }
 
 // =============================================================================
@@ -11257,56 +11258,66 @@ static Item js_json_create_data_property(Item obj, Item key, Item value) {
     return js_create_data_property(obj, prop_key, value);
 }
 
-static Item js_json_revive(Item holder, Item key, Item reviver, JsJsonReviveState* state) {
-    JS_ASSIGN_OR_RETURN(val, js_get_reference(holder, key));
-    TypeId vtype = get_type_id(val);
-
-    bool revive_as_array = js_is_js_array(val);
-    if (!revive_as_array && js_is_proxy(val)) {
-        Item target = js_proxy_get_target(val);
-        revive_as_array = js_is_js_array(target);
-    }
-
-    if (revive_as_array) {
-        Item len_key = js_name_item("length", 6);
-        JS_ASSIGN_OR_RETURN(len_item, js_get_reference(val, len_key));
-        JS_ASSIGN_OR_RETURN(len_num, js_to_number(len_item));
-        double len_d = NAN;
-        TypeId len_type = get_type_id(len_num);
-        if (len_type == LMD_TYPE_INT) len_d = (double)it2i(len_num);
-        else if (len_type == LMD_TYPE_FLOAT) len_d = it2d(len_num);
-        int64_t len = (isnan(len_d) || len_d <= 0) ? 0 : (int64_t)floor(len_d);
-        for (int64_t i = 0; i < len; i++) {
-            Item idx_str = js_to_string((Item){.item = i2it((int)i)});
-            Item new_elem = js_json_revive(val, idx_str, reviver, state);
-            // Reviver calls and their recursive property operations are
-            // abrupt completions; treating the error lane as an ordinary
-            // value would either install it or silently continue the walk.
-            if (item_is_error(new_elem)) return new_elem;
-            if (get_type_id(new_elem) == LMD_TYPE_UNDEFINED) {
-                JS_ASSIGN_OR_RETURN(delete_result, js_delete_property(val, idx_str));
-            } else {
-                JS_ASSIGN_OR_RETURN(create_result, js_json_create_data_property(val, idx_str, new_elem));
-            }
+static Item js_json_is_array(Item value, bool* out_is_array);
+Item js_json_revive_with_ops(Item holder, Item key, Item reviver, void* state,
+        const JsJsonReviveOps* supplied) {
+    static const JsJsonReviveOps defaults = {
+        &js_collection_default_ops, js_get_reference,
+        [](Item value) {
+            bool array = false;
+            Item status = js_json_is_array(value, &array);
+            return item_is_error(status) ? status : Item{.item = b2it(array)};
+        },
+        js_object_keys,
+        [](Item object, Item key, Item value) {
+            return value.item == ITEM_JS_UNDEFINED ? js_delete_property(object, key) :
+                js_json_create_data_property(object, key, value);
+        },
+        [](void* state, Item holder, Item key, Item value) {
+            return js_json_make_reviver_context((JsJsonReviveState*)state, holder, key,
+                value, js_json_value_has_source(value));
         }
-    } else if (vtype == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(keys, js_object_keys(val));
-        int64_t klen = js_array_length(keys);
-        for (int64_t i = 0; i < klen; i++) {
-            Item k = js_elements_get(keys, (Item){.item = i2it((int)i)});
-            JS_ASSIGN_OR_RETURN(new_val, js_json_revive(val, k, reviver, state));
-            if (get_type_id(new_val) == LMD_TYPE_UNDEFINED) {
-                JS_ASSIGN_OR_RETURN(delete_result, js_delete_property(val, k));
-            } else {
-                JS_ASSIGN_OR_RETURN(create_result, js_json_create_data_property(val, k, new_val));
-            }
+    };
+    const JsJsonReviveOps* ops = supplied ? supplied : &defaults;
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    uint64_t value_home = 0, child_home = 0;
+    Rooted<Item> owner(roots, holder), property(roots, key), function(roots, reviver), value(roots, ItemNull),
+        keys(roots, ItemNull), child_key(roots, ItemNull), child(roots, ItemNull);
+    value.set(lambda_item_adopt_scalar_home(ops->get(owner.get(), property.get()), &value_home));
+    if (item_is_error(value.get())) return value.get();
+    if (ops->values->is_object(value.get())) {
+        Item array = ops->is_array(value.get());
+        if (item_is_error(array)) return array;
+        bool indexed = array.item == ITEM_TRUE;
+        int64_t length = 0;
+        if (indexed) {
+            child.set(ops->values->get(value.get(), "length"));
+            if (item_is_error(child.get())) return child.get();
+            child.set(ops->values->number(child.get()));
+            if (item_is_error(child.get())) return child.get();
+            double extent = it2d(child.get());
+            length = isnan(extent) || extent <= 0 ? 0 : extent >= 9007199254740991.0 ?
+                INT64_C(9007199254740991) : (int64_t)floor(extent);
+        } else {
+            keys.set(ops->keys(value.get()));
+            if (item_is_error(keys.get())) return keys.get();
+            length = js_array_length(keys.get());
+        }
+        for (int64_t index = 0; index < length; index++) {
+            child_key.set(indexed ? js_to_string(Item{.item = i2it(index)}) : js_elements_get(keys.get(), Item{.item = i2it(index)}));
+            if (item_is_error(child_key.get())) return child_key.get();
+            child.set(lambda_item_adopt_scalar_home(js_json_revive_with_ops(value.get(), child_key.get(), function.get(), state, ops), &child_home));
+            if (item_is_error(child.get())) return child.get();
+            // InternalizeJSONProperty ignores a refused delete/definition, but propagates an abrupt completion.
+            Item status = ops->write(value.get(), child_key.get(), child.get());
+            if (item_is_error(status)) return status;
         }
     }
-
-    bool has_source = js_json_value_has_source(val);
-    Item context = js_json_make_reviver_context(state, holder, key, val, has_source);
-    Item args[3] = {key, val, context};
-    return js_call_function(reviver, holder, args, 3);
+    child.set(ops->context(state, owner.get(), property.get(), value.get()));
+    if (item_is_error(child.get())) return child.get();
+    Item args[] = {property.get(), value.get(), child.get()};
+    return ops->values->call(function.get(), owner.get(), args, 3);
 }
 
 extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
@@ -11325,7 +11336,7 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         JS_ASSIGN_OR_RETURN(create_result, js_create_data_property(wrapper, empty_key, result));
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
-        result = js_json_revive(wrapper, empty_key, reviver, &state);
+        result = js_json_revive_with_ops(wrapper, empty_key, reviver, &state, NULL);
     }
     return result;
 }
@@ -11342,8 +11353,8 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 static bool js_is_symbol_item(Item item);
 
 static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
-                               const char* gap, int depth, Item holder, Item key,
-                               void** visited, int visited_count, bool* out_wrote);
+                               String* gap, int depth, Item holder, Item key,
+                               void** visited, int visited_count, bool* out_wrote, const JsJsonStringifyOps* ops);
 static void js_stringify_escape_string(StrBuf* sb, const char* s, int len);
 JS_FORWARD_STATIC_VOID( js_stringify_escape_string, (StrBuf* sb, const char* s, int len), escape_append_json_string, (sb, s, (size_t)len, true, true))
 JS_FORWARD_STATIC_EXPRESSION(bool, js_json_is_raw_json_object, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_RAW_JSON))
@@ -11410,279 +11421,129 @@ static Item js_json_is_array(Item value, bool* out_is_array) {
     return ItemNull;
 }
 
-static Item js_json_length_of_array_like(Item value, int64_t* out_len) {
-    Item length_key = js_name_item("length", 6);
-    JS_ASSIGN_OR_RETURN(len_value, js_get_reference(value, length_key));
-    JS_ASSIGN_OR_RETURN(num_value, js_to_number(len_value));
-    double len_num = js_get_number(num_value);
-    if (!(len_num == len_num) || len_num <= 0.0) {
-        *out_len = 0;
-    } else if (len_num >= 9007199254740991.0) {
-        *out_len = 9007199254740991LL;
-    } else {
-        *out_len = (int64_t)floor(len_num);
-    }
+static Item js_json_length_of_array_like(Item value, int64_t* out_len, const JsJsonStringifyOps* ops) {
+    JS_ASSIGN_OR_RETURN(len_value, ops->values->get(value, "length"));
+    JS_ASSIGN_OR_RETURN(num_value, ops->values->number(len_value));
+    double length = it2d(num_value);
+    *out_len = isnan(length) || length <= 0 ? 0 : length >= 9007199254740991.0 ?
+        INT64_C(9007199254740991) : (int64_t)floor(length);
     return ItemNull;
 }
 
-static void js_stringify_indent(StrBuf* sb, const char* gap, int depth) {
-    if (!gap || !gap[0]) return;
+static void js_stringify_indent(StrBuf* sb, String* gap, int depth) {
+    if (!gap || !gap->len) return;
     strbuf_append_char(sb, '\n');
-    for (int i = 0; i < depth; i++) {
-        strbuf_append_str_n(sb, gap, (int)strlen(gap));
-    }
+    for (int i = 0; i < depth; i++) strbuf_append_str_n(sb, gap->chars, gap->len);
 }
 
-// returns true if the value was serialized, false if it's undefined/function/symbol
-// (the caller handles the "skip" vs "null" difference for arrays vs objects)
+// values and keys stay rooted through toJSON/replacer and recursive property reads.
 static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
-                               const char* gap, int depth, Item holder, Item key,
-                               void** visited, int visited_count, bool* out_wrote) {
-    // recursion and user callbacks can collect temporary keys and replacement values (D5.3.3).
+        String* gap, int depth, Item holder, Item key, void** visited, int visited_count,
+        bool* out_wrote, const JsJsonStringifyOps* ops) {
     RootFrame roots(8);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> replacer_root(roots, replacer);
-    Rooted<Item> replacer_array_root(roots, replacer_array);
-    Rooted<Item> holder_root(roots, holder);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> keys_root(roots, ItemNull);
-    Rooted<Item> current_key_root(roots, ItemNull);
-    Rooted<Item> callback_root(roots, ItemNull);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> current(roots, lambda_item_adopt_scalar_home(value, &home)),
+        function(roots, replacer), property_list(roots, replacer_array), owner(roots, holder),
+        property(roots, key), keys(roots, ItemNull), child_key(roots, ItemNull), callback(roots, ItemNull);
     *out_wrote = false;
-    auto finish = [&](bool wrote) -> Item {
-        *out_wrote = wrote;
-        return ItemNull;
-    };
-    // ES spec SerializeJSONProperty steps:
-    // Step 2: toJSON first
-    TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_MAP || js_is_js_array(value) || js_global_is_bigint(value)) {
-        Item toJSON_name = js_name_item("toJSON", 6);
-        JS_ASSIGN_OR_RETURN(toJSON_fn, js_get_reference(value, toJSON_name));
-        callback_root.set(toJSON_fn);
-        if (js_is_callable(toJSON_fn)) {
-            Item args[1] = {key};
-            JS_ASSIGN_OR_RETURN_INTO(value, js_call_function(toJSON_fn, value, args, 1));
-            value_root.set(value);
-            vtype = get_type_id(value);
+    if (ops->values->is_object(current.get()) || js_global_is_bigint(current.get())) {
+        callback.set(ops->values->get(current.get(), "toJSON"));
+        if (item_is_error(callback.get())) return callback.get();
+        if (ops->values->is_callable(callback.get())) {
+            Item argument = property.get();
+            current.set(lambda_item_adopt_scalar_home(ops->values->call(callback.get(), current.get(), &argument, 1), &home));
+            if (item_is_error(current.get())) return current.get();
         }
     }
-
-    // Step 3: Apply replacer function
-    if (js_is_callable(replacer)) {
-        Item args[2] = {key, value};
-        JS_ASSIGN_OR_RETURN_INTO(value, js_call_function(replacer, holder, args, 2));
-        value_root.set(value);
-        vtype = get_type_id(value);
+    if (ops->values->is_callable(function.get())) {
+        Item args[] = {property.get(), current.get()};
+        current.set(lambda_item_adopt_scalar_home(ops->values->call(function.get(), owner.get(), args, 2), &home));
+        if (item_is_error(current.get())) return current.get();
     }
-
-    // Step 4: Unwrap Boolean/Number/String/BigInt wrapper objects
-    if (vtype == LMD_TYPE_MAP) {
-        JsClass cls = js_class_id(value);
-        if (cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_NUMBER || cls == JS_CLASS_STRING || cls == JS_CLASS_BIGINT) {
-            bool pv_own = false;
-            Item pv = js_map_shape_lookup_ext(value.map, "__primitiveValue__", 18, &pv_own);
-            if (pv_own) {
-                if (cls == JS_CLASS_BOOLEAN) {
-                    value = pv;
-                    value_root.set(value);
-                    vtype = get_type_id(value);
-                } else if (cls == JS_CLASS_NUMBER) {
-                    JS_ASSIGN_OR_RETURN_INTO(value, js_to_number(value));
-                    value_root.set(value);
-                    vtype = get_type_id(value);
-                } else if (cls == JS_CLASS_STRING) {
-                    JS_ASSIGN_OR_RETURN_INTO(value, js_to_string(value));
-                    value_root.set(value);
-                    vtype = get_type_id(value);
-                } else if (cls == JS_CLASS_BIGINT) {
-                    // ES spec step 10: BigInt → TypeError
-                    return js_throw_type_error("Do not know how to serialize a BigInt");
-                }
-            }
+    Item payload = ops->unbox(current.get());
+    TypeId wrapped = get_type_id(payload);
+    if (wrapped == LMD_TYPE_INT || wrapped == LMD_TYPE_FLOAT)
+        current.set(lambda_item_adopt_scalar_home(ops->values->number(current.get()), &home));
+    else if (wrapped == LMD_TYPE_STRING) current.set(ops->string(current.get()));
+    else if (wrapped == LMD_TYPE_BOOL || wrapped == LMD_TYPE_DECIMAL) current.set(payload);
+    if (item_is_error(current.get())) return current.get();
+    TypeId type = get_type_id(current.get());
+    if (ops->raw) {
+        callback.set(ops->raw(current.get()));
+        if (item_is_error(callback.get())) return callback.get();
+        if (get_type_id(callback.get()) == LMD_TYPE_STRING) {
+            String* text = it2s(callback.get());
+            strbuf_append_str_n(sb, text->chars, text->len);
+            *out_wrote = true;
+            return ItemNull;
         }
     }
-
-    if (js_json_is_raw_json_object(value)) {
-        Item raw_key = js_name_item("rawJSON", 7);
-        JS_ASSIGN_OR_RETURN(raw_value, js_get_reference(value, raw_key));
-        String* raw = it2s(raw_value);
-        if (!raw) return finish(false);
-        strbuf_append_str_n(sb, raw->chars, (int)raw->len);
-        return finish(true);
-    }
-
-    // Step 5-8: undefined, function, symbol → return false (not serialized)
-    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
-        || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
-        return finish(false);
-    }
-
-    // BigInt → TypeError (ES spec §24.5.2.9 step 10)
-    if (js_global_is_bigint(value)) {
-        return js_throw_type_error("Do not know how to serialize a BigInt");
-    }
-    if (value.item == ItemNull.item) {
-        strbuf_append_str_n(sb, "null", 4);
-        return finish(true);
-    }
-
-    // Boolean
-    if (vtype == LMD_TYPE_BOOL) {
-        if (it2b(value)) strbuf_append_str_n(sb, "true", 4);
-        else strbuf_append_str_n(sb, "false", 5);
-        return finish(true);
-    }
-
-    // Number
-    if (vtype == LMD_TYPE_INT) {
-        char buf[32];
-        int64_t n = it2i(value);
-        int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-        strbuf_append_str_n(sb, buf, len);
-        return finish(true);
-    }
-    if (vtype == LMD_TYPE_FLOAT) {
-        double d = it2d(value);
-        if (d != d || d == (1.0/0.0) || d == (-1.0/0.0)) {
-            strbuf_append_str_n(sb, "null", 4); // NaN, Infinity → null
-            return finish(true);
+    if (type == LMD_TYPE_UNDEFINED || js_is_symbol_item(current.get()) ||
+            ops->values->is_callable(current.get())) return ItemNull;
+    if (js_global_is_bigint(current.get()))
+        return ops->values->error(false, "Do not know how to serialize a BigInt");
+    if (type == LMD_TYPE_NULL) strbuf_append_str(sb, "null");
+    else if (type == LMD_TYPE_BOOL) strbuf_append_str(sb, it2b(current.get()) ? "true" : "false");
+    else if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+        double number = it2d(current.get());
+        char text[64];
+        if (!isfinite(number)) strbuf_append_str(sb, "null");
+        else {
+            lambda_finite_double_to_shortest(number, text, sizeof(text));
+            strbuf_append_str(sb, text);
         }
-        // Negative zero → "0"
-        if (d == 0.0) {
-            strbuf_append_str_n(sb, "0", 1);
-            return finish(true);
-        }
-        char buf[64];
-        int len = snprintf(buf, sizeof(buf), "%.17g", d);
-        strbuf_append_str_n(sb, buf, len);
-        return finish(true);
-    }
-
-    // String
-    if (vtype == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        if (!s) { strbuf_append_str_n(sb, "null", 4); return finish(true); }
-        js_stringify_escape_string(sb, s->chars, (int)s->len);
-        return finish(true);
-    }
-
-    // Circular reference detection for arrays and objects
-    if (js_is_js_array(value) || vtype == LMD_TYPE_MAP) {
-        void* ptr = js_is_js_array(value) ? (void*)value.array : (void*)value.map;
-        for (int vi = 0; vi < visited_count; vi++) {
-            if (visited[vi] == ptr) {
-        return js_throw_type_error("Converting circular structure to JSON");
-            }
-        }
-        if (depth >= JSON_STRINGIFY_MAX_DEPTH) {
-            strbuf_append_str_n(sb, "null", 4);
-            return finish(true);
-        }
-        // Push onto visited stack
-        if (visited_count < JSON_STRINGIFY_MAX_DEPTH) {
-            visited[visited_count] = ptr;
-            visited_count++;
-        }
-    }
-
-    // Array, including Proxy objects whose target is an array
-    bool value_is_array = false;
-    if (js_is_js_array(value)) {
-        value_is_array = true;
-    } else if (vtype == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(array_status, js_json_is_array(value, &value_is_array));
-    }
-    if (value_is_array) {
-        int64_t len = 0;
-        JS_ASSIGN_OR_RETURN(length_status, js_json_length_of_array_like(value, &len));
-        if (len == 0) {
-            strbuf_append_str_n(sb, "[]", 2);
-            return finish(true);
-        }
-        strbuf_append_char(sb, '[');
-        for (int64_t i = 0; i < len; i++) {
-            if (i > 0) strbuf_append_char(sb, ',');
-            js_stringify_indent(sb, gap, depth + 1);
-            // SerializeJSONProperty receives the array index as a String key;
-            // the numeric carrier is only an internal lookup optimization.
-            // Keeping the string form here preserves the observable replacer
-            // and toJSON argument contract (S#24.5.2.1).
-            JS_ASSIGN_OR_RETURN(idx_key, js_to_property_key(js_json_array_index_key(i)));
-            current_key_root.set(idx_key);
-            JS_ASSIGN_OR_RETURN(elem, js_get_reference(value, idx_key));
-            // serialize element; if undefined/function/symbol, write "null" in array context
-            bool wrote = false;
-            JS_ASSIGN_OR_RETURN(serialize_status, js_stringify_value(sb, elem, replacer, replacer_array,
-                                            gap, depth + 1, value, idx_key, visited,
-                                            visited_count, &wrote));
-            if (!wrote) {
-                strbuf_append_str_n(sb, "null", 4);
-            }
-        }
-        js_stringify_indent(sb, gap, depth);
-        strbuf_append_char(sb, ']');
-        return finish(true);
-    }
-
-    // Map (object)
-    if (vtype == LMD_TYPE_MAP) {
-        Item keys;
-        // Use replacer_array (PropertyList) if provided, otherwise own keys
-    if (js_is_js_array(replacer_array)) {
-            keys = replacer_array;
+    } else if (type == LMD_TYPE_STRING) {
+        String* text = it2s(current.get());
+        js_stringify_escape_string(sb, text->chars, text->len);
+    } else if (ops->values->is_object(current.get())) {
+        void* pointer = (void*)(uintptr_t)current.get().item;
+        for (int i = 0; i < visited_count; i++)
+            if (visited[i] == pointer) return ops->values->error(false, "Converting circular structure to JSON");
+        if (depth >= JSON_STRINGIFY_MAX_DEPTH) return ops->values->error(true, "JSON nesting is too deep");
+        visited[visited_count++] = pointer;
+        JS_ASSIGN_OR_RETURN(brand, ops->is_array(current.get()));
+        bool indexed = brand.item == ITEM_TRUE, first = true;
+        int64_t length = 0;
+        if (indexed) {
+            JS_RETURN_IF_ERROR(js_json_length_of_array_like(current.get(), &length, ops));
         } else {
-            JS_ASSIGN_OR_RETURN_INTO(keys, js_object_keys(value));
+            keys.set(property_list.get().item != ITEM_NULL ? property_list.get() : ops->keys(current.get()));
+            if (item_is_error(keys.get())) return keys.get();
+            length = js_array_length(keys.get());
         }
-        keys_root.set(keys);
-
-        int64_t klen = js_array_length(keys);
-        strbuf_append_char(sb, '{');
-        bool first = true;
-        for (int64_t i = 0; i < klen; i++) {
-            Item k = js_elements_get(keys, (Item){.item = i2it((int)i)});
-            JS_ASSIGN_OR_RETURN(k_str, js_to_string(k));
-            current_key_root.set(k_str);
-            JS_ASSIGN_OR_RETURN(v, js_get_reference(value, k_str));
-
-            // Use a temporary buffer to serialize the value
-            StrBuf* tmp = strbuf_new();
-            bool wrote = false;
-            Item serialize_status = js_stringify_value(tmp, v, replacer, replacer_array,
-                                            gap, depth + 1, value, k_str, visited,
-                                            visited_count, &wrote);
-            if (item_is_error(serialize_status)) {
-                strbuf_free(tmp);
-                return serialize_status;
-            }
-            if (!wrote) {
-                // undefined/function/symbol → skip this key in objects
-                strbuf_free(tmp);
-                continue;
-            }
-
+        strbuf_append_char(sb, indexed ? '[' : '{');
+        for (int64_t i = 0; i < length; i++) {
+            child_key.set(indexed ? js_json_array_index_key(i) : js_elements_get(keys.get(), Item{.item = i2it(i)}));
+            if (item_is_error(child_key.get())) return child_key.get();
+            callback.set(ops->get(current.get(), child_key.get()));
+            if (item_is_error(callback.get())) return callback.get();
+            // roll back an omitted object member without allocating a buffer for every field.
+            size_t previous = sb->length;
             if (!first) strbuf_append_char(sb, ',');
-            first = false;
             js_stringify_indent(sb, gap, depth + 1);
-            String* ks = it2s(k_str);
-            if (ks) js_stringify_escape_string(sb, ks->chars, (int)ks->len);
-            else strbuf_append_str_n(sb, "\"\"", 2);
-            strbuf_append_char(sb, ':');
-            if (gap && gap[0]) strbuf_append_char(sb, ' ');
-            strbuf_append_str_n(sb, tmp->str, (int)tmp->length);
-            strbuf_free(tmp);
+            if (!indexed) {
+                String* name = it2s(child_key.get());
+                js_stringify_escape_string(sb, name->chars, name->len);
+                strbuf_append_char(sb, ':');
+                if (gap && gap->len) strbuf_append_char(sb, ' ');
+            }
+            bool wrote = false;
+            JS_RETURN_IF_ERROR(js_stringify_value(sb, callback.get(), function.get(), property_list.get(),
+                gap, depth + 1, current.get(), child_key.get(), visited, visited_count, &wrote, ops));
+            if (!wrote && !indexed) {
+                sb->length = previous;
+                sb->str[previous] = 0;
+            } else {
+                if (!wrote) strbuf_append_str(sb, "null");
+                first = false;
+            }
         }
         if (!first) js_stringify_indent(sb, gap, depth);
-        strbuf_append_char(sb, '}');
-        return finish(true);
-    }
-
-    // Fallback: try toString
-    JS_ASSIGN_OR_RETURN(sval, js_to_string(value));
-    String* ss = it2s(sval);
-    if (ss) js_stringify_escape_string(sb, ss->chars, (int)ss->len);
-    else strbuf_append_str_n(sb, "null", 4);
-    return finish(true);
+        strbuf_append_char(sb, indexed ? ']' : '}');
+    } else return ItemNull;
+    *out_wrote = true;
+    return ItemNull;
 }
 
 // Strict-mode delete rejection: same TypeError shape for a frozen object, a
@@ -11696,140 +11557,105 @@ static Item js_throw_delete_rejected(Item key, const char* owner) {
         js_name_item(msg)));
 }
 
-extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
+Item js_json_stringify_with_ops(Item value, Item replacer, Item space, const JsJsonStringifyOps* supplied) {
+    static const JsJsonStringifyOps defaults = {
+        &js_collection_default_ops, js_get_reference,
+        [](Item value) {
+            bool indexed = false;
+            Item status = js_json_is_array(value, &indexed);
+            return item_is_error(status) ? status : Item{.item = b2it(indexed)};
+        },
+        js_object_keys, js_to_string,
+        [](Item value) {
+            if (get_type_id(value) == LMD_TYPE_MAP) {
+                JsClass kind = js_class_id(value);
+                if (kind == JS_CLASS_NUMBER || kind == JS_CLASS_STRING || kind == JS_CLASS_BOOLEAN || kind == JS_CLASS_BIGINT) {
+                    bool own = false;
+                    Item payload = js_map_shape_lookup_ext(value.map, "__primitiveValue__", 18, &own);
+                    if (own) return payload;
+                }
+            }
+            return Item{.item = ITEM_JS_UNDEFINED};
+        },
+        js_new_object, js_create_data_property,
+        [](Item value) {
+            return js_json_is_raw_json_object(value) ? js_get_reference(value, js_name_item("rawJSON", 7)) :
+                Item{.item = ITEM_JS_UNDEFINED};
+        }
+    };
+    const JsJsonStringifyOps* ops = supplied ? supplied : &defaults;
     RootFrame roots(7);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> replacer_root(roots, replacer);
-    Rooted<Item> space_root(roots, space);
-    Rooted<Item> replacer_array_root(roots, ItemNull);
-    Rooted<Item> property_list_root(roots, ItemNull);
-    Rooted<Item> property_name_root(roots, ItemNull);
-    Rooted<Item> holder_root(roots, ItemNull);
-    // Process space parameter
-    // ES spec §24.5.3 step 5: unwrap Number/String wrapper objects
-    if (get_type_id(space) == LMD_TYPE_MAP) {
-        JsClass cls = js_class_id(space);
-        if (cls == JS_CLASS_NUMBER) {
-            JS_ASSIGN_OR_RETURN_INTO(space, js_to_number(space));
-            space_root.set(space);
-        } else if (cls == JS_CLASS_STRING) {
-            JS_ASSIGN_OR_RETURN_INTO(space, js_to_string(space));
-            space_root.set(space);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0, space_home = 0;
+    Rooted<Item> input(roots, lambda_item_adopt_scalar_home(value, &home)), function(roots, replacer),
+        spacing(roots, lambda_item_adopt_scalar_home(space, &space_home)), properties(roots, ItemNull),
+        name(roots, ItemNull), owner(roots, ItemNull), gap(roots, ItemNull);
+    // PropertyList processing precedes observable coercion of the space argument.
+    if (!ops->values->is_callable(function.get())) {
+        JS_ASSIGN_OR_RETURN(brand, ops->is_array(function.get()));
+        if (brand.item == ITEM_TRUE) {
+            int64_t length = 0;
+            JS_RETURN_IF_ERROR(js_json_length_of_array_like(function.get(), &length, ops));
+            properties.set(Item{.array = array_plain()});
+            if (!properties.get().array) return ItemError;
+            for (int64_t i = 0; i < length; i++) {
+                name.set(js_json_array_index_key(i));
+                if (item_is_error(name.get())) return name.get();
+                name.set(ops->get(function.get(), name.get()));
+                if (item_is_error(name.get())) return name.get();
+                TypeId type = get_type_id(name.get());
+                TypeId wrapped = get_type_id(ops->unbox(name.get()));
+                if (type != LMD_TYPE_STRING && type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT &&
+                        wrapped != LMD_TYPE_STRING && wrapped != LMD_TYPE_INT && wrapped != LMD_TYPE_FLOAT) continue;
+                name.set(ops->string(name.get()));
+                if (item_is_error(name.get())) return name.get();
+                String* text = it2s(name.get());
+                bool duplicate = false;
+                Array* list = properties.get().array;
+                for (int64_t j = 0; j < list->length; j++) {
+                    String* previous = it2s(list->items[j]);
+                    if (previous->len == text->len && !memcmp(previous->chars, text->chars, text->len)) { duplicate = true; break; }
+                }
+                if (!duplicate) {
+                    if (!array_reserve_append_slots(list, 1)) return ItemError;
+                    array_push_verbatim(list, name.get());
+                }
+            }
         }
+        function.set(ItemNull);
     }
-    char gap_buf[11] = {0};
-    const char* gap = "";
-
-    TypeId space_type = get_type_id(space);
+    TypeId wrapped = get_type_id(ops->unbox(spacing.get()));
+    if (wrapped == LMD_TYPE_INT || wrapped == LMD_TYPE_FLOAT) spacing.set(ops->values->number(spacing.get()));
+    else if (wrapped == LMD_TYPE_STRING) spacing.set(ops->string(spacing.get()));
+    if (item_is_error(spacing.get())) return spacing.get();
+    TypeId space_type = get_type_id(spacing.get());
     if (space_type == LMD_TYPE_INT || space_type == LMD_TYPE_FLOAT) {
-        double d = (space_type == LMD_TYPE_FLOAT) ? it2d(space) : (double)it2i(space);
-        int n = (int)d;  // ToInteger: truncate toward zero
-        if (n < 0) n = 0;
-        if (n > 10) n = 10;
-        if (n > 0) {
-            memset(gap_buf, ' ', n);
-            gap_buf[n] = '\0';
-            gap = gap_buf;
-        }
+        double number = it2d(spacing.get());
+        int count = isnan(number) || number <= 0 ? 0 : number >= 10 ? 10 : (int)number;
+        gap.set(Item{.item = s2it(heap_create_name("          ", count))});
     } else if (space_type == LMD_TYPE_STRING) {
-        String* space_str = it2s(space);
-        if (space_str && space_str->len > 0) {
-            int n = (int)space_str->len;
-            if (n > 10) n = 10;
-            str_copy(gap_buf, sizeof(gap_buf), space_str->chars, n);
-            gap = gap_buf;
-        }
+        gap.set(js_str_substring_utf16(spacing.get(), 0, 10));
+        if (item_is_error(gap.get())) return gap.get();
     }
-
-    // Build PropertyList from replacer array (with deduplication)
-    Item replacer_func = ItemNull;
-    Item replacer_array = ItemNull;
-
-    if (js_is_callable(replacer)) {
-        replacer_func = replacer;
-    } else {
-        bool replacer_is_array = false;
-        TypeId replacer_type = get_type_id(replacer);
-        if (js_is_js_array(replacer) || replacer_type == LMD_TYPE_ARRAY) {
-            replacer_is_array = true;
-        } else if (replacer_type == LMD_TYPE_MAP) {
-            JS_ASSIGN_OR_RETURN(array_status, js_json_is_array(replacer, &replacer_is_array));
-        }
-        if (replacer_is_array) {
-        // ES spec step 4.b-f: Build PropertyList with deduplication
-        int64_t rlen = 0;
-        JS_ASSIGN_OR_RETURN(length_status, js_json_length_of_array_like(replacer, &rlen));
-        Item prop_list = js_array_new(0);
-        property_list_root.set(prop_list);
-        for (int64_t i = 0; i < rlen; i++) {
-            Item idx_key = js_json_array_index_key(i);
-            JS_ASSIGN_OR_RETURN(v, js_get_reference(replacer, idx_key));
-            TypeId vt = get_type_id(v);
-            Item item = ItemNull;
-            if (vt == LMD_TYPE_STRING) {
-                item = v;
-            } else if ((vt == LMD_TYPE_INT || vt == LMD_TYPE_FLOAT) && !js_is_symbol_item(v)) {
-                JS_ASSIGN_OR_RETURN_INTO(item, js_to_string(v));
-            } else if (vt == LMD_TYPE_MAP) {
-                // Check for String or Number wrapper objects
-                JsClass cls = js_class_id(v);
-                if (cls == JS_CLASS_STRING || cls == JS_CLASS_NUMBER) {
-                    JS_ASSIGN_OR_RETURN_INTO(item, js_to_string(v));
-                }
-            }
-            // Skip undefined/null entries and duplicates
-            if (item.item == ItemNull.item) continue;
-            property_name_root.set(item);
-            // Check for duplicate
-            bool dup = false;
-            int64_t plen = js_array_length(prop_list);
-            String* item_str = it2s(item);
-            for (int64_t j = 0; j < plen; j++) {
-                Item existing = js_elements_get(prop_list, (Item){.item = i2it((int)j)});
-                String* ex_str = it2s(existing);
-                if (item_str && ex_str && item_str->len == ex_str->len &&
-                    memcmp(item_str->chars, ex_str->chars, item_str->len) == 0) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup) {
-                js_array_push(prop_list, item);
-            }
-        }
-        replacer_array = prop_list;
-        replacer_array_root.set(replacer_array);
-        }
-    }
-
-    // Create wrapper object per spec step 9-10
-    StrBuf* sb = strbuf_new();
-    Item empty_key = ItemEmptyString;
-    Item holder = js_new_object();
-    holder_root.set(holder);
-    Item create_result = js_create_data_property(holder, empty_key, value);
-    if (item_is_error(create_result)) {
-        strbuf_free(sb);
-        return create_result;
-    }
-    void* visited_stack[JSON_STRINGIFY_MAX_DEPTH];
-
-    // Call SerializeJSONProperty — it handles toJSON, replacer, unwrap, and undefined check
+    owner.set(ops->object());
+    if (item_is_error(owner.get())) return owner.get();
+    name.set(ItemEmptyString);
+    JS_RETURN_IF_ERROR(ops->create(owner.get(), name.get(), input.get()));
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return ItemError;
+    void* visited[JSON_STRINGIFY_MAX_DEPTH];
     bool wrote = false;
-    Item stringify_status = js_stringify_value(sb, value, replacer_func, replacer_array,
-                                    gap, 0, holder, empty_key, visited_stack, 0, &wrote);
-    if (item_is_error(stringify_status)) {
-        strbuf_free(sb);
-        return stringify_status;
+    Item result = js_stringify_value(buffer, input.get(), function.get(), properties.get(),
+        gap.get().item == ITEM_NULL ? NULL : it2s(gap.get()), 0, owner.get(), name.get(), visited, 0, &wrote, ops);
+    if (!item_is_error(result)) {
+        String* output = wrote ? heap_strcpy(buffer->str, buffer->length) : NULL;
+        result = !wrote ? Item{.item = ITEM_JS_UNDEFINED} : output ? Item{.item = s2it(output)} : ItemError;
     }
-    if (!wrote) {
-        strbuf_free(sb);
-        return make_js_undefined();
-    }
-
-    String* result = heap_strcpy(sb->str, (int)sb->length);
-    strbuf_free(sb);
-    return (Item){.item = s2it(result)};
+    strbuf_free(buffer);
+    return result;
+}
+extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
+    return js_json_stringify_with_ops(value, replacer, space, NULL);
 }
 JS_FORWARD_ITEM(js_json_stringify, (Item value), js_json_stringify_full, (value, ItemNull, ItemNull))
 
@@ -13756,6 +13582,9 @@ extern "C" uint64_t js_realm_init_time_us(void) {
 }
 
 extern "C" Item js_get_global_this() {
+    // public host reads must observe the same global as compiled Scripts.
+    if (js_runtime_state.formal_mir_owner)
+        return mvp_lmd_dynamic_global_this(NULL);
     if (js_global_this_obj.item == 0) {
         uint64_t realm_start = time_now_us();
         if (!js_global_bindings_ensure_roots()) return ItemNull;
@@ -14117,6 +13946,19 @@ static bool js_with_scope_is_object(Item value) {
            is_virtual_container_type_id(type);
 }
 
+// hosted eval shares the scope chain; its object operations retain its realm.
+static Item js_with_property(Item object, Item key, Item value, int operation, bool strict = false) {
+    if (js_interp_host) return js_interp_host->property(js_interp_host->state,
+        object, key, value, operation, strict, object);
+    switch (operation) {
+    case JS_INTERP_HOST_HAS: return js_in(key, object);
+    case JS_INTERP_HOST_GET: return js_get_key_default(object, key);
+    case JS_INTERP_HOST_SET: return js_set_key_policy(object, key, value, strict);
+    case JS_INTERP_HOST_DELETE: return js_delete_property(object, key);
+    default: return ItemError;
+    }
+}
+
 // Unlink without touching the pushers' storage. This runs at a script boundary
 // where the chain should already be empty, and at a fault landing where the
 // recovery checkpoint has rewound past those frames entirely.
@@ -14140,10 +13982,12 @@ extern "C" Item js_with_push_at(Item* slot, Item obj) {
     if (!slot) return js_status_ok();
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
+        return js_interp_host ? js_interp_host->fail(JS_INTERP_HOST_TYPE)
+            : js_throw_type_error("Cannot convert undefined or null to object");
     }
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
+        JS_ASSIGN_OR_RETURN_INTO(obj, js_interp_host
+            ? js_interp_host->bind_this(js_interp_host->state, obj, false) : js_to_object(obj));
     }
     JsWithFrame* frame = (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame),
         MEM_CAT_JS_RUNTIME);
@@ -14229,7 +14073,8 @@ extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
 JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)
 
 static Item js_with_unscopables_symbol(void) {
-    return js_symbol_well_known(js_name_item("unscopables", 11));
+    return js_interp_host ? Item{.item = s2it(well_known_name_ref(JS_SYMBOL_UNSCOPABLES))}
+        : js_symbol_well_known(js_name_item("unscopables", 11));
 }
 
 extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
@@ -14250,8 +14095,9 @@ extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
 }
 static Item js_with_binding_is_visible(Item key, Item scope_obj) {
     static const JsWithBindingOps ops = {
-        [](Item object, Item key) { return js_in(key, object); },
-        js_get_key_default, js_with_scope_is_object,
+        [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_HAS); },
+        [](Item object, Item key) { return js_with_property(object, key, ItemNull, JS_INTERP_HOST_GET); },
+        js_with_scope_is_object,
         [](Item value) -> int64_t { return js_is_truthy(value); }
     };
     return js_with_binding_is_visible_with_ops(key, scope_obj, js_with_unscopables_symbol(), &ops);
@@ -14274,13 +14120,13 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
                 // Record operations. Re-run HasProperty after @@unscopables:
                 // its getter may have deleted the binding, and Proxy `has` traps
                 // must observe both abstract operations.
-                JS_ASSIGN_OR_RETURN(value_present, js_in(key, scope_obj));
+                JS_ASSIGN_OR_RETURN(value_present, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_HAS));
                 if (!it2b(value_present)) {
                     return strict_get
                         ? js_throw_binding_reference_error(key)
                         : make_js_undefined();
                 }
-                JS_ASSIGN_OR_RETURN(value, js_get_key_default(scope_obj, key));
+                JS_ASSIGN_OR_RETURN(value, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_GET));
                 if (js_with_memo_ready()) {
                     js_last_with_binding_scope = scope_obj;
                     js_last_with_binding_key = key;
@@ -14359,11 +14205,11 @@ static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
                                          int64_t strict) {
     // SetMutableBinding rechecks HasProperty: an earlier @@unscopables getter
     // or compound-read accessor may have removed the resolved binding.
-    JS_ASSIGN_OR_RETURN(still_exists, js_in(key, scope_obj));
+    JS_ASSIGN_OR_RETURN(still_exists, js_with_property(scope_obj, key, ItemNull, JS_INTERP_HOST_HAS));
     if (!it2b(still_exists)) {
         if (strict) return js_throw_binding_reference_error(key);
     }
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_policy(scope_obj, key, value, strict));
+    JS_ASSIGN_OR_RETURN(set_result, js_with_property(scope_obj, key, value, JS_INTERP_HOST_SET, strict != 0));
     return (Item){.item = b2it(true)};
 }
 
@@ -14391,7 +14237,7 @@ extern "C" Item js_set_with_binding_base(Item scope_obj, Item key, Item value, i
 
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     JS_ASSIGN_OR_RETURN(with_scope, js_with_resolve_scope(key, 0));
-    if (with_scope.item != ItemNull.item) return js_delete_property(with_scope, key);
+    if (with_scope.item != ItemNull.item) return js_with_property(with_scope, key, ItemNull, JS_INTERP_HOST_DELETE);
     if (declared_binding) return (Item){.item = b2it(false)};
     if (js_global_lexical_binding_exists(key)) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
@@ -14512,6 +14358,12 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    if (js_runtime_state.formal_mir_owner) {
+        Item present = mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_HAS, false);
+        return item_is_error(present) || present.item == ITEM_FALSE
+            ? (item_is_error(present) ? present : make_js_undefined())
+            : mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_GET, false);
+    }
     // A direct eval's projected caller binding is nearer than any global
     // lexical binding of the same name.
     if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
@@ -14525,6 +14377,8 @@ extern "C" Item js_get_global_property(Item key) {
 }
 
 extern "C" Item js_get_global_property_after_with_lookup(Item key) {
+    if (js_runtime_state.formal_mir_owner)
+        return mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_GET, false);
     if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
     Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
@@ -14577,6 +14431,10 @@ extern "C" Item js_get_global_property_reference(Item key, int64_t strict_refere
 }
 
 extern "C" int64_t js_global_binding_exists_after_with_lookup(Item key) {
+    if (js_runtime_state.formal_mir_owner) {
+        Item present = mvp_lmd_dynamic_global(NULL, key, ItemNull, JS_INTERP_HOST_HAS, false);
+        return present.item == ITEM_TRUE;
+    }
     // Script global lexical declarations are bindings in the realm record,
     // not properties on globalThis. Later classic Scripts (including a
     // Test262 test after its harness) must find them before probing the
@@ -14600,6 +14458,7 @@ extern "C" int64_t js_global_binding_exists(Item key) {
 }
 
 static Item js_throw_binding_reference_error(Item key) {
+    if (js_interp_host) return js_interp_host->fail(JS_INTERP_HOST_REFERENCE);
     String* sk = it2s(key);
     char msg[256];
     if (sk) {
@@ -14626,6 +14485,10 @@ static Item js_set_global_target_property(Item target, Item key, Item value,
 static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
         bool strict) {
     js_last_with_binding_valid = false;
+    if (js_runtime_state.formal_mir_owner) {
+        Item result = mvp_lmd_dynamic_global(NULL, key, value, JS_INTERP_HOST_SET, strict);
+        return item_is_error(result) ? result : js_status_ok();
+    }
     if (js_eval_env_has_binding(key)) {
         return js_set_global_target_property(js_get_global_this(), key, value, strict);
     }

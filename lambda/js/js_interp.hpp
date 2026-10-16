@@ -29,10 +29,8 @@ static inline bool js_ast_interpreter_requested(void) {
 // fallback rather than publishing a mixed-tier realm.
 static inline bool js_execution_auto_requested(void) {
     const char* backend = getenv("JS_EXEC_BACKEND");
-    // D8.1.3v19: a supported unit starts in the retained AST tier. `mir`
-    // remains the explicit opt-in, while unsupported AST surface falls back
-    // to the whole-module MIR lane at the ordinary admission gate.
-    return !backend || !backend[0] || strcmp(backend, "auto") == 0;
+    // D8.1.3v25: normal execution uses MVP MIR; AUTO remains explicit.
+    return backend && strcmp(backend, "auto") == 0;
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.
@@ -107,7 +105,8 @@ enum JsInterpHostOperation {
     JS_INTERP_HOST_GET, JS_INTERP_HOST_HAS, JS_INTERP_HOST_SET,
     JS_INTERP_HOST_DELETE, JS_INTERP_HOST_DECLARE, JS_INTERP_HOST_CHECK_DECLARE,
     JS_INTERP_HOST_HAS_LEXICAL, JS_INTERP_HOST_CHECK_DECLARE_FUNCTION,
-    JS_INTERP_HOST_DECLARE_FUNCTION
+    JS_INTERP_HOST_DECLARE_FUNCTION, JS_INTERP_HOST_CHECK_DECLARE_LEXICAL,
+    JS_INTERP_HOST_SCRIPT = 0x100
 };
 enum JsInterpHostError {
     JS_INTERP_HOST_CAPABILITY, JS_INTERP_HOST_REFERENCE, JS_INTERP_HOST_TYPE,
@@ -161,6 +160,8 @@ struct JsInterpHostOps {
     Item (*object_property)(void*, Item, JsPropertyNode*, Item key, Item value);
     Item (*for_in_keys)(Item);
     Item (*for_in_key_is_live)(Item, Item key);
+    Item (*regexp_literal)(void*, Item pattern, Item flags);
+    Item (*dynamic_import)(void*, Item specifier, const char* reference);
 };
 // The caller owns these exact roots for the duration of a host operation.
 // Escaped functions retain env, never this activation-local descriptor.
@@ -211,8 +212,11 @@ public:
     JsInterpHostScope(const JsInterpHostScope&) = delete;
     JsInterpHostScope& operator=(const JsInterpHostScope&) = delete;
 };
+struct JsInterpEnv;
 Item js_interp_execute_host_source(const JsInterpHostOps*, const char*, size_t,
-    const char* filename, bool indirect_eval);
+    const char* filename, bool indirect_eval, JsInterpEnv** script_environment = NULL);
+Item js_interp_host_global_lexical(const JsInterpHostOps*, JsInterpEnv*,
+    Item key, Item value, int operation, bool* found);
 Item js_interp_call_host_function(const JsInterpHostOps*, Item wrapper,
     JsFunction*, Item receiver, Item*, int, Item new_target);
 

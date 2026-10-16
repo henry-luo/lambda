@@ -113,6 +113,15 @@ Item mvp_lmd_array_species_create(Item source, int64_t length, bool* fresh) {
         Item key = {.item = s2it(heap_create_name("constructor", 11))};
         constructor.set(mvp_lmd_property_with_receiver(owner.get(), key, ItemNull, LMD_PROP_GET, owner.get()));
         if (item_is_error(constructor.get())) return constructor.get();
+        if (mvp_lmd_is_constructor(constructor.get())) {
+            MvpLmdProgram* program = NULL;
+            Item found = mvp_lmd_function_realm(constructor.get(), &program);
+            if (item_is_error(found)) return found;
+            MvpLmdLibraryState* foreign = mvp_lmd_program_library(program);
+            // ArraySpeciesCreate ignores a different realm's intrinsic Array before @@species.
+            if (foreign != state && constructor.get().item == foreign->values[LMD_LIBRARY_ARRAY].item)
+                constructor.set(Item{.item = ITEM_JS_UNDEFINED});
+        }
         if (mvp_lmd_is_object(constructor.get())) {
             key.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES));
             constructor.set(mvp_lmd_property_with_receiver(constructor.get(), key, ItemNull, LMD_PROP_GET, constructor.get()));

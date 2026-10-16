@@ -102,6 +102,8 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
     const char* path, const char* source, size_t length, JsSourceModuleRecord** output);
 Item js_module_evaluate(JsSourceModuleRecord* record);
 bool js_module_set_source_ops(const JsSourceModuleOps* ops, void* owner);
+Item js_source_dynamic_import(Item specifier, const char* reference,
+    const JsSourceModuleOps* ops, void* owner);
 // completion is either a normal null or an encoded abrupt lane, including throw null.
 void js_module_source_complete(JsSourceModuleRecord* record, Item completion);
 JsSourceBindingStatus js_module_resolve_binding(JsSourceModuleRecord* record,

@@ -458,31 +458,49 @@ const JsCollectionOps mvp_lmd_collection_ops = {
     [](Item owner, Item method) { return mvp_lmd_iterator_get_with_method(NULL, owner, method); }
 };
 
+const MvpLmdWeakFamily mvp_lmd_weak_families[4] = {
+    {"WeakMap", JS_BUILTIN_OWNER_WEAKMAP_PROTOTYPE_METHOD},
+    {"WeakSet", JS_BUILTIN_OWNER_WEAKSET_PROTOTYPE_METHOD},
+    {"WeakRef", JS_BUILTIN_OWNER_WEAKREF_PROTOTYPE_METHOD},
+    {"FinalizationRegistry", JS_BUILTIN_OWNER_FINALIZATION_REGISTRY_PROTOTYPE_METHOD}
+};
 static Item weak_collection_construct(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item, Item target) {
     if (target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     MvpLmdLibraryState* library = mvp_lmd_program_library(program);
     MvpLmdClass* base = mvp_lmd_class_record(self);
     bool set = base == &library->weak_collections[1];
+    bool lifetime = library->weak_class_count > 2 && (base == &library->weak_collections[2] ||
+        base == &library->weak_collections[3]);
+    bool registry = lifetime && base == &library->weak_collections[3];
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     Rooted<Item> new_target(roots, target), input(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}),
-        prototype(roots, iterator_property(new_target.get(), "prototype")), output(roots, ItemNull);
+        prototype(roots, ItemNull), output(roots, ItemNull);
+    // validate target/callback before an observable newTarget.prototype getter.
+    if (lifetime) {
+        Item valid = js_weak_validate_input(registry, input.get(), &mvp_lmd_collection_ops);
+        if (item_is_error(valid)) return valid;
+    }
+    prototype.set(mvp_lmd_constructor_prototype(new_target.get(), base->values[1]));
     if (item_is_error(prototype.get())) return prototype.get();
-    if (!mvp_lmd_is_object(prototype.get())) prototype.set(base->values[1]);
     MvpLmdClass* subtype = mvp_lmd_class_record(new_target.get());
     TypeMap* shape = subtype && subtype->ast && lambda_nominal_derives_from(&subtype->nominal, &base->nominal)
         ? &subtype->shape : &base->shape;
-    output.set(js_collection_create_with_storage(shape, context->pool, set ? 1 : 0, true));
+    output.set(lifetime ? js_weak_create_with_storage(shape, registry, input.get(), &mvp_lmd_collection_ops)
+        : js_collection_create_with_storage(shape, context->pool, set ? 1 : 0, true));
     if (item_is_error(output.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     Item linked = mvp_lmd_set_prototype(output.get(), prototype.get());
     if (item_is_error(linked)) return linked;
-    return js_collection_add_entries_with_ops(output.get(), input.get(), !set, &mvp_lmd_collection_ops);
+    return lifetime ? output.get() : js_collection_add_entries_with_ops(output.get(), input.get(), !set, &mvp_lmd_collection_ops);
 }
 
 static Item weak_collection_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item receiver, Item) {
     const JsBuiltinMethodSpec* method = (const JsBuiltinMethodSpec*)((MvpLmdNativeCallable*)self.function)->state;
+    if (method->owner == JS_BUILTIN_OWNER_WEAKREF_PROTOTYPE_METHOD ||
+            method->owner == JS_BUILTIN_OWNER_FINALIZATION_REGISTRY_PROTOTYPE_METHOD)
+        return js_weak_method_with_ops(method->builtin_id, receiver, args, count, &mvp_lmd_collection_ops);
     bool set = method->owner == JS_BUILTIN_OWNER_WEAKSET_PROTOTYPE_METHOD;
     if (!js_collection_has_brand(receiver, set ? 1 : 0, true)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     int operation = method->builtin_id == JS_BUILTIN_WEAKMAP_SET || method->builtin_id == JS_BUILTIN_WEAKSET_ADD ? 0 :
@@ -498,11 +516,12 @@ static Item weak_collection_initialize(MvpLmdProgram* program, MvpLmdLibraryStat
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> function(roots, ItemNull);
-    for (int set = 0; set < 2; set++) {
-        MvpLmdClass* cls = &state->weak_collections[set];
-        const char* name = set ? "WeakSet" : "WeakMap";
+    for (int family = 0; family < state->weak_class_count; family++) {
+        MvpLmdClass* cls = &state->weak_collections[family];
+        const char* name = mvp_lmd_weak_families[family].name;
+        const JsBuiltinGlobalSpec* builtin = js_builtin_global_find(name, strlen(name));
         Item status = mvp_lmd_library_class_initialize(program, state, cls,
-            (int)(state->weak_values - state->values) + 3 * set, name, weak_collection_construct, 0);
+            (int)(state->weak_values - state->values) + 3 * family, name, weak_collection_construct, builtin->param_count);
         if (item_is_error(status)) return status;
         ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
         status = mvp_lmd_named_set(cls->values[1], "constructor", cls->values[0], JSPD_NON_ENUMERABLE);
@@ -510,14 +529,14 @@ static Item weak_collection_initialize(MvpLmdProgram* program, MvpLmdLibraryStat
         JsPropertyDescriptor tag = {};
         tag.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
         js_pd_set_configurable(&tag, true);
-        tag.value = Item{.item = s2it(heap_create_name(name, 7))};
+        tag.value = Item{.item = s2it(heap_create_name(name, strlen(name)))};
         status = mvp_lmd_define_own_property(cls->values[1],
             Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))}, &tag);
         if (item_is_error(status)) return status;
         for (int i = 0; ; i++) {
             const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
             if (!method) break;
-            if (method->owner != (set ? JS_BUILTIN_OWNER_WEAKSET_PROTOTYPE_METHOD : JS_BUILTIN_OWNER_WEAKMAP_PROTOTYPE_METHOD)) continue;
+            if (method->owner != mvp_lmd_weak_families[family].prototype_owner) continue;
             function.set(mvp_lmd_native_function(program, (void*)method, weak_collection_method,
                 method->param_count, method->display_name ? method->display_name : method->name));
             if (item_is_error(function.get())) return function.get();
@@ -608,9 +627,8 @@ static Item collection_construct(Context*, MvpLmdProgram* program, Item* args, u
         output(roots, ItemNull), prototype(roots, ItemNull);
     bool observed_target = target.item != self.item || state->mutable_prototypes;
     if (observed_target) {
-        prototype.set(iterator_property(target, "prototype"));
+        prototype.set(mvp_lmd_constructor_prototype(target, cls->values[1]));
         if (item_is_error(prototype.get())) return prototype.get();
-        if (!mvp_lmd_is_object(prototype.get())) prototype.set(cls->values[1]);
     }
     MvpLmdClass* actual = observed_target ? mvp_lmd_class_record(target) : cls;
     TypeMap* shape = actual && actual->ast && lambda_nominal_derives_from(&actual->nominal, &cls->nominal)

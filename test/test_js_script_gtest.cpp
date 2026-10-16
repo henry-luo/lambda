@@ -1032,7 +1032,7 @@ TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
     ASSERT_FALSE(item_is_error(result));
     Item field_result = js_get_key_default(js_get_global_this(),
         js_make_string("__lambdaFieldOverlayResult"));
-    EXPECT_EQ(field_result.item, flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(field_result, flt2it(42.0)).item, b2it(true));
     runtime_cleanup(&runtime);
 
     Runtime index_runtime = {};
@@ -1068,7 +1068,7 @@ TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
     runtime_cleanup(&index_runtime);
 }
 
-TEST(JsInterpreter, UnsetBackendSelectsAutoAstForSupportedScript) {
+TEST(JsMir, UnsetBackendSelectsMvpForSupportedScript) {
     Runtime runtime = {};
     runtime_init(&runtime);
     const char* previous = getenv("JS_EXEC_BACKEND");
@@ -1078,12 +1078,13 @@ TEST(JsInterpreter, UnsetBackendSelectsAutoAstForSupportedScript) {
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     const char source[] = "var answer = 6 * 7; answer;";
-    Item result = transpile_js_to_mir(&runtime, source, "unset-auto.js", NULL);
+    Item result = transpile_js_to_mir(&runtime, source, "unset-mvp.js", NULL);
 
     if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXEC_BACKEND", saved_backend, 1), 0);
     ASSERT_FALSE(item_is_error(result));
-    EXPECT_TRUE(runtime.js_ast_backend);
-    EXPECT_EQ(result.item, flt2it(42.0).item);
+    EXPECT_FALSE(runtime.js_ast_backend);
+    EXPECT_NE(js_runtime_state.formal_mir_owner, nullptr);
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
     runtime_cleanup(&runtime);
 }
 
@@ -1688,16 +1689,14 @@ TEST(JsInterpreter, ReusesClosedModuleMirArtifactAcrossFreshRuntimes) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, filename);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     Runtime second = {};
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, filename);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};
@@ -1719,16 +1718,14 @@ TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, filename);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     Runtime second = {};
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, filename);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};
@@ -1770,8 +1767,7 @@ TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
     runtime_init(&first);
     Item first_namespace = load_js_module(&first, root_path);
     ASSERT_FALSE(item_is_error(first_namespace));
-    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
-        flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(first_namespace, js_make_string("answer")), flt2it(42.0)).item, ITEM_TRUE);
     runtime_cleanup(&first);
 
     // A different source generation must retire the cached importer before
@@ -1783,8 +1779,7 @@ TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
     runtime_init(&second);
     Item second_namespace = load_js_module(&second, root_path);
     ASSERT_FALSE(item_is_error(second_namespace));
-    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
-        flt2it(53.0).item);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(second_namespace, js_make_string("answer")), flt2it(53.0)).item, ITEM_TRUE);
     runtime_cleanup(&second);
 
     InputScriptCacheStats after = {};
@@ -1900,7 +1895,7 @@ TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
     ASSERT_FALSE(item_is_error(result));
     Item sum = js_get_key_default(js_get_global_this(),
         js_make_string("__lambdaForOfClosureResult"));
-    EXPECT_EQ(sum.item, flt2it(7.0).item);
+    EXPECT_EQ(js_strict_equal(sum, flt2it(7.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -1920,7 +1915,7 @@ TEST(JsMir, KeepsShadowedTailCallAsOrdinaryCall) {
     ASSERT_FALSE(item_is_error(result));
     Item value = js_get_key_default(js_get_global_this(),
         js_make_string("__lambdaShadowedTailCall"));
-    EXPECT_EQ(value.item, flt2it(42.0).item);
+    EXPECT_EQ(js_strict_equal(value, flt2it(42.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }

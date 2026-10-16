@@ -1,6 +1,6 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-13
+**Date:** 2026-10-16
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
@@ -16,8 +16,9 @@ recorded there. Prototype, accessor, proxy and sparse-array expansion is impleme
 in source in §31; performance acceptance remains pending.
 Test262 parity with full LambdaJS is planned in §32, including interpreter-only
 dynamic source; it is not a current conformance claim.
-The §33 build establishes 21,747 audited Test262 passes; §34 plans the next
-milestone of 90% of the frozen LJS passing baseline, with a performance gate.
+The latest completed whole audit in §34 records 37,445/40,261 Test262 passes
+(93.0%). §35 tracks implementation toward full LJS parity; later selected gains
+remain separate from that archived whole-population score.
 
 **Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -41,7 +42,7 @@ The four governing goals remain fixed (USER, 2026-10-07):
    preserving its default Lambda behavior. Count internal utilities, adapters,
    and shared additions too; notify the user before adding any new helper.
 3. **Implement exactly the admitted scope.** Section 3 records the initial
-   subset; §§10–34 record subsequent extensions and planned scope. Excluded
+   subset; §§10–35 record subsequent extensions and planned scope. Excluded
    capabilities receive diagnostics, without reserved machinery for later features.
 4. **Keep the MVP as efficient as possible.** Preserve native computations and
    direct storage/calls where proven; measure release performance with fixed
@@ -1833,3 +1834,128 @@ check fail on both pins; PDF replays cover interpreter/JIT/auto and chart output
 is byte-identical. No expected output, harness or deadline changed.
 Evidence, controls and remaining gaps are recorded in
 `temp/mvp_perf_remaining2_20261015/REPORT.md` and the implementation plan.
+
+## 35. Complete LJS Test262 parity
+
+**Target:** every case in the frozen 40,261-case LJS baseline, including every
+required mode, with no new benchmark regression. Complete remaining syntax,
+RegExp, library/JSON, Atomics/agent, weak-reference and host/environment gaps.
+Existing classes, async/modules, SharedArrayBuffer, proxies and sparse arrays
+receive targeted semantic repairs. Whole-population counts stay separate
+from later selected gains; the intermediate recount below is not the latest
+source's score.
+
+Reuse untyped Lambda and shared JS algorithms first (**D1.3v3**), preserving
+shared shapes and precise ownership (**D3.4.3v5–D3.4.8**, **D5.2–D5.3**).
+Eval and Function-family bodies remain interpreted (**D8.1.3v24**).
+Retain ordinary fast paths, with no `is_normal` flag or inline caches
+(**D8.4.1v2**). Existing historical performance gaps remain acceptance work.
+Implementation and gates: [full-parity plan](../impl/JS_MVP_Lmd_Test262_Full_Parity.md).
+
+The implemented increment covers shared library/JSON algorithms, declaration
+validation, Reflect metadata, `/v` lowering, class property escapes and early
+RegExp validation. Interpreted regex literals use MVP's native constructor.
+Unicode simple folding reuses the repository's UCD data through a shared core
+helper; forward/lookbehind backreferences handle differing UTF-8 widths.
+
+Earlier phase pin validation: **677/677** MVP units, ten focused forced-GC checks,
+**786/786** library canonical cases and **772/772** additional strict variants.
+RegExp reaches **1,649/1,721** canonical cases and **1,647/1,719** additional
+strict variants (**339 recovered, zero lost**); canonical LJS passes 1,650.
+These selected results do not replace the archived whole-population score.
+The standard stored-body LJS baseline remains **40,261/40,261**.
+The integrated Lambda baseline is **7,453/7,457**: its four PDF/chart failures
+also reproduce on phase entry; all **313** GC stress checks pass.
+
+All **84** non-jq benchmark output/backend contracts pass. The initial sweep is
+**0.47% faster** by geometric mean than phase entry. An independent 31-pair
+repeat confirms `object_delete` at **+3.7%** (0.867 vs 0.836 ms); its cause
+remains under investigation. All 53 measurements are retained in the report.
+Performance acceptance, historical gaps and remaining feature packages stay
+open in the implementation plan.
+
+Corpus audit found that the standard LJS baseline uses stored Unicode 16 tests,
+while canonical sources require Unicode 17. Keep these source contracts and
+their results separate; shared Unicode-data gaps are recorded in the plan.
+
+The next increment adds shared WeakRef/FinalizationRegistry lifetime storage,
+collector ephemerons, job-scoped kept targets and rooted cleanup callbacks
+(**D1.3v3**, **D5.2–D5.3**). `$262.evalScript` now uses persistent Script lexical
+environments in the retained interpreter, with global declaration attributes
+and live binding access from MVP (**D8.1.3v24**). Atomic read/modify/write,
+isLockFree and pause reuse the shared typed-array kernels and builtin catalog;
+buffer addresses are reacquired after coercion callbacks can resize/detach.
+
+Private pin `a0d493c7b25d870a3b1f5a7236cece7776e434ebb71d2292040dcf2b497df2bd`
+passes **685/685** MVP units, **18/18** focused forced/poisoned-GC checks,
+**158/158** non-waiter atomic cases and **436/436** affected canonical LJS
+controls. These checks precede the later hosted-realm and asynchronous-waiter
+increments; agent scheduling and the Unicode target decision remain open. Full recount and current
+performance acceptance are reported separately in the implementation plan;
+these selected checks do not establish full parity or close historical gaps.
+
+Distinct hosted realms now retain intrinsic/global identities across calls,
+suspension, Function-family interpretation and Promise jobs. Constructor
+prototype fallback, Array species and native brands reuse the shared ownership
+and nominal model (**D3.4.3v5–D3.4.8**, **D5.2–D5.3**, **D8.1.3v24**).
+The realm pin passes **690/690** units and **23/23** focused forced/poisoned-GC
+checks. The subsequent increment adds shared real-time `waitAsync`/`notify`
+waiters with backing-store/byte-offset identity and precise storage roots.
+That pin passes **696/696** units, **29/29** focused forced-GC checks and the
+**40,261/40,261** LJS baseline. Synchronous wait validation and actual deadlines
+now reuse the same adapter; independent agents and cross-agent wakeup still
+need implementation. Child-realm module graphs and Unicode 16/17 selection
+remain open.
+
+The latest pin passes **699/699** units, **32/32** focused forced-GC checks,
+**370/449** selected canonical cases and **345/424** additional strict variants.
+It recovers 33 cases in each mode with no lost selected passes; all 79 remaining
+cases require agents. Same-pin LJS controls pass **449/449** and its stored-body
+baseline passes **40,261/40,261** without retries.
+The integrated Lambda gate remains open: its PDF checker lacks Pillow, and
+the broad GC sweep timed out in music layout after 298 completed cases. All
+JavaScript groups pass; the implementation plan preserves the exact failures.
+
+The complete intermediate recount on the atomic-storage pin records
+**39,266/40,261 (97.53%)** all-required passes without observed instability,
+with **995** remaining IDs. Nine additional IDs pass only after isolated replay
+and remain marked unstable. This audit predates realms and waiters; selected
+later gains must not be added to it. Its readonly-global assignment crashes
+are fixed in compiler analysis. Detailed provenance and current verification
+are in the implementation plan. No current performance claim is made.
+
+
+## 36. Formal JavaScript MIR engine
+
+**Decision (2026-10-16, USER), D8.1.3v25:** promote MVP-Lmd to the formal
+JavaScript MIR engine. Normal MIR execution must reach MVP through the public
+runtime API, including module and host entry points. Retain the AST tier for
+`eval`, Function-family constructors and other dynamic source. Legacy LJS MIR
+must not silently execute rejected programs. Reuse Lambda's Runtime,
+EvalContext, Script lifetime and shared kernels (**D1.3v3, D5.3**).
+
+Fix remaining failures through this activated path while keeping Test262's
+population, harness, expectations and deadlines intact. Preserve pinned MIR
+benchmark comparisons; activation alone does not establish conformance or
+performance acceptance. Details and progress:
+[formal MIR implementation plan](../impl/JS_MVP_Lmd_Formal_MIR.md).
+
+**Implementation checkpoint:** ordinary public Script/Module execution and
+formal MIR Test262 batches now select MVP. Repeated public Scripts share their
+global object, lexical bindings, intrinsic identities and escaping closures;
+host global access uses that same realm. Heap replacement retires the old
+Promise/module policies. Document/preamble and module caches now retain MVP
+machine-code images with per-realm relocation tables; hits still rebuild frontend
+metadata before checking exact MIR equality (D8.5.1v2). Host API coverage,
+frontend-image reuse and AUTO per-function publication remain incomplete. The implementation plan
+records failing integrated gates separately from passing focused tests.
+Performance acceptance remains open, including the cost of complete public
+realm semantics versus standalone closed-unit analysis.
+
+The RegExp migration follow-up reuses shared match-state and streaming
+replacement kernels, with precise state owned by each MVP realm (D5.3,
+D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
+timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
+capsule teardown. Latest focused gates: 727 MVP units, 61 forced-GC checks,
+and 198/205 isolated Script cases pass; the seven failures are AUTO publication.
+Whole-suite and performance acceptance remain open.

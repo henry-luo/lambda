@@ -17,6 +17,7 @@ extern "C" {
 
 typedef struct Runtime Runtime;
 typedef struct EvalContext EvalContext;
+struct ModuleDescriptor;
 
 typedef Item (*JsNativeP0)(void);
 typedef Item (*JsNativeP1)(Item);
@@ -637,6 +638,11 @@ int js_function_get_arity(Item fn_item);
 // =============================================================================
 
 Item js_console_log(Item value);
+Item js_console_count_fn(Item label);
+Item js_console_countReset_fn(Item label);
+Item js_console_time_fn(Item label);
+Item js_console_timeEnd_fn(Item label);
+Item js_console_timeLog_fn(Item label);
 
 // =============================================================================
 // Math Object Methods & Properties
@@ -656,6 +662,7 @@ Item js_get_css_object_value(void);
 
 Item js_process_stdout_write(Item str_item);
 void js_store_process_argv(int argc, const char** argv);
+const char* const* js_process_bootstrap_arguments(int* argc);
 void js_set_process_argv(int argc, const char** argv);
 void js_store_process_exec_argv(int argc, const char** argv);
 void js_set_process_exec_argv(int argc, const char** argv);
@@ -731,6 +738,20 @@ typedef struct JsRegExpOps {
 // native matchers provide UTF-16 offsets and pool-owned names; unmatched spans start at -1.
 typedef struct JsRegExpIndexSpan { int64_t start, end; } JsRegExpIndexSpan;
 typedef struct JsRegExpIndexName { const char* chars; int length, capture; } JsRegExpIndexName;
+struct JsRegexpLastMatch;
+const char* js_regexp_legacy_name(int index);
+bool js_regexp_legacy_get(struct JsRegexpLastMatch* state, const char* name, int length, Item* out);
+Item js_regexp_update_last_match_spans(struct JsRegexpLastMatch* state, Item input,
+    const int* starts, const int* ends, int count, bool utf16);
+// callers prove native exec, writable lastIndex, string replacement, no captures,
+// and byte spans that do not split a UTF-16 surrogate pair (or an ASCII subject).
+typedef struct JsRegExpReplaceSpanOps {
+    int (*match)(void*, const char*, int, int, int*, int*); // found=1, absent=0, error<0
+    Item (*record)(void*, Item, int, int);
+    Item (*failure)(int);
+} JsRegExpReplaceSpanOps;
+Item js_regexp_replace_spans(Item regex, Item input, Item replacement, void* matcher,
+    const JsRegExpOps* values, const JsRegExpReplaceSpanOps* spans);
 typedef struct JsRegExpIndicesOps {
     const JsRegExpOps* values;
     Item (*null_object)(void);
@@ -893,9 +914,24 @@ typedef struct JsCollectionOps {
     bool (*truthy)(Item);
     Item (*iterator_from_method)(Item, Item);
 } JsCollectionOps;
+typedef struct JsObjectAccessorOps {
+    const JsCollectionOps* values;
+    Item (*to_object)(Item);
+    Item (*key)(Item);
+    Item (*define)(Item, Item, Item, bool getter);
+    Item (*lookup)(Item, Item, bool getter, bool* found);
+    Item (*prototype)(Item);
+} JsObjectAccessorOps;
+Item js_object_legacy_accessor_with_ops(Item receiver, Item property, Item callback,
+    bool define, bool getter, const JsObjectAccessorOps* ops);
 Item js_collection_create_with_storage(struct TypeMap* shape, Pool* pool, int kind, bool weak);
 bool js_collection_has_brand(Item object, int kind, bool weak);
 bool js_can_be_held_weakly(Item key);
+Item js_weak_validate_input(bool registry, Item input, const JsCollectionOps* ops);
+Item js_weak_create_with_storage(struct TypeMap* shape, bool registry, Item input, const JsCollectionOps* ops);
+Item js_weak_method_with_ops(int operation, Item receiver, Item* args, int count, const JsCollectionOps* ops);
+// host job boundary only: release kept targets and run pending native cleanup jobs.
+Item js_weak_job_checkpoint(void);
 Item js_collection_add_entries_with_ops(Item collection, Item iterable, bool is_map,
     const JsCollectionOps* ops);
 Item js_collection_method_with_ops(Item object, int method, Item arg1, Item arg2,
@@ -1071,8 +1107,31 @@ Item js_array_from(Item iterable);
 Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
+typedef struct JsJsonReviveOps {
+    const JsCollectionOps* values;
+    Item (*get)(Item, Item);
+    Item (*is_array)(Item);
+    Item (*keys)(Item);
+    Item (*write)(Item, Item, Item);
+    Item (*context)(void*, Item, Item, Item);
+} JsJsonReviveOps;
+Item js_json_revive_with_ops(Item holder, Item key, Item reviver, void* state,
+    const JsJsonReviveOps* ops);
 LAMBDA_RT_API Item js_json_stringify(Item value);
 Item js_json_stringify_full(Item value, Item replacer, Item space);
+typedef struct JsJsonStringifyOps {
+    const JsCollectionOps* values;
+    Item (*get)(Item, Item);
+    Item (*is_array)(Item);
+    Item (*keys)(Item);
+    Item (*string)(Item);
+    Item (*unbox)(Item); // nonallocating internal payload, or undefined for non-wrappers
+    Item (*object)(void);
+    Item (*create)(Item, Item, Item);
+    Item (*raw)(Item); // optional raw-JSON extension; undefined means an ordinary value
+} JsJsonStringifyOps;
+Item js_json_stringify_with_ops(Item value, Item replacer, Item space,
+    const JsJsonStringifyOps* ops);
 Item js_delete_property(Item obj, Item key);
 
 // v15: fetch() API
@@ -1286,6 +1345,7 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
 Item js_get_global_this(void);
+Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
@@ -1503,8 +1563,8 @@ Item js_iterator_collect_rest(Item iterator);
 // v14: Promise Runtime
 // =============================================================================
 
-// Frontend policy is fixed for one EvalContext. Native Promise jobs retain that
-// owner through the existing realm queue; ordinary LJS uses the null policy.
+// Frontend policy is fixed for one EvalContext. Its active realm owner follows
+// calls and suspension; queued jobs retain their realm through wrap_job.
 typedef struct JsPromiseHostOps {
     Item (*get)(void*, Item, Item, Item);
     bool (*callable)(void*, Item);
@@ -1520,6 +1580,8 @@ typedef struct JsPromiseHostOps {
     Item (*error)(void*, const char*, Item, Item);
     Item (*error_payload)(void*, Item);
     Item (*expose_function)(void*, Item);
+    Item (*wrap_job)(void*, Item job, Item handler);
+    Item (*new_array)(void*, int64_t length);
 } JsPromiseHostOps;
 void js_promise_set_host_ops(const JsPromiseHostOps* ops, void* host_context);
 Item js_promise_property_storage(Item promise, bool create);
@@ -1571,7 +1633,8 @@ Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
 Item js_async_context_create_module(struct JsScript* script, void* mir_main,
     uint32_t module_state_id, Item specifier);
 Item js_async_context_create_module_body(Item (*body)(struct Activation*, Item),
-    void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier);
+    void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier,
+    struct ModuleDescriptor* descriptor);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1660,6 +1723,16 @@ void js_clearImmediate(Item id);
 Item js_requestAnimationFrame(Item callback);          // schedule for next frame
 void js_cancelAnimationFrame(Item request_id);
 Item js_structuredClone(Item value);                   // deep clone
+struct JsTypedArrayOps;
+typedef struct JsStructuredCloneOps {
+    const JsArrayOps* arrays;
+    const struct JsTypedArrayOps* typed_arrays;
+    Item (*object)(void);
+    Item (*keys)(Item);
+    Item (*get)(Item, Item);
+    Item (*create)(Item, Item, Item);
+} JsStructuredCloneOps;
+Item js_structured_clone_with_ops(Item value, const JsStructuredCloneOps* ops);
 
 /**
  * Drain the event loop: process all microtasks, then fire due timers.
@@ -1707,6 +1780,7 @@ Item js_get_live_binding_default(Item specifier);
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
 void js_tla_flush_for_dynamic_import(void);
+void js_tla_flush_for_runtime(struct Runtime* runtime);
 int js_tla_module_depth_get(void);
 
 /**
@@ -1797,6 +1871,8 @@ typedef struct JsGroupByOps {
     Item (*append)(Item array, Item value);
 } JsGroupByOps;
 Item js_group_by_with_ops(Item items, Item callback, const JsGroupByOps* groups,
+    const JsCollectionOps* semantics);
+Item js_object_from_entries_with_ops(Item iterable, const JsGroupByOps* properties,
     const JsCollectionOps* semantics);
 
 Item js_object_set_prototype_of(Item obj, Item proto);
@@ -1903,7 +1979,8 @@ Item js_new_native_body_constructor(JsNativeCallBody call_body,
 Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,
     JsNativeConstructBody construct_body, int formal_length, Item* env, int env_size);
 Item js_new_native_payload_function(JsNativeCallBody call_body,
-                                    uint64_t payload, int formal_length);
+                                    uint64_t payload, int formal_length,
+                                    Item* env = NULL, int env_size = 0);
 #define JS_DECLARE_NATIVE_CLOSURE(arity) \
     LAMBDA_RT_API Item js_new_native_closure(JsNativeP##arity target, int adapter_arity, \
                                Item* env, int env_size);

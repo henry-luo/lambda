@@ -16,9 +16,11 @@
 #include "js_ast.hpp"
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
+#include "js_regexp_compile.h"
 #include "../../lib/log.h"
 #include "../../lib/utf.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/strbuf.h"
 #include <cstring>
 #include <cstdio>
 
@@ -567,7 +569,9 @@ static bool regex_pattern_has_line_terminator(const char* pattern, int pattern_l
 // ---- recursive AST walker --------------------------------------------------
 
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
-static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node);
+enum EarlyErrorStatementPosition { EE_STATEMENT_LIST, EE_STATEMENT_ONLY, EE_ANNEX_B_IF, EE_ANNEX_B_LABEL };
+static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node,
+    EarlyErrorStatementPosition position = EE_STATEMENT_LIST);
 static void walk_statements(EarlyErrorCtx* ctx, JsAstNode* stmts);
 static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* fn,
     bool method = false, bool derived_constructor = false);
@@ -780,6 +784,17 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             if (regex_pattern_has_line_terminator(re->pattern, re->pattern_len)) {
                 ee_error(ctx, node, "Regular expression literal cannot contain a line terminator");
             }
+            // literal patterns are early errors even in unreachable code; constructors validate at runtime.
+            StrBuf* decoded_names = NULL;
+            if (!js_regexp_decode_name_escapes(re->pattern, re->pattern_len, &decoded_names)) {
+                ee_error(ctx, node, "Cannot decode regular expression capture names");
+                break;
+            }
+            JsRegExpCompileInfo info;
+            bool valid = js_regexp_compile_frontend(decoded_names ? decoded_names->str : re->pattern,
+                decoded_names ? decoded_names->length : re->pattern_len, re->flags, re->flags_len, &info);
+            if (decoded_names) strbuf_free(decoded_names);
+            if (!valid) ee_error(ctx, node, info.error);
             break;
         }
 
@@ -834,6 +849,9 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             for (JsAstNode* p = properties; p; p = p->next) {
                 if (p->node_type == AST_NODE_PROPERTY) {
                     JsPropertyNode* prop = (JsPropertyNode*)p;
+                    // shorthand syntax contains an IdentifierReference, never a literal or computed key.
+                    if (prop->shorthand && (prop->computed || !prop->key || prop->key->node_type != AST_NODE_IDENT))
+                        ee_error(ctx, prop, "Invalid shorthand property name");
                     if (prop->computed) walk_expression(ctx, prop->key);
                     else if (prop->key && prop->key->node_type == AST_NODE_IDENT &&
                             is_private_name_string(((JsIdentifierNode*)prop->key)->name))
@@ -933,8 +951,19 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
     }
 }
 
-static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
+static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node, EarlyErrorStatementPosition position) {
     if (!node) return;
+    // declarations are StatementListItems; Annex B admits only sloppy ordinary functions in if/label bodies.
+    if (position != EE_STATEMENT_LIST) {
+        if (node->node_type == AST_NODE_CLASS || (node->node_type == AST_NODE_VAR_STAM &&
+                ((JsVariableDeclarationNode*)node)->kind != JS_VAR_VAR))
+            ee_error(ctx, node, "Declaration requires a statement list");
+        if (node->node_type == AST_NODE_FUNC) {
+            JsFunctionNode* function = (JsFunctionNode*)node;
+            if (position == EE_STATEMENT_ONLY || ctx->in_strict || function->is_async || function->is_generator)
+                ee_error(ctx, node, "Function declaration is not allowed in this statement position");
+        }
+    }
 
     switch (node->node_type) {
         case AST_NODE_BLOCK: {
@@ -968,8 +997,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case AST_NODE_IF_EXPR: {
             JsIfNode* ifn = (JsIfNode*)node;
             walk_expression(ctx, ifn->test);
-            walk_statement(ctx, ifn->consequent);
-            walk_statement(ctx, ifn->alternate);
+            walk_statement(ctx, ifn->consequent, EE_ANNEX_B_IF);
+            walk_statement(ctx, ifn->alternate, EE_ANNEX_B_IF);
             break;
         }
 
@@ -987,7 +1016,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             }
             bool saved_in_iteration = ctx->in_iteration;
             ctx->in_iteration = true;
-            walk_statement(ctx, loop->body);
+            walk_statement(ctx, loop->body, EE_STATEMENT_ONLY);
             ctx->in_iteration = saved_in_iteration;
             if (loop->form == LOOP_FORM_DO_WHILE) walk_expression(ctx, loop->test);
             break;
@@ -1015,7 +1044,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             walk_expression(ctx, fo->right);
             bool saved_in_iteration = ctx->in_iteration;
             ctx->in_iteration = true;
-            walk_statement(ctx, fo->body);
+            walk_statement(ctx, fo->body, EE_STATEMENT_ONLY);
             ctx->in_iteration = saved_in_iteration;
             break;
         }
@@ -1096,14 +1125,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 ee_error(ctx, node, "Strict mode code may not include a with statement");
             }
             // with accepts Statement, excluding declarations and Annex B labelled functions.
-            JsAstNode* body = statement->body;
-            while (body && body->node_type == JS_AST_NODE_LABELED_STATEMENT)
-                body = ((JsLabeledStatementNode*)body)->body;
-            if (body && (body->node_type == AST_NODE_CLASS || body->node_type == AST_NODE_FUNC ||
-                    (body->node_type == AST_NODE_VAR_STAM && ((JsVariableDeclarationNode*)body)->kind != JS_VAR_VAR)))
-                ee_error(ctx, body, "Declaration cannot be the body of a with statement");
             walk_expression(ctx, statement->object);
-            walk_statement(ctx, statement->body);
+            walk_statement(ctx, statement->body, EE_STATEMENT_ONLY);
             break;
         }
 
@@ -1118,17 +1141,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 if (!identifier.name) ee_error(ctx, node, "Cannot retain statement label");
                 else check_identifier_reserved(ctx, (JsAstNode*)&identifier, false);
             }
-            // v17: labeled class/lexical declarations are SyntaxError
             if (ls->body) {
-                if (ls->body->node_type == AST_NODE_CLASS) {
-                    ee_error(ctx, node, "Class declaration cannot be labelled");
-                }
-                if (ls->body->node_type == AST_NODE_VAR_STAM) {
-                    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)ls->body;
-                    if (vd->kind == JS_VAR_LET || vd->kind == JS_VAR_CONST) {
-                        ee_error(ctx, node, "Lexical declaration cannot be labelled");
-                    }
-                }
                 // Track whether this label is on an iteration statement
                 // (for continue target validation per ContainsUndefinedContinueTarget)
                 // chained labels share the underlying iteration's continue target.
@@ -1147,7 +1160,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                         ee_error(ctx, node, "Cannot retain statement label");
                     }
                 }
-                walk_statement(ctx, ls->body);
+                walk_statement(ctx, ls->body, position == EE_STATEMENT_LIST || position == EE_ANNEX_B_LABEL ?
+                    EE_ANNEX_B_LABEL : EE_STATEMENT_ONLY);
                 ee_name_ledger_truncate(&ctx->names, label_mark);
             }
             break;

@@ -33,6 +33,7 @@ struct DomDocument;
 struct DomElement;
 struct UiContext;
 struct JsAtomicsRuntimeState;
+struct JsWeakRuntimeState;
 struct JsPrototypeSnapshotState;
 struct JsMirCompileRecoveryState;
 struct JsPromiseHostOps;
@@ -123,6 +124,7 @@ struct JsRegexpLastMatch {
     int group_count = 0;
     int match_start = 0;
     int match_end = 0;
+    bool utf16_offsets = false;
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the
@@ -660,6 +662,7 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     // and returns its value, or its rejection as an error (RA1).
     JsScript* ast_module_script = NULL;
     Item module_specifier = {};
+    ModuleDescriptor* module_descriptor = NULL; // canonical owner survives queued module continuations
     // JSCU25: the weak scheduler registration held while the body is parked
     // (0 when not registered).
     uint64_t weak_token = 0;
@@ -881,6 +884,8 @@ struct JsRuntimeState {
     uint32_t batch_preamble_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_var_count = 0;
     uint64_t heap_epoch = 1;
+    // non-owning: Runtime Script retirement owns the compiled MIR realm.
+    struct MvpLmdExecution* formal_mir_owner = NULL;
 
     JsRegexpLastMatch regexp_last_match = {};
 
@@ -892,7 +897,10 @@ struct JsRuntimeState {
 
     // The event-loop queues share their three fixed, context-owned Item homes.
     RootVector event_loop_queue_roots = {};
+    JsWeakRuntimeState* weak_lifetimes = NULL; // allocated only on first weak lifetime carrier
 };
+
+void js_weak_state_destroy(JsRuntimeState* state);
 
 // This derived TLS cache is initialized once after the eval thread acquires
 // its context. It must stay paired with `context` until thread teardown.

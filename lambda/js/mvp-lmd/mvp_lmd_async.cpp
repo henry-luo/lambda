@@ -79,7 +79,24 @@ static const JsPromiseHostOps promise_ops = {
     [](void*, Item iterator, Item completion) { return mvp_lmd_iterator_close(iterator, completion); },
     promise_error,
     [](void* context, Item error) { return mvp_lmd_caught_value(mvp_lmd_program_library((MvpLmdProgram*)context), error); },
-    [](void* context, Item function) { return mvp_lmd_dynamic_wrap_function((MvpLmdProgram*)context, function); }
+    [](void* context, Item function) { return mvp_lmd_dynamic_wrap_function((MvpLmdProgram*)context, function); },
+    [](void* opaque, Item job, Item handler) {
+        MvpLmdProgram* program = (MvpLmdProgram*)opaque;
+        if (!mvp_lmd_program_library(program)->test262_host) return job;
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> task(roots, job), callback(roots, handler);
+        if (mvp_lmd_is_callable(callback.get())) {
+            MvpLmdProgram* owner = NULL;
+            Item found = mvp_lmd_function_realm(callback.get(), &owner);
+            // GetFunctionRealm failure selects the current realm for a Promise job.
+            if (!item_is_error(found) && owner) program = owner;
+        }
+        task.set(mvp_lmd_dynamic_wrap_function(program, task.get()));
+        return item_is_error(task.get()) ? task.get() : mvp_lmd_host_task(task.get(),
+            Item{.item = ITEM_JS_UNDEFINED}, Item{.item = ITEM_JS_UNDEFINED});
+    },
+    [](void*, int64_t length) { return mvp_lmd_array_new(length); }
 };
 
 static Item promise_constructor(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
@@ -89,10 +106,9 @@ static Item promise_constructor(Context*, MvpLmdProgram* program, Item* args, ui
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> executor(roots, args[0]), prototype(roots, mvp_lmd_property_get(target,
-        js_name_item("prototype", 9), 0)), result(roots, ItemNull);
+    Rooted<Item> executor(roots, args[0]), prototype(roots, mvp_lmd_constructor_prototype(target,
+        promise_intrinsic(program, true))), result(roots, ItemNull);
     if (item_is_error(prototype.get())) return prototype.get();
-    if (!mvp_lmd_is_object(prototype.get())) prototype.set(promise_intrinsic(program, true));
     result.set(js_promise_create(executor.get()));
     if (item_is_error(result.get())) return result.get();
     Item linked = mvp_lmd_set_prototype(result.get(), prototype.get());

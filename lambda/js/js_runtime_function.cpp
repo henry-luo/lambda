@@ -838,10 +838,8 @@ static Item js_new_interpreted_function_impl(AstFuncNode* function,
     fn->name = function->name;
     // AST closures created inside `with` use the same captured object
     // environment stack as compiled and native JS functions.
-    if (!hosted) {
-        js_function_capture_with_env(fn);
-        js_function_finalize_capabilities(fn);
-    }
+    js_function_capture_with_env(fn);
+    if (!hosted) js_function_finalize_capabilities(fn);
     return function_root.get();
 }
 
@@ -1254,18 +1252,6 @@ Item js_new_native_body_constructor(JsNativeCallBody call_body,
         formal_length, JS_NATIVE_CALL_BODY, true, true);
 }
 
-Item js_new_native_payload_function(JsNativeCallBody call_body,
-        uint64_t payload, int formal_length) {
-    JsNativeTarget stored = {};
-    stored.bits = payload;
-    // D5.3.3/D6.2.2v2: executable host payloads are not Item edges. Keeping
-    // them in the native target union prevents precise closure tracing from
-    // interpreting a process-stable record pointer as a JavaScript value.
-    return js_new_native_function_impl(stored, call_body, NULL,
-        js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY),
-        formal_length, JS_NATIVE_CALL_BODY, false, true);
-}
-
 #define JS_DEFINE_NATIVE_CLOSURE_ADAPTER(exposed_arity, member, call_args) \
     static Item js_native_closure_call_##exposed_arity(Item fn_item, \
             Item this_value, Item* args, int argc, uint64_t* result_home) { \
@@ -1311,6 +1297,19 @@ static Item js_new_native_closure_impl(JsNativeTarget target,
     js_env_rehome_scalars(fn->env);
     js_function_finalize_capabilities(fn);
     return fn_root.get();
+}
+
+Item js_new_native_payload_function(JsNativeCallBody call_body,
+        uint64_t payload, int formal_length, Item* env, int env_size) {
+    JsNativeTarget stored = {};
+    stored.bits = payload;
+    // D5.3.3/D6.2.2v2: native policy pointers remain outside traced Item slots;
+    // optional guest arguments use the existing precise closure owner.
+    auto key = js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY);
+    return env ? js_new_native_closure_impl(stored, call_body, key,
+        formal_length, JS_NATIVE_CALL_BODY, env, env_size)
+        : js_new_native_function_impl(stored, call_body, NULL, key,
+            formal_length, JS_NATIVE_CALL_BODY, false, true);
 }
 
 Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,

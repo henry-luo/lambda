@@ -1906,6 +1906,7 @@ static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preambl
 }
 
 static bool prepare_browser_preamble_consumer(const JsPreambleState* preamble) {
+    if (preamble && preamble->mvp_realm) return true;
     if (!preamble || preamble->module_state_id == UINT32_MAX) return false;
     uint32_t active_state_id = lambda_active_module_state_id();
     if (active_state_id != preamble->module_state_id) return true;
@@ -2302,8 +2303,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
             js_mir_lease_session_complete_build(&preamble_build,
                 cached_preamble != nullptr, false);
 
-            // Compile-only preambles allocate a temporary realm. Destroy it
-            // before compiling dependent units or instantiating the document.
+            // retire any preceding document heap before instantiation. MVP
+            // compile-only images themselves own no heap or guest values.
             js_batch_reset();
             runtime_reset_heap(runtime);
         }

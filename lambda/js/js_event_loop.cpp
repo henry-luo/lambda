@@ -207,6 +207,13 @@ extern "C" Item js_microtask_flush_result(void) {
     if (runtime_job_queue_size(&next_tick_queue) == 0 &&
             runtime_job_queue_size(&microtask_queue) == 0) {
         js_promise_flush_unhandled_checks();
+        // kept targets outlive all synchronous frames and the current microtask checkpoint.
+        if (js_runtime_state.weak_lifetimes && !microtask_running &&
+                !js_runtime_state.event_loop->callback_running &&
+                js_call_activation_current() == &js_runtime_state.execution.base_activation) {
+            Item cleanup = js_weak_job_checkpoint();
+            if (item_is_error(cleanup) && !item_is_error(first_error_root.get())) first_error_root.set(cleanup);
+        }
     }
     return first_error_root.get();
 }

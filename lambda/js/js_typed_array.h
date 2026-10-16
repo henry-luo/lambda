@@ -305,10 +305,18 @@ Item js_sharedarraybuffer_operation_with_ops(Item sab,
 
 // Atomics operations on SharedArrayBuffer-backed integer typed arrays
 Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);
+Item js_atomics_operation_with_ops(int op, Item typed_array, Item index,
+    Item value, Item replacement, const JsBufferViewOps* ops);
 Item js_atomics_wait(Item typed_array, Item index, Item expected, Item timeout);
 Item js_atomics_wait_async(Item typed_array, Item index, Item expected, Item timeout);
+Item js_atomics_wait_with_ops(Item typed_array, Item index, Item expected,
+    Item timeout, const JsBufferViewOps* ops, bool async, bool can_suspend,
+    bool* asynchronous);
 Item js_atomics_notify(Item typed_array, Item index, Item count);
+Item js_atomics_notify_with_ops(Item typed_array, Item index, Item count, const JsBufferViewOps* ops);
 Item js_atomics_is_lock_free(Item size);
+Item js_atomics_is_lock_free_with_ops(Item size, const JsBufferViewOps* ops);
+Item js_atomics_pause_with_ops(Item iterations, const JsBufferViewOps* ops);
 void js_atomics_reset_waiters(void);
 bool js_atomics_runtime_state_ensure(void);
 int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);

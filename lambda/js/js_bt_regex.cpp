@@ -17,6 +17,7 @@
 #include "../core/codepoint_interval.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)
+#include "../core/utf_string.h"
 #include <utf8proc.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,9 +52,18 @@ struct RxSeq {
     int count;
 };
 
+struct RxLiteralChoice {
+    uint32_t cp;
+    int alternative;
+};
+
 struct RxDisj {
     RxSeq** alts;
     int count;
+    RxLiteralChoice* literal_starts;
+    int literal_count;
+    int* other_starts;
+    int other_count;
 };
 
 struct RxNode {
@@ -160,10 +170,6 @@ static int bt_decode_bwd(const char* s, int pos, uint32_t* cp, bool uni) {
 // Character predicates / canonicalization
 // ---------------------------------------------------------------------------
 
-static inline bool bt_is_word(uint32_t cp) {
-    return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
-           (cp >= '0' && cp <= '9') || cp == '_';
-}
 static inline bool bt_is_line_term(uint32_t cp) {
     return cp == 0x0A || cp == 0x0D || cp == 0x2028 || cp == 0x2029;
 }
@@ -173,27 +179,31 @@ static inline uint32_t bt_to_upper(uint32_t cp) {
 static inline uint32_t bt_to_lower(uint32_t cp) {
     return (cp >= 'A' && cp <= 'Z') ? cp + 32 : cp;
 }
-// ECMA-262 Canonicalize (§22.2.2.9) for single-character comparison.
-//
-// This was ASCII-only, so /i comparisons silently failed to fold any non-ASCII
-// letter -- /(?<=\u03a3+)b/i did not match "\u03c3b". It now applies the real
-// rule: uppercase the codepoint, but leave a non-ASCII character alone when its
-// uppercase is ASCII. That exception is what keeps U+017F (long s) and U+212A
-// (Kelvin sign) from folding to "S"/"K" outside /u, and the old ASCII-only code
-// satisfied it only by never folding anything non-ASCII at all.
-//
-// Under /u the spec uses simple case folding rather than uppercasing; the two
-// agree on the bicameral scripts that matter here, and the /u distinction is
-// not threaded through the matcher yet.
-static inline uint32_t bt_canon(uint32_t cp, bool icase) {
-    if (!icase) return cp;
+// ECMA-262 Canonicalize: Unicode uses simple folding; legacy uppercasing must
+// keep non-ASCII characters out of the ASCII equivalence classes.
+static inline uint32_t bt_canon(uint32_t cp, bool unicode) {
     if (cp < 128) return bt_to_upper(cp);
+    if (unicode) {
+        // use the shared UCD simple-fold cycles, independent of the regex backend's data version.
+        uint32_t folded = cp, canonical = cp;
+        do {
+            folded = utf8_simple_fold_next(folded);
+            if (folded < canonical) canonical = folded;
+        } while (folded != cp);
+        return canonical;
+    }
     uint32_t upper = (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
     if (upper < 128) return cp;
     return upper;
 }
-static inline bool bt_char_eq(uint32_t a, uint32_t b, bool icase) {
-    return a == b || (icase && bt_canon(a, icase) == bt_canon(b, icase));
+static inline bool bt_char_eq(uint32_t a, uint32_t b, bool icase, bool unicode) {
+    return a == b || (icase && bt_canon(a, unicode) == bt_canon(b, unicode));
+}
+static inline bool bt_is_word(uint32_t cp, bool icase, bool unicode) {
+    // Unicode ignoreCase includes characters whose simple fold is an ASCII word character.
+    if (icase && unicode && cp >= 128) cp = bt_canon(cp, true);
+    return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+           (cp >= '0' && cp <= '9') || cp == '_';
 }
 
 static bool bt_class_contains_raw(const RxClass* cls, uint32_t cp) {
@@ -202,12 +212,18 @@ static bool bt_class_contains_raw(const RxClass* cls, uint32_t cp) {
     }
     return false;
 }
-static bool bt_class_match(const RxClass* cls, uint32_t cp, bool icase) {
+static bool bt_class_match(const RxClass* cls, uint32_t cp, bool icase, bool unicode) {
     bool in = bt_class_contains_raw(cls, cp);
     if (!in && icase) {
         uint32_t u = bt_to_upper(cp), l = bt_to_lower(cp);
         if (u != cp) in = bt_class_contains_raw(cls, u);
         if (!in && l != cp) in = bt_class_contains_raw(cls, l);
+        uint32_t folded = cp;
+        while (!in && unicode) {
+            folded = utf8_simple_fold_next(folded);
+            if (folded == cp) break;
+            in = bt_class_contains_raw(cls, folded);
+        }
     }
     return in != cls->negated;
 }
@@ -341,12 +357,13 @@ static uint32_t parse_character_escape(Parser* ps, char kind, bool* ok) {
     return value;
 }
 
-// \cX — control escape. A non-letter after \c is not a control escape; the
-// caller then treats the sequence as the literal 'c' (Annex B behaviour).
-static bool parse_control_escape(Parser* ps, uint32_t* out) {
+// legacy classes also admit digits and underscore after \c; invalid escapes
+// leave the character unconsumed so callers preserve the literal backslash.
+static bool parse_control_escape(Parser* ps, uint32_t* out, bool in_class = false) {
     if (ps->pos >= ps->len) return false;
     char c = ps->p[ps->pos];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) return false;
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (in_class && !ps->flags.unicode && ((c >= '0' && c <= '9') || c == '_')))) return false;
     *out = (uint32_t)(c & 0x1F); ps->pos++;
     return true;
 }
@@ -396,8 +413,7 @@ static RxNode* shorthand_class(Parser* ps, char kind) {
 // \p{...} / \P{...} — Unicode property class. The backtracker had no 'p' case,
 // so a routed pattern such as /(\p{L})\1/u matched a literal 'p'. Ranges come
 // from the same generated tables the RE2 side uses, so both engines agree.
-// Returns NULL (without setting ps->error) when the name is not a known
-// property, letting the caller fall back to its previous literal handling.
+// returns NULL for unknown properties; Unicode callers reject those as syntax errors.
 static RxNode* property_class(Parser* ps, const char* name, int name_len, bool negated) {
     enum { BT_PROP_MAX_PAIRS = 8192 };
     int* pairs = (int*)mem_alloc(sizeof(int) * BT_PROP_MAX_PAIRS * 2, MEM_CAT_PARSER);
@@ -469,7 +485,26 @@ static RxNode* parse_class(Parser* ps) {
                     lo = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
                 case 'x': { ps->pos++; bool ok; lo = parse_character_escape(ps, 'x', &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
                 case 'u': { ps->pos++; bool ok; lo = parse_character_escape(ps, 'u', &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
-                case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo)) lo = 'c'; break; }
+                case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo, true)) { lo = '\\'; ps->pos--; } break; }
+                case 'p': case 'P': {
+                    if (!ps->flags.unicode) { lo = (unsigned char)e; ps->pos++; break; }
+                    int start = ps->pos + 2, close = start;
+                    while (close < ps->len && ps->p[close] != '}') close++;
+                    RxNode* property = ps->pos + 1 < ps->len && ps->p[ps->pos + 1] == '{' && close < ps->len ?
+                        property_class(ps, ps->p + start, close - start, e == 'P') : NULL;
+                    if (!property) { ps->error = true; arraylist_free(ranges); return NULL; }
+                    // generated property ranges are sorted; a negated escape contributes their complement.
+                    uint32_t next = 0;
+                    for (int i = 0; i < property->cls->range_count; i++) {
+                        CodePointInterval range = property->cls->ranges[i];
+                        if (!property->cls->negated) add_range(range.first, range.last);
+                        else if (next < range.first) add_range(next, range.first - 1);
+                        next = range.last + 1;
+                    }
+                    if (property->cls->negated && next <= 0x10FFFF) add_range(next, 0x10FFFF);
+                    ps->pos = close + 1; lo_is_shorthand = true;
+                    break;
+                }
                 default: lo = (unsigned char)e; ps->pos++; break;
             }
         } else {
@@ -497,7 +532,7 @@ static RxNode* parse_class(Parser* ps) {
                         hi = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
                     case 'x': { ps->pos++; bool ok; hi = parse_character_escape(ps, 'x', &ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
                     case 'u': { ps->pos++; bool ok; hi = parse_character_escape(ps, 'u', &ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
-                    case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi)) hi = 'c'; break; }
+                    case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi, true)) { hi = '\\'; ps->pos--; } break; }
                     default: hi=(unsigned char)e; ps->pos++; break;
                 }
             } else {
@@ -666,14 +701,16 @@ static RxNode* parse_atom(Parser* ps) {
         }
         // \p{...} / \P{...} before the single-char escapes: the name is braced,
         // so it cannot be confused with a one-character escape.
-        if ((e == 'p' || e == 'P') && ps->pos + 2 < ps->len && ps->p[ps->pos + 2] == '{') {
+        if ((e == 'p' || e == 'P') && ps->flags.unicode) {
             int close = ps->pos + 3;
             while (close < ps->len && ps->p[close] != '}') close++;
-            if (close < ps->len) {
+            if (ps->pos + 2 < ps->len && ps->p[ps->pos + 2] == '{' && close < ps->len) {
                 RxNode* pn = property_class(ps, ps->p + ps->pos + 3,
                                             close - (ps->pos + 3), e == 'P');
                 if (pn) { ps->pos = close + 1; return pn; }
             }
+            ps->error = true;
+            return NULL;
         }
 
         // single-char escapes
@@ -691,7 +728,7 @@ static RxNode* parse_atom(Parser* ps) {
                 cp = 0; ps->pos++; break;
             case 'x': { ps->pos += 2; bool ok; cp = parse_character_escape(ps, 'x', &ok); if (!ok) { ps->error = true; return NULL; } break; }
             case 'u': { ps->pos += 2; bool ok; cp = parse_character_escape(ps, 'u', &ok); if (!ok) { ps->error = true; return NULL; } break; }
-            case 'c': { ps->pos += 2; if (!parse_control_escape(ps, &cp)) cp = 'c'; break; }
+            case 'c': { ps->pos += 2; if (!parse_control_escape(ps, &cp)) { cp = '\\'; ps->pos--; } break; }
             default: cp = (unsigned char)e; ps->pos += 2; break;
         }
         RxNode* n = new_node(ps, RX_CHAR); n->cp = cp; return n;
@@ -787,6 +824,35 @@ static RxSeq* parse_alternative(Parser* ps) {
     return seq;
 }
 
+static void bt_index_literal_alternatives(Parser* ps, RxDisj* disj) {
+    // Large string sets must not retry every literal at every input position.
+    // Keep original ordinals so indexed and unindexed alternatives retain priority.
+    if (ps->flags.ignore_case || disj->count < 8) return;
+    int literals = 0;
+    for (int i = 0; i < disj->count; i++) {
+        RxSeq* seq = disj->alts[i];
+        if (seq->count && seq->items[0]->type == RX_CHAR) literals++;
+    }
+    if (literals < disj->count / 2) return;
+    auto* starts = (RxLiteralChoice*)bt_alloc(ps, sizeof(RxLiteralChoice) * literals);
+    auto* others = (int*)bt_alloc(ps, sizeof(int) * (disj->count - literals + 1));
+    if (!starts || !others) { ps->error = true; return; }
+    for (int i = 0; i < disj->count; i++) {
+        RxSeq* seq = disj->alts[i];
+        if (seq->count && seq->items[0]->type == RX_CHAR)
+            starts[disj->literal_count++] = {seq->items[0]->cp, i};
+        else others[disj->other_count++] = i;
+    }
+    qsort(starts, literals, sizeof(RxLiteralChoice), [](const void* a, const void* b) {
+        auto* x = (const RxLiteralChoice*)a;
+        auto* y = (const RxLiteralChoice*)b;
+        return x->cp != y->cp ? (x->cp < y->cp ? -1 : 1)
+            : (x->alternative < y->alternative ? -1 : x->alternative > y->alternative);
+    });
+    disj->literal_starts = starts;
+    disj->other_starts = others;
+}
+
 static RxDisj* parse_disjunction(Parser* ps) {
     ArrayList* alts = bt_parser_list_new(ps);
     if (!alts) return NULL;
@@ -806,6 +872,7 @@ static RxDisj* parse_disjunction(Parser* ps) {
     d->alts = (RxSeq**)bt_alloc(ps, sizeof(RxSeq*) * d->count);
     for (int i = 0; i < d->count; i++) d->alts[i] = (RxSeq*)arraylist_get(alts, i);
     arraylist_free(alts);
+    bt_index_literal_alternatives(ps, d);
     return d;
 }
 
@@ -942,8 +1009,8 @@ static int bt_simple_step(MatchCtx& ctx, const RxNode* n, int pos, int dir) {
     if (adv == 0) return 0;
     bool ok;
     switch (n->type) {
-        case RX_CHAR:  ok = bt_char_eq(cp, n->cp, ctx.icase); break;
-        case RX_CLASS: ok = bt_class_match(n->cls, cp, ctx.icase); break;
+        case RX_CHAR:  ok = bt_char_eq(cp, n->cp, ctx.icase, ctx.unicode); break;
+        case RX_CLASS: ok = bt_class_match(n->cls, cp, ctx.icase, ctx.unicode); break;
         case RX_ANY:   ok = ctx.dot_all || !bt_is_line_term(cp); break;
         default:       ok = false; break;
     }
@@ -1061,7 +1128,29 @@ static int bt_repeat(MatchCtx& ctx, const RxNode* node, int min, int max, int po
 }
 
 static int bt_match_disj(MatchCtx& ctx, const RxDisj* d, int pos, const Cont* k, int dir) {
-    for (int i = 0; i < d->count; i++) {
+    bool indexed = d->literal_starts && dir >= 0 && !ctx.icase;
+    int literal = 0, other = 0;
+    uint32_t cp = UINT32_MAX;
+    if (indexed) {
+        bt_decode_fwd(ctx.input, ctx.input_len, pos, &cp, ctx.unicode);
+        int hi = d->literal_count;
+        while (literal < hi) {
+            if (++ctx.steps > ctx.budget) { ctx.overflow = true; return -1; }
+            int mid = literal + (hi - literal) / 2;
+            if (d->literal_starts[mid].cp < cp) literal = mid + 1;
+            else hi = mid;
+        }
+    }
+    for (int next = 0; next < d->count;) {
+        int i = next++;
+        if (indexed) {
+            int a = literal < d->literal_count && d->literal_starts[literal].cp == cp
+                ? d->literal_starts[literal].alternative : d->count;
+            int b = other < d->other_count ? d->other_starts[other] : d->count;
+            i = a < b ? a : b;
+            if (i == d->count) break;
+            if (a < b) literal++; else other++;
+        }
         Cont seqk; seqk.kind = Cont::C_SEQ; seqk.up = k; seqk.seq = d->alts[i]; seqk.idx = 0;
         int r = bt_run(ctx, &seqk, pos, dir);
         if (r >= 0) return r;
@@ -1076,22 +1165,22 @@ static int bt_match(MatchCtx& ctx, const RxNode* node, int pos, const Cont* k, i
     case RX_CHAR: {
         if (dir >= 0) {
             uint32_t cp; int adv = bt_decode_fwd(ctx.input, ctx.input_len, pos, &cp, ctx.unicode);
-            if (adv == 0 || !bt_char_eq(cp, node->cp, ctx.icase)) return -1;
+            if (adv == 0 || !bt_char_eq(cp, node->cp, ctx.icase, ctx.unicode)) return -1;
             return bt_run(ctx, k, pos + adv, dir);
         } else {
             uint32_t cp; int adv = bt_decode_bwd(ctx.input, pos, &cp, ctx.unicode);
-            if (adv == 0 || !bt_char_eq(cp, node->cp, ctx.icase)) return -1;
+            if (adv == 0 || !bt_char_eq(cp, node->cp, ctx.icase, ctx.unicode)) return -1;
             return bt_run(ctx, k, pos - adv, dir);
         }
     }
     case RX_CLASS: {
         if (dir >= 0) {
             uint32_t cp; int adv = bt_decode_fwd(ctx.input, ctx.input_len, pos, &cp, ctx.unicode);
-            if (adv == 0 || !bt_class_match(node->cls, cp, ctx.icase)) return -1;
+            if (adv == 0 || !bt_class_match(node->cls, cp, ctx.icase, ctx.unicode)) return -1;
             return bt_run(ctx, k, pos + adv, dir);
         } else {
             uint32_t cp; int adv = bt_decode_bwd(ctx.input, pos, &cp, ctx.unicode);
-            if (adv == 0 || !bt_class_match(node->cls, cp, ctx.icase)) return -1;
+            if (adv == 0 || !bt_class_match(node->cls, cp, ctx.icase, ctx.unicode)) return -1;
             return bt_run(ctx, k, pos - adv, dir);
         }
     }
@@ -1125,8 +1214,8 @@ static int bt_match(MatchCtx& ctx, const RxNode* node, int pos, const Cont* k, i
     case RX_WORD_B:
     case RX_NWORD_B: {
         bool before = false, after = false;
-        if (pos > 0) { uint32_t cp; bt_utf8_decode_prev(ctx.input, pos, &cp); before = bt_is_word(cp); }
-        if (pos < ctx.input_len) { uint32_t cp; bt_utf8_decode(ctx.input, ctx.input_len, pos, &cp); after = bt_is_word(cp); }
+        if (pos > 0) { uint32_t cp; bt_utf8_decode_prev(ctx.input, pos, &cp); before = bt_is_word(cp, ctx.icase, ctx.unicode); }
+        if (pos < ctx.input_len) { uint32_t cp; bt_utf8_decode(ctx.input, ctx.input_len, pos, &cp); after = bt_is_word(cp, ctx.icase, ctx.unicode); }
         bool boundary = (before != after);
         bool ok = (node->type == RX_WORD_B) ? boundary : !boundary;
         return ok ? bt_run(ctx, k, pos, dir) : -1;
@@ -1172,29 +1261,22 @@ static int bt_match(MatchCtx& ctx, const RxNode* node, int pos, const Cont* k, i
         int s = ctx.cap_start[g], e = ctx.cap_end[g];
         if (s < 0 || e < 0 || e == s) return bt_run(ctx, k, pos, dir); // non-participating/empty -> empty match
         int caplen = e - s;
-        if (dir >= 0) {
-            if (pos + caplen > ctx.input_len) return -1;
-            // compare codepoint-by-codepoint with Canonicalize under /i
-            int a = s, b = pos;
-            while (a < e) {
-                uint32_t ca, cb; int aa = bt_utf8_decode(ctx.input, ctx.input_len, a, &ca);
-                int bb = bt_utf8_decode(ctx.input, ctx.input_len, b, &cb);
-                if (aa == 0 || bb == 0 || !bt_char_eq(ca, cb, ctx.icase)) return -1;
-                a += aa; b += bb;
-            }
-            return bt_run(ctx, k, b, dir);
-        } else {
-            if (pos - caplen < 0) return -1;
-            int a = s, b = pos - caplen;
-            while (a < e) {
-                uint32_t ca, cb; int aa = bt_utf8_decode(ctx.input, ctx.input_len, a, &ca);
-                int bb = bt_utf8_decode(ctx.input, ctx.input_len, b, &cb);
-                if (aa == 0 || bb == 0 || !bt_char_eq(ca, cb, ctx.icase)) return -1;
-                a += aa; b += bb;
-            }
-            if (b != pos) return -1;
-            return bt_run(ctx, k, pos - caplen, dir);
+        bool forward = dir >= 0;
+        if (!ctx.icase && (forward ? ctx.input_len - pos < caplen : pos < caplen)) return -1;
+        // folded characters can have different UTF-8 widths; walk both strings
+        // in matching order instead of deriving the subject boundary from caplen.
+        int a = forward ? s : e, b = pos;
+        while (forward ? a < e : a > s) {
+            uint32_t ca, cb;
+            int aa = forward ? bt_decode_fwd(ctx.input, e, a, &ca, ctx.unicode)
+                : bt_decode_bwd(ctx.input, a, &ca, ctx.unicode);
+            int bb = forward ? bt_decode_fwd(ctx.input, ctx.input_len, b, &cb, ctx.unicode)
+                : bt_decode_bwd(ctx.input, b, &cb, ctx.unicode);
+            if (aa == 0 || bb == 0 || !bt_char_eq(ca, cb, ctx.icase, ctx.unicode)) return -1;
+            a += forward ? aa : -aa;
+            b += forward ? bb : -bb;
         }
+        return bt_run(ctx, k, b, dir);
     }
     case RX_QUANT:
         return bt_repeat(ctx, node, node->qmin, node->qmax, pos, k, dir);
@@ -1277,7 +1359,8 @@ extern "C" int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int s
             return JS_BT_EXEC_MATCH;
         }
         if (ctx.overflow) {
-            log_debug("js bt regex: step budget exhausted");
+            log_error("js-bt-regex: resource limit reached, steps=%ld/%ld, input=%d bytes",
+                ctx.steps, ctx.budget, input_len);
             return JS_BT_EXEC_RESOURCE_EXHAUSTED;
         }
         if (only_at_start) break;

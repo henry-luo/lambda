@@ -18,7 +18,7 @@ extern "C" int64_t mvp_lmd_truthy(Item value) {
     return is_truthy(value) == BOOL_TRUE;
 }
 
-extern "C" Item mvp_lmd_fail(int64_t kind, int64_t site) {
+extern "C" Item mvp_lmd_fail(int64_t kind, int64_t site, const char* detail) {
     static const char* messages[] = {"MVP capability error", "ReferenceError",
         "TypeError", "RangeError", "MVP allocation failed", "SyntaxError"};
     static const LambdaErrorCode codes[] = {ERR_NOT_IMPLEMENTED,
@@ -37,7 +37,7 @@ extern "C" Item mvp_lmd_fail(int64_t kind, int64_t site) {
     }
     char message[96];
     snprintf(message, sizeof(message), "%s at byte %lld", messages[kind], (long long)site);
-    LambdaError* error = err_create_heap(codes[kind], message, &location);
+    LambdaError* error = err_create_heap(codes[kind], detail ? detail : message, &location);
     return error ? err2it(error) : Item{.item = ITEM_ERROR};
 }
 
@@ -241,6 +241,10 @@ extern "C" Item mvp_lmd_primitive_to_string(Item value, int64_t library_objects)
     }
     if (type == LMD_TYPE_DECIMAL) return mvp_lmd_bigint_to_string(value, 10);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return mvp_lmd_number_to_string(it2d(value));
+    // foreign scalar formatting uses the shared membrane; i64/u64 keep their
+    // exact BigInt representation (S4.9.1), and datetime keeps host semantics.
+    if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64 || type == LMD_TYPE_DTIME)
+        return js_to_string(value);
     const char* text = type == LMD_TYPE_NULL ? "null" : type == LMD_TYPE_UNDEFINED ? "undefined" :
         type == LMD_TYPE_BOOL ? (value.bool_val ? "true" : "false") : NULL;
     if (!text) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -390,10 +394,24 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index) {
     if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED && js_array_sparse_get(array, index, &value)) return value;
     return index < container_dense_capacity(array) ? array->items[index] : Item{.item = ITEM_JS_DELETED_SENTINEL};
 }
+Item mvp_lmd_array_adopt_realm(Item value) {
+    if (item_is_error(value)) return value;
+    // host initialization can allocate private arrays before the realm's slots exist.
+    if (mvp_lmd_foreign_library && mvp_lmd_foreign_library->values) {
+        Item prototype = mvp_lmd_foreign_library->values[LMD_LIBRARY_ARRAY_PROTOTYPE];
+        if (mvp_lmd_is_object(prototype)) {
+            Item linked = mvp_lmd_set_prototype(value, prototype);
+            if (item_is_error(linked)) return linked;
+        }
+    }
+    return value;
+}
 extern "C" Item mvp_lmd_array_new(int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     Array* result = array();
     if (!result) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item linked = mvp_lmd_array_adopt_realm(Item{.array = result});
+    if (item_is_error(linked)) return linked;
     // empty arrays need no handoff buffer; both growth helpers own precise roots during allocation.
     if (!length) return Item{.array = result};
     if (js_array_should_keep_length_sparse(result, length)) {

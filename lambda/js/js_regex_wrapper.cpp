@@ -12,11 +12,14 @@
  * both engines size transient capture data from the pattern dynamically.
  */
 #include "js_regex_wrapper.h"
+#include "js_regex_generated_properties.h"
 #include "../core/codepoint_interval.h"
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -290,6 +293,7 @@ struct VClassResult {
     CodePointRanges ranges;
     std::vector<std::string> strings;  // multi-char strings from \q{X|Y|...}
     bool negated = false;
+    bool may_contain_strings = false;
 };
 
 static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result);
@@ -304,8 +308,9 @@ static bool v_parse_element(const std::string& s, size_t& i,
                             std::vector<std::string>& el_strings,
                             std::string& el_shorthand_raw,
                             bool& el_is_negated_prop,
-                            int* out_single_codepoint) {
+                            int* out_single_codepoint, bool* may_contain_strings) {
     if (out_single_codepoint) *out_single_codepoint = -1;
+    *may_contain_strings = false;
     el_is_negated_prop = false;
     if (i >= s.size()) return false;
     char c = s[i];
@@ -313,6 +318,7 @@ static bool v_parse_element(const std::string& s, size_t& i,
         // nested class — recursively parse
         VClassResult inner;
         if (!v_parse_class(s, i, inner)) return false;
+        *may_contain_strings = inner.may_contain_strings;
         el_ranges.union_with(inner.ranges);
         // bubble up strings from nested too
         for (auto& str : inner.strings) el_strings.push_back(str);
@@ -375,6 +381,7 @@ static bool v_parse_element(const std::string& s, size_t& i,
                     }
                 }
             }
+            *may_contain_strings = !el_strings.empty();
             return true;
         }
         // \p{...} or \P{...} property escape.
@@ -399,6 +406,7 @@ static bool v_parse_element(const std::string& s, size_t& i,
                 }
             }
             if (found) {
+                *may_contain_strings = true;
                 if (nx == 'P') {
                     // \P{StringProperty} is a spec error inside class — fail.
                     return false;
@@ -540,8 +548,10 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
         std::vector<std::string> el_strings;
         std::string el_shorthand;
         bool el_negated_prop = false;
+        bool el_may_contain_strings = false;
         int el_single = -1;
-        if (!v_parse_element(s, i, el_ranges, el_strings, el_shorthand, el_negated_prop, &el_single)) {
+        if (!v_parse_element(s, i, el_ranges, el_strings, el_shorthand, el_negated_prop,
+                &el_single, &el_may_contain_strings)) {
             return false;
         }
         // shorthand classes (\d, \w, \p{...}) can't easily be turned into ranges
@@ -574,14 +584,17 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
             std::vector<std::string> b_strings;
             std::string b_shorthand;
             bool b_neg = false;
+            bool b_may_contain_strings = false;
             int b_single = -1;
-            if (v_parse_element(s, i, b_ranges, b_strings, b_shorthand, b_neg, &b_single)) {
+            if (v_parse_element(s, i, b_ranges, b_strings, b_shorthand, b_neg,
+                    &b_single, &b_may_contain_strings)) {
                 if (b_single >= 0 && b_shorthand.empty()) {
                     // range A-B
                     el_ranges = CodePointRanges();
                     el_ranges.add(el_single, b_single);
                     el_single = -1;
                     el_shorthand.clear();
+                    el_may_contain_strings = false;
                 } else {
                     // not a range; treat `-` as literal char, then b_* as new element
                     if (pending_op == OP_DIFF) acc.difference_with(el_ranges);
@@ -598,6 +611,7 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
                     el_strings = b_strings;
                     el_shorthand = b_shorthand;
                     el_single = b_single;
+                    el_may_contain_strings = b_may_contain_strings;
                     first_element = false;
                 }
             } else {
@@ -619,6 +633,12 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
             result.strings.back().append(el_shorthand);
         }
         // apply pending op
+        // MayContainStrings is syntactic: subtraction keeps the left operand's
+        // possibility even when its resulting string set happens to be empty.
+        if (first_element || pending_op == OP_UNION)
+            result.may_contain_strings |= el_may_contain_strings;
+        else if (pending_op == OP_INTERSECT)
+            result.may_contain_strings &= el_may_contain_strings;
         if (pending_op == OP_DIFF) {
             acc.difference_with(el_ranges);
             // Js54: difference filters out acc strings that also appear in el_strings.
@@ -659,6 +679,50 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
     return true;
 }
 
+struct JsVStringChoice {
+    const char* bytes;
+    size_t length;
+    size_t characters;
+    int ordinal;
+};
+
+static void v_append_ordered_string_set(StrBuf* output, JsVStringChoice* choices,
+        int count, const char* class_body) {
+    // ECMA-262 CompileAtom: string sets try longer code-point sequences first.
+    // Prefix-first expansion can also make a linear property repeat backtrack exponentially.
+    for (int i = 0; i < count; i++) {
+        choices[i].characters = utf8_count(choices[i].bytes, choices[i].length);
+        choices[i].ordinal = i;
+    }
+    qsort(choices, count, sizeof(JsVStringChoice), [](const void* a, const void* b) {
+        auto* x = (const JsVStringChoice*)a;
+        auto* y = (const JsVStringChoice*)b;
+        return x->characters != y->characters ? (x->characters > y->characters ? -1 : 1)
+            : (x->ordinal < y->ordinal ? -1 : x->ordinal > y->ordinal);
+    });
+    strbuf_append_str(output, "(?:");
+    bool wrote = false, empty = false;
+    for (int i = 0; i < count; i++) {
+        const auto& choice = choices[i];
+        if (!choice.length) { empty = true; continue; }
+        if (wrote) strbuf_append_char(output, '|');
+        for (size_t j = 0; j < choice.length; j++) {
+            unsigned char c = (unsigned char)choice.bytes[j];
+            if (c && c < 0x80 && strchr("\\()[]{}.*+?|^$/#", c))
+                strbuf_append_char(output, '\\');
+            strbuf_append_char(output, (char)c);
+        }
+        wrote = true;
+    }
+    if (class_body && strcmp(class_body, "(?!)")) {
+        if (wrote) strbuf_append_char(output, '|');
+        strbuf_append_str(output, class_body);
+        wrote = true;
+    }
+    if (empty && wrote) strbuf_append_char(output, '|');
+    strbuf_append_char(output, ')');
+}
+
 // Top-level entry: rewrite all /v-classes in `in` into RE2-friendly form.
 // Returns false if any class is malformed (the caller falls back to the JS
 // validator error path).
@@ -685,29 +749,15 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                     }
                 }
                 if (found && in[i + 1] == 'p') {
-                    // Emit alternation. The strings table holds raw UTF-8
-                    // bytes; RE2 in UTF-8 mode matches them byte-for-byte
-                    // against the input. ASCII characters that have regex
-                    // meta-semantics (e.g. `*`, `#`, `+`) must be escaped;
-                    // continuation bytes (>= 0x80) pass through unescaped.
-                    out_str.append("(?:");
-                    for (int k = 0; k < found->count; k++) {
-                        if (k > 0) out_str.push_back('|');
-                        for (int b = 0; b < found->string_lens[k]; b++) {
-                            unsigned char ub = (unsigned char)found->strings[k][b];
-                            if (ub < 0x80 &&
-                                (ub == '\\' || ub == '(' || ub == ')' ||
-                                 ub == '[' || ub == ']' || ub == '{' ||
-                                 ub == '}' || ub == '.' || ub == '*' ||
-                                 ub == '+' || ub == '?' || ub == '|' ||
-                                 ub == '^' || ub == '$' || ub == '/' ||
-                                 ub == '#')) {
-                                out_str.push_back('\\');
-                            }
-                            out_str.push_back((char)ub);
-                        }
-                    }
-                    out_str.push_back(')');
+                    JsRegexScratch<JsVStringChoice> choices(found->count);
+                    if (choices.count < found->count) return false;
+                    for (int k = 0; k < found->count; k++)
+                        choices.slots[k] = {found->strings[k], (size_t)found->string_lens[k], 0, 0};
+                    StrBuf* rendered = strbuf_new();
+                    if (!rendered) return false;
+                    v_append_ordered_string_set(rendered, choices.slots, found->count, NULL);
+                    out_str.append(rendered->str, rendered->length);
+                    strbuf_free(rendered);
                     i = name_end + 1;
                     continue;
                 }
@@ -814,38 +864,16 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
             if (real_strs.empty()) {
                 out_str.append(class_body);
             } else {
-                out_str.append("(?:");
-                bool wrote_alt = false;
-                for (auto& st : real_strs) {
-                    if (st.empty()) continue;
-                    if (wrote_alt) out_str.push_back('|');
-                    // Emit raw UTF-8 bytes. Escape only ASCII regex meta-
-                    // characters; high bytes (>=0x80) pass through so RE2's
-                    // UTF-8 matcher consumes them as the intended codepoints.
-                    for (size_t k = 0; k < st.size(); k++) {
-                        unsigned char ub = (unsigned char)st[k];
-                        if (ub < 0x80 &&
-                            (ub == '\\' || ub == '(' || ub == ')' ||
-                             ub == '[' || ub == ']' || ub == '{' ||
-                             ub == '}' || ub == '.' || ub == '*' ||
-                             ub == '+' || ub == '?' || ub == '|' ||
-                             ub == '^' || ub == '$' || ub == '/' ||
-                             ub == '#')) {
-                            out_str.push_back('\\');
-                        }
-                        out_str.push_back((char)ub);
-                    }
-                    wrote_alt = true;
-                }
-                // Only include the codepoint-class alternative if it actually
-                // matches something. `(?!)` is "never matches" — appending it
-                // would still be sound but RE2 may interpret the whole alt as
-                // a guaranteed mismatch in some configurations, so omit it.
-                if (class_body != "(?!)") {
-                    if (wrote_alt) out_str.push_back('|');
-                    out_str.append(class_body);
-                }
-                out_str.push_back(')');
+                int string_count = (int)real_strs.size();
+                JsRegexScratch<JsVStringChoice> choices(string_count);
+                if (choices.count < string_count) return false;
+                for (int k = 0; k < string_count; k++)
+                    choices.slots[k] = {real_strs[k].data(), real_strs[k].size(), 0, 0};
+                StrBuf* rendered = strbuf_new();
+                if (!rendered) return false;
+                v_append_ordered_string_set(rendered, choices.slots, string_count, class_body.c_str());
+                out_str.append(rendered->str, rendered->length);
+                strbuf_free(rendered);
             }
             i = parse_i;
             continue;
@@ -877,6 +905,30 @@ extern "C" bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, in
 // ============================================================================
 // Annex B strict validator for `u` flag
 // ============================================================================
+static bool validate_unicode_property_escape(const char* pattern, int length,
+        int* offset, bool unicode_sets) {
+    int begin = *offset;
+    if (begin + 2 >= length || pattern[begin + 2] != '{') return false;
+    int end = begin + 3;
+    while (end < length && pattern[end] != '}') end++;
+    if (end == length) return false;
+    const char* name = pattern + begin + 3;
+    int name_length = end - begin - 3;
+    bool valid = js_regex_generated_property_lookup_kind(name, name_length) >= JS_REGEX_PROP_GENERATED_BASE;
+    // properties of strings are admitted only by positive escapes under /v.
+    if (!valid && unicode_sets && pattern[begin + 1] == 'p') {
+        for (int i = 0; i < js_v_string_property_count; i++) {
+            const char* candidate = js_v_string_properties[i].name;
+            if ((int)strlen(candidate) == name_length && !memcmp(candidate, name, name_length)) {
+                valid = true;
+                break;
+            }
+        }
+    }
+    *offset = end;
+    return valid;
+}
+
 // When the `u` flag is set, the Annex B compatibility extensions in B.1.4
 // are NOT applied. This means many patterns that parse leniently without `u`
 // must throw SyntaxError with `u`. Returns true if valid, false if invalid.
@@ -886,9 +938,16 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
     // Js54 P9: track nesting depth, not a bool. /v allows nested classes.
     int class_depth = 0;
     char class_prev_was_shorthand = 0; // 'd','D','s','S','w','W','p','P'
+    bool class_can_range = false, class_range_pending = false;
 
     for (size_t i = 0; i < n; i++) {
         char c = pat[i];
+        if (unicode_sets && c == '[' && i + 1 < n && pat[i + 1] == '^') {
+            // reuse the set parser's syntax facts; ordinary classes need no expansion here.
+            size_t end = i;
+            VClassResult parsed;
+            if (v_parse_class(pat, end, parsed) && parsed.may_contain_strings) return false;
+        }
         if (class_depth == 0) {
             if (c == '\\') {
                 if (i + 1 >= n) return false; // trailing backslash
@@ -960,10 +1019,8 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
                 }
                 // \p{...} or \P{...} — unicode property escape
                 if (nx == 'p' || nx == 'P') {
-                    if (i + 2 >= n || pat[i + 2] != '{') return false;
-                    size_t j = i + 3;
-                    while (j < n && pat[j] != '}') j++;
-                    if (j >= n) return false;
+                    int j = (int)i;
+                    if (!validate_unicode_property_escape(pat.data(), (int)n, &j, unicode_sets)) return false;
                     i = j; continue;
                 }
                 // valid single-char escapes
@@ -984,6 +1041,7 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
             if (c == '[') {
                 class_depth = 1;
                 class_prev_was_shorthand = 0;
+                class_can_range = class_range_pending = false;
                 continue;
             }
             // standalone `]`, `{`, `}` outside a class is illegal under `u`
@@ -1025,16 +1083,32 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
             if (unicode_sets && c == '[') {
                 class_depth++;
                 class_prev_was_shorthand = 0;
+                class_can_range = class_range_pending = false;
                 continue;
             }
             // Js54 P9: under /v, `--` and `&&` are set operators inside class
             if (unicode_sets && i + 1 < n && (
                     (c == '-' && pat[i + 1] == '-') ||
                     (c == '&' && pat[i + 1] == '&'))) {
+                if (!class_can_range || i + 2 >= n || pat[i + 2] == ']' || pat[i + 2] == c) return false;
                 class_prev_was_shorthand = 0;
+                class_can_range = class_range_pending = false;
                 i++; // consume both
                 continue;
             }
+            if (c == '^' && i > 0 && pat[i - 1] == '[') continue;
+            if (c == '-' && class_can_range && i + 1 < n && pat[i + 1] != ']') {
+                if (class_prev_was_shorthand) return false;
+                class_range_pending = true;
+                class_can_range = false;
+                continue;
+            }
+            // ECMA-262 ClassSetSyntaxCharacter and ClassSetReservedDoublePunctuator.
+            if (unicode_sets && c && (strchr("(){}/-|", c) ||
+                    (i + 1 < n && pat[i + 1] == c && strchr("!#$%*+,.:;<=>?@^`~", c)))) return false;
+            bool range_endpoint = class_range_pending;
+            class_can_range = !range_endpoint;
+            class_range_pending = false;
             if (c == '\\') {
                 if (i + 1 >= n) return false;
                 char nx = pat[i + 1];
@@ -1060,30 +1134,13 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
                 if (!unicode_sets && nx == 'q') return false;
                 bool is_shorthand = (nx == 'd' || nx == 'D' || nx == 's' || nx == 'S' ||
                                      nx == 'w' || nx == 'W' || nx == 'p' || nx == 'P');
-                // check for character class shorthand in range: e.g., [\d-a] or [a-\d]
-                // Js54 P10: under /v, `--` is the set-difference operator, not a
-                // range that involves the shorthand. Skip the shorthand-range
-                // check when the dash is actually part of `--`.
-                bool dash_is_set_op = unicode_sets && i + 3 < n &&
-                                      pat[i + 2] == '-' && pat[i + 3] == '-';
-                if (!dash_is_set_op && i + 2 < n && pat[i + 2] == '-' &&
-                    i + 3 < n && pat[i + 3] != ']') {
-                    if (is_shorthand) return false; // [\d-X]
-                }
-                // Same: `[X-\d]` is only illegal when the dash is a literal range
-                // marker, not part of `&&` or anything similar — but the check
-                // here is on the prior token. Under /v with set ops, `--`/`&&`
-                // already consumed the dash above before we'd reach this point.
-                if (class_prev_was_shorthand && (i > 0 && pat[i - 1] == '-')) {
-                    return false; // [X-\d]
-                }
+                // a class escape is a set, so it cannot be a character-range endpoint.
+                if (range_endpoint && is_shorthand) return false;
                 // \p{...} or \P{...} — unicode property escape
                 if (nx == 'p' || nx == 'P') {
-                    if (i + 2 >= n || pat[i + 2] != '{') return false;
-                    size_t j = i + 3;
-                    while (j < n && pat[j] != '}') j++;
-                    if (j >= n) return false;
-                    class_prev_was_shorthand = 0;
+                    int j = (int)i;
+                    if (!validate_unicode_property_escape(pat.data(), (int)n, &j, unicode_sets)) return false;
+                    class_prev_was_shorthand = nx;
                     i = j; continue;
                 }
                 // similar escape validation as outside class (subset)
@@ -1121,10 +1178,14 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
                     i += 2; class_prev_was_shorthand = 0; continue;
                 }
                 // valid escapes inside class
-                if (nx == 'b' || nx == 'B' || nx == 'd' || nx == 'D' ||
+                if (nx == 'b' || nx == 'd' || nx == 'D' ||
                     nx == 's' || nx == 'S' || nx == 'w' || nx == 'W' ||
                     nx == 'f' || nx == 'n' || nx == 'r' || nx == 't' || nx == 'v') {
                     class_prev_was_shorthand = is_shorthand ? nx : 0;
+                    i++; continue;
+                }
+                if (unicode_sets && nx && strchr("&-!#%,:;<=>@`~", nx)) {
+                    class_prev_was_shorthand = 0;
                     i++; continue;
                 }
                 if (nx == '0') {

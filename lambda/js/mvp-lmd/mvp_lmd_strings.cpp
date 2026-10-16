@@ -74,12 +74,12 @@ extern "C" Item mvp_lmd_string_split(Item value, Item separator, int64_t limit) 
     bool absent = separator.item == ITEM_JS_UNDEFINED;
     String* delimiter = absent ? NULL : separator.get_string();
     if (limit == UINT32_MAX && delimiter && string->is_ascii && delimiter->is_ascii &&
-            string->len && delimiter->len) return fn_split_literal_items(value, separator);
+            string->len && delimiter->len) return mvp_lmd_array_adopt_realm(fn_split_literal_items(value, separator));
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, value), sep(roots, separator), result(roots, ItemNull);
-    result.set(Item{.array = array()});
-    if (!result.get().array) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    result.set(mvp_lmd_array_new(0));
+    if (item_is_error(result.get())) return result.get();
     if (!limit) return result.get();
     if (absent) { array_push(result.get().array, source.get()); return result.get(); }
     int64_t size = utf8_to_utf16_length(string->chars, string->len);

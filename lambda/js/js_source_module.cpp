@@ -2,8 +2,10 @@
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_props.h"
 #include "js_well_known_names.h"
+#include "../io/resource_policy.h"
 #include "../runtime/heap_api.h"
 #include "../runtime/runtime-state.h"
 #include "../runtime/lambda-root-frame.hpp"
@@ -47,7 +49,11 @@ static void source_record_destroy(void* opaque) {
     mem_free(record);
 }
 static Item empty_namespace() { return ItemNull; }
-static const ModuleNamespaceOps source_namespace_ops = {empty_namespace, NULL, NULL, NULL};
+static const ModuleNamespaceOps source_namespace_ops = {
+    empty_namespace,
+    [](Item object, const char* name) { return vmap_get_by_str(object.vmap, name); },
+    js_function_get_arity, js_function_get_ptr
+};
 
 static JsSourceModuleRecord* module_record(Runtime* runtime, const JsSourceModuleOps* ops,
         void* owner, const char* path) {
@@ -131,6 +137,10 @@ static Item collect_module_declarations(JsSourceModuleRecord* record, ArrayList*
             char resolved[4096];
             js_resolve_script_module_path(record->runtime, record->descriptor->path,
                 source->chars, (int)source->len, resolved, sizeof(resolved));
+            // a warm registry entry cannot grant a request the host now denies.
+            if (!input_resource_policy_admits(record->runtime->resource_policy, resolved))
+                return module_error(record, JS_SOURCE_MODULE_REFERENCE,
+                    "Module blocked by document resource policy");
             JsSourceModuleRecord* child = module_record(record->runtime, record->ops, record->owner, resolved);
             if (!child) return module_error(record, JS_SOURCE_MODULE_CAPABILITY, "Module belongs to an incompatible frontend");
             auto* request = (JsSourceModuleRequest*)mem_calloc(1, sizeof(JsSourceModuleRequest), MEM_CAT_JS_RUNTIME);
@@ -305,6 +315,9 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
         const char* path, const char* source, size_t length, JsSourceModuleRecord** output) {
     if (output) *output = NULL;
     if (!runtime || !ops || !path) return ItemError;
+    if (!input_resource_policy_admits(runtime->resource_policy, path))
+        return ops->error(owner, JS_SOURCE_MODULE_REFERENCE,
+            "Module blocked by document resource policy");
     JsSourceModuleRecord* root = module_record(runtime, ops, owner, path);
     if (!root) return ops->error(owner, JS_SOURCE_MODULE_CAPABILITY, "Module belongs to an incompatible frontend");
     if (output) *output = root;
@@ -400,21 +413,19 @@ void js_module_source_complete(JsSourceModuleRecord* record, Item completion) {
         if (rejected && parent->source_record)
             js_module_source_complete((JsSourceModuleRecord*)parent->source_record, result.get());
     }
-    if (!rejected) js_tla_flush_for_dynamic_import();
+    if (!rejected) js_tla_flush_for_runtime(record->runtime);
 }
 
-static Item source_body_settled(Item environment, Item value) {
-    Item* slots = (Item*)(uintptr_t)environment.item;
-    if (!slots || get_type_id(slots[0]) != LMD_TYPE_STRING) return ItemError;
-    ModuleDescriptor* descriptor = module_get_for_runtime(context ? context->runtime : NULL,
-        it2s(slots[0])->chars);
-    if (!descriptor || !descriptor->source_record) return ItemError;
+static Item source_body_settled(Item callee, Item, Item* args, int count, uint64_t*) {
+    auto* function = (JsFunction*)callee.function;
+    auto* record = (JsSourceModuleRecord*)(uintptr_t)js_fn_native(function)->target.bits;
+    if (!record || !function->env) return ItemError;
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
-    // cached rejection lanes must not borrow a reaction job's scalar argument home.
-    Rooted<Item> input(roots, js_retain_scalar(value));
-    Rooted<Item> completion(roots, slots[1].item == ITEM_TRUE ? js_throw_value(input.get()) : ItemNull);
-    js_module_source_complete((JsSourceModuleRecord*)descriptor->source_record, completion.get());
+    // registry identity, not a same-spelled path in the current realm, owns completion.
+    Rooted<Item> input(roots, js_retain_scalar(count ? args[0] : make_js_undefined()));
+    Rooted<Item> completion(roots, function->env[0].item == ITEM_TRUE ? js_throw_value(input.get()) : ItemNull);
+    js_module_source_complete(record, completion.get());
     return Item{.item = ITEM_JS_UNDEFINED};
 }
 
@@ -475,11 +486,10 @@ static Item evaluate_graph(JsSourceModuleRecord* record, ArrayList* stack, uint3
             descriptor->deferred_async_frame = record->ops->evaluate(record->owner, record, true);
             if (item_is_error(descriptor->deferred_async_frame)) return descriptor->deferred_async_frame;
             for (int mode = 0; mode < 2; mode++) {
-                Item* environment = js_alloc_env(2);
+                Item* environment = js_alloc_env1(Item{.item = b2it(mode != 0)});
                 if (!environment) return ItemError;
-                environment[0] = descriptor->specifier_item;
-                environment[1] = Item{.item = b2it(mode != 0)};
-                Item callback = js_new_native_closure(source_body_settled, 1, environment, 2);
+                Item callback = js_new_native_payload_function(source_body_settled,
+                    (uint64_t)(uintptr_t)record, 1, environment, 1);
                 (mode ? rejected : fulfilled).set(callback);
                 if (item_is_error(callback)) return callback;
             }

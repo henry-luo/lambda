@@ -1,7 +1,9 @@
 #include "mvp_lmd_runtime.h"
+#include "mvp_lmd_dynamic.h"
 #include "../js_props.h"
 #include "../js_builtin_catalog.hpp"
 #include "../js_runtime.h"
+#include "../js_runtime_internal.hpp"
 #include "../js_source_module.hpp"
 #include "../js_runtime_state.hpp"
 #include "../js_typed_array_carrier.hpp"
@@ -123,20 +125,20 @@ static Item primitive_construct(Context*, MvpLmdProgram* program, Item* args, ui
     if (item_is_error(value.get())) return value.get();
     value.set(lambda_item_adopt_scalar_home(value.get(), &home));
     if (!construct) return get_type_id(value.get()) == LMD_TYPE_FLOAT ? push_d(it2d(value.get())) : value.get();
-    Item key = {.item = s2it(heap_create_name("prototype", 9))};
-    prototype.set(mvp_lmd_property_with_receiver(target, key, ItemNull, LMD_PROP_GET, target));
+    prototype.set(mvp_lmd_constructor_prototype(target, mvp_lmd_class_values(cls)[1]));
     if (item_is_error(prototype.get())) return prototype.get();
-    if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_class_values(cls)[1]);
     return mvp_lmd_box_primitive(value.get(), prototype.get());
 }
 
+enum { PRIMITIVE_PRECISION = 1000, PRIMITIVE_EXPONENTIAL };
 static Item primitive_method(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item receiver, Item) {
     intptr_t operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
     bool locale = operation == 16 + LMD_PRIMITIVE_NUMBER || operation == 16 + LMD_PRIMITIVE_BIGINT;
     bool fixed = operation == LMD_METHOD_TO_FIXED;
-    int kind = fixed ? LMD_PRIMITIVE_NUMBER : locale ? (int)operation - 16 : (int)(operation / 2);
-    bool stringify = fixed || locale || (operation & 1);
+    bool scientific = operation == PRIMITIVE_PRECISION || operation == PRIMITIVE_EXPONENTIAL;
+    int kind = fixed || scientific ? LMD_PRIMITIVE_NUMBER : locale ? (int)operation - 16 : (int)(operation / 2);
+    bool stringify = fixed || scientific || locale || (operation & 1);
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     uint64_t home = 0;
@@ -149,6 +151,24 @@ static Item primitive_method(Context*, MvpLmdProgram* program, Item* args, uint6
     if (type != expected[kind] && !(kind == LMD_PRIMITIVE_NUMBER && type == LMD_TYPE_INT))
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (!stringify) return type == LMD_TYPE_FLOAT ? push_d(it2d(value.get())) : value.get();
+    if (scientific) {
+        // guest coercion and range errors precede the shared primitive-only formatter.
+        Item argument = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
+        bool supplied = argument.item != ITEM_JS_UNDEFINED;
+        if (supplied) {
+            argument = mvp_lmd_primitive_to_number(argument);
+            if (item_is_error(argument)) return argument;
+            double digits = it2d(argument);
+            digits = isnan(digits) ? 0 : trunc(digits);
+            if (isfinite(it2d(value.get())) &&
+                    (digits < (operation == PRIMITIVE_PRECISION ? 1 : 0) || digits > 100))
+                return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+            // non-finite receivers ignore the range, after observing argument coercion.
+            argument = Item{.item = i2it(isfinite(digits) && digits >= 0 && digits <= 100 ? (int64_t)digits : 0)};
+        }
+        return js_numeric_prototype_algorithm(value.get(), operation == PRIMITIVE_PRECISION ?
+            JS_NUMERIC_TO_PRECISION : JS_NUMERIC_TO_EXPONENTIAL, &argument, supplied ? 1 : 0);
+    }
     if (fixed) {
         // the generic prototype entry shares the direct MIR formatter and receiver brand check.
         Item digits = count ? mvp_lmd_primitive_to_number(args[0]) : Item{.item = i2it(0)};
@@ -165,6 +185,23 @@ static Item primitive_method(Context*, MvpLmdProgram* program, Item* args, uint6
 
 static Item primitive_static(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
     int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
+    if (operation == 11 || operation == 12) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> value(roots, count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), converted(roots, ItemNull);
+        Item width = mvp_lmd_primitive_to_number(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+        if (item_is_error(width)) return width;
+        double bits = it2d(width);
+        bits = isnan(bits) ? 0 : trunc(bits);
+        if (bits < 0 || bits > 9007199254740991.0) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+        // ToIndex must finish before ToBigInt can invoke guest conversion hooks.
+        Item bigint = ItemNull;
+        Item status = mvp_lmd_buffer_ops.bigint(value.get(), &bigint);
+        if (item_is_error(status)) return status;
+        converted.set(bigint);
+        width = push_d(bits);
+        return operation == 11 ? js_bigint_as_int_n(width, converted.get()) : js_bigint_as_uint_n(width, converted.get());
+    }
     if (operation == 9 || operation == 10) {
         Item number = mvp_lmd_primitive_to_number(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
         return item_is_error(number) ? number : Item{.item = b2it(operation == 9 ? isnan(it2d(number)) : isfinite(it2d(number)))};
@@ -221,9 +258,9 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
         first.set(lambda_item_adopt_scalar_home(first.get(), &substr_homes[0]));
         second.set(lambda_item_adopt_scalar_home(second.get(), &substr_homes[1]));
     }
-    if (method == LMD_METHOD_MATCH || method == LMD_METHOD_SEARCH || method == LMD_METHOD_REPLACE || method == LMD_METHOD_SPLIT || method == LMD_METHOD_MATCH_ALL)
+    if (method == LMD_METHOD_MATCH || method == LMD_METHOD_SEARCH || method == LMD_METHOD_REPLACE || method == LMD_METHOD_SPLIT || method == LMD_METHOD_MATCH_ALL || method == LMD_METHOD_REPLACE_ALL)
         return mvp_lmd_regexp_string_method(mvp_lmd_program_library(), source.get(), first.get(), second.get(),
-            method == LMD_METHOD_MATCH_ALL ? 4 : method == LMD_METHOD_SPLIT ? 3 : method == LMD_METHOD_SEARCH ? 2 : method == LMD_METHOD_REPLACE);
+            method == LMD_METHOD_REPLACE_ALL ? 5 : method == LMD_METHOD_MATCH_ALL ? 4 : method == LMD_METHOD_SPLIT ? 3 : method == LMD_METHOD_SEARCH ? 2 : method == LMD_METHOD_REPLACE);
     source.set(mvp_lmd_primitive_to_string(source.get()));
     if (item_is_error(source.get())) return source.get();
     if (method == LMD_METHOD_LOWER || method == LMD_METHOD_UPPER)
@@ -342,10 +379,8 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
     // native Error brand while keeping the live JS prototype independent (D2.6.9v3).
     prototype.set(mvp_lmd_class_values(cls)[1]);
     if (target.item != ITEM_JS_UNDEFINED) {
-        Item key = {.item = s2it(heap_create_name("prototype", 9))};
-        prototype.set(mvp_lmd_property_with_receiver(target, key, ItemNull, LMD_PROP_GET, target));
+        prototype.set(mvp_lmd_constructor_prototype(target, mvp_lmd_class_values(cls)[1]));
         if (item_is_error(prototype.get())) return prototype.get();
-        if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_class_values(cls)[1]);
     }
     MvpLmdClass* actual = target.item == ITEM_JS_UNDEFINED ? NULL : mvp_lmd_class_record(target);
     // preserve the declared Lambda subtype when native Error construction supplies its instance storage.
@@ -355,7 +390,7 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
     if (item_is_error(object.get())) return object.get();
     // a newTarget supplies ancestry, but only native Error allocation supplies [[ErrorData]].
     if (!state->error_data_key)
-        state->error_data_key = name_pool_create_unique_private(context->name_pool, {"MVP [[ErrorData]]", 17});
+        state->error_data_key = mvp_lmd_internal_name(LMD_INTERNAL_ERROR);
     if (!state->error_data_key || !map_shape_set(object.get().map, state->error_data_key, Item{.item = ITEM_TRUE}))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (prototype.get().item != mvp_lmd_class_values(cls)[1].item) {
@@ -426,9 +461,10 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     Rooted<Item> held(roots, carrier), object(roots, ItemNull), text(roots, ItemNull);
     int kind = error->code == ERR_TYPE_MISMATCH ? LMD_ERROR_TYPE :
         error->code == ERR_UNDEFINED_VARIABLE ? LMD_ERROR_REFERENCE :
-        error->code == ERR_INDEX_OUT_OF_BOUNDS ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
+        (error->code == ERR_INDEX_OUT_OF_BOUNDS || error->code == ERR_STACK_OVERFLOW) ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
     if (!state->errors) return carrier;
-    const char* message = error->message ? error->message : "";
+    const char* message = error->code == ERR_STACK_OVERFLOW
+        ? "Maximum call stack size exceeded" : error->message ? error->message : "";
     String* copied = heap_strcpy(message, strlen(message));
     if (!copied) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     text.set(Item{.item = s2it(copied)});
@@ -438,7 +474,7 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
         mvp_lmd_class_values(cls)[0], ItemNull, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(object.get())) return object.get();
     // Preserve Error identity if the same carrier crosses another catch boundary.
-    error->thrown_value_item = object.get().item;
+    if (!error->is_static) error->thrown_value_item = object.get().item;
     return object.get();
 }
 
@@ -478,10 +514,11 @@ static Item json_copy(Item source, TypeMap* shape) {
 }
 
 static Item json_parse(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
-    if (count > 1 && args[1].item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    RootFrame roots(1);
+    RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> text(roots, mvp_lmd_primitive_to_string(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}));
+    Rooted<Item> text(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> reviver(roots, count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), holder(roots, ItemNull);
+    text.set(mvp_lmd_primitive_to_string(text.get()));
     if (item_is_error(text.get())) return text.get();
     String* source = text.get().get_string();
     if (memchr(source->chars, 0, source->len)) return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
@@ -496,12 +533,41 @@ static Item json_parse(Context*, MvpLmdProgram*, Item* args, uint64_t count, Ite
     bool number = get_type_id(result) == LMD_TYPE_FLOAT || get_type_id(result) == LMD_TYPE_INT;
     double scalar = number ? it2d(result) : 0;
     pool_destroy(pool);
-    return !ok ? mvp_lmd_fail(LMD_MVP_SYNTAX, 0) : number ? push_d(scalar) : result;
+    if (!ok) return mvp_lmd_fail(LMD_MVP_SYNTAX, 0);
+    if (item_is_error(result)) return result;
+    if (!mvp_lmd_is_callable(reviver.get())) return number ? push_d(scalar) : result;
+    uint64_t home = 0;
+    text.set(number ? lambda_item_adopt_scalar_home(push_d(scalar), &home) : result);
+    holder.set(mvp_lmd_object_new(state->object_shape, 0));
+    if (item_is_error(holder.get())) return holder.get();
+    Item empty = {.item = s2it(heap_create_name("", 0))};
+    if (!empty.get_string()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item status = mvp_lmd_property_with_receiver(holder.get(), empty, text.get(), LMD_PROP_CREATE_DATA, holder.get());
+    if (item_is_error(status)) return status;
+    static const JsJsonReviveOps ops = {
+        &mvp_lmd_collection_ops,
+        [](Item object, Item key) { return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_GET, object); },
+        mvp_lmd_array_is_array,
+        [](Item object) { return mvp_lmd_object_project(object, 0); },
+        [](Item object, Item key, Item value) {
+            if (value.item == ITEM_JS_UNDEFINED)
+                return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_DELETE, object);
+            JsPropertyDescriptor descriptor = {};
+            descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+                JS_PD_HAS_ENUMERABLE | JS_PD_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+            js_pd_set_configurable(&descriptor, true);
+            descriptor.value = value;
+            return mvp_lmd_define_own_property(object, key, &descriptor);
+        },
+        [](void*, Item, Item, Item) { return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0); }
+    };
+    return js_json_revive_with_ops(holder.get(), empty, reviver.get(), NULL, &ops);
 }
 
 static Item json_value(Item input, Item key) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
-    if (!mvp_lmd_is_object(input) || !state || (!state->mutable_prototypes && !state->primitives)) return input;
+    if ((!mvp_lmd_is_object(input) && get_type_id(input) != LMD_TYPE_DECIMAL) ||
+            !state || (!state->mutable_prototypes && !state->primitives)) return input;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> owner(roots, input), property(roots, key), method(roots, ItemNull);
@@ -565,7 +631,7 @@ static Item json_write(StrBuf* buffer, Item input, const JsonAncestor* parent, i
             value.set(lambda_item_adopt_scalar_home(array ? mvp_lmd_array_index_property(held.get(), i, ItemNull, LMD_PROP_GET) :
                 mvp_lmd_class_property(held.get(), key, ItemNull, LMD_PROP_GET, NULL), &home));
             if (item_is_error(value.get())) return value.get();
-            if (mvp_lmd_is_object(value.get())) {
+            if (mvp_lmd_is_object(value.get()) || get_type_id(value.get()) == LMD_TYPE_DECIMAL) {
                 if (array) key = mvp_lmd_number_to_string(i);
                 if (item_is_error(key)) return key;
                 value.set(lambda_item_adopt_scalar_home(json_value(value.get(), key), &home));
@@ -591,11 +657,26 @@ static Item json_write(StrBuf* buffer, Item input, const JsonAncestor* parent, i
 }
 static Item json_stringify(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item, Item) {
     if ((count > 1 && args[1].item != ITEM_JS_UNDEFINED && args[1].item != ITEM_NULL) ||
-            (count > 2 && args[2].item != ITEM_JS_UNDEFINED)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            (count > 2 && args[2].item != ITEM_JS_UNDEFINED)) {
+        static const JsJsonStringifyOps ops = {
+            &mvp_lmd_collection_ops,
+            [](Item object, Item key) { return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_GET, object); },
+            mvp_lmd_array_is_array,
+            [](Item object) { return mvp_lmd_object_project(object, 0); },
+            [](Item value) { return mvp_lmd_primitive_to_string(value); }, primitive_payload,
+            []() { return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0); },
+            [](Item object, Item key, Item value) {
+                return mvp_lmd_property_with_receiver(object, key, value, LMD_PROP_CREATE_DATA, object);
+            },
+            NULL
+        };
+        return js_json_stringify_with_ops(args[0], args[1],
+            count > 2 ? args[2] : Item{.item = ITEM_JS_UNDEFINED}, &ops);
+    }
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> value(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
-    if (mvp_lmd_is_object(value.get())) {
+    if (mvp_lmd_is_object(value.get()) || get_type_id(value.get()) == LMD_TYPE_DECIMAL) {
         String* key = heap_create_name("", 0);
         if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         value.set(json_value(value.get(), Item{.item = s2it(key)}));
@@ -675,10 +756,8 @@ static Item date_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         value = js_date_components_time(parts, true, true);
     }
     MvpLmdLibraryState* state = mvp_lmd_program_library();
-    Item key = {.item = s2it(heap_create_name("prototype", 9))};
-    prototype.set(mvp_lmd_property_with_receiver(actual_target.get(), key, ItemNull, LMD_PROP_GET, actual_target.get()));
+    prototype.set(mvp_lmd_constructor_prototype(actual_target.get(), state->date.values[1]));
     if (item_is_error(prototype.get())) return prototype.get();
-    if (!mvp_lmd_is_object(prototype.get())) prototype.set(state->date.values[1]);
     MvpLmdClass* subtype = mvp_lmd_class_record(actual_target.get());
     TypeMap* shape = subtype && subtype->ast && lambda_nominal_derives_from(&subtype->nominal, &state->date.nominal)
         ? &subtype->shape : &state->date.shape;
@@ -749,7 +828,7 @@ static Item date_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, It
 
 Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!state->date_observed) return ItemNull;
-    state->date_key = name_pool_create_unique_private(context->name_pool, {"MVP [[DateValue]]", 17});
+    state->date_key = mvp_lmd_internal_name(LMD_INTERNAL_DATE);
     if (!state->date_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     ((MvpLmdCallable*)state->date.values[0].function)->custom_new_target = true;
     Item result = mvp_lmd_named_set(state->date.values[1], "constructor", state->date.values[0], JSPD_NON_ENUMERABLE);
@@ -813,6 +892,10 @@ Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState
         if (array_prototype) {
             cls->values[1].array->type = shapes[i];
             if (!map_fill_reserve_data((Map*)cls->values[1].array)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            if (state->default_realm) {
+                Item linked = mvp_lmd_set_prototype(cls->values[1], state->values[LMD_LIBRARY_OBJECT_PROTOTYPE]);
+                if (item_is_error(linked)) return linked;
+            }
         }
     }
     Item result = mvp_lmd_named_set(cls->values[1], "constructor", cls->values[0]);
@@ -822,6 +905,7 @@ Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState
     if (item_is_error(result)) return result;
     String* spelling = heap_create_name(name, strlen(name));
     if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    ((MvpLmdNativeCallable*)cls->values[0].function)->source_name = spelling;
     int flags = immutable_metadata ? JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE : -1;
     result = mvp_lmd_named_set(cls->values[2], "name", Item{.item = s2it(spelling)}, flags);
     return item_is_error(result) ? result : mvp_lmd_named_set(cls->values[2], "length", Item{.item = i2it(arity)}, flags);
@@ -853,7 +937,7 @@ Item mvp_lmd_object_string(Item receiver) {
         bool date = false;
         date_ops.read(receiver, &date);
         if (date) tag = "[object Date]";
-        else if (nominal == &state->regexp.nominal) tag = "[object RegExp]";
+        else if (mvp_lmd_regexp_record(receiver, state)) tag = "[object RegExp]";
         else if (state->error_data_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->error_data_key))
             tag = "[object Error]";
         if (state->arguments_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->arguments_key))
@@ -908,6 +992,32 @@ Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item 
 }
 static Item object_predicate(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item receiver, Item) {
     int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
+    if (operation >= 2) {
+        static const JsObjectAccessorOps ops = {
+            &mvp_lmd_collection_ops,
+            [](Item value) { return mvp_lmd_box_primitive(value); },
+            mvp_lmd_property_key,
+            [](Item object, Item key, Item callback, bool getter) {
+                JsPropertyDescriptor descriptor = {};
+                descriptor.flags = JS_PD_HAS_ENUMERABLE | JS_PD_ENUMERABLE | JS_PD_HAS_CONFIGURABLE |
+                    (getter ? JS_PD_HAS_GET : JS_PD_HAS_SET);
+                js_pd_set_configurable(&descriptor, true);
+                if (getter) descriptor.getter = callback; else descriptor.setter = callback;
+                Item status = mvp_lmd_define_own_property(object, key, &descriptor);
+                return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
+            },
+            [](Item object, Item key, bool getter, bool* found) {
+                JsPropertyDescriptor descriptor = {};
+                Item status = mvp_lmd_get_own_property(object, key, &descriptor);
+                if (item_is_error(status)) return status;
+                *found = status.item == ITEM_TRUE;
+                return *found && (descriptor.flags & (getter ? JS_PD_HAS_GET : JS_PD_HAS_SET)) ?
+                    (getter ? descriptor.getter : descriptor.setter) : Item{.item = ITEM_JS_UNDEFINED};
+            }, mvp_lmd_get_prototype
+        };
+        return js_object_legacy_accessor_with_ops(receiver, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED},
+            count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, operation < 4, !(operation & 1), &ops);
+    }
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, receiver), value(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
@@ -1005,6 +1115,17 @@ static Item object_projection(Context*, MvpLmdProgram*, Item* args, uint64_t cou
 }
 static Item collection_group_by(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
     const JsBuiltinMethodSpec* method = (const JsBuiltinMethodSpec*)((MvpLmdNativeCallable*)self.function)->state;
+    if (method->builtin_id == JS_BUILTIN_OBJECT_FROM_ENTRIES) {
+        static const JsGroupByOps properties = {
+            NULL,
+            [](Item object, Item key, Item value) { return mvp_lmd_property_with_receiver(object, key, value, LMD_PROP_CREATE_DATA, object); },
+            mvp_lmd_property_key,
+            []() { return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0); },
+            NULL, NULL
+        };
+        return js_object_from_entries_with_ops(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED},
+            &properties, &mvp_lmd_collection_ops);
+    }
     static const JsGroupByOps map_groups = {
         [](Item output, Item key) {
             Item value = mvp_lmd_collection_storage_ops.get(output, key);
@@ -1100,16 +1221,26 @@ static Item object_proto_accessor(Context*, MvpLmdProgram*, Item* args, uint64_t
     return item_is_error(result) ? result : result.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : Item{.item = ITEM_JS_UNDEFINED};
 }
 
-static Item array_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item, Item) {
-    if (count == 1 && (get_type_id(args[0]) == LMD_TYPE_INT || get_type_id(args[0]) == LMD_TYPE_FLOAT)) {
-        double length = it2d(args[0]);
-        return length >= 0 && length <= UINT32_MAX && length == trunc(length) ? mvp_lmd_array_new((int64_t)length) : mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    }
-    RootFrame roots(1);
+static Item array_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
+    RootFrame roots(2);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> output(roots, mvp_lmd_array_new(0));
+    Rooted<Item> prototype(roots, ItemNull), output(roots, ItemNull);
+    bool observed = target.item != ITEM_JS_UNDEFINED && target.item != self.item;
+    if (observed) {
+        prototype.set(mvp_lmd_constructor_prototype(target, mvp_lmd_program_library()->array.values[1]));
+        if (item_is_error(prototype.get())) return prototype.get();
+    }
+    bool extent = count == 1 && (get_type_id(args[0]) == LMD_TYPE_INT || get_type_id(args[0]) == LMD_TYPE_FLOAT);
+    double length = extent ? it2d(args[0]) : 0;
+    if (extent && !(length >= 0 && length <= UINT32_MAX && length == trunc(length)))
+        return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    output.set(mvp_lmd_array_new((int64_t)length));
     if (item_is_error(output.get())) return output.get();
-    for (uint64_t i = 0; i < count; i++) {
+    if (observed) {
+        Item linked = mvp_lmd_set_prototype(output.get(), prototype.get());
+        if (item_is_error(linked)) return linked;
+    }
+    for (uint64_t i = 0; !extent && i < count; i++) {
         Item stored = mvp_lmd_array_store(output.get(), i, args[i]);
         if (item_is_error(stored)) return stored;
     }
@@ -1273,12 +1404,9 @@ const JsBufferViewOps mvp_lmd_buffer_ops = {
         return key ? mvp_lmd_property_with_receiver(owner, Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, owner) : ItemError;
     },
     [](Item target, JsBufferViewKind kind) {
-        Item prototype = mvp_lmd_property_with_receiver(target,
-            Item{.item = s2it(heap_create_name("prototype", 9))}, ItemNull, LMD_PROP_GET, target);
-        if (item_is_error(prototype)) return prototype;
         MvpLmdLibraryState* state = mvp_lmd_program_library();
         MvpLmdClass* base = kind == JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER ? state->shared_buffer : &state->buffers[kind];
-        return mvp_lmd_is_object(prototype) ? prototype : base->values[1];
+        return mvp_lmd_constructor_prototype(target, base->values[1]);
     },
     [](Item owner, Item prototype) { return mvp_lmd_set_prototype(owner, prototype); },
     [](bool range, const char*) { return mvp_lmd_fail(range ? LMD_MVP_RANGE : LMD_MVP_TYPE, 0); },
@@ -1314,9 +1442,7 @@ static const JsTypedArrayOps typed_array_ops = {
             ? &actual->shape : &base->shape;
     },
     [](JsTypedArrayType type, Item target) {
-        Item prototype = mvp_lmd_buffer_ops.get(target, "prototype");
-        if (item_is_error(prototype)) return prototype;
-        return mvp_lmd_is_object(prototype) ? prototype : mvp_lmd_program_library()->typed_arrays[type].values[1];
+        return mvp_lmd_constructor_prototype(target, mvp_lmd_program_library()->typed_arrays[type].values[1]);
     },
     [](Item source, int64_t index) { return mvp_lmd_array_index_property(source, index, ItemNull, LMD_PROP_GET); },
     [](Item source) {
@@ -1344,6 +1470,21 @@ static const JsTypedArrayOps typed_array_ops = {
     mvp_lmd_is_constructor,
     [](Item value) { return mvp_lmd_primitive_to_string(value); }
 };
+Item mvp_lmd_structured_clone(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item, Item) {
+    // reuse the shared clone traversal; only allocation and property semantics belong to the realm.
+    static const JsStructuredCloneOps ops = {
+        &mvp_lmd_array_ops, &typed_array_ops,
+        []() { return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0); },
+        [](Item object) { return mvp_lmd_object_project(object, 0); },
+        [](Item object, Item key) {
+            return mvp_lmd_property_with_receiver(object, key, ItemNull, LMD_PROP_GET, object);
+        },
+        [](Item object, Item key, Item value) {
+            return mvp_lmd_property_with_receiver(object, key, value, LMD_PROP_CREATE_DATA, object);
+        }
+    };
+    return js_structured_clone_with_ops(count ? args[0] : make_js_undefined(), &ops);
+}
 static Item object_locale(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
     return js_object_to_locale_string_with_ops(receiver, NULL, &typed_array_ops);
 }
@@ -1476,6 +1617,60 @@ Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* 
     return status;
 }
 
+static Item atomics_method(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item, Item) {
+    const auto* method = (const JsBuiltinMethodSpec*)((MvpLmdNativeCallable*)self.function)->state;
+    Item values[4];
+    for (int i = 0; i < 4; i++) values[i] = (uint64_t)i < count ? args[i] : Item{.item = ITEM_JS_UNDEFINED};
+    int operation;
+    switch (method->builtin_id) {
+    case JS_BUILTIN_ATOMICS_ADD: operation = JS_ATOMICS_OP_ADD; break;
+    case JS_BUILTIN_ATOMICS_AND: operation = JS_ATOMICS_OP_AND; break;
+    case JS_BUILTIN_ATOMICS_COMPAREEXCHANGE: operation = JS_ATOMICS_OP_COMPARE_EXCHANGE; break;
+    case JS_BUILTIN_ATOMICS_EXCHANGE: operation = JS_ATOMICS_OP_EXCHANGE; break;
+    case JS_BUILTIN_ATOMICS_LOAD: operation = JS_ATOMICS_OP_LOAD; break;
+    case JS_BUILTIN_ATOMICS_OR: operation = JS_ATOMICS_OP_OR; break;
+    case JS_BUILTIN_ATOMICS_STORE: operation = JS_ATOMICS_OP_STORE; break;
+    case JS_BUILTIN_ATOMICS_SUB: operation = JS_ATOMICS_OP_SUB; break;
+    case JS_BUILTIN_ATOMICS_XOR: operation = JS_ATOMICS_OP_XOR; break;
+    case JS_BUILTIN_ATOMICS_NOTIFY:
+        return js_atomics_notify_with_ops(values[0], values[1], values[2], &mvp_lmd_buffer_ops);
+    case JS_BUILTIN_ATOMICS_WAIT:
+    case JS_BUILTIN_ATOMICS_WAIT_ASYNC: {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> value(roots, ItemNull), result(roots, ItemNull);
+        bool async = method->builtin_id == JS_BUILTIN_ATOMICS_WAIT_ASYNC;
+        bool can_suspend = true;
+        if (!async && mvp_lmd_program_library()->test262_host) {
+            value.set(mvp_lmd_dynamic_global_this(program, false));
+            if (item_is_error(value.get())) return value.get();
+            if (value.get().item != ITEM_NULL) {
+                value.set(mvp_lmd_buffer_ops.get(value.get(), "__lambda_can_block"));
+                if (item_is_error(value.get())) return value.get();
+                can_suspend = value.get().item != ITEM_FALSE;
+            }
+        }
+        bool asynchronous = false;
+        value.set(js_atomics_wait_with_ops(values[0], values[1], values[2], values[3],
+            &mvp_lmd_buffer_ops, async, can_suspend, &asynchronous));
+        if (item_is_error(value.get()) || !async) return value.get();
+        result.set(mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0));
+        if (item_is_error(result.get())) return result.get();
+        Item status = mvp_lmd_named_set(result.get(), "async", Item{.item = b2it(asynchronous)}, 0);
+        if (!item_is_error(status)) status = mvp_lmd_named_set(result.get(), "value", value.get(), 0);
+        return item_is_error(status) ? status : result.get();
+    }
+    case JS_BUILTIN_ATOMICS_ISLOCKFREE:
+        return js_atomics_is_lock_free_with_ops(values[0], &mvp_lmd_buffer_ops);
+    case JS_BUILTIN_ATOMICS_PAUSE:
+        return js_atomics_pause_with_ops(values[0], &mvp_lmd_buffer_ops);
+    default:
+        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    }
+    return js_atomics_operation_with_ops(operation, values[0], values[1], values[2], values[3], &mvp_lmd_buffer_ops);
+}
+
 static Item buffer_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item, Item target) {
     if (target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -1545,6 +1740,27 @@ static Item buffer_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
 Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!state->buffers) return ItemNull;
     Item result = ItemNull;
+    if (state->atomics_value) {
+        *state->atomics_value = mvp_lmd_object_new(state->object_shape, 0);
+        if (item_is_error(*state->atomics_value)) return *state->atomics_value;
+        for (int i = 0; ; i++) {
+            const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
+            if (!method) break;
+            if (method->owner != JS_BUILTIN_OWNER_ATOMICS_METHOD) continue;
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> function(roots, mvp_lmd_native_function(program, (void*)method,
+                atomics_method, method->param_count, method->name));
+            if (item_is_error(function.get())) return function.get();
+            result = mvp_lmd_named_set(*state->atomics_value, method->name,
+                function.get(), JSPD_NON_ENUMERABLE);
+            if (item_is_error(result)) return result;
+        }
+        result = mvp_lmd_named_set(*state->atomics_value,
+            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+            Item{.item = s2it(heap_create_name("Atomics", 7))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+        if (item_is_error(result)) return result;
+    }
     MvpLmdClass* classes[] = {&state->buffers[0], &state->buffers[1], state->shared_buffer};
     Item* values[] = {state->buffer_values, state->buffer_values + 3, state->shared_buffer_values};
     const char* names[] = {"ArrayBuffer", "DataView", "SharedArrayBuffer"};
@@ -1559,12 +1775,9 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         ((MvpLmdNativeCallable*)cls->values[0].function)->state = (void*)(intptr_t)i;
         result = mvp_lmd_named_set(cls->values[1], "constructor", cls->values[0], JSPD_NON_ENUMERABLE);
         if (item_is_error(result)) return result;
-        JsPropertyDescriptor descriptor = {};
-        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-        js_pd_set_configurable(&descriptor, true);
-        descriptor.value = Item{.item = s2it(heap_create_name(name, strlen(name)))};
-        result = mvp_lmd_define_own_property(cls->values[1],
-            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))}, &descriptor);
+        result = mvp_lmd_named_set(cls->values[1],
+            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+            Item{.item = s2it(heap_create_name(name, strlen(name)))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
         if (item_is_error(result)) return result;
         if (i != JS_BUFFER_VIEW_DATA_VIEW) {
             RootFrame roots(1);
@@ -1583,8 +1796,14 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         result = mvp_lmd_named_set(state->buffer_values[6], "detachArrayBuffer",
             mvp_lmd_native_function(program, (void*)(intptr_t)BUFFER_DETACH_HOST, buffer_method, 1, "detachArrayBuffer"));
         if (item_is_error(result)) return result;
+        result = mvp_lmd_named_set(state->buffer_values[6], "evalScript",
+            mvp_lmd_native_function(program, NULL, mvp_lmd_eval_script, 1, "evalScript"));
+        if (item_is_error(result)) return result;
+        result = mvp_lmd_named_set(state->buffer_values[6], "createRealm",
+            mvp_lmd_native_function(program, NULL, mvp_lmd_create_realm, 0, "createRealm"));
+        if (item_is_error(result)) return result;
         // unavailable host facilities must not become a catchable TypeError from calling undefined.
-        for (const char* name : {"evalScript", "createRealm", "agent"}) {
+        for (const char* name : {"agent"}) {
             RootFrame roots(1);
             if (!roots.valid()) return ItemError;
             Rooted<Item> getter(roots, mvp_lmd_native_function(program,
@@ -1662,24 +1881,31 @@ static Item uri_call(Context*, MvpLmdProgram*, Item* args, uint64_t count,
     Rooted<Item> text(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
     text.set(mvp_lmd_primitive_to_string(text.get()));
     if (item_is_error(text.get())) return text.get();
+    if (spec->id == JS_BUILTIN_GLOBAL_FN_ESCAPE) return js_escape(text.get());
+    if (spec->id == JS_BUILTIN_GLOBAL_FN_UNESCAPE) return js_unescape(text.get());
     return js_uri_transform_string(text.get(), component, decode, uri_error);
 }
 
 Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
     if (!context->name_pool) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    state->prototype_key = name_pool_create_unique_private(context->name_pool, {"MVP [[Prototype]]", 17});
-    state->extensibility_key = name_pool_create_unique_private(context->name_pool, {"MVP [[Extensible]]", 18});
+    state->prototype_key = mvp_lmd_internal_name(LMD_INTERNAL_PROTOTYPE);
+    state->extensibility_key = mvp_lmd_internal_name(LMD_INTERNAL_EXTENSIBLE);
     if (!state->prototype_key || !state->extensibility_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     state->values[LMD_LIBRARY_JSON] = mvp_lmd_object_new(&state->json_shape, 0);
     if (item_is_error(state->values[LMD_LIBRARY_JSON])) return state->values[LMD_LIBRARY_JSON];
-    Item result = mvp_lmd_library_class_initialize(program, state, &state->object, LMD_LIBRARY_OBJECT, "Object", object_construct, 1);
+    Item result = mvp_lmd_named_set(state->values[LMD_LIBRARY_JSON],
+        Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+        Item{.item = s2it(heap_create_name("JSON", 4))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+    if (item_is_error(result)) return result;
+    result = mvp_lmd_library_class_initialize(program, state, &state->object, LMD_LIBRARY_OBJECT, "Object", object_construct, 1);
     if (item_is_error(result)) return result;
     ((MvpLmdCallable*)state->object.values[0].function)->custom_new_target = true;
     result = mvp_lmd_library_class_initialize(program, state, &state->date, LMD_LIBRARY_DATE, "Date", date_construct, 7);
     if (item_is_error(result)) return result;
     result = mvp_lmd_library_class_initialize(program, state, &state->array, LMD_LIBRARY_ARRAY, "Array", array_construct, 1);
     if (item_is_error(result)) return result;
+    ((MvpLmdCallable*)state->array.values[0].function)->custom_new_target = true;
     result = mvp_lmd_library_class_initialize(program, state, &state->symbol, LMD_LIBRARY_SYMBOL, "Symbol", symbol_create, 0);
     if (item_is_error(result)) return result;
     // Symbol has [[Construct]] for heritage/newTarget checks; its native entry throws on construction.
@@ -1692,7 +1918,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         {"species", JS_SYMBOL_SPECIES}, {"isConcatSpreadable", JS_SYMBOL_IS_CONCAT_SPREADABLE},
         {"match", JS_SYMBOL_MATCH}, {"replace", JS_SYMBOL_REPLACE}, {"search", JS_SYMBOL_SEARCH},
         {"split", JS_SYMBOL_SPLIT}, {"matchAll", JS_SYMBOL_MATCH_ALL},
-        {"unscopables", JS_SYMBOL_UNSCOPABLES}, {"asyncIterator", JS_SYMBOL_ASYNC_ITERATOR}};
+        {"unscopables", JS_SYMBOL_UNSCOPABLES}, {"asyncIterator", JS_SYMBOL_ASYNC_ITERATOR},
+        {"dispose", JS_SYMBOL_DISPOSE}, {"asyncDispose", JS_SYMBOL_ASYNC_DISPOSE}};
     for (int i = 0; i < (state->mutable_prototypes ? (int)(sizeof(symbols) / sizeof(symbols[0])) : 1); i++) {
         Item id = {.item = i2it(symbols[i].id)};
         Item value = symbol_create(context, program, &id, 1, Item{.item = ITEM_JS_UNDEFINED}, ItemNull, Item{.item = ITEM_JS_UNDEFINED});
@@ -1764,10 +1991,10 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     result = mvp_lmd_named_set(state->values[LMD_LIBRARY_OBJECT_STATICS], "is",
         mvp_lmd_native_function(program, NULL, object_same_value, 2, "is"), JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
-    const char* predicates[] = {"isPrototypeOf", "propertyIsEnumerable"};
-    for (int i = 0; i < 2; i++) {
+    const char* predicates[] = {"isPrototypeOf", "propertyIsEnumerable", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__"};
+    for (int i = 0; i < 6; i++) {
         result = mvp_lmd_named_set(state->values[LMD_LIBRARY_OBJECT_PROTOTYPE], predicates[i],
-            mvp_lmd_native_function(program, (void*)(intptr_t)i, object_predicate, 1, predicates[i]));
+            mvp_lmd_native_function(program, (void*)(intptr_t)i, object_predicate, i == 2 || i == 3 ? 2 : 1, predicates[i]), JSPD_NON_ENUMERABLE);
         if (item_is_error(result)) return result;
     }
     const char* projections[] = {"keys", "values", "entries", "hasOwn", "getOwnPropertyNames", "getOwnPropertySymbols", "getOwnPropertyDescriptors"};
@@ -1854,7 +2081,7 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         }
     }
     if (state->primitives) {
-        state->primitive_key = name_pool_create_unique_private(context->name_pool, {"MVP [[PrimitiveValue]]", 22});
+        state->primitive_key = mvp_lmd_internal_name(LMD_INTERNAL_PRIMITIVE);
         if (!state->primitive_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         for (int i = 0; i < LMD_PRIMITIVE_COUNT + 1; i++) {
             MvpLmdClass* cls = i == LMD_PRIMITIVE_COUNT ? &state->symbol : &state->primitives[i];
@@ -1886,19 +2113,16 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
                 if (item_is_error(result)) return result;
             }
             if (i >= LMD_PRIMITIVE_BIGINT) {
-                JsPropertyDescriptor descriptor = {};
-                descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-                js_pd_set_configurable(&descriptor, true);
                 const char* tag = i == LMD_PRIMITIVE_BIGINT ? "BigInt" : "Symbol";
-                descriptor.value = Item{.item = s2it(heap_create_name(tag, strlen(tag)))};
-                Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))};
-                result = mvp_lmd_define_own_property(cls->values[1], key, &descriptor);
+                result = mvp_lmd_named_set(cls->values[1],
+                    Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+                    Item{.item = s2it(heap_create_name(tag, strlen(tag)))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
                 if (item_is_error(result)) return result;
                 if (i == LMD_PRIMITIVE_COUNT) {
-                    descriptor.value = mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2), primitive_method, 1, "[Symbol.toPrimitive]");
-                    if (item_is_error(descriptor.value)) return descriptor.value;
-                    key.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE));
-                    result = mvp_lmd_define_own_property(cls->values[1], key, &descriptor);
+                    result = mvp_lmd_named_set(cls->values[1],
+                        Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE))},
+                        mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2), primitive_method, 1, "[Symbol.toPrimitive]"),
+                        JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
                     if (item_is_error(result)) return result;
                 }
             }
@@ -1919,6 +2143,16 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], "toFixed",
             mvp_lmd_native_function(program, (void*)(intptr_t)LMD_METHOD_TO_FIXED, primitive_method, 1, "toFixed"), JSPD_NON_ENUMERABLE);
         if (item_is_error(result)) return result;
+        const char* formats[] = {"toPrecision", "toExponential"};
+        const char* widths[] = {"asIntN", "asUintN"};
+        for (int i = 0; i < 2; i++) {
+            result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], formats[i],
+                mvp_lmd_native_function(program, (void*)(intptr_t)(PRIMITIVE_PRECISION + i), primitive_method, 1, formats[i]), JSPD_NON_ENUMERABLE);
+            if (item_is_error(result)) return result;
+            result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_BIGINT].values[0], widths[i],
+                mvp_lmd_native_function(program, (void*)(intptr_t)(11 + i), primitive_static, 2, widths[i]), JSPD_NON_ENUMERABLE);
+            if (item_is_error(result)) return result;
+        }
         for (int kind : {LMD_PRIMITIVE_NUMBER, LMD_PRIMITIVE_BIGINT}) {
             // the shared no-Intl policy ignores locale arguments and keeps the primitive brand check.
             result = mvp_lmd_named_set(state->primitives[kind].values[1], "toLocaleString",
@@ -1952,7 +2186,9 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         int slot = spec->id == JS_BUILTIN_GLOBAL_FN_DECODE_URI ? LMD_LIBRARY_DECODE_URI :
             spec->id == JS_BUILTIN_GLOBAL_FN_ENCODE_URI ? LMD_LIBRARY_ENCODE_URI :
             spec->id == JS_BUILTIN_GLOBAL_FN_DECODE_URICOMPONENT ? LMD_LIBRARY_DECODE_COMPONENT :
-            spec->id == JS_BUILTIN_GLOBAL_FN_ENCODE_URICOMPONENT ? LMD_LIBRARY_ENCODE_COMPONENT : -1;
+            spec->id == JS_BUILTIN_GLOBAL_FN_ENCODE_URICOMPONENT ? LMD_LIBRARY_ENCODE_COMPONENT :
+            spec->id == JS_BUILTIN_GLOBAL_FN_ESCAPE ? LMD_LIBRARY_ESCAPE :
+            spec->id == JS_BUILTIN_GLOBAL_FN_UNESCAPE ? LMD_LIBRARY_UNESCAPE : -1;
         if (slot < 0) continue;
         state->values[slot] = mvp_lmd_native_function(program, (void*)spec, uri_call, spec->param_count, spec->name);
         if (item_is_error(state->values[slot])) return state->values[slot];
@@ -1964,7 +2200,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     for (int i = 0; ; i++) {
         const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
         if (!method) break;
-        if (method->builtin_id != JS_BUILTIN_MAP_GROUP_BY && method->builtin_id != JS_BUILTIN_OBJECT_GROUP_BY) continue;
+        if (method->builtin_id != JS_BUILTIN_MAP_GROUP_BY && method->builtin_id != JS_BUILTIN_OBJECT_GROUP_BY &&
+                method->builtin_id != JS_BUILTIN_OBJECT_FROM_ENTRIES) continue;
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> function(roots, mvp_lmd_native_function(program, (void*)method, collection_group_by,
