@@ -2479,6 +2479,12 @@ const CssValue* css_project_shorthand_longhand(Pool* pool, const CssValue* value
         return css_grid_shorthand_longhand(pool, value, shorthand, longhand);
     if (shorthand == CSS_PROPERTY_CONTAINER)
         return css_container_shorthand_longhand(value, longhand, pool);
+    if (shorthand == CSS_PROPERTY_GAP) {
+        size_t count = css_space_list_count(value);
+        if (!count || count > 2 || (longhand != CSS_PROPERTY_ROW_GAP && longhand != CSS_PROPERTY_COLUMN_GAP)) return nullptr;
+        // a single gap value supplies both axes; two values keep row/column order.
+        return css_space_list_item(value, longhand == CSS_PROPERTY_COLUMN_GAP && count == 2 ? 1 : 0);
+    }
     if (shorthand != CSS_PROPERTY_FLEX) return value;
     const CssValue* members[3];
     if (!css_flex_components(value, members)) return nullptr;

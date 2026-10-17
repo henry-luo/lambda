@@ -93,7 +93,7 @@ fn literal_term(src) any^ {
     else (<lit v: v>)
   }
 }
-fn int_spelling(s) => not contains(s, ".") and not (contains(lower(s), "e") and not starts_with(lower(s), "0x"))
+fn int_spelling(s: string) => not contains(s, ".") and not (contains(lower(s), "e") and not starts_with(lower(s), "0x"))
   and not contains(["inf", "nan", "-inf"], s)
 
 // ===== lowering =====
@@ -152,7 +152,7 @@ fn func_term(n) any^ {
 
 // a call: a system function goes through the kernel's declared builtin table
 // by name; everything else applies an n-ary closure. A call not engaged by a
-// handler or an `or` rescue propagates an error result (S7.5.1) — that is the
+// handler propagates an error result (S7.5.1v2) — that is the
 // postfix `^` the dump does not record, which a well-typed program must have
 // written (E228) — unless the callee is a system function whose failures are
 // plain values (S7.4.5; the dump's `may_return_error` marks the `T^E` ones).
@@ -476,7 +476,7 @@ pub fn norm(n) any^ => match name(n) {
   }
   case 'AST_NODE_BINARY': {
     let op = string(attr(n, 'op'))
-    let l = if (op == "or") norm_engaged(first(n, 'left')^)^ else norm(first(n, 'left')^)^
+    let l = norm(first(n, 'left')^)^
     let r = if (op == "is") type_term(first(n, 'right')^)^ else norm(first(n, 'right')^)^
     binary_term(op, l, r)^
   }

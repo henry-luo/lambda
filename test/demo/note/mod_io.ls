@@ -4,16 +4,24 @@ import lambda.editor.mod_doc
 import html: lambda.edit.html
 import session: lambda.edit.session
 import model: .mod_model
+import component: lambda.ui.core.component
+
+let max_book_bytes = 64000000
 
 pub fn archive(book) => {format:"lambda-notes",version:1,sequence:book.sequence,folders:book.folders,
     notes:[for (n in book.notes) {*:n,doc:format(n.doc,'mark')^}]}
 fn valid_attrs(attrs) => attrs is array and all([for (a in attrs) a is map and a.name is symbol and
     (a.value is string or a.value is number or a.value is bool)])
+fn safe_color_style(css:string) bool => all([for (decl in split(css,";"),let pair=split(decl,":") where trim(decl)!="")
+    contains(["color","background-color"],trim(pair[0])) and component.hex_color(trim(join(drop(pair,1),":")))])
+fn safe_mark(m) bool => m is map and
+    (if (m.name=='span') m.value is array and all([for (a in m.value,let value=a.value)
+        a is map and a.name=='style' and value is string and safe_color_style(value)])
+    else contains(['strong','b','em','i','u','s','del','sub','sup','code'],m.name) and m.value==true)
 fn safe_node(n,depth=0) bool => depth<48 and n is map and
-    (if (is_text(n)) n.text is string and n.marks is array and all([for (m in n.marks)
-        m is map and contains(['strong','b','em','i','u','s','del','sub','sup','code'],m.name) and m.value==true])
+    (if (is_text(n)) n.text is string and n.marks is array and all([for (m in n.marks) safe_mark(m)])
     else is_node(n) and contains(['doc','p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','li','pre','br','hr',
-        'table','tr','td','th','thead','tbody'],n.tag) and valid_attrs(n.attrs) and n.content is array and
+        'table','tr','td','th','thead','tbody','img'],n.tag) and valid_attrs(n.attrs) and n.content is array and
         all([for (c in n.content) safe_node(c,depth+1)]))
 fn decoded_note(n,folders) map^ {
     if (not (n is map and n.id is string and n.folder is string and n.updated is string and
@@ -27,7 +35,7 @@ fn decoded_note(n,folders) map^ {
     }
 }
 pub fn decode(source) map^ {
-    if (len(source)>4000000) raise error("Notes: notebooks are limited to 4 MB.") else {
+    if (len(source)>max_book_bytes) raise error("Notes: notebooks are limited to 64 MB.") else {
         let data = parse(source,'json')^;
         if (not (data is map and data.format=="lambda-notes" and data.version==1 and
             data.folders is array and data.notes is array and data.sequence is int and data.sequence>0))

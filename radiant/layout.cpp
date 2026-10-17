@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_paged.hpp"
 #include "page_document.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -3971,7 +3972,98 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width) {
     return line->effective_right - (line->advance_x - line->left) - item_width;
 }
 
+static bool expand_line_leaders(LayoutContext* lycon) {
+    if (!lycon->line.has_leaders) return true;
+    View* first = layout_inline_fragment_root(lycon->line.start_view);
+    if (!first) return true;
+    size_t leaders = 0;
+    bool adjacent = lycon->line.has_replaced_content || lycon->line.atomic_inline_count > 0;
+    DomElement* owner = nullptr;
+    auto inspect = [&](View* view) -> bool {
+        if (view->view_type != RDT_VIEW_TEXT) return view->view_type == RDT_VIEW_INLINE;
+        ViewText* text = lam::view_require_text(view);
+        bool current = false;
+        for (TextRect* rect = text->rect; rect; rect = rect->next)
+            current |= rect->line_number == lycon->block.line_number && rect->length > 0;
+        if (current && layout_text_is_leader(text)) {
+            leaders++;
+            owner = text->parent->parent && text->parent->parent->parent
+                ? text->parent->parent->parent->as_element() : text->parent->as_element();
+        } else if (current && text->width > 0.0f) adjacent = true;
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(first, inspect, no_finish);
+    if (!leaders) return true;
+    if (!adjacent) {
+        paged_flow_layout_error(lycon, owner, TYPESET_UNPLACEABLE, "leader cannot occupy a line alone");
+        return false;
+    }
+    float edge = lycon->line.has_float_intrusion ? lycon->line.effective_right : lycon->line.right;
+    float extra = max(0.0f, edge - lycon->line.advance_x) / (float)leaders;
+    float shift = 0.0f; bool success = true;
+    auto expand = [&](View* view) -> bool {
+        if (!success) return false;
+        if (view->view_type == RDT_VIEW_INLINE) return true;
+        if (view->view_type != RDT_VIEW_TEXT) { view->x += shift; return false; }
+        ViewText* text = lam::view_require_text(view);
+        bool leader = layout_text_is_leader(text);
+        if (!leader) {
+            for (TextRect* rect = text->rect; rect; rect = rect->next)
+                if (rect->line_number == lycon->block.line_number) rect->x += shift;
+        } else if (text->rect && text->rect->line_number == lycon->block.line_number) {
+            TextRect* begin = text->rect; TextRect* last = begin; size_t parts = 1;
+            while (last->next) { last = last->next; parts++; }
+            float step = last->x + last->width - begin->x, width = step + extra;
+            if (!isfinite(step) || step <= 0.0f) {
+                paged_flow_layout_error(lycon, owner, TYPESET_UNPLACEABLE, "leader pattern has no advance");
+                success = false; return false;
+            }
+            float allocated_end = begin->x + shift + width;
+            // CSS Content 3 §2.5.3: complete pattern boxes tile from the line's end edge.
+            float end = edge - ceilf(max(0.0f, (edge - allocated_end) / step)) * step;
+            float copies = floorf(max(0.0f, (end - begin->x - shift) / step));
+            size_t limit = paged_flow_node_limit(lycon) / parts;
+            if (!isfinite(copies) || copies < 1.0f || copies >= (float)SIZE_MAX || copies > (float)limit) {
+                paged_flow_layout_error(lycon, owner, copies >= 1.0f ? TYPESET_BUDGET_EXHAUSTED : TYPESET_UNPLACEABLE,
+                    "leader has no complete pattern within its line budget");
+                success = false; return false;
+            }
+            size_t count = (size_t)copies; // INT_CAST_OK: repeated pattern count, bounded by the node budget.
+            layout_shift_text_rects(text, end - (float)count * step - begin->x, 0.0f);
+            TextRect* tail = last;
+            for (size_t i = 1; i < count; i++) {
+                // fallback fonts can split one pattern into several rects; repeat the whole group.
+                for (TextRect* part = begin; ; part = part->next) {
+                    TextRect* copy = lycon->doc->view_tree->alloc_text_rect();
+                    if (!copy) {
+                        paged_flow_layout_error(lycon, owner, TYPESET_OUT_OF_MEMORY, "leader pattern allocation failed");
+                        success = false; return false;
+                    }
+                    *copy = *part; copy->x += (float)i * step; copy->next = nullptr;
+                    tail->next = lam::own(copy); tail = copy;
+                    if (part == last) break;
+                }
+            }
+            // the final allocation also owns the unpainted gap before adjacent content.
+            tail->width += max(0.0f, allocated_end - end); shift += extra;
+        }
+        adjust_text_bounds(text);
+        return false;
+    };
+    auto finish = [&](View* view) {
+        if (view->view_type != RDT_VIEW_INLINE) return;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        recompute_span_bounding_box_after_line_layout(span, inline_span_has_multiple_line_fragments(span),
+            span->font ? span->fontp()->font_handle : nullptr);
+    };
+    layout_walk_inline_views(first, expand, finish);
+    if (success) lycon->line.advance_x += shift;
+    return success;
+}
+
 void line_align(LayoutContext* lycon) {
+    if (!expand_line_leaders(lycon)) return;
     ViewBlock* line_block = lycon->view && lycon->view->is_block()
         ? lam::view_require_block(lycon->view)
         : (lycon->view

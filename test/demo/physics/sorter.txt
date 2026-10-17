@@ -10,24 +10,25 @@
   <body
     <main
       <header class: "page-header",
-        <div
+        <div class: "header-meta",
           <p class: "eyebrow",
             "LAMBDA PHYSICS / PLAYGROUND">
+          <a class: "edition", href: "index.ls",
+            "FOUR EXPERIMENTS · 3D">>
+        <div class: "title-row",
           <h1
-            "Marble sorter">>
-        <a class: "edition", href: "index.ls",
-          "FOUR EXPERIMENTS · 3D">>
-      <nav class: "navigation", aria-label: "Physics demonstrations",
-        <a href: "index.ls", class: "",
-          "All experiments">
-        <a href: "domino.ls", class: "",
-          "Domino circuit">
-        <a href: "salvage.ls", class: "",
-          "Salvage bay">
-        <a href: "sorter.ls", class: "active",
-          "Marble sorter">
-        <a href: "bounce.ls", class: "",
-          "Bounce lab">>
+            "Marble sorter">
+          <nav class: "navigation", aria-label: "Physics demonstrations",
+            <a href: "index.ls", class: "",
+              "All">
+            <a href: "domino.ls", class: "",
+              "Domino circuit">
+            <a href: "salvage.ls", class: "",
+              "Salvage bay">
+            <a href: "sorter.ls", class: "active",
+              "Marble sorter">
+            <a href: "bounce.ls", class: "",
+              "Bounce lab">>>>
       <p class: "intro",
         "Eighteen marbles roll down an inclined tray. A motor-driven paddle changes their paths, and three sensor gates count the first arrival of each marble.">
       <div class: "toolbar", role: "group", aria-label: "Simulation controls",

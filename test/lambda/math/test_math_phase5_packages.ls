@@ -7,7 +7,7 @@ import sym: lambda.doc.math.symbols
 import mhchem: lambda.doc.math.mhchem
 
 fn ast(src) => parse(src, {type: "math"}) ^ { null }
-fn html(src) => format(math.render_inline(ast(src)) ^ { "ERR" }, 'html') or "ERR"
+fn html(src) => (format(math.render_inline(ast(src)) ^ { "ERR" }, 'html') ^ { null }) or "ERR"
 fn has(text, part) => index_of(text, part) != null
 // unmapped commands, and whether the formula renders
 fn check(src) => {unmapped: math.unmapped_commands(ast(src)), renders: (math.render_box(ast(src)) ^ { null }) != null}

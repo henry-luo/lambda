@@ -2,8 +2,8 @@
 // The shared factory table keeps tag choice separate from projection (D7.2.5).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
-import model: .mod_model
 import page: .mod_page
+import rendering: lambda.edit.model
 
 let factories = {
     p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
@@ -36,9 +36,7 @@ fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
 view map {
     if (~.kind == 'text') wrap_marks(~.marks,0,if (~.text == "") "\u200B" else ~.text)
     else if (~.kind == 'node') make(if (~.tag == 'doc') 'div' else ~.tag,
-        // split/delete can leave an empty block: its node-position caret still needs a line box.
-        projected_attrs(~.attrs),if (len(~.content)==0 and len(model.blocks(~))>0) ["\u200B"]
-        else [for (child in ~.content) apply(child)])
+        projected_attrs(~.attrs),rendering.surface_children(~,(child)=>apply(child)))
     else ""
 }
 pub fn surface(editor,zoom,read_only=false) =>

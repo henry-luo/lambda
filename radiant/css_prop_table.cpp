@@ -148,6 +148,8 @@ bool css_property_runtime_inherited(CssPropertyCode property) {
         CSS_PROPERTY_TAB_SIZE,
         CSS_PROPERTY_FILL, CSS_PROPERTY_STROKE, CSS_PROPERTY_STROKE_WIDTH,
         CSS_PROPERTY_ACCENT_COLOR, CSS_PROPERTY_VISIBILITY,
+        // native hit testing consumes the same inherited cursor as computed style.
+        CSS_PROPERTY_CURSOR,
         CSS_PROPERTY_EMPTY_CELLS, CSS_PROPERTY_DIRECTION,
         CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE_TYPE,
         CSS_PROPERTY_LIST_STYLE, CSS_PROPERTY_RUBY_POSITION,
@@ -276,6 +278,14 @@ static bool serialize_direct(const CssPropAccessor* accessor, DomElement* elemen
 
 static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, int pseudo_type) {
     if (!element) return nullptr;
+    if (id == CSS_PROPERTY_ROW_GAP || id == CSS_PROPERTY_COLUMN_GAP) {
+        // CSSOM must choose the same axis winner as layout when gap stays a shorthand.
+        CssDeclaration* axis = pseudo_type ? dom_element_get_pseudo_element_value(element, id, pseudo_type)
+            : dom_element_get_specified_value(element, id);
+        CssDeclaration* gap = pseudo_type ? dom_element_get_pseudo_element_value(element, CSS_PROPERTY_GAP, pseudo_type)
+            : dom_element_get_specified_value(element, CSS_PROPERTY_GAP);
+        return gap && (!axis || css_declaration_cascade_compare(gap, axis) > 0) ? gap : axis;
+    }
     unsigned grid = css_grid_property_mask(id);
     if (grid > 15 && !(grid & (grid - 1))) {
         if (pseudo_type != 0) {
@@ -553,8 +563,9 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         const CssValue* shorthand_value = computed_box_side_value(
             element, id, pseudo_type, &declaration);
         if (shorthand_value) value = shorthand_value;
-        bool container_shorthand = declaration && declaration->property_code == CSS_PROPERTY_CONTAINER;
-        bool flex_shorthand = declaration && declaration->property_code == CSS_PROPERTY_FLEX && id != CSS_PROPERTY_FLEX;
+        bool component_shorthand = grid_shorthand || (declaration && declaration->property_code != id &&
+            (declaration->property_code == CSS_PROPERTY_CONTAINER || declaration->property_code == CSS_PROPERTY_FLEX ||
+             declaration->property_code == CSS_PROPERTY_GAP));
         bool background_shorthand = false;
         if (id == CSS_PROPERTY_BACKGROUND_COLOR) {
             CssDeclaration* background = computed_decl(element, CSS_PROPERTY_BACKGROUND, pseudo_type);
@@ -566,8 +577,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         if (css_value_contains_pending_substitution(value)) {
             // A live declaration read can precede layout; use the same substitution and validation as layout.
             CssPropertyCode value_property = declaration && declaration->pending_shorthand_code > 0
-                ? declaration->pending_shorthand_code : grid_shorthand ? declaration->property_code
-                : container_shorthand || flex_shorthand ? declaration->property_code
+                ? declaration->pending_shorthand_code : component_shorthand ? declaration->property_code
                 : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
             value = css_resolve_element_var_value(scratch, element, value,
                 value_property);
@@ -576,7 +586,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         }
         CssPropertyCode projection = declaration && declaration->pending_shorthand_code > 0
             ? declaration->pending_shorthand_code
-            : grid_shorthand || container_shorthand || flex_shorthand ? declaration->property_code : id;
+            : component_shorthand ? declaration->property_code : id;
         value = css_project_shorthand_longhand(scratch, value, projection, id);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type);
@@ -2118,6 +2128,8 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_VISIBILITY, serialize_visibility, 0),
     // hit testing reads the cascade directly; CSSOM must expose that same inherited value.
     DERIVED_ROW(CSS_PROPERTY_POINTER_EVENTS, serialize_decl, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    // the package's mouse-selection policy must see the cascaded user-select value.
+    DERIVED_ROW(CSS_PROPERTY_USER_SELECT, serialize_decl, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_WIDTH, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_HEIGHT, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MIN_WIDTH, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),

@@ -418,6 +418,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // their overflowing tracks must not feed back into its intrinsic fallback.
     bool has_explicit_height = !layout_block_has_automatic_height(grid_container) ||
         layout_block_has_size_containment_in_axis(grid_container, false);
+    if (grid_layout && grid_layout->computed_row_count > 0 && !has_explicit_height) {
+        // final tracks replace the provisional intrinsic estimate, which may shrink after columns rewrap.
+        grid_container->height = layout_grid_row_border_box_extent(grid_container, grid_layout);
+    }
     // A row with a fixed maximum establishes the auto grid block size;
     // overflowing items must not feed back into that size.
     bool has_non_definite_row = false;

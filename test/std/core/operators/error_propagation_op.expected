@@ -4,8 +4,8 @@ false
 false
 false
 false
-0
-100
-[false, true, "test error"]
+error
+error
+[error, true, "test error"]
 [42, false]
 10

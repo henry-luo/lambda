@@ -4139,6 +4139,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .png       Portable Network Graphics\n");
             printf("  .jpg/.jpeg JPEG Image\n");
             printf("  .gif       Graphics Interchange Format\n");
+            fputs("  .psd       Layered Photoshop image (supported RGB/grayscale8 profile)\n", stdout);
             printf("  .json      JSON (source view)\n");
             printf("  .yaml/.yml YAML (source view)\n");
             printf("  .toml      TOML (source view)\n");
@@ -4349,6 +4350,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
                     strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0 ||
+                    str_ieq_cstr(ext, ".psd") ||
                     strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
                     strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
                     strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
@@ -4361,7 +4363,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

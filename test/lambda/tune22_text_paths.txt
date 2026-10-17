@@ -7,5 +7,5 @@
   literal_empty: [true, false, false, true],
   literal_non_string: [false, false, false, true],
   literal_null: [false, false, false, true],
-  literal_error: [false, false, false, true]
+  literal_error: [error, error, error, error]
 }

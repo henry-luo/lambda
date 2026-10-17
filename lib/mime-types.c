@@ -26,6 +26,7 @@ MimePattern magic_patterns[] = {
     // GIF
     {"GIF87a", 6, 0, 50, "image/gif", "image/gif", 80},
     {"GIF89a", 6, 0, 50, "image/gif", "image/gif", 80},
+    {"8BPS", 4, 0, 50, "image/vnd.adobe.photoshop", "image/vnd.adobe.photoshop", 80},
 
     // TIFF
     {"MM\x00\x2a", 4, 0, 50, "image/tiff"},

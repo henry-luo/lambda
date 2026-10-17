@@ -73,7 +73,7 @@ pub fn closure_of(f, kinds) any^ =>
 // A host error is a VALUE the modelled program holds, tests and rescues
 // (S7.4.1, S7.9.1–S7.9.4): the kernel keeps one inside `<errv v: e>`, so a
 // `^` on `ev(…)` never mistakes it for stuckness. `host` wraps a host result,
-// `raw` unwraps before a host operation, `truthy` is S3.1 (an error is falsy).
+// `raw` unwraps before a host operation; S3.4/S3.5 inspect errors before truthiness.
 pub fn stuck(why) any^ => raise error({code: 7001, message: why})
 fn propagate(v: any | error) any^ { let o: error = v;  raise error("sem-propagate", o) }
 fn is_errv(v) => type(v) == element and name(v) == 'errv'
@@ -553,12 +553,12 @@ pub fn ev(t, env, fuel) any^ =>
     // expressed by NOT recursing into the second child, so an ill-formed or
     // stuck right operand is never reached; the checks prove that by putting an
     // unbound variable there. Found by the Stage 5 harness on comp_expr.ls.
-    case 'andd': { let l = ev(t[0], env, fuel - 1)^; if (truthy(l)) ev(t[1], env, fuel - 1)^ else l }
-    case 'orr':  { let l = ev(t[0], env, fuel - 1)^; if (truthy(l)) l else ev(t[1], env, fuel - 1)^ }
-    // `not err` is true: the truthy family participates (S7.9.2)
-    case 'nott': { let x = ev(t[0], env, fuel - 1)^;  not truthy(x) }
-    case 'iff': if (truthy(ev(t[0], env, fuel - 1)^)) ev(t[1], env, fuel - 1)^
-                else ev(t[2], env, fuel - 1)^
+    case 'andd': { let l = ev(t[0], env, fuel - 1)^; if (is_errv(l)) l else if (truthy(l)) ev(t[1], env, fuel - 1)^ else l }
+    case 'orr':  { let l = ev(t[0], env, fuel - 1)^; if (is_errv(l)) l else if (truthy(l)) l else ev(t[1], env, fuel - 1)^ }
+    // S3.4: a visited error remains the logical expression value.
+    case 'nott': { let x = ev(t[0], env, fuel - 1)^; if (is_errv(x)) x else not truthy(x) }
+    case 'iff': { let x = ev(t[0], env, fuel - 1)^; if (is_errv(x)) x
+                else if (truthy(x)) ev(t[1], env, fuel - 1)^ else ev(t[2], env, fuel - 1)^ }
     // a closure captures its defining environment as data — this is what makes
     // the model environment-based (P2) and so needs no capture-avoiding subst
     case 'lam': {
@@ -897,19 +897,35 @@ fn mapv_get(m, k) {
     if (len(hits) > 0) hits[len(hits) - 1] else null
 }
 fn mapv_keys(m) => unique([for (e in m) e.k])
+// S5.1.5: each visited comparison decides before the next child is evaluated.
+fn sem_eq_items(a, b, keys, i) any^ {
+    if (i >= len(keys)) true
+    else {
+        let result = if (is_mapv(a)) sem_eq(mapv_get(a, keys[i]), mapv_get(b, keys[i]))^
+            else sem_eq(a[i], b[i])^;
+        if (is_errv(result)) result else if (not result) false
+        else sem_eq_items(a, b, keys, i + 1)^
+    }
+}
 fn sem_eq(a, b) any^ {
-    if (is_elmv(a) and is_elmv(b))
-        a.n == b.n and sem_eq(elmv_attrs(a), elmv_attrs(b))^ and sem_eq(elmv_kids(a), elmv_kids(b))^
+    let err = first_error(a, b)
+    if (err != null) err
+    else if (is_elmv(a) and is_elmv(b)) {
+        if (a.n != b.n) false
+        else { let attrs = sem_eq(elmv_attrs(a), elmv_attrs(b))^;
+            if (is_errv(attrs)) attrs else if (not attrs) false
+            else sem_eq(elmv_kids(a), elmv_kids(b))^ }
+    }
     else if (is_mapv(a) and is_mapv(b)) {
         let ka = mapv_keys(a)
         let kb = mapv_keys(b)
-        len(ka) == len(kb) and all([for (k in ka) contains(kb, k) and sem_eq(mapv_get(a, k), mapv_get(b, k))^])
+        if (len(ka) != len(kb) or not all([for (k in ka) contains(kb, k)])) false
+        else sem_eq_items(a, b, ka, 0)^
     }
-    else if (type(a) == array and type(b) == array)
-        len(a) == len(b) and all([for (i in 0 to len(a) - 1) sem_eq(a[i], b[i])^])
-    // equality is total (SI4): an error compares like any value and answers a
-    // boolean (`error("x") == 1` is false), so no short-circuit here
-    else { let x = raw(a)  let y = raw(b);  host(x == y)^ }
+    else if (type(a) == array and type(b) == array) {
+        if (len(a) != len(b)) false else sem_eq_items(a, b, a, 0)^
+    }
+    else { let x = raw(a)  let y = raw(b); host(x == y)^ }
 }
 // one host binary operation on two evaluated operands; an error operand is
 // the result (S7.9.3), otherwise the operands reach the host typed `any`

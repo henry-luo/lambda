@@ -128,7 +128,7 @@ pub fn cell_asts(el, operators) {
     let tag = string(name(el))
     let gathered = starts_with(tag, "gather") or starts_with(tag, "multline") or
         starts_with(tag, "equation")
-    let cells = [for (row in rows_for(el), cell in (if (row.error == null)
+    let cells = [for (row in rows_for(el), cell in (if (row.error is null)
         row_cells(row.math, gathered) else [])) cell];
     [for (cell in cells, let ast = parse_cell(cell_expression(cell, operators))
         where ast != null) ast]
@@ -234,7 +234,7 @@ fn strip_annotations(source, i, depth, st) {
 pub fn rows_for(el) {
     let tag = string(name(el))
     let parsed = alignat_body(if (el.source != null) el.source else "", tag)
-    if (parsed.error != null)
+    if (not (parsed.error is null))
         [{math: "", label: null, tag: null, bare_tag: false,
           suppress: false, error: parsed.error}]
     else {
@@ -292,7 +292,7 @@ fn render_alignment(el, tag, rows, numbers, operators) {
         let columns = if (starts_with(tag, "eqnarray")) ["right", "center", "left"] else ["right", "left"];
         <div class: if (multline) "latex-align latex-align-multline" else "latex-align",
             for (i, row in rows)
-                if (row.error != null)
+                if (not (row.error is null))
                     util.unsupported_element("amsmath", row.error, el.source_offset)
                 else alignment_row(row.math, gathered,
                     if (multline and i == 0) (c) => "left"
@@ -319,7 +319,7 @@ pub fn render_environment(el, numbers, operators) {
     if (starts_with(tag, "equation")) {
         let row = rows[0]
         let number_tag = row_tag(row, numbers, 0)
-        if (row.error != null) util.unsupported_element("amsmath", row.error, el.source_offset)
+        if (not (row.error is null)) util.unsupported_element("amsmath", row.error, el.source_offset)
         else <div class: "latex-equation",
             id: if (row.label != null) util.slugify(row.label) else null,
             math_cell(row.math, true, active_operators, el.source_offset);

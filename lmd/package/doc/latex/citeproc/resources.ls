@@ -88,9 +88,9 @@ fn compile_options(options, base, language) {
     let issues = style.diagnostics ++ [for (item in captures, issue in item.captured.diagnostics) issue]
     let attempt = if (len(issues) > 0) {failure: null} else cp.compile(style.xml, {*:bundled, *:overrides},
         {*:options, parents: parents, source: style.source, locale: selected}) ^ { {failure: c.error_issue(^)} }
-    let compiled = if (len(issues) > 0 or attempt.failure != null) null else attempt;
+    let compiled = if (len(issues) > 0 or not (attempt.failure is null)) null else attempt;
     {compiled: compiled, assets: style.assets ++ [for (item in captures, asset in item.captured.assets) asset],
-        diagnostics: issues ++ (if (attempt.failure == null) [] else [attempt.failure]) ++
+        diagnostics: issues ++ (if (attempt.failure is null) [] else [attempt.failure]) ++
             (if (compiled == null or compiled.locales[selected] != null) [] else
                 [c.issue("csl-locale-fallback", "Locale " ++ selected ++ " falls back to bundled terms")])}
 }

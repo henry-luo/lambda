@@ -10,6 +10,6 @@ let checks=[
     {name:"repeated calls preserve package state",ok:all([for (value in repeated) value==first])},
     {name:"legacy flavor spelling uses the same exporter",ok:legacy==first},
     {name:"caller bindings and native formatting survive the nested load",ok:source=="\\frac{a+b}{c}" and format(42,'json')^=="42" and contains(outer("x^2")^,"<msup>")},
-    {name:"errors propagate through format",ok:(format(parse("\\undefinedcommand",'math')^,{type:"math",flavor:"mathml"}) or "invalid")=="invalid"}
+    {name:"errors propagate through format",ok:(format(parse("\\undefinedcommand",'math')^,{type:"math",flavor:"mathml"}) ^ { "invalid" })=="invalid"}
 ];
 [for (check in checks where check.ok!=true) check.name]

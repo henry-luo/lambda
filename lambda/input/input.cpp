@@ -1898,6 +1898,7 @@ static void parse_mdx_input(Input* input, const char* source) {
 }
 
 static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
+    {"image/vnd.adobe.photoshop", "psd"},
     {"model/obj", "obj"},
     {"model/mtl", "mtl"},
     {"model/gltf+json", "gltf"},
@@ -2260,6 +2261,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
             parse_eps(input, source, source_len);
         }
+#ifndef LAMBDA_NO_IMAGE_IO
+        else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
+#endif
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF

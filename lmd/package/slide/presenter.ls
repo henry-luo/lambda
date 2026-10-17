@@ -21,7 +21,8 @@ pub fn reduce(ui, command, now_ms) map^ {
     else raise c.fail("presenter", "unknown tool " ++ command)
 }
 pub fn destination(plan, value) int^ {
-    let numeric = int(value)
+    // S7.5.3v2: a textual slide ID is the alternate parse, not a failed condition.
+    let numeric = int(value) ^ { null }
     if (numeric != null and c.as_text(numeric) == c.as_text(value) and numeric >= 1 and numeric <= len(plan.slides)) numeric - 1
     else {
         let matches = [for (i, scene in plan.slides where scene.id == value) i]

@@ -22,6 +22,6 @@ fn array_tree(n) => if (n < 0) array_tree(0) else if (n == 0) [0]
     else [array_tree(n-1)];
 [name(choose(1)^) == 'one', name(choose(2)^) == 'one',
     name(choose(null)^) == 'empty', after(1)^ == 43,
-    (choose(3) or "caught") == "caught", name(choose(4)^[0]) == 'one',
+    ((choose(3) ^ { null }) or "caught") == "caught", name(choose(4)^[0]) == 'one',
     name(choose(5)^.value) == 'one', map_tree(2).child.child.leaf == true,
     array_tree(2)[0][0][0] == 0]

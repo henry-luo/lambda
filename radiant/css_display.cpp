@@ -127,7 +127,14 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
     if (dom_elem->specified_style) {
         CssDeclaration* content_decl = style_tree_get_declaration(
             dom_elem->specified_style, CSS_PROPERTY_CONTENT);
-        if (content_decl && css_content_value_has_image_url(content_decl->value)) {
+        const CssValue* content = content_decl ? content_decl->value : nullptr;
+        if (content && content->type == CSS_VALUE_TYPE_LIST && !content->data.list.comma_separated &&
+            content->data.list.count > 1) {
+            // CSS Content 3 §1: only a sole image (plus optional / alt text) replaces the entire box.
+            const char* separator = css_math_token_name(content->data.list.values[1]);
+            content = separator && strcmp(separator, "/") == 0 ? content->data.list.values[0] : nullptr;
+        }
+        if (css_content_value_has_image_url(content)) {
             // CSS Content 3: selected image-set content has the same replaced-box sizing as url().
             is_replaced = true;
         }

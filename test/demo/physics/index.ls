@@ -10,9 +10,7 @@ fn preview(kind) element {
 
 <html ui.head("Physics playground");
     <body <main
-        <header class:"page-header", <div <p class:"eyebrow", "LAMBDA PHYSICS / PLAYGROUND"> <h1 "Small worlds. Real motion.">>
-            <span class:"edition", "FOUR EXPERIMENTS · 3D">>
-        ui.navigation("index");
+        ui.header("Small worlds. Real motion.", "index");
         <p class:"intro", "Chain reactions, weightless assemblies, a mechanical sorter, and a measured bounce experiment. Open a world, change its conditions, and explore it from any angle.">
         <div class:"gallery",for (demo in ui.demos) <article class:"experiment",
             preview(demo.id);

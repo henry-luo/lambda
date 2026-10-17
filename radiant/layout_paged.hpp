@@ -9,9 +9,9 @@ struct LayoutContext;
 struct TableMetadata;
 // native list geometry refines the shared table tracks before cell layout.
 float paged_label_body_columns(LayoutContext* lycon, ViewTable* table, TableMetadata* metadata, float width);
-size_t paged_table_grid_limit(LayoutContext* lycon);
+size_t paged_flow_node_limit(LayoutContext* lycon);
 bool paged_table_source_admit(LayoutContext* lycon, ViewElement* source);
-void paged_table_layout_error(LayoutContext* lycon, DomElement* source, TypesetStatus status, const char* reason);
+void paged_flow_layout_error(LayoutContext* lycon, DomElement* source, TypesetStatus status, const char* reason);
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
     size_t max_nodes;

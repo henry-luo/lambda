@@ -9,14 +9,14 @@ let selected = [for (entry in content(seven)^ where entry.name == "file4") entry
 let earlier = [for (entry in content(seven)^ where entry.name == "file2") entry][0]
 let text = input(selected, 'text')^;
 [
-    [for (file in bad) (input("test/input/archive/" ++ file) or "error") == "error"],
-    (input("test/input/archive/legacy.rar", 'rar5') or "error") == "error",
-    (input("test/input/archive/sample.tar.gz", {max_expanded_bytes: 10239}) or "error") == "error",
-    (input("test/input/archive/sample.tar", {max_member_bytes: 1}) or "error") == "error",
-    (input("test/input/archive/7z-lzma2.7z", {max_index_bytes: 32}) or "error") == "error",
-    (input(content(nested)^[0], '7z') or "error") == "error",
+    [for (file in bad) (input("test/input/archive/" ++ file) ^ { "error" }) == "error"],
+    (input("test/input/archive/legacy.rar", 'rar5') ^ { "error" }) == "error",
+    (input("test/input/archive/sample.tar.gz", {max_expanded_bytes: 10239}) ^ { "error" }) == "error",
+    (input("test/input/archive/sample.tar", {max_member_bytes: 1}) ^ { "error" }) == "error",
+    (input("test/input/archive/7z-lzma2.7z", {max_index_bytes: 32}) ^ { "error" }) == "error",
+    (input(content(nested)^[0], '7z') ^ { "error" }) == "error",
     len(text) == 52,
     input(selected, 'text')^ == text,
-    (input(earlier, 'text') or "error") == "error",
-    (input(earlier, 'text') or "error") == "error"
+    (input(earlier, 'text') ^ { "error" }) == "error",
+    (input(earlier, 'text') ^ { "error" }) == "error"
 ]

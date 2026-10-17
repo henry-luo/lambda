@@ -107,12 +107,15 @@ fn replace_all_with_text(st, txt) {
 
 fn last_caret_pos_in(n, path) {
   if (is_text(n)) { pos(path, len(n.text)) }
+  // atomic images have no internal caret; continue at their parent's child boundary.
+  else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)+1) }
   else if (is_node(n) and len(n.content) > 0) { last_caret_pos_in(n.content[len(n.content) - 1], [*path, len(n.content) - 1]) }
   else { pos(path, 0) }
 }
 
 fn first_caret_pos_in(n, path) {
   if (is_text(n)) { pos(path, 0) }
+  else if (is_node(n) and contains(['img','image'],n.tag)) { pos(parent_path(path),last_index(path)) }
   else if (is_node(n) and len(n.content) > 0) { first_caret_pos_in(n.content[0], [*path, 0]) }
   else { pos(path, 0) }
 }
@@ -192,6 +195,13 @@ fn replace_node_with_blocks(st, blocks) {
     let selected_parent_path = parent_path(st.selection.path)
     let selected_index = last_index(st.selection.path)
     if (len(selected_parent_path) == 0) { replace_node_with_slice(st, blocks, selection_after_inserted_blocks(selected_index, blocks)) }
+    else if (len(blocks)==1 and block_allows_inline(st,blocks[0].tag) and
+             block_allows_inline(st,node_at(st.doc,selected_parent_path).tag) and len(blocks[0].content)>0) {
+      // replacing an inline object must retain pasted inline objects, not flatten them to text.
+      let kids = blocks[0].content
+      let last_path = [*selected_parent_path,selected_index+len(kids)-1]
+      replace_node_with_slice(st,kids,caret(last_caret_pos_in(kids[len(kids)-1],last_path)))
+    }
     else { replace_node_with_text(st, doc_text(node('fragment', blocks))) }
   }
 }
@@ -547,6 +557,17 @@ fn insert_inline_nodes_select_first(st, inline_nodes) {
       }
     }
   }
+  else if (sel_collapsed(sel) and is_node(node_at(st.doc,sel.anchor.path)) and
+           block_allows_inline(st,node_at(st.doc,sel.anchor.path).tag)) {
+    // atomic insertion also accepts child boundaries, including empty inline containers.
+    let path = sel.anchor.path
+    let index = sel.anchor.offset
+    let parent = node_at(st.doc,path)
+    if (index<0 or index>len(parent.content)) null else {
+      let tx = tx_step(tx_begin(st.doc,sel),step_replace(path,index,index,inline_nodes))
+      tx_set_selection(tx,node_selection([*path,index]))
+    }
+  }
   else if (sel_top_block_range(sel)) {
     let span = cross_block_text_span_parts(st)
     if (span == null) { null }
@@ -688,23 +709,27 @@ pub fn cmd_paste_fragment(st, fragment) {
     let lo = sel_lo(sel)
     let hi = sel_hi(sel)
     let leaf = node_at(st.doc, lo.path)
-    if (leaf == null or not is_text(leaf) or len(lo.path) < 2) { null }
+    let boundary = is_node(leaf) and block_allows_inline(st,leaf.tag) and pos_equal(lo,hi)
+    if (leaf == null or (not boundary and (not is_text(leaf) or len(lo.path) < 2))) { null }
     else {
       let blocks = coerce_children(state_schema(st), fragment, 'block')
       if (len(blocks) == 0) { null }
       else {
-        let block_path = find_inline_container_path(st.doc, state_schema(st), lo.path, 0)
+        let block_path = if (boundary) lo.path else find_inline_container_path(st.doc, state_schema(st), lo.path, 0)
         let block = if (block_path == null) { null } else { node_at(st.doc, block_path) }
         if (block == null or not is_node(block)) { cmd_paste_text(st, doc_text(node('fragment', blocks))) }
         else {
-          let top_index = lo.path[len(block_path)]
+          let top_index = if (boundary) lo.offset else lo.path[len(block_path)]
           let target = block.content[top_index]
           let rel_lo = slice(lo.path, len(block_path) + 1, len(lo.path))
           let rel_hi = slice(hi.path, len(block_path) + 1, len(hi.path))
           let before = inline_prefix_before_pos(target, rel_lo, lo.offset)
           let after = inline_suffix_after_pos(target, rel_hi, hi.offset)
-          let head_inline = list_concat(list_slice(block.content, 0, top_index), before)
-          let tail_inline = list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
+          // rich paste also accepts child-boundary carets, including an empty block after Cut.
+          let head_inline = if (boundary) list_slice(block.content,0,top_index)
+            else list_concat(list_slice(block.content, 0, top_index), before)
+          let tail_inline = if (boundary) list_slice(block.content,top_index,len(block.content))
+            else list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
           let first = blocks[0]
           let tail_block = blocks[len(blocks) - 1]
           let blk_inl = block_allows_inline(st, block.tag)
@@ -814,6 +839,26 @@ pub fn cmd_move_node(st, source_path, target_parent_path, target_index) {
       let tx2 = tx_step(tx1, step_replace(target_parent_path, insert_index, insert_index, [moved]))
       tx_set_selection(tx2, node_selection([*target_parent_path, insert_index]))
     }
+  }
+}
+
+pub fn cmd_move_inline_node(st, source_path, target_pos) {
+  let moved = node_at(st.doc,source_path)
+  let target = if (target_pos==null) null else node_at(st.doc,target_pos.path)
+  let entry = if (is_node(moved)) state_schema(st)[moved.tag] else null
+  let limit = if (is_text(target)) len(target.text) else if (is_node(target) and block_allows_inline(st,target.tag)) len(target.content) else -1
+  if (entry==null or entry.role!='inline' or len(source_path)==0 or target_pos==null or
+      path_is_prefix(source_path,target_pos.path) or not (target_pos.offset is int) or
+      target_pos.offset<0 or target_pos.offset>limit) null
+  else {
+    let parent = parent_path(source_path)
+    let index = last_index(source_path)
+    let tx1 = tx_step(tx_begin(st.doc,st.selection),step_replace(parent,index,index+1,[]))
+    // map the destination through removal before splitting its marked text leaf.
+    let destination = tx_map_pos(tx1,target_pos)
+    let tx2 = insert_inline_nodes_select_first({*:st,doc:tx1.doc_after,selection:caret(destination)},[moved])
+    if (tx2==null or tx2.doc_after==st.doc) null
+    else tx_set_selection(tx_apply_steps(tx1,tx2.steps,0,len(tx2.steps)),tx2.sel_after)
   }
 }
 
@@ -1834,20 +1879,20 @@ pub fn cmd_lift_blockquote(st) {
 
 fn table_supported(st) => state_schema(st).table != null
 
-fn make_table_cells(cols, cell_tag, i, acc) {
+fn make_table_cells(cols: int, cell_tag: symbol, i: int, acc: array) array {
   if (i >= cols) { acc }
   else { make_table_cells(cols, cell_tag, i + 1, [*acc, node(cell_tag, [text("")])]) }
 }
 
-fn make_table_row(cols, header) =>
+fn make_table_row(cols: int, header: bool) =>
   node('tr', make_table_cells(cols, if (header) { 'th' } else { 'td' }, 0, []))
 
-fn make_table_rows(rows, cols, header, i, acc) {
+fn make_table_rows(rows: int, cols: int, header: bool, i: int, acc: array) array {
   if (i >= rows) { acc }
   else { make_table_rows(rows, cols, header, i + 1, [*acc, make_table_row(cols, header and i == 0)]) }
 }
 
-fn make_table_node(rows, cols, header) =>
+fn make_table_node(rows: int, cols: int, header: bool) =>
   node('table', make_table_rows(rows, cols, header, 0, []))
 
 fn insert_block_after_selection(st, block) {
@@ -2093,7 +2138,13 @@ fn split_block_path_for_leaf_at(doc, path) {
   let parent = parent_path(path)
   let n = node_at(doc, parent)
   if (n != null and is_node(n) and split_inline_wrapper_tag(n.tag)) { split_block_path_for_leaf_at(doc, parent) }
-  else { parent }
+  else {
+    let container_path = parent_path(parent)
+    let container = node_at(doc, container_path)
+    // HTML lists may wrap their text in a paragraph; Enter must split the item, not that wrapper.
+    if (is_node(n) and n.tag == 'p' and is_node(container) and container.tag == 'li') { container_path }
+    else { parent }
+  }
 }
 
 fn split_nonempty_node(n, content) =>

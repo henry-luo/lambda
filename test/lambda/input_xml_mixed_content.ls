@@ -3,7 +3,7 @@
 // white space between the elements of element-only content and the edges of a
 // text-only element are not significant. A DOCTYPE's internal subset ends at
 // its `]`. The writer spells comments and processing instructions as such.
-fn xml(src) => parse(src, 'xml') or null
+fn xml(src) => (parse(src, 'xml') ^ { null }) or null
 fn root(src) => [for (c in content(xml(src)) where type(c) == element and not starts_with(string(name(c)), "?") and not starts_with(string(name(c)), "!")) c][0]
 
 "mixed content keeps its spaces:";
@@ -17,7 +17,7 @@ len(content(root("<list>\n  <item>a</item>\n  <item>b</item>\n</list>")));
 "a DOCTYPE internal subset ends at its bracket:";
 [for (c in content(xml("<?xml version=\"1.0\"?>\n<!DOCTYPE r [\n  <!ENTITY e \"x\">\n]>\n<r>text</r>\n<!-- after -->\n"))) name(c)];
 "comments and processing instructions are written as such:";
-[format(xml("<?xml version=\"1.0\"?>\n<!-- note --><?pi data?><r>x</r>"), 'xml') or "(error)"]
+[(format(xml("<?xml version=\"1.0\"?>\n<!-- note --><?pi data?><r>x</r>"), 'xml') ^ { null }) or "(error)"]
 
 "Unicode text and attributes survive XML serialization:";
 let unicode = "café 中文 αβ 😀"

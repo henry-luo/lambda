@@ -10,24 +10,25 @@
   <body
     <main
       <header class: "page-header",
-        <div
+        <div class: "header-meta",
           <p class: "eyebrow",
             "LAMBDA PHYSICS / PLAYGROUND">
+          <a class: "edition", href: "index.ls",
+            "FOUR EXPERIMENTS · 3D">>
+        <div class: "title-row",
           <h1
-            "Small worlds. Real motion.">>
-        <span class: "edition",
-          "FOUR EXPERIMENTS · 3D">>
-      <nav class: "navigation", aria-label: "Physics demonstrations",
-        <a href: "index.ls", class: "active",
-          "All experiments">
-        <a href: "domino.ls", class: "",
-          "Domino circuit">
-        <a href: "salvage.ls", class: "",
-          "Salvage bay">
-        <a href: "sorter.ls", class: "",
-          "Marble sorter">
-        <a href: "bounce.ls", class: "",
-          "Bounce lab">>
+            "Small worlds. Real motion.">
+          <nav class: "navigation", aria-label: "Physics demonstrations",
+            <a href: "index.ls", class: "active",
+              "All">
+            <a href: "domino.ls", class: "",
+              "Domino circuit">
+            <a href: "salvage.ls", class: "",
+              "Salvage bay">
+            <a href: "sorter.ls", class: "",
+              "Marble sorter">
+            <a href: "bounce.ls", class: "",
+              "Bounce lab">>>>
       <p class: "intro",
         "Chain reactions, weightless assemblies, a mechanical sorter, and a measured bounce experiment. Open a world, change its conditions, and explore it from any angle.">
       <div class: "gallery",

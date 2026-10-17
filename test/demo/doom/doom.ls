@@ -34,24 +34,24 @@ pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
     let handles = if (next.handles == null) present.bind(owner, next.map_data, next.game) else next.handles
     present.paint(owner, next.map_data, if (reset_clock) null else previous.game, next.game, handles,
         if (reset_clock) null else previous.visible, RULES, VISUALS, IMAGES, BASE) ^ { problem = ^.message } ~ { painted = ~ }
-    if (problem == null) {
+    if (problem is null) {
         effects.synchronize(handles.camera, next.transients, next.game, camera.pose(next.game).angle, BASE) ^ { problem = ^.message } ~ { transients = ~ }
     }
-    if (problem == null) {
+    if (problem is null) {
         audio.synchronize(owner, next.audio, next.game, BASE) ^ { problem = ^.message } ~ { sounds = ~ }
     }
-    let token = if (problem == null and next.game.mode == "playing") dom.request_frame(owner, "doom_frame") else 0
-    if (next.game.mode == "playing" and token == 0 and problem == null) { problem = "DOOM: frame request failed" }
-    if (problem != null) {
+    let token = if (problem is null and next.game.mode == "playing") dom.request_frame(owner, "doom_frame") else 0
+    if (next.game.mode == "playing" and token == 0 and problem is null) { problem = "DOOM: frame request failed" }
+    if (not (problem is null)) {
         if (sounds != null) audio.close(owner, sounds)
         sounds = null
         dom.set_attribute(owner, "data-error", problem)
         present.text(handles.status, problem)
     }
-    if (problem != null or next.game.mode != "playing" or next.game.spectator != "player" or next.game.autoplay)
+    if (not (problem is null) or next.game.mode != "playing" or next.game.spectator != "player" or next.game.autoplay)
         dom.set_relative_mouse(owner, false)
     return {*: next, handles: handles, visible: painted, transients: transients, audio: sounds, token: token,
-        game: if (problem == null) next.game else {*: next.game, mode: "error", input: controls.empty()},
+        game: if (problem is null) next.game else {*: next.game, mode: "error", input: controls.empty()},
         clock: if (reset_clock) sim.initial_clock() else next.clock}
 }
 pn load_map(owner, session_value, map_name, keep_inventory = false) any^ {

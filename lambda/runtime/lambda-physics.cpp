@@ -1,5 +1,6 @@
 #include "lambda-physics.hpp"
 #include "transpiler.hpp"
+#include "value_builder.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "../../lib/physics/physics_math.h"
@@ -9,19 +10,11 @@ static Item physics_string(const char* value) {return Item{.item=s2it(heap_creat
 static Item physics_number(double value) {return push_d(value);}
 static Item physics_integer(uint64_t value) {return Item{.item=i2it((int64_t)value)};}
 
-// each field is rooted before its key allocation; no partially built value lives only on the native stack.
-struct PhysicsValue {
-    RootFrame roots;
-    Rooted<Item> value,field;
-    PhysicsValue(bool array=false):roots(2),value(roots,array?Item{.array=array_plain()}:vmap_new()),field(roots,ItemNull) {}
-    void put(const char* key,Item item) {field.set(item);Item status=vmap_set(value.get(),physics_string(key),field.get());if(item_is_error(status))value.set(status);}
-    void append(Item item) {field.set(item);array_push_verbatim(value.get().array,field.get());}
-};
 static Item physics_vector(PhysicsVec vector) {
-    PhysicsValue values(true);values.append(physics_number(vector.x));values.append(physics_number(vector.y));values.append(physics_number(vector.z));return values.value.get();
+    RootedValueBuilder values(true);values.append(physics_number(vector.x));values.append(physics_number(vector.y));values.append(physics_number(vector.z));return values.value.get();
 }
 static Item physics_rotation(PhysicsQuat q) {
-    PhysicsValue values(true);values.append(physics_number(q.x));values.append(physics_number(q.y));values.append(physics_number(q.z));values.append(physics_number(q.w));return values.value.get();
+    RootedValueBuilder values(true);values.append(physics_number(q.x));values.append(physics_number(q.y));values.append(physics_number(q.z));values.append(physics_number(q.w));return values.value.get();
 }
 static const char* physics_read_text(ItemReader value) {return value.isString()?value.asString()->chars:value.isSymbol()?value.asSymbol()->chars:nullptr;}
 static bool physics_selected(const char* id,Item selection) {
@@ -30,24 +23,24 @@ static bool physics_selected(const char* id,Item selection) {
     return false;
 }
 Item physics_state_value(const PhysicsScene& scene,const PhysicsState& state,Item selection) {
-    RootFrame roots(1);Rooted<Item> selected(roots,selection);PhysicsValue frame,bodies(true);
+    RootFrame roots(1);Rooted<Item> selected(roots,selection);RootedValueBuilder frame,bodies(true);
     frame.put("tick",physics_integer(state.tick));frame.put("time",physics_number(state.time));
     for(size_t i=0;i<state.body_count;i++) {
         const auto& b=state.bodies[i];const char* id=physics_scene_id(scene,b.id);if(!physics_selected(id,selected.get()))continue;
-        PhysicsValue body;body.put("id",physics_string(id));body.put("position",physics_vector(b.pose.position));body.put("quaternion",physics_rotation(b.pose.rotation));
+        RootedValueBuilder body;body.put("id",physics_string(id));body.put("position",physics_vector(b.pose.position));body.put("quaternion",physics_rotation(b.pose.rotation));
         body.put("velocity",physics_vector(b.velocity));body.put("angular_velocity",physics_vector(b.angular_velocity));body.put("centre_of_mass",physics_vector(b.centre_of_mass));
         body.put("mass",physics_number(b.mass));body.put("sleeping",Item{.item=b2it(b.sleeping)});bodies.append(body.value.get());
     }
     frame.put("bodies",bodies.value.get());return frame.value.get();
 }
 Item physics_event_value(const PhysicsScene& scene,const PhysicsEvent& e) {
-        PhysicsValue event;event.put("tick",physics_integer(e.tick));
+        RootedValueBuilder event;event.put("tick",physics_integer(e.tick));
         event.put("type",physics_string(e.sensor?(e.started?"sensor-enter":"sensor-exit"):(e.started?"contact-start":"contact-end")));
         event.put("collider_a",physics_string(physics_scene_id(scene,e.collider_a)));event.put("collider_b",physics_string(physics_scene_id(scene,e.collider_b)));
         event.put("body_a",physics_string(physics_scene_id(scene,e.body_a)));event.put("body_b",physics_string(physics_scene_id(scene,e.body_b)));return event.value.get();
 }
 Item physics_events_value(const PhysicsScene& scene,const PhysicsState& state) {
-    PhysicsValue events(true);
+    RootedValueBuilder events(true);
     for(size_t i=0;i<state.event_count;i++)events.append(physics_event_value(scene,state.events[i]));
     return events.value.get();
 }
@@ -100,10 +93,10 @@ Item physics_queries_value(const PhysicsScene& scene,PhysicsWorld* world,Item in
         if(!queries.append(query)||!hits.append({}))return physics_error("physics: query allocation failed");
     }
     PhysicsError error={};if(!physics_query(world,queries.data(),queries.size(),hits.data(),&error))return physics_error(error.message);
-    PhysicsValue result(true);
+    RootedValueBuilder result(true);
     for(const auto& hit:hits) {
         if(!hit.found){result.append(ItemNull);continue;}
-        PhysicsValue record;record.put("body",physics_string(physics_scene_id(scene,hit.body)));record.put("collider",physics_string(physics_scene_id(scene,hit.collider)));
+        RootedValueBuilder record;record.put("body",physics_string(physics_scene_id(scene,hit.body)));record.put("collider",physics_string(physics_scene_id(scene,hit.collider)));
         record.put("distance",physics_number(hit.distance));record.put("point",physics_vector(hit.point));record.put("normal",physics_vector(hit.normal));result.append(record.value.get());
     }
     return result.value.get();
@@ -146,7 +139,7 @@ extern "C" Item fn_physics_simulate(Item input,Item options) {
             for(const auto& c:commands)if(schedule.size()>=65536||!schedule.append({(uint64_t)tick,c}))return physics_error("physics: schedule allocation failed");
         }
     }
-    PhysicsValue trace,frames(true),events(true);PhysicsState state={};physics_read(owner.world,&state,&error);
+    RootedValueBuilder trace,frames(true),events(true);PhysicsState state={};physics_read(owner.world,&state,&error);
     frames.append(physics_state_value(scene,state,selected.get()));
     for(uint64_t tick=0;tick<(uint64_t)steps;tick++) {
         for(const auto& entry:schedule)if(entry.tick==tick&&!physics_apply(owner.world,&entry.command,1,&error))return physics_error(error.message);

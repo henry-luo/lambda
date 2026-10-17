@@ -147,8 +147,8 @@ static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
 
 // D6.1.3 (LR12-24): may a value expression carry an error its static type does
 // not declare? The error enters only through a call (`call_may_defect` decides
-// which) and flows through value positions: operands (not an `or`'s rescued
-// left), branches, a member or index base, and an unannotated binding's
+// which) and flows through value positions: operands, conditions, branches,
+// a member or index base, and an unannotated binding's
 // initializer; an annotated binding is guarded. build_ast and the MIR solver
 // share this walk and differ only in what they know about a call.
 typedef bool (*AstCallDefectPredicate)(AstCallNode* call, void* ctx);
@@ -192,13 +192,14 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
                 call_may_defect, ctx, depth + 1);
     case AST_NODE_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        // `or` rescues its left operand's error (S7.5.3)
-        return (binary->op != OPERATOR_OR &&
-                ast_value_may_carry_defect(binary->left, call_may_defect, ctx, depth + 1)) ||
+        // S7.5.3v2: `or` preserves its left operand's error.
+        return ast_value_may_carry_defect(binary->left, call_may_defect, ctx, depth + 1) ||
             ast_value_may_carry_defect(binary->right, call_may_defect, ctx, depth + 1);
     }
     case AST_NODE_IF_EXPR:
-        return ast_value_may_carry_defect(((AstIfNode*)node)->then,
+        return ast_value_may_carry_defect(((AstIfNode*)node)->cond,
+                call_may_defect, ctx, depth + 1) ||
+            ast_value_may_carry_defect(((AstIfNode*)node)->then,
                 call_may_defect, ctx, depth + 1) ||
             ast_value_may_carry_defect(((AstIfNode*)node)->otherwise,
                 call_may_defect, ctx, depth + 1);

@@ -1,0 +1,11 @@
+{
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "data-rdt-document", "equals": "image"},
+    {"type": "assert_count", "target": {"selector": "img.rdt-image-document"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "img"}, "attribute": "src", "contains": "data:image/png;base64,"},
+    {"type": "assert_rect", "target": {"selector": "img"}, "width": 96, "height": 64, "tolerance": 0.5},
+    {"type": "assert_pixel", "target": {"selector": "img", "offset_x": 8, "offset_y": 8}, "min_r": 250, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "target": {"selector": "img", "offset_x": 56, "offset_y": 8}, "max_r": 5, "max_g": 5, "min_b": 250},
+    {"type": "assert_pixel", "target": {"selector": "img", "offset_x": 80, "offset_y": 8}, "min_r": 250, "max_g": 5, "max_b": 5}
+  ]
+}

@@ -5,6 +5,7 @@ import icons: lambda.ui.dtna.icons
 import controls: lambda.ui.controls
 import rich: lambda.edit.rich_text
 import model: .mod_model
+import images: .mod_images
 
 pub fn icon(name) => icons.render({name:name,width:19,height:19})^
 pub pn task_hit(st,evt) {
@@ -19,15 +20,33 @@ pub pn task_hit(st,evt) {
 }
 view <note_button> {
     <button id:~.id,type:"button",class:"tool " ++ (~.class or ""),title:~.label,
+        role:if (contains(~.class or "","context-item")) "menuitem" else null,
+        style:if (~.tint==null or ~.tint=="") null else "--note-color:" ++ ~.tint,
         ["aria-label"]:~.label,["aria-pressed"]:string(~.pressed or false),
         *:if (~.disabled) {disabled:""} else {},
         if (~.graphic!=null) icon(~.graphic) else <span ~.label>;
-        if (~.graphic!=null and (contains(~.class or "","menu-item") or contains(~.class or "","with-label"))) <span ~.label> else null>
+        if (~.graphic!=null and (contains(~.class or "","menu-item") or contains(~.class or "","with-label"))) <span ~.label> else null;
+        if (~.shortcut!=null and ~.shortcut!="") <span class:"context-key",~.shortcut> else null>
 }
 on mousedown() { return 'prevent-default' }
 on click(evt) { emit("note_command",{id:~.action,params:~.params or {},node:evt.target,event:evt}) }
-pub fn button(id,action,label,graphic=null,params={},pressed=false,disabled=false,css="") =>
-    apply(<note_button id:id,action:action,label:label,graphic:graphic,params:params,pressed:pressed,disabled:disabled,class:css>)
+pub fn button(id,action,label,graphic=null,params={},pressed=false,disabled=false,css="",tint="",shortcut="") =>
+    apply(<note_button id:id,action:action,label:label,graphic:graphic,params:params,pressed:pressed,disabled:disabled,class:css,tint:tint,shortcut:shortcut>)
+
+let marks = [{id:"bold",label:"Bold",graphic:"bold",mark:'strong'},
+    {id:"italic",label:"Italic",graphic:"italic",mark:'em'},{id:"underline",label:"Underline",graphic:"underline",mark:'u'}]
+let text_colors = [{id:"black",label:"Black",value:"#000000"},{id:"gray",label:"Gray",value:"#808080"},
+    {id:"red",label:"Red",value:"#ff0000"},{id:"orange",label:"Orange",value:"#ff8000"},{id:"yellow",label:"Yellow",value:"#ffff00"},
+    {id:"green",label:"Green",value:"#00ff00"},{id:"cyan",label:"Cyan",value:"#00ffff"},{id:"blue",label:"Blue",value:"#0000ff"},
+    {id:"purple",label:"Purple",value:"#8000ff"},{id:"magenta",label:"Magenta",value:"#ff00ff"}]
+let highlight_colors = [{id:"yellow",label:"Yellow",value:"#fff09b"},{id:"peach",label:"Peach",value:"#ffd5ad"},
+    {id:"pink",label:"Pink",value:"#ffd1df"},{id:"lavender",label:"Lavender",value:"#e3d6fa"},
+    {id:"blue",label:"Blue",value:"#cce7fa"},{id:"green",label:"Green",value:"#ccebd6"}]
+
+fn mark_buttons(st,prefix="",css="",disabled=false) => [for (entry in marks)
+    button(prefix ++ entry.id,"edit." ++ entry.id,entry.label,entry.graphic,{},edit_mark_active(st.editor,entry.mark),disabled,css)]
+fn menu_item(id,action,label,graphic=null,shortcut="",disabled=false,params={}) =>
+    button("context-" ++ id,action,label,graphic,params,false,disabled,"context-item menu-item","",shortcut)
 
 view <note_folder> {
     <button id:"folder-" ++ ~.folder,type:"button",class:"folder-row",title:~.label,
@@ -89,6 +108,10 @@ pub fn toolbar(st) {
         <div class:"editor-tools",
             button("new-note","note.new","New note (⌘N)","edit");<span class:"toolbar-divider">
             button("format-note","menu.format","Text formatting",null,{},st.menu=="format",disabled,"format-tool");
+            *mark_buttons(st,"","",disabled);
+            button("text-color","menu.color","Text color","font-colors",{},st.menu=="color",disabled,"color-tool",st.last_color);
+            button("highlight","menu.highlight","Highlight","highlight",{},st.menu=="highlight",disabled,"color-tool",st.last_highlight);
+            <span class:"toolbar-divider">
             button("checklist","edit.checklist","Checklist","check-circle",{},false,disabled);
             button("insert-table","edit.table","Insert table","table",{},false,disabled);
             <span class:"toolbar-divider">
@@ -100,15 +123,70 @@ pub fn toolbar(st) {
             button("more","menu.more","Notebook actions","ellipsis",{},st.menu=="more")>
     >
 }
+
+fn color_picker(st) => <div id:"color-picker",class:"popover color-popover",role:"group",["aria-label"]:if (st.menu=="color") "Text color" else "Highlight color",
+    <div class:"popover-title",if (st.menu=="color") "Text color" else "Highlight color">
+    <div class:"color-swatches",*[for (color in if (st.menu=="color") text_colors else highlight_colors)
+        button(st.menu ++ "-" ++ color.id,"edit." ++ st.menu,color.label,null,{color:color.value},
+            model.color_value(st.editor,st.menu)==color.value,false,"color-swatch",color.value)]>
+    button("color-clear","edit." ++ st.menu,if (st.menu=="color") "Automatic" else "Remove highlight",null,{color:""},false,false,"color-clear");
+    <div class:"popover-rule"><label for:"color-value",class:"color-label","Custom color">
+    <div class:"custom-color",apply(<control.input id:"color-value",label:"Hex color",value:st.picker_value,
+        placeholder:"#RRGGBB",on_change:{action:"picker.value"}>);
+        button("color-apply","picker.apply","Apply",null,{},false,false,"color-apply")>
+    if (st.picker_error!="") <p class:"color-error",role:"alert",st.picker_error> else null
+>
+
+view <note_context> { ~.rendered }
+on render(evt) {
+    if (evt.event_phase==2) {
+        let root = dom.root_node(evt.target)
+        let menu = dom.get_element_by_id(root,"note-context-menu")
+        let box = dom.bounding_box(menu)
+        let viewport = dom.bounding_box(dom.get_element_by_id(root,"notes"))
+        // measure the actual menu so its last row remains reachable near any window edge.
+        dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8))) ++ "px")
+        dom.style_set_property(menu,"top",string(max(8,min(box.y,viewport.height-box.height-8))) ++ "px")
+        dom.focus_set(dom.query_selector(menu,"button:not([disabled])"),false)
+    }
+    return 'pass'
+}
+fn context_menu(st) {
+    let n = model.current(st)
+    let selected = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
+    let disabled = n==null or n.deleted;
+    apply(<note_context rendered:<div id:"note-context-menu",class:"popover context-popover",role:"menu",["aria-label"]:if (st.context.kind=="text") "Text actions" else "Note actions",
+        style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
+        if (st.context.kind=="text") [
+            menu_item("undo","edit.undo","Undo","undo","⌘Z",not edit_can_undo(st.editor) or disabled),
+            menu_item("redo","edit.redo","Redo","redo","⇧⌘Z",not edit_can_redo(st.editor) or disabled),<div class:"popover-rule">,
+            menu_item("cut","clipboard.cut","Cut","scissor","⌘X",not selected or disabled),
+            menu_item("copy","clipboard.copy","Copy","copy","⌘C",not selected),
+            menu_item("paste","clipboard.paste","Paste","snippets","⌘V",disabled),
+            menu_item("select-all","clipboard.selectAll","Select All","select","⌘A"),<div class:"popover-rule">,
+            <div class:"context-format",*mark_buttons(st,"context-","",disabled)>,
+            menu_item("color","menu.color","Text Color…","font-colors","",disabled),
+            menu_item("highlight","menu.highlight","Highlight…","highlight","",disabled)
+        ] else [
+            if (n.deleted) menu_item("restore","note.restore","Restore Note","undo")
+                else menu_item("pin","note.pin",if (n.pinned) "Unpin Note" else "Pin Note","pushpin"),
+            if (not n.deleted) <div class:"context-label","Move to"> else null,
+            *if (n.deleted) [] else [for (f in st.folders where f.id!=n.folder)
+                menu_item("move-" ++ f.id,"note.move",f.name,"folder","",false,{folder:f.id})],
+            <div class:"popover-rule">,
+            menu_item("delete","note.delete",if (n.deleted) "Delete Permanently…" else "Delete Note","delete")
+        ]
+    >>)
+}
+
 pub fn menus(st) => if (st.menu=="format") <div class:"popover format-popover",role:"group",["aria-label"]:"Text formatting",
     <div class:"popover-title","Text style">
     <div class:"style-choices",*[for (choice in [{tag:'h1',label:"Title"},{tag:'h2',label:"Heading"},{tag:'p',label:"Body"}])
         button("style-" ++ string(choice.tag),"edit.style",choice.label,null,{tag:choice.tag},false,false,"style-choice") ]>
-    <div class:"format-choices",*[for (entry in [{id:"bold",label:"Bold",graphic:"bold",mark:'strong'},
-        {id:"italic",label:"Italic",graphic:"italic",mark:'em'},{id:"underline",label:"Underline",graphic:"underline",mark:'u'}])
-        button(entry.id,"edit." ++ entry.id,entry.label,entry.graphic,{},edit_mark_active(st.editor,entry.mark))];
-        <span class:"toolbar-divider">button("bullets","edit.bullets","Bulleted list","menu")>
-> else if (st.menu=="more") <div class:"popover more-popover",role:"group",["aria-label"]:"Notebook actions",
+    <div class:"format-choices",button("bullets","edit.bullets","Bulleted list","menu",{},false,false,"with-label")>
+> else if (st.menu=="color" or st.menu=="highlight") color_picker(st)
+else if (st.menu=="context") context_menu(st)
+else if (st.menu=="more") <div class:"popover more-popover",role:"group",["aria-label"]:"Notebook actions",
     button("save-notebook","file.save","Save Notebook…","save",{},false,false,"menu-item");
     button("save-as","file.saveAs","Save Notebook As…",null,{},false,false,"menu-item");
     button("open-notebook","file.open","Open Notebook…","folder-open",{},false,false,"menu-item");
@@ -126,7 +204,8 @@ pub fn editor(st) {
             button("empty-new","note.new","New Note",null,{},false,false,"primary")> else <div class:"editor-scroll",
             <div class:"note-date",n.updated ++ " · " ++ model.folder_name(st,n.folder)>
             if (n.deleted) <div class:"deleted-banner","This note is in Recently Deleted. Restore it to make changes."> else null;
-            <div class:"note-paper",*:if (n.deleted) {inert:""} else {},rich.surface(st.editor,"note-content")>
+            <div id:"note-paper",class:"note-paper",*:if (n.deleted) {inert:""} else {},
+                rich.surface(st.editor,"note-content");if (not n.deleted) images.tools(st.editor) else null>
         >;
         <footer class:"editor-footer",<span id:"status",role:"status",st.status>
             <span if (n!=null) string(len(join(model.lines(n)," "))) ++ " characters" else "">
@@ -150,7 +229,7 @@ pub fn dialog(st) {
             <h2 d.title><p d.message or "">
             if (contains(["folder","save","open"],d.kind)) apply(<control.input id:"dialog-value",label:if (d.kind=="folder") "Folder name" else "Notebook path",
                 value:d.value or "",placeholder:if (d.kind=="folder") "Folder name" else "path/to/Notebook.note.json",on_change:{action:"dialog.value"}>) else null;
-            if (d.error!="" and d.error!=null) <p class:"dialog-error",role:"alert",d.error> else null;
+            if (d.error!="" and not (d.error is null)) <p class:"dialog-error",role:"alert",d.error> else null;
             <div class:"dialog-buttons",button("dialog-cancel","dialog.cancel","Cancel",null,{},false,false,"dialog-button");
                 if (d.kind=="unsaved") button("dialog-discard","dialog.discard","Don't Save",null,{},false,false,"dialog-button") else null;
                 button("dialog-confirm","dialog.confirm",d.confirm or "Save",null,{},false,false,"dialog-button primary")>

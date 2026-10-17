@@ -33,7 +33,7 @@ fn stars(node,value,shown) => [for (index in 0 to c.option(c.props(node),"count"
         <span class:"dtna-rate-first",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>
         <span class:"dtna-rate-second",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>>]
 fn current(node,selected) => c.option(c.props(node),"value",selected)
-pn pointer_value(node,evt) {
+fn pointer_value(node,evt) {
     let star = dom.closest(evt.target,".dtna-rate-star");
     if (star == null) null else (
         let index = int(dom.get_attribute(star,"data-dtna-rate-index"))^,

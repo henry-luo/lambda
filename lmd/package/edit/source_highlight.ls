@@ -277,7 +277,7 @@ fn guarded_runs(text, line, spans, fm_end) => if (len(text) > LONG_LINE) [] else
 pub fn highlight(b, first, final, scan, lang) {
   let lo = max(0, first)
   let hi = min(b.count - 1, final)
-  let r = parse(b.chunks, {type: lang, sourcepos: 'spans', window: [lo, hi], prescan: scan}) or null
+  let r = parse(b.chunks, {type: lang, sourcepos: 'spans', window: [lo, hi], prescan: scan}) ^ { null }
   if (r == null) null
   else {
     let spans = [for (i in 0 to len(r[1]) div FIELDS - 1) span_at(r, i)]

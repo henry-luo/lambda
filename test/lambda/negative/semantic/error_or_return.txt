@@ -1,0 +1,1 @@
+error[E208]: function 'rejected' may return error from call to 'int': call result has type number | error

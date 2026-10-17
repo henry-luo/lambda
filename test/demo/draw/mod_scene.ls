@@ -12,90 +12,11 @@ on scroll(evt) {
     return 'handled'
 }
 
-fn rotation(node) {
-    let c = geom.rect_center(model.box(node));
-    "rotate(" ++ string(model.attr(node,"rotation")) ++ " " ++ string(c.x) ++ " " ++ string(c.y) ++ ")"
-}
-fn flipping(node) {
-    let c = geom.rect_center(model.box(node));
-    "translate(" ++ string(c.x) ++ " " ++ string(c.y) ++ ") scale(" ++
-        (if (model.attr(node,"flip-x")) "-1" else "1") ++ " " ++ (if (model.attr(node,"flip-y")) "-1" else "1") ++
-        ") translate(" ++ string(0-c.x) ++ " " ++ string(0-c.y) ++ ")"
-}
-fn shape_view(node,source) {
-    let b = model.box(node);
-    <g id:"shape-" ++ model.id(node),opacity:model.attr(node,"opacity"),
-        <g transform:rotation(node),
-            <g class:"shape-graphic",transform:flipping(node),(paint.graphic(node));(shapes.detail(model.attr(node,"variant"),b,paint.stroke(node)))>
-            ; (paint.text(node,b,model.attr(node,"label")))
-            ; (if (source == model.id(node)) <rect x:b.x-6,y:b.y-6,width:b.width+12,height:b.height+12,rx:10,
-                fill:"none",stroke:"#d3902a",'stroke-width':2,'stroke-dasharray':"5 4"> else null)
-        >
-    >
-}
-fn edge_view(drawing,node,ids) {
-    let points = model.route(drawing,node)
-    let label = model.attr(node,"label")
-    let center = model.point_on_route(model.visible_route(drawing,node),model.attr(node,"label-position"))
-    let size = model.attr(node,"font-size")
-    let label_width = max(30,len(label)*size*0.6+14)
-    let d = if (model.attr(node,"routing") == 'curved') router.route_to_curved_svg_path(points,model.curve_radius) else router.route_to_svg_path(points);
-    <g id:"edge-" ++ model.id(node),opacity:model.attr(node,"opacity"),
-        (if (contains(ids,model.id(node))) <path d:d,fill:"none",stroke:"#c9d5ff",'stroke-width':model.attr(node,"stroke-width")+5> else null);
-        <path class:"connector-line",d:d,fill:"none",*:(paint.stroke(node)),
-            'marker-start':if (model.attr(node,"start-arrow") == "none") "none" else "url(#arrow-start-" ++ model.id(node) ++ ")",
-            'marker-end':if (model.attr(node,"end-arrow") == "none") "none" else "url(#arrow-end-" ++ model.id(node) ++ ")">
-        ; (if (label != "") <g
-            <rect x:center.x-label_width/2,y:center.y-size-8,width:label_width,height:size+10,rx:4,fill:"#ffffff">
-            ; (paint.text(node,{x:center.x-label_width/2,y:center.y-size-8,width:label_width,height:size+10},label,true))
-        > else null)
-    >
-}
-fn selection_view(drawing,ids,zoom) {
-    let single = if (len(ids)==1) model.lookup(drawing,ids[0]).shape else null
-    let handles = if (single.tag == 'connector') model.edge_handles(drawing,single) else {}
-    let group_box = model.selection_box(drawing,ids)
-    let r = 6/zoom;
-    // controls render after every object, so attached endpoints remain visible and draggable.
-    <g id:"selection-overlay",
-        *[for (node in model.objects(drawing) where node.tag == 'shape' and contains(ids,model.id(node)))
-            (let b = model.box(node), <g transform:rotation(node),
-                <rect class:"selection-frame",x:b.x-4/zoom,y:b.y-4/zoom,width:b.width+8/zoom,height:b.height+8/zoom,
-                    fill:"none",stroke:"#4c6ef5",'stroke-width':1.2/zoom>
-                ; (if (len(ids)==1) <g
-                    <path d:"M " ++ string(b.x+b.width/2) ++ " " ++ string(b.y) ++ " v " ++ string(-28/zoom),stroke:"#4c6ef5",'stroke-width':1/zoom>
-                    ; *[for (p in [geom.v2(b.x,b.y),geom.v2(b.x+b.width,b.y),geom.v2(b.x,b.y+b.height),geom.v2(b.x+b.width,b.y+b.height)])
-                        <rect x:p.x-4/zoom,y:p.y-4/zoom,width:8/zoom,height:8/zoom,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':1.2/zoom>]
-                    ; <circle id:"shape-rotation-handle",cx:b.x+b.width/2,cy:b.y-28/zoom,r:5/zoom,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':1.5/zoom>
-                > else null)
-            >)]
-        ; (if (single.tag == 'connector') <g
-            <rect id:"edge-bend-handle",x:handles.bend.x-5/zoom,y:handles.bend.y-5/zoom,width:10/zoom,height:10/zoom,fill:"#fff1d6",stroke:"#d3902a",'stroke-width':1.5/zoom>
-            <circle id:"edge-from-handle",cx:handles.from.x,cy:handles.from.y,r:r,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':2/zoom>
-            <circle id:"edge-to-handle",cx:handles.to.x,cy:handles.to.y,r:r,fill:"#ffffff",stroke:"#4c6ef5",'stroke-width':2/zoom>
-        > else null)
-        ; (if (len(ids)>1) <rect id:"group-selection-frame",x:group_box.x-8/zoom,y:group_box.y-8/zoom,width:group_box.width+16/zoom,height:group_box.height+16/zoom,
-            fill:"none",stroke:"#4c6ef5",'stroke-width':1/zoom,'stroke-dasharray':string(5/zoom) ++ " " ++ string(4/zoom)> else null)
-    >
-}
-pub fn svg(drawing,selected="",source="",grid=false,standalone=false,selection=[],zoom=1.0,marquee=null) {
-    let ids = if (len(selection)>0) selection else if (selected != "") [selected] else [];
-    <svg xmlns:"http://www.w3.org/2000/svg",width:if (standalone) string(model.width) else "100%",
-        height:if (standalone) string(model.height) else "100%",viewBox:"0 0 " ++ string(model.width) ++ " " ++ string(model.height),role:"img",'aria-label':"Diagram",
-        <defs *[for (node in model.objects(drawing) where node.tag == 'shape' and model.attr(node,"pattern") != "solid") paint.pattern(node)]
-            ; *[for (node in model.objects(drawing) where node.tag == 'connector') <g (paint.marker(node,"start"));(paint.marker(node,"end"))>]>
-        <rect width:model.width,height:model.height,fill:"#ffffff">
-        ; (if (grid) <g stroke:"#eef1f6",'stroke-width':0.6,
-            *[for (x in 0 to int(model.width/20)) <path d:"M " ++ string(x*20) ++ " 0 V " ++ string(model.height)>]
-            ; *[for (y in 0 to int(model.height/20)) <path d:"M 0 " ++ string(y*20) ++ " H " ++ string(model.width)>]
-        > else null)
-        ; *[for (node in model.objects(drawing) where node.tag == 'connector') edge_view(drawing,node,ids)]
-        ; *[for (node in model.objects(drawing) where node.tag == 'shape') shape_view(node,source)]
-        ; (if (len(ids)>0) selection_view(drawing,ids,zoom) else null)
-        ; (if (marquee != null) <rect id:"marquee",x:marquee.x,y:marquee.y,width:marquee.width,height:marquee.height,
-            fill:"#4c6ef5",'fill-opacity':0.1,stroke:"#4c6ef5",'stroke-width':1/zoom,'stroke-dasharray':string(4/zoom) ++ " " ++ string(3/zoom)> else null)
-    >
-}
+import drawing_scene: lambda.editor.draw.scene
+// compatibility exports; the drawing package owns the implementation.
+
+
+pub fn svg(drawing,selected="",source="",grid=false,standalone=false,selection=[],zoom=1.0,marquee=null) => drawing_scene.svg(drawing,selected,source,grid,standalone,selection,zoom,marquee)
 
 fn icon_path(kind) => if (kind == "select") "M 5 3 L 19 13 L 12 14 L 9 21 Z"
     else if (kind == "marquee") "M 3 8 V 3 H 8 M 16 3 H 21 V 8 M 21 16 V 21 H 16 M 8 21 H 3 V 16"
@@ -140,7 +61,7 @@ pub fn tree() => <main id:"draw",'data-error':"",
         <div class:"file-actions",(button("open","Open","open"));(button("save","Save","save"));(button("export","Export SVG","export"))>
     >
     <nav class:"toolbar",'aria-label':"Diagram tools",
-        <div class:"tool-group",(button("tool-select","Select (V)","tool-select","select"));(button("tool-marquee","Rectangle select (M)","tool-marquee","marquee"));(button("tool-connect","Connect","tool-connect","connect"));(button("tool-pan","Pan","tool-pan","pan"))>
+        <div class:"tool-group",(button("tool-select","Select (V)","tool-select","select"));(button("tool-marquee","Rectangle select (M)","tool-marquee","marquee"));(button("tool-connect","Connector (C): drag to draw a line","tool-connect","connect"));(button("tool-pan","Pan (H): move the canvas","tool-pan","pan"))>
         <span class:"divider">
         <div class:"tool-group",(button("undo","Undo","undo","undo"));(button("redo","Redo","redo","redo"))>
         <span class:"divider">
@@ -156,7 +77,7 @@ pub fn tree() => <main id:"draw",'data-error':"",
             <div class:"shape-library",*[for (entry in shapes.catalog) <button id:"add-" ++ entry.id,type:"button",'data-action':"add-" ++ entry.id,
                 (icon(entry.id));<strong (entry.label)>>
             ]>
-            <div class:"library-section",<p class:"eyebrow","MAKE CONNECTIONS"><p "Select Connect, then click a source shape and a destination.">;
+            <div class:"library-section",<p class:"eyebrow","MAKE CONNECTIONS"><p "Select Connector (C), then drag between shapes or empty points. You can also click two shapes.">;
                 (button("connect-help","Connect shapes","tool-connect","connect"))>
             <div class:"library-section",<p class:"eyebrow","A FRESH PAGE">;(button("blank","New blank diagram","blank"));(button("example","Load example","example"))>
             <div class:"library-note",<strong "Ideas, connected."><p "Flowcharts, little plans, and the big picture."><span "BUILT WITH LAMBDA + RADIANT">>
@@ -203,7 +124,7 @@ pub fn tree() => <main id:"draw",'data-error':"",
                     (select_field("to-shape","To shape",[]));(select_field("to-port","Destination attachment",model.ports));
                     (field("label-position","Label position (0–1)","number"));
                     <div class:"arrange-actions",(button("reverse-edge","Reverse","reverse-edge"));(button("reset-bend","Reset bend","reset-bend"))>
-                    <p class:"control-note","Drag blue endpoints anywhere or onto a shape to attach. Drag the gold handle to edit the route.">
+                    <p class:"control-note","Drag endpoints onto a shape: a green × confirms attachment. Drag a cyan segment handle to reshape the line; the gold handle sets a bend.">
                 >
                 ; <p class:"property-heading","Outline & line">
                 ; (field("stroke","Outline hex color"));(select_field("stroke-style","Line style",model.stroke_styles));
@@ -216,6 +137,13 @@ pub fn tree() => <main id:"draw",'data-error':"",
         >
     >
     <footer <span class:"status-dot"><span id:"status",role:"status",'aria-live':"polite","Ready"><span id:"history-label","0 edits">>
+    ; <div id:"connector-menu",role:"toolbar",'aria-label':"Connector settings",style:"display:none",
+        *[for (key in ["start-arrow","end-arrow"]) <button id:"connector-" ++ key,type:"button",'data-arrow-key':key,
+            'data-action':"arrow-open-" ++ key,'aria-label':if (key == "start-arrow") "Start arrowhead" else "End arrowhead",
+            'aria-haspopup':"listbox",'aria-expanded':"false",'aria-controls':key ++ "-options">]
+        ; <button id:"connector-routing",type:"button",'data-action':"cycle-routing",'aria-label':"Change connector routing",
+            <svg width:20,height:20,viewBox:"0 0 24 24",'aria-hidden':"true",<path d:"M 4 18 V 6 H 20",fill:"none",stroke:"currentColor",'stroke-width':1.6,'stroke-linejoin':"round">>>
+    >
     ; *[for (key in ["start-arrow","end-arrow"]) arrow_options(key)]
     ; <div id:"file-dialog",class:"dialog-backdrop",style:"display:none",
         <section class:"file-dialog",role:"dialog",'aria-modal':"true",'aria-labelledby':"dialog-title",

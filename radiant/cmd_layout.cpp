@@ -2802,6 +2802,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
     {".jpg", load_image_layout_file}, {".jpeg", load_image_layout_file},
     {".gif", load_image_layout_file},
+    {".psd", nullptr, "psd"},
     {".json", load_text_doc}, {".yaml", load_text_doc},
     {".yml", load_text_doc}, {".toml", load_text_doc},
     {".txt", load_text_doc}, {".csv", load_text_doc},
@@ -3497,6 +3498,12 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
     if (!runtime) return nullptr;
     runtime_init(runtime);
     runtime->resource_policy = document->resource_policy;
+    // a second static document must acquire its evaluator before module initialization (D5.4.1).
+    if (!radiant_eval_context_switch(runtime_get_eval_context(runtime))) {
+        log_error("package-layout-runtime: failed to acquire evaluator for %s", package_module);
+        release_layout_runtime(runtime);
+        return nullptr;
+    }
     Script* package = nullptr;
     if (!run_lambda_package_module(runtime, package_module, &package) || !package) {
         log_error("package-layout-runtime: failed to initialize %s", package_module);

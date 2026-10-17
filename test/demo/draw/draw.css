@@ -132,3 +132,8 @@ input, textarea { user-select: text; }
 .arrow-options button { display: flex; width: 100%; height: 34px; min-height: 34px; padding: 5px; border: 0; border-radius: 3px; background: #fff; }
 .arrow-options button[aria-selected="true"] { background: #eaf0ff; color: #4263df; }
 .arrow-options button:hover, .arrow-options button:focus { background: #edf1ff; color: #4263df; }
+#connector-menu { position:absolute; z-index:10; align-items:center; gap:1px; padding:3px; background:#fff; border:1px solid #dce1e9; border-radius:12px; box-shadow:0 3px 12px #26365320; }
+#connector-menu button { width:32px; min-height:28px; padding:3px; border:0; background:transparent; border-radius:8px; display:flex; align-items:center; justify-content:center; }
+#connector-menu button:hover { background:#edf3ff; }
+#connector-menu button:focus-visible { outline:2px solid #4c6ef5; }
+#connector-menu svg { width:24px; height:20px; pointer-events:none; }

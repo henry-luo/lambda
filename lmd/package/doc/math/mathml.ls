@@ -33,7 +33,7 @@ pub fn export_file(path, options = null) element^ => to_mathml(input(path,
 
 // Root detection must never confuse a TeX AST's unqualified math tag with MathML.
 pub fn to_mathml(ast, options = null) element^ {
-    let valid_source=require(not (ast is element) or is_mathml(ast) or ast.error==null,
+    let valid_source=require(not (ast is element) or is_mathml(ast) or ast.error is null,
         "input parse error: "++string(ast.error))^
     let valid_options=require((options==null or options is map) and
         (options.display==null or options.display is bool) and

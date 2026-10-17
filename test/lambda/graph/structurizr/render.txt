@@ -1,5 +1,4 @@
 {
-  installed: true,
   retained: true,
   scene: ["LR", true, true, 2, 3, 2],
   clusters: [["group:Platform", null, true, true], ["group:Platform/Payments", "group:Platform", true, true]],

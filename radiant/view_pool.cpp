@@ -383,6 +383,8 @@ static void free_vector_path_payload(DomElement* elem, ViewTree* tree) {
     view_pool_free(tree, path->dash_pattern);
 }
 
+static thread_local bool releasing_detached_subtree;
+
 static void release_embedded_document(DomElement* elem) {
     if (!elem || !elem->embed || !elem->embedp()->doc) {
         return;
@@ -391,7 +393,9 @@ static void release_embedded_document(DomElement* elem) {
     DomDocument* embedded_doc = elem->embedp()->doc;
     elem->embed->doc = nullptr;
     dom_document_clear_embedding(embedded_doc);
-    free_document(embedded_doc);
+    // D5.4.1: DOM mutation still runs on its caller's evaluator and native root stack.
+    if (releasing_detached_subtree) radiant_defer_document_destroy(embedded_doc);
+    else free_document(embedded_doc);
 }
 
 static void release_detached_embedded_documents(DomNode* node) {
@@ -1103,9 +1107,12 @@ void view_pool_release_detached_subtree(DomNode* root) {
     DomElement* owner = root->is_element() ? root->as_element()
         : root->parent && root->parent->is_element() ? root->parent->as_element() : nullptr;
     ViewTree* tree = owner && owner->doc ? (ViewTree*)owner->doc->view_tree : nullptr;
+    bool previous_detach = releasing_detached_subtree;
+    releasing_detached_subtree = true;
     view_teardown_visit_node(tree, root,
         VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL | VIEW_TEARDOWN_CLEAR_POINTERS,
         false);
+    releasing_detached_subtree = previous_detach;
 }
 
 static void view_pool_release_detached_form_props_walk(DomNode* node) {

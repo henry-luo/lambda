@@ -7,7 +7,7 @@ error
 error
 '-- len is a value function too (8.1: iterating an error yields an error) --'
 error
-'-- but the truthy family still participates: these are the discharge surfaces --'
-["F", true, "dflt", false]
+'-- logical operations and equality preserve encountered errors --'
+[error, error, error, error]
 '-- and containment is not propagation: an error inside a collection is data --'
 3

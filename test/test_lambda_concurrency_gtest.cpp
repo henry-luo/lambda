@@ -316,6 +316,42 @@ TEST(JubeDom4, ConcurrentInterfacePublicationKeepsAllModuleRecords) {
     EXPECT_EQ(jube_interface_registry_digest(), before);
 }
 
+TEST(JubeDom4, CatalogueMembersPreserveColours) {
+    jube_register_builtin_modules();
+    const JubeModuleDef* radiant = jube_find_static_module("radiant");
+    ASSERT_NE(radiant, nullptr);
+    ASSERT_TRUE(jube_activate_module(radiant));
+
+    // a member door must preserve its catalogue row's colour (D7.4.6).
+    static const struct { const char* iface; const char* name; bool is_proc; } colours[] = {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+        {#iface, (member)[0] ? member : #name, (sig)[0] == 'p'},
+#include "../lambda/dom/dom_api.def"
+#undef DOM_OP
+    };
+    for (const auto& entry : colours) {
+        if (strcmp(entry.iface, "none") == 0) continue;
+        const JubeTypeDef* type = jube_iface_type_by_name(entry.iface,
+            (uint32_t)strlen(entry.iface));
+        ASSERT_NE(type, nullptr) << entry.iface;
+        int ordinal = jube_member_ordinal(type, entry.name, (uint32_t)strlen(entry.name));
+        ASSERT_GE(ordinal, 0) << entry.iface << "." << entry.name;
+        EXPECT_EQ(jube_member_is_proc_at(type, ordinal), entry.is_proc)
+            << entry.iface << "." << entry.name;
+    }
+}
+
+TEST(JubeDom4, LayoutRegistrationIsNotPublic) {
+    jube_register_builtin_modules();
+    for (const char* name : {"radiant", "dom"}) {
+        const JubeModuleDef* module = jube_find_static_module(name);
+        ASSERT_NE(module, nullptr);
+        for (int32_t i = 0; i < module->function_count; i++) {
+            EXPECT_STRNE(module->functions[i].name, "register_layout") << name;
+        }
+    }
+}
+
 TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
     Runtime runtime = {};
     runtime_init(&runtime);

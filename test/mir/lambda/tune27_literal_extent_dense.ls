@@ -25,7 +25,7 @@ pn main() {
     let by: float[] = [0.0, 0.5, 1.5, 3.5]
     print(pair_sums(bx, by))
     print("\n")
-    // a short array takes the checked arm and reads null out of range
-    print(pair_sums([1.0], [1.0]) == null)
+    // S7.7.1: the checked read's null cannot enter a float binding.
+    print(pair_sums([1.0], [1.0]) is error)
     print("\n")
 }

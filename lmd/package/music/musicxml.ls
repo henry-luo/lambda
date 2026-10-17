@@ -197,7 +197,7 @@ fn read_measure(previous, row, part) map^ {
     let initial = {context: previous.context, cursor: t.ZERO, extent: t.ZERO, anchor: null,
         events: [], changes: [], directions: [], barlines: [], warnings: [], new_system: false, new_page: false}
     let nodes = [for (i,x in c.children(row.node)) {index: i, node: x}]
-    let body = c.fold(nodes, initial, (st, x) => measure_child(st, x, part, row.index)^)
+    let body = c.fold(nodes, initial, (st, x) => measure_child(st, x, part, row.index)^)^
     let checked = c.require(body is map and len(body.events)<=1024, location(part, row.index) ++ ": invalid or excessive measure")^
     let initial_changes=[for (change in body.changes where change.onset.num==0) change]
     let start_context = if (len(initial_changes)>0) initial_changes[len(initial_changes)-1].context else previous.context
@@ -218,7 +218,8 @@ fn read_part(node, declaration) map^ {
     let bars = c.named(node, "measure")
     let checked = c.require(len(bars) > 0 and len(bars) <= 2048, id ++ ": measure count exceeds profile")^
     let initial = {context: {divisions: null, transpose: 0, staffs: [default_staff]}, end: t.ZERO, measures: [], warnings: []}
-    let result = c.fold([for (i,bar in bars) {index:i, node:bar}], initial, (st, row) => read_measure(st, row, id)^)
+    // S7.6.3v2: a failed measure must leave before an error enters part fields.
+    let result = c.fold([for (i,bar in bars) {index:i, node:bar}], initial, (st, row) => read_measure(st, row, id)^)^
     let midi = c.child(declaration, "midi-instrument")
     {id: id, label: c.field(declaration, "part-name", id), abbreviation: c.field(declaration, "part-abbreviation"),
         instruments: c.named(declaration, "score-instrument"),

@@ -1,0 +1,1 @@
+{ root_name: "HTML", local_name: "html", node_type: 1, is_connected: true, child_count: 2, first_name: "HEAD", last_name: "BODY", next_name: "BODY", parent_name: "BODY", text_name: "#text", text_value: "Alpha", text_data: "Alpha", text_content: "Alpha", document_root: "HTML", document_query: "P", keys: [], document_keys: [], text_keys: [], node: element, free: null}

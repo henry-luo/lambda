@@ -2,8 +2,8 @@ true
 false
 false
 false
-0
-100
+error
+error
 42
 error
 error

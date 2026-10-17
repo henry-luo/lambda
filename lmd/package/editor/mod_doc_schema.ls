@@ -8,7 +8,7 @@
 // schema. Tags are disjoint between the two schemas, so there is no shadowing.
 
 import .mod_md_schema
-import .mod_drawing_schema
+import lambda.editor.draw.schema
 
 pub let doc_schema = {
   // ── flow-doc (markdown subset) entries ──

@@ -55,6 +55,17 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
 
+TEST(ErrorSemanticsTests, OperatorsPreserveErrorsAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/error_operator_value_flow.ls",
+            "test/lambda/error_operator_value_flow.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/proc/error_operator_short_circuit.ls",
+            "test/lambda/proc/error_operator_short_circuit.txt", true, tier);
+    }
+}
+
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
     const char* modes[] = {NULL, "--chunked"};
     for (const char* mode : modes) {

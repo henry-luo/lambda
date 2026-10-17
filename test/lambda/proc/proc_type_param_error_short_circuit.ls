@@ -11,6 +11,7 @@ pn mutate(var value) {
 pn main() {
     var poisoned: any | error = null
     poisoned = source_fail()
-    print((mutate(poisoned) or 50) ++ "\n")
-    print((poisoned or 60) ++ "\n")
+    let outcome = mutate(poisoned)
+    print((outcome ^ { 50 }) ++ "\n")
+    print((poisoned ^ { 60 }) ++ "\n")
 }

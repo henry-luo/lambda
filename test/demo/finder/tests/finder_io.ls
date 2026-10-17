@@ -12,7 +12,7 @@ let data = f.preview(welcome)^;
     welcome.kind == "Text document" and welcome.size > 0 and len(welcome.modified)>0 and welcome.modified_raw != null,
     ends_with(welcome.path,"/test/demo/finder/files/Welcome.md"),
     assets.dir and assets.kind == "Folder",
-    data.kind == "text" and contains(data.text,"A place for everything."),
+    data.kind == "document" and ends_with(data.src,"/Welcome.md"),
     not data.truncated,
     f.preview(assets)^.kind == "folder",
     f.preview(image)^.kind == "image",

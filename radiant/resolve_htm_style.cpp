@@ -1785,24 +1785,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (form_created) {
             block->form->name = block->get_attribute("name");
             apply_html_form_state_attributes(lycon, block, false, false, false);
-            // Count options and find selected index
+            // count options before normalizing the retained selection.
             int option_count = 0;
-            int selected_idx = -1;
             for (DomElement* option = dom_select_next_option(block, nullptr); option;
                  option = dom_select_next_option(block, option)) {
-                // Script writes to option.selected are live IDL state, not a
-                // selected attribute; preserve that state when DOM mutation
-                // reconciliation rebuilds this form control.
-                if (dom_option_is_selected(option) && selected_idx < 0) {
-                    selected_idx = option_count;
-                }
                 option_count++;
             }
             block->form->option_count = option_count;
-            bool is_multiple = block->has_attribute("multiple");
-            int init_index = (selected_idx >= 0) ? selected_idx :
-                (is_multiple ? -1 : (option_count > 0 ? 0 : -1));
             DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
+            // rebuilding layout must preserve user selection; the getter reads DOM defaults only for a new owner.
+            int init_index = form_control_get_selected_index(state, (View*)block);
             form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Intrinsic measurement can allocate FormControlProp before HTML defaults

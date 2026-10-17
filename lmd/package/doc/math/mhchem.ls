@@ -19,7 +19,7 @@ let UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 let LOWER = "abcdefghijklmnopqrstuvwxyz"
 let DIGITS = "0123456789"
 
-fn is_in(ch, set) => ch != null and ch != "" and (contains(set, ch) or false)
+fn is_in(ch, set) => ch != null and ch != "" and (contains(set, ch) ^ { false })
 
 // the parsed math of a <chemistry> node: the items of its formula
 pub fn items(n) {

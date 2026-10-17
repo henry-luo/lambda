@@ -28,11 +28,11 @@ let parts = ui.render(ui.alert({message:"Styled",class:"authored",style:"opacity
     ["controlled hidden",(ui.render(ui.alert({visible:false})^)).hidden == ""],
     ["initial hidden",(ui.render(ui.alert({default_visible:false})^)).hidden == ""],
     ["explicit null title",len(content(content(ui.render(ui.alert({title:null,message:"Not chosen"})^))[0])) == 0],
-    ["invalid visibility pair",(ui.alert({visible:true,default_visible:true}) or null) == null],
-    ["invalid flags",(ui.alert({show_icon:null}) or null) == null and (ui.alert({banner:1}) or null) == null and (ui.alert({closable:1}) or null) == null],
-    ["invalid status or variant",(ui.alert({status:'processing'}) or null) == null and (ui.alert({variant:'solid'}) or null) == null and
-        (ui.alert({status:null}) or null) == null and (ui.alert({variant:null}) or null) == null],
-    ["invalid semantic slots",(ui.alert({styles:{typo:"color:red;"}}) or null) == null and (ui.alert({class_names:{root:4}}) or null) == null],
-    ["invalid close label",(ui.alert({close_label:4}) or null) == null],
-    ["unknown prop",(ui.alert({unknown:true}) or null) == null]
+    ["invalid visibility pair",((ui.alert({visible:true,default_visible:true}) ^ { null }) or null) == null],
+    ["invalid flags",((ui.alert({show_icon:null}) ^ { null }) or null) == null and ((ui.alert({banner:1}) ^ { null }) or null) == null and ((ui.alert({closable:1}) ^ { null }) or null) == null],
+    ["invalid status or variant",((ui.alert({status:'processing'}) ^ { null }) or null) == null and ((ui.alert({variant:'solid'}) ^ { null }) or null) == null and
+        ((ui.alert({status:null}) ^ { null }) or null) == null and ((ui.alert({variant:null}) ^ { null }) or null) == null],
+    ["invalid semantic slots",((ui.alert({styles:{typo:"color:red;"}}) ^ { null }) or null) == null and ((ui.alert({class_names:{root:4}}) ^ { null }) or null) == null],
+    ["invalid close label",((ui.alert({close_label:4}) ^ { null }) or null) == null],
+    ["unknown prop",((ui.alert({unknown:true}) ^ { null }) or null) == null]
 ]

@@ -61,6 +61,7 @@ const char* jube_member_name_at(const JubeTypeDef* type, int ordinal, bool camel
 int jube_member_ordinal(const JubeTypeDef* type, const char* name, uint32_t len);
 uint8_t jube_member_kind_at(const JubeTypeDef* type, int ordinal);
 bool jube_member_can_raise_at(const JubeTypeDef* type, int ordinal);
+bool jube_member_is_proc_at(const JubeTypeDef* type, int ordinal);
 int jube_member_arity_at(const JubeTypeDef* type, int ordinal);
 const JubeTypeDef* jube_member_result_type_at(const JubeTypeDef* type, int ordinal);
 

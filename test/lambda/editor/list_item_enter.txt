@@ -30,3 +30,17 @@ true
 1
 "t6_is_para:"
 true
+"t7_items:"
+2
+"t7_keeps_text:"
+true
+"t7_empty_item:"
+true
+"t7_caret:"
+true
+"t8_items:"
+2
+"t8_text:"
+["o", "ne"]
+"t8_caret:"
+true

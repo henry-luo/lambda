@@ -2,6 +2,16 @@
   "version": 1,
   "families": [
     {
+      "properties": ["user-select"],
+      "qualification": "partial",
+      "scope": "computed none/auto/text values, pointer and double-click suppression, auto descendants, explicit text overrides, retained button focus, editable fields and Finder item selection",
+      "evidence": [
+        "test/ui/dom_user_select_pointer.json",
+        "test/ui/finder/item_selection.json"
+      ],
+      "limits": "complete all/contain pointer behavior, pseudo-elements and cross-subtree drag boundaries remain outside this increment"
+    },
+    {
       "properties": [
         "container",
         "container-name",
@@ -14,10 +24,10 @@
         "test/ui/css_container_owner_values.json",
         "test/ui/css_container_conditions.json",
         "test/ui/css_container_motion.json",
-        "test/test_view_tree_model_gtest.cpp#SizeContainerConditionsAndUnitsUseIndependentEditionGeometry",
-        "test/test_view_tree_model_gtest.cpp#SizeContainerQueryMathUsesEditionOwnerFontsAndVariables",
-        "test/test_view_tree_model_gtest.cpp#SizeContainerFragmentsRetainTheUnfragmentedContentExtent",
-        "test/test_view_tree_model_gtest.cpp#SizeContainerPassBudgetsFailBeforeCommitAndResetDropsMeasurements",
+        "test/test_paged_media_gtest.cpp#SizeContainerConditionsAndUnitsUseIndependentEditionGeometry",
+        "test/test_paged_media_gtest.cpp#SizeContainerQueryMathUsesEditionOwnerFontsAndVariables",
+        "test/test_paged_media_gtest.cpp#SizeContainerFragmentsRetainTheUnfragmentedContentExtent",
+        "test/test_paged_media_gtest.cpp#SizeContainerPassBudgetsFailBeforeCommitAndResetDropsMeasurements",
         "test/test_pdf_render_visual_gtest.cpp#SizeContainersMatchExplicitGeometryInFlatAndFragmentedExports"
       ],
       "limits": "broader containment and consumers; pseudo/shadow rendering; complete conditional-motion lifecycle; resource-pressure controls; style/scroll-state queries"
@@ -38,9 +48,9 @@
         "test/test_rdt_vector_gtest.cpp#PaintContainmentClipsWithoutAllocatingAScrollPane",
         "test/test_rdt_vector_gtest.cpp#EllipticalCornersRetainTheSamePaintAndHitRegion",
         "test/ui/css_containment_style.json",
-        "test/test_view_tree_model_gtest.cpp#StyleCounterScopesKeepReadsAndIsolateNestedMutations",
-        "test/test_view_tree_model_gtest.cpp#CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames",
-        "test/test_view_tree_model_gtest.cpp#StyleContainmentScopesCountersAndQuotesInIndependentViews",
+        "test/test_paged_media_gtest.cpp#StyleCounterScopesKeepReadsAndIsolateNestedMutations",
+        "test/test_paged_media_gtest.cpp#CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames",
+        "test/test_paged_media_gtest.cpp#StyleContainmentScopesCountersAndQuotesInIndependentViews",
         "test/test_pdf_render_visual_gtest.cpp#StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs"
       ],
       "limits": "complete stacking/depth ordering and non-principal/table/ruby applicability; complete intrinsic-size/visibility interactions; secondary-view geometry/paint containment"
@@ -61,13 +71,13 @@
         "test/test_css_animation_gtest.cpp#SkippedComputedReadsRefreshInheritedEndpointsAndPreserveEvents",
         "test/test_css_animation_gtest.cpp#VisibilityApplicabilityFollowsSizeContainmentBoxes",
         "test/test_dom_range_gtest.cpp#InnerTextTrimsAtomicInlineEdgesAndOmitsSkippedContents",
-        "test/test_view_tree_model_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
+        "test/test_paged_media_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
         "test/test_pdf_render_visual_gtest.cpp#ContentVisibilityKeepsHiddenBoxesAndPrintsAutoContentsAcrossOutputs",
         "test/ui/css_content_visibility_events.json",
         "test/js/dom_content_visibility_events.js",
         "test/ui/css_content_visibility_scroll_into_view.json",
         "test/ui/css_content_visibility_memory.json",
-        "test/test_view_tree_model_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases"
+        "test/test_paged_media_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases"
       ],
       "limits": "auto retains descendant layout for UA geometry access; broader independent memory lifecycle and fragmentation, top-layer relevance and complete applicability/forced-geometry/lifetime qualification remain open; explicit skipped-motion sampling is bounded to tested opacity endpoints, with font/leading/SVG and other contexts still unqualified; state-change event flags, initial notification interop and complete rendering-task order remain unqualified"
     },
@@ -88,10 +98,10 @@
         "test/test_css_animation_gtest.cpp#IntrinsicSizeNoneClearsFallbackWithoutDiscardingAutomaticMemory",
         "test/test_css_animation_gtest.cpp#IntrinsicSizeMathUsesComputedFontAndClampsNegativeResults",
         "test/test_css_animation_gtest.cpp#IntrinsicMeasurementsSharePhysicalLogicalCascadeAndComputedInheritance",
-        "test/test_view_tree_model_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
+        "test/test_paged_media_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
         "test/test_pdf_render_visual_gtest.cpp#ContentVisibilityKeepsHiddenBoxesAndPrintsAutoContentsAcrossOutputs",
         "test/ui/css_content_visibility_memory.json",
-        "test/test_view_tree_model_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases",
+        "test/test_paged_media_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases",
         "test/ui/css_containment_computed.json",
         "test/test_css_animation_gtest.cpp#IntrinsicComputedReadsPreserveModesOwnerMathAndCascade",
         "test/test_css_animation_gtest.cpp#IntrinsicComputedInheritanceAndPseudosKeepOwnerLengthsWithoutScratchGrowth",
@@ -129,7 +139,7 @@
         "test/test_view_reuse_gtest.cpp#PlacementAndTrackListsRejectInvalidDeclarationsBeforeCascade",
         "test/test_view_reuse_gtest.cpp#PendingGridProjectionRetainsGrammarAfterSourcePoolRetirement",
         "test/test_view_reuse_gtest.cpp#GridComputedReadsDoNotRetainProjectionScratch",
-        "test/test_view_tree_model_gtest.cpp#GridUsedTracksRetainOwnerTextAcrossEditionsAndRollback",
+        "test/test_paged_media_gtest.cpp#GridUsedTracksRetainOwnerTextAcrossEditionsAndRollback",
         "test/ui/css_grid_repeat_math.json",
         "test/ui/css_grid_repeat_structure.json",
         "test/ui/css_grid_repeat_mutation.json",
@@ -288,10 +298,10 @@
       "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5); single linear-gradient text uses per-pixel glyph coverage and the owner positioning box while retaining foreground paint; selected-font SVG/PDF contours handle opaque constant intervals in canonical owner order, exact cardinal axes, repeats and two-glyph runs; 42 exact output comparisons at 1x/2x and 40 causal live size/direction/indent/clip/foreground/content assertions qualify the bounded consumer (CI-18 / D4.5.1v4); text-clipped color and linear layers share authored tile size/position/repetition/no-repeat and apply coverage before layer composition; native CPU blits preserve foreground source-over and captured clips, immutable publications retain deferred replay; 84 exact PNG/SVG/PDF references at 1x/2x, 24 further tile/color/rounded-ancestor live assertions, 32 replays after cache/style mutation and all coverage-byte source-over pairs qualify this increment (CI-18 / D4.5.1v4); affine linear native fills sample shared premultiplied colors at pixel centers with bounded path/clip coverage, fractional tile origins, logarithmic stop lookup and scanline reuse; range aliases and 1024-stop hard boundaries have native/scoped sanitizer controls; eight marker/border range byte discrepancies are fixed in PNG/PDF controls; pseudo currentColor computed reads retain the receiving pseudo through initial/explicit/inherited values and dirty callbacks, reaching companion background/border paint in PNG/SVG/PDF at 1x/2x; Phase 1 modern Oklab/Oklch and sRGB/Oklab two-color theme mixes share the ordinary background-color consumer; Phase 6 intake confirms existing non-repeating outside-range linear/radial colors in raster/SVG at both densities and PDF at 1x; eleven remaining 2x PDF differences have zero differing interior pixels",
       "evidence": [
         "test/ui/css_image_set_selection.json",
-        "test/test_view_tree_model_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
-        "test/test_view_tree_model_gtest.cpp#CssImageSetInvalidDescriptorsRejectBeforeCascade",
-        "test/test_view_tree_model_gtest.cpp#CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner",
-        "test/test_view_tree_model_gtest.cpp#CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse",
+        "test/test_paged_media_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
+        "test/test_paged_media_gtest.cpp#CssImageSetInvalidDescriptorsRejectBeforeCascade",
+        "test/test_paged_media_gtest.cpp#CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner",
+        "test/test_paged_media_gtest.cpp#CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse",
         "test/test_pdf_render_visual_gtest.cpp#CssImageSetsMatchSelectedNaturalImageSizesAcrossOutputs",
         "test/test_rdt_vector_gtest.cpp#EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates",
         "test/ui/css_background_layers.json",
@@ -340,8 +350,8 @@
       "scope": "shared image-kind recognition and density/type selection for URL list/border images; stylesheet-relative sources retain their base; raster marker natural dimensions and border auto widths respect selected density; valid list images override a none marker string; explicit none stops image inheritance; retained markers refresh source and suppression on mutations and safely reuse their element-owned fonts; 256 repeated resolutions and independent border URL/gradient inheritance/replacement cycles retain bounded pool ownership; shared nine-slice raster/SVG/PDF geometry with owned deferred gradient stops; 54 causal live assertions at two device scales; untranslated and translated marker/image/clip paint and export extents; 28 visible image/linear-gradient references through three outputs; shared linear/radial/conic and repeating/degenerate gradient marker paint, owned paths/stops/software samples survive 1536 source-release cycles; live selected-gradient replacement/font/transform/filter and DPR causal mutations; hard stops, specified premultiplied zero-period averages and distance-weighted unresolved linear periods, transparent colors, page-density effect snapshots and straight-alpha PDF images compare with independent PNG references; lazy file raster decode and relocatable SVG embedding; horizontal intrinsic/density URL inside-marker bottom-edge baseline and image/font/space line contributions; current-face normal/content metrics and owner leading refresh; 96 independent inline-image pairs /288 PNG/SVG/PDF comparisons at 1x/2x; 95 causal native font/leading/source/pseudo/none checks",
       "evidence": [
         "test/ui/css_image_set_parts.json",
-        "test/test_view_tree_model_gtest.cpp#CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase",
-        "test/test_view_tree_model_gtest.cpp#BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload",
+        "test/test_paged_media_gtest.cpp#CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase",
+        "test/test_paged_media_gtest.cpp#BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload",
         "test/test_pdf_render_visual_gtest.cpp#CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs",
         "test/ui/css_gradient_markers.json",
         "test/test_rdt_vector_gtest.cpp#SourceReplacementAndRecordingReleasePreserveDeferredPixels",

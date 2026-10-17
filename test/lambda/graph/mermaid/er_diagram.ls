@@ -18,7 +18,6 @@ let source_edges = model.edges(source)
 let normalized = normalize.normalize(source)
 let html = transform.to_html(source)
 let html_nodes = children(html, "node")
-let installed = transform.install()
 let rendered = transform.render_scene(source, 800, 600)
 let scene_nodes = children(rendered.scene, "node")
 let scene_edges = children(rendered.scene, "edge")
@@ -36,7 +35,7 @@ let scene_edges = children(rendered.scene, "edge")
       [node.id, node.label, model.tag(model.content_element(node))]]],
   html: [for (node in html_nodes)
     [node["data-node-id"], node["data-label"], model.tag(node[0])]],
-  render: [installed, len(scene_nodes), len(scene_edges),
+  render: [rendered.svg is string, len(scene_nodes), len(scene_edges),
     all([for (node in scene_nodes) node.width > 0 and node.height > 0]),
     [for (edge in scene_edges) [edge.from, edge.to,
       edge["marker-start"], edge["marker-end"]]],

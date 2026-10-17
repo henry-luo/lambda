@@ -15,8 +15,8 @@ fn workspace_model(workspace) => first(children(workspace, "c4-model"))
 fn workspace_views(workspace) => first(children(workspace, "c4-views"))
 fn workspace_styles(workspace) => first(children(workspace, "c4-styles"))
 
-fn elements(workspace) => children(workspace_model(workspace), "c4-element") or []
-fn relationships(workspace) => children(workspace_model(workspace), "c4-relationship") or []
+fn elements(workspace) => (children(workspace_model(workspace), "c4-element") ^ { null }) or []
+fn relationships(workspace) => (children(workspace_model(workspace), "c4-relationship") ^ { null }) or []
 
 pub fn view_keys(workspace) => [
   for (diagram in children(workspace_views(workspace), "c4-view")) string(diagram.key)

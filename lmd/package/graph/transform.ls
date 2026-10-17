@@ -1,4 +1,4 @@
-// Semantic HTML transform and Radiant custom-layout installation.
+// Semantic HTML transform and automatically resolved Radiant layout export.
 
 import radiant
 import graph_layout: .layout
@@ -8,7 +8,7 @@ import html: .transform.html
 import paint: .transform.paint
 import sequence: lambda.chart.sequence
 
-fn lambda_graph_layout(parent, children, ctx) {
+pub fn layout(parent, children, ctx) {
   let result = graph_layout.from_velmts(parent, children, ctx);
   let edge_color = if (parent.attrs != null and parent.attrs["data-edge-color"] != null)
     string(parent.attrs["data-edge-color"]) else "#59636e";
@@ -19,8 +19,6 @@ fn lambda_graph_layout(parent, children, ctx) {
     paint_layers: paint.layers(result, {edge_color: edge_color})
   }
 }
-
-pub fn install() => radiant.register_layout("lambda-graph", lambda_graph_layout)
 
 pub fn to_html(graph, opts = null) {
   let canonical = normalize.normalize(graph).graph;

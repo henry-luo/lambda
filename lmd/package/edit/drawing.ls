@@ -41,8 +41,8 @@ pub fn picked_indices(ds) => [for (p in ds.picked) p.index]
 pub fn num(v, fallback) any {
   if (v == null) fallback
   else {
-    let s = trim(string(v))
-    float(if (ends_with(s, "px")) slice(s, 0, len(s) - 2) else s) or fallback
+    let s = trim(string(v));
+    (float(if (ends_with(s, "px")) slice(s, 0, len(s) - 2) else s) ^ { null }) or fallback
   }
 }
 
@@ -60,7 +60,7 @@ pub fn view_box(doc) {
   else box(0.0, 0.0, num(attr_get(doc, 'width'), 300.0), num(attr_get(doc, 'height'), 150.0))
 }
 
-fn has(s, part) bool => contains(s, part) or false
+fn has(s, part) bool => contains(s, part) ^ { false }
 
 // ---------------------------------------------------------------------------
 // Objects and their geometry
@@ -416,7 +416,7 @@ fn canvas_of(parsed) {
 // The drawing surface: the projected canvas inside a focusable host.
 pub fn surface(doc, ds) =>
   <div id: "edit-surface", class: "edit-drawing", tabindex: "0",
-    canvas_of(parse(projection_xml(doc, ds), 'xml') or null)
+    canvas_of(parse(projection_xml(doc, ds), 'xml') ^ { null })
   >
 
 pub let css = "

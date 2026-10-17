@@ -795,36 +795,6 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
 // keeps data = base->data with stride metadata.  So `data[flat_offset]` always
 // resolves correctly when flat_offset is computed via effective strides.
 
-// D1.9: malformed shape metadata must stop at this boundary, before any
-// caller-owned fixed-rank buffer is written.
-static bool array_num_shape_is_valid(const ArrayNum* arr) {
-    if (!arr) return false;
-    if (!arr->is_ndim) return !arr->is_view;
-    if (!arr->extra) return false;
-    const ArrayNumShape* shape = (const ArrayNumShape*)(uintptr_t)arr->extra;
-    return shape->ndim >= 1 && shape->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM;
-}
-
-// Read shape and strides into caller-provided arrays. Returns zero for invalid
-// metadata; callers must return ItemError without consuming either buffer.
-// For 1-D owned arrays, returns ndim=1 with shp[0]=length, str[0]=1.
-int array_num_get_shape_strides(ArrayNum* arr, int64_t* shp, int64_t* str) {
-    if (!shp || !str || !array_num_shape_is_valid(arr)) {
-        log_error("array-num-shape: invalid rank metadata");
-        return 0;
-    }
-    if (arr->is_ndim) {
-        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr->extra;
-        int64_t* sd = array_num_shape_dims(s);
-        int64_t* ss = array_num_shape_strides(s);
-        for (int i = 0; i < s->ndim; i++) { shp[i] = sd[i]; str[i] = ss[i]; }
-        return s->ndim;
-    }
-    shp[0] = arr->length;
-    str[0] = 1;
-    return 1;
-}
-
 // Compute broadcast output shape from two operand shapes.
 // Outputs broadcast shape into out_shp[] and effective strides for each operand
 // into eff_str_a[] and eff_str_b[] (with 0 for stretched size-1 axes).

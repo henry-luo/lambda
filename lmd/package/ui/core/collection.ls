@@ -13,7 +13,7 @@ pub fn key_props(items, props, name, default_name, owner) bool^ {
     let initial = validate_keys(items,c.option(props,default_name,[]),owner)^;
     if (c.has(props,name) and c.has(props,default_name)) raise c.fail(owner,name ++ " and " ++ default_name ++ " are mutually exclusive") else true
 }
-pub fn toggle(keys, key, multiple = true) => if (contains(keys,key)) [for (old in keys where old != key) old] else if (multiple) [*keys,key] else [key]
+pub fn toggle(keys, key, multiple = true) => if (contains(keys,key) ^ { false }) [for (old in keys where old != key) old] else if (multiple) [*keys,key] else [key]
 pub fn set_keys(keys, candidates, checked) => if (checked) unique([*keys,*candidates]) else [for (key in keys where not contains(candidates,key)) key]
 pub fn validate(items, owner) bool^ {
     if (not (items is array)) raise c.fail(owner, "items must be an array")

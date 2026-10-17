@@ -13,7 +13,7 @@ pub fn tag(value) => if (value is element) replace(string(name(value)), "timelin
 pub fn fail(path, message) error => error("timeline: " ++ path ++ ": " ++ message)
 pub fn positive(value) => util.finite_number(value) and value > 0
 pub fn integral(value) => util.finite_number(value) and floor(value) == value
-pub fn enum(value, choices) => contains(choices, text(value)) or false
+pub fn enum(value, choices) => contains(choices, text(value)) ^ { false }
 pub fn id(value) string | error => if ((value is string or value is symbol) and len(string(value)) > 0) string(value)
     else fail("id", "expected a nonempty string or symbol")
 pub fn properties(value, allowed, path, ordinary = false) {

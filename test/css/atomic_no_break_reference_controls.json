@@ -1,0 +1,18 @@
+{
+  "category": "wpt-css-text",
+  "reference_control": {
+    "stylesheet": "div { white-space: nowrap; }",
+    "specification": "https://www.w3.org/TR/css-text-3/#line-break-details",
+    "reason": "CSS Text 3 §5.5 prohibits this GL/WJ/ZWJ boundary break. Each fixture has one otherwise unbreakable group; nowrap supplies equivalent geometry independently of the browser atomic-boundary defect.",
+    "wpt_match": "css/reference/ref-filled-green-100px-square.xht"
+  },
+  "fixtures": [
+    "line-breaking/line-breaking-atomic-003.html",
+    "line-breaking/line-breaking-atomic-014.html",
+    "line-breaking/line-breaking-atomic-018.html",
+    "line-breaking/line-breaking-atomic-019.html",
+    "line-breaking/line-breaking-atomic-020.html",
+    "line-breaking/line-breaking-atomic-022.html",
+    "line-breaking/line-breaking-atomic-026.html"
+  ]
+}

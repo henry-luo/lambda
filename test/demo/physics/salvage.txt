@@ -10,24 +10,25 @@
   <body
     <main
       <header class: "page-header",
-        <div
+        <div class: "header-meta",
           <p class: "eyebrow",
             "LAMBDA PHYSICS / PLAYGROUND">
+          <a class: "edition", href: "index.ls",
+            "FOUR EXPERIMENTS · 3D">>
+        <div class: "title-row",
           <h1
-            "Salvage bay">>
-        <a class: "edition", href: "index.ls",
-          "FOUR EXPERIMENTS · 3D">>
-      <nav class: "navigation", aria-label: "Physics demonstrations",
-        <a href: "index.ls", class: "",
-          "All experiments">
-        <a href: "domino.ls", class: "",
-          "Domino circuit">
-        <a href: "salvage.ls", class: "active",
-          "Salvage bay">
-        <a href: "sorter.ls", class: "",
-          "Marble sorter">
-        <a href: "bounce.ls", class: "",
-          "Bounce lab">>
+            "Salvage bay">
+          <nav class: "navigation", aria-label: "Physics demonstrations",
+            <a href: "index.ls", class: "",
+              "All">
+            <a href: "domino.ls", class: "",
+              "Domino circuit">
+            <a href: "salvage.ls", class: "active",
+              "Salvage bay">
+            <a href: "sorter.ls", class: "",
+              "Marble sorter">
+            <a href: "bounce.ls", class: "",
+              "Bounce lab">>>>
       <p class: "intro",
         "Nine asymmetric assemblies float inside a containment chamber. Apply an off-centre pulse, then turn gravity on to see how their shape and mass distribution affect the tumble.">
       <div class: "toolbar", role: "group", aria-label: "Simulation controls",

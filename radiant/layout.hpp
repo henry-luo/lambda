@@ -2394,6 +2394,7 @@ typedef struct LineMetricsSnapshot {
     float max_normal_line_height;
     bool has_c1_control_text;
     bool has_non_c1_text;
+    bool has_leaders;
     bool has_direct_block_text;
     float c1_control_line_height;
     bool has_cjk_text;
@@ -2406,7 +2407,9 @@ struct LineHangingSpaceUnit {
     float width;
     bool conditional;
     bool trim_ink;
+    bool discard;
     lam::Up<TextRect> rect;
+    lam::Up<ViewText> text;
     lam::Up<LineHangingSpaceUnit> previous;
 };
 
@@ -2471,6 +2474,7 @@ typedef struct Linebox {
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     bool has_c1_control_text;       // true when line contains visible C1 control glyphs
     bool has_non_c1_text;           // true when line contains visible non-C1 text glyphs
+    bool has_leaders;               // a generated pattern needs the finished line's remaining advance
     bool has_direct_block_text;     // non-collapsed text in the block's anonymous inline box
     float c1_control_line_height;   // browser-sized C1 control glyph line strut
     // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
@@ -3993,6 +3997,8 @@ float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal)
 float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
+// a context also re-evaluates percentage-bearing math at the supplied inline basis.
+void layout_reresolve_percentage_box(ViewBlock* block, float inline_base, LayoutContext* lycon);
 bool layout_view_tree_has_percentage_spacing(View* root);
 // Table Captions
 
@@ -4331,8 +4337,10 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
     int viewport_width, int viewport_height);
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
-void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                float iframe_width, float iframe_height);
+void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
+                                float iframe_width, float iframe_height, bool initial_load = true);
+bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
+                               float viewport_width, float viewport_height);
 bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
 DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
     float viewport_width, float viewport_height);
@@ -4450,13 +4458,19 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon, bool forced_break = false);
+inline bool layout_text_is_leader(const DomNode* text) {
+    DomNode* parent = text ? text->parent.get() : nullptr;
+    return parent && parent->is_element() && parent->as_element()->is_synthetic() &&
+        parent->as_element()->tag_name && strcmp(parent->as_element()->tag_name, "::leader") == 0;
+}
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height);
 void layout_finalize_static_inline_positions(LayoutContext* lycon);
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span);
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
-                                             bool update_ancestor_bounds);
+                                             bool update_ancestor_bounds,
+                                             bool suppress_text = false);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
 void layout_finalize_phantom_inline_line(LayoutContext* lycon);
@@ -4531,6 +4545,8 @@ bool paged_line_keep(LayoutContext* lycon, DomNode* node);
 // native content dimensions size the object and only fill unspecified viewport axes.
 void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height);
 void paged_table_cell_alignment(LayoutContext* lycon, ViewTableCell* cell);
+// publication keeps resolved missing slots before the common grid's scratch storage retires.
+void paged_table_grid(LayoutContext* lycon, ViewTable* table, TableMetadata* metadata, float* positions);
 float paged_table_column_share(LayoutContext* lycon, ViewElement* column, bool fixed_definite);
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
     const CssValue* value, bool* handled);

@@ -22,11 +22,11 @@ let cells = content(content(descriptions)[0]);
     ["numeric span clamped",contains(cells[2].style,"--dtna-description-span-xs:span 1;") and contains(cells[2].style,"--dtna-description-span-md:span 2;")],
     ["last cell fills row",contains(cells[3].style,"--dtna-description-span-sm:span 1;") and contains(cells[3].style,"--dtna-description-span-md:span 1;")],
     ["responsive inheritance",responsive.at({sm:2,lg:4},"md",1) == 2 and responsive.at({sm:2},"xs",1) == 1],
-    ["badge flags validated",(ui.badge({show_zero:1}) or null) == null and (ui.badge({dot:1}) or null) == null],
-    ["badge offset validated",(ui.badge({offset:[1]}) or null) == null and (ui.badge({offset:[1,nan]}) or null) == null],
-    ["badge count validated",(ui.badge({count:-1}) or null) == null and (ui.badge({overflow_count:inf}) or null) == null],
-    ["ribbon validated",(ui.badge_ribbon({placement:'left'}) or null) == null and (ui.badge_ribbon({color:"red;display:none"}) or null) == null],
-    ["description columns validated",(ui.descriptions({column:0,items:[]}) or null) == null and (ui.descriptions({column:{tablet:2},items:[]}) or null) == null and (ui.descriptions({column:{},items:[]}) or null) == null],
-    ["description items validated",(ui.descriptions({items:[{span:0}]}) or null) == null and (ui.descriptions({items:[{bogus:1}]}) or null) == null and (ui.description_item({span:0},"Value") or null) == null],
-    ["description layout validated",(ui.descriptions({items:[],layout:'grid'}) or null) == null and (ui.descriptions({items:[],bordered:1}) or null) == null]
+    ["badge flags validated",((ui.badge({show_zero:1}) ^ { null }) or null) == null and ((ui.badge({dot:1}) ^ { null }) or null) == null],
+    ["badge offset validated",((ui.badge({offset:[1]}) ^ { null }) or null) == null and ((ui.badge({offset:[1,nan]}) ^ { null }) or null) == null],
+    ["badge count validated",((ui.badge({count:-1}) ^ { null }) or null) == null and ((ui.badge({overflow_count:inf}) ^ { null }) or null) == null],
+    ["ribbon validated",((ui.badge_ribbon({placement:'left'}) ^ { null }) or null) == null and ((ui.badge_ribbon({color:"red;display:none"}) ^ { null }) or null) == null],
+    ["description columns validated",((ui.descriptions({column:0,items:[]}) ^ { null }) or null) == null and ((ui.descriptions({column:{tablet:2},items:[]}) ^ { null }) or null) == null and ((ui.descriptions({column:{},items:[]}) ^ { null }) or null) == null],
+    ["description items validated",((ui.descriptions({items:[{span:0}]}) ^ { null }) or null) == null and ((ui.descriptions({items:[{bogus:1}]}) ^ { null }) or null) == null and ((ui.description_item({span:0},"Value") ^ { null }) or null) == null],
+    ["description layout validated",((ui.descriptions({items:[],layout:'grid'}) ^ { null }) or null) == null and ((ui.descriptions({items:[],bordered:1}) ^ { null }) or null) == null]
 ]

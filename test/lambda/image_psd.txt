@@ -1,0 +1,8 @@
+[binary, 2, 1, 'stack', 2]
+['stack', "色 🎨", "Blue", "Red"]
+['raster', 'mask', 1]
+[true, 0, 255, 188]
+[true, "色 🎨"]
+true
+[0, true]
+["empty", "Blank", null, 0]

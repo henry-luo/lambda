@@ -5,10 +5,10 @@ import parameter: .parameter
 import util: .util
 import behavior: .behavior
 
-pn dom_element(node) { if (node == null or dom.node_type(node) == 1) node else dom.parent_element(node) }
-pub pn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
-pub pn attribute(node, key) { if (node == null) null else dom.get_attribute(node, key) }
-pn metadata(node, key) {
+fn dom_element(node) { if (node == null or dom.node_type(node) == 1) node else dom.parent_element(node) }
+pub fn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
+pub fn attribute(node, key) { if (node == null) null else dom.get_attribute(node, key) }
+fn metadata(node, key) {
     let carrier = closest(node, "[" ++ key ++ "]");
     let text = attribute(carrier, key);
     if (text == null) null else parse(text, 'json') ^ {null}

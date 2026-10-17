@@ -533,7 +533,7 @@ pub fn option_enabled(value) {
 }
 
 // whether a package's options (null when it is not loaded) enable `key`
-pub fn option_on(options, key) => (options != null and option_enabled(options[key])) or false
+pub fn option_on(options, key) => (options != null and option_enabled(options[key])) ^ { false }
 
 pub fn unsupported_element(package, message, offset) {
     <span class: "latex-unsupported", 'data-latex-error': message,

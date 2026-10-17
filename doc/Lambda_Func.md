@@ -48,6 +48,52 @@ pn save_result(data) {
 }
 ```
 
+### DOM reads and procedural calls
+
+Reading a property does not require `pn`. The native DOM API keeps getters
+and queries as `fn`: `node.id`, `dom.get_attribute`, `dom.query_selector`,
+`dom.root_node`, and `dom.document_selection` can be used in a function.
+The DOM node being mutable does not change those operations' declared colour
+(**D7.4.6**). The rule enforced by **S12.1.1v3** is that an `fn` cannot call a
+declared `pn`; it does not classify every DOM access as procedural.
+
+```lambda
+import dom
+
+fn surface(node) => dom.get_element_by_id(dom.root_node(node), "edit-surface")
+fn title(node) => dom.get_attribute(node, "title")
+
+pn focus_surface(node) {
+    let host = surface(node)
+    if (host != null) dom.focus_set(host, false)
+}
+```
+
+Here the lookup is `fn`; moving focus is `pn`. Attribute writes, scrolling,
+event dispatch and native editing likewise require `pn`. Some names conceal
+an effect: `dom.check_validity` is `pn` because validation can dispatch an
+`invalid` event. Check the published signature, not whether a call sounds like
+a question. The [DOM API colour table](Lambda_Packages.md#native-dom-api-colours)
+lists representative signatures.
+
+```lambda error=E224
+import dom
+
+fn focus_surface(node) => dom.focus_set(node, false)
+```
+
+An explicit `pn` declaration restricts a wrapper's callers even if its body
+only calls `fn` functions. Such a wrapper can be more restrictive than its
+implementation needs; it is not evidence that a property read requires `pn`.
+In a reactive UI, template bodies are `fn` context and `on` handlers are `pn`
+context (**S12.1.3**). Element construction is also `fn` context, including
+inside a procedure: bind a procedure's result before using it in an element
+(**S12.1.1v3**).
+
+Function colour and failure are separate: `fn ... T^` is a pure function with
+an error channel, while a `pn` can have effects without declaring one
+(**S7.4.2**, **S12.1.1v3**).
+
 ---
 
 ## Function Declarations

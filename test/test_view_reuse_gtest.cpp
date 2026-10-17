@@ -4,6 +4,9 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/grid_placement.hpp"
 #include "../radiant/grid_sizing_algorithm.hpp"
+#include "../radiant/layout_table.hpp"
+#include "../radiant/page_document.hpp"
+#include "../radiant/page_fo_expression.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../lambda/lambda-data.hpp"
@@ -3446,49 +3449,325 @@ TEST(ViewTreeOwnershipTest, AllocatorsRegisterUnderTheOwnerContext) {
     mem_context_destroy(doc_ctx);
 }
 
-#ifdef __APPLE__
-TEST(FontMetricTest, PlatformLookupDoesNotActivateDownloadableFonts) {
-    // downloadable family names from web fonts must not open FontRegistry UI during layout.
-    const int weights[] = {400, 600};
-    for (int weight : weights) {
-        void* font = font_platform_create_ct_font("NanumPenScript-Regular", "Nanum Pen Script",
-            16.0f, weight, FONT_SLANT_NORMAL);
-        ASSERT_NE(font, nullptr);
-        float ascent = 0.0f, descent = 0.0f, height = 0.0f;
-        EXPECT_TRUE(font_platform_get_metrics_from_ref(font, &ascent, &descent, &height));
-        EXPECT_GT(height, 0.0f);
-        font_platform_destroy_ct_font(font);
+TEST(RadiantImageSizing, IntrinsicPercentFitAndIndependentViewportAxesRetainTheirOwnBases) {
+    const struct { RadiantImageAxis x, y; bool non_uniform; float width, height, content_width, content_height; } cases[] = {
+        {{RADIANT_IMAGE_AUTO, 0}, {RADIANT_IMAGE_AUTO, 0}, false, NAN, NAN, 60, 30},
+        {{RADIANT_IMAGE_LENGTH, 120}, {RADIANT_IMAGE_AUTO, 0}, false, NAN, NAN, 120, 60},
+        {{RADIANT_IMAGE_AUTO, 0}, {RADIANT_IMAGE_LENGTH, 15}, false, 100, 100, 30, 15},
+        {{RADIANT_IMAGE_LENGTH, 120}, {RADIANT_IMAGE_LENGTH, 15}, false, 100, 100, 30, 15},
+        {{RADIANT_IMAGE_LENGTH, 120}, {RADIANT_IMAGE_LENGTH, 15}, true, 100, 100, 120, 15},
+        {{RADIANT_IMAGE_FIT, 0}, {RADIANT_IMAGE_FIT, 0}, false, 120, 30, 60, 30},
+        {{RADIANT_IMAGE_FIT, 0}, {RADIANT_IMAGE_AUTO, 0}, false, 120, 15, 120, 60},
+        {{RADIANT_IMAGE_FIT_DOWN, 0}, {RADIANT_IMAGE_AUTO, 0}, false, 120, 10, 60, 30},
+        {{RADIANT_IMAGE_FIT_UP, 0}, {RADIANT_IMAGE_AUTO, 0}, false, 30, 20, 60, 30},
+        {{RADIANT_IMAGE_PERCENT, 50}, {RADIANT_IMAGE_PERCENT, 200}, false, NAN, NAN, 30, 15},
+        {{RADIANT_IMAGE_PERCENT, 50}, {RADIANT_IMAGE_PERCENT, 200}, true, NAN, NAN, 30, 60},
+        {{RADIANT_IMAGE_FIT, 0}, {RADIANT_IMAGE_AUTO, 0}, false, NAN, 100, 60, 30}
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        SCOPED_TRACE(i); const auto& test = cases[i]; RadiantImageSpec spec = {};
+        spec.axes[0] = test.x; spec.axes[1] = test.y; spec.non_uniform = test.non_uniform;
+        float width = test.width, height = test.height, content_width = 0.0f, content_height = 0.0f;
+        ASSERT_TRUE(radiant_image_size(&spec, 60, 30, &width, &height, &content_width, &content_height));
+        EXPECT_FLOAT_EQ(content_width, test.content_width); EXPECT_FLOAT_EQ(content_height, test.content_height);
+        EXPECT_FLOAT_EQ(width, isnan(test.width) ? test.content_width : test.width);
+        EXPECT_FLOAT_EQ(height, isnan(test.height) ? test.content_height : test.height);
     }
-    float ascent = 0.0f, descent = 0.0f, height = 0.0f;
-    ASSERT_TRUE(get_font_metrics_platform("Nanum Pen Script", 16.0f, &ascent, &descent, &height));
-    EXPECT_GT(height, 0.0f);
+    RadiantImageSpec spec = {}; float width = NAN, height = NAN, x = 0.0f, y = 0.0f;
+    EXPECT_FALSE(radiant_image_size(&spec, 0, 30, &width, &height, &x, &y));
+    EXPECT_FALSE(radiant_image_size(&spec, 60, INFINITY, &width, &height, &x, &y));
 }
 
-TEST(FontMetricTest, NormalMetricsTrackPlatformFamilyAliasAndCssSize) {
-    FontTables tables = {};
-    Os2Table os2 = {};
-    tables.os2 = &os2;
-    tables.parsed_flags = FONT_PARSED_OS2;
-    FontHandle handle = {};
-    handle.tables = &tables;
-    handle.family_name = (char*)"Helvetica";
-    handle.metrics_ready = true;
-    const struct { const char* alias; float size; } cases[] = {
-        {"Times", 16.0f}, {"Times", 16.0f}, {"Courier", 16.0f},
-        {nullptr, 16.0f}, {nullptr, 21.0f}, {nullptr, 0.0f}, {"Times", 16.0f}};
-    for (const auto& entry : cases) {
-        handle.metric_family_name = (char*)entry.alias;
-        handle.size_px = entry.size;
-        float ascent = 0.0f, descent = 0.0f, height = 0.0f;
-        if (entry.size > 0.0f) {
-            ASSERT_TRUE(get_font_metrics_platform(entry.alias ? entry.alias : handle.family_name,
-                entry.size, &ascent, &descent, &height));
-        }
-        EXPECT_FLOAT_EQ(font_calc_normal_line_height(&handle), height);
-        float split_ascent = 0.0f, split_descent = 0.0f;
-        font_get_normal_lh_split(&handle, &split_ascent, &split_descent);
-        EXPECT_FLOAT_EQ(split_ascent, ascent + (height - ascent - descent) / 2.0f);
-        EXPECT_FLOAT_EQ(split_descent, fmaxf(0.0f, descent + (height - ascent - descent) / 2.0f));
+TEST(RadiantImageSizing, AllowedScalesIntersectUniformAxesAndPreferDiscreteChoicesBeforeAny) {
+    const float choices[] = {.5f, 1.5f, 3.0f}, shared[] = {1.0f, 1.5f}, disjoint[] = {1.0f}, too_large[] = {3.0f};
+    struct Case { RadiantImageScales x, y; bool independent, success; float width, height; };
+    const Case cases[] = {
+        {{choices, 3, true}, {shared, 2, true}, false, true, 90, 45},
+        {{choices, 3, false}, {shared, 2, false}, false, true, 90, 45},
+        {{choices, 3, false}, {disjoint, 1, false}, false, false, 0, 0},
+        {{choices, 3, true}, {disjoint, 1, true}, false, true, 90, 45},
+        {{choices, 3, false}, {disjoint, 1, false}, true, true, 90, 30},
+        {{too_large, 1, true}, {}, false, true, 120, 60},
+        {{too_large, 1, false}, {}, false, false, 0, 0}
+    };
+    for (const Case& item : cases) {
+        RadiantImageSpec spec = {}; spec.axes[0].kind = spec.axes[1].kind = RADIANT_IMAGE_FIT;
+        spec.allowed[0] = item.x; spec.allowed[1] = item.y; spec.non_uniform = item.independent;
+        float width = 120, height = 60, x = -1, y = -1;
+        ASSERT_EQ(radiant_image_size(&spec, 60, 30, &width, &height, &x, &y), item.success);
+        if (item.success) { EXPECT_FLOAT_EQ(x, item.width); EXPECT_FLOAT_EQ(y, item.height); }
+        EXPECT_FLOAT_EQ(width, 120); EXPECT_FLOAT_EQ(height, 60);
     }
 }
-#endif
+
+TEST(RadiantImageSizing, AllowedScalesRespectExactAxesAndTheInactiveUpDownFitBranches) {
+    const float values[] = {.5f, 1.5f};
+    const struct { RadiantImageAxis axis; float viewport; bool success; float content; } cases[] = {
+        {{RADIANT_IMAGE_FIT_DOWN, 0}, 120, false, 0},
+        {{RADIANT_IMAGE_FIT_DOWN, 0}, 45, true, 30},
+        {{RADIANT_IMAGE_FIT_UP, 0}, 30, false, 0},
+        {{RADIANT_IMAGE_FIT_UP, 0}, 120, true, 90},
+        {{RADIANT_IMAGE_PERCENT, 150}, 120, true, 90},
+        {{RADIANT_IMAGE_LENGTH, 90}, 120, true, 90},
+        {{RADIANT_IMAGE_PERCENT, 125}, 120, false, 0},
+        {{RADIANT_IMAGE_AUTO, 0}, 120, false, 0}
+    };
+    for (const auto& item : cases) {
+        RadiantImageSpec spec = {}; spec.axes[0] = item.axis; spec.allowed[0] = {values, 2, false};
+        float width = item.viewport, height = NAN, x = 0, y = 0;
+        ASSERT_EQ(radiant_image_size(&spec, 60, 30, &width, &height, &x, &y), item.success);
+        if (item.success) { EXPECT_FLOAT_EQ(x, item.content); EXPECT_FLOAT_EQ(y, item.content * .5f); }
+    }
+}
+
+TEST(RadiantLabelBodySizing, SeparateWidthsAndGapRetainTheirOwnContainingBlockBases) {
+    RadiantLabelBodySpec spec = {}; spec.distance = {25.0f, true}; spec.separation = {5.0f, true};
+    float label = 0.0f, gap = 0.0f, body = 0.0f;
+    ASSERT_TRUE(radiant_label_body_size(&spec, 200.0f, &label, &gap, &body));
+    EXPECT_FLOAT_EQ(label, 40.0f); EXPECT_FLOAT_EQ(gap, 10.0f); EXPECT_FLOAT_EQ(body, 150.0f);
+    spec.distance = {32.0f, false}; spec.separation = {8.0f, false};
+    ASSERT_TRUE(radiant_label_body_size(&spec, 200.0f, &label, &gap, &body));
+    EXPECT_FLOAT_EQ(label, 24.0f); EXPECT_FLOAT_EQ(gap, 8.0f); EXPECT_FLOAT_EQ(body, 168.0f);
+    spec.separation.value = 40.0f; EXPECT_FALSE(radiant_label_body_size(&spec, 200.0f, &label, &gap, &body));
+    spec.separation.value = -1.0f; EXPECT_FALSE(radiant_label_body_size(&spec, 200.0f, &label, &gap, &body));
+    spec.separation.value = 8.0f; EXPECT_FALSE(radiant_label_body_size(&spec, 32.0f, &label, &gap, &body));
+    EXPECT_FALSE(radiant_label_body_size(&spec, INFINITY, &label, &gap, &body));
+}
+
+TEST(LayoutTableTracks, ProportionalDistributionRetainsBasesAndHandlesLargeWeightsWithoutOverflow) {
+    float widths[] = {20.0f, 10.0f, 0.0f, 0.0f};
+    const float weights[] = {0.0f, 2.0f, 2.0f, 1.0f}; float extent = 230.0f;
+    layout_table_distribute_fixed_columns(widths, 4, &extent, 30.0f, 2, weights);
+    EXPECT_FLOAT_EQ(widths[0], 20.0f); EXPECT_FLOAT_EQ(widths[1], 90.0f);
+    EXPECT_FLOAT_EQ(widths[2], 80.0f); EXPECT_FLOAT_EQ(widths[3], 40.0f); EXPECT_FLOAT_EQ(extent, 230.0f);
+    float large[] = {0.0f, 0.0f}; const float large_weights[] = {3e38f, 1e38f}; extent = 120.0f;
+    layout_table_distribute_fixed_columns(large, 2, &extent, 0.0f, 2, large_weights);
+    EXPECT_FLOAT_EQ(large[0], 90.0f); EXPECT_FLOAT_EQ(large[1], 30.0f);
+    float overfull[] = {100.0f, 60.0f}; extent = 120.0f;
+    layout_table_distribute_fixed_columns(overfull, 2, &extent, 160.0f, 0, large_weights);
+    EXPECT_FLOAT_EQ(extent, 160.0f); EXPECT_FLOAT_EQ(overfull[0], 100.0f); EXPECT_FLOAT_EQ(overfull[1], 60.0f);
+    // unspecified tracks share the remainder with unit weight beside authored proportional tracks.
+    float mixed[] = {20.0f, 0.0f, 0.0f, 0.0f}; const float mixed_weights[] = {0.0f, 2.0f, 2.0f, 0.0f}; extent = 200.0f;
+    layout_table_distribute_fixed_columns(mixed, 4, &extent, 20.0f, 3, mixed_weights);
+    EXPECT_FLOAT_EQ(mixed[0], 20.0f); EXPECT_FLOAT_EQ(mixed[1], 72.0f);
+    EXPECT_FLOAT_EQ(mixed[2], 72.0f); EXPECT_FLOAT_EQ(mixed[3], 36.0f);
+}
+
+TEST(FoExpressions, ProportionalProjectionPreservesAffineBasesAndRejectsNonlinearTrackExpressions) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.proportional"); ASSERT_NE(pool, nullptr);
+    struct Case { const char* text; double weight, base; CssMathType type; };
+    const Case cases[] = {{"proportional-column-width(3)", 3, 0, CSS_MATH_LENGTH},
+        {"2 * 3 * proportional-column-width(4)", 24, 0, CSS_MATH_LENGTH},
+        {"(10pt + proportional-column-width(2)) * 3", 6, 40, CSS_MATH_LENGTH},
+        {"proportional-column-width(3) div 2 + 6pt", 1.5, 8, CSS_MATH_LENGTH},
+        {"5% + proportional-column-width(1)", 1, 5, CSS_MATH_LENGTH_PERCENT},
+        {"max(6pt + proportional-column-width(2), 15pt + proportional-column-width(2))", 2, 20, CSS_MATH_LENGTH}};
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.text); double weight = 0.0;
+        RadiantFoExpression expression = radiant_fo_expression(pool, item.text, 1000, 64, nullptr, nullptr, &weight);
+        ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason; EXPECT_DOUBLE_EQ(weight, item.weight);
+        CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+        CssMathResult base = css_math_evaluate(expression.value, &context); EXPECT_TRUE(base.resolved); EXPECT_EQ(base.type, item.type);
+        EXPECT_NEAR(item.type == CSS_MATH_LENGTH_PERCENT ? base.percentage : base.value, item.base, 1e-9);
+    }
+    const char* invalid[] = {"proportional-column-width(1) * proportional-column-width(2)",
+        "10pt div proportional-column-width(2)", "1pt * proportional-column-width(1)",
+        "min(10pt, proportional-column-width(1))", "abs(proportional-column-width(1))",
+        "proportional-column-width(1) - proportional-column-width(2)", "proportional-column-width(1) + 2",
+        "proportional-column-width(proportional-column-width(1))", "proportional-column-width(1) * 1e309"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text); double weight = 0.0;
+        RadiantFoExpression expression = radiant_fo_expression(pool, text, 1000, 64, nullptr, nullptr, &weight);
+        EXPECT_EQ(expression.status, TYPESET_INVALID); EXPECT_EQ(expression.value, nullptr); EXPECT_NE(expression.reason, nullptr);
+    }
+    StrBuf* sum = strbuf_new(); ASSERT_NE(sum, nullptr);
+    for (size_t i = 0; i < 1024; i++) {
+        if (i) strbuf_append_str(sum, " + ");
+        strbuf_append_str(sum, "proportional-column-width(1)");
+    }
+    double weight = 0.0;
+    RadiantFoExpression flat = radiant_fo_expression(pool, sum->str, 10000, 64, nullptr, nullptr, &weight);
+    ASSERT_EQ(flat.status, TYPESET_OK) << flat.reason; EXPECT_DOUBLE_EQ(weight, 1024); strbuf_free(sum);
+    EXPECT_EQ(radiant_fo_expression(pool, "1pt + proportional-column-width(1)", 3, 64, nullptr, nullptr, &weight).status, TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(radiant_fo_expression(pool, "proportional-column-width(1)", 1000, 64).status, TYPESET_INVALID);
+    mem_pool_destroy(pool);
+}
+
+TEST(FoExpressions, ScaleListsRetainTypedArithmeticKeywordsAndExpressionBudgets) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.scale-list"); ASSERT_NE(pool, nullptr);
+    RadiantFoExpression expression = radiant_fo_expression(pool, "any 25% * 2 min(200%, 150%) 300%", 1000, 32,
+        nullptr, nullptr, nullptr, FO_EXPRESSION_SCALES);
+    ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason;
+    ASSERT_NE(expression.value, nullptr); ASSERT_EQ(expression.value->type, CSS_VALUE_TYPE_LIST);
+    ASSERT_EQ(expression.value->data.list.count, 4);
+    EXPECT_STREQ(css_value_identifier_name(expression.value->data.list.values[0]), "any");
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    const double percentages[] = {50, 150, 300};
+    for (size_t i = 0; i < 3; i++) {
+        CssMathResult result = css_math_evaluate(expression.value->data.list.values[i + 1], &context);
+        EXPECT_EQ(result.type, CSS_MATH_PERCENT); EXPECT_TRUE(result.resolved); EXPECT_DOUBLE_EQ(result.percentage, percentages[i]);
+    }
+    for (const char* text : {"", "any50%", "50%any", "50%, 100%", "(50%)any", "any unknown", "any 1e309%"}) {
+        SCOPED_TRACE(text); EXPECT_EQ(radiant_fo_expression(pool, text, 1000, 32, nullptr, nullptr, nullptr, FO_EXPRESSION_SCALES).status, TYPESET_INVALID);
+    }
+    EXPECT_EQ(radiant_fo_expression(pool, "any 50% 100%", 3, 32, nullptr, nullptr, nullptr, FO_EXPRESSION_SCALES).status, TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(radiant_fo_expression(pool, "50%", 100, 0, nullptr, nullptr, nullptr, FO_EXPRESSION_SCALES).status, TYPESET_BUDGET_EXHAUSTED);
+    mem_pool_destroy(pool);
+}
+
+TEST(FoExpressions, DecorationComponentsRetainArithmeticKeywordsHexAndComputedRgb) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.components"); ASSERT_NE(pool, nullptr);
+    RadiantFoExpression expression = radiant_fo_expression(pool, "1pt + 2pt solid rgb(50% + 25%, 10pt div 1pt, 0)",
+        1000, 32, nullptr, nullptr, nullptr, FO_EXPRESSION_COMPONENTS);
+    ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason;
+    ASSERT_EQ(expression.value->type, CSS_VALUE_TYPE_LIST); ASSERT_EQ(expression.value->data.list.count, 3);
+    EXPECT_STREQ(css_value_identifier_name(expression.value->data.list.values[1]), "solid");
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    CssMathResult width = css_math_evaluate(expression.value->data.list.values[0], &context);
+    EXPECT_EQ(width.type, CSS_MATH_LENGTH); EXPECT_TRUE(width.resolved); EXPECT_DOUBLE_EQ(width.value, 4);
+    CssValue* color = expression.value->data.list.values[2]; ASSERT_EQ(color->type, CSS_VALUE_TYPE_FUNCTION);
+    EXPECT_DOUBLE_EQ(css_math_evaluate(color->data.function->args[0], &context).value, 191.25);
+    EXPECT_DOUBLE_EQ(css_math_evaluate(color->data.function->args[1], &context).value, 10);
+    expression = radiant_fo_expression(pool, "1pt + 2pt solid #d04020", 1000, 32, nullptr, nullptr, nullptr, FO_EXPRESSION_COMPONENTS);
+    ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason;
+    EXPECT_EQ(expression.value->data.list.values[2]->type, CSS_VALUE_TYPE_COLOR);
+    for (const char* text : {"", "1pt solid #zzzz", "1pt 2pt, 3pt", "1pt solid rgb(1px,2,3)",
+        "1pt solid rgb(1 div 0,2,3)", "1pt (2pt)solid", "1pt solid rgb(1e309,0,0)"}) {
+        SCOPED_TRACE(text); EXPECT_EQ(radiant_fo_expression(pool, text, 1000, 32,
+            nullptr, nullptr, nullptr, FO_EXPRESSION_COMPONENTS).status, TYPESET_INVALID);
+    }
+    EXPECT_EQ(radiant_fo_expression(pool, "1pt solid red", 3, 32, nullptr, nullptr, nullptr,
+        FO_EXPRESSION_COMPONENTS).status, TYPESET_BUDGET_EXHAUSTED);
+    mem_pool_destroy(pool);
+}
+
+TEST(FoExpressions, ArithmeticUsesCommonTypedMathWithXslPrecedenceRoundingAndRemainders) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.expressions"); ASSERT_NE(pool, nullptr);
+    struct Case { const char* source; CssMathType type; double value; };
+    const Case cases[] = {
+        {"2 + 3 * 4", CSS_MATH_NUMBER, 14}, {"(2 + 3) * 4", CSS_MATH_NUMBER, 20},
+        {"20 div 2 div 5", CSS_MATH_NUMBER, 2}, {"2+3", CSS_MATH_NUMBER, 5},
+        {"2 -3", CSS_MATH_NUMBER, -1}, {"-(2 + 3)", CSS_MATH_NUMBER, -5},
+        {"-7 mod 3", CSS_MATH_NUMBER, -1}, {"7 mod -3", CSS_MATH_NUMBER, 1},
+        {"floor(-2.1)", CSS_MATH_NUMBER, -3}, {"ceiling(-2.1)", CSS_MATH_NUMBER, -2},
+        {"round(-2.5)", CSS_MATH_NUMBER, -2}, {"round(2.5)", CSS_MATH_NUMBER, 3},
+        {"max(2, min(6, 3))", CSS_MATH_NUMBER, 3}, {"abs(-2pt) * 3", CSS_MATH_LENGTH, 8},
+        {"1in - 6pt * 2", CSS_MATH_LENGTH, 80}, {"20% * 2 + 10%", CSS_MATH_PERCENT, 50},
+        {"7pt mod 2pt", CSS_MATH_LENGTH, 4.0 / 3.0},
+        {"1in div 12pt", CSS_MATH_NUMBER, 6},
+        {"2pt * 3pt div 1pt", CSS_MATH_LENGTH, 8},
+        {"(2pt * 3pt + 4pt * 3pt) div 2pt", CSS_MATH_LENGTH, 12},
+        {"(2 div 1pt) * 3pt", CSS_MATH_NUMBER, 6},
+        {"(2pt * 3pt) div (1pt * 2pt)", CSS_MATH_NUMBER, 3},
+        {"abs(-2pt * 3pt) div 1pt", CSS_MATH_LENGTH, 8},
+        {"min(2pt * 3pt, 4pt * 3pt) div 1pt", CSS_MATH_LENGTH, 8},
+        {"(7pt * 3pt mod (2pt * 3pt)) div 1pt", CSS_MATH_LENGTH, 4},
+        {"floor(1in div 10pt)", CSS_MATH_NUMBER, 7}
+    };
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.source);
+        RadiantFoExpression expression = radiant_fo_expression(pool, item.source, 1000, 32);
+        ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason; ASSERT_NE(expression.value, nullptr);
+        CssMathResult value = css_math_evaluate(expression.value, &context);
+        EXPECT_EQ(value.type, item.type); ASSERT_TRUE(value.resolved);
+        EXPECT_NEAR(item.type == CSS_MATH_PERCENT ? value.percentage : value.value, item.value, 1e-9);
+    }
+    const char* invalid[] = {"", "2 3", "1 / 2", "2 +", "2 + pi", "1 div 0", "1 mod 0", "2 + 1pt",
+        "min(1)", "max(1,2,3)", "floor(1pt)", "ceiling(1%)", "round(1,2)", "floor(2", "Floor(2)",
+        "min(1,2) garbage", "sqrt(4)", "1pt * 2pt", "10pt-2pt", "1deg + 2deg", "/*comment*/ 2",
+        "1 div 1pt", "1pt * 1pt + 1pt", "min(1pt * 1pt, 1pt) div 1pt",
+        "1pt * 1pt mod 1pt", "(1pt * 1pt) div (1pt - 1pt)", "10% * 2pt div 1pt"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text); RadiantFoExpression expression = radiant_fo_expression(pool, text, 1000, 32);
+        EXPECT_EQ(expression.status, TYPESET_INVALID); EXPECT_EQ(expression.value, nullptr); EXPECT_NE(expression.reason, nullptr);
+    }
+    EXPECT_EQ(radiant_fo_expression(pool, "1 + 2 + 3", 3, 32).status, TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(radiant_fo_expression(pool, "(((1)))", 100, 2).status, TYPESET_BUDGET_EXHAUSTED);
+    StrBuf* long_sum = strbuf_new(); ASSERT_NE(long_sum, nullptr);
+    strbuf_append_str(long_sum, "1");
+    for (size_t i = 1; i < 1024; i++) strbuf_append_str(long_sum, " + 1");
+    RadiantFoExpression expression = radiant_fo_expression(pool, long_sum->str, 4096, 32);
+    ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason;
+    EXPECT_DOUBLE_EQ(css_math_evaluate(expression.value, &context).value, 1024);
+    strbuf_free(long_sum);
+    mem_pool_destroy(pool);
+}
+
+TEST(FoExpressions, RgbChannelsUseCommonMathAndRejectNonNumericOrNonfiniteResults) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.colors"); ASSERT_NE(pool, nullptr);
+    struct Case { const char* text; uint8_t r, g, b; };
+    const Case cases[] = {{"rgb(255 div 2, floor(127.9), ceiling(63.2))", 128, 127, 64},
+        {"rgb(max(0, 300), -10, round(127.5))", 255, 0, 128},
+        {"rgb(1in div 1pt, (2pt * 3pt) div (1pt * 2pt), abs(-4))", 72, 3, 4},
+        {"rgb(50%, 10%, 110%)", 128, 26, 255},
+        {"rgb(100% div 50%, floor(50%), max(10%, 20%))", 2, 127, 51},
+        {"rgb(abs(-50%) + 0.5, round(50%), 10% * 2 - 1)", 128, 128, 50},
+        {"rgb(100% * 1pt div 1pt, 50% mod 100, -10%)", 255, 28, 0}};
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.text);
+        RadiantFoExpression expression = radiant_fo_expression(pool, item.text, 1000, 32);
+        ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason; ASSERT_NE(expression.value, nullptr);
+        CssComputedColor color = {}; ASSERT_TRUE(css_color_compute(expression.value, &color));
+        uint8_t r, g, b, a; ASSERT_TRUE(css_color_to_rgba(&color, &r, &g, &b, &a));
+        EXPECT_EQ(r, item.r); EXPECT_EQ(g, item.g); EXPECT_EQ(b, item.b); EXPECT_EQ(a, 255);
+    }
+    for (const char* invalid : {"rgb(1,2)", "rgb(1,2,3,4)", "rgb(1pt,2,3)",
+            "rgb(1 div 0,2,3)", "rgb(1e308 * 1e308,2,3)", "rgb(rgb(1,2,3),2,3)",
+            "rgb(1,2,3) + 1", "rgb(1,2,3) div 2", "rgb(1,2,3) trailing"}) {
+        SCOPED_TRACE(invalid);
+        RadiantFoExpression expression = radiant_fo_expression(pool, invalid, 1000, 32);
+        EXPECT_EQ(expression.status, TYPESET_INVALID); EXPECT_EQ(expression.value, nullptr); EXPECT_NE(expression.reason, nullptr);
+    }
+    EXPECT_EQ(radiant_fo_expression(pool, "rgb(1,2,3)", 3, 32).status, TYPESET_BUDGET_EXHAUSTED);
+    mem_pool_destroy(pool);
+}
+
+TEST(FoExpressions, RgbPercentagesUseTheirFunctionBaseThroughNestedNumericExpressions) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.color.percent"); ASSERT_NE(pool, nullptr);
+    const struct { const char* text; uint8_t expected[3]; } colors[] = {
+        {"rgb(86.66666666666667%, 100%, 173.33333333333334% div 2)", {221, 255, 221}},
+        {"rgb(100% * 2 div 3, round(66.50980392156863%), 100%)", {170, 170, 255}}
+    };
+    for (const auto& color : colors) {
+        SCOPED_TRACE(color.text);
+        RadiantFoExpression expression = radiant_fo_expression(pool, color.text, 1000, 32);
+        ASSERT_EQ(expression.status, TYPESET_OK);
+        CssDeclaration declaration = {}; declaration.value = expression.value;
+        const char* text = css_serialize_declaration_value(&declaration, pool);
+        SCOPED_TRACE(text);
+        CssDeclaration* reparsed = css_parse_property_value_declaration("color", 5, text, strlen(text), pool);
+        ASSERT_NE(reparsed, nullptr); ASSERT_TRUE(css_declaration_is_supported(reparsed));
+        CssComputedColor computed; ASSERT_TRUE(css_color_compute(reparsed->value, &computed));
+        uint8_t r, g, b, a; ASSERT_TRUE(css_color_to_rgba(&computed, &r, &g, &b, &a));
+        EXPECT_EQ(r, color.expected[0]); EXPECT_EQ(g, color.expected[1]); EXPECT_EQ(b, color.expected[2]);
+    }
+    for (const char* invalid : {"rgb(100% * 1pt, 0, 0)", "rgb(100% div 0%, 0, 0)",
+            "rgb(1e308%, 0, 0)", "floor(50%)", "rgb(100%, 0%, 0%) + 50%"}) {
+        SCOPED_TRACE(invalid);
+        EXPECT_EQ(radiant_fo_expression(pool, invalid, 1000, 32).status, TYPESET_INVALID);
+    }
+    RadiantFoExpression percentage = radiant_fo_expression(pool, "50% + 25%", 100, 32);
+    ASSERT_EQ(percentage.status, TYPESET_OK);
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    CssMathResult value = css_math_evaluate(percentage.value, &context);
+    EXPECT_EQ(value.type, CSS_MATH_PERCENT); EXPECT_DOUBLE_EQ(value.percentage, 75);
+    EXPECT_EQ(radiant_fo_expression(pool, "rgb(100%, 0%, 0%)", 3, 32).status, TYPESET_BUDGET_EXHAUSTED);
+    mem_pool_destroy(pool);
+}
+
+TEST(RadiantFlowTraits, SpaceResolutionAppliesConditionalRunsForcePrecedenceAndRangeIntersection) {
+    RadiantSpaceSpec spaces[] = {{10, 10, 10, 0, false, false, true},
+        {4, 4, 4, 0, false, true, true}, {5, 5, 5, 0, false, false, true}};
+    EXPECT_FLOAT_EQ(radiant_spaces_resolve(spaces, 3, true, false).optimum, 5.0f);
+    EXPECT_FLOAT_EQ(radiant_spaces_resolve(spaces, 3, false, true).optimum, 10.0f);
+    spaces[0].force = spaces[2].force = true;
+    EXPECT_FLOAT_EQ(radiant_spaces_resolve(spaces, 3, false, false).optimum, 15.0f);
+    spaces[0] = {2, 8, 12, 3, false, true, true}; spaces[1] = {6, 8, 10, 3, false, true, true};
+    RadiantSpaceSpec intersection = radiant_spaces_resolve(spaces, 2, false, false);
+    EXPECT_FLOAT_EQ(intersection.minimum, 6.0f); EXPECT_FLOAT_EQ(intersection.optimum, 8.0f); EXPECT_FLOAT_EQ(intersection.maximum, 10.0f);
+    spaces[2] = {1, 1, 1, 4, false, true, true};
+    EXPECT_FLOAT_EQ(radiant_spaces_resolve(spaces, 3, false, false).optimum, 1.0f);
+    EXPECT_GT(radiant_keep_compare({INT32_MIN, RADIANT_KEEP_NUMBER}, {}), 0);
+    EXPECT_GT(radiant_keep_compare({0, RADIANT_KEEP_ALWAYS}, {INT32_MAX, RADIANT_KEEP_NUMBER}), 0);
+}

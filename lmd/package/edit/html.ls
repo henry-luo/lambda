@@ -470,7 +470,7 @@ fn inline_atom(item) {
   else [inline_html(item.content)]
 }
 
-fn inline_html(items) => join(nest_marks(items, mark_order, wrap_mark, inline_atom), "")
+pub fn inline_html(items) => join(nest_marks(items, mark_order, wrap_mark, inline_atom), "")
 
 fn body_html(blocks, depth) =>
   if (len(blocks) == 1 and is_implied(blocks[0])) inline_html(blocks[0].content) else blocks_html(blocks, depth)

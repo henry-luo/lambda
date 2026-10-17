@@ -4,12 +4,17 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/event.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
+ArrayList* build_view_stack(EventContext* context, View* target);
+void fire_events(EventContext* context, ArrayList* stack);
+void update_hover_state(EventContext* context, View* target);
 
 TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
     EXPECT_TRUE(is_space(0x000A));
@@ -207,6 +212,68 @@ protected:
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
 };
+
+TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    DomElement* grid = dom_find_element_by_id(document->root->as_element(), "grid");
+    ASSERT_NE(grid, nullptr);
+    const float widths[] = {500.0f, 320.0f, 640.0f};
+    for (float width : widths) {
+        ui.viewport_width = ui.window_width = width;
+        layout_html_doc(&ui, document, true);
+        EXPECT_FLOAT_EQ(grid->width, width);
+        float bottom = 0.0f;
+        for (DomNode* child = grid->first_child; child; child = child->next_sibling) {
+            if (child->is_element()) bottom = max(bottom, child->y + child->height);
+        }
+        EXPECT_NEAR(grid->height, bottom + grid->boundary()->padding.bottom, 0.5f) << width;
+    }
+}
+
+TEST_F(RadiantTextQuery, FilenameGlyphsKeepTheirInheritedPointerCursor) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    struct CursorCase { const char* id; CssEnum cursor; };
+    const CursorCase cases[] = {{"label", CSS_VALUE_POINTER}, {"ordinary", CSS_VALUE_TEXT},
+        {"crosshair", CSS_VALUE_CROSSHAIR}, {"explicit", CSS_VALUE_TEXT}};
+    for (const CursorCase& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        DomNode* text = element->first_child;
+        ASSERT_NE(text, nullptr);
+        if (entry.cursor == CSS_VALUE_POINTER) {
+            EXPECT_EQ(element->inl()->cursor, CSS_VALUE_POINTER) << "label before hover";
+            EXPECT_EQ(element->parent->as_element()->inl()->cursor, CSS_VALUE_POINTER) << "button before hover";
+        }
+        EventContext context = {};
+        context.ui_context = &ui;
+        context.target_document = document;
+        context.event.type = RDT_EVENT_MOUSE_MOVE;
+        context.new_cursor = CSS_VALUE_AUTO;
+        update_hover_state(&context, static_cast<View*>(text));
+        ArrayList* stack = build_view_stack(&context, static_cast<View*>(text));
+        fire_events(&context, stack);
+        arraylist_free(stack);
+        EXPECT_EQ(context.new_cursor, entry.cursor) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ComputedGapLonghandsProjectTheirWinningShorthand) {
+    ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    struct GapCase { const char* id; const char* row; const char* column; };
+    const GapCase cases[] = {{"grid", "22px", "10px"}, {"gap-one", "8px", "8px"},
+        {"gap-axis", "4px", "9px"}, {"gap-later", "6px", "7px"}};
+    for (const GapCase& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        char value[64];
+        ASSERT_TRUE(css_prop_serialize_computed(element, CSS_PROPERTY_ROW_GAP, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, entry.row) << entry.id;
+        ASSERT_TRUE(css_prop_serialize_computed(element, CSS_PROPERTY_COLUMN_GAP, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, entry.column) << entry.id;
+    }
+}
 
 TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
     ASSERT_NE(load("test/html/layout_preserved_whitespace.html"), nullptr);
@@ -2922,6 +2989,138 @@ TEST_F(RadiantTextLayout, PhotoDtnaButtonHasThemeLeadingAndCenteredText) {
 }
 
 class RadiantFrameDelivery : public RadiantTextQuery {};
+
+TEST_F(RadiantTextLayout, GraphLayoutConnectsAutomaticallyAcrossDocumentsAndReflow) {
+    ASSERT_NE(load("test/html/automatic_graph_layout.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    Runtime* first_runtime = dom_document_loader_runtime(document);
+    ASSERT_NE(first_runtime, nullptr);
+    DomElement* graph = dom_find_element_by_id(document->root->as_element(), "graph");
+    ASSERT_NE(graph, nullptr);
+    ASSERT_NE(graph->custom_layout_paint_prop(), nullptr);
+    ASSERT_GT(graph->custom_layout_paint_prop()->layer_count, 0);
+    float first_width = graph->width;
+    EXPECT_GT(first_width, 160.0f);
+
+    // two static documents own independent package state; closing one must not disconnect the other.
+    DomDocument* first = document;
+    struct HeldDocument {
+        DomDocument* doc;
+        ~HeldDocument() { free_document(doc); }
+    } held = {first};
+    document = nullptr;
+    ASSERT_NE(load("test/html/automatic_graph_layout.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    EXPECT_NE(dom_document_loader_runtime(document), first_runtime);
+    DomElement* second_graph = dom_find_element_by_id(document->root->as_element(), "graph");
+    ASSERT_NE(second_graph, nullptr);
+    EXPECT_FLOAT_EQ(second_graph->width, first_width);
+    ui.document = nullptr;
+    free_document(document);
+    document = nullptr;
+
+    ui.document = lam::up(first);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, first, true);
+        EXPECT_EQ(dom_document_loader_runtime(first), first_runtime);
+        EXPECT_FLOAT_EQ(graph->width, first_width);
+        DomElement* a = dom_find_element_by_id(first->root->as_element(), "a");
+        DomElement* b = dom_find_element_by_id(first->root->as_element(), "b");
+        ASSERT_NE(a, nullptr);
+        ASSERT_NE(b, nullptr);
+        EXPECT_GT(b->x, a->x + a->width);
+        EXPECT_FLOAT_EQ(a->y, b->y);
+        ASSERT_NE(graph->custom_layout_paint_prop(), nullptr);
+        EXPECT_GT(graph->custom_layout_paint_prop()->layer_count, 0);
+    }
+    ui.document = nullptr;
+}
+
+static bool test_package_layout_callback(const CustomLayoutContext* context,
+                                         CustomLayoutResult* result) {
+    return radiant_package_layout_callback(context, result, ".test.lambda._custom_layout_callbacks");
+}
+
+TEST_F(RadiantTextLayout, TikzLayoutConnectsAutomaticallyAndRetainsMeasuredPaint) {
+    DomElement* owner = load("test/lambda/ui/_automatic_tikz_layout.ls");
+    ASSERT_NE(owner, nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        DomElement* wrapper = dom_find_element_by_id(owner, "picture");
+        ASSERT_NE(wrapper, nullptr);
+        ASSERT_NE(wrapper->first_child, nullptr);
+        DomElement* picture = wrapper->first_child->as_element();
+        ASSERT_NE(picture, nullptr);
+        EXPECT_STREQ(picture->get_attribute("data-radiant-layout"), "lambda-tikz");
+        EXPECT_GT(picture->width, 100.0f);
+        EXPECT_GT(picture->height, 0.0f);
+        CustomLayoutPaintState* paint = picture->custom_layout_paint_prop();
+        ASSERT_NE(paint, nullptr);
+        ASSERT_EQ(paint->layer_count, 1);
+        ASSERT_NE(paint->layers[0].content, nullptr);
+        EXPECT_TRUE(strview_equal(&((TypeElmt*)paint->layers[0].content->type)->name, "svg"));
+        DomElement* a = picture->first_child->as_element();
+        ASSERT_NE(a, nullptr);
+        ASSERT_NE(a->next_sibling, nullptr);
+        DomElement* b = a->next_sibling->as_element();
+        ASSERT_NE(b, nullptr);
+        EXPECT_GT(a->width, 0.0f);
+        EXPECT_GT(b->x, a->x + a->width);
+    }
+}
+
+class RadiantPackageLayout : public RadiantTextLayout {
+    void TearDown() override {
+        RadiantTextLayout::TearDown();
+        custom_layout_registry_clear();
+    }
+};
+
+TEST_F(RadiantPackageLayout, ChildMarginsStayInsideCustomFormattingContext) {
+    ASSERT_TRUE(custom_layout_register("bfc_smoke", test_package_layout_callback));
+    ASSERT_NE(load("test/lambda/radiant_custom_layout_bfc.html"), nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        expect_box("graph", 0.0f, 0.0f, 20.0f, 10.0f);
+        expect_box("child", 0.0f, 0.0f, 20.0f, 10.0f);
+        expect_box("after", 0.0f, 10.0f, 5.0f, 5.0f);
+    }
+}
+
+TEST_F(RadiantPackageLayout, MeasuredChildConstraintsAndNegativePlacementsSurviveReflow) {
+    ASSERT_TRUE(custom_layout_register("flow_smoke", test_package_layout_callback));
+    ASSERT_NE(load("test/lambda/radiant_custom_layout_flow.html"), nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        expect_box("graph", 0.0f, 0.0f, 140.0f, 80.0f);
+        expect_box("a", -10.0f, 0.0f, 40.0f, 20.0f);
+        expect_box("b", 40.0f, 30.0f, 40.0f, 20.0f);
+        expect_box("c", 90.0f, 60.0f, 40.0f, 20.0f);
+    }
+}
+
+TEST_F(RadiantPackageLayout, VelmtAttributesRemainAvailableToGeneratedPaint) {
+    ASSERT_TRUE(custom_layout_register("projection-smoke", test_package_layout_callback));
+    ASSERT_NE(load("test/html/custom_layout_projection.html"), nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        DomElement* graph = dom_find_element_by_id(document->root->as_element(), "projection");
+        ASSERT_NE(graph, nullptr);
+        CustomLayoutPaintState* paint = graph->custom_layout_paint_prop();
+        ASSERT_NE(paint, nullptr);
+        ASSERT_EQ(paint->layer_count, 1);
+        ElementReader content(paint->layers[0].content);
+        String* tag = content.get_attr("data-projection-tag").asString();
+        String* role = content.get_attr("data-projection-role").asString();
+        String* id = content.get_attr("data-projection-id").asString();
+        ASSERT_NE(tag, nullptr);
+        ASSERT_NE(role, nullptr);
+        ASSERT_NE(id, nullptr);
+        EXPECT_STREQ(tag->chars, "div");
+        EXPECT_STREQ(role->chars, "node");
+        EXPECT_STREQ(id->chars, "n0");
+    }
+}
 
 TEST_F(RadiantTextLayout, MathMLUsesMeasuredPaintAndRetainsItsSourceDom) {
     DomElement* owner = load("test/html/mathml_native.html");

@@ -2,6 +2,7 @@
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "layout.hpp"
+#include "page_document.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -554,7 +555,8 @@ static inline uint32_t render_text_resolve_mathlive_fallback_glyph(uint32_t code
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
-                                        bool include_ellipsis, CssEnum white_space) {
+                                        bool include_ellipsis, CssEnum white_space,
+                                        const RadiantWhitespaceSpec* whitespace) {
     if (!text || !text_rect) return nullptr;
 
     const char* trailing_character = text_rect->trailing_hyphenate_character;
@@ -570,7 +572,7 @@ char* render_text_create_export_segment(const unsigned char* text,
     unsigned char* src_end = src + source_length;
     char* dst = content;
 
-    bool preserve_spaces = white_space_preserves_space_advance(white_space);
+    bool preserve_spaces = whitespace ? !whitespace->collapse : white_space_preserves_space_advance(white_space);
     bool has_space = render_text_source_has_space(text, source_start, preserve_spaces);
     bool is_word_start = render_text_source_word_start(text, source_start);
     while (src < src_end) {
@@ -581,14 +583,25 @@ char* render_text_create_export_segment(const unsigned char* text,
             if (bytes <= 0) bytes = 1;
         }
         if (codepoint == 0x00AD) { src += bytes; continue; }
+        bool linefeed = codepoint == '\n' || codepoint == '\r';
+        if (whitespace) {
+            if (linefeed && whitespace->linefeed != RADIANT_LINEFEED_SPACE) {
+                if (whitespace->linefeed == RADIANT_LINEFEED_ZERO_WIDTH) dst += utf8_encode(0x200B, dst);
+                src += bytes;
+                if (whitespace->linefeed != RADIANT_LINEFEED_IGNORE) { is_word_start = true; has_space = false; }
+                continue;
+            }
+            if (linefeed) codepoint = ' ';
+            else if (whitespace->ignore && is_space(codepoint)) { src += bytes; continue; }
+        }
         // preserved breaks already positioned the next line; their source bytes produce no glyphs.
-        if ((codepoint == '\n' || codepoint == '\r') && !layout_white_space_collapses_newlines(white_space)) {
+        if (!whitespace && linefeed && !layout_white_space_collapses_newlines(white_space)) {
             src += bytes; has_space = false; is_word_start = true;
             continue;
         }
         if (is_space(codepoint)) {
             // the source byte range stays intact; only its painted representation collapses.
-            if (preserve_spaces || !has_space) *dst++ = preserve_spaces ? *src : ' ';
+            if (preserve_spaces || !has_space) *dst++ = preserve_spaces && !linefeed ? *src : ' ';
             has_space = true;
             is_word_start = true;
         } else {
@@ -1848,10 +1861,10 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
 
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
         const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run,
-        bool reverse_clusters, const char** logical_text) {
+        bool reverse_clusters, const char** logical_text, const RadiantWhitespaceSpec* whitespace) {
     if (!text || !text_rect || !font || !font->style || !run) return nullptr;
     char* content = render_text_create_export_segment(text->text_data(), text_rect,
-        render_text_inherited_transform(text), true, get_white_space_value(text));
+        render_text_inherited_transform(text), true, get_white_space_value(text), whitespace);
     if (!content) return nullptr;
     if (reverse_clusters) {
         size_t length = strlen(content);

@@ -10,8 +10,14 @@ pub fn head(title) element => <head <meta charset:"utf-8"> <meta name:"viewport"
     <script type:"importmap", "{\"imports\":{\"three\":\"../scene3d/vendor/three/three.module.js\"}}">>
 
 pub fn navigation(active) element => <nav class:"navigation",'aria-label':"Physics demonstrations",
-    <a href:"index.ls",class:(if (active == "index") "active" else ""), "All experiments">
+    <a href:"index.ls",class:(if (active == "index") "active" else ""), "All">
     for (demo in demos) <a href:demo.file,class:(if (active == demo.id) "active" else ""),demo.title>>
+
+// share the compact title and navigation arrangement across the gallery and experiments.
+pub fn header(title, active) element => <header class:"page-header",
+    <div class:"header-meta", <p class:"eyebrow", "LAMBDA PHYSICS / PLAYGROUND">
+        <a class:"edition",href:"index.ls", "FOUR EXPERIMENTS · 3D">>
+    <div class:"title-row", <h1 title> navigation(active)>>
 
 fn action_button(action) element => <button id:action.id,type:"button",class:(if (action.primary == true) "primary" else ""),
     'data-request':format(action.request,'json'),'data-restart':string(action.restart == true),
@@ -20,9 +26,7 @@ fn action_button(action) element => <button id:action.id,type:"button",class:(if
 pub fn page(kind, scene, options) element => <html
     head(options.title);
     <body <main
-        <header class:"page-header", <div <p class:"eyebrow", "LAMBDA PHYSICS / PLAYGROUND"> <h1 options.title>>
-            <a class:"edition",href:"index.ls", "FOUR EXPERIMENTS · 3D">>
-        navigation(kind);
+        header(options.title, kind);
         <p class:"intro",options.description>
         <div class:"toolbar",role:"group",'aria-label':"Simulation controls",
             for (action in options.actions) action_button(action);

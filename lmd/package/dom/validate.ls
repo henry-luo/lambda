@@ -25,7 +25,7 @@ fn as_number(text) {
         let n = float(text);
         // float() yields an error value for non-numeric text; keep it null so
         // callers can treat "not a number" and "absent" the same way
-        if (type(n) == 'error') null else n
+        if (n is error) null else n
     }
 }
 
@@ -63,7 +63,7 @@ pub fn value_is_email(text) {
 
 pub fn value_is_url(text) {
     // a non-text value is no URL: its error (S7.9.3) answers false
-    starts_with(text, "http://") or starts_with(text, "https://") or false
+    (starts_with(text, "http://") ^ { false }) or (starts_with(text, "https://") ^ { false })
 }
 
 // --- the constraint pass ---------------------------------------------------

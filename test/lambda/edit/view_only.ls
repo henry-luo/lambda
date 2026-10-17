@@ -26,7 +26,7 @@ fn has_math(items) {
 [for (s in ["<br>", "<img src=\"a.png\">", "<input type=\"checkbox\">"]) len(html_view(s))]
 
 // a Markdown block is sanitized whole, so raw tags pair around its text
-fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown') or null) where type(c) == element and name(c) == 'body') c][0]) where type(c) == element) c][0]
+fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown') ^ { null }) where type(c) == element and name(c) == 'body') c][0]) where type(c) == element) c][0]
 "markdown block:";
 [shown(markdown_view(md_block("Press <kbd>K</kbd>, see [docs](https://example.com) and ![p](p.png)[^1].\n")))]
 "markdown block with raw script:";
@@ -39,7 +39,7 @@ fn md_block(src) => [for (c in content([for (c in content(parse(src, 'markdown')
                  "Fraction $\\frac{1}{2}$ and root $\\sqrt{x}$.[^1]\n\n[^1]: a note\n"])
   has_math(markdown_view(md_block(source)))]
 let math_source = "Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n\n$$\nE = mc^2\n$$\n"
-let math_doc = md.import_text(math_source) or null
+let math_doc = md.import_text(math_source) ^ { null }
 let formulas = [for (n in math_doc.doc.content[0].content where n.tag == 'math') n];
 "inline math projections:";
 [for (n in formulas) has_math(attr_get(n, view_attr))]
@@ -49,7 +49,7 @@ let formulas = [for (n in math_doc.doc.content[0].content where n.tag == 'math')
 
 // the HTML adapter keeps an element outside its profile with a view; one
 // that shows nothing keeps only its source
-let loaded = html.import_text("<p>Press <kbd>K</kbd> <a name=\"top\"></a></p><video src=\"v.mp4\"></video>\n") or null
+let loaded = html.import_text("<p>Press <kbd>K</kbd> <a name=\"top\"></a></p><video src=\"v.mp4\"></video>\n") ^ { null }
 let kept = [for (b in loaded.doc.content) for (x in [b, *b.content] where x.kind == 'node' and (x.tag == 'raw_html' or x.tag == 'html_block')) x];
 "html adapter views:";
 [for (k in kept) [k.tag, shown(attr_get(k, view_attr))]]
