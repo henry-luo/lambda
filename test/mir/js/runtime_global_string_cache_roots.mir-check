@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
-  "description": "D5.3.3: URI errors and character-cache values survive exact-root forced-GC execution.",
+  "description": "D5.3/D5.4, D6.2.2v2: generic string/global calls retain rooted values and use the formal callable entry.",
   "checks": [
     {
-      "in_func": "js_main",
+      "in_func": "mvp_lmd_program",
       "expect": [
-        "mov\t{{r}}, js_call",
-        "call\tjs_call_p_r6_n1_a6, {{r}}"
+        "call\tmvp_lmd_signature,",
+        "call\towned_item_slot_store",
+        "mov\ti64:80(runtime),",
+        "call\tmvp_lmd_property_get_fixed"
       ]
     }
   ]

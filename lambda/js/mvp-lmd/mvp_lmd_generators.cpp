@@ -12,6 +12,8 @@
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 
+const char* const mvp_lmd_iterator_names[LMD_ITERATOR_COUNT] = {"Map Iterator", "Set Iterator", "String Iterator"};
+
 static bool iterator_object(Item value) {
     return mvp_lmd_is_object(value);
 }
@@ -183,7 +185,15 @@ static Item sequence_iterator(Context*, MvpLmdProgram* program, Item*, uint64_t,
     // array keys/entries are generic ToObject operations; collection projections
     // (6..8) retain their branded ordered-map admission.
     bool ordered = projection >= 6;
-    if (projection && !ordered && !mvp_lmd_is_object(receiver)) {
+    if (code & 64) {
+        if (receiver.item == ITEM_NULL || receiver.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> text(roots, mvp_lmd_primitive_to_string(receiver, 1));
+        return item_is_error(text.get()) ? text.get() :
+            mvp_lmd_sequence_iterator_create(program, text.get(), 0, false, false, true);
+    }
+    if (!ordered && !mvp_lmd_is_object(receiver)) {
         Item object = mvp_lmd_box_primitive(receiver);
         return item_is_error(object) ? object :
             mvp_lmd_sequence_iterator_create(program, object, projection, false, false);
@@ -191,7 +201,7 @@ static Item sequence_iterator(Context*, MvpLmdProgram* program, Item*, uint64_t,
     return mvp_lmd_sequence_iterator_create(program, receiver, projection, ordered, code & 32);
 }
 extern "C" Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item receiver,
-        int projection, bool ordered, bool set) {
+        int projection, bool ordered, bool set, bool string) {
     TypeId type = get_type_id(receiver);
     if (ordered ? type != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_ORDERED :
             type != LMD_TYPE_STRING && !mvp_lmd_is_object(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -205,8 +215,9 @@ extern "C" Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item re
     if (!carrier) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     carrier->base.type_id = LMD_TYPE_MAP; carrier->base.map_kind = MAP_KIND_ITERATOR;
     MvpLmdLibraryState* library = mvp_lmd_program_library(program);
-    carrier->base.type = ordered && library->collection_iterators
-        ? &library->collection_iterators[set ? 1 : 0].shape : &library->iterator.shape;
+    carrier->base.type = (ordered || string) && library->iterator_families
+        ? &library->iterator_families[string ? LMD_ITERATOR_STRING : set ? LMD_ITERATOR_SET : LMD_ITERATOR_MAP].shape
+        : &library->iterator.shape;
     carrier->payload.source = held.get();
     carrier->payload.ordered_projection = ordered ? projection : 0;
     carrier->payload.sequence_projection = ordered ? 0 : projection;
@@ -398,6 +409,15 @@ Item mvp_lmd_generator_call(Context*, MvpLmdProgram* program, Item* args, uint64
         if (activation_fault(state->activation)) result = mvp_lmd_fail(LMD_MVP_RANGE, 0);
         state->done = true; activation_destroy(state->activation); state->activation = NULL;
         return item_is_error(result) ? result : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    }
+    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+    if (library->mutable_prototypes || library->generator_function_values) {
+        // parameter defaults run before this live lookup, just as on the async generator path.
+        owner.set(iterator_property(function.get(), "prototype"));
+        if (item_is_error(owner.get())) return owner.get();
+        if (!iterator_object(owner.get())) owner.set(library->values[LMD_LIBRARY_GENERATOR_PROTOTYPE]);
+        Item linked = mvp_lmd_set_prototype(object.get(), owner.get());
+        if (item_is_error(linked)) return linked;
     }
     return object.get();
 }
@@ -685,6 +705,10 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ITERATOR_PROTOTYPE], "next",
         mvp_lmd_native_function(program, NULL, sequence_next, 0, "next"), JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
+    result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ITERATOR_PROTOTYPE],
+        Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+        js_name_item("Array Iterator"), JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+    if (item_is_error(result)) return result;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     const JsBuiltinMethodSpec* identity_spec = state->iterator_base
@@ -705,12 +729,13 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     for (int index : prototypes) {
         // observed sequence/generator families inherit the one shared IteratorPrototype identity.
         if (state->iterator_base || (index == LMD_LIBRARY_GENERATOR_PROTOTYPE && state->generator_function_values)) continue;
-        if (!map_shape_set(state->values[index].map, key, identity.get())) return ItemError;
+        result = mvp_lmd_named_set(state->values[index], Item{.item = s2it(key)}, identity.get(), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
     }
-    if (state->collection_iterators) for (int set = 0; set < 2; set++) {
-        MvpLmdClass* cls = &state->collection_iterators[set];
+    if (state->iterator_families) for (int family = 0; family < LMD_ITERATOR_COUNT; family++) {
+        MvpLmdClass* cls = &state->iterator_families[family];
         result = mvp_lmd_iterator_prototype_initialize(program, cls,
-            state->collection_iterator_values + set * 3, set ? "Set Iterator" : "Map Iterator");
+            state->iterator_family_values + family * 3, mvp_lmd_iterator_names[family]);
         if (item_is_error(result)) return result;
         identity.set(mvp_lmd_native_function(program, cls, sequence_next, 0, "next"));
         if (item_is_error(identity.get())) return identity.get();
@@ -719,8 +744,17 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     }
     state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = mvp_lmd_native_function(program, NULL, sequence_iterator, 0, "values");
     if (item_is_error(state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return state->values[LMD_LIBRARY_SEQUENCE_ITERATOR];
-    if (!map_shape_set((Map*)state->values[LMD_LIBRARY_ARRAY_PROTOTYPE].array, key,
-            state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return ItemError;
+    result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], Item{.item = s2it(key)},
+        state->values[LMD_LIBRARY_SEQUENCE_ITERATOR], JSPD_NON_ENUMERABLE);
+    if (item_is_error(result)) return result;
+    state->values[LMD_LIBRARY_STRING_ITERATOR] = mvp_lmd_native_function(program,
+        (void*)(intptr_t)64, sequence_iterator, 0, "[Symbol.iterator]");
+    if (item_is_error(state->values[LMD_LIBRARY_STRING_ITERATOR])) return state->values[LMD_LIBRARY_STRING_ITERATOR];
+    if (state->primitives) {
+        result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_STRING].values[1],
+            Item{.item = s2it(key)}, state->values[LMD_LIBRARY_STRING_ITERATOR], JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
     result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "values",
         state->values[LMD_LIBRARY_SEQUENCE_ITERATOR], JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
@@ -756,7 +790,9 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
             if (item_is_error(result)) return result;
         }
         Item method = iterator_property(state->values[slot + 1], set ? "values" : "entries");
-        if (item_is_error(method) || !map_shape_set(state->values[slot + 1].map, key, method)) return ItemError;
+        if (item_is_error(method)) return method;
+        result = mvp_lmd_named_set(state->values[slot + 1], Item{.item = s2it(key)}, method, JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
         if (set) {
             result = mvp_lmd_named_set(state->values[slot + 1], "keys", method, JSPD_NON_ENUMERABLE);
             if (item_is_error(result)) return result;

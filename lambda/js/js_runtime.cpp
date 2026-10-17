@@ -6,6 +6,8 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_source_module.hpp"
+#include "js_interp.hpp"
+#include "../../lib/uv_loop.h"
 #include "js_object_meta.h"
 #include "../input/input.hpp"
 #include "js_host_hooks.h"
@@ -5156,8 +5158,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (receiver_root.get().item == 0) receiver_root.set(object);
     receiver = receiver_root.get();
     TypeId type = get_type_id(object);
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
     if ((type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) ||
-            (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
+            (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
         // D6.2.2v2: host callers must not read the legacy callable tail.
         key_root.set(mvp_lmd_property_key(key));
         return item_is_error(key_root.get()) ? key_root.get() :
@@ -14502,6 +14505,10 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
                 return js_throw_type_error("is not a constructor");
             Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
                 callee_root.get(), make_js_undefined(), args, arg_count, target_root.get()));
+            if (item_is_error(result)) {
+                MvpLmdRealmScope realm(mvp_lmd_property_program(callee_root.get()));
+                result = realm.complete(result, true);
+            }
             return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
         }
         JsFunction* fn = (JsFunction*)callee_root.get().function;
@@ -15023,6 +15030,11 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
                     owned_args, "js-call-mvp")) return ItemError;
             Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
                 callee.get(), receiver.get(), args, arg_count, make_js_undefined()));
+            if (item_is_error(result)) {
+                // native observers need the callee's Error object, including implicit builtin failures.
+                MvpLmdRealmScope realm(mvp_lmd_property_program(callee.get()));
+                result = realm.complete(result, true);
+            }
             return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
         }
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
@@ -26272,6 +26284,8 @@ extern "C" Item js_get_css_object_value() {
 
     js_realm_intrinsic_slots_ensure_roots();
     js_css_namespace_object = js_new_object_with_class(JS_CLASS_CSS_NAMESPACE);
+    // Web IDL namespace objects inherit the owning realm's ordinary conversion methods.
+    js_namespace_set_object_prototype(js_css_namespace_object);
 
     js_install_builtin_method_specs(js_css_namespace_object, JS_BUILTIN_OWNER_CSS_METHOD);
 
@@ -26803,10 +26817,8 @@ extern "C" Item js_get_console_object_value() {
 #define js_262_eval_script_active (js_runtime_state.test262_agent ? \
     js_runtime_state.test262_agent->eval_script_active : 0)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
-#define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
 #define js_262_agent_report_values (js_runtime_state.test262_agent->report_values)
 #define js_262_agent_report_rows (js_runtime_state.test262_agent->reports)
-#define js_262_agent_current_slot (js_runtime_state.test262_agent->current_slot)
 
 static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
     if (!state) return;
@@ -26816,7 +26828,6 @@ static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
 void js_test262_agent_state_destroy(JsTest262AgentState* state) {
     if (!state) return;
     js_262_agent_report_rows_clear(state);
-    root_vector_destroy(&state->callbacks);
     root_vector_destroy(&state->report_values);
 }
 
@@ -26833,18 +26844,13 @@ static bool js_262_agent_report_rows_ensure(void) {
     return true;
 }
 
-static Item js_262_agent_callback_at(int64_t slot) {
-    Item* callback = root_vector_at(&js_262_agent_callbacks, slot);
-    return callback ? *callback : ItemNull;
-}
-
 static Item js_262_agent_report_value(const JsTest262AgentReport* row) {
     Item* value = row ? root_vector_at(&js_262_agent_report_values,
         row->root_slot) : NULL;
     return value ? *value : ItemNull;
 }
 
-static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
+static bool js_262_agent_enqueue_report(Item report) {
     if (!js_262_agent_report_rows_ensure()) return false;
     RootFrame roots(1);
     Rooted<Item> report_root(roots, report);
@@ -26852,7 +26858,6 @@ static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
         sizeof(JsTest262AgentReport), MEM_CAT_JS_RUNTIME);
     if (!row) return false;
     row->root_slot = root_vector_count(&js_262_agent_report_values);
-    row->waiter_id = waiter_id;
     if (!root_vector_push(&js_262_agent_report_values, report_root.get())) {
         mem_free(row);
         return false;
@@ -26867,14 +26872,12 @@ static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
     return true;
 }
 
-static bool js_262_agent_remove_report(int index, Item* report,
-        int* waiter_id) {
+static bool js_262_agent_remove_report(int index, Item* report) {
     if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
             index < 0 || index >= js_262_agent_report_rows->length) return false;
     JsTest262AgentReport* row = (JsTest262AgentReport*)
         js_262_agent_report_rows->data[index];
     if (report) *report = js_262_agent_report_value(row);
-    if (waiter_id) *waiter_id = row->waiter_id;
     int64_t tail_slot = root_vector_count(&js_262_agent_report_values) - 1;
     JsTest262AgentReport* tail_row = NULL;
     for (int i = 0; i < js_262_agent_report_rows->length; i++) {
@@ -26901,29 +26904,171 @@ static bool js_262_agent_remove_report(int index, Item* report,
     return true;
 }
 
+// Test262 agents share only SAB storage and the context's precise-root service.
+// Their stacks, globals, jobs and retained-source controllers are independent.
+struct JsAgentMember {
+    JsAgentGroup* group;
+    JsRuntimeState* state;
+    Runtime runtime;
+    Activation* activation;
+    RootVector values; // callback, broadcast buffer, broadcast token
+    double wake_at;
+    bool pending_broadcast;
+    bool leaving;
+};
+struct JsAgentGroup {
+    JsRuntimeState* parent;
+    Runtime* runtime;
+    ArrayList* members;
+    RootVector error;
+    bool pumping;
+};
+
+static JsAgentGroup* js_agent_group_ensure() {
+    JsTest262AgentState* state = js_test262_agent_state_ensure(&js_runtime_state);
+    if (!state) return NULL;
+    if (state->group) return state->group;
+    if (!context || !context->runtime) return NULL;
+    auto* group = (JsAgentGroup*)mem_calloc(1, sizeof(JsAgentGroup), MEM_CAT_JS_RUNTIME);
+    if (!group) return NULL;
+    group->parent = js_active_runtime_state;
+    group->runtime = context->runtime;
+    runtime_module_state_owner(context, group->runtime);
+    if (!group->runtime->scripts) group->runtime->scripts = arraylist_new(8);
+    group->members = arraylist_new(4);
+    root_vector_init(&group->error, (Context*)context, "Test262 agent failure");
+    if (!group->runtime->scripts || !group->members || !root_vector_push(&group->error, ItemNull)) {
+        if (group->members) arraylist_free(group->members);
+        root_vector_destroy(&group->error); mem_free(group); return NULL;
+    }
+    state->group = group;
+    return group;
+}
+
+JsRuntimeState* js_agent_state_at(int index) {
+    if (index < 0 || !js_active_runtime_state) return NULL;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    JsAgentGroup* group = agent ? agent->group : NULL;
+    if (!group) return index == 0 ? js_active_runtime_state : NULL;
+    if (!index) return group->parent;
+    return index <= group->members->length
+        ? ((JsAgentMember*)group->members->data[index - 1])->state : NULL;
+}
+
+bool js_agent_pump() {
+    JsTest262AgentState* state = js_active_runtime_state ? js_runtime_state.test262_agent : NULL;
+    JsAgentGroup* group = state ? state->group : NULL;
+    if (!group || group->pumping || state->member) return false;
+    group->pumping = true;
+    bool progressed = false;
+    for (int i = 0; i < group->members->length; i++) {
+        auto* member = (JsAgentMember*)group->members->data[i];
+        if (member->leaving || !member->activation ||
+                activation_status(member->activation) == ACTIVATION_DONE ||
+                member->wake_at > pn_clock() * 1000.0) continue;
+        progressed = true;
+        if (activation_resume(member->activation, make_js_undefined()) == ACTIVATION_DONE) {
+            Item result = activation_value(member->activation);
+            if (item_is_error(result)) {
+                // preserve the actual failure before any later agent allocates.
+                *root_vector_at(&group->error, 0) = result;
+            }
+        }
+    }
+    group->pumping = false;
+    return progressed;
+}
+
+void js_agent_checkpoint() {
+    JsTest262AgentState* state = js_active_runtime_state ? js_runtime_state.test262_agent : NULL;
+    if (!state || !state->group) return;
+    if (state->member && activation_current() == state->member->activation) {
+        activation_suspend(make_js_undefined());
+    } else if (!state->member) js_agent_pump();
+}
+
+static Item js_agent_member_entry(Activation* activation, Item source) {
+    auto* member = (JsAgentMember*)activation_user(activation);
+    js_active_runtime_state = member->state;
+    context->runtime = &member->runtime;
+    JsInterpHostScope interpreter(NULL);
+    MvpLmdRealmScope native_realm(NULL, true);
+    JsOwnedCallActivation call;
+    RootFrame roots(2);
+    Rooted<Item> result(roots, ItemNull), buffer(roots, ItemNull);
+    if (!js_runtime_state_init(context)) return ItemError;
+    String* text = source.get_string();
+    result.set(js_interp_execute_source(&member->runtime, text->chars, text->len,
+        "<test262-agent>", NULL, true));
+    if (item_is_error(result.get())) return result.get();
+    while (!member->leaving) {
+        if (member->pending_broadcast && js_is_callable(*root_vector_at(&member->values, 0))) {
+            buffer.set(js_sharedarraybuffer_clone_with_ops(*root_vector_at(&member->values, 1),
+                &js_buffer_view_default_ops));
+            if (item_is_error(buffer.get())) return buffer.get();
+            Item args[] = {buffer.get(), *root_vector_at(&member->values, 2)};
+            member->pending_broadcast = false;
+            *root_vector_at(&member->values, 1) = ItemNull;
+            result.set(js_call_function(*root_vector_at(&member->values, 0),
+                make_js_undefined(), args, 2));
+            if (item_is_error(result.get())) return result.get();
+        }
+        result.set(js_microtask_flush_result());
+        if (item_is_error(result.get())) return result.get();
+        activation_suspend(make_js_undefined());
+    }
+    return make_js_undefined();
+}
+
+static void js_agent_member_destroy(JsAgentMember* member, Runtime* parent) {
+    if (member->activation) activation_destroy(member->activation);
+    // abandoning a stack invalidates its LIFO call link before timer cleanup.
+    member->state->execution.current_activation = NULL;
+    member->state->with_head = NULL;
+    js_runtime_state_destroy_agent(member->state);
+    root_vector_destroy(&member->values);
+    module_registry_cleanup_for_runtime(&member->runtime);
+    // unreachable AST functions are finalized with the shared heap; keep their
+    // Script metadata until the parent performs its ordinary post-heap cleanup.
+    for (int i = 0; member->runtime.scripts && i < member->runtime.scripts->length; i++) {
+        Script* script = (Script*)member->runtime.scripts->data[i];
+        if (script) {
+            lambda_module_state_release(script->module_state_id);
+            arraylist_append(parent->scripts, script);
+        }
+    }
+    if (member->runtime.scripts) member->runtime.scripts->length = 0;
+    runtime_free_all_scripts(&member->runtime);
+    mem_free(member);
+}
+
+void js_agent_group_shutdown(JsRuntimeState* owner) {
+    JsTest262AgentState* agent = owner ? owner->test262_agent : NULL;
+    JsAgentGroup* group = agent ? agent->group : NULL;
+    if (!group || group->parent != owner) return;
+    agent->group = NULL;
+    for (int i = 0; i < group->members->length; i++)
+        js_agent_member_destroy((JsAgentMember*)group->members->data[i], group->runtime);
+    arraylist_free(group->members);
+    root_vector_destroy(&group->error);
+    mem_free(group);
+}
+
 static void js_262_agent_reset_state() {
     if (!js_runtime_state.test262_agent) return;
-    js_262_agent_object = (Item){.item = ITEM_NULL};
-    root_vector_clear(&js_262_agent_callbacks);
+    js_agent_group_shutdown(js_active_runtime_state);
+    js_262_agent_object = ItemNull;
     js_262_agent_report_rows_clear(js_runtime_state.test262_agent);
-    js_262_agent_current_slot = -1;
     js_atomics_reset_waiters();
 }
 
 void js_reset_262_object() {
-    js_262_object = (Item){.item = ITEM_NULL};
+    js_262_object = ItemNull;
     js_262_agent_reset_state();
 }
 
 extern "C" Item js_get_current_this(void);
-
-extern "C" int64_t js_262_eval_script_is_active() {
-    return js_262_eval_script_active;
-}
-
-extern "C" int js_262_agent_current_slot_for_atomics() {
-    return js_runtime_state.test262_agent ? js_262_agent_current_slot : -1;
-}
+extern "C" int64_t js_262_eval_script_is_active() { return js_262_eval_script_active; }
 
 static Item js_262_eval_script(Item code) {
     JsTest262AgentState* agent = js_test262_agent_state_ensure(&js_runtime_state);
@@ -26936,105 +27081,126 @@ static Item js_262_eval_script(Item code) {
 }
 
 static Item js_262_agent_start(Item code) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     RootFrame roots(1);
-    Rooted<Item> code_root(roots, code);
-    int64_t slot = root_vector_count(&js_262_agent_callbacks);
-    if (!root_vector_push(&js_262_agent_callbacks, ItemNull)) return ItemError;
-    int saved_slot = js_262_agent_current_slot;
-    js_262_agent_current_slot = (int)slot;
-    Item result = js_builtin_eval(code_root.get(), 1);
-    js_262_agent_current_slot = saved_slot;
-    if (item_is_error(result)) return result;
-    return get_type_id(result) == LMD_TYPE_UNDEFINED ? result : make_js_undefined();
+    Rooted<Item> source(roots, js_to_string(code));
+    if (item_is_error(source.get())) return source.get();
+    JsAgentGroup* group = js_agent_group_ensure();
+    if (!group || js_runtime_state.test262_agent->member) return ItemError;
+    auto* member = (JsAgentMember*)mem_calloc(1, sizeof(JsAgentMember), MEM_CAT_JS_RUNTIME);
+    if (!member) return ItemError;
+    member->group = group;
+    member->state = js_runtime_state_create_agent(context);
+    if (!member->state) { mem_free(member); return ItemError; }
+    runtime_init(&member->runtime);
+    member->runtime.eval_context = context;
+    member->runtime.js_ast_backend = true;
+    member->runtime.js_promotion_policy_resolved = true;
+    member->runtime.import_base_dir = group->runtime->import_base_dir;
+    member->runtime.resource_policy = group->runtime->resource_policy;
+    JsTest262AgentState* agent = js_test262_agent_state_ensure(member->state);
+    root_vector_init(&member->values, (Context*)context, "Test262 agent broadcast");
+    bool ready = agent != NULL;
+    for (int i = 0; ready && i < 3; i++) ready = root_vector_push(&member->values, ItemNull);
+    if (ready) {
+        agent->group = group; agent->member = member;
+        member->activation = activation_create(js_agent_member_entry, source.get(), true, member);
+        ready = member->activation && arraylist_append(group->members, member);
+    }
+    if (!ready) { js_agent_member_destroy(member, group->runtime); return ItemError; }
+    js_agent_pump();
+    return make_js_undefined();
 }
 
 static Item js_262_agent_receive_broadcast(Item callback) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
-            root_vector_count(&js_262_agent_callbacks)) {
-        return make_js_undefined();
-    }
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("$262.agent.receiveBroadcast requires a function");
-    }
-    Item* callback_slot = root_vector_at(&js_262_agent_callbacks,
-        js_262_agent_current_slot);
-    if (callback_slot) *callback_slot = callback;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (!agent || !agent->member) return js_throw_type_error("receiveBroadcast requires a child agent");
+    if (!js_is_callable(callback)) return js_throw_type_error("receiveBroadcast requires a function");
+    *root_vector_at(&agent->member->values, 0) = callback;
     return make_js_undefined();
 }
 
-static Item js_262_agent_broadcast(Item value) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
-    for (int64_t i = 0; i < callback_count; i++) {
-        Item callback = js_262_agent_callback_at(i);
-        if (!js_is_callable(callback)) continue;
-        Item args[1] = { value };
-        int saved_slot = js_262_agent_current_slot;
-        js_262_agent_current_slot = (int)i;
-        Item callback_result = js_call_function(callback, js_262_agent_object, args, 1);
-        js_262_agent_current_slot = saved_slot;
-        if (item_is_error(callback_result)) return callback_result;
+static Item js_262_agent_broadcast(Item value, Item token) {
+    RootFrame roots(2);
+    Rooted<Item> buffer(roots, value), number(roots, js_retain_scalar(token));
+    JsArrayBuffer* native = js_get_arraybuffer_ptr_item(buffer.get());
+    if (!native || !js_arraybuffer_shared(native)) return js_throw_type_error("broadcast requires a SharedArrayBuffer");
+    JsAgentGroup* group = js_agent_group_ensure();
+    if (!group) return ItemError;
+    for (int i = 0; i < group->members->length; i++) {
+        auto* member = (JsAgentMember*)group->members->data[i];
+        if (member->leaving) continue;
+        *root_vector_at(&member->values, 1) = buffer.get();
+        *root_vector_at(&member->values, 2) = number.get();
+        member->pending_broadcast = true;
     }
-    return make_js_undefined();
+    for (;;) {
+        js_agent_pump();
+        bool pending = false;
+        for (int i = 0; i < group->members->length; i++) {
+            auto* member = (JsAgentMember*)group->members->data[i];
+            pending |= !member->leaving && member->pending_broadcast;
+        }
+        if (!pending) return make_js_undefined();
+        Item interrupt = js_execution_interrupt_status();
+        if (item_is_error(interrupt)) return interrupt;
+        Item failure = *root_vector_at(&group->error, 0);
+        if (item_is_error(failure)) return failure;
+    }
 }
 
 static Item js_262_agent_report(Item value) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
-    int waiter_id = js_atomics_report_waiter_for_agent(
-        js_262_agent_current_slot, report);
-    if (!js_262_agent_enqueue_report(report, waiter_id)) return ItemError;
-    return make_js_undefined();
+    RootFrame roots(1);
+    Rooted<Item> message(roots, report);
+    JsRuntimeState* previous = js_active_runtime_state;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (agent && agent->group) js_active_runtime_state = agent->group->parent;
+    bool stored = js_test262_agent_state_ensure(js_active_runtime_state) &&
+        (js_root_vector_ensure_registered(js_runtime_state.test262_agent),
+         js_262_agent_enqueue_report(message.get()));
+    js_active_runtime_state = previous;
+    return stored ? make_js_undefined() : ItemError;
 }
 
 static Item js_262_agent_get_report() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
-            js_262_agent_report_rows->length == 0) return ItemNull;
-    int ready_offset = -1;
-    for (int offset = 0; offset < js_262_agent_report_rows->length; offset++) {
-        JsTest262AgentReport* row = (JsTest262AgentReport*)
-            js_262_agent_report_rows->data[offset];
-        int waiter_id = row->waiter_id;
-        if (waiter_id <= 0 || js_atomics_report_waiter_ready(waiter_id)) {
-            ready_offset = offset;
-            break;
-        }
-    }
-    if (ready_offset < 0) return ItemNull;
-
+    js_agent_pump();
+    JsAgentGroup* group = js_runtime_state.test262_agent->group;
+    if (group && item_is_error(*root_vector_at(&group->error, 0))) return *root_vector_at(&group->error, 0);
     Item report = ItemNull;
-    int waiter_id = 0;
-    if (!js_262_agent_remove_report(ready_offset, &report, &waiter_id)) {
-        return ItemNull;
-    }
-    RootFrame roots(1);
-    Rooted<Item> report_root(roots, report);
-    if (waiter_id > 0) {
-        report_root.set(js_atomics_resolve_waiter_report(waiter_id,
-            report_root.get()));
-    }
-    return report_root.get();
+    return js_262_agent_remove_report(0, &report) ? report : ItemNull;
 }
 
 static Item js_262_agent_leaving() {
-    js_atomics_agent_leaving(js_262_agent_current_slot);
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (agent && agent->member) agent->member->leaving = true;
     return make_js_undefined();
 }
 
-static Item js_262_agent_sleep(Item ms) {
-    js_atomics_agent_sleep(ms);
+static Item js_262_agent_sleep(Item value) {
+    JS_ASSIGN_OR_RETURN(converted, js_to_number(value));
+    double delay = js_get_number(converted);
+    if (isnan(delay) || delay < 0) delay = 0;
+    if (!isfinite(delay)) delay = INT_MAX;
+    double deadline = pn_clock() * 1000.0 + delay;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    do {
+        if (agent && agent->member && activation_current() == agent->member->activation) {
+            agent->member->wake_at = deadline;
+            activation_suspend(make_js_undefined());
+        } else {
+            js_agent_pump();
+            double remaining = deadline - pn_clock() * 1000.0;
+            if (remaining > 0) uv_sleep((unsigned int)ceil(fmin(remaining, 1.0)));
+        }
+    } while (pn_clock() * 1000.0 < deadline);
+    if (agent && agent->member) agent->member->wake_at = 0;
     return make_js_undefined();
 }
 
-static Item js_262_get_agent_object() {
+static Item js_262_agent_monotonic_now() { return js_make_number(pn_clock() * 1000.0); }
+
+extern "C" Item js_262_get_agent_object() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
     js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
@@ -27043,7 +27209,7 @@ static Item js_262_get_agent_object() {
     M("start", js_262_agent_start) M("receiveBroadcast", js_262_agent_receive_broadcast) \
     M("broadcast", js_262_agent_broadcast) M("report", js_262_agent_report) \
     M("getReport", js_262_agent_get_report) M("leaving", js_262_agent_leaving) \
-    M("sleep", js_262_agent_sleep) M("monotonicNow", js_atomics_agent_monotonic_now)
+    M("sleep", js_262_agent_sleep) M("monotonicNow", js_262_agent_monotonic_now)
 #define JS_262_INSTALL_AGENT_METHOD(name, target) \
     js_runtime_set_native_method(js_262_agent_object, name, target);
     JS_262_AGENT_METHODS(JS_262_INSTALL_AGENT_METHOD)
@@ -27783,7 +27949,8 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
         return mvp_lmd_get_prototype(object);
     if (get_type_id(object) == LMD_TYPE_ERROR || js_is_resting_error(object)) {
         // LambdaError stores ordinary properties in a side map. A custom
@@ -27864,7 +28031,8 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_object_get_prototype_chain(Item object) {
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
         return mvp_lmd_get_prototype(object);
     TypeId object_type = get_type_id(object);
     if (is_virtual_container_type_id(object_type) && js_host_object_type(object)) {
@@ -27934,7 +28102,8 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
     proto_root.set(js_object_get_prototype_chain(object_root.get()));
     while (proto_root.get().item != ItemNull.item) {
         Item proto = proto_root.get();
-        if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(proto)) {
+        MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(proto));
+        if (mvp_lmd_program_library() && mvp_lmd_owns_properties(proto)) {
             // the MVP chain owns both accessor receivers and its terminal absence.
             if (out_found) *out_found = true;
             property_root.set(mvp_lmd_property_key(property_root.get()));
@@ -29215,7 +29384,8 @@ static Item js_iterator_next_cache(Item iterator, Item next, bool write) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> owner(roots, iterator), method(roots, next);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(owner.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(owner.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(owner.get())) {
         NameRef name = mvp_lmd_internal_name(LMD_INTERNAL_ITERATOR_NEXT);
         if (!name) return ItemError;
         Item key = {.item = s2it(name)};

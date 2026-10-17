@@ -909,7 +909,7 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
 }
 Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descriptor) {
     Item foreign;
-    if (mvp_lmd_foreign_candidate(owner) && mvp_lmd_foreign_property(owner, name,
+    if (mvp_lmd_foreign_candidate(owner, true) && mvp_lmd_foreign_property(owner, name,
             ItemNull, owner, LMD_FOREIGN_DESCRIPTOR, &foreign, descriptor)) return foreign;
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
         return js_module_namespace_get_own(owner, name, descriptor);
@@ -979,6 +979,17 @@ Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descr
     return Item{.item = ITEM_TRUE};
 }
 Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, MvpLmdPropertyCache* cache) {
+    if (!mvp_lmd_is_object(owner)) {
+        RootFrame roots(4);
+        if (!roots.valid()) return ItemError;
+        uint64_t home = 0;
+        Rooted<Item> object(roots, owner), key(roots, name),
+            argument(roots, lambda_item_adopt_scalar_home(value, &home)), target(roots, receiver);
+        // ToObject supplies descriptors; setters still receive the primitive from the reference.
+        object.set(mvp_lmd_box_primitive(object.get()));
+        return item_is_error(object.get()) ? object.get() :
+            mvp_lmd_set_completion(object.get(), key.get(), argument.get(), target.get(), cache);
+    }
     Item foreign;
     if (mvp_lmd_foreign_candidate(owner) && mvp_lmd_foreign_property(owner, name,
             value, receiver, LMD_PROP_SET, &foreign)) return foreign;
@@ -1441,7 +1452,7 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     return result.get();
 }
 extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
-    if (mvp_lmd_foreign_candidate(owner)) {
+    if (mvp_lmd_foreign_candidate(owner, true)) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> object(roots, owner);

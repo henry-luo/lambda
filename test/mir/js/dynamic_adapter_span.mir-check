@@ -1,25 +1,71 @@
 {
   "schema_version": 1,
-  "description": "Dynamic JS calls reserve rooted source argument spans; adaptation remains in the runtime boundary.",
+  "description": "D5.3/D5.4, D6.2.2v2: both ordinary and wide dynamic calls retain one source argument span through the formal callable ABI and fallback.",
   "checks": [
     {
-      "in_func": "_js_invoke2_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect_seq": [
-        { "pattern": "add\t{{r}}, {{r}}, 0" },
-        { "pattern": "mov\t{{r:target}}, js_call" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}" }
+        {
+          "pattern": "mov\t{{r:entry}}, i64:16({{r:callee}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:args}}),"
+        },
+        {
+          "pattern": "call\tmvp_lmd_class_invoke_p_r6_n1_a5, mvp_lmd_class_invoke,"
+        },
+        {
+          "pattern": "mov\ti64:80(runtime), {{r}}"
+        },
+        {
+          "pattern": "call\tmvp_lmd_signature, {{r:entry}}, {{r}}, runtime, {{r}}, {{r:args}},"
+        }
       ],
+      "count": {
+        "call\tmvp_lmd_signature,": 1
+      },
       "forbid": [
         "js_args_save",
         "js_args_push",
-        "js_args_restore"
+        "js_args_restore",
+        "js_call_function_into",
+        "js_call_function_prerooted_args_into"
       ]
     },
     {
-      "in_func": "_js_invokeMany_#_body",
+      "in_func": "mvp_lmd_f3",
       "expect_seq": [
-        { "pattern": "mov\t{{r:target}}, js_call" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}" }
+        {
+          "pattern": "add\t{{r:args}}, {{r}}, 320"
+        },
+        {
+          "pattern": "mov\ti64:80(runtime), {{r}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, u8:3({{r:callee}})"
+        },
+        {
+          "pattern": "mov\t{{r:entry}}, i64:16({{r:callee}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:args}}),"
+        },
+        {
+          "pattern": ", {{r:args}}, 40,"
+        },
+        {
+          "pattern": "call\tmvp_lmd_signature, {{r:entry}}, {{r}}, runtime, {{r}}, {{r:args}}, 40,"
+        }
+      ],
+      "count": {
+        "call\tmvp_lmd_signature,": 1
+      },
+      "forbid": [
+        "js_args_save",
+        "js_args_push",
+        "js_args_restore",
+        "js_call_function_into",
+        "js_call_function_prerooted_args_into"
       ]
     }
   ]

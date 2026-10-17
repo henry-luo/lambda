@@ -23,6 +23,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/mir/mir.h"
 #include "../lib/mem.h"
+#include "../lib/uv_loop.h"
 
 #include <pthread.h>
 #include <sched.h>
@@ -115,6 +116,99 @@ TEST(JsStructuredClone, RetainsRecursiveDestinationsAcrossEveryAllocation) {
         gc_set_poison_freed(gc, 0);
         runtime_cleanup(&runtime);
     }
+}
+
+TEST(JsStructuredClone, SharedBuffersKeepDistinctCarriersAndReleaseSharedHandle) {
+    for (const char* backend : {"ast", "mir"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        int64_t allocations = byte_storage_allocation_count();
+        int64_t releases = byte_storage_release_count();
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;",
+            "shared-clone-setup.js", NULL)));
+        gc_heap_t* gc = runtime.eval_context->heap->gc;
+        gc_set_force_collect_interval(gc, 1);
+        gc_set_poison_freed(gc, 1);
+        const char* source = R"JS(
+            let source=new SharedArrayBuffer(8,{maxByteLength:32});
+            let copy=structuredClone(source);
+            let typed=structuredClone(new Int32Array(source,4));
+            let data=structuredClone(new DataView(source,4));
+            let fixed=structuredClone(new Uint8Array(source,2,3));
+            let ok=source!==copy && copy instanceof SharedArrayBuffer &&
+                typed instanceof Int32Array && data instanceof DataView;
+            copy.grow(16);typed[0]=42;
+            ok=ok && source.byteLength===16 && typed.length===3 &&
+                data.byteLength===12 && data.getInt32(0,true)===42 && fixed.length===3;
+            source=null;copy=null;gc();
+            data.setInt32(0,7,true);gc();
+            ok && typed[0]===7
+        )JS";
+        Item result = transpile_js_to_mir(&runtime, source, "shared-clone.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        if (!item_is_error(result)) EXPECT_EQ(result.item, ITEM_TRUE);
+        gc_set_force_collect_interval(gc, 0);
+        gc_set_poison_freed(gc, 0);
+        runtime_cleanup(&runtime);
+        EXPECT_EQ(byte_storage_allocation_count()-allocations,
+            byte_storage_release_count()-releases);
+    }
+}
+
+TEST(JsAgentState, KeepsQueuesGlobalsAndTimerOwnershipSeparate) {
+    JsExecutionBackendScope selected("mir");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;", "agent-state-setup.js", NULL)));
+    JsRuntimeState* parent = js_active_runtime_state;
+    JsRuntimeState* agent = js_runtime_state_create_agent(context);
+    ASSERT_NE(agent, nullptr);
+    EXPECT_NE(agent->event_loop, parent->event_loop);
+    EXPECT_NE(agent->global_environment, parent->global_environment);
+    {
+        RootFrame roots(4);
+        Rooted<Item> parent_global(roots, js_get_global_this()), agent_global(roots, ItemNull),
+            callback(roots, ItemNull), timer(roots, ItemNull);
+        auto configure = [&]() {
+            js_active_runtime_state = agent;
+            ASSERT_TRUE(js_runtime_state_init(context));
+            ASSERT_EQ(js_runtime_state_for(context), agent);
+            ASSERT_TRUE(js_runtime_state_ensure_input(context));
+            agent_global.set(js_get_global_this());
+            callback.set(js_new_native_function(+[]() -> Item {
+                js_set_global_property(js_name_item("agentTick"), Item{.item = ITEM_TRUE}, 0);
+                return make_js_undefined();
+            }));
+            js_microtask_enqueue(callback.get());
+            timer.set(js_setTimeout(callback.get(), Item{.item = i2it(0)}));
+            ASSERT_FALSE(item_is_error(timer.get()));
+        };
+        configure();
+        js_active_runtime_state = parent;
+        EXPECT_EQ(js_runtime_state_for(context), parent);
+        EXPECT_NE(parent_global.get().item, agent_global.get().item);
+        EXPECT_EQ(runtime_job_queue_size(&agent->event_loop->microtask_queue), 1);
+        EXPECT_EQ(runtime_job_queue_size(&parent->event_loop->microtask_queue), 0);
+        EXPECT_FALSE(item_is_error(js_microtask_flush_result()));
+        EXPECT_EQ(runtime_job_queue_size(&agent->event_loop->microtask_queue), 1);
+        heap_gc_collect();
+        uv_run(lambda_uv_loop(), UV_RUN_ONCE);
+        EXPECT_EQ(js_active_runtime_state, parent);
+        EXPECT_FALSE(agent->event_loop->callback_running);
+        EXPECT_EQ(js_get_key_cstr(agent_global.get(), "agentTick").item, ITEM_TRUE);
+        EXPECT_EQ(js_get_key_cstr(parent_global.get(), "agentTick").item, ITEM_JS_UNDEFINED);
+        js_active_runtime_state = agent;
+        EXPECT_FALSE(item_is_error(js_microtask_flush_result()));
+        js_active_runtime_state = parent;
+        EXPECT_EQ(runtime_job_queue_size(&agent->event_loop->microtask_queue), 0);
+    }
+    js_runtime_state_destroy_agent(agent);
+    EXPECT_EQ(js_runtime_state_for(context), parent);
+    EXPECT_EQ(context_capsule(context, CONTEXT_CAPSULE_JS_RUNTIME), parent);
+    heap_gc_collect();
+    runtime_cleanup(&runtime);
 }
 
 TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
@@ -1294,11 +1388,162 @@ TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) 
     EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
 
     Item args[] = {js_make_string("count"), flt2it(5.0)};
-    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
-    ASSERT_FALSE(item_is_error(result));
-    EXPECT_EQ(js_get_key_default(result, js_make_string("count5")).item,
-        flt2it(6.0).item);
+    {
+        RootFrame roots(1);
+        ASSERT_TRUE(roots.valid());
+        // the lookup key allocation can collect this managed result before the property call.
+        Rooted<Item> result(roots, js_call_function(function_item, make_js_undefined(), args, 2));
+        ASSERT_FALSE(item_is_error(result.get()));
+        EXPECT_EQ(js_get_key_default(result.get(), js_make_string("count5")).item,
+            flt2it(6.0).item);
+    }
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NativeAndMirJsonNumbersAndCssNamespaceUseSharedContracts) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_EQ(setenv("JS_EXEC_BACKEND", backend, 1), 0);
+        Item value = transpile_js_to_mir(&runtime,
+            "typeof JSON.parse('9007199254740993')==='number'&&"
+            "JSON.parse('9007199254740993')===9007199254740992&&1/JSON.parse('-0')===-Infinity&&"
+            "Object.getPrototypeOf(CSS)===Object.prototype&&String(CSS)==='[object CSS]'&&"
+            "CSS+''==='[object CSS]'&&CSS.toString===Object.prototype.toString;",
+            "shared-json-css-contract.js", NULL);
+        unsetenv("JS_EXEC_BACKEND");
+        EXPECT_FALSE(item_is_error(value)); EXPECT_EQ(value.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, AutoMvpPromotionsPreserveRealmBindingsAndCallableIdentity) {
+    const char* sources[] = {
+        "var counter=1;function f(n){counter+=n;return counter}"
+        "if(f(1)!==2||f(2)!==4||globalThis.counter!==4)throw 1;"
+        "globalThis.counter=8;if(f(1)!==9||counter!==9)throw 2;f;",
+        "function f(x){return x.foo.bar}let errors=0;"
+        "for(let i=0;i<3;i++){try{f(null)}catch(e){"
+        "if(!(e instanceof TypeError)||e.name!=='TypeError'||e.constructor!==TypeError)throw 1;errors++;}}"
+        "if(errors!==3)throw 2;f;",
+        "function f(){return [Math.max,{method:Math.max}]}let a=f(),b=f();"
+        "if(a[0]!==b[0]||b[0]!==Math.max||b[1].method!==Math.max||b.indexOf(Math.max)!==0)throw 1;f;",
+        "function f(){return Math.max}let a=f(),b=f();if(a!==b||b!==Math.max)throw 1;f;",
+        "function f(n){return {value:n}}let a=f(1),b=f(2);"
+        "Object.freeze(b);let descriptor=Object.getOwnPropertyDescriptor(b,'value');"
+        "if(descriptor.value!==2||descriptor.writable||Object.keys(b).join(',')!=='value'||!Object.isFrozen(b))throw 1;"
+        "b.value=9;if(b.value!==2)throw 2;gc();f;",
+        "var f=function named(n){return n?named:named(1)};"
+        "if(f(1)!==f||f(0)!==f)throw 1;gc();if(f(1)!==f)throw 2;f;",
+        "let ap=Array.prototype;let op=Object.prototype;let seen=0;"
+        "function f(n){seen+=n;return [seen,{n:n}]}"
+        "let a=f(1),b=f(2);gc();let c=f(3);"
+        "if(seen!==6||c[0]!==6||Object.getPrototypeOf(b)!==ap||"
+        "Object.getPrototypeOf(b[1])!==op||!(b instanceof Array))throw 1;"
+        "Array.prototype.extra=19;if(c.extra!==19)throw 2;f;",
+        "let original=globalThis;let numberPrototype=Number.prototype;"
+        "Number.prototype.extra=function(){return 23};"
+        "function f(n){return n.extra()}"
+        "if(f(1)!==23||f(2)!==23||globalThis!==original||Number.prototype!==numberPrototype)throw 1;"
+        "gc();if(f(3)!==23)throw 2;f;",
+        "function f(v){this.value=v}let prototype=f.prototype;f.call({},0);f.call({},1);"
+        "new f(1);let b=new f(2);gc();let c=new f(3);"
+        "if(b.value!==2||c.value!==3||Object.getPrototypeOf(b)!==prototype||!(c instanceof f))throw 1;f;"
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+        ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
+        Item value = transpile_js_to_mir(&runtime, source, "p2-mvp-realm.js", NULL);
+        unsetenv("JS_FUNC_JIT_THRESHOLD"); unsetenv("JS_EXEC_BACKEND");
+        EXPECT_FALSE(item_is_error(value));
+        EXPECT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+        if (get_type_id(value) == LMD_TYPE_FUNC) {
+            auto* function = (JsFunction*)value.function;
+            EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+            Item compiled = function->code->compiled_body;
+            EXPECT_EQ(get_type_id(compiled), LMD_TYPE_FUNC);
+            if (get_type_id(compiled) == LMD_TYPE_FUNC)
+                EXPECT_TRUE(function_has_abi(compiled.function, FN_ENTRY_ABI_MVP_LMD));
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, AutoMvpPromotedDefinitionsShareOneNativeRealm) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
+    Item value = transpile_js_to_mir(&runtime,
+        "function f(){return Math.max}function g(){return Math.min}"
+        "f();g();f();g();gc();if(f()!==Math.max||g()!==Math.min)throw 1;[f,g];",
+        "p2-mvp-shared-realm.js", NULL);
+    unsetenv("JS_FUNC_JIT_THRESHOLD"); unsetenv("JS_EXEC_BACKEND");
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    for (int i = 0; i < 2; i++) {
+        Item function = value.array->items[i];
+        ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
+        auto* code = ((JsFunction*)function.function)->code;
+        EXPECT_EQ(code->p2_promotion.state, FN_PROMOTION_COMPILED);
+        EXPECT_EQ(get_type_id(code->compiled_body), LMD_TYPE_FUNC);
+        if (get_type_id(code->compiled_body) == LMD_TYPE_FUNC)
+            EXPECT_TRUE(function_has_abi(code->compiled_body.function, FN_ENTRY_ABI_MVP_LMD));
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoMvpLoopHandoffKeepsLiveBindingsAndReceiver) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "100000", 1), 0);
+    ASSERT_EQ(setenv("JS_LOOP_JIT_THRESHOLD", "2", 1), 0);
+    const char* source = "function f(n){let total=this.seed;for(let i=0;i<n;i++){total+=i}return total}"
+        "let o={seed:7,f:f};if(o.f(10)!==52)throw 1;gc();if(o.f(4)!==13)throw 2;f;";
+    Item value = transpile_js_to_mir(&runtime, source, "p2-mvp-loop.js", NULL);
+    unsetenv("JS_LOOP_JIT_THRESHOLD"); unsetenv("JS_FUNC_JIT_THRESHOLD"); unsetenv("JS_EXEC_BACKEND");
+    EXPECT_FALSE(item_is_error(value));
+    EXPECT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    if (get_type_id(value) == LMD_TYPE_FUNC) {
+        auto* function = (JsFunction*)value.function;
+        EXPECT_EQ(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+        EXPECT_TRUE(function->code->p2_promotion.loop_entered);
+        Item compiled = function->code->compiled_loop_body;
+        EXPECT_EQ(get_type_id(compiled), LMD_TYPE_FUNC);
+        if (get_type_id(compiled) == LMD_TYPE_FUNC)
+            EXPECT_TRUE(function_has_abi(compiled.function, FN_ENTRY_ABI_MVP_LMD));
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoDynamicClassicScriptRetainsLexicalsWithoutPromotion) {
+    JsExecutionBackendScope backend("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    runtime.js_promotion_backedge_threshold = 1;
+    const char source[] = "let dynamicLexical=41;function dynamicFunction(){let sum=0;"
+        "for(let i=0;i<8;i++)sum+=i;return sum;}"
+        "dynamicFunction();dynamicFunction();dynamicFunction;";
+    Item value = js_interp_execute_source(&runtime, source, sizeof(source)-1, "<dynamic-classic>", NULL, true);
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    auto* function = (JsFunction*)value.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST);
+    ASSERT_TRUE(js_fn_ast_script(function)->dynamic_source);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP);
+    EXPECT_EQ(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_PINNED);
+    const char followup[] = "dynamicLexical+dynamicFunction();";
+    Item result = js_interp_execute_source(&runtime, followup, sizeof(followup)-1, "dynamic-followup.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_DOUBLE_EQ(it2d(result), 69);
     runtime_cleanup(&runtime);
 }
 

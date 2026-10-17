@@ -188,6 +188,12 @@ bool eval_context_shutdown(EvalContext* owner) {
 // The canonical EvalContext of a Runtime, created on first use. Lives here,
 // beside the ownership seam that materializes it, so core-linked binaries
 // that carry runtime-state.o need no runner.o.
+Runtime* runtime_module_state_owner(EvalContext* owner, Runtime* fallback) {
+    if (!owner) return fallback;
+    if (!owner->module_state_allocator) owner->module_state_allocator = fallback;
+    return owner->module_state_allocator;
+}
+
 EvalContext* runtime_get_eval_context(Runtime* runtime) {
     if (!runtime) return NULL;
     if (!runtime->eval_context) {
@@ -198,6 +204,7 @@ EvalContext* runtime_get_eval_context(Runtime* runtime) {
         }
         memset(runtime->eval_context, 0, sizeof(EvalContext));
     }
+    runtime_module_state_owner(runtime->eval_context, runtime);
     runtime->eval_context->runtime = runtime;
     return runtime->eval_context;
 }
@@ -215,6 +222,8 @@ bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner) {
         return false;
     }
     owner->runtime = runtime;
+    runtime_module_state_owner(owner,
+        runtime_module_state_owner(runtime->eval_context, runtime));
     owner->heap = heap;
     owner->name_pool = name_pool;
     owner->type_list = runtime_type_list(runtime);
@@ -226,6 +235,7 @@ void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner) {
     if (!runtime || !owner) return;
     owner->runtime = runtime;
     EvalContext* canonical = runtime_get_eval_context(runtime);
+    runtime_module_state_owner(owner, runtime_module_state_owner(canonical, runtime));
     if (!canonical || canonical == owner) return;
     canonical->heap = owner->heap;
     canonical->name_pool = owner->name_pool;
@@ -785,7 +795,7 @@ extern "C" bool lambda_module_state_reserve(uint32_t var_count,
         uint32_t* out_module_id) {
     EvalContext* owner = context;
     if (!owner || !out_module_id) return false;
-    Runtime* runtime_owner = owner->runtime;
+    Runtime* runtime_owner = runtime_module_state_owner(owner, owner->runtime);
     if (!runtime_owner) {
         log_error("module-state: cannot reserve module id without owning runtime");
         return false;

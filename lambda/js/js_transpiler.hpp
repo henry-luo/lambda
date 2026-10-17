@@ -95,6 +95,8 @@ struct JsScript : Script {
     // Direct eval code (JSI35). A MIR caller projects its bindings through the
     // EvalContext bridge; an interpreted caller links its live environments.
     bool is_direct_eval;
+    // dynamic classic scripts retain global lexicals but never promote their bodies to MIR.
+    bool dynamic_source;
     // The Script of the interpreted frame whose environments this direct eval
     // execution links to (D8.1.3v21); null for every other execution.
     JsScript* eval_caller_script;

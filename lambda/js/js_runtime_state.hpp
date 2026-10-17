@@ -19,6 +19,11 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/line_framer.h"
 
+// dynamic JS source follows the bound evaluator without changing the hot TLS read.
+static inline Runtime* js_current_runtime(void) {
+    return context ? context->runtime : NULL;
+}
+
 struct JsFunction;
 struct JsCallableCode;
 struct JsRuntimeState;
@@ -33,6 +38,8 @@ struct DomDocument;
 struct DomElement;
 struct UiContext;
 struct JsAtomicsRuntimeState;
+struct JsAgentGroup;
+struct JsAgentMember;
 struct JsWeakRuntimeState;
 struct JsPrototypeSnapshotState;
 struct JsMirCompileRecoveryState;
@@ -492,20 +499,18 @@ struct JsRealmIntrinsicState {
 
 struct JsTest262AgentReport {
     int64_t root_slot = -1;
-    int waiter_id = 0;
 };
 
 struct JsTest262AgentState : RootVector {
     Item object = {};
-    // Agent slots contain only callback identities; report rows carry the
-    // paired waiter metadata with their one rooted report value.
-    RootVector callbacks = {};
+    JsAgentGroup* group = NULL;
+    JsAgentMember* member = NULL;
+    // FIFO rows name one precise report value; callbacks belong to child owners.
     RootVector report_values = {};
     ArrayList* reports = NULL;
-    int current_slot = -1;
     int64_t eval_script_active = 0;
-    // Atomics waiter records are allocated only when the Atomics namespace is
-    // materialized. They belong to this realm's Test262 agent simulation.
+    uint64_t next_waiter_order = 0;
+    // each execution owner retains its own promises, timers and waiter resources.
     JsAtomicsRuntimeState* atomics_waiter_state = NULL;
 };
 
@@ -523,6 +528,10 @@ struct JsProcessState : RootVector {
 };
 
 JsProcessState* js_process_state_ensure(JsRuntimeState* state);
+void js_agent_group_shutdown(JsRuntimeState* state);
+JsRuntimeState* js_agent_state_at(int index);
+bool js_agent_pump(void);
+void js_agent_checkpoint(void);
 
 // One label owns both console.count and console.time state. A label may serve
 // either operation independently, but it has one realm-local identity.
@@ -886,6 +895,7 @@ struct JsRuntimeState {
     uint64_t heap_epoch = 1;
     // non-owning: Runtime Script retirement owns the compiled MIR realm.
     struct MvpLmdExecution* formal_mir_owner = NULL;
+    struct MvpLmdExecution* auto_mir_owner = NULL;
 
     JsRegexpLastMatch regexp_last_match = {};
 
@@ -902,10 +912,14 @@ struct JsRuntimeState {
 
 void js_weak_state_destroy(JsRuntimeState* state);
 
-// This derived TLS cache is initialized once after the eval thread acquires
-// its context. It must stay paired with `context` until thread teardown.
+// The execution selector stays paired with one EvalContext; Activation snapshots
+// carry distinct agent states across cooperative switches within that owner.
 extern __thread JsRuntimeState* js_active_runtime_state;
 static inline JsRuntimeState* js_runtime_state_for(EvalContext* owner) {
+    // independent agents share a heap owner while retaining separate rooted execution state.
+    if (owner && js_active_runtime_state &&
+            js_active_runtime_state->execution.base_activation_items.owner == (Context*)owner)
+        return js_active_runtime_state;
     return owner ? (JsRuntimeState*)context_capsule(owner, CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
 }
 
@@ -961,6 +975,8 @@ public:
     JsOwnedCallActivation& operator=(const JsOwnedCallActivation&) = delete;
 };
 bool js_runtime_state_init(EvalContext* context);
+JsRuntimeState* js_runtime_state_create_agent(EvalContext* owner);
+void js_runtime_state_destroy_agent(JsRuntimeState* state);
 bool js_runtime_state_thread_matches(const EvalContext* context);
 bool js_runtime_state_shutdown(EvalContext* context);
 bool js_runtime_state_ensure_input(EvalContext* context);

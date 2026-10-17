@@ -366,6 +366,10 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
     gc_mark_object_ptr(gc, js_fn_source_text(fn));
+    if (fn->code) {
+        gc_mark_item(gc, fn->code->compiled_body.item);
+        gc_mark_item(gc, fn->code->compiled_loop_body.item);
+    }
     // JSCUO8: one container holds every optional record, so the whole payload
     // side of the trace is reached through a single null check.
     const JsFunctionPayload* p = fn->payload;

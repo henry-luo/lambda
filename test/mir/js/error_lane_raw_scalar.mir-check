@@ -1,15 +1,19 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: a cataloged raw scalar return is not published into the merged Item error lane, so its comparison branch has no unreachable ERROR-tag test.",
+  "description": "D8.4.3v2: native comparison/truthiness scalars add no ERROR observation; only the two Number-conversion boundaries remain fallible.",
   "checks": [
     {
-      "in_func": "_js_rawScalarBranch_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_eq_raw",
-        "call\tjs_logical_not"
+        "deq",
+        "dne"
       ],
+      "count": {
+        "{{r}}, 27": 2
+      },
       "forbid": [
-        "eq\t{{r}}, {{r}}, 27"
+        "js_eq_raw",
+        "js_logical_not"
       ]
     }
   ]

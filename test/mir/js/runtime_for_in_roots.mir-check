@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
-  "description": "D5.3.3: for-in key collection and liveness checks preserve all live Items across safepoints.",
+  "description": "D5.3/D5.4: key snapshot and each live-property query retain rooted Items across collection.",
   "checks": [
     {
-      "in_func": "js_main",
+      "in_func": "mvp_lmd_program",
       "expect": [
-        "call\tjs_for_in_keys",
-        "call\tjs_for_in_key_is_live"
+        "call\tmvp_lmd_for_in_keys",
+        "call\tmvp_lmd_class_property",
+        "mov\ti64:80(runtime),",
+        "call\towned_item_slot_store"
       ]
     }
   ]

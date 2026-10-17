@@ -45,12 +45,6 @@ extern bool g_jm_preamble_mode;
 extern bool g_jm_preamble_compile_only;
 extern JsPreambleState* g_jm_preamble_out;
 extern const JsPreambleState* g_jm_preamble_in;
-// Dynamic JS compilation follows the bound EvalContext. This direct TLS read
-// keeps runtime selection context-local without adding a hot-path check.
-static inline Runtime* js_current_runtime(void) {
-    return context ? context->runtime : NULL;
-}
-
 typedef struct ActiveJsTranspileOwner {
     JsTranspiler* tp;
     JsMirTranspiler* mt;

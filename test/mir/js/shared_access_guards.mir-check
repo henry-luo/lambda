@@ -1,38 +1,33 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.3v2: a Number-proven computed read uses the native-key element kernel while its write retains the canonical Set kernel.",
+  "description": "D8.4.1v2: packed field and numeric-index guards retain the formal descriptor/prototype fallback.",
   "checks": [
     {
-      "in_func": "_js_readRecord_#_body",
+      "in_func": "mvp_lmd_f2",
       "expect": [
-        "call\tjs_get_name_id"
-      ],
-      "forbid": [
-        "js_shaped_slot_get",
-        "js_literal_shape"
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmap_shape_field_to_item",
+        "call\tmvp_lmd_class_property"
       ]
     },
     {
-      "in_func": "_js_writeRecord_#_body",
+      "in_func": "mvp_lmd_f3",
       "expect": [
-        "call\tjs_get_name_id",
-        "call\tjs_set_name_id"
-      ],
-      "forbid": [
-        "js_shaped_slot_get",
-        "js_literal_shape"
+        "call\tmvp_lmd_property_set_fixed",
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmap_field_store",
+        "call\tmvp_lmd_class_property"
       ]
     },
     {
-      "in_func": "_js_numericRegion_#_body",
+      "in_func": "mvp_lmd_f4",
       "expect": [
-        "call\tjs_elements_get_number",
-        "call\tjs_set"
+        "call\tmvp_lmd_array_index_property",
+        "call\tmvp_lmd_class_property"
       ],
       "forbid": [
         "js_get_number_reference",
-        "js_set_number_assignment",
-        "js_number_key_to_index_fast"
+        "js_set_number_assignment"
       ]
     }
   ]

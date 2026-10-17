@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
-      "description": "The literal 27 is LMD_TYPE_ERROR (lambda/lambda.h); re-pin it if the enum shifts. D8.4.3: a MAY_SET named access contributes one ERROR-tag branch, while js_with_save_depth and the abrupt catch exit add none.",
+  "description": "D8.4.3v2: generic property admission and catch conversion retain independent fallible boundaries in the formal emitter.",
   "checks": [
     {
-      "in_func": "_js_dynamicCaught_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_get_name_id_p_r6_n1_a2, js_get_name_id",
-        "call\tjs_error_lane_payload"
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmvp_lmd_class_property",
+        "call\tmvp_lmd_caught_value"
       ],
       "count": {
-        "eq\t{{r}}, {{r}}, 27": 1
+        "call\tmvp_lmd_caught_value": 1,
+        "{{r}}, 27": 5
       }
     }
   ]

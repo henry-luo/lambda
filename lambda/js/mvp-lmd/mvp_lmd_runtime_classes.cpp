@@ -8,6 +8,7 @@
 #include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
 #include "../js_well_known_names.h"
+#include "../js_typed_array.h"
 #include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
@@ -93,6 +94,11 @@ extern "C" Item mvp_lmd_get_prototype(Item object) {
     return mvp_lmd_get_prototype_with_library(object, mvp_lmd_program_library());
 }
 extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
+    if (prevent && js_is_typed_array(object)) {
+        JsTypedArray* view = js_get_typed_array_ptr(object.map);
+        // resizable backing storage cannot establish a permanent indexed property set.
+        if (js_arraybuffer_resizable(view->base.buffer)) return Item{.item = ITEM_FALSE};
+    }
     Item foreign;
     if (mvp_lmd_foreign_candidate(object) && mvp_lmd_foreign_property(object, ItemNull,
             ItemNull, object, prevent ? LMD_FOREIGN_PREVENT : LMD_FOREIGN_EXTENSIBLE, &foreign)) return foreign;
@@ -328,7 +334,8 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     if (binding && (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_PLAIN))
         return inherited_binding();
     if (!fixed && (operation & ~LMD_PROP_STRICT) == LMD_PROP_SET &&
-            mvp_lmd_program_library() && mvp_lmd_program_library()->mutable_prototypes) {
+            ((!mvp_lmd_is_object(owner)) ||
+            (mvp_lmd_program_library() && mvp_lmd_program_library()->mutable_prototypes))) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         uint64_t home = 0;
@@ -348,7 +355,10 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
         Item status = mvp_lmd_define_own_property(owner, name, &descriptor);
         return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
     }
-    if (!fixed && mvp_lmd_foreign_candidate(owner)) {
+    TypeId owner_type = get_type_id(owner);
+    MvpLmdClass* cls = owner_type == LMD_TYPE_MAP ? mvp_lmd_class_record(owner) : NULL;
+    // reuse nominal resolution; ordinary MVP maps retain their original foreign-admission cost.
+    if (!fixed && mvp_lmd_foreign_candidate(owner, cls == NULL)) {
         int opcode = operation & ~LMD_PROP_STRICT;
         if (opcode >= LMD_PROP_KEYS && opcode <= LMD_PROP_ENTRIES)
             return mvp_lmd_object_project(owner, opcode - LMD_PROP_KEYS);
@@ -418,7 +428,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
         Item prepared = mvp_lmd_function_prepare(owner);
         if (item_is_error(prepared)) return prepared;
     }
-    MvpLmdClass* cls = mvp_lmd_class_record(owner);
+    if (owner_type != LMD_TYPE_MAP) cls = mvp_lmd_class_record(owner);
     if (cls) {
         bool constructor = get_type_id(owner) == LMD_TYPE_FUNC;
         Map* map = constructor ? mvp_lmd_class_values(cls)[2].map : owner.map;
@@ -694,7 +704,10 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
         MvpLmdLibraryState* library = mvp_lmd_program_library();
         if (!library) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-        held.set(mvp_lmd_dynamic_wrap_function(library->object.program, held.get()));
+        if (library->native_callable_values)
+            return mvp_lmd_dynamic_call_native(library->object.program, held.get(), self.get(),
+                arguments, (uint64_t)argc, target.get());
+        held.set(mvp_lmd_dynamic_import_value(library->object.program, held.get()));
         return item_is_error(held.get()) ? held.get() :
             mvp_lmd_class_invoke(held.get(), self.get(), arguments, argc, target.get());
     }

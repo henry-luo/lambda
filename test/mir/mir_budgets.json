@@ -198,23 +198,34 @@
       "name": "js_numeric_inference_call",
       "script": "test/mir/js/numeric_inference_call.js",
       "language": "js",
-      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
+      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
         "default": {
-          "module_insns": 242,
+          "module_insns": 696,
           "functions": {
-            "js_main": {
-              "insns": 195
+            "mvp_lmd_program": {
+              "insns": 571
+            },
+            "mvp_lmd_f1": {
+              "insns": 125
             }
           },
           "frames": [
             {
-              "name": "js_main",
-              "roots": 7,
-              "root_stores": 17,
+              "name": "mvp_lmd_program",
+              "roots": 5,
+              "root_stores": 19,
+              "scalar_homes": 9,
+              "number_scratch": 0,
+              "safepoints": 22
+            },
+            {
+              "name": "mvp_lmd_f1",
+              "roots": 3,
+              "root_stores": 4,
               "scalar_homes": 2,
               "number_scratch": 0,
-              "safepoints": 20
+              "safepoints": 4
             }
           ]
         }
@@ -224,113 +235,45 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots. 2026-10-01: Linux debug emits the same five instructions; the finalized MIR diff against the 2026-09-28 Linux artifact shows the ERROR-tag test and branch, with the existing frame budgets unchanged (D8.6.1). Windows debug-v3 measured the same +5 module instructions on 2026-10-01 (D8.6.1). 2026-10-07: shared Float adoption replaces one native copy call with inline payload canonicalization into the reserved destination home (D2.2.5, D5.3.1-D5.3.4, D8.2.6). Reviewed Darwin module delta +6; function/frame budgets are unchanged. The same emitter delta is applied to Linux/Windows debug budgets pending native confirmation.",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots. 2026-10-01: Linux debug emits the same five instructions; the finalized MIR diff against the 2026-09-28 Linux artifact shows the ERROR-tag test and branch, with the existing frame budgets unchanged (D8.6.1). Windows debug-v3 measured the same +5 module instructions on 2026-10-01 (D8.6.1). 2026-10-07: shared Float adoption replaces one native copy call with inline payload canonicalization into the reserved destination home (D2.2.5, D5.3.1-D5.3.4, D8.2.6). Reviewed Darwin module delta +6; function/frame budgets are unchanged. The same emitter delta is applied to Linux/Windows debug budgets pending native confirmation. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
         "default": {
-          "module_insns": 507,
+          "module_insns": 1016,
           "functions": {
-            "js_main": {
-              "insns": 76
+            "mvp_lmd_program": {
+              "insns": 105
+            },
+            "mvp_lmd_f1": {
+              "insns": 584
+            },
+            "mvp_lmd_f3": {
+              "insns": 83
             }
           },
           "frames": [
             {
-              "name": "js_main",
-              "roots": 2,
-              "root_stores": 7,
+              "name": "mvp_lmd_program",
+              "roots": 1,
+              "root_stores": 2,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 12
+              "safepoints": 6
             },
             {
-              "name": "_js_anon1_#",
-              "occurrence": 0,
-              "roots": 4,
-              "root_stores": 8,
-              "scalar_homes": 2,
+              "name": "mvp_lmd_f1",
+              "roots": 5,
+              "root_stores": 26,
+              "scalar_homes": 8,
               "number_scratch": 0,
-              "safepoints": 12
-            }
-          ]
-        },
-        "darwin-debug-v3": {
-          "module_insns": 356,
-          "functions": {
-            "js_main": {
-              "insns": 87
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 2,
-              "root_stores": 7,
-              "scalar_homes": 1,
-              "number_scratch": 0,
-              "safepoints": 10
+              "safepoints": 25
             },
             {
-              "name": "_js_anon1_#",
-              "occurrence": 0,
-              "roots": 4,
-              "root_stores": 8,
-              "scalar_homes": 1,
-              "number_scratch": 0,
-              "safepoints": 12
-            }
-          ]
-        },
-        "linux-debug-v3": {
-          "module_insns": 356,
-          "functions": {
-            "js_main": {
-              "insns": 87
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
+              "name": "mvp_lmd_f3",
               "roots": 2,
-              "root_stores": 7,
+              "root_stores": 1,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 10
-            },
-            {
-              "name": "_js_anon1_#",
-              "occurrence": 0,
-              "roots": 4,
-              "root_stores": 8,
-              "scalar_homes": 1,
-              "number_scratch": 0,
-              "safepoints": 12
-            }
-          ]
-        },
-        "windows-debug-v3": {
-          "module_insns": 355,
-          "functions": {
-            "js_main": {
-              "insns": 87
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 2,
-              "root_stores": 7,
-              "scalar_homes": 1,
-              "number_scratch": 0,
-              "safepoints": 10
-            },
-            {
-              "name": "_js_anon1_#",
-              "occurrence": 0,
-              "roots": 4,
-              "root_stores": 8,
-              "scalar_homes": 1,
-              "number_scratch": 0,
-              "safepoints": 12
+              "safepoints": 2
             }
           ]
         }
@@ -365,10 +308,10 @@
       "name": "js_corpus_array_methods",
       "script": "test/js/array_methods.js",
       "language": "js",
-      "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-18 (-18): measured shrink with the JS interpreter-tuning commits e4498011e/20f3458e8/d7fce59c6 in tree (not attributed to one); unrelated to the Lambda S12.1.1v2 work. 2026-09-29: +98 reviewed instructions are chiefly ERROR Item checks after coercing binary helpers (S1.11, D8.4.3v2), plus the Float-home key arm in guarded packed-index reads; source-matched MIR comparison found no new call-boundary root stores. +18 more instructions route throwing branch comparisons through an Item completion instead of a raw bool (D8.4.3v2). LR07-46 (2026-10-06, +24 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it.",
+      "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-18 (-18): measured shrink with the JS interpreter-tuning commits e4498011e/20f3458e8/d7fce59c6 in tree (not attributed to one); unrelated to the Lambda S12.1.1v2 work. 2026-09-29: +98 reviewed instructions are chiefly ERROR Item checks after coercing binary helpers (S1.11, D8.4.3v2), plus the Float-home key arm in guarded packed-index reads; source-matched MIR comparison found no new call-boundary root stores. +18 more instructions route throwing branch comparisons through an Item completion instead of a raw bool (D8.4.3v2). LR07-46 (2026-10-06, +24 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback. 2026-10-17 formal numeric-coercion correction (D8.1.3v25, D8.4.3v2): +23 reviewed instructions across three generic multiplication sites. A left Symbol must throw before RHS object coercion; a high-byte comparison avoids generic tag/container dispatch, and primitive RHS and typed-number paths omit the guard. +5 inline, +9 per two generic callbacks including their existing error/root publication. Exact default budget; no added slack.",
       "budgets": {
         "default": {
-          "module_insns": 3727
+          "module_insns": 16645
         }
       }
     },
@@ -376,10 +319,10 @@
       "name": "js_corpus_generator_basic",
       "script": "test/js/generator_basic.js",
       "language": "js",
-      "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). 2026-09-29: +7 reviewed instructions route a coercing binary helper's ERROR Item through generator completion (S1.11, D8.4.3v2); +12 carry throwing branch comparisons as Item completions through the same lane. 2026-10-04 Runtime Async P4 (RA1, vibe/Lambda_Design_Runtime_Async.md): +52 reviewed. A yield is now an ordinary may-GC, may-reenter call to activation_suspend, so the generator env and three reentry-cached values are reloaded after it and after js_gen_yield_result (about +13 per yield-dense body); the deleted resume-state dispatch, per-state env save/restore and expression spills offset part of it, and the other corpus probes shrink. LR07-46 (2026-10-06, -2 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it.",
+      "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). 2026-09-29: +7 reviewed instructions route a coercing binary helper's ERROR Item through generator completion (S1.11, D8.4.3v2); +12 carry throwing branch comparisons as Item completions through the same lane. 2026-10-04 Runtime Async P4 (RA1, vibe/Lambda_Design_Runtime_Async.md): +52 reviewed. A yield is now an ordinary may-GC, may-reenter call to activation_suspend, so the generator env and three reentry-cached values are reloaded after it and after js_gen_yield_result (about +13 per yield-dense body); the deleted resume-state dispatch, per-state env save/restore and expression spills offset part of it, and the other corpus probes shrink. LR07-46 (2026-10-06, -2 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
         "default": {
-          "module_insns": 5880
+          "module_insns": 11855
         }
       }
     },
@@ -387,10 +330,10 @@
       "name": "js_corpus_side_stack_frame_gc",
       "script": "test/js/regression_side_stack_frame_gc.js",
       "language": "js",
-      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3). JS2 reviewed growth (D8.6.1): +307 instructions above the recorded budget for guarded field/index access with the existing rooted fallback kernels. The profiling build adds 24 instructions for the existing named probe/hit/miss counters and their joins. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). LR07-46 (2026-10-06, +4 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it.",
+      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3). JS2 reviewed growth (D8.6.1): +307 instructions above the recorded budget for guarded field/index access with the existing rooted fallback kernels. The profiling build adds 24 instructions for the existing named probe/hit/miss counters and their joins. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). LR07-46 (2026-10-06, +4 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
         "default": {
-          "module_insns": 8794
+          "module_insns": 22551
         }
       }
     },
@@ -550,14 +493,26 @@
       "name": "js_error_lane_tag_budget",
       "script": "test/mir/js/error_lane_dynamic_catch.js",
       "language": "js",
-      "description": "D8.4.3 standing emission ratchet: the deliberate dynamic property-access error path emits exactly one ERROR-tag comparison. The counter already targeted tag 27; D7.4.5v2 made that the live Error tag, exposing the stale zero budget. Any added lane check must be reviewed and re-baselined in this file.",
+      "description": "D8.4.3 standing emission ratchet: the deliberate dynamic property-access error path emits exactly one ERROR-tag comparison. The counter already targeted tag 27; D7.4.5v2 made that the live Error tag, exposing the stale zero budget. Any added lane check must be reviewed and re-baselined in this file. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
         "default": {
+          "module_insns": 739,
           "functions": {
-            "_js_dynamicCaught_#_body": {
-              "error_lane_tag_tests": 1
+            "mvp_lmd_f1": {
+              "insns": 354,
+              "error_lane_tag_tests": 5
             }
-          }
+          },
+          "frames": [
+            {
+              "name": "mvp_lmd_f1",
+              "roots": 2,
+              "root_stores": 9,
+              "scalar_homes": 2,
+              "number_scratch": 0,
+              "safepoints": 8
+            }
+          ]
         }
       }
     },
@@ -565,110 +520,34 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3). Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-19 (Tune14): +9 deterministic receiver snapshots hold the evaluated write Reference through its RHS (S1.11, D8.2.3). Re-baseline 2026-09-22 (Tune14 final method analysis): debug profiles add one js_finalize_function transaction (+5 MIR instructions, +1 safepoint) for each of the fixture's 129 class methods, publishing compiler-known facts for js_call_entry_mir_this capability selection (D6.2.2v2). The Linux debug-v3 budget now records the reviewed 2026-09-28 emission (+652 module/js_main instructions and +129 safepoints, with one fewer root store); roots and scalar homes are unchanged. LR07-46 (2026-10-06, +387 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it.",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3). Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-19 (Tune14): +9 deterministic receiver snapshots hold the evaluated write Reference through its RHS (S1.11, D8.2.3). Re-baseline 2026-09-22 (Tune14 final method analysis): debug profiles add one js_finalize_function transaction (+5 MIR instructions, +1 safepoint) for each of the fixture's 129 class methods, publishing compiler-known facts for js_call_entry_mir_this capability selection (D6.2.2v2). The Linux debug-v3 budget now records the reviewed 2026-09-28 emission (+652 module/js_main instructions and +129 safepoints, with one fewer root store); roots and scalar homes are unchanged. LR07-46 (2026-10-06, +387 module): the root-publication frontier now keeps the non-rewinding guard at every frontier some incoming path has already published, and proves loop blocks published as a greatest fixpoint (D5.3.3). The old immediate-predecessor test stored root_end outright there, rewinding side_root_top beneath a live native RootFrame such as an item_keys key list. Measured against the pre-fix emitter on darwin debug; earlier unrecorded shrinks are locked in with it. Formal MIR activation (2026-10-16, D8.1.3v25, D5.3/D5.4, D8.4.3v2, D8.6.1): replaces retired LJS scopes and thresholds with reviewed MVP Item entries, precise root/home frames and mutable Script global/callee guards. Error tag metric covers direct branches as well as eq materialization. Measured darwin release; other platforms unqualified and retain zero-slack fallback.",
       "budgets": {
-        "linux-debug": {
-          "module_insns": 14166,
-          "functions": {
-            "js_main": {
-              "insns": 5652
-            },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 10
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 11,
-              "root_stores": 785,
-              "scalar_homes": 15,
-              "number_scratch": 0,
-              "safepoints": 2102
-            }
-          ]
-        },
-        "linux-debug-v3": {
-          "module_insns": 17142,
-          "functions": {
-            "js_main": {
-              "insns": 12627
-            },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 5
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 11,
-              "root_stores": 655,
-              "scalar_homes": 15,
-              "number_scratch": 0,
-              "safepoints": 1823
-            }
-          ]
-        },
-        "darwin-debug": {
-          "module_insns": 17529,
-          "functions": {
-            "js_main": {
-              "insns": 12627
-            },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 5
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 11,
-              "root_stores": 655,
-              "scalar_homes": 15,
-              "number_scratch": 0,
-              "safepoints": 1823
-            }
-          ]
-        },
         "default": {
-          "module_insns": 21474,
+          "module_insns": 15762,
           "functions": {
-            "js_main": {
-              "insns": 12573
+            "mvp_lmd_program": {
+              "insns": 8154
             },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 10
+            "mvp_lmd_f129": {
+              "insns": 33
             }
           },
           "frames": [
             {
-              "name": "js_main",
-              "roots": 12,
-              "root_stores": 878,
-              "scalar_homes": 16,
-              "number_scratch": 0,
-              "safepoints": 2176
-            }
-          ]
-        },
-        "windows-debug-v3": {
-          "module_insns": 17142,
-          "functions": {
-            "js_main": {
-              "insns": 12627
-            },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 5
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
+              "name": "mvp_lmd_program",
               "roots": 11,
-              "root_stores": 655,
-              "scalar_homes": 15,
+              "root_stores": 503,
+              "scalar_homes": 10,
               "number_scratch": 0,
-              "safepoints": 1823
+              "safepoints": 892
+            },
+            {
+              "name": "mvp_lmd_f129",
+              "roots": 0,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 0
             }
           ]
         }

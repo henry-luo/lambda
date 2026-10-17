@@ -285,7 +285,8 @@ extern "C" Item mvp_lmd_bigint_binary(Item left, Item right, int64_t operation) 
             Item other = lb ? b.get() : a.get();
             TypeId type = get_type_id(other);
             if (operation == OPERATOR_JS_STRICT_EQ || operation == OPERATOR_JS_STRICT_NE ||
-                    (equality && (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED))) unordered = true;
+                    (equality && (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_SYMBOL))) unordered = true;
+            else if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             else if (type == LMD_TYPE_STRING) {
                 Item parsed = bigint_from_string(other.get_string()->chars, other.get_string()->len);
                 if (item_is_error(parsed)) unordered = true;

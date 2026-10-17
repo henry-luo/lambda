@@ -65,7 +65,9 @@ Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
 // the result, and a blank source, a V8 native probe, or a lone RegExp literal
 // completes without a script. Returns true when *result holds the completion
 // or the early error that was thrown.
-bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result);
+struct JsInterpHostOps;
+bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result,
+                             const JsInterpHostOps* host = NULL);
 // allocation-free shared lexer proof: an empty Script has undefined completion.
 bool js_eval_source_is_blank(String* code_str);
 // Execute source in a module-private slab. `strict` distinguishes the

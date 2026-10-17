@@ -775,14 +775,30 @@ JsAstNode* build_js_template_element_from_source(JsTranspiler* tp,
     }
     if (end < begin) return NULL;
     size_t length = end - begin;
+    // both TV and TRV fold source CR/CRLF to LF; escape spellings remain untouched.
+    const char* text = source.str + begin;
+    if (memchr(text, '\r', length)) {
+        char* normalized = (char*)pool_alloc(tp->pool, length + 1);
+        if (!normalized) return NULL;
+        size_t out = 0;
+        for (size_t i = 0; i < length; i++) {
+            char value = text[i];
+            if (value == '\r') {
+                value = '\n';
+                if (i + 1 < length && text[i + 1] == '\n') i++;
+            }
+            normalized[out++] = value;
+        }
+        normalized[out] = 0; text = normalized; length = out;
+    }
     JsTemplateElementNode* element =
         (JsTemplateElementNode*)alloc_js_ast_node_span(tp,
             JS_AST_NODE_TEMPLATE_ELEMENT, span,
             sizeof(JsTemplateElementNode));
     if (!element) return NULL;
-    element->raw = name_pool_create_len(tp->name_pool, source.str + begin,
+    element->raw = name_pool_create_len(tp->name_pool, text,
         (int)length);
-    element->cooked = js_template_cooked_string(tp, source.str + begin,
+    element->cooked = js_template_cooked_string(tp, text,
         length);
     element->tail = tail;
     element->type = &TYPE_STRING;

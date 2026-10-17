@@ -1,6 +1,7 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
+#include "../js_well_known_names.h"
 #include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
@@ -120,6 +121,9 @@ Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     Item& object = state->values[LMD_LIBRARY_REFLECT];
     object = mvp_lmd_object_new(state->object_shape, 0);
     if (item_is_error(object)) return object;
+    Item tag = mvp_lmd_named_set(object, Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+        js_name_item("Reflect"), JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE);
+    if (item_is_error(tag)) return tag;
     const char* names[] = {"apply", "construct", "defineProperty", "deleteProperty", "get", "getOwnPropertyDescriptor",
         "getPrototypeOf", "has", "isExtensible", "ownKeys", "preventExtensions", "set", "setPrototypeOf"};
     const uint8_t arities[] = {3, 2, 3, 2, 2, 2, 1, 2, 1, 1, 1, 3, 2};

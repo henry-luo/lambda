@@ -198,6 +198,7 @@ Item js_arraybuffer_slice_with_ops(Item buffer, Item begin, Item end, int argc,
     const JsBufferViewOps* ops);
 Item js_arraybuffer_slice_kernel(Item buffer, Item begin, Item end, int argc,
     bool shared, const JsBufferViewOps* ops);
+Item js_sharedarraybuffer_clone_with_ops(Item source, const JsBufferViewOps* ops);
 
 typedef enum JsAtomicsOp {
     JS_ATOMICS_OP_ADD,
@@ -319,13 +320,6 @@ Item js_atomics_is_lock_free_with_ops(Item size, const JsBufferViewOps* ops);
 Item js_atomics_pause_with_ops(Item iterations, const JsBufferViewOps* ops);
 void js_atomics_reset_waiters(void);
 bool js_atomics_runtime_state_ensure(void);
-int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);
-bool js_atomics_report_waiter_ready(int waiter_id);
-Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string);
-void js_atomics_agent_sleep(Item ms);
-Item js_atomics_agent_monotonic_now(void);
-void js_atomics_agent_leaving(int agent_slot);
-
 // DataView operations
 typedef enum JsDataViewOperation {
     JS_DATAVIEW_GET_INT8,

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "D8.1.3v25, D8.2.4-D8.2.6, D5.3/D5.4: formal MIR physical contract for Result29NumberIndexedLaneUsesSharedReferenceSemantics. The original JS operations and output/differential assertions remain in test_js_opt_gtest.cpp; retired LJS runtime counter expectations are replaced by exact source-scope lowering checks.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_program",
+      "expect": [
+        "ret\t",
+        "func\ti64, p:runtime, p:unit, p:arguments, i64:argc"
+      ],
+      "count": {
+        "dadd\t": 1,
+        "call\tarray_reserve_append_slots": 1,
+        "call\tmvp_lmd_property_key": 7,
+        "call\tmvp_lmd_to_primitive": 1,
+        "call\tmvp_lmd_primitive_to_number": 6,
+        "call\tmvp_lmd_class_property": 3,
+        "call\tmvp_lmd_array_index_property": 4,
+        "call\tmvp_lmd_throw": 1,
+        "call\tmvp_lmd_string_concat": 1
+      }
+    },
+    {
+      "forbid": [
+        "call\tjs_set_module_var",
+        "call\tjs_new_literal_object_with_typemap",
+        "call\tjs_set_class_instance_shape"
+      ],
+      "in_func": "*"
+    }
+  ]
+}

@@ -478,7 +478,7 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len);
 
 // A source that is exactly one RegExp literal evaluates to that RegExp;
 // construct it without a per-call script. Other flags take the parser.
-static bool js_eval_source_is_regexp_literal(String* code_str) {
+static bool js_eval_source_is_regexp_literal(String* code_str, size_t* closing_slash) {
     const char* s = code_str->chars;
     size_t len = code_str->len;
     if (len < 2 || s[0] != '/' || s[1] == '/' || s[1] == '*') return false;
@@ -486,13 +486,18 @@ static bool js_eval_source_is_regexp_literal(String* code_str) {
     bool in_class = false;
     while (pos < len) {
         char c = s[pos];
-        if (c == '\\' && pos + 1 < len) { pos += 2; continue; }
+        if (js_eval_at_line_terminator(s, len, pos, NULL)) return false;
+        if (c == '\\' && pos + 1 < len) {
+            if (js_eval_at_line_terminator(s, len, pos + 1, NULL)) return false;
+            pos += 2; continue;
+        }
         if (c == '[') in_class = true;
         else if (c == ']') in_class = false;
         else if (c == '/' && !in_class) break;
         pos++;
     }
     if (pos >= len) return false;
+    *closing_slash = pos;
     for (pos++; pos < len; pos++) {
         char f = s[pos];
         if (f != 'g' && f != 'i' && f != 'm' && f != 's' && f != 'u' && f != 'y') return false;
@@ -503,8 +508,9 @@ static bool js_eval_source_is_regexp_literal(String* code_str) {
 // ============================================================================
 // eval(code)
 // ============================================================================
-bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result) {
-    if (!js_current_runtime()) {
+bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result,
+        const JsInterpHostOps* host) {
+    if (!host && !js_current_runtime()) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         *result = ItemNull;
         return true;
@@ -518,20 +524,40 @@ bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result) 
     *result = (Item){.item = ITEM_JS_UNDEFINED};
     if (!code_str || code_str->len == 0) return true;
     bool native_probe_value = false;
-    if (js_eval_source_is_v8_native_probe(code_str, &native_probe_value)) {
+    if (!host && js_eval_source_is_v8_native_probe(code_str, &native_probe_value)) {
         // Node official tests use V8 native probes under --allow_natives_syntax;
         // these probes observe engine internals and should not enter the JS parser.
         if (native_probe_value) *result = (Item){.item = b2it(true)};
         return true;
     }
-    Item initializer_status = js_eval_initializer_early_error(code_str, is_direct_eval);
-    if (item_is_error(initializer_status)) {
-        *result = initializer_status;
-        return true;
+    if (!host) {
+        // host early errors use its parser and realm-local error constructors.
+        Item initializer_status = js_eval_initializer_early_error(code_str, is_direct_eval);
+        if (item_is_error(initializer_status)) {
+            *result = initializer_status;
+            return true;
+        }
     }
     if (js_eval_source_is_blank(code_str)) return true;
-    if (js_eval_source_is_regexp_literal(code_str)) {
-        *result = js_create_regexp_from_source(code_str->chars, code_str->len);
+    size_t closing_slash = 0;
+    if (js_eval_source_is_regexp_literal(code_str, &closing_slash)) {
+        if (host) {
+            if (!host->regexp_literal) return false;
+            // each eval creates a fresh realm-local RegExp without retaining a script.
+            RootFrame roots(3);
+            if (!roots.valid()) { *result = ItemError; return true; }
+            Rooted<Item> code(roots, code_item), pattern(roots, ItemNull), flags(roots, ItemNull);
+            String* text = heap_strcpy(code.get().get_string()->chars + 1, closing_slash - 1);
+            if (!text) { *result = host->fail(JS_INTERP_HOST_MEMORY); return true; }
+            pattern.set(Item{.item = s2it(text)});
+            code_str = code.get().get_string();
+            text = heap_strcpy(code_str->chars + closing_slash + 1, code_str->len - closing_slash - 1);
+            if (!text) { *result = host->fail(JS_INTERP_HOST_MEMORY); return true; }
+            flags.set(Item{.item = s2it(text)});
+            *result = host->regexp_literal(host->state, pattern.get(), flags.get());
+        } else {
+            *result = js_create_regexp_from_source(code_str->chars, code_str->len);
+        }
         return true;
     }
     return false;

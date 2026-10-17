@@ -110,7 +110,7 @@ struct ModuleRegistry;
 
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
-    uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
+    uint32_t next_module_state_id;  // canonical context allocator; borrowed controllers reuse its counter
     struct hashmap* loaded_script_index;  // canonical path -> current Runtime Script*
     // Immutable images carry logical compilation-unit IDs.  This per-Runtime
     // map assigns each such unit a compact EvalContext module-slab address.

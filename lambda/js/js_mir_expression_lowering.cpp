@@ -457,6 +457,13 @@ bool js_ast_is_proto_literal_key(JsAstNode* key) {
     return false;
 }
 
+bool js_ast_property_is_proto_setter(const JsPropertyNode* property) {
+    return property && !property->computed && !property->method &&
+        !property->is_getter && !property->is_setter && !property->shorthand &&
+        property->key && property->value && property->key != property->value &&
+        js_ast_is_proto_literal_key(property->key);
+}
+
 static JsFuncCollected* jm_find_direct_function_decl_for_identifier(
         JsMirTranspiler* mt, JsIdentifierNode* id) {
     AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
@@ -9387,12 +9394,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
                 key = jm_transpile_box_item(mt, p->key);
             }
             MIR_reg_t val = jm_transpile_box_item(mt, p->value);
-            bool is_proto_literal = false;
-            if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
-                !p->shorthand &&
-                p->key && p->value && p->key != p->value) {
-                is_proto_literal = js_ast_is_proto_literal_key(p->key);
-            }
+            bool is_proto_literal = js_ast_property_is_proto_setter(p);
             // function name inference from object property key
             if (!is_proto_literal && p->value &&
                 (p->value->node_type == AST_NODE_FUNC_EXPR ||

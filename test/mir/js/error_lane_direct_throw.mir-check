@@ -1,16 +1,33 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: a known ERROR Item routes directly from throw to catch; no ERROR-tag test is emitted in the function body.",
+  "description": "D8.4.3v2: a known source throw transfers directly to catch without testing its known ERROR result. Catch materialization is checked independently.",
   "checks": [
     {
-      "in_func": "_js_directCaught_#_body",
-      "expect": [
-        "call\tjs_throw_value",
-        "call\tjs_error_lane_payload"
+      "in_func": "mvp_lmd_f1",
+      "in_range": {
+        "from": "func",
+        "to": "call\tmvp_lmd_caught_value"
+      },
+      "expect_seq": [
+        {
+          "pattern": "call\tmvp_lmd_throw"
+        },
+        {
+          "pattern": "mov\t{{r}}, {{r}}"
+        },
+        {
+          "pattern": "jmp\t"
+        }
       ],
       "forbid": [
-        "eq\t{{r}}, {{r}}, 27"
+        "{{r}}, 27"
       ]
+    },
+    {
+      "in_func": "mvp_lmd_f1",
+      "count": {
+        "call\tmvp_lmd_caught_value": 1
+      }
     }
   ]
 }

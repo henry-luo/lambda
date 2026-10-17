@@ -26,6 +26,7 @@ __thread JsRuntimeState* js_active_runtime_state = NULL;
 // (JsOwnedCallActivation), so no later resume reads the first resumer's chain.
 typedef struct JsAmbient {
     JsRuntimeState* state;
+    Runtime* runtime;
     const JsInterpHostOps* interpreter_host;
     void* promise_context;
     JsCallActivation* current_activation;
@@ -48,6 +49,7 @@ static void js_ambient_init(void* storage) {
     memset(ambient, 0, sizeof(*ambient));
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->runtime = context ? context->runtime : NULL;
     ambient->interpreter_host = js_interp_host;
     if (!state) return;
     ambient->inherit_call_chain = true;
@@ -61,6 +63,7 @@ static void js_ambient_save(void* storage) {
     JsAmbient* ambient = (JsAmbient*)storage;
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->runtime = context ? context->runtime : NULL;
     ambient->interpreter_host = js_interp_host;
     ambient->inherit_call_chain = false;
     if (!state) return;
@@ -80,6 +83,9 @@ static void js_ambient_save(void* storage) {
 static void js_ambient_load(const void* storage) {
     const JsAmbient* ambient = (const JsAmbient*)storage;
     JsRuntimeState* state = ambient->state;
+    // same-owner async work may install its module controller lazily. Only
+    // an execution-owner switch restores a different agent's controller.
+    if (context && js_active_runtime_state != state) context->runtime = ambient->runtime;
     js_active_runtime_state = state;
     js_interp_host = ambient->interpreter_host;
     if (!state) return;
@@ -152,6 +158,7 @@ static void js_release_input_resources(void);
 
 static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state);
 static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state);
+static void js_runtime_state_release(JsRuntimeState* state);
 
 static bool js_execution_state_prepare(JsRuntimeState* state,
                                        EvalContext* owner) {
@@ -501,11 +508,8 @@ JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state) {
         log_error("js-runtime-state: failed to allocate lazy Test262 agent record");
         return NULL;
     }
-    root_vector_init(&agent->callbacks, (Context*)context,
-        "Test262 agent callbacks");
     root_vector_init(&agent->report_values, (Context*)context,
         "Test262 agent reports");
-    agent->current_slot = -1;
     state->test262_agent = agent;
     return agent;
 }
@@ -583,6 +587,64 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     return true;
 }
 
+static bool js_runtime_state_initialize(JsRuntimeState* state, EvalContext* owner) {
+    if (!js_runtime_state_alloc_records(state)) return false;
+    state->heap_epoch = 1;
+    root_vector_init(&state->promises.domain_stack, (Context*)owner, "domain stack");
+    js_eval_state_vectors_init(&state->eval, (Context*)owner);
+    state->batch_test_module_state_id = UINT32_MAX;
+    state->batch_preamble_module_state_id = UINT32_MAX;
+    state->batch_preamble_var_count = 0;
+    // raw allocation bypasses C++ defaults; every execution owner needs these queue identities.
+    state->event_loop->next_raf_id = 1;
+    runtime_job_queue_init(&state->event_loop->next_tick_queue, &state->event_loop->queue_storage[0]);
+    runtime_job_queue_init(&state->event_loop->microtask_queue, &state->event_loop->queue_storage[1]);
+    runtime_job_queue_init(&state->event_loop->animation_frame_queue, &state->event_loop->queue_storage[2]);
+    runtime_job_queue_init(&state->promises.unhandled_queue, &state->promises.unhandled_storage);
+    state->event_loop->next_id = 1;
+    state->string_caches->last_from_char_code_cp = -1;
+    state->string_caches->ascii_chars_epoch = ~0ULL;
+    state->clipboard.generation = 1;
+    state->clipboard.next_object_url_id = 1;
+    state->intrinsics->mutation_serial = 1;
+    state->promises.unhandled_strict = js_promise_initial_unhandled_rejections_strict();
+    state->performance.origin_epoch = UINT64_MAX;
+    return true;
+}
+
+JsRuntimeState* js_runtime_state_create_agent(EvalContext* owner) {
+    if (!eval_context_matches(owner)) return NULL;
+    auto* state = (JsRuntimeState*)mem_calloc(1, sizeof(JsRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) return NULL;
+    if (!js_runtime_state_initialize(state, owner)) { mem_free(state); return NULL; }
+    if (!js_execution_state_prepare(state, owner)) {
+        JsRuntimeState* previous = js_active_runtime_state;
+        js_active_runtime_state = state;
+        js_runtime_owned_cache_destroy_context(state);
+        js_runtime_state_release(state);
+        js_active_runtime_state = previous;
+        return NULL;
+    }
+    return state;
+}
+
+void js_runtime_state_destroy_agent(JsRuntimeState* state) {
+    if (!state) return;
+    if (!context || state->execution.base_activation_items.owner != (Context*)context ||
+            state == js_active_runtime_state || state == context_capsule(context, CONTEXT_CAPSULE_JS_RUNTIME)) {
+        log_error("js-agent-state: refusing to destroy an active or foreign execution owner");
+        return;
+    }
+    JsRuntimeState* previous = js_active_runtime_state;
+    js_active_runtime_state = state;
+    // abandon only this owner's timers and roots; shared context capsules stay live.
+    js_event_loop_shutdown();
+    js_runtime_owned_cache_destroy_context(state);
+    js_release_input_resources();
+    js_runtime_state_release(state);
+    js_active_runtime_state = previous;
+}
+
 bool js_runtime_state_init(EvalContext* runtime_context) {
     if (!eval_context_matches(runtime_context)) {
         log_error("js-thread-init: EvalContext is not current owner");
@@ -600,7 +662,7 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             log_error("js-runtime-state: failed to allocate context state");
             return false;
         }
-        if (!js_runtime_state_alloc_records(state)) {
+        if (!js_runtime_state_initialize(state, runtime_context)) {
             context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
             // The resource service is established during record allocation,
             // before this runtime state becomes usable by another client.
@@ -608,35 +670,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
                 CONTEXT_CAPSULE_RUNTIME_RESOURCES);
             return false;
         }
-        state->heap_epoch = 1;
-        root_vector_init(&state->promises.domain_stack,
-            (Context*)runtime_context, "domain stack");
-        js_eval_state_vectors_init(&state->eval,
-            (Context*)runtime_context);
-        state->batch_test_module_state_id = UINT32_MAX;
-        state->batch_preamble_module_state_id = UINT32_MAX;
-        state->batch_preamble_var_count = 0;
-        // This capsule is raw-allocated for C-compatible runtime ownership,
-        // so restore non-zero queue identities that C++ default initializers
-        // would otherwise provide only for a constructed object.
-        state->event_loop->next_raf_id = 1;
-        runtime_job_queue_init(&state->event_loop->next_tick_queue,
-            &state->event_loop->queue_storage[0]);
-        runtime_job_queue_init(&state->event_loop->microtask_queue,
-            &state->event_loop->queue_storage[1]);
-        runtime_job_queue_init(&state->event_loop->animation_frame_queue,
-            &state->event_loop->queue_storage[2]);
-        runtime_job_queue_init(&state->promises.unhandled_queue,
-            &state->promises.unhandled_storage);
-        state->event_loop->next_id = 1;
-        state->string_caches->last_from_char_code_cp = -1;
-        state->string_caches->ascii_chars_epoch = ~0ULL;
-        state->clipboard.generation = 1;
-        state->clipboard.next_object_url_id = 1;
-        state->intrinsics->mutation_serial = 1;
-        state->promises.unhandled_strict =
-            js_promise_initial_unhandled_rejections_strict();
-        state->performance.origin_epoch = UINT64_MAX;
     }
     if (js_active_runtime_state &&
             js_active_runtime_state != state) {
@@ -736,6 +769,7 @@ void js_runtime_state_release_heap_resources(void) {
         log_error("js-runtime-state-release: owner thread is not current");
         return;
     }
+    js_agent_group_shutdown(state);
     // Regex cache records point into the current GC heap. Release their native
     // engines before heap_destroy invalidates those records; capsule teardown
     // later only disposes context-owned containers that are still present.
@@ -754,22 +788,7 @@ void js_runtime_state_release_heap_resources(void) {
     js_release_input_resources();
 }
 
-void js_runtime_state_destroy_context(void) {
-    EvalContext* runtime_context = context;
-    JsRuntimeState* state = js_runtime_state_for(runtime_context);
-    if (!runtime_context || !state) return;
-    bool was_active = js_active_runtime_state == state;
-    if (was_active) js_event_loop_shutdown();
-    // Final runtime cleanup does not pass through batch reset, so detach the
-    // optional Node session while its heap-backed state is still valid.
-    jube_modules_runtime_detach();
-    state = (JsRuntimeState*)context_capsule_take(runtime_context,
-        CONTEXT_CAPSULE_JS_RUNTIME);
-    if (!state) return;
-    js_runtime_owned_cache_destroy_context(state);
-    // JSCU18: the DOM/web capsules leave through the directory's own walk
-    // instead of eight hand-maintained calls.
-    context_capsule_destroy_all(runtime_context);
+static void js_runtime_state_release(JsRuntimeState* state) {
     js_atomics_destroy_context(state);
     js_weak_state_destroy(state);
     jm_compile_recovery_state_destroy_context(state);
@@ -797,6 +816,27 @@ void js_runtime_state_destroy_context(void) {
     js_code_store_destroy(&state->code_store);
     js_runtime_state_free_records(state);
     mem_free(state);
+}
+
+void js_runtime_state_destroy_context(void) {
+    EvalContext* runtime_context = context;
+    auto* state = runtime_context ? (JsRuntimeState*)context_capsule(runtime_context,
+        CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
+    if (!runtime_context || !state) return;
+    js_agent_group_shutdown(state);
+    bool was_active = js_active_runtime_state == state;
+    if (was_active) js_event_loop_shutdown();
+    // Final runtime cleanup does not pass through batch reset, so detach the
+    // optional Node session while its heap-backed state is still valid.
+    jube_modules_runtime_detach();
+    state = (JsRuntimeState*)context_capsule_take(runtime_context,
+        CONTEXT_CAPSULE_JS_RUNTIME);
+    if (!state) return;
+    js_runtime_owned_cache_destroy_context(state);
+    // JSCU18: the DOM/web capsules leave through the directory's own walk
+    // instead of eight hand-maintained calls.
+    context_capsule_destroy_all(runtime_context);
+    js_runtime_state_release(state);
     if (was_active) js_active_runtime_state = NULL;
 }
 

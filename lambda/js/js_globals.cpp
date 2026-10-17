@@ -40,6 +40,7 @@
 #include "../lambda-data.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../lambda.hpp"
+#include "../input/input-parsers.h"
 #include "../core/name_pool.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/transpiler.hpp"
@@ -177,7 +178,7 @@ static Item js_publish_lazy_global(Item object, Item key, Item value) {
     if (item_is_error(value_root.get())) return value_root.get();
     if (js_runtime_state.formal_mir_owner && object.item == mvp_lmd_dynamic_global_this(NULL).item) {
         MvpLmdLibraryState* library = mvp_lmd_program_library();
-        value_root.set(mvp_lmd_dynamic_wrap_function(library->object.program, value_root.get()));
+        value_root.set(mvp_lmd_dynamic_import_value(library->object.program, value_root.get()));
         if (item_is_error(value_root.get())) return value_root.get();
         // the marker has already passed declaration admission. Replace its
         // storage directly, without recursively observing its lazy descriptor.
@@ -481,9 +482,6 @@ static int js_get_parent_pid_win32(void) {
     return parent_pid;
 }
 #endif
-
-// forward declaration for JSON parser
-extern Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 
 extern "C" void js_defprop_set_internal_state(Item obj, Item key, Item value);
 static Item js_require_object_type(Item arg, const char* method_name);
@@ -3368,6 +3366,12 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         return result_root.get();
     }
 
+    // shared buffers get a realm-local identity over the same growable handle.
+    if (js_is_sharedarraybuffer(value_root.get())) {
+        return js_sharedarraybuffer_clone_with_ops(value_root.get(),
+            ops ? ops->typed_arrays->buffer : &js_buffer_view_default_ops);
+    }
+
     // ArrayBuffer: clone bytes, or clone as the transferred backing store.
     if (js_is_arraybuffer(value_root.get()) && !js_is_sharedarraybuffer(value_root.get())) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value_root.get());
@@ -3393,6 +3397,30 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
             return js_message_port_clone_for_transfer(value_root.get());
         }
         return value_root.get();
+    }
+
+    JsTypedArray* typed = js_is_typed_array(value_root.get())
+        ? js_get_typed_array_ptr(value_root.get().map) : NULL;
+    JsArrayBufferView* shared_view = typed ? &typed->base : js_get_dataview_ptr(value_root.get());
+    if (shared_view && js_arraybuffer_shared(shared_view->buffer)) {
+        // snapshot view metadata before cloning allocates; only the native handle is shared.
+        int element_type = typed ? typed->element_type : -1;
+        int offset = shared_view->byte_offset;
+        int length = shared_view->length_tracking ? -1 : typed
+            ? shared_view->byte_length / js_typed_array_element_size(typed->element_type)
+            : shared_view->byte_length;
+        keys_root.set(Item{.item = shared_view->buffer_item});
+        keys_root.set(js_sharedarraybuffer_clone_with_ops(keys_root.get(),
+            ops ? ops->typed_arrays->buffer : &js_buffer_view_default_ops));
+        JS_RETURN_IF_ERROR(keys_root.get());
+        Item start = {.item = i2it(offset)};
+        Item extent = length < 0 ? make_js_undefined() : Item{.item = i2it(length)};
+        if (element_type >= 0) return ops
+            ? js_typed_array_construct_with_ops(element_type, keys_root.get(), start,
+                extent, 3, make_js_undefined(), ops->typed_arrays)
+            : js_typed_array_new_from_buffer(element_type, keys_root.get(), offset, length);
+        return js_dataview_construct_with_ops(keys_root.get(), start, extent,
+            make_js_undefined(), ops ? ops->typed_arrays->buffer : &js_buffer_view_default_ops);
     }
 
     // typed array: copy buffer
@@ -5584,7 +5612,8 @@ static Item js_get_async_function_prototype() {
 }
 
 extern "C" Item js_get_prototype_of(Item object) {
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
         return mvp_lmd_get_prototype(object);
     // Proxy [[GetPrototypeOf]] trap
     if (js_is_proxy(object)) {
@@ -5788,8 +5817,8 @@ extern "C" Item js_reflect_own_keys(Item obj) {
         symbols_root, ItemNull,
         result_root, ItemNull);
     TypeId type = get_type_id(obj);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() &&
-            mvp_lmd_owns_properties(obj)) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(obj));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(obj)) {
         // native consumers retain the owning engine's Symbol identities and private-key filtering.
         if (type == LMD_TYPE_FUNC && !mvp_lmd_foreign_candidate(obj))
             JS_RETURN_IF_ERROR(mvp_lmd_function_prepare(object_root.get()));
@@ -6101,7 +6130,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         descriptor_root, ItemNull,
         current_root, ItemNull,
         receiver_descriptor_root, ItemNull);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(target_root.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(target_root.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(target_root.get())) {
         // native Set must not append fields to the MVP family's immutable shape.
         if (receiver_root.get().item == ITEM_NULL) receiver_root.set(target_root.get());
         key_root.set(mvp_lmd_property_key(key_root.get()));
@@ -6485,7 +6515,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
     JS_ROOTS(roots, object_root, obj, key_root, key, descriptor_root, desc);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object_root.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
         key_root.set(mvp_lmd_property_key(key_root.get()));
         if (item_is_error(key_root.get())) return key_root.get();
         JsPropertyDescriptor converted = {}; uint64_t home = 0;
@@ -6756,7 +6787,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     Rooted<Item> original_name_root(roots, name);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> descriptor_root(roots, ItemNull);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object_root.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
         name_root.set(mvp_lmd_property_key(name_root.get()));
         return item_is_error(name_root.get()) ? name_root.get() :
             mvp_lmd_get_own_descriptor(object_root.get(), name_root.get());
@@ -7456,7 +7488,8 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         name_root, name,
         descriptor_root, descriptor,
         result_root, ItemNull);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object_root.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object_root.get())) {
         name_root.set(mvp_lmd_property_key(name_root.get()));
         return item_is_error(name_root.get()) ? name_root.get() :
             mvp_lmd_define_property(object_root.get(), name_root.get(), descriptor_root.get());
@@ -11376,7 +11409,8 @@ extern "C" Item js_json_parse(Item str_item) {
     str_copy(buf, buf_len, s->chars, s->len);
 
     bool ok = false;
-    Item result = parse_json_to_item_strict(js_input, buf, &ok);
+    // JSON numbers have the JS Number face; this is not a Lambda numeric FFI crossing.
+    Item result = parse_json_to_item_strict(js_input, buf, &ok, true);
     if (heap_buf) mem_free(buf);
     if (!ok) {
         return js_throw_syntax_error(js_name_item("Unexpected token in JSON"));

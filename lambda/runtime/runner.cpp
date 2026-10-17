@@ -3198,11 +3198,12 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     // without runtime_init), so every Lambda module loaded into a JS page took
     // id 0 and collapsed onto the JS realm's module state — "sealed layout
     // changed for module 0", which left the dom package with no templates
-    // (ESO34). Allocation comes from the owning Runtime's counter, the same one
+    // (ESO34). Allocation comes from the context allocator's counter, the same one
     // lambda_module_state_reserve() uses, so Lambda and JS ids never overlap.
     // Logical cache units are independent from this Runtime's dense physical
     // slab IDs.  Never let a process-wide cache counter size module_states.
-    script->module_state_id = runtime->next_module_state_id++;
+    Runtime* allocator = runtime_module_state_owner(runtime->eval_context, runtime);
+    script->module_state_id = allocator->next_module_state_id++;
     runtime_module_unit_index_put(runtime, script);
     if (!runtime->scripts) {
         // No script list on this runtime: path dedup and the script index are
@@ -3467,8 +3468,9 @@ void runtime_release_script_generation(Runtime* runtime, int first_script_index,
                 runtime->scripts->length - first);
         }
     }
-    if (runtime->next_module_state_id > first_module_state_id) {
-        runtime->next_module_state_id = first_module_state_id;
+    Runtime* allocator = runtime_module_state_owner(runtime->eval_context, runtime);
+    if (allocator->next_module_state_id > first_module_state_id) {
+        allocator->next_module_state_id = first_module_state_id;
     }
 }
 

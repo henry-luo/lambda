@@ -119,6 +119,8 @@ void js_module_source_complete(JsSourceModuleRecord* record, Item completion);
 JsSourceBindingStatus js_module_resolve_binding(JsSourceModuleRecord* record,
     String* name, JsResolvedModuleBinding* output);
 Item js_module_binding_get(const JsResolvedModuleBinding* binding);
+Item js_module_environment_binding(JsSourceModuleRecord* record, NameEntry* entry,
+    Item value, bool write);
 Item js_module_namespace_create(JsSourceModuleRecord* record);
 
 enum JsModuleNamespaceOperation { JS_MODULE_NAMESPACE_GET, JS_MODULE_NAMESPACE_HAS,

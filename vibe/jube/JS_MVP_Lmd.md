@@ -1927,92 +1927,43 @@ are in the implementation plan. No current performance claim is made.
 
 ## 36. Formal JavaScript MIR engine
 
-**Decision (2026-10-16, USER), D8.1.3v25:** promote MVP-Lmd to the formal
-JavaScript MIR engine. Normal MIR execution must reach MVP through the public
-runtime API, including module and host entry points. Retain the AST tier for
-`eval`, Function-family constructors and other dynamic source. Legacy LJS MIR
-must not silently execute rejected programs. Reuse Lambda's Runtime,
-EvalContext, Script lifetime and shared kernels (**D1.3v3, D5.3**).
+**Decision (2026-10-16, USER), D8.1.3v25:** MVP-Lmd is the formal JavaScript MIR
+engine for public Script, Module, host and Test262 execution. Rejected source
+must not fall back to retired LJS MIR. `eval`, Function-family constructors and
+other dynamic source use the retained AST interpreter.
 
-Fix remaining failures through this activated path while keeping Test262's
-population, harness, expectations and deadlines intact. Preserve pinned MIR
-benchmark comparisons; activation alone does not establish conformance or
-performance acceptance. Details and progress:
+The engine shares Lambda nominal shapes, closures, Runtime/EvalContext,
+precise roots, owned scalar storage and collection kernels (**D3.4.7,
+D5.3/D5.4, D6.2.2v2**). Public scripts retain one realm and live bindings across
+host calls, imports, suspension and AUTO promotion. Class inheritance and native
+callable/DOM interoperability use those shared contracts. Independent agents
+use separate realm/job owners, shared buffer handles and cooperative Lambda
+Activation scheduling (**D6.3.1**); native worker threads are not qualified
+(**D6.3.2**).
+
+**Unicode 17** is included (USER, 2026-10-16). Identifier, RegExp property,
+emoji string-property and shared Lambda simple-folding data use one canonical
+version with source hashes (**S17.7.1, D8.1.3v25**). Large passive declarations
+and array literals reuse bounded initialization and Lambda ownership.
+
+**Functional migration completed (2026-10-17):** qualified optimized `host124`
+is published as `lambda.exe`. Its complete canonical formal MIR audit passes
+**40,261/40,261**, with zero failures, timeouts or unresolved results. The actual
+shared Lambda baseline passes **5,568/5,568**. Release units pass **812/812**,
+migration checks **144/144** normally and with forced/poisoned GC, Script GC
+checks **15/15**, and formal MIR fixtures **509/509** without retries.
+
+The actual standard Test262 target passes with **40,247 fully passing cases +
+14 isolated-retry-only slow classifications**, zero failures/regressions; its
+2,652 pre-existing exclusions remain separate. Native helpers preserve Script
+`var` declarations; destructuring targets and Annex B companions use the
+existing declaration checks. Implicit errors retain their callee realm
+(**D8.1.3v25, D8.4.3v2**).
+
+All **20/20 size ratchets** and **93/93 JS optimization checks** pass. One
+reviewed generic callback module needs 23 instructions for correct numeric
+coercion order; typed-number paths and the other JS budgets remain unchanged.
+Benchmark timing remains deferred; no new performance acceptance is claimed.
+
+Exact pins, source provenance, implementation and remaining gates:
 [formal MIR implementation plan](../impl/JS_MVP_Lmd_Formal_MIR.md).
-
-**Implementation checkpoint:** ordinary public Script/Module execution and
-formal MIR Test262 batches now select MVP. Repeated public Scripts share their
-global object, lexical bindings, intrinsic identities and escaping closures;
-host global access uses that same realm. Heap replacement retires the old
-Promise/module policies. Document/preamble and module caches now retain MVP
-machine-code images with per-realm relocation tables; hits still rebuild frontend
-metadata before checking exact MIR equality (D8.5.1v2). Host API coverage,
-frontend-image reuse and AUTO per-function publication remain incomplete. The implementation plan
-records failing integrated gates separately from passing focused tests.
-Performance acceptance remains open, including the cost of complete public
-realm semantics versus standalone closed-unit analysis.
-
-The RegExp migration follow-up reuses shared match-state and streaming
-replacement kernels, with precise state owned by each MVP realm (D5.3,
-D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
-timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
-capsule teardown.
-
-The host integration follow-up reuses shared descriptors, exotic operations,
-lazy global catalogs and native callable identities across the MVP boundary
-(D6.2.2v2, D8.1.3v25). It preserves Lambda nominal shapes during descriptor
-mutation (D3.4), rebinds prepared Window/document roots (D5.3), and installs
-Array keys/entries through the existing iterator kernel. Large open script
-entries share generic call dispatch after the existing emission budget, fixing
-`dom_module_props` compilation. Broader library compilation remains open.
-
-The next host-boundary checkpoint shares private DateValue storage between
-native DOM and MVP Date operations, admits native callables carried by host
-arrays through their existing ABI bridge, and preserves host array prototypes
-and native callable home realms (D3.4, D5.3/D5.4, D6.2.2v2). Performance and Date
-now reuse the host's existing virtual/frame clock and time origin.
-
-The public host follow-up shares lazy host-family installers, native Timeout
-handles and classic string-handler execution through the retained interpreter
-(**D8.1.3v25, D5.3/D5.4**). Native property/descriptor operations and prototype
-walks use existing ABI/nominal ownership; shared iterator caches are private and
-unforgeable (**D3.4.3v5, D6.2.2v2**). Host subclasses reuse native construction,
-virtual collection `for…in` reuses foreign descriptors, and source-relative
-CommonJS require shares the existing resolver, cache and native closure layout.
-The retained AST keeps its existing implicit require policy.
-
-Function-source reflection now reuses the retained interpreter's method-span
-helper and the shared IdentifierName validator. Static methods omit their
-class-only prefix; native names that cannot form an identifier use anonymous
-native-function syntax (**D6.2.2v2, D8.1.3v25**).
-
-Lambda-source imports now reuse the existing Lambda loader, canonical module
-registry, precise export slabs and procedure-to-Promise scheduler. JS namespace
-imports keep the existing module exotic while the native Lambda namespace
-stays intact (**D5.3/D5.4.3, D7.2.1, D8.1.3v25**). Native callable adapters
-preserve Core Function layout, packed Lambda maps share field reads, and
-Lambda VMaps/native errors reuse their existing carrier reads. Custom-element
-constructors use ABI-aware private associations; shared call/construct entry
-points recognize default MVP classes (**D3.4.7, D6.2.2v2**).
-
-Direct eval within `with` now shares interleaved object and lexical environment
-records with the retained interpreter. Parameters and blocks shadow captured
-objects; escaped closures retain their object, unscopables and call receiver.
-Eval vars and Annex B publication target the existing variable record
-(**D5.3, D8.1.3v21, D8.1.3v25**). Units without the eval bridge keep their
-existing MIR path.
-
-**Latest verification:** `host60` passes 767/767 MVP units and 100/100 focused
-checks normally and with forced/poisoned GC. Its CLI is byte-identical to
-`host59`, which passes all 51 selected host fixtures and both original eval/
-with fixtures with forced/poisoned GC and explicit AST. Script integration
-remains 198/205, with seven known AUTO publication failures; the separate
-small-fixture replay improves to 28/32. The final pin passes all 3,764 selected
-canonical cases on formal MIR, including 650 eval/with cases; those 650 also
-pass explicit AST. There are no unresolved records in either canonical run.
-This is not a whole-suite recount.
-The implementation plan records exact pins and remaining work. The earlier
-complete isolated fixture diagnostic remains 461/507 passes, 41 failures and
-five outer timeouts; focused fixes are not added to that aggregate. Full
-baseline closure and performance acceptance remain open; benchmark timing
-stays deferred.

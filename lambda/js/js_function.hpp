@@ -158,6 +158,9 @@ struct JsCallableCode {
     bool definition_owned;
     // A compiled JS entry is valid only in the realm that compiled it.
     bool interned;
+    // precise definition roots retain MVP bodies between closure instances.
+    Item compiled_body;
+    Item compiled_loop_body;
     // Reuse Lambda's definition-site cell on the durable JS code record:
     // JS MIR analysis is currently session-owned, while this record survives
     // every AST closure created from the same definition.

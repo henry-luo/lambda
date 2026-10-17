@@ -516,7 +516,9 @@ static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool
     if (start <= input->units) found = js_bt_exec(object->compiled, input->view.str, input->view.length,
         input->byte_offset((size_t)start), object->flags.sticky,
         matches, matches + count, count);
-    if (found < 0) result.set(mvp_lmd_fail(found == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE, 0));
+    // preserve the shared engine's resource diagnostic across the formal error boundary.
+    if (found < 0) result.set(mvp_lmd_fail(found == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE,
+        0, found == JS_BT_EXEC_ALLOCATION_FAILURE ? NULL : "RegExp match exceeded engine resources"));
     else {
         if (stateful) result.set(regexp_ops.set_last_index(held.get(), Item{.item = i2it(found ?
             input->unit_offset(matches[count]) : 0)}));
@@ -721,7 +723,8 @@ static Item regexp_string_native(MvpLmdLibraryState* state, Item source, Item pa
             [](void* opaque, Item input, int start, int end) {
                 return js_regexp_update_last_match_spans(((SpanState*)opaque)->legacy, input, &start, &end, 1, false);
             },
-            [](int error) { return mvp_lmd_fail(error == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE, 0); }
+            [](int error) { return mvp_lmd_fail(error == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE,
+                0, error == JS_BT_EXEC_ALLOCATION_FAILURE ? NULL : "RegExp match exceeded engine resources"); }
         };
         return js_regexp_replace_spans(regex.get(), original.get(), substitution.get(), &spans_state, &regexp_ops, &spans);
     }

@@ -1,17 +1,28 @@
 {
   "schema_version": 1,
-  "description": "The field arrow's body loads `this` from its captured environment and resolves it lexically, rather than starting from a fresh undefined register (Stage 4C LambdaJS bugs #1/#2). The env load is not pinned to an exact count so a redundant-load cleanup does not have to touch this fixture.",
+  "description": "D5.4, D6.2.2v2: a field arrow retains lexical this in the shared Lambda closure environment instead of consulting its caller receiver.",
   "checks": [
     {
-      "in_func": "_js_anon0_#_body",
+      "in_func": "mvp_lmd_f3",
+      "expect": [
+        "call\theap_calloc_closure_env",
+        "call\towned_item_slot_store"
+      ]
+    },
+    {
+      "in_func": "mvp_lmd_f4",
       "expect_seq": [
-        { "pattern": ", i64:(_js.env)" },
-        { "pattern": "call\tjs_resolve_lexical_this_p" }
+        {
+          "pattern": "mov\t{{r:env}}, i64:24(self)"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:env}})"
+        }
       ],
-      "count": {
-        ", i64:(_js.env)": { "min": 1 },
-        "call\tjs_resolve_lexical_this_p": 1
-      }
+      "forbid": [
+        "js_get_current_this",
+        "js_resolve_lexical_this"
+      ]
     }
   ]
 }
