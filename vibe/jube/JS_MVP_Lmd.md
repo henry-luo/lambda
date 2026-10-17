@@ -2080,3 +2080,36 @@ lines** and **75 test lines**. The current native-support total in §36.1 is
 **85,776 lines**; the original helper comparison and its **2,238 retired Legacy
 MIR-only lines** remain recorded. Source/build evidence and verification limits:
 [native helper audit follow-up](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md#document-cache-adapter-retirement).
+
+### 36.5 Performance recovery after migration
+
+**2026-10-17; D3.3.4, D3.4.5, D5.2.1v3, S7.11.4; JC24:** recover numeric
+operand consumption and bounded recursive inlining while retaining coercion
+order, precise scalar ownership and real recursive stack guards. Recursive
+expansion requires a native scalar return or a declared class method; generic
+callable guards retain their ordinary entry to bound fallback duplication. A
+closed write inventory proves numeric implicit-global keys without treating unresolved
+identifiers as `undefined`. Deferred assignments retain proven numeric index lanes
+and guard boxed Numbers at repeated sites without coercion callbacks. Object-key
+coercion remains after the RHS; canonical names are reused. Ordinary property
+helpers reuse immutable-shape cache entries, specialize Get dispatch and reuse
+the existing live array-chain proof before constructing keys for absent indices.
+Typed-array ancestors, foreign and exotic chains retain semantic lookup; no
+container-wide `is_normal` flag is introduced.
+
+The internal `MvpLmdPropertyCache::find_shape` lookup consolidates existing cache
+searches; no exported C runtime helper is added. The historical `divrec` control
+used the removed self-tail-call loop, so matching that result cannot justify
+restoring tail-call elimination contrary to JC24. Qualification and paired,
+release-MIR self-time evidence are recorded in
+[`temp/js_mvp_regression_fix_20261017/REPORT.md`](../../temp/js_mvp_regression_fix_20261017/REPORT.md).
+
+The final seven-round replay removes statistical confirmation for eight of the
+original 20 slowdowns; 12 comparable gaps remain, plus the obsolete `divrec`
+control. Final qualification passes 817 runtime tests, 7,145 selected forced-MIR
+Test262 cases, 84 benchmark output/backend checks, six forced-GC tests, 93
+optimizer tests and 20 MIR budget tests. The earlier whole Lambda gate had 12
+unrelated failures; its five introduced emission failures are fixed without
+changing sidecars or budgets. Direct comparison with the frozen pre-fix release
+still confirms Splay at +1.4–1.9%; three inconclusive helper experiments were
+reverted, and this cause remains open. Four jq timings remain deferred.

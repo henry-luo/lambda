@@ -188,6 +188,11 @@ enum { MVP_LMD_PROPERTY_CACHE_SIZE = 4 };
 struct MvpLmdPropertyCache {
     MvpLmdPropertyCacheEntry entries[MVP_LMD_PROPERTY_CACHE_SIZE];
     uint8_t next;
+    MvpLmdPropertyCacheEntry* find_shape(TypeMap* shape) {
+        for (MvpLmdPropertyCacheEntry& entry : entries)
+            if (entry.shape == shape) return &entry;
+        return NULL;
+    }
 };
 struct MvpLmdLibraryState {
     Item* values;

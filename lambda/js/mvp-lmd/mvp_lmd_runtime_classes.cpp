@@ -51,15 +51,14 @@ Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library
         TypeMap* shape = (TypeMap*)map->type;
         ShapeEntry* link = NULL;
         bool cached = false, shared = typemap_is_shared_shape(shape);
-        if (shared) for (const MvpLmdPropertyCacheEntry& entry : library->prototype_links.entries) {
-            if (entry.shape != shape) continue;
+        if (MvpLmdPropertyCacheEntry* entry = shared ? library->prototype_links.find_shape(shape) : NULL) {
             // reuse the MIR cache's proven packed object-pointer lane, including null.
-            if (entry.pointer_lane == 2 && map->data) {
+            if (entry->pointer_lane == 2 && map->data) {
                 uint64_t pointer;
-                memcpy(&pointer, (char*)map->data + entry.offset, sizeof(pointer));
+                memcpy(&pointer, (char*)map->data + entry->offset, sizeof(pointer));
                 return Item{.item = pointer ? pointer : ITEM_NULL};
             }
-            link = entry.field; cached = true; break;
+            link = entry->field; cached = true;
         }
         if (!cached) {
             link = typemap_hash_lookup_key(shape, library->prototype_key);
@@ -183,9 +182,8 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         ShapeEntry* field = NULL;
         bool cacheable = cache && shape && typemap_is_shared_shape(shape) &&
             (!library || !library->arguments_key);
-        if (cacheable) for (const MvpLmdPropertyCacheEntry& entry : cache->entries) {
-            if (entry.shape == shape) { field = entry.field; break; }
-        }
+        if (MvpLmdPropertyCacheEntry* entry = cacheable ? cache->find_shape(shape) : NULL)
+            field = entry->field;
         if (!field && shape) {
             field = identity ? typemap_hash_lookup_key(shape, identity)
                 : typemap_hash_lookup(shape, key, (int)length);
@@ -274,9 +272,7 @@ const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member, 
 
 void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
         ShapeEntry* field, Item inherited, bool writable, bool nullable_initializer) {
-    MvpLmdPropertyCacheEntry* entry = NULL;
-    for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++)
-        if (cache->entries[i].shape == shape) { entry = &cache->entries[i]; break; }
+    MvpLmdPropertyCacheEntry* entry = cache->find_shape(shape);
     if (!entry) entry = &cache->entries[cache->next++ % MVP_LMD_PROPERTY_CACHE_SIZE];
     entry->shape = shape; entry->field = field;
     entry->inherited = field ? ItemNull : inherited;
@@ -317,7 +313,7 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
 template<bool fixed, bool binding = false, int known_operation = -1>
 static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache, Item receiver) {
-    // a known Get prunes unrelated operation gates without duplicating property semantics.
+    // a known operation prunes unrelated gates without duplicating property semantics.
     if constexpr (known_operation >= 0) operation = known_operation;
     auto inherited_binding = [&]() -> Item {
         RootFrame roots(3);
@@ -357,8 +353,8 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     }
     TypeId owner_type = get_type_id(owner);
     MvpLmdClass* cls = owner_type == LMD_TYPE_MAP ? mvp_lmd_class_record(owner) : NULL;
-    // reuse nominal resolution; ordinary MVP maps retain their original foreign-admission cost.
-    if (!fixed && mvp_lmd_foreign_candidate(owner, cls == NULL)) {
+    // resolved MVP nominal metadata already excludes a foreign Map carrier.
+    if (!fixed && !cls && mvp_lmd_foreign_candidate(owner, true)) {
         int opcode = operation & ~LMD_PROP_STRICT;
         if (opcode >= LMD_PROP_KEYS && opcode <= LMD_PROP_ENTRIES)
             return mvp_lmd_object_project(owner, opcode - LMD_PROP_KEYS);
@@ -443,7 +439,11 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
         if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE ||
                 operation == LMD_PROP_OWN || operation == LMD_PROP_HAS) {
             String* key = name.get_string();
-            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, key);
+            TypeMap* shape = (TypeMap*)map->type;
+            MvpLmdPropertyCacheEntry* cached = cache && typemap_is_shared_shape(shape)
+                ? cache->find_shape(shape) : NULL;
+            // immutable shape identity proves the cached own descriptor; values stay live.
+            ShapeEntry* field = cached && cached->field ? cached->field : typemap_hash_lookup_key(shape, key);
             bool found = field != NULL;
             if (binding && !found) return inherited_binding();
             bool presence = operation == LMD_PROP_OWN || operation == LMD_PROP_HAS;
@@ -477,7 +477,6 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             }
             if (item_is_error(result)) return result;
             // immutable shapes invalidate on shadowing/retyping; methods remain program-rooted.
-            TypeMap* shape = (TypeMap*)map->type;
             if (cache && !presence && !cls->owner && !constructor && found &&
                     (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
                     (field || ((!library || !library->mutable_prototypes) && get_type_id(result) == LMD_TYPE_FUNC))) {
@@ -557,6 +556,10 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
+    if (operation == LMD_PROP_GET)
+        return mvp_lmd_class_property_impl<false, false, LMD_PROP_GET>(owner, name, value, operation, cache, owner);
+    if (operation == LMD_PROP_HAS)
+        return mvp_lmd_class_property_impl<false, false, LMD_PROP_HAS>(owner, name, value, operation, cache, owner);
     if (operation == LMD_PROP_CALLEE)
         return mvp_lmd_class_property_impl<false, false, LMD_PROP_CALLEE>(owner, name, value, operation, cache, owner);
     if (operation == LMD_PROP_GET_BINDING)

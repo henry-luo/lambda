@@ -9369,6 +9369,10 @@ TEST_F(JsMvpLmd, ColdPropertySitesRetainDescriptorAndReceiverSemantics) {
 TEST_F(JsMvpLmd, RepeatedPropertySitesRetainCacheInvalidation) {
     boolean("let object={value:1},sum=0;for(let i=0;i<6;i++){if(i===2)Object.defineProperty(object,'value',{get(){return 5},configurable:true});if(i===4)Object.defineProperty(object,'value',{value:9,writable:true});sum+=object.value}sum===30");
     boolean("function read(object){return object.value}let parent={value:1},object=Object.create(parent);let first=read(object);parent.value=2;let second=read(object);object.value=3;let third=read(object);delete object.value;first===1&&second===2&&third===3&&read(object)===2");
+    boolean("function read(o){return o.value}function write(o,v){o.value=v}let a={value:1},b={value:2};"
+        "let first=read(a)+read(b);write(a,3);Object.defineProperty(b,'value',{writable:false});write(b,9);"
+        "Object.defineProperty(a,'value',{get(){return 7},configurable:true});write(a,11);"
+        "first===3&&read(a)===7&&read(b)===2");
 }
 TEST_F(JsMvpLmd, GenericArraySearchRetainsHolesEqualityAndCoercion) {
     boolean("let objects=[[,NaN,4],new Float64Array([NaN,4])],ok=true;for(let object of objects){ok=ok&&object.includes(NaN)&&object.indexOf(NaN)===-1&&object.includes(4)&&object.indexOf(4)>=0}ok&&objects[0].includes(undefined)&&objects[0].indexOf(undefined)===-1");
@@ -12366,6 +12370,77 @@ TEST_F(JsMvpLmd, RawTypedOptionalKeysPreserveNumericPayloads) {
         "a[keys[3]]=7;return x===5e-324&&a[keys[3]]===7}f()");
     boolean("function f(){let a=new Int32Array(2),keys=[0];a[keys[3]]='value';"
         "let x=a[keys[3]];return x==='value'&&a[keys[0]]===0}f()");
+}
+TEST_F(JsMvpLmd, BoundedNativeInliningPreservesRecursiveActivations) {
+    numeric("function rotate(n,a,b){if(n===0)return 100*a+b;return rotate(n-1,b,a)}rotate(7,2,3)", 302);
+    numeric("function count(n){let x=1;if(n===0)return x;return x+count(n-1)}count(40)", 41);
+    boolean("function recurse(n){if(n<0)return 0;return recurse(n+1)}"
+        "let caught=false;try{recurse(0)}catch(e){caught=e instanceof RangeError}caught");
+    boolean("let order='';function recurse(n){try{if(n===0)return 7;return recurse(n-1)}"
+        "finally{order+=n}}recurse(3)===7&&order==='0123'");
+    boolean("class C{constructor(v){this.v=v}sum(n){if(n===0)return this.v;"
+        "let x=this.v;this.v++;return x+this.sum(n-1)}}let a=new C(2),b=new C(7);"
+        "a.sum(3)===14&&a.v===5&&b.sum(2)===24&&b.v===9");
+}
+TEST_F(JsMvpLmd, ImplicitGlobalNumericKeysRetainClosedPropertyProof) {
+    numeric("function fill(){let a=[0,0,0];for(implicitIndex=0;implicitIndex<3;implicitIndex++)"
+        "a[implicitIndex]=implicitIndex+1;return a[0]+a[1]+a[2]}fill()", 6);
+    char* mir = dump("temp/mvp_lmd_implicit_numeric_keys.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "mvp_lmd_array_index_property"), nullptr);
+    free(mir);
+    boolean("function change(){implicitKey='named'}implicitKey=0;let a=[1];"
+        "change();a[implicitKey]=7;a.named===7&&a[0]===1");
+    boolean("implicitKey=0;let a=[1];[[implicitKey]]=[['named']];"
+        "a[implicitKey]=7;a.named===7&&a[0]===1");
+    boolean("implicitKey=0;let a=[1];globalThis.implicitKey='named';"
+        "a[implicitKey]=7;a.named===7&&a[0]===1");
+}
+TEST_F(JsFormalMir, NumericConsumptionPreservesCoercionAndEvaluationOrder) {
+    // the formal entry supplies the standard realm used by ordinary array coercion.
+    const char* cases[] = {
+        "(function(){function f(a,b){return a.x-b.x}return f({x:[7]},{x:2})===5})()",
+        "(function(){function f(a,b){return a.x+b.x}return f({x:[7]},{x:2})==='72'})()",
+        "(function(){let a={x:[7]};function change(){a.x[0]=9;return 2}return a.x-change()===7})()",
+        "(function(){let order='';let a={x:{valueOf(){order+='a';return 7}}};"
+            "let b={get x(){order+='b';return 2}};return a.x-b.x===5&&order==='ba'})()",
+        "(function(){let touched=false;try{Symbol()-{valueOf(){touched=true;return 1}}}"
+            "catch(e){if(!(e instanceof TypeError))throw e}return !touched})()",
+        "(function(){let a={valueOf(){return 7n}},b={valueOf(){return 2n}};return a-b===5n})()"
+    };
+    for (const char* source : cases) EXPECT_EQ(run(source).item, ITEM_TRUE) << source;
+}
+TEST_F(JsMvpLmd, NumericArrayConsumersRetainCoercionHolesAndOwnership) {
+    boolean("function f(a,b){return a[0]*b[0]}f(['7'],[2])===14&&isNaN(f([undefined],[2]))");
+    boolean("function f(a,b){return a[0]-b[0]}f([[7]],[2])===5&&isNaN(f([],[2]))");
+    boolean("let a=[5e-324];function change(){a[0]=1;return 2}a[0]*change()===1e-323");
+    boolean("let a=[];a[1000000]='7';function f(a,i){return a[i]*2}"
+        "f(a,1000000)===14&&isNaN(f(a,1))");
+    boolean("let order='';let a=[{valueOf(){order+='a';return 7}}];"
+        "let b={get value(){order+='b';return 2}};a[0]*b.value===14&&order==='ba'");
+    boolean("let a=new Array(2),ok=a[0]===undefined;Array.prototype[0]=7;"
+        "ok=ok&&a[0]===7;delete Array.prototype[0];ok=ok&&a[0]===undefined;"
+        "Object.defineProperty(Array.prototype,'0',{set(v){this.seen=v},configurable:true});"
+        "a[0]=9;delete Array.prototype[0];ok&&a.seen===9&&a[0]===undefined");
+    boolean("let a=new Array(2);Object.preventExtensions(a);a[0]=3;"
+        "let b=[];Object.defineProperty(b,'length',{writable:false});b[0]=4;"
+        "a[0]===undefined&&b.length===0&&b[0]===undefined");
+    boolean("let calls=0,ok=true,value={valueOf(){calls++;return 7}};"
+        "for(let TA of [Uint8Array,BigInt64Array]){let target=new TA(1),a=Object.setPrototypeOf([],target);"
+        "a[1]=value;ok=ok&&a.length===0&&!Object.prototype.hasOwnProperty.call(a,'1')}ok&&calls===0");
+}
+TEST_F(JsMvpLmd, DeferredAssignmentKeysPreserveNumericIndicesAndEffectOrder) {
+    boolean("function put(a,k,v){a[k]=v}let a=[];put(a,0,7);put(a,-0,8);put(a,'name',9);"
+        "put(a,1.5,10);put(a,4294967295,11);put(a,NaN,12);let s=Symbol();put(a,s,13);"
+        "a.length===1&&a[0]===8&&a.name===9&&a['1.5']===10&&a['4294967295']===11&&a.NaN===12&&a[s]===13");
+    boolean("let order='',index=0,a=[];let key={toString(){order+='k';return index}};"
+        "function rhs(){order+='r';index=1;return 7}a[key]=rhs();order==='rk'&&a[0]===undefined&&a[1]===7");
+    boolean("function put(a,k,v){a[k]=v}let a={},b=new Uint8Array(2);put(a,1,7);put(b,1,9);"
+        "put(b,'name',11);put(b,'-0',12);a['1']===7&&b[1]===9&&b[0]===0&&b.name===11");
+    boolean("let keys='',a=new Proxy([],{set(t,k,v){keys+=typeof k+':'+k+';';return Reflect.set(t,k,v)}});"
+        "function put(a,k){a[k]=7}put(a,0);put(a,'x');keys==='string:0;string:x;'&&a[0]===7&&a.x===7");
+    boolean("let order='',key={toString(){order+='k';return 'x'}},base={set x(v){order+='s';this.y=v}};"
+        "let o={__proto__:base,m(){super[key]=(order+='r',7)}};o.m();order==='rks'&&o.y===7");
 }
 TEST_F(JsMvpLmd, FullParityReplaceAllProtocolsAndUtf16) {
     boolean(R"JS('\ud83d\ude00'.replaceAll('', '_') === '_\ud83d_\ude00_')JS");

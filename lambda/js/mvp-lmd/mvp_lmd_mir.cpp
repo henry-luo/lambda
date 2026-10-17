@@ -1884,8 +1884,13 @@ static unsigned binary_kind(Operator op, unsigned left, unsigned right, bool big
     return em_numeric_op_plan(op, &plan) && plan.is_comparison ? K_BOOL :
         (left == K_BIGINT || right == K_BIGINT) ? K_BIGINT : K_NUMBER | (left & right & K_BIGINT);
 }
-static bool numeric_operands(Operator op, unsigned left, unsigned right) {
-    if ((left | right) & (K_BIGINT | K_OBJECT | K_ARRAY | K_MAP | K_TYPED_ARRAY | K_FUNCTION)) return false;
+static bool numeric_operands(Operator op, unsigned left, unsigned right, bool inert = false) {
+    constexpr unsigned objects = K_OBJECT | K_ARRAY | K_MAP | K_TYPED_ARRAY | K_FUNCTION;
+    if ((left | right) & K_BIGINT) return false;
+    if (((left | right) & objects) && !inert) return false;
+    // an ordinary object's primitive may be a string even in a callback-free unit.
+    if (left & objects) left |= K_STRING;
+    if (right & objects) right |= K_STRING;
     if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_JS_STRICT_EQ ||
             op == OPERATOR_JS_STRICT_NE || op == OPERATOR_JS_INSTANCEOF) return false;
     if (op == OPERATOR_ADD) return !((left | right) & K_STRING);
@@ -4692,7 +4697,9 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
     // numeric consumers can merge absence as NaN at the load, without a second conversion branch.
     bool integral = ref.lanes == LMD_ARRAY_ITEMS && ref.elements.state == 1 && (!numeric || ref.in_bounds);
     bool optional = ref.lanes == LMD_ARRAY_ITEMS && (!numeric || integral) && !ref.in_bounds;
-    numeric = ref.lanes == LMD_ARRAY_ITEMS;
+    bool known_numbers = ref.lanes == LMD_ARRAY_ITEMS;
+    // a numeric consumer can decode an unknown Item here, before it needs a scalar home.
+    numeric |= known_numbers;
     bool floating = numeric && !integral;
     MIR_reg_t present = optional ? constant(c, 0) : 0;
     MIR_label_t length = ref.key_known || ref.numeric_key ? NULL : label(c), done = label(c);
@@ -4707,10 +4714,10 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
     MIR_reg_t element = em_load_at(&c->em,
         em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "element");
     // specialize proven arrays in hole-free units; retain the generic property fallback's CFG.
-    if (!numeric && !dense && (replay || callbacks || c->program->array_holes || semantic(ref.owner) != K_ARRAY))
+    if (!known_numbers && !dense && (replay || callbacks || c->program->array_holes || semantic(ref.owner) != K_ARRAY))
         branch(c, MIR_BEQ, replay ? replay : callbacks ? sparse : done, reg(c, element), integer(c, ITEM_JS_DELETED_SENTINEL));
     move(c, result, reg(c, integral ? em_unbox_finite_int_item(&c->em, element, 0, ref.elements.lower >= 0) :
-        numeric ? to_number(c, boxed(c, element, K_NUMBER)) :
+        numeric ? to_number(c, boxed(c, element, known_numbers ? K_NUMBER : K_ANY)) :
         element), floating);
     if (present) move(c, present, integer(c, 1));
     if (length) {
@@ -4730,7 +4737,7 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
                 MIR_T_P, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key), true);
         if (callbacks) check_error(c, observed);
         branch(c, MIR_BEQ, done, reg(c, observed), integer(c, ITEM_JS_DELETED_SENTINEL));
-        move(c, result, reg(c, observed));
+        move(c, result, reg(c, numeric ? to_number(c, boxed(c, observed)) : observed), floating);
     }
     put_label(c, done); return numeric ? LmdValue{result, present ? K_NUMBER | K_UNDEFINED : K_NUMBER,
         false, 0, integral, length ? LmdRange{} : ref.elements, present} :
@@ -5272,8 +5279,16 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
         // pattern references retain the key value; PutValue converts it after the source/default effects.
         MIR_label_t valid = label(c);
         branch_truth(c, valid, nullish(c, ref.owner), false); fail(c, LMD_MVP_TYPE, site); put_label(c, valid);
-        LmdValue key = canonical_key(c, ref.deferred_name);
-        ref.name = key.reg; ref.deferred_name = {}; ref.uncoerced_name = false;
+        // numeric keys have no conversion effects; retain their index lane until a named lookup needs spelling.
+        // repeated closed sites amortize the Number guard; reflective sites keep one canonical-key path.
+        bool repeated_primitive = repeated_execution(c) && !c->program->coercion_callbacks;
+        LmdValue key = canonical_key(c, ref.deferred_name,
+            !ref.receiver && (semantic(ref.deferred_name) == K_NUMBER || repeated_primitive));
+        // a canonical string/Symbol already has its spelling; only preserved Numbers need deferred naming.
+        bool deferred_number = !ref.receiver && (semantic(key) & K_NUMBER);
+        ref.name = deferred_number ? 0 : key.reg;
+        ref.deferred_name = deferred_number ? key : LmdValue{}; ref.uncoerced_name = false;
+        ref.numeric_key = semantic(key) == K_NUMBER;
         ref.key = property_key(c, key, semantic(ref.owner) == K_TYPED_ARRAY);
     }
     if (ref.receiver) {
@@ -6042,8 +6057,8 @@ static int numeric_region_path(MvpLmdProgram* p, LmdNumericRegion* region, AstNo
     return index;
 }
 struct LmdInlineBudget { int nodes; bool allowed; MvpLmdProgram* program; LmdFunction* owner;
-    bool statements; bool method; bool returns; LmdNumericRegion* region = NULL; };
-struct LmdInlineBody { AstNode* value; AstNode* prefix; AstNode* end; bool early_returns; unsigned nodes; };
+    bool statements; bool method; bool returns; LmdNumericRegion* region = NULL; bool recursive = false; };
+struct LmdInlineBody { AstNode* value; AstNode* prefix; AstNode* end; bool early_returns; unsigned nodes; bool recursive; };
 static void inline_budget(AstNode* node, void* opaque) {
     LmdInlineBudget* budget = (LmdInlineBudget*)opaque;
     if (!budget->allowed || ++budget->nodes > (budget->region ? 384 : budget->statements ? 64 : 24)) {
@@ -6146,11 +6161,14 @@ static void inline_budget(AstNode* node, void* opaque) {
     case AST_NODE_LITERAL: case AST_NODE_BINARY:
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: case AST_NODE_CONDITIONAL_EXPR:
         break;
-    case AST_NODE_CALL_EXPR:
-        if (!budget->method) budget->allowed = false;
+    case AST_NODE_CALL_EXPR: {
+        bool self = direct_target(budget->program, (AstCallNode*)node) == budget->owner;
+        budget->recursive |= self;
+        if (!budget->method && (!budget->owner->native || !self)) budget->allowed = false;
         break;
+    }
     case AST_NODE_RETURN_STAM:
-        if (!budget->method || !budget->statements) budget->allowed = false;
+        if ((!budget->method && !budget->owner->native) || !budget->statements) budget->allowed = false;
         budget->returns = true;
         break;
     case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL: case AST_NODE_PROPERTY:
@@ -6293,11 +6311,14 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
             ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return false;
     if (f->observes_receiver && !f->home) return false;
     if (guarded_method && (f->owns_captures || (!constructor && f->home && f->id == f->home->constructor_id))) return false;
-    // keep recursive calls and deeply nested method graphs on their ordinary ABI.
-    int depth = 0;
-    for (LmdInlineFrame* frame = c->inlining; frame; frame = frame->parent)
-        if (frame->function == f || ++depth >= 3) return false;
-    if (f == c->function) return false;
+    // bounded scalar/method inlining retains a real recursive edge and its stack guard (JC24).
+    int depth = 0, recursive = f == c->function;
+    for (LmdInlineFrame* frame = c->inlining; frame; frame = frame->parent) {
+        recursive += frame->function == f;
+        if (++depth >= 3) return false;
+    }
+    // generic callable guards do not prove a class method's layout or a scalar return ABI.
+    if (recursive && ((!f->native && !(guarded_method && f->home)) || recursive > 1)) return false;
     // duplicate formals need the ordinary parameter installation order.
     if (js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return false;
     int locals = 0;
@@ -6326,6 +6347,9 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
     if (numeric) { body->nodes = f->numeric_region->nodes; return true; }
     if (body->value) inline_budget(body->value, &budget);
     body->nodes = budget.nodes + 1;
+    body->recursive = budget.recursive;
+    // early-return native expansion is for bounded recursion; loop bodies retain their ordinary call boundary.
+    if (!guarded_method && body->early_returns && !body->recursive) return false;
     // constructor expansion also duplicates allocation and fallback entries; reserve their code budget.
     return budget.allowed && (!constructor || budget.nodes <= 48);
 }
@@ -6385,7 +6409,7 @@ static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const Lm
         }
     }
     if (body.early_returns) {
-        frame.result_kind = frame.region && (f->returns == K_NUMBER || f->returns == K_BOOL)
+        frame.result_kind = (frame.region || f->native) && (f->returns == K_NUMBER || f->returns == K_BOOL)
             ? f->returns : K_ANY;
         frame.exit = label(c); frame.result = em_new_reg(&c->em, "inline_return",
             frame.result_kind == K_NUMBER ? MIR_T_D : MIR_T_I64);
@@ -6402,6 +6426,9 @@ static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const Lm
         put_label(c, frame.exit);
         result = native ? LmdValue{frame.result, frame.result_kind} : boxed(c, frame.result);
     }
+    // preserve the callee's proven integer return lane even if a local uses f64.
+    if (f->native && f->integer && !result.integer)
+        result = {scalar_reg(c, result, K_NUMBER, true), K_NUMBER, false, 0, true, f->range};
     c->inlining = frame.parent; c->strict = caller_strict;
     return result;
 }
@@ -6734,8 +6761,9 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         !direct->numeric_region->allocates &&
         ast_linked_node_count(n->arguments) <= LAMBDA_MAX_FUNCTION_ARGS;
     bool expand = !captured && inline_body(c, direct, &body, false, false, numeric_region);
-    // reserve direct statement-body expansion for loop call sites.
-    if (body.prefix && !numeric_region && !enclosing_loop(c->program, (AstNode*)n, c->function, true)) expand = false;
+    // bounded recursive bodies retain their scalar ABI when expanded outside a loop.
+    if (body.prefix && !numeric_region && !(direct && direct->native && body.recursive) &&
+            !enclosing_loop(c->program, (AstNode*)n, c->function, true)) expand = false;
     if (expand) {
         // snapshot all arguments, including extras, before substituting immutable parameter reads.
         LmdValue* values = call_arguments(c, n, false);
@@ -7200,10 +7228,25 @@ static LmdValue logical(LmdCompiler* c, Operator operation, AstNode* left, AstNo
     put_label(c, done); return numeric ? LmdValue{result, K_NUMBER} : boxed(c, result);
 }
 // these operands cannot overwrite a scalar source or allocate on a successful evaluation.
-static bool immediate_scalar_operand(LmdCompiler* c, AstNode* n) {
+static bool immediate_scalar_operand(LmdCompiler* c, AstNode* n, bool inert = false, int depth = 0) {
+    if (!n || depth == 16) return false;
     if (n->node_type == AST_NODE_IDENT || n->node_type == AST_NODE_LITERAL) return true;
+    // the broader proof is used only after excluding callbacks and non-Number domains;
+    // borrowed scalar reads retain the narrower array-only proof below.
+    if (inert && n->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)n;
+        return immediate_scalar_operand(c, binary->left, true, depth + 1) &&
+            immediate_scalar_operand(c, binary->right, true, depth + 1);
+    }
+    if (inert && n->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)n;
+        return (unary->op == OPERATOR_POS || unary->op == OPERATOR_NEG || unary->op == OPERATOR_NOT ||
+            unary->op == OPERATOR_JS_BIT_NOT) && immediate_scalar_operand(c, unary->operand, true, depth + 1);
+    }
     if (n->node_type != AST_NODE_MEMBER_EXPR && n->node_type != AST_NODE_INDEX_EXPR) return false;
     AstFieldNode* field = (AstFieldNode*)n;
+    if (inert) return immediate_scalar_operand(c, field->object, true, depth + 1) &&
+        (!field->computed || immediate_scalar_operand(c, field->property, true, depth + 1));
     if (field->object->node_type != AST_NODE_IDENT) return false;
     LmdBinding* owner = identifier_binding(c->program, (AstIdentNode*)field->object);
     // intrinsic receivers have no lexical NameEntry and cannot prove an array read.
@@ -7532,7 +7575,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         LmdReference ref = reference(c, a->left, false, a->op == OPERATOR_ASSIGN);
         LmdValue old = {};
         bool consume = a->op != OPERATOR_ASSIGN && numeric_operands(compound_operator(a->op),
-            kind(c->program, a->left, c->inlining), kind(c->program, a->right, c->inlining));
+            kind(c->program, a->left, c->inlining), kind(c->program, a->right, c->inlining),
+            !c->program->coercion_callbacks && !c->program->bigints && !c->program->symbols &&
+                immediate_scalar_operand(c, a->right, true));
         if (a->op != OPERATOR_ASSIGN) old = read_reference(c, ref, a->left, false, false, consume);
         LmdValue rhs = expression(c, a->right, false, consume);
         if (a->op != OPERATOR_ASSIGN) rhs = binary_value(c, compound_operator(a->op), old, rhs);
@@ -7715,7 +7760,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         if (b->op == OPERATOR_AND || b->op == OPERATOR_OR || b->op == OPERATOR_JS_NULLISH_COALESCE)
             return logical(c, b->op, b->left, b->right);
         bool consume = numeric_operands(b->op, kind(c->program, b->left, c->inlining),
-            kind(c->program, b->right, c->inlining));
+            kind(c->program, b->right, c->inlining),
+            !c->program->coercion_callbacks && !c->program->bigints && !c->program->symbols &&
+                immediate_scalar_operand(c, b->right, true));
         MirNumericOpPlan plan = {};
         bool integer_consumer = (em_numeric_op_plan(b->op, &plan) && plan.is_comparison) ||
             (b->op >= OPERATOR_JS_BIT_AND && b->op <= OPERATOR_JS_URSHIFT);
@@ -11994,6 +12041,17 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
             if (!indexed_local) return false;
         }
     }
+    String* implicit_name = !local && !field && backing == node && node->node_type == AST_NODE_IDENT
+        ? ((AstIdentNode*)node)->name : NULL;
+    if (implicit_name && (p->global_bindings_exposed || p->module_realm || p->property_callbacks ||
+            named(implicit_name, "this") || named(implicit_name, "super") ||
+            js_builtin_global_find(implicit_name->chars, implicit_name->len))) return false;
+    auto matches_local = [&](AstNode* target) {
+        if (!target || target->node_type != AST_NODE_IDENT) return false;
+        LmdBinding* binding = identifier_binding(p, (AstIdentNode*)target);
+        return local ? binding == local : implicit_name && !binding &&
+            named(((AstIdentNode*)target)->name, implicit_name->chars);
+    };
     LmdFunction* incoming = local && local->entry->is_parameter ? local->owner : NULL;
     // Global reflection cannot reach unaliased local arrays; calls and field inventories
     // still require a closed global binding environment.
@@ -12130,7 +12188,7 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
         }
         return true;
     }
-    if (!local && !field) return false;
+    if (!local && !field && !implicit_name) return false;
     auto array_seed = [&](auto&& seed, AstNode* value, int levels) -> bool {
         if (!levels) return safe(value);
         if (!value) return false;
@@ -12163,7 +12221,10 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
     for (AstNodeId i = 0; i < tree->count; i++) {
         AstNode* other = tree->nodes[i];
         if (other->node_type == AST_NODE_MAP_PATTERN) return false;
-        if (local) {
+        if (implicit_name && (other->node_type == AST_NODE_ARRAY_PATTERN ||
+                (other->node_type == AST_NODE_ASSIGN &&
+                 ((AstAssignNode*)other)->left->node_type == AST_NODE_ARRAY))) return false;
+        if (local || implicit_name) {
             AstNode* implicit = other->node_type == AST_NODE_FOR_OF_STAM || other->node_type == AST_NODE_FOR_IN_STAM ?
                 ((JsForOfNode*)other)->left : NULL;
             if (other->node_type == AST_NODE_ASSIGN) {
@@ -12174,7 +12235,7 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
                 implicit = ((AstArrayNode*)implicit)->item;
             // Iterator and destructuring writes are not ordinary assignment nodes.
             for (AstNode* item = implicit; item; item = item->next)
-                if (item->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)item) == local) return false;
+                if (matches_local(item)) return false;
         }
         if (global_scalar) {
             // Reflective reads can expose the global through aliases or bulk
@@ -12251,7 +12312,8 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
                 (((AstUnaryNode*)other)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)other)->op == OPERATOR_JS_DECREMENT)) {
             target = ((AstUnaryNode*)other)->operand; value = other;
         }
-        bool matching = local ? target && target->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)target) == local :
+        // implicit globals have no NameEntry; their closed write inventory still proves key kinds.
+        bool matching = local || implicit_name ? matches_local(target) :
             target && (target->node_type == AST_NODE_MEMBER_EXPR || target->node_type == AST_NODE_INDEX_EXPR) &&
                 named(member_spelling((AstFieldNode*)target), field->chars);
         if (matching && !indexed_field) {
