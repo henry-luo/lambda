@@ -275,44 +275,8 @@ struct JsModuleMirArtifact {
     int static_dependency_count;
 };
 
-// Radiant owns only bounded InputManager artifact leases; it does not own a
-// second JavaScript MIR cache.
-struct JsMirLeaseSession;
-
-struct JsMirLeaseSessionStats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t compiles;
-    uint64_t instantiations;
-    size_t retained_entries;
-    size_t retained_metadata_bytes;
-};
-
-JsMirLeaseSession* js_mir_lease_session_create(void);
-void js_mir_lease_session_close(JsMirLeaseSession* session);
-const JsPreambleState* js_mir_lease_session_lookup(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble);
-const JsPreambleState* js_mir_lease_session_adopt(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble, JsPreambleState* compiled_state);
-InputScriptBuildClaim js_mir_lease_session_begin_build(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble, InputScriptBuildScope* build);
-const JsPreambleState* js_mir_lease_session_adopt_build(
-    JsMirLeaseSession* session, InputScriptBuildScope* build,
-    JsPreambleState* compiled_state);
-void js_mir_lease_session_complete_build(InputScriptBuildScope* build,
-    bool published, bool poison);
-void js_mir_lease_session_record_instantiation(JsMirLeaseSession* session);
-
-// Direct module artifacts use the same manager-owned opaque MIR slot as
-// document scripts. The returned scope pins a live module image until its
-// Runtime has destroyed the realm that may hold pointers into that code.
+// the returned InputManager scope pins a live module image until its Runtime
+// has destroyed the realm that may hold pointers into that code (D8.5.1v2).
 const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
     size_t source_len, const char* filename, struct InputCacheScope** out_scope);
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,

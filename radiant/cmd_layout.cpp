@@ -6253,10 +6253,6 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
-    // Browser documents always use the AST executor, so a batch MIR lease
-    // cannot supply a compatible preamble or compiled unit.
-    script_runner_set_js_mir_lease_session(nullptr);
-
     for (int i = 0; i < opts.font_dir_count; i++) {
         font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
     }
@@ -6377,7 +6373,6 @@ int cmd_layout(int argc, char** argv) {
         fclose(timing_file);
         timing_file = nullptr;
     }
-    script_runner_set_js_mir_lease_session(nullptr);
     ui_context_cleanup(&ui_context);
     if (cwd) url_destroy(cwd);
 

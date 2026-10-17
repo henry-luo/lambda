@@ -1987,28 +1987,37 @@ MVP's compiler has **57% fewer source lines**. The counted files are
 `mvp_lmd_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
 file family includes retained shared entrypoint/cache integration.
 
-**Cleaned native helper count (2026-10-17):** working tree based on `6c14534a7`,
-after the retirement and helper audit in §36.2–§36.3. All counts below are exact
-file totals; the earlier provisional common/LJS attribution is superseded.
+**Cleaned native helper count (2026-10-17):** working tree based on `b37f6877a`,
+after the retirement, helper audit and document-cache removal in §36.2–§36.4. Current sizes and the
+measured reduction use exact file totals.
 
-| Native runtime C/C++ support | Implementation files | Source lines |
-|---|---:|---:|
-| Shared JS helper pool: MVP, retained AST/AUTO and hosts | 27 | **73,219** |
-| MVP-specific helpers | 14 | **10,303** |
-| Legacy LJS MIR-only helpers, retired | 0 | **0** |
-| **Comparable helper source total** | **41** | **83,522** |
-| Shared execution/cache/loader/recovery services | 4 | **2,541** |
-| **Native support including shared services** | **45** | **86,063** |
+**Original attribution preserved (`051adda5e`):** common **72,675** lines,
+MVP-specific **10,303**, Legacy LJS MIR-only **2,782**, total **85,760**.
+The common/legacy split was a provisional static estimate.
 
-The comparable helper total uses the same 41-file scope as the original
-**85,760-line** snapshot: **2,238 fewer lines (2.6%)**. Shared interpreter and
+| Native runtime C/C++ support | Current implementation files | Historical comparison, reconciled | Cleaned source lines |
+|---|---:|---:|---:|
+| Shared JS helper pool: MVP, retained AST/AUTO and hosts | 27 | **73,219** | **73,219** |
+| MVP-specific helpers | 14 | **10,303** | **10,303** |
+| Legacy LJS MIR-only helpers, retired | 0 | **2,238** | **0** |
+| **Comparable helper source total** | **41** | **85,760** | **83,522** |
+| Shared execution/cache/loader/recovery services | 4 | — | **2,254** |
+| **Native support including shared services** | **45** | — | **85,776** |
+
+**Comparison accounting (USER):** charge the full **2,238-line reduction
+(2.6%)** to Legacy MIR-only code. The reconciled historical column preserves
+the **85,760-line** baseline and records those retired lines alongside the
+**83,522** retained helper lines. The original **2,782-line** estimate remains
+above as a separate historical record.
+
+Both helper totals use the same 41-file scope. Shared interpreter and
 host support remains necessary under **D8.1.3v25**, including interpreted
 dynamic source; the interpreter implementation itself remains excluded.
 
 The four shared services moved out of the legacy compiler during retirement:
-`js_execution.cpp` (1,703), `js_code_cache.cpp` (458), `js_module_loader.cpp`
+`js_execution.cpp` (1,703), `js_code_cache.cpp` (171), `js_module_loader.cpp`
 (212) and `js_compile_recovery.cpp` (168). They were previously within the
-compiler comparison's scope, so their **2,541 lines** are shown separately
+compiler comparison's scope, so their **2,254 lines** are shown separately
 before the extended native-support total. Per-file counts and source hashes:
 `temp/js_runtime_helper_size/counts.json`. Source-size accounting and the
 function-level dependency audit are separate measurements.
@@ -2047,9 +2056,27 @@ through actual calls, emitted imports, callbacks, builtin tables and ownership
 hooks. An import registry entry alone does not establish use.
 
 The audit removes **92 unused function bodies** and **1,365 additional physical
-C/C++ lines**. It retains 4,404 bodies with production/host/lifetime/diagnostic
-references, 18 conditional build implementations and five APIs with test callers
-only. The dormant document-cache adapter is recorded explicitly. No semantic
+C/C++ lines**. At that checkpoint it retained 4,404 bodies with
+production/host/lifetime/diagnostic references, 18 conditional build
+implementations and five APIs with test callers only. The document-cache
+adapter was subsequently removed in §36.4. No semantic
 runtime helper is added. Method, per-function artifacts, retention decisions
 and qualification results are in the
 [native helper audit](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md).
+
+
+### 36.4 Retire the dormant document-cache adapter
+
+**2026-10-17, USER; D8.1.3v25, D8.5.1v2, D5.3/D5.4:** remove the
+`JsMirLeaseSession` API, its document-preamble/classic-script cache branches and
+layout session hooks. Browser documents already select AST execution and the
+layout runner supplied a null session. Remove `SingleFlightsCommonMirLeaseBuild`
+and simplify the remaining module-cache concurrency helper.
+
+The active `js_module_mir_cache_*` APIs, immutable MVP image ownership and their
+module-cache tests remain. Layout timing retains its zero-valued legacy cache
+fields for schema compatibility. This cleanup removes **490 production C/C++
+lines** and **75 test lines**. The current native-support total in §36.1 is
+**85,776 lines**; the original helper comparison and its **2,238 retired Legacy
+MIR-only lines** remain recorded. Source/build evidence and verification limits:
+[native helper audit follow-up](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md#document-cache-adapter-retirement).

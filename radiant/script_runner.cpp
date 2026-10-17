@@ -55,8 +55,6 @@
 #include "../lib/tagged.hpp"
 #include "../lib/time_util.h"
 #include "../lambda/js/js_event_loop.h"
-#include "../lambda/jube/jube_registry.h"
-#include "../lambda/jube/jube_interface.h"
 #include "../lambda/network/network_resource_manager.h"
 
 #include <cstring>
@@ -305,7 +303,6 @@ extern "C" void script_runner_resume_js_watchdog(void) {
 #endif
 }
 
-static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 static bool s_static_headless_snapshot = false;
@@ -322,12 +319,6 @@ extern "C" void script_runner_set_static_headless_snapshot(bool snapshot) {
 
 extern "C" void script_runner_set_execute_external_scripts(bool execute) {
     s_execute_external_scripts = execute;
-}
-
-extern "C" void script_runner_set_js_mir_lease_session(JsMirLeaseSession* session) {
-    // The layout batch owns leases only. InputManager remains the cache owner,
-    // so the runner cannot retain code beyond the batch lifetime.
-    s_js_mir_lease_session = session;
 }
 
 extern "C" void script_runner_cleanup_heap() {
@@ -1752,82 +1743,6 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
     return result;
 }
 
-static Item execute_cached_external_classic(Runtime* runtime,
-                                            JsPreambleState* preamble,
-                                            const char* source, size_t source_len,
-                                            const char* filename,
-                                            DocumentScriptPhaseTiming* timing) {
-    if (!runtime || !preamble || !s_js_mir_lease_session ||
-            !script_eval_context_activate(runtime)) {
-        return ItemError;
-    }
-
-    if (timing) timing->cache_lookups++;
-    const JsPreambleState* cached = js_mir_lease_session_lookup(
-        s_js_mir_lease_session, false,
-        source, source_len, filename, preamble);
-    if (timing) {
-        if (cached) timing->cache_hits++;
-        else timing->cache_misses++;
-    }
-
-    InputScriptBuildScope cache_build = {};
-    if (!cached) {
-        InputScriptBuildClaim claim = js_mir_lease_session_begin_build(
-            s_js_mir_lease_session, false, source, source_len, filename,
-            preamble, &cache_build);
-        if (claim == INPUT_SCRIPT_BUILD_READY) {
-            cached = js_mir_lease_session_lookup(s_js_mir_lease_session, false,
-                source, source_len, filename, preamble);
-        }
-    }
-
-    JsPreambleState compiled = {};
-    if (!cached) {
-        Item compile_result = compile_js_mir_with_preamble_len(
-            runtime, source, source_len, filename, preamble, &compiled);
-        js_mir_accumulate_last_phase_timing(false);
-        if (get_type_id(compile_result) == LMD_TYPE_ERROR) {
-            js_mir_lease_session_complete_build(&cache_build, false, false);
-            preamble_state_destroy(&compiled);
-            return compile_result;
-        }
-        if (cache_build.state == INPUT_SCRIPT_BUILD_OWNER) {
-            cached = js_mir_lease_session_adopt_build(s_js_mir_lease_session,
-                &cache_build, &compiled);
-        } else if (cache_build.state != INPUT_SCRIPT_BUILD_POISONED) {
-            cached = js_mir_lease_session_adopt(s_js_mir_lease_session, false,
-                source, source_len, filename, preamble, &compiled);
-        }
-        js_mir_lease_session_complete_build(&cache_build, cached != nullptr, false);
-        if (cached && timing) timing->cache_compiles++;
-        if (!cached) {
-            // Functions materialized by a compiled unit retain its MIR code.
-            // If cache ownership cannot be established, use the normal path
-            // whose deferred-MIR teardown already follows document lifetime.
-            preamble_state_destroy(&compiled);
-            uint64_t result_home = 0;
-            return execute_js_source_with_preamble(
-                runtime, preamble, source, source_len, filename,
-                true, &result_home);
-        }
-    }
-
-    Item result = execute_compiled_js_in_current_realm(
-        runtime, preamble, cached, true);
-    js_mir_lease_session_record_instantiation(s_js_mir_lease_session);
-    if (timing) timing->cache_instantiations++;
-    js_mir_accumulate_last_phase_timing(false);
-    if (get_type_id(result) != LMD_TYPE_ERROR &&
-            !preamble_state_update_from_compiled(preamble, cached)) {
-        log_error("script-cache-external: failed to publish declaration snapshot for %s",
-                  filename ? filename : "<external-script>");
-        result = ItemError;
-    }
-    preamble_state_destroy(&compiled);
-    return result;
-}
-
 static Item execute_js_module_source(Runtime* runtime, const char* source, size_t source_len,
                                      const char* filename) {
     if (!runtime) return ItemError;
@@ -2009,8 +1924,7 @@ private:
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
                                       const char* phase_name,
-                                      JsScriptTaskCollection* collection,
-                                      DocumentScriptPhaseTiming* timing) {
+                                      JsScriptTaskCollection* collection) {
     bool fatal_error = false;
     if (!queue) return true;
     size_t accepted_source_bytes = 0;
@@ -2074,10 +1988,6 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
             // import.meta use the document snapshot behind its task label.
             result = execute_js_module_source(
                 runtime, source, task->source_len, filename);
-        } else if (task->external && s_js_mir_lease_session && !s_retain_js_state &&
-                   !runtime->js_ast_backend) {
-            result = execute_cached_external_classic(
-                runtime, preamble, source, task->source_len, filename, timing);
         } else {
             result = execute_js_source_with_preamble(
                 runtime, preamble, source, task->source_len, filename,
@@ -2258,71 +2168,10 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     preamble_source_len = preamble_buf->length;
 #endif
     const char* preamble_filename = "<document-preamble>";
-    const JsPreambleState* cached_preamble = nullptr;
-    InputScriptBuildScope preamble_build = {};
-    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
-        if (timing) timing->cache_lookups++;
-        cached_preamble = js_mir_lease_session_lookup(
-            s_js_mir_lease_session, true,
-            preamble_buf->str, preamble_buf->length, preamble_filename, nullptr);
-        if (timing) {
-            if (cached_preamble) timing->cache_hits++;
-            else timing->cache_misses++;
-        }
-        if (!cached_preamble) {
-            InputScriptBuildClaim claim = js_mir_lease_session_begin_build(
-                s_js_mir_lease_session, true, preamble_buf->str,
-                preamble_buf->length, preamble_filename, nullptr,
-                &preamble_build);
-            if (claim == INPUT_SCRIPT_BUILD_READY) {
-                cached_preamble = js_mir_lease_session_lookup(
-                    s_js_mir_lease_session, true, preamble_buf->str,
-                    preamble_buf->length, preamble_filename, nullptr);
-            }
-        }
-    }
-
-    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
-        if (!cached_preamble) {
-            result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
-                                                 preamble_buf->length,
-                                                 preamble_filename, preamble);
-            js_mir_accumulate_last_phase_timing(true);
-            if (get_type_id(result) != LMD_TYPE_ERROR) {
-                if (preamble_build.state == INPUT_SCRIPT_BUILD_OWNER) {
-                    cached_preamble = js_mir_lease_session_adopt_build(
-                        s_js_mir_lease_session, &preamble_build, preamble);
-                } else if (preamble_build.state != INPUT_SCRIPT_BUILD_POISONED) {
-                    cached_preamble = js_mir_lease_session_adopt(
-                        s_js_mir_lease_session, true, preamble_buf->str,
-                        preamble_buf->length, preamble_filename, nullptr, preamble);
-                }
-                if (cached_preamble && timing) timing->cache_compiles++;
-            }
-            js_mir_lease_session_complete_build(&preamble_build,
-                cached_preamble != nullptr, false);
-
-            // retire any preceding document heap before instantiation. MVP
-            // compile-only images themselves own no heap or guest values.
-            js_batch_reset();
-            runtime_reset_heap(runtime);
-        }
-
-        if (cached_preamble) {
-            result = instantiate_js_preamble(runtime, cached_preamble, preamble);
-            js_mir_lease_session_record_instantiation(s_js_mir_lease_session);
-            if (timing) timing->cache_instantiations++;
-            js_mir_accumulate_last_phase_timing(true);
-        } else {
-            preamble_state_destroy(preamble);
-            result = ItemError;
-        }
-    } else {
-        uint64_t result_home = 0;
-        result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
-                                                  preamble_filename, preamble, &result_home);
-        js_mir_accumulate_last_phase_timing(true);
-    }
+    uint64_t result_home = 0;
+    result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
+                                              preamble_filename, preamble, &result_home);
+    js_mir_accumulate_last_phase_timing(true);
 #ifndef NDEBUG
     if (timing_enabled) {
         long preamble_wall_us = script_runner_wall_now_us() - preamble_start_us;
@@ -2382,7 +2231,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.post_dom, preamble, "post-dom", collection, timing)) {
+            runtime, queues.post_dom, preamble, "post-dom", collection)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2398,7 +2247,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.defer, preamble, "defer", collection, timing)) {
+            runtime, queues.defer, preamble, "defer", collection)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2415,7 +2264,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     // model, but ready async tasks still run before the window load boundary.
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
-            runtime, queues.async_ready, preamble, "async-ready", collection, timing)) {
+            runtime, queues.async_ready, preamble, "async-ready", collection)) {
         any_error = true;
     }
     if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;
@@ -2627,16 +2476,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     js_host_hooks_set_redirect_stdout_to_stderr(dom_doc->js.redirect_stdout_to_stderr);
     dom_set_ui_context(runtime->dom_ui_context);
     dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
-
-    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
-        const JubeModuleDef* radiant = jube_find_static_module("radiant");
-        // The compile-only preamble runs before normal document binding, but
-        // its document member ordinals must see the same Jube registry as the
-        // later realm or the retained cache key changes after the first file.
-        if (radiant && !jube_activate_module(radiant)) {
-            log_error("execute_document_scripts: failed to activate radiant before preamble cache");
-        }
-    }
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.

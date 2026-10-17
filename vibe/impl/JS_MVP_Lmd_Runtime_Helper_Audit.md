@@ -61,7 +61,7 @@ This pass removes **1,365 net physical C/C++ source lines**, including declarati
 and metadata, in addition to the preceding retirement. Comments/blank lines
 were not reformatted to manufacture the reduction.
 
-## Explicit retention decisions
+## Explicit retention decisions at the audit checkpoint
 
 | API | Reason to retain |
 |---|---|
@@ -71,14 +71,13 @@ were not reformatted to manufacture the reduction.
 | `js_async_iterator_close_result` | Raw iterator close contract tests |
 | `lambda_side_root_contains_span` | Live argument-span diagnostics under `#ifndef NDEBUG` (**D5.3/D5.4**) |
 
-The document lease adapter deserves a separate distinction: its lookup/adopt
-functions have callers in `radiant/script_runner.cpp`, but production currently
-sets the session to null and browser documents use AST execution. Those host
-paths are dormant today. They and the tested cache session API are retained;
-they are not described as active MVP MIR dependencies. Ordinary MVP executable
-image caching uses the shared module artifact/build APIs.
+At this checkpoint the document lease adapter's lookup/adopt functions had
+callers in `radiant/script_runner.cpp`, while production supplied a null session
+and browser documents selected AST execution. Its tested cache session API was
+retained conservatively. The follow-up below retires that dormant adapter and
+its adapter-specific test; active MVP module artifact/build APIs remain.
 
-## Verification and artifacts
+## Verification and artifacts at the audit checkpoint
 
 - Release executable, four native Node modules and seven focused native test
   executables build successfully. Final incremental build: exit 0
@@ -128,3 +127,37 @@ python3 utils/js_runtime_helper_audit.py
 No Test262 harness, exclusions, goldens or deadlines are changed. Full Lambda
 and Test262 aggregate baselines and benchmark timing are separate gates and
 are not inferred from this source audit or focused checks.
+
+
+## Document-cache adapter retirement
+
+**2026-10-17, USER; base `b37f6877a`; D8.1.3v25, D8.5.1v2, D5.3/D5.4.**
+
+Remove the `JsMirLeaseSession` type, request/adoption/lease helpers, declarations,
+runner state and layout setter hooks. Delete cached document-preamble and
+external-classic execution branches; the existing AST document path now stands
+alone. Remove `SingleFlightsCommonMirLeaseBuild` and its mode/session-specific
+waiter fields. The surviving waiter calls the module build API directly.
+
+The active module-cache implementation is source-identical to the archived
+version after substituting its two private forwarding calls with the existing
+`input_script_build_scope_begin` / `input_script_build_scope_complete` calls.
+Module publication, dependency freshness, code ownership and image execution
+are preserved. The module-cache concurrency/reuse tests and AST document-realm
+isolation test remain. Layout timing's existing zero-valued cache counters are
+retained for schema compatibility.
+
+Source accounting: **490 production C/C++ lines + 75 test lines removed**;
+`js_code_cache.cpp` falls from **458 to 171 lines**. The extended native support
+count becomes **85,776 lines**, while the comparable 41-file helper count stays
+**83,522**. Its historical **2,238-line Legacy MIR-only** removal record remains.
+
+Static checks find no adapter symbols or fixture references in maintained
+production/test source. Test declaration comparison confirms exactly the one
+adapter fixture was removed. Source copies and checks are recorded under
+`temp/js_document_cache_retirement/`; `source_changes.json` contains the file
+counts and hashes. Release compile/link qualification passes for `lambda` and
+`test_js_script_gtest` (exit 0, `build.log`); `binaries.json` records their hashes.
+The linked executable contains no retired adapter symbols.
+Runtime tests and benchmark timing were not run for this follow-up; the earlier
+checkpoint's pass counts above describe the preceding implementation.

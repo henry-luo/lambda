@@ -1725,93 +1725,18 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
     EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
 }
 
-struct JsCommonMirBuildWaiter {
-    bool module_mode;
-    JsMirLeaseSession* session;
+struct JsModuleMirBuildWaiter {
     const char* source;
     size_t source_length;
     const char* reference;
     InputScriptBuildScope build;
 };
 
-static void* js_common_mir_build_waiter_main(void* opaque) {
-    JsCommonMirBuildWaiter* waiter = (JsCommonMirBuildWaiter*)opaque;
-    if (waiter->module_mode) {
-        (void)js_module_mir_cache_begin_build(waiter->source,
-            waiter->source_length, waiter->reference, &waiter->build);
-    } else {
-        (void)js_mir_lease_session_begin_build(waiter->session, true,
-            waiter->source, waiter->source_length, waiter->reference, NULL,
-            &waiter->build);
-    }
+static void* js_module_mir_build_waiter_main(void* opaque) {
+    JsModuleMirBuildWaiter* waiter = (JsModuleMirBuildWaiter*)opaque;
+    (void)js_module_mir_cache_begin_build(waiter->source,
+        waiter->source_length, waiter->reference, &waiter->build);
     return NULL;
-}
-
-TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
-    JsExecutionBackendScope backend("mir");
-    InputScriptCache* cache = input_manager_global_script_cache();
-    ASSERT_NE(cache, nullptr);
-    JsMirLeaseSession* session = js_mir_lease_session_create();
-    ASSERT_NE(session, nullptr);
-    InputScriptCacheStats before = {};
-    input_script_cache_get_stats(cache, &before);
-
-    static int cache_generation = 0;
-    char reference[64];
-    snprintf(reference, sizeof(reference), "<js-mir-lease-claim-%d>",
-        ++cache_generation);
-    const char source[] = "var cachedAnswer = 42;";
-
-    InputScriptBuildScope owner = {};
-    ASSERT_EQ(js_mir_lease_session_begin_build(session, true, source,
-        sizeof(source) - 1, reference, NULL, &owner), INPUT_SCRIPT_BUILD_OWNER);
-    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
-
-    JsCommonMirBuildWaiter waiter = {false, session, source,
-        sizeof(source) - 1, reference, {}};
-    pthread_t worker = {};
-    int create_result = pthread_create(&worker, NULL,
-        js_common_mir_build_waiter_main, &waiter);
-    if (create_result != 0) {
-        js_mir_lease_session_complete_build(&owner, false, false);
-        js_mir_lease_session_close(session);
-        ADD_FAILURE() << "failed to create MIR lease claim waiter";
-        return;
-    }
-
-    bool wait_observed = false;
-    for (int attempt = 0; attempt < 100000; attempt++) {
-        InputScriptCacheStats current = {};
-        input_script_cache_get_stats(cache, &current);
-        if (current.single_flight_waits > before.single_flight_waits) {
-            wait_observed = true;
-            break;
-        }
-        sched_yield();
-    }
-
-    Runtime runtime = {};
-    runtime_init(&runtime);
-    JsPreambleState compiled = {};
-    Item compile_result = compile_js_mir_preamble_len(&runtime, source,
-        sizeof(source) - 1, reference, &compiled);
-    bool published = !item_is_error(compile_result) &&
-        js_mir_lease_session_adopt_build(session, &owner, &compiled) != NULL;
-    if (!published) preamble_state_destroy(&compiled);
-    js_mir_lease_session_complete_build(&owner, published, false);
-    ASSERT_EQ(pthread_join(worker, NULL), 0);
-    EXPECT_TRUE(wait_observed);
-    EXPECT_TRUE(published);
-    EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
-    EXPECT_EQ(waiter.build.kind, INPUT_SCRIPT_BUILD_MIR);
-    js_mir_lease_session_complete_build(&waiter.build, false, false);
-    js_mir_lease_session_close(session);
-    runtime_cleanup(&runtime);
-
-    InputScriptCacheStats after = {};
-    input_script_cache_get_stats(cache, &after);
-    EXPECT_EQ(after.mir_builds, before.mir_builds + 1);
-    EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
 }
 
 TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
@@ -1831,11 +1756,11 @@ TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
         reference, &owner), INPUT_SCRIPT_BUILD_OWNER);
     EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
 
-    JsCommonMirBuildWaiter waiter = {true, NULL, source,
+    JsModuleMirBuildWaiter waiter = {source,
         sizeof(source) - 1, reference, {}};
     pthread_t worker = {};
     int create_result = pthread_create(&worker, NULL,
-        js_common_mir_build_waiter_main, &waiter);
+        js_module_mir_build_waiter_main, &waiter);
     if (create_result != 0) {
         js_module_mir_cache_complete_build(&owner, false, false);
         ADD_FAILURE() << "failed to create module MIR claim waiter";
