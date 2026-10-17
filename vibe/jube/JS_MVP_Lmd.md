@@ -1,6 +1,6 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-16
+**Date:** 2026-10-17
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
@@ -1967,3 +1967,37 @@ Benchmark timing remains deferred; no new performance acceptance is claimed.
 
 Exact pins, source provenance, implementation and remaining gates:
 [formal MIR implementation plan](../impl/JS_MVP_Lmd_Formal_MIR.md).
+
+### 36.1 MIR compiler and native helper source size
+
+**Snapshot (2026-10-17):** source revision `051adda5e`. Counts are physical
+implementation lines, including comments and blanks, excluding headers.
+Parser/AST code, the interpreter implementation, Lambda core, third-party MIR,
+generated data tables, tests and documentation are outside the counted scope.
+
+| MIR compiling | MVP-Lmd | Legacy LJS |
+|---|---:|---:|
+| Implementation files | 1 | 13 |
+| Source lines | **13,874** | **32,314** |
+
+MVP's compiler has **57% fewer source lines**. The counted files are
+`mvp_lmd_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
+file family includes retained shared entrypoint/cache integration.
+
+| Native runtime C/C++ helpers | Source lines | Attribution |
+|---|---:|---|
+| Common to MVP and LJS | **72,675** | Conservative static estimate |
+| MVP-specific | **10,303** | Exact total of 14 implementation files |
+| LJS-specific | **2,782** | Provisional static estimate |
+| **Distinct helper source total** | **85,760** | Exact total of 41 implementation files |
+
+The existing 27-file JS helper pool contains **75,457** lines; its shared and
+LJS-specific portions are attributed at function/data level. The dependency
+census follows calls, function addresses and callback tables from MVP,
+the retained interpreter and shared host/runtime interoperability. Interpreter
+bridges therefore contribute shared dependencies under **D8.1.3v25**, although
+the interpreter's own source is excluded. Mixed-file scaffolding is charged
+to common code; the global import-symbol inventory does not establish use.
+Indirect dispatch, conditional compilation and builtin tables limit exact
+exclusivity and can overestimate sharing. These estimates do not establish
+which legacy code can safely be removed or imply a runtime-size reduction.
