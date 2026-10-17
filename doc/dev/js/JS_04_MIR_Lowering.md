@@ -1,306 +1,87 @@
-# LambdaJS — MIR Lowering, Code Generation & Exceptions
+# LambdaJS — MIR Lowering and Native Helpers
 
-> **Last verified against tree:** 2026-09-15 *(§8 dynamic call-site entry re-verified after JC18; §9 argument-slot clearing re-verified; stack-overflow guard paragraph updated for JC23 — the signal-backstop paragraph after it was not re-verified; §10 rewritten 2026-09-24 for JSI35 and revised the same day for JSI36)*
-
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and the direct-`eval` call site (dynamic code itself is interpreted, §10).
+> **Last verified against tree:** 2026-10-17 (source and release-link inspection; runtime qualification is recorded separately).
 >
-> **Primary sources:** `lambda/js/js_mir_expression_lowering.cpp` (`jm_transpile_binary`, `jm_transpile_unary`, `jm_transpile_call`, `jm_transpile_condition`, `jm_try_fold_const`), `lambda/js/js_mir_statement_lowering.cpp` (`jm_transpile_if`, loops, try/catch/finally, `jm_emit_error_lane_propagate_check`, `jm_branch_dead_safe`), `lambda/js/js_mir_calls_boxing_types.cpp` (`jm_ensure_import`, `jm_call_*`, boxing/unboxing, `jm_emit_is_truthy`), `lambda/js/js_dynamic_code.cpp` (`js_builtin_eval`, `new Function`), `lambda/js/js_mir_completion.cpp` (abrupt completions), `lambda/js/js_runtime_state.cpp` (`js_throw_value` / `js_error_lane_payload`), `lambda/lambda-stack.cpp` (stack-overflow guard).
-> **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
-
----
-
-## 1. Purpose & scope
-
-The compilation phases, the per-compile transpiler state (`JsMirTranspiler`), interpreter-vs-JIT selection, and MIR symbol resolution are all in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md). This document picks up at phases 2 and 3 — the per-node emission performed by `jm_define_function` and the `js_main` body — and describes how the transpiler turns expressions and statements into MIR instructions. The value representation (the tagged `Item`) is shared with [JS_03 — Value Model & Memory](JS_03_Value_Model.md); closures, capture and scope-env write-back are in [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md); iterator/generator lowering is in [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md).
-
----
-
-## 2. The emission model: boxed Item by default, native fast paths
-
-The default unit of value in emitted MIR is a **boxed `Item` in an `MIR_T_I64` register**. Most helpers return one, most runtime imports take and return them, and `jm_transpile_box_item` is the canonical "give me a boxed Item for this expression" entry point. On top of that baseline the transpiler opportunistically keeps numeric values **unboxed** — native `MIR_T_I64` (integer) or `MIR_T_D` (double) — whenever static type inference proves both an operand and its consumer are numeric, so an arithmetic chain need not box and re-box at every step.
-
-The discriminator is `jm_get_effective_type` (the per-node inferred `TypeId`, fed by phase 1.75–1.78 inference in [JS_01](JS_01_Compilation_Pipeline.md) §5). `jm_is_native_type` (`js_mir_calls_boxing_types.cpp:1125`) admits exactly `LMD_TYPE_INT`, `LMD_TYPE_FLOAT`, `LMD_TYPE_BOOL`. A value flows native through arithmetic, then crosses back to boxed only at a boundary that demands an `Item` (a call argument, a property store, a return, a variable that is not statically typed). The native-vs-boxed decision is recomputed at each consumer rather than tracked as a global property of a register, which is why `jm_transpile_as_native` re-derives whether a child took the native path (`:1356`) before deciding to unbox.
-
-<img alt="Expression lowering: boxed vs native" src="diagram/d04_expr_lowering.svg" width="720">
-
----
-
-## 3. Boxing & unboxing (tag arithmetic)
-
-Boxing and unboxing of the common scalars is emitted **inline as MIR bit-ops**, not as runtime calls, so the fast paths stay branch-light.
-
-- **Box int** — `jm_box_int_reg` (`js_mir_calls_boxing_types.cpp:356`) masks to 56 bits and ORs in `ITEM_INT_TAG`, but first range-checks against `INT53_MAX/MIN`; out-of-range integers are promoted to a boxed float via `MIR_I2D` + `push_d` rather than truncated. JS Symbols are direct pointer-backed `LMD_TYPE_SYMBOL` Items and do not share this lane. `jm_box_int_const` (`:329`) is the constant-folded variant: a pure `MIR_MOV` of `ITEM_INT_TAG | (value & MASK56)`.
-- **Box float** — `jm_box_float` is a single `push_d` call. Inline encodings stay in the Item; only the out-of-band residue consumes one raw slot in the current number side-stack (see [JS_03](JS_03_Value_Model.md)).
-- **Box string** — `jm_box_string` (`:411`) ORs `STR_TAG` onto a non-null pointer (NULL maps to `ITEM_NULL`); `jm_box_string_literal` (`:429`) interns into the name pool at transpile time and bakes `s2it(interned)` as a raw `MIR_MOV` constant — valid because the interned `String*` outlives the transpiler.
-- **Box bool** — handled in `jm_box_native` (`:767`) by ORing `LMD_TYPE_BOOL << 56` onto the 0/1 reg.
-- **Unbox int** — `jm_emit_unbox_int` (`:709`) is `LSH 8` then arithmetic `RSH 8` to sign-extend the low 56 bits.
-- **Unbox float** — `jm_emit_unbox_float` (`:720`) short-circuits if the register is already `MIR_T_D`/`MIR_T_F`, else calls the runtime `it2d`.
-
-`jm_box_native` / `jm_ensure_native_int` / `jm_ensure_native_float` (`:749`–`:780`) are the type-directed adapters used at native↔boxed boundaries. `jm_ensure_boxed` (`:784`) is a defensive net that boxes a stray `MIR_T_D` register before it reaches a boxed-Item sink.
-
----
-
-## 4. Native arithmetic & numeric fast paths
-
-`jm_transpile_binary` selects its numeric hit through the shared
-`em_numeric_op_plan` table in `lambda/runtime/mir_emitter_shared.hpp`. The
-table is deliberately physical only: it describes the MIR operation and its
-numeric helper where one is unavoidable; it carries no JavaScript coercion,
-nullability, or truthiness policy. This is the required sharing boundary under
-**D1.3** and **D8.2.3**.
-
-JavaScript admits the plan only when *both* operands have an INT/FLOAT proof.
-It then obtains native operands via `jm_transpile_as_native` and emits one
-native sequence: `+`, `-`, `*`, and `/` use the appropriate F64 arithmetic;
-`%` uses the numeric remainder helper; equality and relational operations
-return a raw I64 boolean. Integer multiplication still uses the double route
-where that is required to preserve JavaScript Number precision. `**`, bitwise
-operators, and every incomplete/mixed proof use their established JavaScript
-semantic lowering.
-
-This restriction is intentional. A String, object, BigInt, or unknown value
-never enters the Number plan for `+`; no native-looking register type is used
-as proof of source semantics. NaN, signed zero, conversion, abrupt completion,
-and overloaded operator behavior therefore stay in the boxed JS kernel when
-the exact Number proof is absent (**D2.4.1–D2.4.3**, **D8.4.1v2**). The
-compiler profile records admission/fallback while emitting; it does not insert
-a generated-code trace call, so trace-on and trace-off have identical finalized
-MIR.
-
-### 4.1 Physical property plans and compact references
-
-`JsMirReference` separates language-owned reference evaluation from the
-post-evaluation physical decision. It preserves base/key evaluation order,
-optional/private/`super` setup, completion checks, and roots; `jm_emit_get_value`
-and `jm_emit_put_value` then choose either a small guarded hit or exactly one
-existing JS semantic fallback. This leaves uncommon property semantics out of
-the common read path (**D5.3.4**, **D8.4.3v2**).
-
-- A proven computed INT/FLOAT key remains native until the selector. A literal
-  packed tagged Array hit checks its receiver/layout, bounds, and element
-  presence before using the shared element-address emitter and one tagged
-  load. Noncanonical keys, holes, prototype-visible cases, and other receivers
-  use the existing native-key or generic JS kernel once; they are not
-  reimplemented in MIR.
-- Object literals and eligible constructor prefixes receive immutable TypeMap
-  recipes. A predicted ordinary named field checks the exact recipe/layout and
-  slot assumptions, then directly loads or stores. A shape transition,
-  descriptor/exotic receiver, or incompatible store takes `js_get_name_id` or
-  `js_set_name_id`. The recipe is compile metadata, never a mutable feedback
-  cache, as required by **D8.4.1v2**.
-- ASCII string leaves profile search, split, slice, character access, and
-  concat separately from Unicode. The runtime's epoch-guarded, rooted
-  substring cache only reuses eligible ASCII substrings; UTF-16/Unicode cases
-  retain their semantic path.
-
-The known-code source setter used during MIR function setup is no-GC; the
-module-unit state index is likewise a no-GC `ArrayList`. This removes common
-path safepoints without relaxing emitter-owned roots (**D5.3.4**). Focused
-MIR contracts for the Number, index, and field plans, plus Result45 and its
-interleaved A/B, are recorded in [JS Tune11](../../../vibe/jube/JS_Tune11.md).
-
----
-
-## 5. Condition lowering, the `_raw` facades & `jm_emit_is_truthy`
-
-Branch conditions (the test of `if`, `while`, `for`, ternary, and the operands of `!`) go through `jm_transpile_condition` (`js_mir_expression_lowering.cpp:12330`), which produces a **raw int64 0/1** directly usable in `MIR_BF`/`MIR_BT` — avoiding the box-a-boolean-then-unbox-it round trip:
-
-1. **Typed numeric comparison** → defer to `jm_transpile_expression`, since the native comparison path (§4) already yields 0/1 (`:12356`).
-2. **Untyped comparison** → call a `_raw` facade that returns int64 directly: `js_cmp_raw(op, l, r)` for the four relational ops (op a constant operand), `js_eq_raw` for `===`, `js_loose_eq_raw` for `==`, with `!==`/`!=` collapsed to the same call XOR-ed with 1 (`:12398`–`:12435`).
-3. **`!expr`** → recurse on the operand and `MIR_XOR` with 1 (`:12440`).
-4. **Fallback** → `jm_transpile_box_item` then `jm_emit_is_truthy` (`:12453`).
-
-`jm_emit_is_truthy` (`js_mir_calls_boxing_types.cpp:1235`) is the general truthiness primitive: for a statically-BOOL expression it just `AND`s the low bit (the boolean Item's payload), otherwise it calls the runtime `js_is_truthy` and `uext8`-narrows the result. The empty test of `for(;;)` becomes a constant 1 (`:12331`).
-
----
-
-## 6. Short-circuit operators
-
-`&&`, `||`, and `??` are lowered in `jm_transpile_binary` **before** the boxed fallback (`js_mir_expression_lowering.cpp:2038`) so the right operand is only evaluated when needed. The shape is uniform: evaluate the left into a boxed Item; compute a branch condition (`jm_emit_is_truthy` for `&&`/`||`, `js_is_nullish` for `??`); branch with `MIR_BF` (for `||`) or `MIR_BT` (for `&&` and `??`) to the right-evaluation label; on the short-circuit edge `MOV` the left value into the result, else `MOV` the right value (`:2056`–`:2090`). The whole expression therefore yields a boxed Item, matching ECMAScript semantics that these operators return one of their operands, not a coerced boolean.
-
-A separate peephole sits just after: `typeof x === "literal"` collapses the typeof + string-box + strict-equal triple into a single `js_typeof_is(value, type_str)` call returning a raw 0/1 that is then re-boxed as a boolean Item (`:2093`–`:2152`), gated on the operand being an in-scope identifier.
-
----
-
-## 7. Constant folding & dead-branch elimination
-
-`jm_try_fold_const` (`js_mir_calls_boxing_types.cpp:1552`, declared from the expression file) is a pure compile-time evaluator over literal/unary/binary subtrees, gated by `jm_const_fold_enabled` (on unless `LAMBDA_JS_CONST_FOLD=0`, `:1543`). It is deliberately conservative to preserve runtime numeric semantics:
-
-- number literals carry an `is_float` classification mirroring `jm_get_effective_type`; bigint and non-finite values are not folded (`:1557`).
-- integer `+`/`-`/`*` only fold when the result **round-trips exactly** through int64 and stays within ±2^53 (`:1608`); `/` and `%` always yield float; bit-ops fold via `ToInt32`/`ToUint32` helpers (`:1625`).
-- unary `-0` is **not** folded (it must stay float), and `**`, `&&`, `||`, `??`, `in`, `instanceof` are never folded (`:1581`, `:1646`).
-
-At a value site, `jm_emit_folded_at_value_site` (`:1661`) emits either a native constant (when the caller wants native and the fold type agrees) or a boxed Item, and returns false to fall through to normal codegen on a type mismatch — keeping the folded representation consistent with what the consumer expects.
-
-Dead-branch elimination lives in `jm_transpile_if` (`js_mir_statement_lowering.cpp:1114`): if the test folds to a constant, the never-taken branch is dropped **only when** `jm_branch_dead_safe` (`:1094`) confirms it cannot hoist an Annex-B function declaration into the enclosing scope. That whitelist admits throw/expression/return/break/continue statements and blocks recursively composed of them; anything else (notably a function declaration) is conservatively kept and lowered normally, because `var` hoisting is already handled by local collection but function hoisting is not.
-
----
-
-## 8. Call emission & MIR import
-
-Runtime helpers are referenced by name and resolved at link time. The emit side is `jm_ensure_import` (`js_mir_calls_boxing_types.cpp:97`), which lazily builds one `MIR_new_proto_arr` + `MIR_new_import` per distinct `(name, return type, nres, nargs, arg types)` signature and caches both keyed by a string like `name#r<ret>#n<nres>#a<nargs>#<argtype>…` (`:104`). The arity-specialized wrappers `jm_call_0`…`jm_call_6` and `jm_call_void_0`…`jm_call_void_5` (`:154`–`:299`) build the actual call instruction. The resolution side (`import_resolver`, `func_map`, `jit_runtime_imports[]`) is documented in [JS_01](JS_01_Compilation_Pipeline.md) §7.
-
-Every generated entry point also uses the shared Lambda side-stack emitter. `jm_begin_function_frame` inserts one checked prologue that binds the context stacks, saves root/number watermarks, and reserves the function's static root count. Heap-capable locals and raw env/args pointers publish into root slots; assignments refresh their slots and helper calls first publish all live scope variables. `jm_emit` rewrites every `MIR_RET` to one return label. Return inference selects a scalar lifetime mode (`NONE`, `FLOAT`, `INT64`, `DTIME`, or `DYNAMIC`). `jm_finish_function_frame` re-homes owned env scalars, then the shared MIR emitter either restores the number watermark directly or donates one normalized frame-base slot for a callee-owned wide scalar. No scalar capture/rebuild import is involved. Generator and async state-machine entries use `DYNAMIC` and the same discipline, so suspension state owns no pointer into a reclaimed invocation.
-
-`jm_transpile_call` recognizes syntax-level operations such as `require`, dynamic
-`import`, direct `eval`, and `super`, but it does not select an ordinary method's
-semantics from receiver class or source spelling.  Under **D6.2.2v2**, a member
-call first evaluates and roots the receiver, performs `js_property_access` (or
-the equivalent NameId helper), propagates an accessor ERROR before evaluating
-arguments, and only then calls the returned value with the receiver as `this`.
-Optional member calls use the same `Get -> Call` sequence after their nullish
-guards.  `jm_resolve_native_call` therefore rejects every member expression;
-only an exact lexical function binding may use a direct body call.
-
-The generic path builds a caller-owned argument span in the function's
-argument frame slots and delegates to `jm_call_function_into`
-(`js_mir_calls_boxing_types.cpp`). That helper donates a scalar result home and
-emits one six-operand call shape, with the emitter's rooting provenance as the
-final literal operand:
-
-- **Target selection.** A layout guard runs first: the callee is a container
-  pointer (high byte 0, non-null) whose record has `type_id == LMD_TYPE_FUNC`,
-  `entry_abi == FN_ENTRY_ABI_JS_FUNCTION`, and a non-null `invoke`. If it
-  passes, the target register holds the callee's stored `[[Call]]` capability.
-  Otherwise `em_load_import_address` loads the address of `js_call`, the single
-  runtime entry, into the same register. `js_call` performs the same layout
-  split before entering the same `invoke`, so both targets are observably
-  identical.
-- **One call.** The site then makes a single indirect call
-  (`call js_call_p…, <target reg>, …`). It reuses the `js_call` import's proto
-  and audited metadata through `em_call_indirect_as`, so its safepoint, root and
-  exception bookkeeping are identical to a direct import call.
-
-The guard tests layout, not callee identity, and nothing is stored per site
-(**D8.4.1v2**). The guard costs ten instructions per site and adds no safepoint,
-root store or error-lane join; the call result is the ordinary carrier. For an ordinary callee `invoke` is the call
-kernel itself (`js_call_entry_generic`); the kernel then calls the callee's
-finalized body entry, which for compiled code is its MIR span entry (JS_05 §2).
-The shape is pinned by `test/mir/js/dynamic_call_invoke_entry.mir-check`. Spread forms route through
-`js_apply_function_into`. Dynamic construction uses
-`jm_construct_value_into`, whose six-operand runtime call carries the callee,
-argument span, argument count, explicit `newTarget`, result home, and the
-pre-rooted-span fact to `js_construct_value`. There is no pending `newTarget`
-handoff. Exact direct-body calls may temporarily install active `this` and
-`new.target` for their dynamic extent, restoring both on exit; this is active
-activation state rather than constructor-selection state.
-
-Every call site that can observe side effects is wrapped by its argument
-frame-slot scope (cleared at expression completion and on error-lane exits),
-closure-environment readback, and `jm_emit_error_lane_propagate_check` (§9). The standing MIR fixture
-`test/mir/js/tune4_call_construct.mir-check` ratchets property `Get` before
-dynamic call and the explicit construct operand shape.
-
----
-
-## 9. Exceptions
-
-LambdaJS does not use C++ exceptions or `longjmp` for ordinary JS throws. It
-uses Lambda's merged Item error lane, as required by D1.4v3/DI15v2/D8.4.3v2:
-a fallible helper returns either its normal Item or an ERROR-tagged
-`LambdaError*`, and each JIT/native caller routes and returns that Item through
-its own activation. The cross-language contract is detailed in
-[`vibe/Lambda_Design_Runtime_Error_Handling.md`](../../../vibe/Lambda_Design_Runtime_Error_Handling.md).
-
-**Carrier** (`js_runtime_state.cpp`): `js_throw_value(v)` creates or reuses
-the `LambdaError` carrier and returns its ERROR-tagged Item; every convenience
-thrower funnels through it. `js_error_lane_payload` is the catch-boundary
-conversion: it unwraps a primitive throw carrier or retags the same Error
-pointer to its Map-compatible resting form. `JsRuntimeState` holds neither an
-exception value/message buffer nor fault-bridge slots; there is no pending
-flag or `js_check_exception`/`js_clear_exception` protocol.
-
-**Propagation** is emitted by `jm_emit_error_lane_propagate_check`, called after
-runtime calls whose catalog effect may set an error. `jm_emit_error_lane_test`
-branches on the high-byte ERROR tag of the latest Item result. It finds the
-topmost non-`yield_state_only` entry on `try_ctx_stack`: inside a try it emits
-`MIR_BT` to the catch/finally label; outside any try it emits `MIR_BT` to the
-per-function `func_error_lane_label`, which returns the error Item. Before the
-jump it zeroes every active argument frame-slot scope, because a throw during
-argument evaluation ends those calls' lifetimes (JS_03 §7). This preserves
-the original identity through nested calls, loops, and accessors.
-
-**Online lane proof.** `error_lane_track ∈ {UNKNOWN, CLEAN, SET, UNREACHABLE}`
-is compiler-only dataflow used to elide branches. Catalog-proven `PRESERVES`
-calls do not emit a branch; `UNKNOWN` tests the already-held Item result; `SET`
-routes directly. No poll helper, signal-coherence tripwire, or ambient runtime
-state is emitted. The proof is saved/restored around nested function and
-state-machine compilation.
-
-<img alt="Exception model and stack-overflow recovery" src="diagram/d04_exceptions.svg" width="720">
-
-**JIT try/catch/finally** (`JS_AST_NODE_TRY_STATEMENT`, `:5483`) pushes a
-`JsTryContext` recording the catch/finally/end labels, delayed-return
-registers, and a stable incoming-error register. After each statement in the
-try body it routes an ERROR-tagged result to catch/finally (`:5552`). The
-catch block restores the `with`-scope depth, then
-`js_error_lane_payload` supplies the thrown value to the catch parameter.
-Finally saves the in-flight Item, scopes a clean compiler proof for its body,
-and re-raises the
-saved Item unless the finalizer itself throws a new one (which takes
-precedence per spec §13.15.8). A fallback carrier is written into the existing
-try register rather than replacing that register after catch lowering, which
-protects nested-call error identity. `throw` and abrupt
-`return`/`break`/`continue` still inline intervening finalizers and pop
-`with` scopes. `yield_state_only` contexts remain synthetic resume state and
-are skipped by throw/return routing.
-
-**Stack overflow** has two layers. The language-level guard is an explicit
-check: every JIT direct source call (`jm_enter_source_invocation`) and every
-call-kernel instance (`js_call_kernel`) compares the native stack pointer with
-`Context::stack_limit` and throws a catchable `RangeError` through the error lane
-when it is below. The limit comes from `lambda_stack_recoverable_limit()`: a
-32 MB default budget from the thread's stack base (scaled by `--stack-size`),
-never lower than the fault limit plus 256 KB of throw headroom (JC23,
-`vibe/jube/JS_Runtime_Call_Flatten.md` §3.6). The signal layer below is the
-backstop for native recursion that never passes a call guard.
-
-The backstop is the one case that *does* use signals (`lambda/lambda-stack.cpp`, shared with the Lambda runtime). `lambda_stack_init` installs a `SIGSEGV` handler on an alternate stack (`sigaltstack` + `SA_ONSTACK`, `:194`). The core pipeline arms a `sigsetjmp` recovery point and sets `_lambda_recovery_armed` only around the `js_main` call (`js_mir_entrypoints_require.cpp:798`–`:815`). On a fault the handler disambiguates a genuine stack overflow from other segfaults, and — only if armed — `siglongjmp`s back (`lambda-stack.cpp:177`–`:191`); the pipeline then converts the recovery into a normal JS exception via `js_throw_range_error("Maximum call stack size exceeded")` (`js_mir_entrypoints_require.cpp:810`). An unarmed overflow (e.g. during AST build) falls through to a clean default crash rather than jumping into a zero-initialized `jmp_buf`.
-
----
-
-## 10. Dynamic code: the direct-`eval` call site
-
-MIR never lowers dynamic source (**D8.1.3v20 / JSI35**). `eval`, the `Function`-family constructors, string timer handlers, and `$262.evalScript` all go through `js_dynamic_code.cpp`. That file assembles the source text and runs the pre-parse steps every eval shares (`js_eval_source_shortcut`: a non-string argument, V8 native probes, the field-initializer `arguments`/`super`/`new.target` checks, and the two script-free shapes below). For a MIR caller's direct eval it adds the strict-assignment scan for bridged `const`s. It then hands the code to the AST interpreter (`js_interp_execute_direct_eval_source`, `js_interp_execute_indirect_eval_source`, or `js_interp_execute_source` for a `Function`-family wrapper). An interpreted caller's direct eval parses and runs in `js_interp.cpp`, linked to the caller's environments (**D8.1.3v21 / JSI36**). Two source shapes never create a script: whitespace/comment-only source completes with `undefined`, and a lone RegExp literal constructs its RegExp. Other dynamic source shares the process-wide AST template cache. The exception is a direct eval that names private members; its parse depends on the caller.
-
-MIR keeps only the caller side of a direct eval (`jm_emit_eval_identifier_call` → `jm_emit_intrinsic_direct_eval` in `js_mir_expression_lowering.cpp`). The call site compares the callee with the intrinsic `%eval%`; a mismatch is an ordinary indirect call. For a direct eval it projects the caller's bindings into the `EvalContext` bridge and calls `js_builtin_eval` with the direct flag. Function locals and parameters go through the env frame. At `js_main` level, script `let`/`const` module slots go through the global-lexical frame. The innermost class's private names go through the eval-private frame. After the call it writes projected var/param registers (and, at `js_main` level, module lexical slots) back, then pops the frames, including when the eval throws. Eval-created `var`s land in the activation's eval journal, which MIR reads back through `js_eval_local_get_binding_or_fallback`. Global eval code and `Function` bodies reach a MIR script's top-level lexicals through the realm lexical record. `js_main` declares each one with `js_global_lexical_declare_module_slot`, linking the record to its module slot. The eval code's semantics — declaration instantiation, completion values, `this` — belong to the interpreter (`js_interp.cpp`; design in `vibe/Lambda_Design_JS_Interpreter.md` §5.6).
-
----
-
-## Known Issues & Future Improvements
-
-Grounded in the current code; candidates for cleanup, not necessarily bugs.
-
-1. **Boxed `MIR_MOV` overhead / no destination-passing.** The short-circuit, conditional, and many fold/boxed paths thread results through explicit `MIR_MOV` into a fresh result register rather than letting the consumer name the destination. The volume of `MIR_MOV` is high (the boxed-Item discipline plus per-site result regs), and a destination-passing rewrite — having `jm_transpile_*` accept a target register — is the obvious next optimization but has not been done.
-2. **Oversized lowering files.** `jm_transpile_binary`, `jm_transpile_call`, and `jm_transpile_condition` live in a ~13.7k-line `js_mir_expression_lowering.cpp`; `js_mir_statement_lowering.cpp` is ~6k lines with the entire try/catch/finally state machine inline in one `switch` case (`:5483`+). The special-callee dispatch in `jm_transpile_call` is a long linear chain of `memcmp` callee-name checks.
-3. **MIR-gen spill workaround for generators.** Values that must survive a `yield` are manually spilled to the generator env via `jm_gen_spill_save`/`jm_gen_spill_load` (`js_mir_analysis.cpp:293`), threaded through try/catch/finally (`:5774`+). This is a hand-rolled compensation for the register allocator not preserving virtual registers across the resume edge; it is error-prone and scattered.
-4. **A MIR caller's direct-eval const check still scans source text.** A strict assignment to a bridged `const` is detected by a string scan (`js_eval_source_assigns_immutable_binding` in `js_dynamic_code.cpp`) because the bridge projects bindings as plain values. An interpreted caller links its environments instead (**D8.1.3v21 / JSI36**), so its eval code reaches the error from the binding itself. The scan retires with the MIR bridge at P4. Strict `eval`/`arguments` targets need no scan: the early-error pass rejects them in every assignment form.
-5. **Native multiply routes INT×INT through doubles.** Correct for ≤2^53 but means a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` instead of an integer multiply (`js_mir_expression_lowering.cpp:1806`); a range-guarded integer-multiply fast path is possible.
-6. **Native-child materialization is still local.** Tune11 centralizes binary
-   operation selection in `MirNumericOpPlan`, but `jm_transpile_as_native`
-   still consults a child's effective type when it materializes that child.
-   Carrying a richer child-plan carrier could remove that remaining query, but
-   should be attempted only with a measured compiler-time or hot-loop benefit.
-
----
-
-## Appendix A — Source map
-
-| File | Responsibility (this doc) |
-|---|---|
-| `lambda/js/js_mir_expression_lowering.cpp` | `jm_transpile_binary`/`_unary`/`_call`/`_condition`/`_conditional`, native arithmetic, short-circuit, `jm_try_fold_const` body, `_raw` facade emission. |
-| `lambda/js/js_mir_statement_lowering.cpp` | `jm_transpile_if`, loops, try/catch/finally, throw, `jm_emit_error_lane_propagate_check`, `jm_branch_dead_safe`. |
-| `lambda/js/js_mir_calls_boxing_types.cpp` | `jm_ensure_import` + `jm_call_*`, inline box/unbox helpers, `jm_box_native`, `jm_is_native_type`, `jm_emit_is_truthy`, `jm_transpile_as_native`. |
-| `lambda/js/js_dynamic_code.cpp` | `js_builtin_eval` dispatch and dynamic-source checks, `new Function` / `GeneratorFunction` / `AsyncFunction` source assembly; execution is AST (§10). |
-| `lambda/js/js_mir_completion.cpp` | Abrupt-completion cleanup (`jm_emit_abrupt_jump_cleanup`, break/continue). |
-| `lambda/js/js_mir_analysis.cpp` | `jm_gen_spill_save` / `jm_gen_spill_load`. |
-| `lambda/js/js_runtime_state.cpp` | `js_throw_value` / `js_error_lane_payload`, TDZ/const-assign throwers. |
-| `lambda/lambda-stack.cpp` | `lambda_stack_init`, SIGSEGV alt-stack handler, `sigsetjmp` recovery. |
-
-## Appendix B — Related documents
-
-- [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) — phases 1–3, interp/JIT selection, MIR import resolution.
-- [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — the tagged `Item`, tag layout, execution side stacks for boxed numerics.
-- [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) — capture analysis, scope-env reload around calls, native/boxed dual versions.
-- [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — generator yield-state lowering and the spill mechanism.
-- [JS_15 — Performance & Optimization](JS_15_Performance.md) — fast-path measurements, link cost, opt-level trade-offs.
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
+> **Authority:** S1.11, D8.1.3v25, D8.2.3, D8.4.1v2, D8.4.3v2 and D5.3/D5.4.
+> **Primary sources:** `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, its `mvp_lmd_*` runtime files, and `lambda/runtime/mir_emitter_shared.hpp`.
+
+## 1. Compiler boundary
+
+MVP-Lmd supplies the formal JavaScript MIR path (**D8.1.3v25**). The legacy LJS
+MIR emitter and its `JsMirTranspiler` state have been removed. Public execution
+selection and the retained frontend are described in
+[JS_01](JS_01_Compilation_Pipeline.md).
+
+`mvp_lmd_compile_unit` runs admission, representation planning and lowering.
+`MvpLmdProgram` owns unit analysis and code; `LmdCompiler` owns the current
+function's emission state. Its `MirEmitter` is shared with Lambda. Retained
+analysis selects representations and guards; emission consumes those facts
+(**D8.2.3**, **D8.4.1v2**).
+
+## 2. Values, operations and storage
+
+`LmdValue` carries a MIR register and its known representation/kinds. Proven
+scalar computations use native lanes. Unknown values and language boundaries
+use Lambda `Item`. Conversion and representation are distinct operations
+(**D2.4.1–D2.4.3**); source assignments can change a binding's kind.
+
+Expression, reference and statement lowering share ordinary Lambda arrays,
+maps, shapes and nominal records. Stable layouts permit direct field/element
+access; guards retain observable property behavior, coercion order and fallback
+for special storage. Shared shapes and JS policy follow **D2.6.6v3**, **D3.4.7**
+and **S1.11**. The working design records the admission and optimization details:
+[JS MVP design](../../../vibe/jube/JS_MVP_Lmd.md).
+
+## 3. Calls, closures and roots
+
+Known functions can use direct generated calls. Dynamic functions enter their
+stored capabilities; MVP, AST and native callables preserve their owning ABI.
+MVP closures reuse Lambda Function/environment ownership with mutable JS cells
+(**D6.2.2v2**). Scalar result homes and precise frame/root publication use the
+shared emitter (**D5.3/D5.4**).
+
+Shared `js_call_entry_compiled_light` / `js_call_entry_compiled_this` entries
+remain for interpreter definitions promoted to MVP. Their flags and owner
+checks describe a shared compiled body. The removed LJS MIR factories and weak
+code-intern table no longer construct values.
+
+## 4. Errors, completion and suspension
+
+Returned Item failures preserve the existing error/completion lane
+(**D8.4.3v2**). JS owns evaluation order, throws, catch/finally completion and
+strict-reference behavior (**S1.11**). Precise ownership spans native callbacks,
+property operations and suspended activations.
+
+MVP generators, async functions and modules use shared suspended-activation,
+Promise and source-module services. The legacy MIR state-machine constructors
+and its native module carrier have been removed. Shared AST and MVP carrier
+bodies retain their own entry functions.
+
+## 5. Dynamic source and TypeScript
+
+`mvp_lmd_dynamic.cpp` adapts live bindings, globals, receivers, calls and foreign
+values to the retained AST interpreter. `eval` and Function-family bodies are
+interpreted (**D8.1.3v25**); ordinary formal MIR source does not fall back to LJS.
+
+TypeScript admission is a frontend option on the same compiler. Its unshadowed
+`type(value)` intrinsic calls the existing `ts_type_info` helper. The option adds
+no new semantic runtime helper and no TypeScript-specific check to generated
+ordinary JavaScript loops.
+
+## 6. Native helper ownership
+
+The `mvp_lmd_*` support files implement/adapt property and class operations,
+arrays, primitive conversions, builtins, regex protocols, iterators, async work,
+proxies/reflection, dynamic source and host services. They reuse shared JS and
+Lambda algorithms. Common helper reachability includes interpreter and host
+bridges; source-file ownership alone does not establish exclusive engine use.
+
+The retirement removes compiler-only literal/array factories, declaration and
+eval-environment bridge wrappers, typed-element facades, old function factories
+and their import records. Shared algorithms and MVP promotion call entries are
+retained. Pre-retirement size estimates and their attribution limits are in
+[design §36.1](../../../vibe/jube/JS_MVP_Lmd.md#361-mir-compiler-and-native-helper-source-size).
+
+Build evidence and runtime/performance qualification are recorded separately in
+[the retirement implementation record](../../../vibe/impl/JS_MVP_Lmd_Legacy_MIR_Retirement.md).

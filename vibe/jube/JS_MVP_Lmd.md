@@ -1970,10 +1970,13 @@ Exact pins, source provenance, implementation and remaining gates:
 
 ### 36.1 MIR compiler and native helper source size
 
-**Snapshot (2026-10-17):** source revision `051adda5e`. Counts are physical
-implementation lines, including comments and blanks, excluding headers.
+Counts are physical implementation lines, including comments and blanks,
+excluding headers.
 Parser/AST code, the interpreter implementation, Lambda core, third-party MIR,
 generated data tables, tests and documentation are outside the counted scope.
+
+**Historical compiler comparison (2026-10-17):** source revision `051adda5e`,
+before the legacy compiler retirement in §36.2.
 
 | MIR compiling | MVP-Lmd | Legacy LJS |
 |---|---:|---:|
@@ -1984,20 +1987,69 @@ MVP's compiler has **57% fewer source lines**. The counted files are
 `mvp_lmd_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
 file family includes retained shared entrypoint/cache integration.
 
-| Native runtime C/C++ helpers | Source lines | Attribution |
-|---|---:|---|
-| Common to MVP and LJS | **72,675** | Conservative static estimate |
-| MVP-specific | **10,303** | Exact total of 14 implementation files |
-| LJS-specific | **2,782** | Provisional static estimate |
-| **Distinct helper source total** | **85,760** | Exact total of 41 implementation files |
+**Cleaned native helper count (2026-10-17):** working tree based on `6c14534a7`,
+after the retirement and helper audit in §36.2–§36.3. All counts below are exact
+file totals; the earlier provisional common/LJS attribution is superseded.
 
-The existing 27-file JS helper pool contains **75,457** lines; its shared and
-LJS-specific portions are attributed at function/data level. The dependency
-census follows calls, function addresses and callback tables from MVP,
-the retained interpreter and shared host/runtime interoperability. Interpreter
-bridges therefore contribute shared dependencies under **D8.1.3v25**, although
-the interpreter's own source is excluded. Mixed-file scaffolding is charged
-to common code; the global import-symbol inventory does not establish use.
-Indirect dispatch, conditional compilation and builtin tables limit exact
-exclusivity and can overestimate sharing. These estimates do not establish
-which legacy code can safely be removed or imply a runtime-size reduction.
+| Native runtime C/C++ support | Implementation files | Source lines |
+|---|---:|---:|
+| Shared JS helper pool: MVP, retained AST/AUTO and hosts | 27 | **73,219** |
+| MVP-specific helpers | 14 | **10,303** |
+| Legacy LJS MIR-only helpers, retired | 0 | **0** |
+| **Comparable helper source total** | **41** | **83,522** |
+| Shared execution/cache/loader/recovery services | 4 | **2,541** |
+| **Native support including shared services** | **45** | **86,063** |
+
+The comparable helper total uses the same 41-file scope as the original
+**85,760-line** snapshot: **2,238 fewer lines (2.6%)**. Shared interpreter and
+host support remains necessary under **D8.1.3v25**, including interpreted
+dynamic source; the interpreter implementation itself remains excluded.
+
+The four shared services moved out of the legacy compiler during retirement:
+`js_execution.cpp` (1,703), `js_code_cache.cpp` (458), `js_module_loader.cpp`
+(212) and `js_compile_recovery.cpp` (168). They were previously within the
+compiler comparison's scope, so their **2,541 lines** are shown separately
+before the extended native-support total. Per-file counts and source hashes:
+`temp/js_runtime_helper_size/counts.json`. Source-size accounting and the
+function-level dependency audit are separate measurements.
+
+### 36.2 Retire legacy LJS MIR handling
+
+**Decision (2026-10-17, USER), D8.1.3v25:** remove the superseded LJS MIR
+compiler, its private compiler state, alternative compiled-entry/preamble
+handling and exclusive native helpers. Public execution APIs continue through
+MVP or the explicitly selected AST/AUTO tier. Dynamic source remains interpreted.
+
+Shared module/path resolution, code-image leases, host entry points and frontend
+recovery move into separate JS service files. MVP Runtime/Script ownership
+replaces deferred native-context stores, including DOM inline handlers
+(**D5.3/D5.4**, **D8.5.1v2**). Shared compiled-call entries remain for AST
+definitions promoted to MVP; source ownership must account for these users.
+
+TypeScript selects the existing parser profile on MVP and reuses `ts_type_info`
+for its unshadowed `type(value)` intrinsic. No new semantic runtime helper is
+introduced. Ordinary JS generated paths retain their existing representation,
+property, ownership and call plans (**D8.2.3**, **D8.4.1v2**).
+
+The compiler comparison in §36.1 is historical; its helper table reflects the
+latest cleanup. Removal size, build evidence and remaining
+runtime/performance qualification are recorded in the
+[retirement implementation record](../impl/JS_MVP_Lmd_Legacy_MIR_Retirement.md).
+The retirement removes **33,033 net physical C/C++ lines** (27,249 code lines);
+the release executable and four native Node modules build successfully.
+Runtime conformance and benchmark performance have not been requalified in
+this removal pass.
+
+### 36.3 Native helper audit after retirement
+
+**2026-10-17, USER; D8.1.3v25, D5.3/D5.4, D6.2.2v2:** trace native helpers
+through actual calls, emitted imports, callbacks, builtin tables and ownership
+hooks. An import registry entry alone does not establish use.
+
+The audit removes **92 unused function bodies** and **1,365 additional physical
+C/C++ lines**. It retains 4,404 bodies with production/host/lifetime/diagnostic
+references, 18 conditional build implementations and five APIs with test callers
+only. The dormant document-cache adapter is recorded explicitly. No semantic
+runtime helper is added. Method, per-function artifacts, retention decisions
+and qualification results are in the
+[native helper audit](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md).

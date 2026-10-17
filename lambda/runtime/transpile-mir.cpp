@@ -2022,7 +2022,7 @@ static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr,
 
 // Thin wrappers over the shared emitter primitives (P0.1). These delegate to
 // the em_* functions in mir_emitter_shared.hpp so the register/label/insn
-// emit logic lives once and JsMirTranspiler can adopt the same primitives.
+// emit logic is shared with the formal JavaScript MVP compiler.
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
     return em_new_reg(&mt->em, prefix, type);
 }

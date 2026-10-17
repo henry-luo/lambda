@@ -38,13 +38,15 @@ struct MvpLmdOptions {
     bool namespace_result = false; // public module loaders consume the live export namespace
     const MvpLmdCode* cached_code = NULL;
     bool native_harness = false; // harnessless Test262 batches use the shared callable helpers
+    bool typescript = false;    // parser profile and the existing TS type() intrinsic
 };
 MvpLmdExecution* mvp_lmd_execute_with_options(const char* source, size_t length,
     double* execution_ms, const MvpLmdHost* host, const MvpLmdOptions* options);
 // formal MIR entry: the Runtime retains code and the result's original heap.
 Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t length,
     const char* filename, uint64_t* result_home, bool module = false,
-    const MvpLmdCode* cached_code = NULL);
+    const MvpLmdCode* cached_code = NULL, bool typescript = false,
+    bool native_harness = false);
 
 // the execution owns its AST, MIR, heap and result until destroy (D5.3).
 // optional timing covers only the generated entry, excluding compile/setup and result publication.

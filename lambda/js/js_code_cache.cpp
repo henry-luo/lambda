@@ -1,5 +1,5 @@
 #include "js_transpiler.hpp"
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
 #include "mvp-lmd/mvp_lmd.h"
 #include "../jube/jube_interface.h"
 #include "../input/input.hpp"
@@ -28,25 +28,6 @@ static uint64_t js_mir_lease_preamble_abi_hash(const JsPreambleState* preamble) 
 
     hash = hash_combine_u64(hash, (uint64_t)preamble->module_var_count);
     hash = hash_combine_u64(hash, 0x4e494431u);
-    hash = hash_combine_u64(hash, (uint64_t)preamble->module_property_count);
-    hash = hash_combine_u64(hash, (uint64_t)preamble->module_property_bytes_size);
-    if (preamble->module_property_specs && preamble->module_property_bytes_size > 0) {
-        hash = hash_combine_u64(hash, hashmap_hash_xxhash3_bytes(
-            preamble->module_property_specs,
-            preamble->module_property_bytes_size, 0, 0));
-    }
-    for (int i = 0; preamble->entries && i < preamble->entry_count; i++) {
-        const JsModuleConstEntry* entry = &preamble->entries[i];
-        size_t name_len = entry->name ? strlen(entry->name) : 0;
-        hash = hash_combine_u64(hash, hashmap_hash_xxhash3_bytes(entry->name, name_len, 0, 0));
-        hash = hash_combine_u64(hash, (uint64_t)entry->const_type);
-        hash = hash_combine_u64(hash, (uint64_t)entry->int_val);
-        hash = hash_combine_u64(hash, (uint64_t)entry->var_kind);
-        hash = hash_combine_u64(hash, (uint64_t)entry->modvar_type);
-        hash = hash_combine_u64(hash, entry->is_nested_func_hoist ? 1 : 0);
-        hash = hash_combine_u64(hash, entry->is_iife_func_decl ? 1 : 0);
-        hash = hash_combine_u64(hash, entry->is_live_default_binding ? 1 : 0);
-    }
     return hash;
 }
 
@@ -67,7 +48,7 @@ static InputScriptRequest js_mir_lease_request(bool preamble_mode,
     request.backend = "mir";
     request.execution_mode = preamble_mode ? "preamble" : "classic";
     request.ast_abi = 1;
-    request.compiler_abi = 2;
+    request.compiler_abi = 3;
     request.interface_abi = js_mir_lease_preamble_abi_hash(preamble);
     request.dependency_digest = jube_interface_registry_digest();
     request.optimize_level = g_js_mir_optimize_level;
@@ -104,11 +85,7 @@ static void js_mir_lease_destroy_artifact(void* value) {
 static size_t js_mir_lease_artifact_bytes(const void* value) {
     const JsPreambleState* state = (const JsPreambleState*)value;
     if (!state) return 0;
-    size_t bytes = sizeof(JsPreambleState) +
-        (size_t)(state->entry_count > 0 ? state->entry_count : 0) *
-        sizeof(JsModuleConstEntry) + state->module_property_bytes_size;
-    bytes += mvp_lmd_code_bytes(state->mvp_code);
-    if (state->source_buffer) bytes += strlen(state->source_buffer) + 1;
+    size_t bytes = sizeof(JsPreambleState) + mvp_lmd_code_bytes(state->mvp_code);
     return bytes;
 }
 
@@ -338,7 +315,7 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.backend = "mir";
     request.execution_mode = "module";
     request.ast_abi = 1;
-    request.compiler_abi = 2;
+    request.compiler_abi = 3;
     request.interface_abi = jube_interface_registry_digest();
     request.dependency_digest = jube_interface_registry_digest();
     request.optimize_level = g_js_mir_optimize_level;
@@ -365,11 +342,8 @@ static size_t js_module_mir_cache_artifact_bytes(const void* value) {
     const JsModuleMirArtifact* artifact = (const JsModuleMirArtifact*)value;
     const JsPreambleState* image = artifact ? &artifact->image : nullptr;
     if (!image) return 0;
-    size_t bytes = sizeof(JsModuleMirArtifact) +
-        (size_t)(image->entry_count > 0 ? image->entry_count : 0) *
-        sizeof(JsModuleConstEntry) + image->module_property_bytes_size;
+    size_t bytes = sizeof(JsModuleMirArtifact);
     bytes += mvp_lmd_code_bytes(image->mvp_code);
-    if (image->source_buffer) bytes += strlen(image->source_buffer) + 1;
     bytes += (size_t)(artifact->static_dependency_count > 0
         ? artifact->static_dependency_count : 0) * sizeof(char*);
     for (int i = 0; i < artifact->static_dependency_count; i++) {
@@ -457,41 +431,6 @@ bool js_module_mir_cache_record_dependency(const char* importer_source,
     return linked;
 }
 
-const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
-        size_t source_len, const char* filename, JsModuleMirArtifact* compiled,
-        InputCacheScope** out_scope) {
-    if (out_scope) *out_scope = nullptr;
-    if (!compiled || !compiled->image.owns_compiled_state ||
-            !compiled->image.mir_ctx || !compiled->image.entry_func) {
-        return nullptr;
-    }
-    InputScriptCache* cache = input_manager_global_script_cache();
-    if (!cache || !input_script_cache_mir_enabled(cache)) return nullptr;
-    InputCacheScope* scope = input_script_cache_open_scope(cache);
-    if (!scope) return nullptr;
-    InputScriptRequest request = js_module_mir_request(source, source_len, filename);
-    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
-    if (!lease) {
-        input_script_cache_close_scope(scope);
-        return nullptr;
-    }
-    void* existing = nullptr;
-    if (input_script_cache_get_mir(lease, &existing)) {
-        input_script_cache_close_scope(scope);
-        return nullptr;
-    }
-    InputScriptArtifactOps ops = {
-        js_module_mir_cache_destroy_artifact,
-        js_module_mir_cache_artifact_bytes,
-    };
-    if (!input_script_cache_publish_mir(lease, compiled, &ops)) {
-        input_script_cache_close_scope(scope);
-        return nullptr;
-    }
-    if (out_scope) *out_scope = scope;
-    else input_script_cache_close_scope(scope);
-    return compiled;
-}
 
 const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
         InputScriptBuildScope* build, JsModuleMirArtifact* compiled,

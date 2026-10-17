@@ -97,7 +97,6 @@ struct Activation;
 extern "C" Item js_interp_generator_body(Activation* self, Item generator);
 extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
-extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);
 
 // A dynamic-source client supplies its own value semantics while sharing the

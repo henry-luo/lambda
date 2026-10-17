@@ -81,8 +81,8 @@ extern char* js_load_script_source_from_cache(const char* path,
                                               bool module_mode,
                                               size_t* out_length,
                                        InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
-extern void jm_cleanup_active_mir(void);
-extern void jm_abandon_active_mir_after_signal(void);
+extern void js_cleanup_active_compile(void);
+extern void js_abandon_active_compile_after_signal(void);
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 // Keep the teardown flag platform-wide because the public cleanup query and
@@ -331,7 +331,6 @@ extern "C" void script_runner_set_js_mir_lease_session(JsMirLeaseSession* sessio
 }
 
 extern "C" void script_runner_cleanup_heap() {
-    jm_cleanup_deferred_mir();
 }
 
 typedef enum JsScriptTaskKind {
@@ -2737,8 +2736,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         sigaction(SIGBUS, &js_exec_current->old_bus, NULL);
 		        // the native signal may have interrupted MIR/JIT state in-place;
 		        // abandon active MIR contexts instead of finalizing corrupted lists.
-		        jm_abandon_active_mir_after_signal();
-	        jm_cleanup_deferred_mir();
+		        js_abandon_active_compile_after_signal();
 	        if (preamble) {
 	            // siglongjmp can land after MIR preamble ownership was transferred;
 	            // use the normal destroyer so source_buffer/MIR/pools are released.
@@ -3116,17 +3114,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
 
-    // Get the new MIR context before restoring the old eval context.
-    // The handler functions were compiled in this new context and must be
-    // retained for the Function Items installed below.
-    MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
-    if (!handler_mir_ctx) {
-        log_error("collect_and_compile_event_handlers: no deferred MIR context found");
-        InlineHandlerInstallMap::destroy(handlers->element_map);
-        mem_pool_destroy(handlers_pool);
-        return;
-    }
-
+    // the document Runtime retains MVP units and their escaping handler Functions (D5.3).
     // Install the compiled functions into each element's on<type> IDL slot.
     // From this point on, normal dom_dispatch_event() handles `this`,
     // `event`, return-false default prevention, and propagation ordering.

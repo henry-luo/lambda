@@ -117,7 +117,7 @@ struct JsAstBody {
     Item lexical_new_target;
 };
 
-// One JS code record is shared by AST closures and MIR-interned values. Keep
+// One JS code record is shared by AST closures and their MVP promotions. Keep
 // definition facts and realm code facts directly on that owner: neither has an
 // independent allocation or identity (D6.2.1, D8.2.3; JSCU52).
 struct JsCallableCode {
@@ -127,8 +127,6 @@ struct JsCallableCode {
     String* source_text;
     void* func_ptr;
     Context* runtime_context;
-    // a weak realm table is detached before its owner is destroyed.
-    HashMap* intern_table;
     // Compiler-pool recipe for an ordinary function's own constructor fields.
     // It belongs to the source definition shared by every closure instance.
     TypeMap* instance_shape;
@@ -137,7 +135,6 @@ struct JsCallableCode {
     int param_count;
     int catalog_id;
     uint32_t module_state_id;
-    uint32_t intern_refcount;
 
     // compact definition and realm flags
     int16_t formal_length;
@@ -156,8 +153,6 @@ struct JsCallableCode {
     // Script-pool code is shared by all closures from one AST definition and
     // must not be reclaimed when one GC function value dies.
     bool definition_owned;
-    // A compiled JS entry is valid only in the realm that compiled it.
-    bool interned;
     // precise definition roots retain MVP bodies between closure instances.
     Item compiled_body;
     Item compiled_loop_body;
@@ -331,11 +326,6 @@ JsBoundData* js_fn_bound_ensure(JsFunction* fn);
 JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);
 JsCallableCode* js_fn_code_ensure(JsFunction* fn);
-JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
-        Context* runtime_context, int param_count, uint32_t module_state_id);
-void js_callable_code_release(JsCallableCode* code);
-void js_callable_code_table_destroy(HashMap* table);
-
 // A callable Item holds this record when its entry ABI names a hosted
 // language. Reading it is safe on either layout: the Function base supplies
 // `entry_abi` at offset 3, and a Lambda `Function` never carries a hosted
@@ -378,11 +368,6 @@ static_assert(offsetof(Function, type_id) == 0,
 static_assert(offsetof(Function, entry_abi) == 3,
               "Function layout discriminator is read before any field access");
 
-template <typename Field>
-static inline size_t js_function_offset(Field JsFunction::*field) {
-    JsFunction layout;
-    return (size_t)((const char*)&(layout.*field) - (const char*)&layout);
-}
 
 static inline void js_function_init_abi(JsFunction* fn) {
     function_init_abi((Function*)fn, LMD_TYPE_FUNC,
@@ -429,7 +414,7 @@ static inline Item js_fn_home_class(const JsFunction* fn) {
 #define JS_FUNC_FLAG_READS_THIS 2048
 #define JS_FUNC_FLAG_READS_NEW_TARGET 4096
 #define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
-#define JS_FUNC_FLAG_MIR_CONTEXT_ABI 16384
+#define JS_FUNC_FLAG_COMPILED_BODY 16384
 #define JS_FUNC_FLAG_CLASS_CONSTRUCTOR 32768
 #define JS_FUNC_FLAG_USES_ARGUMENTS 65536
 #define JS_FUNC_FLAG_DIRECT_EVAL 131072

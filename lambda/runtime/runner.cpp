@@ -3649,7 +3649,6 @@ void runtime_cleanup(Runtime* runtime) {
         ? runtime->eval_context->template_registry : NULL;
     if (runtime->eval_context) runtime->eval_context->template_registry = NULL;
     template_registry_destroy(template_registry);
-    js_eval_preamble_cache_reset();
     js_fetch_reset();
 
     bool event_loop_cleaned = false;
@@ -3730,7 +3729,6 @@ void runtime_cleanup(Runtime* runtime) {
             if (!js_runtime_state_thread_matches(cleanup_context)) return;
             // One-shot teardown has no later heap calls; finish eval-generated
             // MIR while its deferred-context list still belongs to this realm.
-            jm_cleanup_deferred_mir();
             js_runtime_state_destroy_context();
         }
         // DOM and JS cleanup can dispose callbacks that still activate their

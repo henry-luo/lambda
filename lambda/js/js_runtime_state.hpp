@@ -42,7 +42,7 @@ struct JsAgentGroup;
 struct JsAgentMember;
 struct JsWeakRuntimeState;
 struct JsPrototypeSnapshotState;
-struct JsMirCompileRecoveryState;
+struct JsCompileRecoveryState;
 struct JsPromiseHostOps;
 
 // Namespace selection is the JS profile's counterpart to the shared module
@@ -236,26 +236,10 @@ void js_realm_slots_destroy(JsRealmSlots* slots);
 void js_realm_slots_clear(JsRealmSlots* slots);
 Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
 Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
-bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
-    Item** values, int count, bool reserve);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
 LAMBDA_RT_API bool js_realm_runtime_is_active(void);
 LAMBDA_RT_API bool js_realm_runtime_has_input(void);
-bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
-    bool reserve);
-
-// A module's realm-items record is exactly one Item* per realm slot, in slot
-// order, so the record itself is the lookup's output array. The static_assert
-// pins that correspondence at every use site instead of a per-module copy loop.
-#define JS_REALM_ITEMS_FILL(Type, items, reserve, ...) \
-    static const JsRealmSlotId js_realm_item_slots[] = { __VA_ARGS__ }; \
-    static_assert(sizeof(Type) == \
-        sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0]) * sizeof(Item*), \
-        #Type " must hold exactly one Item* per realm slot, in slot order"); \
-    return js_realm_items_fill((items), js_realm_item_slots, \
-        (int)(sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0])), (reserve))
-
 
 void js_realm_slots_clear_transient(JsRealmSlots* slots);
 
@@ -280,35 +264,10 @@ static inline int js_with_frame_slots(int scope_count) {
     return scope_count + JS_WITH_MEMO_SLOTS;
 }
 
-// Generated closures retain only their MIR context and source buffer. Names
-// and observable strings are materialized through the owning module NameId
-// table, so compiler pools never cross the compile/execute boundary.
-// JSCU16: one owner per compiled unit -- its MIR context and the source
-// buffer that unit's generated code still reads -- held in a dynamic store
-// instead of two parallel fixed arrays with a hard cap.
-struct JsCompiledArtifact {
-    void* mir_context = NULL;
-    char* source_owner = NULL;   // freed with the context; may be NULL
-};
-
-struct JsCodeStore {
-    ArrayList* artifacts = NULL;
-};
-
-bool js_code_store_push(JsCodeStore* store, void* mir_context);
-// Hands the last pushed artifact ownership of a source buffer.
-void js_code_store_attach_source(JsCodeStore* store, char* source_owner);
-void* js_code_store_last_context(JsCodeStore* store);
-int js_code_store_count(const JsCodeStore* store);
-JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
-void js_code_store_clear_rows(JsCodeStore* store);
-void js_code_store_destroy(JsCodeStore* store);
-
 // Optional Node-leaf callbacks are semantic to one realm. Keep their function
 // pointers beside that realm rather than letting the last initialized module
 // overwrite a process-wide callback for every context.
 struct JsHostHooksState {
-    void (*shutdown_participant)(void) = NULL;
     Item (*console_format_hook)(Item) = NULL;
     bool redirect_stdout_to_stderr = false;
 };
@@ -847,18 +806,10 @@ struct JsRuntimeState {
     // in root slots their pushers own.
     JsWithFrame* with_head = NULL;
     bool with_memo_valid = false;
-    JsCodeStore code_store = {};
-    // P2 satellite code remains callable after the source turn ends, unlike
-    // ordinary deferred module artifacts.
-    JsCodeStore p2_code_store = {};
-    // Definition-level MIR code records are shared by closures and method
-    // wrappers while their functions remain live. The table is weak storage;
-    // each code record releases itself when its last GC function dies.
-    HashMap* callable_code_interned = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
     // process globals; compilation is cold and generated code never reads it.
-    JsMirCompileRecoveryState* mir_compile_recovery_state = NULL;
+    JsCompileRecoveryState* compile_recovery_state = NULL;
     // Wrapper identity is observable through .prototype and must therefore be
     // private to the context that owns the function objects and their heap.
     // §14.1: the fixed 512-entry cache was 12,288 B — 57 % of this

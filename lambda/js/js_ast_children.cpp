@@ -610,3 +610,27 @@ bool js_ast_has_optional_chain(JsAstNode* node) {
     }
     return false;
 }
+
+bool js_ast_is_proto_literal_key(JsAstNode* key) {
+    if (!key) return false;
+    if (key->node_type == AST_NODE_IDENT) {
+        JsIdentifierNode* id = (JsIdentifierNode*)key;
+        return id->name && id->name->len == 9 &&
+            memcmp(id->name->chars, "__proto__", 9) == 0;
+    }
+    if (key->node_type == AST_NODE_LITERAL) {
+        JsLiteralNode* literal = (JsLiteralNode*)key;
+        String* value = literal->literal_type == AST_LITERAL_STRING ?
+            literal->value.string_value : NULL;
+        return value && value->len == 9 &&
+            memcmp(value->chars, "__proto__", 9) == 0;
+    }
+    return false;
+}
+
+bool js_ast_property_is_proto_setter(const JsPropertyNode* property) {
+    return property && !property->computed && !property->method &&
+        !property->is_getter && !property->is_setter && !property->shorthand &&
+        property->key && property->value && property->key != property->value &&
+        js_ast_is_proto_literal_key(property->key);
+}

@@ -252,22 +252,15 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
                                         uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
-struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
 struct MvpLmdCode;
 
 struct JsPreambleState {
     MvpLmdCode* mvp_code;       // immutable code image; realm metadata is never cached
     bool mvp_realm;             // declarations belong to the persistent public MVP realm
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
-    char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
     int module_var_count;       // number of harness module vars
     uint32_t module_state_id;   // live realm slab that retains those harness vars
-    JsModuleConstEntry* entries;// owned snapshot of harness module_consts
-    int entry_count;
-    PropertyKeySpec* module_property_specs; // sealed spelling image for MIR property names
-    uint32_t module_property_count;
-    uint32_t module_property_bytes_size;
     bool owns_compiled_state;   // clones share the immutable MIR context
 };
 
@@ -322,9 +315,6 @@ void js_mir_lease_session_record_instantiation(JsMirLeaseSession* session);
 // Runtime has destroyed the realm that may hold pointers into that code.
 const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
     size_t source_len, const char* filename, struct InputCacheScope** out_scope);
-const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
-    size_t source_len, const char* filename, JsModuleMirArtifact* compiled,
-    struct InputCacheScope** out_scope);
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
     size_t source_len, const char* filename, InputScriptBuildScope* build);
 const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
@@ -369,12 +359,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state);
 void preamble_state_destroy(JsPreambleState* state);
 
-// Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)
-void jm_cleanup_deferred_mir();
-
-// Get the most recently deferred MIR context (for function pointer lookup after with_preamble compilation)
-void* jm_get_last_deferred_mir_ctx();
-
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
 extern "C" {
@@ -399,8 +383,6 @@ Item js_greater_than(Item left, Item right);
 Item js_compare(int64_t op, Item left, Item right);
 
 // Logical operators
-Item js_logical_and(Item left, Item right);
-Item js_logical_or(Item left, Item right);
 Item js_logical_not(Item operand);
 
 // Bitwise operators
@@ -415,8 +397,6 @@ Item js_unsigned_right_shift(Item left, Item right);
 // Unary operators
 Item js_unary_plus(Item operand);
 Item js_unary_minus(Item operand);
-Item js_increment(Item operand);
-Item js_decrement(Item operand);
 Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
 
@@ -436,13 +416,6 @@ Item js_set_key_default(Item object, Item key, Item value);
 Item js_call_function(Item func, Item this_binding, Item* args, int arg_count);
 Item js_call_function_into(Item func, Item this_binding, Item* args,
                            int arg_count, uint64_t* result_home);
-Item js_call_constructor_body_into(Item func, Item this_binding, Item* args,
-                                   int arg_count, Item new_target,
-                                   uint64_t* result_home);
-Item js_call_constructor_body_prerooted_args_into(Item func, Item this_binding,
-                                                  Item* args, int arg_count,
-                                                  Item new_target,
-                                                  uint64_t* result_home);
 Item js_construct_value(Item callee, Item* args, int arg_count, Item new_target,
                         uint64_t* result_home, bool args_prerooted);
 Item js_init_class_instance_fields_after_super(Item callee, Item object);

@@ -4230,7 +4230,6 @@ Item js_numeric_prototype_algorithm(Item num,
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
-extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 
 #define g_uri_last_four_byte_string (js_runtime_state.string_caches->uri_last_four_byte_string)
 #define g_uri_last_four_byte_cp (js_runtime_state.string_caches->uri_last_four_byte_cp)
@@ -4378,53 +4377,7 @@ extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
     return -1;
 }
 
-extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
-    JS_ASSIGN_OR_RETURN(first_value, js_from_char_code_to_uint16(first_item));
-    JS_ASSIGN_OR_RETURN(second_value, js_from_char_code_to_uint16(second_item));
-    int first = (int)it2i(first_value);
-    int second = (int)it2i(second_value);
 
-    char buf[8];
-    int pos = 0;
-    if (utf_is_high_surrogate((uint32_t)first) && utf_is_low_surrogate((uint32_t)second)) {
-        uint32_t cp = utf16_decode_pair((uint16_t)first, (uint16_t)second);
-        if (js_global_string_caches_ensure_roots() &&
-            g_uri_last_four_byte_string.item &&
-            g_uri_last_four_byte_cp == cp &&
-            g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
-            return g_uri_last_four_byte_string;
-        }
-        pos += (int)utf8_encode_wtf8(cp, buf + pos);
-    } else {
-        pos += (int)utf8_encode_wtf8((uint32_t)first, buf + pos);
-        pos += (int)utf8_encode_wtf8((uint32_t)second, buf + pos);
-    }
-    return js_make_small_string(buf, pos, first < 128 && second < 128);
-}
-
-extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item,
-                                                    Item second_item, int64_t component) {
-    JS_ASSIGN_OR_RETURN(str_val, (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item));
-    String* s = it2s(str_val);
-    uint32_t cp = 0;
-    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
-    bool has_fast_cp = cached_cp >= 0;
-    if (has_fast_cp) cp = (uint32_t)cached_cp;
-    if (has_fast_cp || js_uri_try_decode_four_byte_cp(s, &cp)) {
-        JS_ASSIGN_OR_RETURN(first_value, js_from_char_code_to_uint16(first_item));
-        JS_ASSIGN_OR_RETURN(second_value, js_from_char_code_to_uint16(second_item));
-        int first = (int)it2i(first_value);
-        int second = (int)it2i(second_value);
-        bool matched = false;
-        uint32_t pair_cp = utf16_decode_pair((uint16_t)first, (uint16_t)second);
-        matched = pair_cp != 0 && pair_cp == cp;
-        return (Item){.item = b2it(matched)};
-    }
-
-    JS_ASSIGN_OR_RETURN(decoded, component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item));
-    JS_ASSIGN_OR_RETURN(expected, js_string_fromCharCode2(first_item, second_item));
-    return js_strict_equal(decoded, expected);
-}
 
 extern "C" Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
         const JsStringCodeOps* ops) {
@@ -4994,14 +4947,6 @@ static Item js_map_constructor_prototype_for_instanceof(Item right, bool* out_is
     return ItemNull;
 }
 
-static bool js_class_matches_instanceof_target(JsClass actual, JsClass target) {
-    if (actual == target) return true;
-    if (target == JS_CLASS_ERROR) return js_class_is_error_like(actual);
-    if (target == JS_CLASS_EVENT) return js_class_is_event_like(actual);
-    if (target == JS_CLASS_UI_EVENT) return js_class_is_ui_event_like(actual);
-    if (target == JS_CLASS_MOUSE_EVENT) return js_class_is_mouse_event_like(actual);
-    return false;
-}
 
 // cross-realm VM errors are classified by the constructor's immutable
 // intrinsic policy; observable `.name` is freely redefinable (D6.2.2v2).
@@ -5133,110 +5078,6 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
 }
 
 // instanceof check by constructor name for native function fallback.
-extern "C" Item js_instanceof_classname(Item left, Item classname) {
-    if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-
-    String* rn = it2s(classname);
-    if (!rn) return (Item){.item = b2it(false)};
-    JsClass target_cls = js_class_from_name(rn->chars, (int)rn->len);
-
-    // Check built-in types whose intrinsic identity is carried by metadata.
-    TypeId lt = get_type_id(left);
-
-    // Array check
-    if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
-        return (Item){.item = b2it(js_is_js_array(left))};
-    }
-    // v20: Object check — any object type is instanceof Object (unless null-prototype)
-    if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
-        if (js_is_js_array(left) || lt == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
-        if (lt == LMD_TYPE_MAP) {
-            // null-prototype objects (Object.create(null)) are NOT instanceof Object
-            // js_get_prototype stores undefined as sentinel for null prototype
-            Item raw_proto = js_get_prototype(left);
-            if (raw_proto.item == ITEM_JS_UNDEFINED) {
-                return (Item){.item = b2it(false)};
-            }
-            return (Item){.item = b2it(true)};
-        }
-        return (Item){.item = b2it(false)};
-    }
-    // v20: Function check — any function is instanceof Function
-    if (rn->len == 8 && strncmp(rn->chars, "Function", 8) == 0) {
-        return (Item){.item = b2it(js_is_callable(left))};
-    }
-    // RegExp check
-    if (rn->len == 6 && strncmp(rn->chars, "RegExp", 6) == 0) {
-        return (Item){.item = b2it(lt == LMD_TYPE_MAP && js_class_id(left) == JS_CLASS_REGEXP)};
-    }
-
-    if (lt == LMD_TYPE_MAP) {
-        // Collection types: WeakSet, WeakMap, Map, Set
-        if ((rn->len == 3 && strncmp(rn->chars, "Map", 3) == 0) ||
-            (rn->len == 7 && strncmp(rn->chars, "WeakMap", 7) == 0)) {
-            return (Item){.item = b2it(js_is_map_instance(left))};
-        }
-        if ((rn->len == 3 && strncmp(rn->chars, "Set", 3) == 0) ||
-            (rn->len == 7 && strncmp(rn->chars, "WeakSet", 7) == 0)) {
-            return (Item){.item = b2it(js_is_set_instance(left))};
-        }
-
-        // TypedArray types
-        if (js_is_typed_array(left)) {
-            JsTypedArray* ta = js_get_typed_array_ptr(left.map);
-            if (rn->len == 10 && strncmp(rn->chars, "Uint8Array", 10) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8)};
-            if (rn->len == 17 && strncmp(rn->chars, "Uint8ClampedArray", 17) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8_CLAMPED)};
-            if (rn->len == 11 && strncmp(rn->chars, "Uint16Array", 11) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT16)};
-            if (rn->len == 11 && strncmp(rn->chars, "Uint32Array", 11) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT32)};
-            if (rn->len == 9 && strncmp(rn->chars, "Int8Array", 9) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT8)};
-            if (rn->len == 10 && strncmp(rn->chars, "Int16Array", 10) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT16)};
-            if (rn->len == 10 && strncmp(rn->chars, "Int32Array", 10) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT32)};
-            if (rn->len == 12 && strncmp(rn->chars, "Float32Array", 12) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT32)};
-            if (rn->len == 12 && strncmp(rn->chars, "Float64Array", 12) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT64)};
-            if (rn->len == 12 && strncmp(rn->chars, "Float16Array", 12) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT16)};
-            if (rn->len == 13 && strncmp(rn->chars, "BigInt64Array", 13) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_BIGINT64)};
-            if (rn->len == 14 && strncmp(rn->chars, "BigUint64Array", 14) == 0)
-                return (Item){.item = b2it(ta->element_type == JS_TYPED_BIGUINT64)};
-        }
-
-        // ArrayBuffer check
-        if (rn->len == 11 && strncmp(rn->chars, "ArrayBuffer", 11) == 0) {
-            return (Item){.item = b2it(js_is_arraybuffer(left))};
-        }
-    }
-
-    if (target_cls == JS_CLASS_NONE) {
-        return (Item){.item = b2it(false)};
-    }
-    if (!js_instanceof_can_walk_prototype(left)) {
-        return (Item){.item = b2it(false)};
-    }
-
-    Item obj = left;
-    int depth = 0;
-    while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
-        JsClass actual = js_class_id(obj);
-        if (actual != JS_CLASS_NONE && js_class_matches_instanceof_target(actual, target_cls)) {
-            return (Item){.item = b2it(true)};
-        }
-        Item next = js_get_prototype_of(obj);
-        if (next.item == obj.item) break;
-        obj = next;
-        depth++;
-    }
-    return (Item){.item = b2it(false)};
-}
 
 // =============================================================================
 // in operator — check if key exists in object/array
@@ -5448,11 +5289,6 @@ extern "C" Item js_in(Item key, Item object) {
     return (Item){.item = b2it(false)};
 }
 
-extern "C" Item js_nullish_coalesce(Item left, Item right) {
-    TypeId type = get_type_id(left);
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return right;
-    return left;
-}
 
 // =============================================================================
 // Object.create — create new object with specified prototype
@@ -9211,83 +9047,8 @@ extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     return result;
 }
 
-static inline int js_test262_upper_hex_digit(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    return -1;
-}
 
-static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32_t byte3,
-                                                            uint32_t* cp_out) {
-    if (!left || left->len != 9 || !left->is_ascii) return false;
-    if (left->chars[0] != '%' || left->chars[3] != '%' || left->chars[6] != '%') return false;
 
-    // Keep the cached prefix and its decoded bytes in the same rooted capsule;
-    // the prior static pointer outlived both GC and hot-realm reset boundaries.
-    bool cache_rooted = js_global_string_caches_ensure_roots();
-    Item left_value = (Item){.item = s2it(left)};
-    Item cached_left_item = js_runtime_state.string_caches->test262_cached_percent_left;
-    uint32_t byte0 = 0;
-    uint32_t byte1 = 0;
-    uint32_t byte2 = 0;
-    if (!cache_rooted || cached_left_item.item != left_value.item) {
-        int b0_high = js_test262_upper_hex_digit(left->chars[1]);
-        int b0_low = js_test262_upper_hex_digit(left->chars[2]);
-        int b1_high = js_test262_upper_hex_digit(left->chars[4]);
-        int b1_low = js_test262_upper_hex_digit(left->chars[5]);
-        int b2_high = js_test262_upper_hex_digit(left->chars[7]);
-        int b2_low = js_test262_upper_hex_digit(left->chars[8]);
-        if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
-        byte0 = (uint32_t)((b0_high << 4) | b0_low);
-        byte1 = (uint32_t)((b1_high << 4) | b1_low);
-        byte2 = (uint32_t)((b2_high << 4) | b2_low);
-        if (cache_rooted) {
-            js_runtime_state.string_caches->test262_cached_percent_left = left_value;
-            js_runtime_state.string_caches->test262_percent_byte0 = byte0;
-            js_runtime_state.string_caches->test262_percent_byte1 = byte1;
-            js_runtime_state.string_caches->test262_percent_byte2 = byte2;
-        }
-    } else {
-        byte0 = js_runtime_state.string_caches->test262_percent_byte0;
-        byte1 = js_runtime_state.string_caches->test262_percent_byte1;
-        byte2 = js_runtime_state.string_caches->test262_percent_byte2;
-    }
-    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
-    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
-    uint32_t cp = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
-                  ((byte2 & 0x3F) << 6) | (byte3 & 0x3F);
-    if (cp < 0x10000 || cp > 0x10FFFF) return false;
-    *cp_out = cp;
-    return true;
-}
-
-extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
-    JS_ASSIGN_OR_RETURN(left_val, (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item));
-    String* left = it2s(left_val);
-    if (!left) left = heap_create_name("", 0);
-
-    uint32_t n = 0;
-    if (!js_test262_item_to_uint32(n_item, &n)) return ItemNull;
-
-    uint32_t byte = n & 0xFF;
-    int64_t left_len = left->len;
-    String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
-    result->len = left_len + 3;
-    result->flags = 0;
-    result->is_ascii = left->is_ascii;
-    memcpy(result->chars, left->chars, left_len);
-    result->chars[left_len] = '%';
-    result->chars[left_len + 1] = hex_encode_nibble_upper((byte >> 4) & 0xF);
-    result->chars[left_len + 2] = hex_encode_nibble_upper(byte & 0xF);
-    result->chars[left_len + 3] = '\0';
-    Item result_item = (Item){.item = s2it(result)};
-    uint32_t cp = 0;
-    if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
-        js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
-    }
-    return result_item;
-}
 
 // =============================================================================
 // Native assert.sameValue / assert.notSameValue for test262 batch mode
@@ -14254,18 +14015,7 @@ extern "C" void js_with_pop() {
     js_last_with_binding_valid = false;
 }
 
-JS_FORWARD_EXPRESSION(int, js_with_save_depth, (void), js_with_stack_depth)
 
-extern "C" void js_with_restore_depth(int depth) {
-    if (depth < 0) depth = 0;
-    while (js_with_stack_depth > depth) {
-        JsWithFrame* frame = js_with_head;
-        if (!frame || !frame->owns_record) break;
-        js_with_head = frame->parent;
-        js_with_frame_drop(frame);
-    }
-    js_last_with_binding_valid = false;
-}
 
 // Closures and suspensions both snapshot the object list: the chain structure
 // is immutable once created, and the scope objects are shared by reference.
@@ -14395,7 +14145,6 @@ static Item js_get_with_binding_or_fallback_impl(Item key, Item fallback,
     return found ? result : fallback;
 }
 JS_FORWARD_ITEM(js_get_with_binding_or_fallback, (Item key, Item fallback), js_get_with_binding_or_fallback_impl, (key, fallback, false))
-JS_FORWARD_ITEM(js_get_with_binding_or_fallback_strict, (Item key, Item fallback), js_get_with_binding_or_fallback_impl, (key, fallback, true))
 
 extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
     // plain identifier calls inside `with` keep the Object Environment Record as
@@ -14434,9 +14183,6 @@ extern "C" Item js_probe_with_binding_from(Item key, int64_t minimum_depth) {
     return (Item){.item = b2it(scope_obj.item != ItemNull.item)};
 }
 
-extern "C" Item js_capture_with_binding(Item key) {
-    return js_capture_with_binding_from(key, 0);
-}
 
 extern "C" Item js_capture_with_binding_from(Item key, int64_t minimum_depth) {
     js_last_with_binding_valid = false;
@@ -14574,27 +14320,6 @@ extern "C" void js_global_lexical_declare_module_slot(Item key, int64_t index,
         (int)index, lambda_active_module_state_id());
 }
 
-extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutable) {
-    key = js_to_property_key(key);
-    if (item_is_error(key)) return;
-    int idx = js_global_lexical_find(key);
-    if (idx >= 0) {
-        JsGlobalBinding* binding = js_global_environment_binding_at(
-            js_global_environment_state, idx);
-        if (!binding) return;
-        js_global_environment_set_binding_value(js_global_environment_state,
-            binding, value);
-        binding->immutable = immutable != 0;
-        binding->module_index = -1;
-        binding->module_state_id = UINT32_MAX;
-        return;
-    }
-    // Script global lexical declarations live in the global environment record
-    // but not on the global object, so Object.hasOwnProperty must stay false.
-    js_global_environment_upsert(js_global_environment_state,
-        JS_GLOBAL_BINDING_LEXICAL, key, value, immutable != 0, -1,
-        UINT32_MAX);
-}
 
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
@@ -14652,30 +14377,7 @@ extern "C" Item js_get_global_property_after_with_lookup(Item key) {
 // js_get_global_property_strict: like js_get_global_property but throws ReferenceError
 // for properties that don't exist on the global object. Used for bare identifier reads
 // (e.g. `x` as opposed to `obj.x`), which per ES spec must throw ReferenceError.
-extern "C" Item js_get_global_property_strict(Item key) {
-    // Check with-scope stack first
-    if (js_with_stack_depth > 0) {
-        bool found = false;
-        Item result = js_with_scope_lookup(key, &found, true);
-        if (found) return result;
-    }
-    return js_get_global_property_after_with_lookup(key);
-}
 
-extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference) {
-    // Identifier reads always throw for truly unresolvable names, but with-object
-    // GetBindingValue uses the Reference's strictness for deleted bindings.
-    if (js_with_stack_depth > 0) {
-        bool found = false;
-        Item result = js_with_scope_lookup(key, &found, strict_reference != 0);
-        if (found) return result;
-    }
-    // This entry already performed Object Environment Record HasBinding.
-    // Calling the public strict lookup repeated the same Proxy [[Has]] trap
-    // before reaching the global environment fallback.
-    Item result = js_get_global_property_after_with_lookup(key);
-    return result;
-}
 
 extern "C" int64_t js_global_binding_exists_after_with_lookup(Item key) {
     if (js_runtime_state.formal_mir_owner) {
@@ -14795,41 +14497,11 @@ extern "C" Item js_set_global_property_after_with_lookup(Item key, Item value,
     return js_set_global_property_after_with_lookup_impl(key, value, strict != 0);
 }
 
-extern "C" Item js_set_global_var_property_fast(Item key, Item value) {
-    if (js_with_stack_depth == 0 && get_type_id(key) == LMD_TYPE_STRING) {
-        Item global = js_get_global_this();
-        if (get_type_id(global) == LMD_TYPE_MAP && global.map) {
-            String* str = it2s(key);
-            if (str && str->len > 0) {
-                ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
-                bool found = false;
-                Item slot = js_map_shape_lookup_ext(global.map, str->chars, (int)str->len, &found);
-                JsShapeSlotStatus status = js_own_shape_slot_status(global, str->chars, (int)str->len, NULL, NULL);
-                TypeId slot_type = get_type_id(slot);
-                TypeId value_type = get_type_id(value);
-                if (found && status == JS_SHAPE_SLOT_DATA &&
-                    se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
-                    js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
-                    slot_type == value_type) {
-                    fn_map_set(global, key, value);
-                    return js_status_ok();
-                }
-            }
-        }
-    }
-    return js_set_global_property_impl(key, value, false);
-}
 
 // Tune8 §2.2: js_set_global_property_strict removed — call
 // js_set_global_property(key, value, 1) instead. No C-side callers existed.
 
 
-extern "C" Item js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs) {
-    if (!binding_exists_at_lhs) {
-        return js_throw_binding_reference_error(key);
-    }
-    return js_set_global_property_impl(key, value, true);
-}
 // Tune8 §2.2: dispatcher for JIT-emitted define-global-property calls. The
 // three existing C functions (var / eval-var / function) have substantially
 // different bodies, so the fold is a runtime switch routing to the originals.
@@ -14840,13 +14512,6 @@ extern "C" Item js_set_global_property_strict_prechecked(Item key, Item value, i
 //   kind = 0  → var-property      (cached, non-configurable; module-init hot path)
 //   kind = 1  → eval-var-property (configurable, special undefined handling)
 //   kind = 2  → function-property (complex existing-check + descriptor merge)
-extern "C" void js_define_global_property_v(int64_t kind, Item key, Item value) {
-    switch (kind) {
-    case 0: js_define_global_var_property(key, value); break;
-    case 1: js_define_global_eval_var_property(key, value); break;
-    case 2: js_define_global_function_property(key, value); break;
-    }
-}
 
 extern "C" void js_define_global_var_property(Item key, Item value) {
     if (!js_global_bindings_ensure_roots()) return;
@@ -14885,135 +14550,9 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
         UINT32_MAX);
 }
 
-static bool js_define_global_var_property_fast_absent(Item global, Item key, Item value) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* str = it2s(key);
-    if (!str || str->len <= 0 || str->len >= 200) return true;
-    if (get_type_id(global) != LMD_TYPE_MAP || !global.map || !js_input || !js_input->pool) {
-        return false;
-    }
-    JsOwnSlotStatus st = js_ordinary_own_status(global, str->chars, (int)str->len);
-    if (st == JS_HAS_PRESENT) return true;
-    if (st != JS_HAS_ABSENT) return false;
 
-    map_put_heap(global.map, str, value, js_input);
-    TypeMap* tm = (TypeMap*)global.map->type;
-    ShapeEntry* se = tm ? tm->last : NULL;
-    if (se && se->name && (int)se->name->length == (int)str->len &&
-            memcmp(se->name->str, str->chars, (size_t)str->len) == 0) {
-        js_map_promote_descriptor_kind(global.map);
-        jspd_set_configurable(se, false);
-    } else {
-        js_attr_set_configurable(global, str->chars, (int)str->len, false);
-    }
-    return true;
-}
 
-static bool js_define_global_var_properties_bulk_absent(Item global, const Item* keys,
-        int count) {
-    if (!keys || count <= 0) return false;
-    if (get_type_id(global) != LMD_TYPE_MAP || !global.map || !js_input || !js_input->pool) {
-        return false;
-    }
-    String** strings = (String**)mem_alloc(sizeof(String*) * (size_t)count, MEM_CAT_JS_RUNTIME);
-    if (!strings) return false;
 
-    for (int i = 0; i < count; i++) {
-        if (get_type_id(keys[i]) != LMD_TYPE_STRING) {
-            mem_free(strings);
-            return false;
-        }
-        String* str = it2s(keys[i]);
-        if (!str || str->len <= 0 || str->len >= 200) {
-            mem_free(strings);
-            return false;
-        }
-        JsOwnSlotStatus st = js_ordinary_own_status(global, str->chars, (int)str->len);
-        if (st != JS_HAS_ABSENT) {
-            mem_free(strings);
-            return false;
-        }
-        strings[i] = str;
-    }
-
-    bool ok = map_put_undefined_unique_absent_bulk_heap(global.map, strings, count,
-        js_input, JSPD_NON_CONFIGURABLE);
-    mem_free(strings);
-    return ok;
-}
-
-static Item js_existing_global_var_data_value(Item global, Item key) {
-    String* name = it2s(key);
-    if (!name) return make_js_undefined();
-    JsPropertyDescriptor descriptor = {};
-    if (!js_get_own_property_descriptor(global, name->chars, (int)name->len,
-            &descriptor) || (descriptor.flags & JS_PD_HAS_VALUE) == 0) {
-        return make_js_undefined();
-    }
-    return descriptor.value;
-}
-
-extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
-        const uint32_t* module_name_indices, const NameId* direct_name_ids,
-        int count, int define_global_var_properties) {
-    if (!indices || count <= 0) return;
-    Item undef = make_js_undefined();
-    Item global = ItemNull;
-    Item* keys = NULL;
-    if (define_global_var_properties && module_name_indices && direct_name_ids) {
-        keys = (Item*)mem_alloc(sizeof(Item) * (size_t)count, MEM_CAT_JS_RUNTIME);
-        if (keys) {
-            for (int i = 0; i < count; i++) {
-                keys[i] = lambda_active_module_name_item(module_name_indices[i],
-                    direct_name_ids[i]);
-            }
-        }
-    }
-    if (define_global_var_properties) {
-        global = js_get_global_this();
-    }
-    if (define_global_var_properties && keys) {
-        if (js_define_global_var_properties_bulk_absent(global, keys, count)) {
-            for (int i = 0; i < count; i++) {
-                int index = indices[i];
-                if (index < 0) continue;
-                lambda_active_module_var_store((uint32_t)index, undef);
-            }
-            js_register_global_var_module_bindings_bulk(keys, indices, count);
-            mem_free(keys);
-            return;
-        }
-    }
-    for (int i = 0; i < count; i++) {
-        int index = indices[i];
-        if (index < 0) continue;
-        Item key = ItemNull;
-        Item initial = undef;
-        if (define_global_var_properties) {
-            // Allocation failure may disable only the bulk acceleration; it
-            // must not drop CreateGlobalVarBinding or its module-slot bridge.
-            key = keys ? keys[i]
-                : lambda_active_module_name_item(module_name_indices[i],
-                    direct_name_ids[i]);
-            // A later classic script may redeclare an existing global var.
-            // Its new module slab must retain that data binding, not reset it.
-            initial = js_existing_global_var_data_value(global, key);
-        }
-        lambda_active_module_var_store((uint32_t)index, initial);
-        if (define_global_var_properties) {
-            if (!js_define_global_var_property_fast_absent(global, key, undef)) {
-                js_define_global_var_property(key, undef);
-            }
-            if (!keys) {
-                js_register_global_var_module_binding(key, index);
-            }
-        }
-    }
-    if (define_global_var_properties && keys) {
-        js_register_global_var_module_bindings_bulk(keys, indices, count);
-    }
-    mem_free(keys);
-}
 
 extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     Item global = js_get_global_this();
@@ -15151,22 +14690,7 @@ static JsEvalBridgeBinding* js_eval_binding_journal_binding_at(
         ? (JsEvalBridgeBinding*)arraylist_get(journal->bindings, index) : NULL;
 }
 
-static bool js_eval_binding_journal_record(JsEvalBindingJournal* journal,
-        Item key, bool from_journal, bool immutable, const char* label);
 
-static bool js_eval_binding_journal_push_frame(JsEvalBindingJournal* journal,
-        const char* label) {
-    if (!journal->frames) journal->frames = arraylist_new(8);
-    JsEvalBridgeFrame* frame = (JsEvalBridgeFrame*)mem_calloc(1,
-        sizeof(JsEvalBridgeFrame), MEM_CAT_JS_RUNTIME);
-    if (!frame || !journal->frames || !arraylist_append(journal->frames, frame)) {
-        mem_free(frame);
-        log_error("js-eval-%s: cannot grow frame journal", label);
-        return false;
-    }
-    frame->binding_mark = (int)root_vector_count(&journal->keys);
-    return true;
-}
 
 static int js_eval_private_frame_count(void) {
     return js_eval_private->frames ? js_eval_private->frames->length : 0;
@@ -15196,9 +14720,6 @@ static JsEvalLocalFrameMarks* js_eval_local_current_frame(void) {
 
 #define js_eval_local_frame_depth js_eval_local_frame_count()
 
-extern "C" void js_eval_env_push_frame(void) {
-    js_eval_binding_journal_push_frame(js_eval_env, "env");
-}
 
 // Bridge vars introduced by a PRIOR direct eval in this function scope
 // (they live only in the eval-local journal, not in any static local slot).
@@ -15210,51 +14731,9 @@ extern "C" void js_eval_env_push_frame(void) {
 // static-local binds: an eval'd `var x` re-declaring a static local puts the
 // current value in the journal, and identifier reads in the caller resolve
 // journal-first, so the journal value must win over the static bind here too.
-extern "C" void js_eval_env_bridge_journal_vars(void) {
-    if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
-    Item global = js_get_global_this();
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return;
-    int frame_start = local_frame->local_mark;
-    for (int i = frame_start; i < js_eval_local_binding_count; i++) {
-        Item key = *root_vector_at(&js_eval_local.keys, i);
-        if (!js_eval_binding_journal_record(js_eval_env, key, true, false,
-                "env")) break;
-        js_set_key_default(global, key, *root_vector_at(&js_eval_local.values, i));
-    }
-}
 
-extern "C" void js_eval_global_lexical_push_frame(void) {
-    js_eval_binding_journal_push_frame(js_eval_global_lexical, "global-lexical");
-}
 
-extern "C" int64_t js_eval_local_push_frame(void) {
-    if (!js_eval_local.frame_marks) js_eval_local.frame_marks = arraylist_new(8);
-    JsEvalLocalFrameMarks* marks = (JsEvalLocalFrameMarks*)mem_calloc(1,
-        sizeof(JsEvalLocalFrameMarks), MEM_CAT_JS_RUNTIME);
-    if (!marks || !js_eval_local.frame_marks ||
-        !arraylist_append(js_eval_local.frame_marks, marks)) {
-        mem_free(marks);
-        log_error("js-eval-local: cannot grow frame journal");
-        return 0;
-    }
-    marks->local_mark = js_eval_local_binding_count;
-    marks->lexical_mark = js_eval_lexical_binding_count;
-    marks->immutable_mark = js_eval_immutable_binding_count;
-    return 1;
-}
 
-extern "C" void js_eval_local_pop_frame(void) {
-    if (js_eval_local_frame_depth <= 0) return;
-    int frame_index = js_eval_local_frame_depth - 1;
-    JsEvalLocalFrameMarks marks = *js_eval_local_current_frame();
-    root_vector_shrink(&js_eval_local.keys, marks.local_mark);
-    root_vector_shrink(&js_eval_local.values, marks.local_mark);
-    root_vector_shrink(&js_eval_local.lexical_keys, marks.lexical_mark);
-    root_vector_shrink(&js_eval_local.immutable_keys, marks.immutable_mark);
-    mem_free(arraylist_get(js_eval_local.frame_marks, frame_index));
-    arraylist_remove(js_eval_local.frame_marks, frame_index);
-}
 
 extern "C" void js_eval_private_push_frame(void) {
     if (!js_eval_private->frames) js_eval_private->frames = arraylist_new(8);
@@ -15369,16 +14848,6 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
     }
 }
 
-static void js_eval_local_note_binding(Item key, RootVector* keys,
-        int frame_start, const char* label) {
-    int count = (int)root_vector_count(keys);
-    for (int i = count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(*root_vector_at(keys, i), key)) return;
-    }
-    if (!root_vector_push(keys, key)) {
-        log_error("js-eval-%s: cannot grow binding journal", label);
-    }
-}
 
 static int64_t js_eval_local_has_binding(RootVector* keys, int frame_start, Item key) {
     for (int i = (int)root_vector_count(keys) - 1; i >= frame_start; i--) {
@@ -15387,14 +14856,6 @@ static int64_t js_eval_local_has_binding(RootVector* keys, int frame_start, Item
     return 0;
 }
 
-extern "C" void js_eval_local_note_lexical_binding(Item key) {
-    if (js_eval_local_frame_depth <= 0) return;
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return;
-    js_eval_local_note_binding(key, &js_eval_local.lexical_keys,
-        local_frame->lexical_mark,
-        "lexical");
-}
 
 extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
@@ -15405,14 +14866,6 @@ extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
         key);
 }
 
-extern "C" void js_eval_local_note_immutable_binding(Item key) {
-    if (js_eval_local_frame_depth <= 0) return;
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return;
-    js_eval_local_note_binding(key, &js_eval_local.immutable_keys,
-        local_frame->immutable_mark,
-        "immutable");
-}
 
 extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
@@ -15425,59 +14878,9 @@ extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
 
 // The root lanes are kept separate from the non-Item binding row, so GC only
 // scans Items while each bridge binding still has one ownership record.
-static bool js_eval_binding_journal_record(JsEvalBindingJournal* journal,
-        Item key, bool from_journal, bool immutable, const char* label) {
-    if (!js_eval_binding_journal_current_frame(journal)) return false;
-    if (!journal->bindings) journal->bindings = arraylist_new(8);
-    JsEvalBridgeBinding* binding = (JsEvalBridgeBinding*)mem_calloc(1,
-        sizeof(JsEvalBridgeBinding), MEM_CAT_JS_RUNTIME);
-    if (!binding || !journal->bindings) {
-        mem_free(binding);
-        log_error("js-eval-%s: cannot grow binding journal", label);
-        return false;
-    }
-    Item global = js_get_global_this();
-    if (!root_vector_push(&journal->keys, key)) {
-        mem_free(binding);
-        log_error("js-eval-%s: cannot grow key journal", label);
-        return false;
-    }
-    binding->from_journal = from_journal;
-    binding->immutable = immutable;
-    binding->had_own = it2b(js_has_own_property(global, key));
-    Item old_value = binding->had_own
-        ? js_get_key_default(global, key) : make_js_undefined();
-    if (!root_vector_push(&journal->old_values, old_value)) {
-        root_vector_pop(&journal->keys);
-        mem_free(binding);
-        log_error("js-eval-%s: cannot grow old-value journal", label);
-        return false;
-    }
-    if (!arraylist_append(journal->bindings, binding)) {
-        root_vector_pop(&journal->old_values);
-        root_vector_pop(&journal->keys);
-        mem_free(binding);
-        log_error("js-eval-%s: cannot append binding row", label);
-        return false;
-    }
-    return true;
-}
 
-static void js_eval_bridge_bind(JsEvalBindingJournal* journal, Item key,
-        Item value, bool immutable, const char* label) {
-    if (!js_eval_binding_journal_record(journal, key, false, immutable, label)) return;
-    Item global = js_get_global_this();
-    js_set_key_default(global, key, value);
-}
 
-extern "C" void js_eval_env_bind(Item key, Item value) {
-    js_eval_bridge_bind(js_eval_env, key, value, false, "env");
-}
 
-extern "C" void js_eval_global_lexical_bind(Item key, Item value, int64_t immutable) {
-    js_eval_bridge_bind(js_eval_global_lexical, key, value, immutable != 0,
-        "global-lexical");
-}
 
 extern "C" int64_t js_eval_env_has_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return 0;
@@ -15534,120 +14937,11 @@ extern "C" Item js_eval_global_lexical_set_if_exists(Item key, Item value) {
 
 JS_FORWARD_EXPRESSION(int64_t, js_eval_env_is_active, (void), js_eval_env_frame_depth > 0 ? 1 : 0)
 
-static void js_eval_restore_global_binding(Item global, Item key, Item old_value, bool had_own) {
-    if (had_own) {
-        js_set_key_default(global, key, old_value);
-        return;
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* key_string = it2s(key);
-        if (key_string && key_string->len > 0 && key_string->len < 200) {
-            // Pending eval SyntaxErrors make ordinary delete short-circuit;
-            // tombstone bridge-created globals directly while preserving the throw.
-            js_shape_mark_deleted_own(global, key_string->chars, (int)key_string->len,
-                                      /*create_if_missing=*/false);
-            return;
-        }
-    }
-    js_delete_property(global, key);
-}
 
-extern "C" void js_eval_env_pop_frame(void) {
-    if (js_eval_env_frame_depth <= 0) return;
-    int frame_index = js_eval_env_frame_depth - 1;
-    JsEvalBridgeFrame* frame_row = js_eval_binding_journal_current_frame(js_eval_env);
-    if (!frame_row) return;
-    JsEvalBridgeFrame frame = *frame_row;
-    mem_free(frame_row);
-    arraylist_remove(js_eval_env->frames, frame_index);
-    Item global = js_get_global_this();
-    while (js_eval_env_binding_count > frame.binding_mark) {
-        int binding_idx = js_eval_env_binding_count - 1;
-        // The vacated slots are cleared, so the popped pair is kept as exact
-        // side-stack roots across the restoring property operations.
-        RootFrame roots(2);
-        Rooted<Item> key_root(roots, *root_vector_at(&js_eval_env->keys, binding_idx));
-        Rooted<Item> old_root(roots,
-            *root_vector_at(&js_eval_env->old_values, binding_idx));
-        JsEvalBridgeBinding* binding = js_eval_binding_journal_binding_at(
-            js_eval_env, binding_idx);
-        bool had_own = binding && binding->had_own;
-        bool from_journal = binding && binding->from_journal;
-        root_vector_shrink(&js_eval_env->keys, binding_idx);
-        root_vector_shrink(&js_eval_env->old_values, binding_idx);
-        mem_free(binding);
-        arraylist_remove(js_eval_env->bindings, binding_idx);
-        if (from_journal) {
-            // journal-origin vars have no static slot the caller could write
-            // back to; assignments made by the eval'd code landed in the
-            // bridged temporary global and must flow back into the journal
-            // before the old global value is restored.
-            int idx = js_eval_local_find_binding(key_root.get());
-            if (idx >= 0) {
-                *root_vector_at(&js_eval_local.values, idx) =
-                    js_get_key_default(global, key_root.get());
-            }
-        }
-        js_eval_restore_global_binding(global, key_root.get(), old_root.get(), had_own);
-    }
-}
 
-extern "C" void js_eval_global_lexical_pop_frame(void) {
-    if (js_eval_global_lexical_frame_depth <= 0) return;
-    int frame_index = js_eval_global_lexical_frame_depth - 1;
-    JsEvalBridgeFrame* frame_row = js_eval_binding_journal_current_frame(
-        js_eval_global_lexical);
-    if (!frame_row) return;
-    JsEvalBridgeFrame frame = *frame_row;
-    mem_free(frame_row);
-    arraylist_remove(js_eval_global_lexical->frames, frame_index);
-    Item global = js_get_global_this();
-    while (js_eval_global_lexical_binding_count > frame.binding_mark) {
-        int binding_idx = js_eval_global_lexical_binding_count - 1;
-        RootFrame roots(2);
-        Rooted<Item> key_root(roots,
-            *root_vector_at(&js_eval_global_lexical->keys, binding_idx));
-        Rooted<Item> old_root(roots,
-            *root_vector_at(&js_eval_global_lexical->old_values, binding_idx));
-        JsEvalBridgeBinding* binding = js_eval_binding_journal_binding_at(
-            js_eval_global_lexical, binding_idx);
-        bool had_own = binding && binding->had_own;
-        root_vector_shrink(&js_eval_global_lexical->keys, binding_idx);
-        root_vector_shrink(&js_eval_global_lexical->old_values, binding_idx);
-        mem_free(binding);
-        arraylist_remove(js_eval_global_lexical->bindings, binding_idx);
-        js_eval_restore_global_binding(global, key_root.get(), old_root.get(), had_own);
-    }
-}
 
-extern "C" Item js_check_unresolved_capture(Item value, NameId name_id, int64_t len) {
-    if (value.item != ITEM_ERROR) return js_status_ok();
-    NameRef name_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
-        name_id);
-    const char* name = name_ref ? name_ref->chars : "";
-    if (name_ref) len = (int64_t)name_ref->len;
-    char msg[256];
-    int n = (int)len;
-    if (n > 200) n = 200;
-    snprintf(msg, sizeof(msg), "%.*s is not defined", n, name ? name : "");
-    return js_throw_reference_error(js_name_item(msg, strlen(msg)));
-}
 
-extern "C" Item js_check_capture_binding(Item value, NameId name_id, int64_t len) {
-    // Captured reads use one merged lane check: unresolved captures retain the
-    // historical ReferenceError, while a TDZ sentinel retains the lexical
-    // ReferenceError. Keeping both predicates in one helper avoids emitting
-    // two identical name-id calls and two error-lane branches per read.
-    if (value.item == ITEM_ERROR) return js_check_unresolved_capture(value, name_id, len);
-    if (value.item == ITEM_JS_TDZ) return js_check_tdz(value, name_id, (int)len);
-    return js_status_ok();
-}
 
-extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof) {
-    if (value.item != ITEM_ERROR) return value;
-    if (in_typeof) return make_js_undefined();
-    return js_check_unresolved_capture(value, name_id, len);
-}
 
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.

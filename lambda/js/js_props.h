@@ -229,7 +229,6 @@ typedef enum {
     JS_HAS_PRESENT = 1,
     JS_HAS_DELETED = 2,
 } JsOwnSlotStatus;
-JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len);
 
 // OrdinaryHasProperty over the prototype chain; callers handle exotic traps.
 bool js_ordinary_has_property(Item object, const char* name, int name_len);

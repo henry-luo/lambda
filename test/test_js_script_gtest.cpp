@@ -16,7 +16,7 @@
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_event_loop.h"
-#include "../lambda/js/js_mir_internal.hpp"
+#include "../lambda/js/js_execution_internal.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
 #include "../lambda/dom/dom_events.h"
@@ -591,34 +591,6 @@ TEST(JsInterpreter, PlansImmutableCallArgumentShapeAtBuild) {
 }
 
 static uint64_t js_test_callable_target(Context*, uint64_t value) { return value; }
-
-TEST(JsCallableDefinitions, LiveMirValuesSurviveWeakTableTeardown) {
-    Runtime runtime = {};
-    runtime_init(&runtime);
-    const char source[] = "0;";
-    js_interp_execute_source(&runtime, source, sizeof(source) - 1, "code-owner.js", NULL);
-    {
-        RootFrame roots(2);
-        Rooted<Item> first(roots, js_new_distinct_function_mir((void*)js_test_callable_target, 1));
-        Rooted<Item> second(roots, js_new_distinct_function_mir((void*)js_test_callable_target, 1));
-        ASSERT_EQ(get_type_id(first.get()), LMD_TYPE_FUNC);
-        ASSERT_EQ(get_type_id(second.get()), LMD_TYPE_FUNC);
-        JsFunction* a = (JsFunction*)first.get().function;
-        JsFunction* b = (JsFunction*)second.get().function;
-        EXPECT_NE(a, b);
-        ASSERT_EQ(a->code, b->code);
-        EXPECT_EQ(a->code->intern_refcount, 2u);
-        JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
-        ASSERT_NE(state, nullptr);
-        EXPECT_EQ(hashmap_count(state->callable_code_interned), 1u);
-        // surviving values retain the record after its weak owner disappears.
-        js_callable_code_table_destroy(state->callable_code_interned);
-        state->callable_code_interned = NULL;
-        EXPECT_EQ(a->code->intern_table, nullptr);
-        EXPECT_EQ(js_fn_param_count(a), 1);
-    }
-    runtime_cleanup(&runtime);
-}
 
 TEST(JsRuntimeResources, SharesOneContextCapsuleAcrossHostOwners) {
     Runtime runtime = {};
@@ -3008,7 +2980,7 @@ TEST(JsInterpreter, StaticModuleHonorsRequestedAstBackend) {
         js_make_string("answer")), flt2it(42.0)).item, b2it(true));
     JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
     ASSERT_NE(state, nullptr);
-    EXPECT_EQ(js_code_store_count(&state->code_store), 0);
+    EXPECT_EQ(state->formal_mir_owner, nullptr);
 
     runtime_cleanup(&runtime);
 }

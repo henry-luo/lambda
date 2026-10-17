@@ -668,7 +668,7 @@ static bool js_test262_restore_preamble_module_state(const JsPreambleState* prea
     return true;
 }
 
-extern void jm_abandon_active_mir_after_signal(void);
+extern void js_abandon_active_compile_after_signal(void);
 #endif // LAMBDA_NO_JS
 
 #ifdef _WIN32
@@ -4929,7 +4929,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (hot_reload) {
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 } else {
                     js_batch_reset();
@@ -5027,7 +5026,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     &preamble_var_checkpoint, &saved_harness_src, &saved_harness_len);
                 test262_native_harness = false;
                 if (ast_harness.script || ast_harness.prepare_failed) {
-                    jm_cleanup_deferred_mir();
                     if (hot_reload) {
                         if (!js_test262_hot_context_recycle(&runtime, batch_context)) {
                             mem_free(harness_src);
@@ -5342,7 +5340,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             if (!mvp_lmd && (result >= 128 || result == 124)) {
                 // A recovery jump bypasses the compiler epilogue; abandon the
                 // active owner before the next reset can observe it.
-                jm_abandon_active_mir_after_signal();
+                js_abandon_active_compile_after_signal();
             }
 
             gettimeofday(&tv_end, NULL);
@@ -5454,10 +5452,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     // The active compile owner may be inconsistent after a
                     // signal, so abandon it without re-entering MIR_finish.
-                    jm_abandon_active_mir_after_signal();
+                    js_abandon_active_compile_after_signal();
                     js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
                     if (ast_harness.script) {
@@ -5502,7 +5499,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     // Clear heap-bound JS caches before the realm is discarded;
                     // otherwise the next large library inherits stale Items.
                     js_batch_reset();
-                    jm_cleanup_deferred_mir();
                     if (saved_harness_src) {
                         js_test262_hot_context_destroy(&runtime, batch_context);
                         js_test262_hot_context_create(&runtime, batch_context);
@@ -5537,7 +5533,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         break;
                     }
                 } else if (ast_test_generation_active) {
-                    jm_cleanup_deferred_mir();
                     // AST JS-harness batches retain parsed source and scope
                     // facts only. Replacing their realm prevents a test
                     // from mutating harness functions seen by its successor.
@@ -5549,7 +5544,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         js_batch_reset_to(preamble_var_checkpoint);
                         // Reset clears test-owned function/cache references first;
                         // only then is it safe to finish that test's MIR context.
-                        jm_cleanup_deferred_mir();
                     } else {
                         has_preamble = false;
                     }
@@ -5560,7 +5554,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     // and globals affect the next test in this hot worker.
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 }
             } else {
@@ -5622,7 +5615,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // released. This matches the in-batch heap recycle path: heap
         // objects may still reference JIT code pages until the batch state
         // is gone.
-        jm_cleanup_deferred_mir();
 
         if (has_preamble) {
             preamble_state_destroy(&preamble);

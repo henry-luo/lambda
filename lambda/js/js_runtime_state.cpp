@@ -116,8 +116,7 @@ extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
-extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
-extern void jm_destroy_p2_mir_contexts(JsRuntimeState* state);
+extern void js_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -454,10 +453,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_entries = NULL;
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
-        if (state->callable_code_interned) {
-            js_callable_code_table_destroy(state->callable_code_interned);
-            state->callable_code_interned = NULL;
-        }
     }
     if (!state) return;
     if (state->global_environment) {
@@ -791,7 +786,7 @@ void js_runtime_state_release_heap_resources(void) {
 static void js_runtime_state_release(JsRuntimeState* state) {
     js_atomics_destroy_context(state);
     js_weak_state_destroy(state);
-    jm_compile_recovery_state_destroy_context(state);
+    js_compile_recovery_state_destroy_context(state);
     js_runtime_prototype_snapshot_destroy_context(state);
     js_runtime_regex_cache_destroy_context(state);
     // JSCU9: generators are GC-owned carriers; the heap finalizer releases
@@ -812,8 +807,6 @@ static void js_runtime_state_release(JsRuntimeState* state) {
     js_eval_state_vectors_destroy(&state->eval);
     // P2 entries remain callable past a source turn, so their native code is
     // released only at the owning EvalContext's final lifetime boundary.
-    jm_destroy_p2_mir_contexts(state);
-    js_code_store_destroy(&state->code_store);
     js_runtime_state_free_records(state);
     mem_free(state);
 }
@@ -998,24 +991,7 @@ bool js_realm_runtime_has_input(void) {
         js_active_runtime_state->input->pool;
 }
 
-bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
-        Item** values, int count, bool reserve) {
-    if (!slots || !slot_ids || !values || count < 0) return false;
-    for (int i = 0; i < count; i++) {
-        Item* value = reserve ? js_realm_slot(slots, slot_ids[i]) :
-            js_realm_slot_existing(slots, slot_ids[i]);
-        if (!value) return false;
-        values[i] = value;
-    }
-    return true;
-}
 
-bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
-        bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    return js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids,
-        (Item**)items, count, reserve);
-}
 
 static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
         int, const char*, void*) {
@@ -1042,56 +1018,6 @@ static void js_root_vector_reset_all(void) {
 #define JS_EVAL_VECTOR_INIT(vec, label) root_vector_init(vec, owner, label);
 #define JS_EVAL_VECTOR_DESTROY(vec, label) root_vector_destroy(vec);
 #define JS_EVAL_VECTOR_CLEAR(vec, label) root_vector_clear(vec);
-
-// One stable row owns each compiled unit's MIR context and source buffer.
-// ArrayList is storage only; the row is the lifetime authority.
-bool js_code_store_push(JsCodeStore* store, void* mir_context) {
-    if (!store || !mir_context) return false;
-    if (!store->artifacts) store->artifacts = arraylist_new(8);
-    JsCompiledArtifact* artifact = (JsCompiledArtifact*)mem_calloc(1,
-        sizeof(JsCompiledArtifact), MEM_CAT_JS_RUNTIME);
-    if (!artifact || !store->artifacts || !arraylist_append(store->artifacts, artifact)) {
-        mem_free(artifact);
-        log_error("js-code-store: cannot grow artifact rows");
-        return false;
-    }
-    artifact->mir_context = mir_context;
-    return true;
-}
-
-void js_code_store_attach_source(JsCodeStore* store, char* source_owner) {
-    JsCompiledArtifact* artifact = js_code_store_artifact_at(store,
-        js_code_store_count(store) - 1);
-    if (artifact) artifact->source_owner = source_owner;
-}
-
-void* js_code_store_last_context(JsCodeStore* store) {
-    JsCompiledArtifact* artifact = js_code_store_artifact_at(store,
-        js_code_store_count(store) - 1);
-    return artifact ? artifact->mir_context : NULL;
-}
-
-int js_code_store_count(const JsCodeStore* store) {
-    return store && store->artifacts ? store->artifacts->length : 0;
-}
-
-JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index) {
-    return store && store->artifacts && index >= 0 && index < store->artifacts->length
-        ? (JsCompiledArtifact*)arraylist_get(store->artifacts, index) : NULL;
-}
-
-void js_code_store_clear_rows(JsCodeStore* store) {
-    if (!store || !store->artifacts) return;
-    for (int i = 0; i < store->artifacts->length; i++) {
-        mem_free(arraylist_get(store->artifacts, i));
-    }
-    arraylist_free(store->artifacts);
-    store->artifacts = NULL;
-}
-
-void js_code_store_destroy(JsCodeStore* store) {
-    js_code_store_clear_rows(store);
-}
 
 static void js_eval_native_rows_clear(ArrayList** rows) {
     if (!rows || !*rows) return;
@@ -1200,9 +1126,6 @@ static Item* js_ensure_active_module_vars(void) {
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
 void js_regex_cache_reset();
 
-extern "C" void js_set_strict_mode(int64_t strict) {
-    js_strict_mode = (strict != 0);
-}
 
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -1230,8 +1153,6 @@ static void js_runtime_make_non_enumerable(Item object, Item name) {
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
 // v37: Toggle private field initialization mode (called from transpiled code)
-extern "C" void js_private_field_init_begin() { js_private_field_initializing = true; }
-extern "C" void js_private_field_init_end() { js_private_field_initializing = false; }
 
 // v37: Lazily resolve and cache Object.prototype for prototype chain fallback.
 // Plain objects without __proto__ need this for HasProperty / property_get checks.
@@ -1445,18 +1366,6 @@ extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
 // TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone.
 // Names arrive as module NameIds so delayed MIR never dereferences a compiler
 // pool spelling after that pool has been released (D5.4.3).
-extern "C" Item js_check_tdz(Item value, NameId name_id, int name_len) {
-    if (value.item == ITEM_JS_TDZ) {
-        NameRef name_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
-            name_id);
-        const char* name = name_ref ? name_ref->chars : "";
-        if (name_ref) name_len = (int)name_ref->len;
-        char buf[256];
-        snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
-        return js_throw_named_error_text("ReferenceError", buf);
-    }
-    return value;
-}
 
 // Const assignment check: throw TypeError when assigning to a const variable.
 extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
@@ -1511,7 +1420,6 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_process_reset_listeners();
     js_strict_mode = false;
     js_reset_core_module_caches();
-    if (full_reset) js_eval_preamble_cache_reset();
     if (full_reset) {
         js_array_runtime_items_cleanup_all();
         js_array_immortal_props_cleanup_all();
@@ -2085,31 +1993,13 @@ extern "C" Item js_resolve_lexical_this(Item this_val) {
     return this_val;
 }
 
-extern "C" void js_set_this(Item this_val) {
-    js_current_this = this_val;
-}
 JS_FORWARD_EXPRESSION(Item, js_get_new_target, (), (js_new_target))
 
-extern "C" void js_set_direct_new_target(Item target) {
-    // Directly set new.target (for direct calls that bypass js_call_function)
-    js_new_target = target;
-}
 
-extern "C" void js_set_pending_call_source(const char* source, int64_t len) {
-    js_pending_call_source = source;
-    js_pending_call_source_len = (len > 0 && len < 8192) ? (int)len : 0;
-    if (!source || js_pending_call_source_len == 0) {
-        js_pending_call_source = NULL;
-        js_pending_call_source_len = 0;
-    }
-}
 
 // Build the 'arguments' array-like object from the pending call args.
 // Called at the top of JIT-compiled functions that reference 'arguments'.
 
-extern "C" void js_set_arguments_info(int64_t is_strict) {
-    js_pending_args_is_strict = (int)is_strict;
-}
 
 void js_reset_transient_call_state() {
     js_current_this = (Item){0};

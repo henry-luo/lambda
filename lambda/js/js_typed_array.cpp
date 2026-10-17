@@ -1440,10 +1440,6 @@ JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options_target,
     (Item length_arg, Item options_arg, Item new_target),
     js_construct_arraybuffer_target, (length_arg, options_arg, new_target, true, &js_buffer_view_default_ops))
 
-extern "C" Item js_arraybuffer_construct_with_ops(Item length, Item options,
-        Item target, const JsBufferViewOps* ops) {
-    return js_construct_arraybuffer_target(length, options, target, false, ops);
-}
 
 extern "C" bool js_is_arraybuffer(Item val) {
     if (get_type_id(val) != LMD_TYPE_MAP || !val.map ||
@@ -1717,10 +1713,6 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin, Item end, int a
 }
 
 // Item-returning wrapper for MIR JIT calls (MIR expects Item return type)
-extern "C" Item js_arraybuffer_is_view_item(Item val) {
-    bool result = js_is_typed_array(val) || js_is_dataview(val);
-    return (Item){.item = result ? (ITEM_TRUE) : (ITEM_FALSE)};
-}
 
 // Detach an ArrayBuffer through the stable handle so storage is released once.
 extern "C" void js_arraybuffer_detach(Item val) {
@@ -2436,71 +2428,7 @@ extern "C" Item js_typed_array_set_numeric(Item ta_item, double numeric_index,
         is_negative_zero, value);
 }
 
-extern "C" Item js_typed_array_set_numeric_key(Item ta_item,
-        double numeric_index, Item value) {
-    // A raw MIR Number preserves -0, while the existing typed-array setter
-    // needs that canonical-index distinction as an explicit argument.
-    bool is_negative_zero = numeric_index == 0.0 && signbit(numeric_index);
-    return js_typed_array_set_numeric_impl(ta_item, numeric_index,
-        is_negative_zero, value);
-}
 
-extern "C" bool js_typed_array_set_number_if_kind(Item ta_item,
-        double numeric_index, int expected_type, double value) {
-    if (!js_is_typed_array(ta_item)) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return false;
-    }
-
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-    if (!ta) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return false;
-    }
-    js_typed_array_refresh_arraynum_view(ta);
-    if ((int)ta->element_type != expected_type ||
-            ta->element_type == JS_TYPED_BIGINT64 ||
-            ta->element_type == JS_TYPED_BIGUINT64) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return false;
-    }
-
-    // This is the Number-only portion of IntegerIndexedElementSet. The
-    // caller has already evaluated a proven primitive Number, so no coercion
-    // is observable here. An invalid canonical numeric index is still a
-    // completed integer-indexed write that leaves the receiver unchanged.
-    bool is_negative_zero = numeric_index == 0.0 && signbit(numeric_index);
-    if (is_negative_zero || !isfinite(numeric_index) ||
-            floor(numeric_index) != numeric_index || numeric_index < 0.0 ||
-            numeric_index > (double)INT32_MAX) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_TAKEN);
-        return true;
-    }
-
-    int index = (int)numeric_index;
-    if (index >= js_typed_array_current_length(ta)) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_TAKEN);
-        return true;
-    }
-    // This leaf receives a raw MIR Number and cannot observe a buffer change
-    // between its initial live-view witness and the store.
-    void* data = js_typed_array_prepare_write_current(ta);
-    if (!data) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_TAKEN);
-        return true;
-    }
-    js_typed_array_store_number_direct(ta->element_type, (char*)data, index,
-        value);
-    js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
-        JS_OPT_OUTCOME_TAKEN);
-    return true;
-}
 
 extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
@@ -2530,31 +2458,6 @@ extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
     return js_typed_array_current_data(ta);
 }
 
-extern "C" void* js_typed_array_data_at_if_kind(Item ta_item,
-        int expected_type, int64_t index) {
-    if (index < 0 || !js_is_typed_array(ta_item)) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return NULL;
-    }
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-    if (!ta || (int)ta->element_type != expected_type) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return NULL;
-    }
-    // The NO_GC read can borrow only a generation-matched pointer. A resized
-    // buffer goes through the ordinary path, which refreshes the view safely.
-    if (index >= js_typed_array_current_length(ta)) {
-        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
-            JS_OPT_OUTCOME_FALLBACK);
-        return NULL;
-    }
-    void* data = js_typed_array_cached_read_data(ta);
-    js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
-        data ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
-    return data;
-}
 
 extern "C" bool js_item_bytes(Item item, const char** data, int* len) {
     if (!data || !len) return false;
@@ -2697,11 +2600,6 @@ extern "C" Item js_typed_array_fill_with_ops(Item ta_item, Item value, int start
     return ta_item;
 }
 
-extern "C" Item js_typed_array_fill(Item ta, Item value, int start, int end,
-        bool array_semantics) {
-    return js_typed_array_fill_with_ops(ta, value, start, end, array_semantics,
-        &js_buffer_view_default_ops);
-}
 
 // .set(source [, offset]) — bulk copy from another array/typed array
 extern "C" Item js_typed_array_set_from_with_ops(Item ta_item, Item source, int offset,
@@ -2799,9 +2697,6 @@ extern "C" Item js_typed_array_set_from_with_ops(Item ta_item, Item source, int 
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_typed_array_set_from(Item ta, Item source, int offset) {
-    return js_typed_array_set_from_with_ops(ta, source, offset, NULL);
-}
 
 // .slice(begin, end) — creates a copy
 extern "C" Item js_typed_array_slice_with_ops(Item ta_item, int start, int end,
@@ -2889,9 +2784,6 @@ extern "C" Item js_typed_array_slice_with_ops(Item ta_item, int start, int end,
     return output.get();
 }
 
-extern "C" Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics) {
-    return js_typed_array_slice_with_ops(ta, start, end, array_semantics, NULL);
-}
 
 // .subarray(begin, end) shares storage and captures length before coercion.
 extern "C" Item js_typed_array_subarray(Item ta_item, Item begin, Item end,

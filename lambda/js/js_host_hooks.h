@@ -7,11 +7,8 @@
 
 // Host hooks invert optional Node-leaf back-calls. An absent hook is a
 // deliberate no-op so minimal profiles remain independent of Node modules.
-typedef void (*JsHostShutdownParticipant)(void);
 typedef Item (*JsHostConsoleFormatHook)(Item args);
 
-void js_host_hooks_set_shutdown_participant(JsHostShutdownParticipant participant);
-void js_host_hooks_run_shutdown_participants(void);
 LAMBDA_RT_API void js_host_hooks_set_console_format_hook(JsHostConsoleFormatHook hook);
 Item js_host_hooks_format_console(Item args);
 void js_host_hooks_set_redirect_stdout_to_stderr(bool enabled);

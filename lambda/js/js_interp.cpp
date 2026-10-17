@@ -1,7 +1,8 @@
 #include "js_interp.hpp"
 #include "js_source_module.hpp"
 #include "../runtime/activation.h"
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
+#include "../core/lambda-decimal.hpp"
 
 #include <limits.h>
 
@@ -6571,7 +6572,7 @@ static Item js_interp_configure_function_metadata(Item function_item) {
 
 // JC20: shared null [[HomeObject]] home for callees without a payload; the
 // frame only reads it.
-static uint64_t js_interp_no_home_class = ITEM_NULL_VAL;
+static uint64_t js_interp_no_home_class = ITEM_NULL;
 
 Item js_interp_initialize_body_vars(JsInterpEnv* body, JsInterpEnv* parameters) {
     if (!body || body == parameters) return make_js_undefined();
@@ -7145,20 +7146,6 @@ extern "C" Item js_interp_module_async_body(Activation* self, Item unused) {
     }
     if (module) module->loading = false;
     return js_interp_module_async_reject(state, result.value);
-}
-
-// A MIR module with a top-level await runs its js_main (state_fn) once on the
-// same carrier; js_await_park parks it there (RA1). js_main itself completes
-// the module's async evaluation at its end.
-extern "C" Item js_mir_module_async_body(Activation* self, Item unused) {
-    (void)unused;
-    JsAsyncContextStateRecord* state =
-        (JsAsyncContextStateRecord*)activation_user(self);
-    JsOwnedCallActivation call_facts;
-    JsModuleBodyScope module_scope(state);
-    Item result = js_mir_execute_compiled_entry(state->state_fn);
-    if (!item_is_error(result)) return make_js_undefined();
-    return js_interp_module_async_reject(state, result);
 }
 
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
@@ -7823,7 +7810,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         module->loading = false;
         return star_validation;
     }
-    Rooted<Item> frame_root(roots, js_async_context_create_module(script, NULL,
+    Rooted<Item> frame_root(roots, js_async_context_create_module(script,
         script->module_state_id, module->specifier_item));
     if (item_is_error(frame_root.get())) {
         module->evaluation_error = frame_root.get();

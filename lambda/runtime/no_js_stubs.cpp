@@ -52,12 +52,10 @@ uint64_t js_get_heap_epoch(void) { return 0; }
 
 void js_batch_reset(void) {}
 void js_intrinsic_state_teardown(void) {}
-void js_eval_preamble_cache_reset(void) {}
 void js_release_global_var_module_bindings_from(uint32_t first_module_state_id) {
     (void)first_module_state_id;
 }
 void js_event_loop_shutdown(void) {}
-void jm_cleanup_deferred_mir() {}
 void js_canvas_cleanup(void) {}
 void js_fetch_reset(void) {}
 void dom_batch_reset(void) {}

@@ -2,7 +2,7 @@
 #include "lambda/js/js_runtime.h"
 #include "lambda/js/js_interp.hpp"
 #include "lambda/js/js_transpiler.hpp"
-#include "lambda/js/js_mir_internal.hpp"
+#include "lambda/js/js_execution_internal.hpp"
 #include "lambda/js/js_event_loop.h"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"

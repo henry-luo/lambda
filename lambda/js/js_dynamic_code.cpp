@@ -4,7 +4,7 @@
 // whatever the caller's tier or the unit selector; MIR never lowers it. This
 // file assembles the source text, applies the source-level early errors that
 // depend on the caller's context, and hands the code to js_interp.cpp.
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"

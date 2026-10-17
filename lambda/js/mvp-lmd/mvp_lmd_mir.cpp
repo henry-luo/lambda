@@ -217,6 +217,7 @@ size_t mvp_lmd_code_bytes(const MvpLmdCode* code) {
         (code->reference ? strlen(code->reference) + 1 : 0) : 0;
 }
 struct MvpLmdProgram {
+    bool typescript;
     bool relocatable;
     ArrayList* relocations;
     MvpLmdCode* code;
@@ -6425,6 +6426,20 @@ static LmdValue capture_member_callee(LmdCompiler* c, AstNode* member, AstNode* 
     return boxed(c, callee);
 }
 static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = NULL) {
+    // the TS language intrinsic shares its existing helper and respects source bindings.
+    if (c->program->typescript && !captured && !n->optional &&
+            n->callee->node_type == AST_NODE_IDENT) {
+        AstIdentNode* name = (AstIdentNode*)n->callee;
+        if (!name->entry && named(name->name, "type")) {
+            LmdValue* arguments = call_arguments(c, n, false);
+            LmdValue value = n->arguments ? box(c, arguments[0]) : boxed(c, constant(c, ITEM_NULL));
+            MIR_reg_t result = em_call_1(&c->em, "ts_type_info", MIR_T_I64,
+                MIR_T_I64, reg(c, value.reg), true);
+            mem_free(arguments);
+            check_error(c, result);
+            return boxed(c, result, K_STRING);
+        }
+    }
     if (!captured && n->callee->node_type == AST_NODE_IDENT && !((AstIdentNode*)n->callee)->entry &&
             named(((AstIdentNode*)n->callee)->name, "import")) {
         LmdValue specifier = box(c, expression(c, n->arguments));
@@ -12905,9 +12920,12 @@ static bool mvp_lmd_compile_unit(MvpLmdProgram* p, const char* source, size_t le
     char* retained = (char*)pool_alloc(p->frontend->pool, length + 1);
     if (!retained) { diagnostic(p, NULL, "source allocation failed"); return false; }
     memcpy(retained, source, length); retained[length] = '\0';
-    p->frontend->strict_js = true;
+    p->frontend->strict_js = !p->typescript;
+    if (p->typescript) p->frontend->strict_mode = true;
     p->failure_phase = MVP_LMD_PARSE_FAILURE;
-    if (!js_transpiler_parse_c(p->frontend, retained, length, p->source_module ? JS_PARSE_MODULE : JS_PARSE_SCRIPT) ||
+    JsParseMode mode = p->source_module ? JS_PARSE_MODULE : JS_PARSE_SCRIPT;
+    if (p->typescript) mode = (JsParseMode)(mode | JS_PARSE_TYPESCRIPT);
+    if (!js_transpiler_parse_c(p->frontend, retained, length, mode) ||
             p->frontend->has_errors || !p->frontend->ast_root) {
         diagnostic(p, NULL, "JS parsing or validation failed"); return false;
     }
@@ -13359,6 +13377,7 @@ static MvpLmdExecution* mvp_lmd_execute_owned(const char* source, size_t length,
     } else host = e->host;
     if (existing && p->library) p->library->abort_kind = 0;
     p->host_enabled = host != NULL;
+    p->typescript = options && options->typescript;
     // the public JS host exposes $262 like the retained interpreter; async
     // harness completion remains separately controlled by host->test262.
     p->test262_host = runtime || (host && host->test262);
@@ -13647,7 +13666,8 @@ Item mvp_lmd_call_function_satellite(Item compiled, Item source, Item receiver,
     return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
 }
 Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t length,
-        const char* filename, uint64_t* result_home, bool module, const MvpLmdCode* cached_code) {
+        const char* filename, uint64_t* result_home, bool module, const MvpLmdCode* cached_code,
+        bool typescript, bool native_harness) {
     if (!runtime) return ItemError;
     EvalContext* owner = runtime_get_eval_context(runtime);
     if (!owner || (context && context != owner)) return ItemError;
@@ -13681,6 +13701,8 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     MvpLmdOptions options = {filename, module || js_c_source_is_module(source, length)};
     options.namespace_result = module;
     options.cached_code = cached_code;
+    options.typescript = typescript;
+    options.native_harness = native_harness;
     MvpLmdExecution* execution = mvp_lmd_execute_owned(source, length, NULL, &host, &options, runtime);
     if (retained) retained->execution = execution;
     MvpLmdFailurePhase phase;
