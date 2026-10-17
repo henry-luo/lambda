@@ -251,12 +251,18 @@ static char* canonicalize_mir(const char* input) {
                 value < 72057594037927936ULL;
             uint64_t tag = value >> 56;
             uint64_t payload = value & UINT64_C(0x00ffffffffffffff);
-            bool is_text_pointer = (tag == LMD_TYPE_STRING || tag == LMD_TYPE_SYMBOL) &&
-                payload >= 4300000000ULL;
-            if (is_stack_guard_pointer || is_user_pointer || is_text_pointer) {
-                // formal MIR embeds tagged canonical names; normalize their addresses, retaining the tag.
-                const char* token = is_text_pointer ?
-                    (tag == LMD_TYPE_STRING ? "<string-ptr>" : "<symbol-ptr>") : "<ptr>";
+            static const struct { uint64_t tag; const char* token; } tagged_pointers[] = {
+                {LMD_TYPE_STRING, "<string-ptr>"},
+                {LMD_TYPE_SYMBOL, "<symbol-ptr>"},
+                {LMD_TYPE_FLOAT, "<float-ptr>"},
+            };
+            const char* tagged_token = NULL;
+            if (payload >= 4300000000ULL)
+                for (const auto& entry : tagged_pointers)
+                    if (tag == entry.tag) { tagged_token = entry.token; break; }
+            if (is_stack_guard_pointer || is_user_pointer || tagged_token) {
+                // subnormal literals retain a float-home pointer; packed +/-0 and inline scalars are constants.
+                const char* token = tagged_token ? tagged_token : "<ptr>";
                 size_t length = strlen(token);
                 memcpy(output + out, token, length);
                 out += length;
@@ -369,7 +375,8 @@ static const char* opt_executable() {
 static bool run_fixture_mode_backend(const char* name, const char* source,
                                      bool trace_enabled, const char* backend,
                                      TraceResult* trace, char* output,
-                                     size_t output_size, int timeout_ms = 30000) {
+                                     size_t output_size, int timeout_ms = 30000,
+                                     bool standalone = false) {
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
@@ -387,7 +394,8 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
     // MIR dumping is intentionally gated by --no-log. Keep logging enabled for
     // this child so the finalized artifact is available for the differential
     // contract below; the child writes diagnostics to its normal log sink.
-    const char* args[] = {executable, "js", script_path, NULL};
+    // benchmark units are closed scripts; ordinary entry keeps the shared realm's globals reflective.
+    const char* args[] = {executable, "js", script_path, standalone ? "--runtime=mvp-lmd" : NULL, NULL};
     ShellEnvEntry env[5] = {};
     int env_count = 0;
     // This suite contracts the finalized MIR lowering. AUTO now selects the
@@ -450,14 +458,14 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
 
 static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
                              TraceResult* trace, char* output, size_t output_size,
-                             int timeout_ms = 30000) {
+                             int timeout_ms = 30000, bool standalone = false) {
     return run_fixture_mode_backend(name, source, trace_enabled, NULL, trace,
-        output, output_size, timeout_ms);
+        output, output_size, timeout_ms, standalone);
 }
 
 static bool run_fixture(const char* name, const char* source, TraceResult* trace,
-                        char* output, size_t output_size) {
-    bool ok = run_fixture_mode(name, source, true, trace, output, output_size);
+                        char* output, size_t output_size, bool standalone = false) {
+    bool ok = run_fixture_mode(name, source, true, trace, output, output_size, 30000, standalone);
     if (ok) {
         // shared emission checks replace retired LJS trace hooks; retain the exact behavioral fixture.
         char script[512], sidecar[512];
@@ -470,10 +478,10 @@ static bool run_fixture(const char* name, const char* source, TraceResult* trace
 
 static void expect_trace_off_same(const char* name, const char* source,
                                   const char* trace_output,
-                                  const char* backend = NULL) {
+                                  const char* backend = NULL, bool standalone = false) {
     char output[4096];
     ASSERT_TRUE(run_fixture_mode_backend(name, source, false, backend, NULL,
-        output, sizeof(output)));
+        output, sizeof(output), 30000, standalone));
     char normalized_trace_output[4096];
     char normalized_output[4096];
     normalize_child_output(trace_output, normalized_trace_output,
@@ -541,13 +549,19 @@ static void expect_ok_output(const char* output) {
 
 TEST(JsOpt, MirCanonicalizationPreservesTextTagsAndScalarConstants) {
     char text[256];
-    snprintf(text, sizeof(text), "%llu %llu %llu 42 360287974484639744",
+    snprintf(text, sizeof(text), "%llu %llu %llu %llu %llu %llu 42 360287974484639744",
         (unsigned long long)(((uint64_t)LMD_TYPE_STRING << 56) | UINT64_C(0x123456789)),
         (unsigned long long)(((uint64_t)LMD_TYPE_SYMBOL << 56) | UINT64_C(0x123456789)),
-        (unsigned long long)UINT64_C(0x123456789));
+        (unsigned long long)UINT64_C(0x123456789),
+        (unsigned long long)(((uint64_t)LMD_TYPE_FLOAT << 56) | UINT64_C(0x123456788)),
+        (unsigned long long)ITEM_FLOAT_P0, (unsigned long long)ITEM_FLOAT_N0);
     char* normalized = canonicalize_mir(text);
     ASSERT_NE(normalized, nullptr);
-    EXPECT_STREQ(normalized, "<string-ptr> <symbol-ptr> <ptr> 42 360287974484639744");
+    char expected[256];
+    snprintf(expected, sizeof(expected),
+        "<string-ptr> <symbol-ptr> <ptr> <float-ptr> %llu %llu 42 360287974484639744",
+        (unsigned long long)ITEM_FLOAT_P0, (unsigned long long)ITEM_FLOAT_N0);
+    EXPECT_STREQ(normalized, expected);
     free(normalized);
 }
 
@@ -1411,6 +1425,160 @@ TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
     expect_ok_output(output);
     expect_trace_off_same("recursive_literal_field", source, output);
 }
+
+namespace {
+
+struct MvpMirTuningCase {
+    const char* name;
+    const char* fixture;
+    const char* source;
+    bool standalone = true;
+};
+
+// keep callback-free admission cases separate: reflection would disable their numeric proofs.
+static const MvpMirTuningCase kMvpMirTuningCases[] = {
+    {"BoundedNativeRecursion", "mvp_bounded_native_recursion", R"JS(
+function count(n) {
+    let one = 1;
+    if (n === 0) return one;
+    return one + count(n - 1);
+}
+function rotate(n, a, b) {
+    if (n === 0) return 100 * a + b;
+    return rotate(n - 1, b, a);
+}
+if (count(40) !== 41 || rotate(7, 2, 3) !== 302)
+    throw new Error('recursive scalar result or argument snapshot');
+console.log('OPT_OK');
+)JS"},
+    {"BoundedMethodRecursion", "mvp_bounded_method_recursion", R"JS(
+class Counter {
+    constructor(value) { this.value = value; }
+    sum(n) {
+        if (n === 0) return this.value;
+        let total = 0;
+        for (let i = 0; i < 2; i++) total += this.sum(n - 1);
+        return total;
+    }
+}
+const a = new Counter(2), b = new Counter(7);
+if (a.sum(3) !== 16 || a.value !== 2 || b.sum(2) !== 28 || b.value !== 7)
+    throw new Error('recursive method receiver or local snapshot');
+console.log('OPT_OK');
+)JS"},
+    {"NonrecursiveEarlyReturnKeepsCall", "mvp_nonrecursive_early_return", R"JS(
+function scan(n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) total += i;
+    if (total > 0) return total;
+    return 0;
+}
+function driver(n) { return scan(n); }
+if (driver(10) !== 45 || driver(0) !== 0)
+    throw new Error('nonrecursive early return');
+console.log('OPT_OK');
+)JS"},
+    {"ClosedImplicitGlobalNumericKey", "mvp_implicit_numeric_key", R"JS(
+function fill() {
+    const values = [0, 0, 0];
+    for (implicitIndex = 0; implicitIndex < 3; implicitIndex++)
+        values[implicitIndex] = implicitIndex + 1;
+    return values[0] + values[1] + values[2];
+}
+if (fill() !== 6) throw new Error('implicit numeric key');
+console.log('OPT_OK');
+)JS"},
+    {"ImplicitKeyDestructuringRejectsNumericProof", "mvp_implicit_destructured_key", R"JS(
+function fill() {
+    const values = [1];
+    implicitKey = 0;
+    [[implicitKey]] = [['named']];
+    values[implicitKey] = 7;
+    return values[0] === 1 && values.named === 7;
+}
+if (!fill()) throw new Error('destructuring bypassed key inventory');
+console.log('OPT_OK');
+)JS"},
+    {"ReflectiveGlobalRetainsPropertyFallback", "mvp_reflective_global_key", R"JS(
+function fill() {
+    const values = [1];
+    implicitKey = 0;
+    globalThis.implicitKey = 'named';
+    values[implicitKey] = 7;
+    return values[0] === 1 && values.named === 7;
+}
+if (!fill()) throw new Error('reflective global bypassed key fallback');
+console.log('OPT_OK');
+)JS", false},
+    {"UnknownArrayNumericConsumer", "mvp_unknown_array_numeric_consumer", R"JS(
+function product(a, b) { return a[0] * b[0]; }
+function difference(a, b) { return a[0] - b[0]; }
+if (product(['7'], [2]) !== 14 || difference([[7]], [2]) !== 5 ||
+    product([5e-324], [2]) !== 1e-323 || !isNaN(product([], [2])) ||
+    !isNaN(difference([undefined], [2])))
+    throw new Error('numeric element conversion or absence');
+console.log('OPT_OK');
+)JS"},
+    {"NumericConsumerRetainsCallbacksAndOwnership", "mvp_numeric_consumer_callbacks", R"JS(
+function product(a, b) { return a[0] * b.value; }
+let order = '';
+const a = [{ valueOf() { order += 'a'; return 7; } }];
+const b = { get value() { order += 'b'; return 2; } };
+if (product(a, b) !== 14 || order !== 'ba')
+    throw new Error('operand coercion order');
+const wide = [5e-324];
+const mutating = { get value() { wide[0] = 1; return 2; } };
+if (product(wide, mutating) !== 1e-323)
+    throw new Error('scalar element lifetime');
+const hole = new Array(1);
+Array.prototype[0] = 9;
+const inherited = product(hole, { value: 2 });
+delete Array.prototype[0];
+if (inherited !== 18) throw new Error('prototype element fallback');
+console.log('OPT_OK');
+)JS"},
+    {"RepeatedDeferredNumericKey", "mvp_repeated_deferred_numeric_key", R"JS(
+const keys = [0];
+function put(owner) {
+    for (let i = 0; i < 2; i++) owner[keys[0]] = i + 10;
+}
+const array = [], object = {};
+put(array); keys[0] = 1; put(array);
+keys[0] = true; put(object); keys[0] = null; put(object);
+keys[0] = 1.5; put(object); keys[0] = -0; put(array);
+if (array.length !== 2 || array[0] !== 11 || array[1] !== 11 ||
+    object.true !== 11 || object.null !== 11 || object['1.5'] !== 11)
+    throw new Error('deferred Number or named key');
+console.log('OPT_OK');
+)JS"},
+    {"DeferredObjectKeyKeepsRhsOrder", "mvp_deferred_object_key_order", R"JS(
+function put(owner, key) { owner[key] = rhs(); }
+function rhs() { order += 'r'; index = 1; return 7; }
+let order = '', index = 0;
+const key = { toString() { order += 'k'; return index; } };
+const array = [];
+put(array, key);
+if (order !== 'rk' || array[0] !== undefined || array[1] !== 7)
+    throw new Error('deferred key converted before RHS');
+console.log('OPT_OK');
+)JS"},
+};
+
+class JsMvpMirOpt : public ::testing::TestWithParam<MvpMirTuningCase> {};
+
+TEST_P(JsMvpMirOpt, EmissionAndSemantics) {
+    const MvpMirTuningCase& test = GetParam();
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture(test.fixture, test.source, &trace, output, sizeof(output), test.standalone));
+    expect_ok_output(output);
+    expect_trace_off_same(test.fixture, test.source, output, NULL, test.standalone);
+}
+
+INSTANTIATE_TEST_SUITE_P(Tuning, JsMvpMirOpt, ::testing::ValuesIn(kMvpMirTuningCases),
+    [](const ::testing::TestParamInfo<MvpMirTuningCase>& info) { return info.param.name; });
+
+}  // namespace
 
 TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     const char* source =

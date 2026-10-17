@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6v2: recursive early-return admission must not copy a nonrecursive loop body into its callers. The driver retains a native scalar call and no copied loop arithmetic.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f2",
+      "expect": [
+        "func\ti64, i64, p:runtime, p:unit"
+      ],
+      "count": {
+        "call\tmvp_lmd_f1": 1
+      },
+      "forbid": [
+        "\tadd\t",
+        "\tdadd\t",
+        "\tlt\t",
+        "call\tmvp_lmd_class_invoke"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.4, D8.2.6v2: a repeated callback-free assignment guards the boxed Number key before spelling. Keep numeric array storage, Boolean/null/fractional named fallbacks and at most two deferred canonical-name sites, without a string-to-number round trip.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "expect_seq": [
+        "call\tmvp_lmd_array_own_item",
+        "mov\t{{r:tag}}, 8",
+        ", {{r:tag}}, 8",
+        "call\tmvp_lmd_primitive_to_string_fixed",
+        "call\tmvp_lmd_property_key_fixed",
+        "call\tmvp_lmd_array_store"
+      ],
+      "count": {
+        "call\tmvp_lmd_property_key_fixed": {
+          "min": 1,
+          "max": 2
+        },
+        "call\tmvp_lmd_array_store": 1,
+        "call\tmvp_lmd_class_property_fixed": 1
+      },
+      "forbid": [
+        "call\tmvp_lmd_string_to_number",
+        "call\tmvp_lmd_array_index_property"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6v2, S7.11.4; JC24: one guarded recursive method expansion preserves receiver/local state and the ordinary callable fallback. Both recursion copies remain bounded and still invoke the selected callee.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f2",
+      "count": {
+        "dsub\t": 2,
+        "dadd\t": 2,
+        "call\tmvp_lmd_class_invoke": 2,
+        "call\tlambda_stack_is_exhausted": 1
+      },
+      "expect": [
+        "call\tmvp_lmd_class_property_fixed"
+      ]
+    }
+  ]
+}
