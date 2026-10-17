@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three/three.module.js';
 import { ImprovedNoise } from './vendor/three/addons/math/ImprovedNoise.js';
+import { OrbitControls } from './vendor/three/addons/controls/OrbitControls.js';
 
 const canvas = document.getElementById('garden');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -10,6 +11,17 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 800 / 500, 0.1, 100);
 camera.position.set(8, 7, 11);
 camera.lookAt(0, 0.4, 0);
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 0.4, 0);
+controls.minDistance = 4;
+controls.maxDistance = 35;
+controls.minPolarAngle = 0.08;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.maxTargetRadius = 8;
+controls.screenSpacePanning = true;
+controls.listenToKeyEvents(canvas);
+controls.update();
+controls.saveState();
 scene.add(new THREE.AmbientLight(0x809fff, 1.4));
 const light = new THREE.DirectionalLight(0xffd2b0, 3);
 light.position.set(4, 8, 3);
@@ -60,8 +72,42 @@ scene.add(ring);
 const halo = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshBasicMaterial({ color: 0xaab9ff, transparent: true, opacity: 0.2, depthWrite: false }));
 halo.position.set(0, 3.8, 0);
 scene.add(halo);
+// redraw on camera changes; the static garden needs no recurring frame loop.
+controls.addEventListener('change', () => renderer.render(scene, camera));
+function mode(pan) {
+    controls.mouseButtons.LEFT = pan ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    document.getElementById('orbit-mode').setAttribute('aria-pressed', String(!pan));
+    document.getElementById('pan-mode').setAttribute('aria-pressed', String(pan));
+}
+function reset() { controls.reset(); mode(false); }
+const actions = {
+    'orbit-mode': () => mode(false), 'pan-mode': () => mode(true),
+    'orbit-left': () => controls.rotateLeft(0.16),
+    'orbit-right': () => controls.rotateLeft(-0.16),
+    'tilt-up': () => controls.rotateUp(0.12),
+    'tilt-down': () => controls.rotateUp(-0.12),
+    'zoom-in': () => controls.dollyIn(0.85),
+    'zoom-out': () => controls.dollyOut(0.85),
+    reset
+};
+for (const id of Object.keys(actions)) document.getElementById(id).addEventListener('click', actions[id]);
+// OrbitControls consumes pointer defaults, so explicitly focus the keyboard target.
+canvas.addEventListener('pointerdown', () => canvas.focus());
+canvas.addEventListener('keydown', event => {
+    const key = event.key.toLowerCase();
+    if (key === '+' || key === '=') actions['zoom-in']();
+    else if (key === '-' || key === '_') actions['zoom-out']();
+    else if (key === 'r') reset();
+    else return;
+    event.preventDefault();
+});
+window.addEventListener('pagehide', () => {
+    controls.dispose();
+    renderer.dispose();
+    renderer.forceContextLoss();
+});
 renderer.render(scene, camera);
 document.getElementById('status').textContent = '49 instanced crystals · Lambert lighting · data texture · transparent halo';
-globalThis.threeGallery = { renderer, scene, camera, crystals, texture, geometry, material };
+globalThis.threeGallery = { renderer, scene, camera, controls, reset, crystals, texture, geometry, material };
 document.getElementById('status').setAttribute('data-ready', 'true');
 globalThis.threeGalleryReady = true;

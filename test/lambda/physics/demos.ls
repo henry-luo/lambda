@@ -1,4 +1,4 @@
-import scenes: ~~.~~.demo.physics._scenes
+import scenes: ~~.~~.demo.scene3d.physics._scenes
 import physics: lambda.physics
 
 let descriptions=[scenes.domino(),scenes.salvage(),scenes.sorter(),scenes.bounce()];

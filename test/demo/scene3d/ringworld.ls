@@ -1,6 +1,7 @@
 // visual demo: open with ./lambda.exe view test/demo/scene3d/ringworld.ls
 import s: lambda.scene3d
 import geometry: ._geometry
+import navigation: ._navigation
 
 let pi = 3.141592653589793
 
@@ -99,12 +100,15 @@ let viewport = s.normalize(s.scene([
 
 <html
     <head
-        <title "Ringworld / Native 3D">
+        <meta name:"viewport",content:"width=device-width,initial-scale=1">
+        <title "Ringworld / Scene3D">
+        <link rel:"stylesheet",href:"demo.css">
         <link rel: "stylesheet", href: "ringworld.css">
         <script type: "importmap", "{\"imports\":{\"three\":\"./vendor/three/three.module.js\"}}">
     >
     <body
         <main *[
+            navigation.breadcrumbs("Ringworld"),
             <header *[
                 <div *[<p class: "eyebrow", "PROCEDURAL PLANET STUDY / 001">, <h1 "RINGWORLD">]>,
                 <div class: "edition", "LAMBDA + RADIANT">

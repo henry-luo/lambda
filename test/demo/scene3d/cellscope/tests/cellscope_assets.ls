@@ -3,7 +3,7 @@ import assets: ~~.mod_assets
 import data: ~~.mod_data
 
 // Golden batches have no entry-script argv; fixtures resolve from the harness working directory.
-let base = "file://" ++ sys.proc.self.cwd# ++ "/test/demo/cellscope/"
+let base = "file://" ++ sys.proc.self.cwd# ++ "/test/demo/scene3d/cellscope/"
 let plant = assets.load(base,"plant")^
 let source = input(base ++ "assets/plant/plant.gltf",'json')^
 let attributes = source.meshes[0].primitives[0].attributes

@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "event.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -806,6 +807,12 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
         if (!item) continue;
 
         layout_grid_item_final_content_multipass(lycon, item);
+        // grid items bypass block finalization; publish their final overflow clip even when content fits.
+        if (item->scroller) {
+            BoxEdges border = layout_boundary_border_edges(item->boundary());
+            update_scroller(item, item->content_width + border.right,
+                item->content_height + border.bottom);
+        }
     }
 
     log_info("FINAL GRID CONTENT LAYOUT END");

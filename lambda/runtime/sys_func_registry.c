@@ -3795,19 +3795,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // reads the rooted receiver's immutable view descriptor; detached or
         // resized storage changes length/data, never the element kind.
         "js_typed_array_element_type",
-        // This read snapshot performs only class/view validation and a live
-        // ArrayNum refresh before returning a pointer consumed by the next
-        // generated load. It cannot allocate or dispatch guest code.
-        "js_typed_array_data_at_if_kind",
-        // This existing-slot write excludes growth, holes, scalar homes, and
-        // descriptor overlays before mutating direct packed storage.
-        "js_array_set_existing_number_no_gc",
-        // This read admits only a direct present own dense element through an
-        // existing companion map; it rejects scalar homes, holes and numeric
-        // descriptor overlays.
-        "js_array_get_existing_own_dense_with_props_or_missing",
-
-
+        // D5.3.2: retired imports must leave this exact registry audit as well.
         "js_async_iterator_close_needs_await",
 #endif // LAMBDA_NO_JS
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
@@ -3839,9 +3827,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "lambda_unit_const_at",
-#ifndef LAMBDA_NO_JS
-        "js_with_save_depth",
-#endif // LAMBDA_NO_JS
         // LR07-7 root-honesty probe. Reads one machine word, compares it
         // against the GC zone (`gc_is_managed`, a pure range query) and may
         // log; it allocates no GC object, never calls gc_collect, and never

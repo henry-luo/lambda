@@ -1,4 +1,5 @@
 import data: .mod_data
+import navigation: ~~._navigation
 import scene: .mod_scene
 import assets: .mod_assets
 
@@ -28,6 +29,7 @@ fn info(cell) => <div id:"info-" ++ cell.id,class:"cell-info",style:if (cell.id 
 >
 
 pub fn tree() element^ => <main id:"cellscope",'data-cell':"plant",'data-part':"nucleus",'data-compare':"false",'data-loading':"true",
+    navigation.breadcrumbs("CellScope", "../index.html");
     <div id:"model-loading",class:"model-loading",role:"status",'aria-live':"polite",'aria-atomic':"true",
         <div class:"loading-card",
             <p class:"loading-label","Loading 3D specimen">

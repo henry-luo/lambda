@@ -1,8 +1,10 @@
 import physics: lambda.physics
+import navigation: ~~._navigation
 
 <html
-    <head <title "Lambda physics"><style "body { margin: 24px; background: #171c25; color: #edf2f8; font-family: sans-serif; } scene3d { display: block; }">>
+    <head <link rel:"stylesheet",href:"../demo.css"><title "Lambda physics"><style "body { margin: 24px; background: #171c25; color: #edf2f8; font-family: sans-serif; } scene3d { display: block; }">>
     <body
+        navigation.breadcrumbs("Basic rigid bodies", "../index.html");
         <h1 "Native rigid-body physics">
         <p "Three boxes fall onto the floor. Physics advances at 120 ticks per second.">
         <p <button id:"play", "Play"> " " <button id:"pause", "Pause"> " "

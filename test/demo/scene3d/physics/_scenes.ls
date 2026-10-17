@@ -1,6 +1,6 @@
 // S12.1.1v2: these descriptions are shared by live scenes and deterministic batch checks.
 import physics: lambda.physics
-import geometry: ~~.scene3d._geometry
+import geometry: ~~._geometry
 
 pub let palette = ["#60a5fa", "#34d399", "#fbbf24", "#fb7185", "#a78bfa"]
 

@@ -1,13 +1,11 @@
 // S12.1.3: values describe the scene; only event handlers mutate retained DOM.
 import dom
-import resources: ~~.mod_resources
 import data: .mod_data
 import model: .mod_model
 import assets: .mod_assets
 import ui: .mod_ui
 import present: .mod_present
 
-let BASE = url_resolve(resources.entry_uri()^,".")
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"cellscope")
 
 pn publish(owner,previous,next) {
@@ -45,7 +43,9 @@ on cell_prepare(evt) {
 on cell_load(evt) {
     if (evt.event_phase != 2 or evt.detail != session.load_token) { return 'pass' }
     let jobs = present.pending(evt.target,session)
-    if (len(jobs) > 0) assets.ensure(present.node(evt.target,jobs[0].viewport),BASE,jobs[0].cell)
+    // resolve assets from this document after navigation, rather than the process entry argv.
+    if (len(jobs) > 0) assets.ensure(present.node(evt.target,jobs[0].viewport),
+        url_resolve(evt.target.base_uri,"."),jobs[0].cell)
     // handle comparison models one at a time, painting each specimen's name first.
     session = publish(evt.target,session,{*:session,load_token:0})
     return 'handled'
@@ -136,7 +136,8 @@ on load(evt) {
     if (owner != null) dom.request_frame(owner,"cell_activate")
     return 'handled'
 }
-<html lang:"en",<head <meta charset:"UTF-8"><title "CellScope — Lambda">
-    <link rel:"stylesheet",href:url_resolve(BASE,"cellscope.css")>>
-    apply(<cell_document rendered:<body apply(<cell_session rendered:ui.tree()^>)>>)
+<html lang:"en",<head <meta charset:"UTF-8"><meta name:"viewport",content:"width=device-width,initial-scale=1"><title "CellScope / Scene3D">
+    <link rel:"stylesheet",href:"../demo.css">
+    <link rel:"stylesheet",href:"cellscope.css">>
+    apply(<cell_document rendered:<body class:"scene3d-light",apply(<cell_session rendered:ui.tree()^>)>>)
 >

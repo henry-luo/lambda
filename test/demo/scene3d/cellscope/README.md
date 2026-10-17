@@ -6,9 +6,10 @@ based on commit `1cab982e7a0f96af854a696430c0724707764358`, with the
 Muscle model from the [deployed gallery](https://cell-architecture-studio.lanshuagent.com/).
 
 ```sh
-./lambda.exe demo cellscope
+./lambda.exe demo scene3d
+# Choose the CellScope tile.
 # Equivalent direct entry:
-./lambda.exe view test/demo/cellscope/cellscope.ls
+./lambda.exe view test/demo/scene3d/cellscope/cellscope.ls
 ```
 
 ![Native CellScope](preview.png)
@@ -115,8 +116,8 @@ UVs, texture, retained model on zoom, comparison, and actual rendered pixels,
 then the White Blood Cell GLB:
 
 ```sh
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/cellscope/cellscope.ls \
-  --headless --event-file test/demo/cellscope/tests/cellscope_remote.json \
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/scene3d/cellscope/cellscope.ls \
+  --headless --event-file test/demo/scene3d/cellscope/tests/cellscope_remote.json \
   --event-result temp/cellscope-remote-result.json
 ```
 

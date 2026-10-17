@@ -17,7 +17,6 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 ./lambda demo doom
 ./lambda demo photo
 ./lambda demo scene3d
-./lambda demo cellscope
 ./lambda demo slides
 ./lambda demo wordcloud
 ./lambda demo --list
@@ -26,7 +25,10 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 Named demos forward to `lambda view` with their entry point under `test/demo/`.
 Viewer options can follow the name, including `--headless`, `--event-file`,
 `--event-result` and `--font-dir`. The [demo catalog](../test/demo/README.md)
-lists all names, paths and controls, including the other native 3D examples.
+lists all names, paths and controls. `scene3d` opens a single tile index for
+CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
+Crystal garden, Observatory, and Shared Animation, with breadcrumbs back to
+the collection.
 
 ## Viewer features
 

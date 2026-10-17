@@ -1,15 +1,16 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Radiant · Kinetic observatory</title>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="demo.css"><meta charset="utf-8"><title>Kinetic observatory / Scene3D</title>
 <style>
 body { margin: 0; background: #07121c; color: #edf5ec; font-family: sans-serif; }
-header { padding: 24px 32px 12px; } h1 { margin: 0 0 8px; font-size: 28px; }
-p { margin: 0; color: #a4b8ba; } canvas { display: block; width: 800px; height: 500px; margin: 0 24px; touch-action: none; }
-footer { padding: 14px 32px; font-size: 13px; color: #acc5c3; }
+header { padding: 0 0 16px; } h1 { margin: 0 0 8px; font-size: 28px; }
+p { margin: 0; color: #a4b8ba; } canvas { display: block; width: 100%; max-width: 800px; height: auto; margin: 0; touch-action: none; }
+footer { padding: 16px 0; font-size: 13px; color: #acc5c3; }
 button { margin-right: 12px; padding: 6px 12px; }
-</style></head><body>
+</style></head><body><main class="scene3d-page">
+<nav class="scene3d-breadcrumbs" aria-label="Breadcrumb" data-current="Kinetic observatory"><a href="index.html">Scene3D</a></nav>
 <header><h1>Kinetic observatory</h1><p>Brushed metal, warm stone and orbiting light. Drag to explore; click a satellite.</p></header>
 <canvas id="observatory" width="800" height="500"></canvas>
 <footer><button id="play">Play / pause</button><span id="status" data-ready="false">Loading…</span></footer>
 <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js"}}</script>
 <script type="module" src="observatory.js"></script>
-</body></html>
+</main><script type="module" src="navigation.js"></script></body></html>

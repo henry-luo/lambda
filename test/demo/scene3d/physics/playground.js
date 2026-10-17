@@ -1,6 +1,6 @@
 import { operate } from './_control.ls';
-import * as THREE from '../scene3d/vendor/three/three.module.js';
-import { OrbitControls } from '../scene3d/vendor/three/addons/controls/OrbitControls.js';
+import * as THREE from '../vendor/three/three.module.js';
+import { OrbitControls } from '../vendor/three/addons/controls/OrbitControls.js';
 
 const byId = id => document.getElementById(id);
 const viewport = byId('world');

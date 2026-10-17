@@ -337,10 +337,11 @@ With no name, opens the bundled `lambda.doc` viewer with its startup splash from
 `view`: `lambda demo tetris` is equivalent to
 `lambda view test/demo/tetris/tetris.ls`.
 
-Names include `tetris`, `superlambda`, `doom`, `photo`, `draw`, `word`, `cellscope`, `scene3d` (also `ringworld`),
-`observatory`, `three-gallery`, `asset-gallery`, `shared-animation`, `slides`
-and `wordcloud`. Run named demos from the checkout or unpacked release root;
-their relative paths and local assets are under `test/demo/`.
+Names include `tetris`, `superlambda`, `doom`, `photo`, `draw`, `word`, `finder`,
+`note`, `scene3d`, `slides`, and `wordcloud`. `scene3d` opens one tile index for
+CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
+Crystal garden, Observatory, and Shared Animation. Run named demos from the checkout or unpacked release root; their
+relative paths and local assets are under `test/demo/`.
 See the [demo catalog](../test/demo/README.md) for entry points and controls.
 
 `--list`, `--help` and `-h` show the available demos. An unknown name reports an

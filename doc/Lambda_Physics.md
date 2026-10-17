@@ -104,21 +104,21 @@ Contact/sensor notifications are queued after solver execution as
 body IDs and collider IDs. Trace events use `contact-start`, `contact-end`,
 `sensor-enter` and `sensor-exit` type strings.
 
-Open the demonstration gallery with:
+Open the Scene3D index and choose a physics experiment:
 
 ```sh
-./lambda.exe view test/demo/physics/index.ls
+./lambda.exe demo scene3d
 ```
 
-The gallery contains a 32-tile domino cascade, a zero-gravity compound-body
+The index has direct tiles for a 32-tile domino cascade, a zero-gravity compound-body
 chamber, a kinematic marble sorter with sensor counters, and a restitution
 comparison with native trajectory charts. Each has playback controls and an
-orbit camera. See the [demo guide](../test/demo/physics/README.md).
+orbit camera. See the [demo guide](../test/demo/scene3d/physics/README.md).
 
 The original minimal example is also available:
 
 ```sh
-./lambda.exe view test/demo/physics/rigid.ls
+./lambda.exe view test/demo/scene3d/physics/rigid.ls
 ```
 
 The current profile has discrete sphere/box contacts, sleeping, compound mass

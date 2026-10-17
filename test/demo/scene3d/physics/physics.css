@@ -38,14 +38,6 @@ scene3d { display: block; width: 100%; height: auto; touch-action: none; }
 .plot-card h2 { font-size: 18px; margin: 0 0 6px; }
 .plot-card p { color: #51667e; font-size: 12px; }
 .plot-card svg { max-width: 100%; height: auto; }
-.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
-.experiment { min-width: 0; background: #111d2e; border: 1px solid #293b54; border-radius: 12px; overflow: hidden; }
-.experiment scene3d { height: 250px; }
-.experiment .card-content { padding: 20px; }
-.experiment h2 { margin: 8px 0; font-size: 24px; }
-.experiment p { color: #9eb3cd; font-size: 13px; line-height: 1.6; margin: 0 0 18px; }
-.experiment a { color: #6ee7cb; text-decoration: none; font-size: 13px; }
-.experiment .tag { color: #8cabc9; font-size: 10px; letter-spacing: 1.2px; }
 @media (max-width: 700px) {
     body { padding: 18px; }
     h1 { font-size: 32px; }
@@ -53,7 +45,6 @@ scene3d { display: block; width: 100%; height: auto; touch-action: none; }
     .title-row { align-items: flex-start; }
     .navigation { width: 100%; }
     .stage scene3d { height: 360px; }
-    .gallery { grid-template-columns: minmax(0, 1fr); }
     .metrics { flex-wrap: wrap; }
     .metric { flex-basis: 45%; padding: 13px; }
     .metric strong { font-size: 22px; }

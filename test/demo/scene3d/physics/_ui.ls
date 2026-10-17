@@ -1,3 +1,5 @@
+import collection: ~~._navigation
+
 pub let demos = [
     {id:"domino",title:"Domino circuit",caption:"One nudge. Thirty-two collisions.",file:"domino.ls",tag:"CHAIN REACTION"},
     {id:"salvage",title:"Salvage bay",caption:"Compound shapes, drifting in zero gravity.",file:"salvage.ls",tag:"MASS & INERTIA"},
@@ -6,17 +8,18 @@ pub let demos = [
 ]
 
 pub fn head(title) element => <head <meta charset:"utf-8"> <meta name:"viewport",content:"width=device-width,initial-scale=1">
-    <title title++" / Physics playground"> <link rel:"stylesheet",href:"physics.css">
-    <script type:"importmap", "{\"imports\":{\"three\":\"../scene3d/vendor/three/three.module.js\"}}">>
+    <title title++" / Scene3D"> <link rel:"stylesheet",href:"../demo.css"> <link rel:"stylesheet",href:"physics.css">
+    <script type:"importmap", "{\"imports\":{\"three\":\"../vendor/three/three.module.js\"}}">>
 
 pub fn navigation(active) element => <nav class:"navigation",'aria-label':"Physics demonstrations",
-    <a href:"index.ls",class:(if (active == "index") "active" else ""), "All">
+    <a href:"../index.html", "Scene3D">
     for (demo in demos) <a href:demo.file,class:(if (active == demo.id) "active" else ""),demo.title>>
 
-// share the compact title and navigation arrangement across the gallery and experiments.
+// each experiment returns directly to the shared Scene3D collection.
 pub fn header(title, active) element => <header class:"page-header",
-    <div class:"header-meta", <p class:"eyebrow", "LAMBDA PHYSICS / PLAYGROUND">
-        <a class:"edition",href:"index.ls", "FOUR EXPERIMENTS · 3D">>
+    collection.breadcrumbs(title, "../index.html");
+    <div class:"header-meta", <p class:"eyebrow", "LAMBDA PHYSICS / EXPERIMENTS">
+        <span class:"edition", "LAMBDA / NATIVE 3D">>
     <div class:"title-row", <h1 title> navigation(active)>>
 
 fn action_button(action) element => <button id:action.id,type:"button",class:(if (action.primary == true) "primary" else ""),

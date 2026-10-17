@@ -1,9 +1,11 @@
-# Physics playground
+# Physics experiments
 
-Open the gallery:
+Open the Scene3D collection and choose an experiment directly:
 
 ```sh
-./lambda.exe view test/demo/physics/index.ls
+./lambda.exe demo scene3d
+# Equivalent direct entry:
+./lambda.exe view test/demo/scene3d/physics/domino.ls
 ```
 
 | Demo | What to try |
@@ -27,19 +29,19 @@ boundary (**D7.5.3**), updates telemetry and moves the camera. Three's existing
 OrbitControls supplies camera interaction; Radiant renders every scene.
 
 `_scenes.ls` derives visual and collider dimensions from the same part lists.
-The shared sphere geometry in `../scene3d/_geometry.ls` is also used by Ringworld.
+The shared sphere geometry in `../_geometry.ls` is also used by Ringworld.
 
 Deterministic batch checks and the five native viewer cases are registered in
 the existing harnesses:
 
 ```sh
 ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*physics_demos'
-./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.PhysicsDemo*:Scene3dTest.PhysicsGallery*'
+./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.PhysicsDemo*'
 ```
 
 Viewer cases cover point impulses, compound rotation, gravity changes,
 kinematic motion, unique sensor arrivals, restitution, chart output, camera
 preservation, reset, and explicit garbage collection. Their definitions live
-in `test/scene3d/events/PhysicsDemo*.json` and `PhysicsGallery*.json`. The gallery
-replay visits all four experiments with native mouse clicks and advances the
-document clock to verify playback and telemetry across repeated navigation.
+in `test/scene3d/events/PhysicsDemo*.json`. The navigation replay opens all four
+experiments directly from Scene3D tiles and returns through their breadcrumbs,
+while advancing the document clock to verify playback and telemetry.

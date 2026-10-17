@@ -526,6 +526,8 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     // layout html doc
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
+        // navigation must start Lambda load handlers as initial presentation does.
+        radiant_dispatch_lambda_body_load(&ui_context, doc);
     }
     // ES19: the init phase sits between layout and render. Positioned, not
     // gated on paint — the render below may be skipped, the init may not be.

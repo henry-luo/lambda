@@ -40,8 +40,8 @@ npm install --prefix temp/cellscope-tools --cache temp/npm-cache \
   --ignore-scripts --no-audit --no-fund \
   @gltf-transform/core@4.5.0 @gltf-transform/extensions@4.5.0 \
   @gltf-transform/functions@4.5.0 meshoptimizer@1.0.1
-node test/demo/cellscope/assets/prepare_plant.mjs \
-  temp/cellscope-source/plant.glb test/demo/cellscope/assets/plant temp/cellscope-tools
+node test/demo/scene3d/cellscope/assets/prepare_plant.mjs \
+  temp/cellscope-source/plant.glb test/demo/scene3d/cellscope/assets/plant temp/cellscope-tools
 ```
 
 See [glTF Transform simplify](https://gltf-transform.dev/modules/functions/functions/simplify)
