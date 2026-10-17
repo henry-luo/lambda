@@ -16,6 +16,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
 | `note` | `note/note.ls` | [Notes](note/README.md) |
 | `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |
+| `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
 | `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
 | `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
 

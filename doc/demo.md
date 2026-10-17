@@ -17,6 +17,7 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 ./lambda demo doom
 ./lambda demo photo
 ./lambda demo scene3d
+./lambda demo chart
 ./lambda demo slides
 ./lambda demo wordcloud
 ./lambda demo --list
@@ -29,6 +30,8 @@ lists all names, paths and controls. `scene3d` opens a single tile index for
 CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
 Crystal garden, Observatory, and Shared Animation, with breadcrumbs back to
 the collection.
+The `chart` collection opens normal charts with animation and interaction,
+scientific plots, and graphs including word clouds, timelines, Mermaid, and TikZ.
 
 ## Viewer features
 

@@ -25,6 +25,9 @@ cp -r ./lmd ./release/lmd
 # Named demo commands retain their checkout paths and local resource trees.
 mkdir -p ./release/test
 cp -R ./test/demo ./release/test/demo
+# The chart collection shares the regression dashboard's source data.
+mkdir -p ./release/test/lambda/chart
+cp ./test/lambda/chart/dashboard_data.json ./release/test/lambda/chart/
 
 # Step 2c: Copy sample documents for the demo viewer to browse
 # Copy layout sample HTML files from test/html/
