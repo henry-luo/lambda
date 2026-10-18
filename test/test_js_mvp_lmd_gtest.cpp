@@ -9374,6 +9374,78 @@ TEST_F(JsMvpLmd, RepeatedPropertySitesRetainCacheInvalidation) {
         "Object.defineProperty(a,'value',{get(){return 7},configurable:true});write(a,11);"
         "first===3&&read(a)===7&&read(b)===2");
 }
+TEST_F(JsFormalMir, PrototypeFunctionsRetainMutationAndLifetime) {
+    EXPECT_EQ(run(R"JS((function(){
+        function C(value){this.value=value}function read(o){return o.value}
+        let a=new C(1),b=new C(2),ok=read(a)===1&&read(b)===2;
+        a.value=1.25;ok=ok&&read(a)===1.25&&read(b)===2;
+        Object.defineProperty(a,'value',{get(){gc();return 7},configurable:true});
+        ok=ok&&read(a)===7;delete a.value;C.prototype.value=9;
+        ok=ok&&read(a)===9;C.prototype.value=11;ok=ok&&read(a)===11;
+        Object.setPrototypeOf(a,{get value(){return this.other}});a.other=13;
+        return ok&&read(a)===13&&read(b)===2;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function make(n){return class {constructor(){this.value=n}method(){return n}}}
+        function read(o){return o.value}function method(o){return o.method()}
+        let A=make(3),B=make(5),a=new A(),b=new B();
+        let ok=read(a)===3&&read(b)===5&&method(a)===3&&method(b)===5;
+        A=null;B=null;gc();return ok&&read(a)===3&&read(b)===5&&method(a)===3&&method(b)===5;
+    })())JS").item, ITEM_TRUE);
+}
+TEST_F(JsFormalMir, PrototypeLookupRetainsCallState) {
+    EXPECT_EQ(run(R"JS((function(){
+        function make(n){return {add:function(x){return this.value+n+x}}}
+        function C(value){this.value=value}let a=new C(3),b=new C(5);
+        Object.setPrototypeOf(a,make(7));Object.setPrototypeOf(b,make(11));
+        let total=0;for(let i=0;i<4;i++){total+=a.add(i);total+=b.add(i)}
+        let first=a.add((a.add=function(x){return 100+x},1));
+        gc();return total===116&&first===11&&a.add(2)===102&&b.add(2)===18;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        let calls=0,proto={read:function(x){calls++;return this.value+x}};
+        let object=Object.create(proto);object.value=7;let total=0;
+        for(let i=0;i<3;i++){total+=object.read(i)}
+        Object.defineProperty(proto,'read',{get(){calls+=10;return function(x){return this.value-x}}});
+        return total===24&&object.read(2)===5&&calls===13;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        let p={read:function(){return typeof this==='object'&&this.valueOf()===7}};
+        Number.prototype.read=p.read;let ok=true;for(let i=0;i<4;i++)ok=ok&&(7).read();
+        delete Number.prototype.read;return ok;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        let captured={value:9},p={value:3,read:function(){'use strict';return this.value},
+            target:function(){return new.target},arrow:()=>captured.value};
+        let sum=0;for(let i=0;i<4;i++){sum+=p.read();sum+=p.arrow();if(p.target()!==undefined)throw 1}
+        return sum===48;
+    })())JS").item, ITEM_TRUE);
+}
+TEST_F(JsFormalMir, GuardedOwnReadRetainsExoticAndScalarSemantics) {
+    EXPECT_EQ(run(R"JS((function(){
+        function C(value){this.value=value}function read(o){return o.value}
+        let calls=0,plain=new C(1.25);
+        let proxy=new Proxy(plain,{get(t,k,r){calls++;return Reflect.get(t,k,r)+1}});
+        let ok=read(plain)===1.25&&read(proxy)===2.25&&calls===1;
+        Object.defineProperty(plain,'value',{get(){gc();return 7},configurable:true});
+        return ok&&read(plain)===7&&read(proxy)===8&&calls===2;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function sum(a,b){return a.value+b.value}
+        function product(a,b){return a.value*b.value}
+        function C(value){this.value=value}
+        let a=new C(1.25),b={get value(){a.value=99;gc();return 2}};
+        let s=sum(a,b);a.value=1.25;let p=product(a,b);
+        return s===3.25&&p===2.5;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function read(o){return o.value}function index(o){return o[0]}
+        function mapped(x){let a=arguments;index(a);x=7;return index(a)}
+        let parent={value:3},a=Object.create(parent),b={value:5};
+        let ok=read(a)===3&&read(b)===5;parent.value=7;
+        return ok&&read(a)===7&&mapped(1)===7;
+    })())JS").item, ITEM_TRUE);
+}
 TEST_F(JsMvpLmd, GenericArraySearchRetainsHolesEqualityAndCoercion) {
     boolean("let objects=[[,NaN,4],new Float64Array([NaN,4])],ok=true;for(let object of objects){ok=ok&&object.includes(NaN)&&object.indexOf(NaN)===-1&&object.includes(4)&&object.indexOf(4)>=0}ok&&objects[0].includes(undefined)&&objects[0].indexOf(undefined)===-1");
     boolean("let seen='',array=[1,2,3],owners=[array,new Int8Array([1,2,3])];for(let owner of owners){let from={valueOf(){seen+='F';return 1}};if(!owner.includes(2,from)||owner.indexOf(3,from)!==2)throw 9}seen==='FFFF'");
