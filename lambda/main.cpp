@@ -989,6 +989,10 @@ void clear_persistent_last_error();
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
+#ifndef LAMBDA_NO_SERVE
+int exec_mcp(int argc, char** argv);
+int exec_serve_mcp(int argc, char** argv);
+#endif
 
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
@@ -2378,6 +2382,7 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
 #endif
 #ifdef LAMBDA_NO_SERVE
     {"serve", "the HTTP server"},
+    {"mcp", "the MCP server"},
 #endif
 #ifdef LAMBDA_NO_GUI
     {"view", "a display window"}, {"edit", "a display window"},
@@ -2624,6 +2629,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
     // publish the compacted vector so sys.proc.self.argv uses its live count.
     sysinfo_set_argv(argc, argv);
 
+#ifndef LAMBDA_NO_SERVE
+    // stdio MCP owns stdout before any interactive/document execution begins.
+    if (argc >= 2 && strcmp(argv[1], "mcp") == 0) {
+        return lambda_main_finish(exec_mcp(argc - 2, argv + 2));
+    }
+    if (argc >= 2 && strcmp(argv[1], "serve") == 0) {
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--mcp") == 0) {
+                return lambda_main_finish(exec_serve_mcp(argc - 2, argv + 2));
+            }
+        }
+    }
+#endif
     run_assertions();
     log_debug("Assertions completed");
 

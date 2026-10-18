@@ -13,6 +13,8 @@
 #include "../js_interp.hpp"
 #include "../js_interp_env.h"
 #include "../js_typed_array.h"
+#include "../../ts/ts_ast.hpp"
+#include "../../ts/ts_runtime.h"
 #include "../../dom/dom.h"
 #include "../../runtime/mir_emitter_shared.hpp"
 #include "../../runtime/runtime-state.h"
@@ -885,7 +887,8 @@ static void walk(AstNode* n, LmdWalk* state) {
     MvpLmdProgram* p = state->p;
     LmdWalk inner = *state;
     inner.parent = n;
-    switch (n->node_type) {
+    // type annotation tags share the AST's numeric domain, but use a separate enum.
+    switch ((int)n->node_type) {
     case AST_SCRIPT:
         collect_scope(p, state->owner, ((AstScript*)n)->global_vars); break;
     case AST_NODE_IMPORT: case AST_NODE_IMPORT_SPECIFIER: case AST_NODE_EXPORT_SPECIFIER:
@@ -1633,12 +1636,15 @@ static void walk(AstNode* n, LmdWalk* state) {
                 !(state->owner->complex_params && state->parent == (AstNode*)state->owner->ast))
             diagnostic(p, n, "spread requires an array literal");
         break;
-    case AST_NODE_ASSIGN_PATTERN: {
-        AstAssignNode* assignment = (AstAssignNode*)n;
+    case AST_NODE_ASSIGN_PATTERN: case TS_AST_NODE_PARAMETER: {
+        // type annotations retain a wrapper around the same executable parameter shape.
+        AstNode* target = js_ast_parameter_pattern(n);
+        AstNode* default_value = js_ast_parameter_default_value(n);
+        if (target->node_type == AST_NODE_ASSIGN_PATTERN) target = ((AstAssignNode*)target)->left;
         // inferred function names need intrinsic metadata even when no property read activates it.
-        if (assignment->left->node_type == AST_NODE_IDENT &&
-                (assignment->right->node_type == AST_NODE_FUNC_EXPR || assignment->right->node_type == AST_NODE_ARROW_FUNC) &&
-                !((AstFuncNode*)assignment->right)->name) activate_library(p, n);
+        if (target->node_type == AST_NODE_IDENT && default_value &&
+                (default_value->node_type == AST_NODE_FUNC_EXPR || default_value->node_type == AST_NODE_ARROW_FUNC) &&
+                !((AstFuncNode*)default_value)->name) activate_library(p, n);
         break;
     }
     case AST_NODE_REST_ELEMENT: case AST_NODE_REST_PROPERTY: break;
@@ -5449,26 +5455,29 @@ static void bind_pattern(LmdCompiler* c, AstNode* pattern, LmdValue value, bool 
         else write_binding(c, identifier_binding(c->program, (AstIdentNode*)pattern), value, pattern, initialize);
         return;
     }
-    if (pattern->node_type == AST_NODE_ASSIGN_PATTERN) {
-        AstAssignNode* assignment = (AstAssignNode*)pattern;
+    AstNode* target = js_ast_parameter_pattern(pattern);
+    AstNode* default_value = js_ast_parameter_default_value(pattern);
+    if (default_value) {
+        if (target->node_type == AST_NODE_ASSIGN_PATTERN) target = ((AstAssignNode*)target)->left;
         MIR_reg_t selected = em_new_reg(&c->em, "binding_default", MIR_T_I64);
         move(c, selected, reg(c, box(c, value).reg)); boxed(c, selected);
         MIR_label_t supplied = label(c);
         branch(c, MIR_BNE, supplied, reg(c, selected), integer(c, ITEM_JS_UNDEFINED));
-        move(c, selected, reg(c, box(c, expression(c, assignment->right)).reg));
-        if (assignment->left->node_type == AST_NODE_IDENT &&
-                (assignment->right->node_type == AST_NODE_FUNC_EXPR || assignment->right->node_type == AST_NODE_ARROW_FUNC) &&
-                !((AstFuncNode*)assignment->right)->name) {
+        move(c, selected, reg(c, box(c, expression(c, default_value)).reg));
+        if (target->node_type == AST_NODE_IDENT &&
+                (default_value->node_type == AST_NODE_FUNC_EXPR || default_value->node_type == AST_NODE_ARROW_FUNC) &&
+                !((AstFuncNode*)default_value)->name) {
             // NamedEvaluation applies only to a directly anonymous definition, not a sequence/call result.
             MIR_reg_t named = em_call_4(&c->em, "mvp_lmd_named_set", MIR_T_I64,
                 MIR_T_I64, reg(c, selected), MIR_T_P, relocated(c, (uint64_t)"name"),
-                MIR_T_I64, relocated(c, s2it(((AstIdentNode*)assignment->left)->name)),
+                MIR_T_I64, relocated(c, s2it(((AstIdentNode*)target)->name)),
                 MIR_T_I64, integer(c, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE), true);
             check_error(c, named);
         }
         put_label(c, supplied);
-        bind_pattern(c, assignment->left, stable_item(c, selected), initialize, resolved); return;
+        bind_pattern(c, target, stable_item(c, selected), initialize, resolved); return;
     }
+    if (target != pattern) { bind_pattern(c, target, value, initialize, resolved); return; }
     if (pattern->node_type == AST_NODE_ARRAY_PATTERN || pattern->node_type == AST_NODE_ARRAY) {
         LmdValue owner = box(c, value);
         MIR_reg_t record = em_call_2(&c->em, "mvp_lmd_iterator_get", MIR_T_I64,
@@ -9269,6 +9278,8 @@ struct LmdImport { const char* name; void* address; JitImportMetadata audit; };
     {#name, (void*)name, REENTRY(JIT_EFFECT_MAY_GC, ITEM, args)}, \
     {#name "_fixed", (void*)name, AUDIT(JIT_EFFECT_MAY_GC, ITEM, args)}
 static const LmdImport imports[] = {
+    // the TS-only type() call uses this shared helper in the active MIR engine.
+    {"ts_type_info", (void*)ts_type_info, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
     {"lambda_recovery_publish_fault_item", (void*)lambda_recovery_publish_fault_item,
         AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,SCALAR)|ARG(2,SCALAR))},
     {"mvp_lmd_dynamic_environment", (void*)mvp_lmd_dynamic_environment, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR,
@@ -9648,9 +9659,10 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
         c.parameter_initializer = f->eval_environment;
         uint64_t i = 0;
         for (AstNode* a = f->ast->params; a; a = a->next, i++) {
+            AstNode* pattern = js_ast_parameter_pattern(a);
             AstIdentNode* id = js_ast_parameter_binding_identifier(a);
             LmdBinding* b = id ? binding(p, id->entry) : NULL;
-            if (a->node_type == AST_NODE_REST_ELEMENT || a->node_type == AST_NODE_SPREAD) {
+            if (pattern->node_type == AST_NODE_REST_ELEMENT || pattern->node_type == AST_NODE_SPREAD) {
                 MIR_reg_t rest = em_call_1(&c.em, "mvp_lmd_array_new", MIR_T_I64, MIR_T_I64, integer(&c, 0), true);
                 check_error(&c, rest); LmdValue array = boxed(&c, rest, K_ARRAY);
                 MIR_reg_t index = constant(&c, i);
@@ -9663,7 +9675,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
                 move(&c, index, reg(&c, op(&c, MIR_ADD, reg(&c, index), integer(&c, 1)))); jump(&c, start);
                 put_label(&c, done);
                 if (b) write_binding(&c, b, array, a, true);
-                else bind_pattern(&c, ((JsSpreadElementNode*)a)->argument, array, true);
+                else bind_pattern(&c, ((JsSpreadElementNode*)pattern)->argument, array, true);
                 continue;
             }
             if (f->direct_args) {
@@ -9682,7 +9694,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
                 jump(&c, done); put_label(&c, absent); move(&c, value, integer(&c, ITEM_JS_UNDEFINED));
                 put_label(&c, done);
             }
-            if (a->node_type == AST_NODE_ASSIGN_PATTERN) {
+            if (js_ast_parameter_default_value(a)) {
                 bind_pattern(&c, a, boxed(&c, value), true); continue;
             }
             if (b) write_binding(&c, b, boxed(&c, value, b->kinds), a, true);

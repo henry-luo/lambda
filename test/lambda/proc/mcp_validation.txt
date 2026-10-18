@@ -1,0 +1,4 @@
+endpoint rejected
+tool endpoint rejected
+scheme rejected
+timeout rejected

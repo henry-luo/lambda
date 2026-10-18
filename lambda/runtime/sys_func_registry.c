@@ -193,6 +193,8 @@ extern Item pn_io_http_route(Item server, Item method, Item path, Item handler);
 extern Item pn_io_http_use(Item server, Item middleware);
 extern Item pn_io_http_static(Item server, Item url_path, Item dir_path);
 extern Item pn_io_http_stop(Item server);
+extern Item pn_mcp_request(Item endpoint, Item method, Item params);
+extern Item pn_mcp_call_tool(Item endpoint, Item name, Item arguments);
 
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
@@ -1291,6 +1293,11 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_IO_TEXT_SEARCH, "io_text_search", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_text_search3", PROFILE_FILE_IO_FPTR(pn_io_text_search3), NULL, NULL, false, 0},
+
+    {SYSPROC_MCP_REQUEST, "mcp_request", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_mcp_request", PROFILE_NETWORK_FPTR(pn_mcp_request), NULL, NULL, false, 0},
+    {SYSPROC_MCP_CALL_TOOL, "mcp_call_tool", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_mcp_call_tool", PROFILE_NETWORK_FPTR(pn_mcp_call_tool), NULL, NULL, false, 0},
 
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,

@@ -105,7 +105,7 @@ The first token of an import path decides where it looks (S16.9.8): a **name** s
 | `import ~~.a` | `../a.ls`, one directory up from the importing file; each further leading `~~.` goes up one more (`import ~~.~~.lib.util` is `../../lib/util.ls`) |
 | `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D7.2.4v2) |
 | `import lambda.doc.<package>.m` | `<LAMBDA_HOME>/package/doc/<package>/m.ls` — includes `math`, `pdf`, and `latex` (D7.2.4v3) |
-| `import math`, `import io` | The built-in modules; `import lambda.math` and `import lambda.io` are the same modules |
+| `import math`, `import io`, `import mcp` | Built-in modules; the corresponding `lambda.math`, `lambda.io`, `lambda.mcp` paths name the same modules (D7.2.4v3). MCP provides procedural `request(endpoint, method, params)` and `call_tool(endpoint, name, arguments)` HTTP exchanges; see the [MCP design and implementation status](../vibe/Lambda_IO_MCP.md). |
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
 | `import a`, `import a.b` (any other name) | Error E216: bare names are reserved for packages, and there is no package `a`. The name never refers to a file in the working directory |
 | `import /.a` | Error: rooted import paths are reserved |

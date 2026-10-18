@@ -171,7 +171,7 @@ This does not clear the aggregate gate or the real host/promotion gaps.
 | `eval` / Function-family dynamic source | Retained AST, as required by D8.1.3v25 |
 | Document/preamble compiled artifacts | MVP MIR; shared code images with fresh realm metadata |
 | Explicit AUTO function promotion and loop handoff | MVP satellite bodies through the native callable ABI |
-| TypeScript-specific lowering | Existing path; separate from this JS activation |
+| TypeScript-specific lowering | Shared C AST admission and MVP parameter initialization; no legacy MIR fallback (D8.1.3v25) |
 
 Module/child-realm ownership, interleaved `with`/eval records, host properties,
 CommonJS, timers, process events and cooperative agents are implemented and
@@ -1484,3 +1484,33 @@ Functional migration is complete. Benchmark timing/performance acceptance,
 native worker threads, broader browser compatibility and other-platform
 qualification retain the boundaries defined above; none is silently inferred
 from these functional results (**D6.3.1-D6.3.2, D8.6.3**).
+
+## TypeScript parameter admission repair (2026-10-18)
+
+The active MIR engine now admits the C parser's retained `TsParameterNode`
+wrappers under **D8.1.3v25**. Eleven existing TypeScript goldens previously
+stopped at admission. The shared child catalog exposed these wrappers only
+to the AST index, leaving ordinary analysis walkers unable to see their
+binding patterns and default expressions. The catalog now describes both
+walks, and shared parameter helpers preserve the executable pattern/default
+shape while retaining annotation metadata. Parameter facts and MIR
+initialization apply the existing JavaScript default, rest, destructuring,
+function-length and closure rules to that shape.
+
+Two exposed cases also aborted during lowering: the TS-only `type()` intrinsic
+already emitted a call to `ts_type_info`, but the active engine's import table
+omitted the helper. Its existing implementation is now registered with an
+Item argument/result and a collecting-call contract; lexical bindings named
+`type` continue through ordinary call dispatch (**D5.3.3, D8.1.3v25**).
+
+Existing goldens and harness expectations are unchanged. The new
+`test/ts/parameter_shapes.ts` golden covers typed defaults, rest, destructuring,
+captured parameter mutation, inferred function names, function length and
+parameter temporal dead zones. A native MIR test retains a typed default
+closure past compilation and collection and checks the `type()` intrinsic.
+The TypeScript suite passes **20/20** normally and with forced collection plus
+freed-memory poisoning; the native regression passes in both configurations.
+The required `make test-lambda-baseline` exits zero with **7,724/7,724** passing
+cases: **2,112/2,112** input cases and **5,612/5,612** runtime cases, including
+**818/818** MVP units and **313/313** GC stress cases. Focused rooting and
+convention lint checks pass. Evidence is under `temp/ts-format-fix/`.

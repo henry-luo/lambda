@@ -57,6 +57,8 @@ struct HttpResponse {
     int headers_sent;       // 1 after first write
     int finished;           // 1 after final send
     int chunked;            // 1 if using chunked transfer encoding
+    int defer_send;         // worker builds bytes; owning loop submits socket writes
+    int send_pending;
 
     // -- internal --
     void *user_data;

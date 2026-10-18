@@ -2481,6 +2481,10 @@ test-js-opt: build-test
 	@$(MAKE) --no-print-directory debug
 	@./test/test_js_opt_gtest.exe --gtest_color=no
 
+.PHONY: test-mcp
+test-mcp: build
+	@python3 test/mcp/test_mcp.py
+
 test-library: build
 	@echo "Running library test suite..."
 	@node test/test_run.js --target=library --raw

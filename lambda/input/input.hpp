@@ -145,6 +145,8 @@ void skip_whitespace(const char** text);
 void skip_tab_pace(const char** text);
 
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+// parse captured NUL-terminated source into a caller-owned Input; no acquisition.
+bool input_parse_source_exact(const char* type, Input* input, const char* source);
 Input* input_from_source_n(const char* source, size_t source_len, Url* url,
     String* type, String* flavor);
 Input* input_from_source_n_with_name_parent(const char* source, size_t source_len,
@@ -224,6 +226,7 @@ typedef struct {
     bool verify_ssl;
     bool enable_compression;
     struct CookieJar* cookie_jar;  // optional profile jar for browser Fetch/XHR
+    size_t max_response_bytes;     // 0 uses the shared HTTP response limit
 } FetchConfig;
 
 typedef struct FetchResponse {

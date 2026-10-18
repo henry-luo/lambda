@@ -159,6 +159,12 @@ void http_response_write_fmt(HttpResponse *resp, const char *fmt, ...) {
 
 void http_response_send(HttpResponse *resp) {
     if (!resp || resp->headers_sent || !resp->client) return;
+    if (resp->defer_send) {
+        resp->send_pending = 1;
+        resp->headers_sent = 1;
+        resp->finished = 1;
+        return;
+    }
 
     // estimate total size
     size_t hdr_size = 256;
@@ -204,7 +210,10 @@ void http_response_send(HttpResponse *resp) {
     write_req->data = buf;
 
     uv_buf_t uv_buf = uv_buf_init(buf, (unsigned int)off);
-    uv_write(write_req, (uv_stream_t *)resp->client, &uv_buf, 1, on_write_done);
+    if (uv_write(write_req, (uv_stream_t *)resp->client, &uv_buf, 1, on_write_done) < 0) {
+        mem_free(buf);
+        mem_free(write_req);
+    }
 
     resp->headers_sent = 1;
     resp->finished = 1;

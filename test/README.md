@@ -38,6 +38,7 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 | DOM: `lambda/dom/` | **`make test-radiant-baseline`** (DOM UI fixtures, WPT input-events) + **`make test-lambda-baseline`** (JS DOM fixtures) | `make dom-ui test=<id>`; `./test/test_lambda_domnode_gtest.exe`; `./test/test_dom_range_gtest.exe`; `./test/test_wpt_dom_nodes_gtest.exe` (extended) |
 | Validator: `lambda/validator/` | `make test-validator` (validator suite, part of test-all-baseline) | `./test/test_validator_gtest.exe --gtest_filter='ValidatorTest.*'`; `./test/test_validator_input_gtest.exe` |
 | `lib/` utilities | `make test-library` (library suite, part of test-all-baseline) | `./test/test_str_gtest.exe`, `./test/test_arena_gtest.exe`, … (source `test/lib/test_<name>_gtest.cpp`) |
+| MCP client/server: `lambda/io/mcp*`, `lambda/serve/mcp_server*`, `lambda/runtime/mcp_module.cpp` | `make test-mcp` (real stdio and loopback HTTP; needs socket permission) + `make test-lambda-baseline` for runtime changes | `python3 test/mcp/test_mcp.py ClientTests`; transport contract and current scope: [mcp/README.md](mcp/README.md) |
 | Jube / Node modules: `lambda/jube/`, `lambda/module/node_*` | **`make test-lambda-baseline`** (builds node-core/node-fs) + `make node-regression-gate` | `make node-baseline`; `make test-jube-module-integrity`; `make check-host-exports` |
 | Release-only checks (perf, JIT timing) | n/a | `make release` first (rule 10). Never run it in a worktree. |
 

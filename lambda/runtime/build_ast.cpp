@@ -2826,7 +2826,6 @@ static bool strview_matches_string(StrView* view, String* str) {
         strncmp(view->str, str->chars, view->length) == 0;
 }
 
-#ifndef SIMPLE_SCHEMA_PARSER
 static void add_jube_module_import(Transpiler* tp, String* module, String* alias) {
     JubeModuleImport* entry = (JubeModuleImport*)pool_calloc(tp->pool, sizeof(JubeModuleImport));
     entry->module = module;
@@ -2834,7 +2833,6 @@ static void add_jube_module_import(Transpiler* tp, String* module, String* alias
     entry->next = tp->jube_module_imports;
     tp->jube_module_imports = entry;
 }
-#endif
 
 static const char* registered_jube_module_name(StrView* name) {
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -2852,9 +2850,18 @@ static const char* registered_jube_module_name(StrView* name) {
 
 // Check if an identifier matches a built-in or descriptor-backed module name,
 // or a registered alias for one. Returns the real module name if matched.
+static const char* builtin_module_name(StrView name) {
+    static const char* const modules[] = {"math", "io", "mcp"};
+    if (name.length > 7 && !memcmp(name.str, "lambda.", 7)) {
+        name.str += 7;
+        name.length -= 7;
+    }
+    for (const char* module : modules) if (strview_equal(&name, module)) return module;
+    return NULL;
+}
+
 static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
-    if (strview_equal(name, "math")) return "math";
-    if (strview_equal(name, "io")) return "io";
+    if (const char* builtin = builtin_module_name(*name)) return builtin;
     // check aliases
     if (strview_matches_string(name, tp->builtin_alias_math)) return "math";
     if (strview_matches_string(name, tp->builtin_alias_io)) return "io";
@@ -2871,9 +2878,9 @@ static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
 static bool resolve_builtin_module_member(StrView path, const char** module,
         StrView* member) {
     static const char* prefixes[] = {
-        "lambda.sys.", "lambda.math.", "lambda.io.", "math.", "io."
+        "lambda.sys.", "lambda.math.", "lambda.io.", "lambda.mcp.", "math.", "io.", "mcp."
     };
-    static const char* modules[] = {"sys", "math", "io", "math", "io"};
+    static const char* modules[] = {"sys", "math", "io", "mcp", "math", "io", "mcp"};
     if (!path.str || !module || !member) return false;
     while (path.length && (path.str[path.length - 1] == ' ' ||
             path.str[path.length - 1] == '\t' ||
@@ -2896,13 +2903,7 @@ static bool resolve_builtin_module_member(StrView path, const char** module,
 }
 
 static const char* resolve_builtin_import_module(StrView* module) {
-    if (strview_equal(module, "math") || strview_equal(module, "lambda.math")) {
-        return "math";
-    }
-    if (strview_equal(module, "io") || strview_equal(module, "lambda.io")) {
-        return "io";
-    }
-    return NULL;
+    return builtin_module_name(*module);
 }
 
 static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
@@ -13259,6 +13260,11 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     if (builtin_module && strcmp(builtin_module, "io") == 0) {
         if (node->alias) tp->builtin_alias_io = node->alias;
         else tp->builtin_import_io = true;
+        return import_resolves_to_marker(node);
+    }
+    if (builtin_module) {
+        // additional builtins share the prefix/alias list rather than per-module flags.
+        add_jube_module_import(tp, name_pool_create_name(tp->name_pool, builtin_module), node->alias);
         return import_resolves_to_marker(node);
     }
 #ifdef LAMBDA_NO_FILE_IO

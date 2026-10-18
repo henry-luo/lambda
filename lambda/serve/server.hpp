@@ -47,10 +47,15 @@ struct ClientConnection {
     char               *read_buf;       // accumulated read buffer
     size_t              read_len;
     size_t              read_cap;
+    size_t              consumed_bytes;
 
     // keep-alive tracking
     int                 request_count;
     int                 keep_alive;
+    int                 pending_tasks;
+    int                 open_handles;
+    int                 closing;
+    uv_shutdown_t       shutdown;
 
     // linked list for connection tracking
     ClientConnection   *prev;
@@ -87,6 +92,7 @@ struct Server {
     uv_signal_t         sigint_handle;
     uv_signal_t         sigterm_handle;
     int                 shutting_down;
+    int                 signals_initialized;
 
     // user data
     void               *app_data;
@@ -102,7 +108,7 @@ Server* server_create(const ServerConfig *config);
 // create server with an existing libuv loop
 Server* server_create_with_loop(const ServerConfig *config, uv_loop_t *loop);
 
-// destroy server and all components
+// destroy outside a running loop callback; drain connections/work before release
 void server_destroy(Server *server);
 
 // start listening on HTTP (and optionally HTTPS) port
@@ -175,6 +181,6 @@ void* server_get_app_data(Server *server);
 // Connection Management (internal but exposed for testing)
 // ============================================================================
 
-ClientConnection* server_connection_add(Server *server, uv_tcp_t *client, int is_tls);
+ClientConnection* server_connection_accept(Server *server, uv_stream_t *listener, int is_tls);
 void              server_connection_remove(Server *server, ClientConnection *conn);
 void              server_connection_close(ClientConnection *conn);

@@ -172,9 +172,12 @@ def expect_image_source_build(module) -> None:
         generator = linux_validation_generator(module, architecture)
         codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
         sources = codec['source_files']
-        if any('/mux/' in f or '/demux/' in f or f.endswith(('egif_lib.c', 'ratectrl_rtc.cc'))
+        if any('/mux/' in f or '/demux/' in f or f.endswith('ratectrl_rtc.cc')
                for f in sources):
-            fail('image source target includes unused animation or standalone tool providers')
+            fail('image source target includes unused WebP animation or standalone tool providers')
+        # animated GIF output uses both the encoder and its compression hash table.
+        if not {'lib/image/giflib/egif_lib.c', 'lib/image/giflib/gif_hash.c'} <= set(sources):
+            fail(f'{architecture} image target omits required GIF encoding providers')
         if not all((ROOT / f).is_file() for f in sources):
             fail(f'{architecture} image target has missing sources')
         arm_files = any('/arm/' in f or 'aarch64_cpudetect.c' in f for f in sources)
