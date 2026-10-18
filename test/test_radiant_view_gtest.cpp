@@ -491,6 +491,7 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_EQ(result.exit_code, strcmp(name, "unknown-demo") == 0 ? 1 : 0) << output;
         EXPECT_NE(strstr(output, "Usage: lambda demo [name] [view options]"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/tetris/tetris.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/sentence-game/sentence-game.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
         EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "three-gallery"), nullptr) << output;
