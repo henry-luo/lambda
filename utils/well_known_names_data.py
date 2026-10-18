@@ -43,6 +43,14 @@ MARKUP_TRAILING_ENTRIES = [
     ("CSS_HYPHENATE_LIMIT_CHARS", "hyphenate-limit-chars"),
     ("CSS_PAGE", "page"), ("CSS_STRING_SET", "string-set"),
     ("CSS_FOOTNOTE_POLICY", "footnote-policy"),
+    ("CSS_X", "x"),
+    ("CSS_Y", "y"),
+    ("CSS_CX", "cx"),
+    ("CSS_CY", "cy"),
+    ("CSS_R", "r"),
+    ("CSS_RX", "rx"),
+    ("CSS_RY", "ry"),
+
 ]
 MARKUP_ENTRY_SYMBOLS = {
     spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES
@@ -115,6 +123,7 @@ fill-opacity stroke-opacity stroke-dasharray stroke-dashoffset stroke-linecap st
 marker-start marker-mid marker-end marker vector-effect color-interpolation color-interpolation-filters text-anchor
 -webkit-box-orient
 page string-set footnote-policy
+x y cx cy r rx ry
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

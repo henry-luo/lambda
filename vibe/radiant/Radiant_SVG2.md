@@ -1,8 +1,9 @@
 # Radiant SVG2: Unified External and Inline SVG Handling
 
-**Parser rulings:** ratified 2026-10-18 in **D2.11.1–D2.11.2** of
+**Rulings:** ratified 2026-10-18 in **D2.11.1–D2.11.4** of
 [Lambda Formal Design](../../doc/Lambda_Formal_Design.md). **D2.11.1** governs
 SVG in HTML; **D2.11.2** governs the shared external-SVG parser and result model.
+**D2.11.3–D2.11.4** govern current-DOM SVG export and virtual-frame snapshots.
 XHTML keeps its XML syntax under **D2.10.1**. The wider resource/cache proposal
 below remains partial.
 
@@ -28,6 +29,38 @@ remain isolated. Parser sharing does not enable scripts, input or external
 resources in an isolated image. Network sprites remain deferred by the user.
 The HTML behavior follows the
 [WHATWG foreign-content rules](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign).
+
+## DOM export and virtual-frame snapshots
+
+**USER, 2026-10-18; D2.11.3–D2.11.4:** exporting an SVG saves its current DOM.
+Edits to elements, text, attributes and styles appear in the exported SVG, with
+its current resource references. Reuse namespace-aware DOM serialization to
+retain the SVG structure. General HTML-page SVG/PDF rendering continues to use
+the paint exporter and its existing vector/raster capabilities.
+
+For animation, the caller selects a frame with the existing virtual timer and
+lets that frame's pending updates, animation samples, style and layout settle.
+Export reads that fixed frame without advancing or resetting its clock. The
+same DOM and virtual frame produce a stable snapshot; wall-clock animation
+capture is outside the requirement.
+
+Animation samples can live outside the DOM's base attributes. A frozen-frame
+SVG therefore needs those effective values in an export copy, with animation
+drivers made inert there so reopening the file preserves the selected frame.
+The live DOM retains its editable source and animation declarations. Reuse the
+existing sampling and serialization helpers through the DOM/provider
+boundary (**D7.3.3–D7.3.4**); exporting never introduces another animation clock.
+The frame-copy step projects the selected animation state onto SVG DOM content;
+ordinary SVG source export uses direct DOM serialization.
+
+**2026-10-18 implementation:** `dom_serialize_xml` is the shared walk used by
+XMLSerializer and SVG source saves. Standalone SVG saves select that route;
+targeted interactive saves call `render_svg_dom_to_file`. Frozen captures use a
+serialization projection with current presentation samples and disabled drivers;
+the live DOM is unchanged. Edited-tree and CSS/SMIL selected-frame reload cases
+pass their focused checks. Final qualification and limits live in the
+[implementation checkpoint](../impl/Radiant_Impl_SVG_Support.md#13-current-implementation-checkpoint).
+Earlier PNG/SVG/PDF paint checks retain their original route and scope.
 
 ## Goal
 
@@ -773,3 +806,11 @@ Chromium's stale dynamic conditions are retained alongside a 25/25 ordinary
 display reference. Embedded HTML is being connected to the existing layout/paint
 engine under the SVG2 §12.2 containing rectangle (**RSC1/RSC6/RSC11–RSC12**);
 its interaction, isolated-image and export gates remain open.
+
+**2026-10-18 SVG enhancement increment.** Individual 2D transforms now share
+paint, bounds and pointer matrices. CSS fill/stroke paint samples and retained
+transitions reach SVG leaves; component transfer uses bounded owned channel
+functions; CSS geometry reaches rect/circle/ellipse. See the
+[implementation checkpoint](../impl/Radiant_Impl_SVG_Support.md#13-current-implementation-checkpoint)
+for acceptance and aggregate qualification. Convolution, wider vector effects,
+geometry animation and network sprites remain outside this increment.

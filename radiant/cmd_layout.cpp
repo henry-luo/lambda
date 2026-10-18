@@ -3161,6 +3161,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
         viewport_height, pool, html->str);
     strbuf_free(html);
     mem_free(source.data);
+    if (doc) doc->services.svg_source_document = true;
     return doc;
 }
 

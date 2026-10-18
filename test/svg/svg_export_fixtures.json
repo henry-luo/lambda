@@ -19,5 +19,10 @@
   "svg_smil_export_initial",
   "css_container_size",
   "css_containment_boxes",
-  "css_containment_stacking"
+  "css_containment_stacking",
+  "svg_individual_transforms",
+  "svg_css_motion",
+  "svg_component_transfer",
+  "svg_css_geometry",
+  "svg_css_geometry_cascade"
 ]

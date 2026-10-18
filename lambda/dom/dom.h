@@ -22,6 +22,24 @@ const char* dom_element_namespace_uri(void* element);
 const char* dom_element_lookup_namespace_uri(void* element, const char* prefix);
 const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name);
 void dom_invalidate_layout_subtree(void* node);
+void dom_svg_invalidate_presentation(void* node);
+
+struct StrBuf;
+// optional serializer overrides are borrowed for the duration of one element.
+typedef struct DomXmlAttributeOverride {
+    const char* name;
+    const char* value;
+    const char* namespace_uri;
+    struct DomXmlAttributeOverride* next;
+    bool written;
+} DomXmlAttributeOverride;
+typedef struct DomXmlProjection {
+    void* context;
+    bool (*include_element)(void* context, void* element);
+    DomXmlAttributeOverride* (*attributes)(void* context, void* element);
+} DomXmlProjection;
+bool dom_serialize_xml(void* node, struct StrBuf* output, const DomXmlProjection* projection);
+
 
 #include "../lambda.h"
 

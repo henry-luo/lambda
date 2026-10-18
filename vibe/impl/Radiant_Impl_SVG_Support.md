@@ -1,14 +1,15 @@
 # Radiant SVG support enhancement plan
 
-**Date:** 2026-10-18. **Status:** feature milestones proposed; the user-ratified
+**Date:** 2026-10-18. **Status:** implementation active; the user-ratified
 shared-parser repair is implemented, with qualification limits recorded in §12.
 **Source reviewed:** `f29404b31`.
 
 Deliver CSS-driven icons and diagrams, then close the missing component-transfer
-filter primitive. Follow with a separate, bounded CSS geometry increment. This
-order assumes inline icons, interactive charts and locally supplied document art
-are the main workloads. Network sprites are deferred by the user (2026-10-18);
-specialist illustration effects have separate decisions below.
+filter primitive. Follow with a separate, bounded CSS geometry increment. The
+user confirmed interactive-first (2026-10-18): inline icons, interactive charts
+and diagrams define the leading acceptance workloads. Network sprites are
+deferred by the user (2026-10-18); specialist illustration effects have separate
+decisions below.
 
 This follows the finite delivery model in the latest
 [CSS implementation plan](Radiant_Impl_CSS_Support.md#1-delivery-scope-and-priorities)
@@ -28,12 +29,14 @@ retains its completed inventory and outstanding platform gate.
 | 1 | Individual SVG transforms | P1: modern CSS can position and rotate icons and diagram groups | Static 2D `translate`, `rotate`, `scale` on shapes, `g` and local `use`; view/fill reference boxes | Medium |
 | 2 | CSS paint and motion | P1: hover states, progress rings and chart updates reach SVG paint | Six SVG paint/stroke properties through transitions and keyframes; existing opacity/2D-transform controls | Large |
 | 3 | Component transfer | P1: SVG art using channel/alpha remapping renders its filter graph | `feComponentTransfer`, four channel children, five transfer types | Medium |
+| Shared | SVG DOM export and virtual-frame snapshots | P1: edited SVG saves as SVG and selected frames export deterministically | E0 current-DOM serialization and fixed virtual-frame acceptance across Milestones 1–3 | Medium |
 | 4 | CSS shape geometry | P2: styles and variables control simple chart geometry | `rect`, `circle`, `ellipse`; nine applicable geometry properties | Medium |
 
-**Core delivery ends after Milestones 0–3.** Milestone 4 is a subsequent extension,
-not a condition for shipping the core. Milestones 1, 3 and 4 require intake;
-Milestone 2 also requires Milestone 1. The order is a delivery recommendation,
-not a normative design ruling or a measured frequency ranking.
+**Core delivery ends after Milestones 0–3 and shared E0 export acceptance.**
+Implement and qualify E0 alongside the selected feature milestones. Milestone 4
+is a subsequent extension. Milestones 1, 3 and 4 require intake;
+Milestone 2 also requires Milestone 1. This schedule records the user's
+interactive-first priority; the feature milestones remain proposed.
 
 CSS motion precedes new SMIL features because existing `animate`,
 `animateTransform` and `set` already have a substantial delivered inventory,
@@ -79,6 +82,7 @@ current aggregate.
 | Authority | Constraint |
 |---|---|
 | **D2.11.1–D2.11.2** | Inline HTML SVG follows browser-standard foreign-content parsing; external SVG reuses the same HTML5 parser and Mark result model. XML/XHTML hosts keep their syntax under **D2.10.1**. |
+| **D2.11.3–D2.11.4** | SVG source export serializes the current edited DOM. Animation snapshots capture the selected virtual frame, keep that clock fixed and remain at that frame when reopened. |
 | **D4.1.3 / D4.2.2v2–D4.2.6** | Parsed SVG, compiled filters, resources and sampled payloads retain their actual document/pool owners. Copy or retain every value that survives the current walk. |
 | **D4.5.1v4 / D4.1.4v5** | Preserve document and selected-view ownership and independent scratch arenas: “pin, gen-check, copy-as-value.” Cache retirement cannot invalidate retained paint. |
 | **D4.6.1v4** | Extend canonical property identity and generated accessors; preserve existing IDs. |
@@ -101,10 +105,14 @@ Promote shared helpers through the coherent module header/provider instead of
 copying them. Extract shared cases before adding another per-property variant.
 
 Keep inline SVG in host CSS and external SVG images in their isolated style and
-resource mode. Preserve the existing resolved-paint export contract: vectors
-where supported, transparent fallbacks at the requested density otherwise.
-Current CLI exports sample initial document time; this scope adds no new clock
-option. ThorVG remains a backend; all changes belong in Lambda-owned code.
+resource mode. SVG source export uses the current DOM, including edits, under
+**D2.11.3**. A selected virtual frame supplies the settled state for a stable
+snapshot under **D2.11.4**; capture preserves its time. Reuse the existing virtual
+timer controls and DOM serialization through the declared provider boundary.
+Rendered PNG/PDF and general HTML-page SVG output retain their resolved-paint
+contract: vectors where supported, transparent fallbacks at the requested
+density otherwise. ThorVG remains a backend; all changes belong in Lambda-owned
+code.
 
 ## 4 Milestone 0 Qualification intake
 
@@ -159,6 +167,8 @@ product across every SVG element.
 
 **Outcome:** CSS hover transitions and keyframes visibly animate an inline icon,
 chart mark or progress ring, with coherent computed reads and cache updates.
+Shared E0 acceptance saves DOM edits and captures a stable selected virtual
+frame for the implemented animation profile.
 
 The six new sampling properties are `fill`, `stroke`, `fill-opacity`,
 `stroke-opacity`, `stroke-width` and `stroke-dashoffset`. Include solid sRGB
@@ -180,7 +190,7 @@ origins, including their precedence against important declarations. Behavior fol
 | A2.2 | A keyframed progress ring changes dash offset and width; opacity controls change actual coverage. Remove restores the underlying value, authored important values override keyframes, and active transitions retain their specified cascade precedence. |
 | A2.3 | An inherited group color/stroke sample reaches an unstyled child. Pausing and resuming through existing controls produces deterministic samples. |
 | A2.4 | A transformed moving shape has matching paint/hit geometry at the midpoint. Detach/reinsert does not retain a stale animation owner or cached sample. |
-| A2.5 | Cache off/eager agrees. Existing SMIL controls retain their behavior; initial-time PNG/SVG/PDF matches an independently authored static reference. |
+| A2.5 | Cache off/eager agrees. Existing SMIL controls retain their behavior; initial and selected virtual-frame paint match independently authored static references. E0 verifies that the serialized SVG frame remains stable after reopening. |
 
 **Excluded:** gradient/pattern/URL-paint interpolation, `none` interpolation,
 dash-list interpolation, geometry-property animation, animation of isolated
@@ -260,6 +270,50 @@ geometry/paint/hit fixture; neighboring shared contour and attribute tests;
 then required CSS/DOM/Radiant gates. Add a unit only for a shared computation
 that the visible fixture cannot adequately distinguish.
 
+### 8.1 Shared SVG DOM export and virtual-frame acceptance
+
+**Outcome, USER 2026-10-18; D2.11.3–D2.11.4:** export the current SVG DOM,
+including edits, and use the frame selected by the virtual timer for stable
+animation snapshots. E0 is shared core acceptance across Milestones 1–3.
+
+The namespace-aware DOM walk is now exposed as `dom_serialize_xml` in
+`lambda/dom/dom.cpp`, behind `dom_xml_serializer_serialize_to_string`. Reuse or
+expose that shared walk through the DOM/provider boundary; never copy it into
+the painter. Preserve SVG elements, text, attributes, styles, child order and
+resource references. A DOM `<text>` remains text and a filter graph remains SVG
+elements. General HTML-page SVG/PDF rendering retains its separate paint route.
+
+Reuse `js_event_loop_set_virtual_clock`, `js_event_loop_advance_virtual_time`,
+the document animation scheduler and the existing SVG timeline controls. Let
+the selected frame's due work, sampled animation values, style and layout settle,
+then capture without advancing or resetting virtual time. The existing virtual
+frame controls define advancement; export adds no independent clock or sleep.
+
+CSS/SMIL sampled values can live outside DOM base attributes. For a frozen
+snapshot, project those effective values onto an export copy of the current SVG
+DOM and make animation drivers inert in that copy. Preserve the live DOM's base
+values and animation declarations. Reopening the snapshot must display the
+selected frame. The export-copy step reuses the current animation/presentation
+adapters and namespace-aware serializer under **D7.3.3–D7.3.4**.
+
+| Acceptance | Observable result |
+|---|---|
+| E0.1 | Insert/remove a shape, edit its attributes/style and change SVG text; export and reload preserve the edited tree, text, IDs, namespace identity and local references. |
+| E0.2 | Select a nonzero virtual frame and settle its work. Repeated exports at that fixed frame preserve the same content and visible state despite elapsed wall-clock time; capture leaves the virtual timestamp unchanged. |
+| E0.3 | A CSS paint/transform sample and an existing SMIL sample match independent static references after the exported SVG is reopened. Cache off/eager and 1×/2× captures agree; the exported animation stays frozen. |
+| E0.4 | Edit the SVG at the selected frame and export again; the edit appears. Capture preserves live base attributes and animation declarations. Advancing the existing virtual timer then produces the next sampled state normally. |
+
+**Scope:** current-DOM SVG save and deterministic virtual-frame snapshots for
+the selected feature inventory. Wall-clock animation capture, animated/video
+export, authoring-tool metadata and new PDF vector/text capabilities stay
+outside this delivery. Network sprites retain their existing deferral.
+
+**Verification budget:** two fixtures, an edited static SVG and a virtual-frame
+animated SVG. Reuse the current event/virtual-clock harness, DOM serializer
+checks and export runner. Assert the reloaded tree as well as visible pixels;
+earlier paint-only SVG/PDF comparisons do not qualify DOM serialization. Run
+the required area gates after the shared implementation stabilizes.
+
 ## 9 Qualification and completion
 
 During implementation, run the focused cases listed per milestone. After stable
@@ -275,7 +329,8 @@ use named fixtures in the existing `test/svg/test_svg_export.cjs` runner during
 edits. Use `make test-svg-paint`/`make test-svg-smil` for their affected inventories.
 Register new acceptance fixtures with their existing UI/export owners; do not
 build a second harness. Check nonempty paint, causal mutation and real pointer
-targets. Native-to-native agreement alone cannot establish correctness.
+targets. E0 additionally checks current-DOM serialization and fixed-frame
+reopening. Native-to-native agreement alone cannot establish correctness.
 
 Run layout float-cast lint when geometry changes, the CSS inventory check when
 wiring changes, and boundary validation when provider placement/imports change.
@@ -308,17 +363,24 @@ verification budget. Existing common-page blockers can change this order.
 | 2 | `feConvolveMatrix` | Useful for imported illustration effects; lower reuse than component transfer. Start with a bounded kernel profile, specified edge/alpha behavior and explicit rejection outside its budget. |
 | 3 | `animateMotion` / `mpath` | Adds animated diagram paths; existing transform animation already covers common motion. Define path-distance, rotation and clock scope before implementation. |
 | 4 | Further SVG CSS | Geometry on images/viewports/foreignObject, CSS animation in image/use documents, stroke-box accuracy, sampled CSSOM and remaining paint interpolation. Each needs its own named context. |
-| 5 | Text and vector-output expansion | Complex shaping belongs to the shared font plan; searchable/selectable export text and wider native PDF paint need separate output requirements. |
+| 5 | Text shaping and rendered-page output | Complex shaping belongs to the shared font plan; searchable/selectable text in rendered-page export and wider native PDF paint need separate output requirements. SVG DOM save preserves its existing text nodes under **D2.11.3**. |
 | 6 | Architecture and conformance tail | Full resource/cache API redesign, persistent ID indexes, cache eviction/rotated-layer acceleration, broad SVG DOM reflection, discard and at-risk vector effects require demonstrated need. |
 
 Minor SVG/PDF edge differences retain their existing qualification owner.
 No full-SVG2 claim, blanket WPT import, universal native-vector export or complete
 cross-product of elements/effects/units is part of this delivery.
 
-## 11 Scope decisions and open design questions
+## 11 Confirmed scope decisions
 
 **Confirmed scope (2026-10-18):** defer network sprites. No new remote-resource
 loading milestone is required for this delivery.
+
+**Confirmed workload priority (USER, 2026-10-18):** interactive-first. After
+qualification intake, deliver individual SVG transforms, then CSS paint and
+motion, then component transfer. Acceptance centers on CSS-styled icons,
+progress rings and interactive charts/diagrams, including coherent live paint,
+geometry and pointer targeting. CSS shape geometry remains the subsequent P2
+extension.
 
 **Confirmed parser rulings (USER, 2026-10-18):** **D2.11.1** requires browser-
 standard parsing for SVG embedded in HTML. **D2.11.2** requires external SVG to
@@ -327,17 +389,15 @@ duplication. This supersedes the earlier recommendation to retain separate XML
 intake for SVG pictures. Explicit XML/XHTML hosts retain their syntax under
 **D2.10.1**. The working SVG2 design is reconciled to these rulings.
 
-1. **Which workload should determine the order?** The proposed core favors
-   inline icons and interactive diagrams. If static illustration import/export
-   is the priority, move component transfer ahead of CSS motion.
-2. **Does enhanced export require editable vectors or sampled animation time?**
-   The recommendation is to retain current resolved vectors plus density-aware
-   transparent fallbacks and initial-time snapshots. Requiring searchable text,
-   all-vector filters/PDF or a CLI sample-time option materially changes scope
-   and needs a separate bounded output milestone.
+**Confirmed export contract (USER, 2026-10-18):** **D2.11.3** saves the current
+SVG DOM, including edits. **D2.11.4** uses the frame selected by the virtual
+timer for stable snapshots; capture preserves that frame and virtual time.
+Wall-clock animation capture is outside the requirement. Shared E0 acceptance
+defines the finite implementation and verification scope. Rendered-page
+SVG/PDF keeps its existing paint contract.
 
-These questions do not prevent review of the proposed phases. New export
-requirements need a separate bounded milestone; the parser question is resolved.
+The workload, parsing and export decisions are settled. No open design question
+blocks the proposed milestones.
 
 ## 12 Shared SVG parser implementation record
 
@@ -415,3 +475,115 @@ Evidence and exact failed cases: `temp/svg_parser_unification/validation.json`,
 the two `*_gate/test_summary.json` files, `pdf_focus_results.json`, the export
 reports and browser captures in the same directory. No Linux/Windows execution
 or full HTML/SVG standards-conformance claim is made by this repair.
+
+## 13 Current implementation checkpoint
+
+**2026-10-18, base `06f4d14f9`:** implements the confirmed interactive-first
+proposal and the P2 shape extension. E0 follows **D2.11.3–D2.11.4**. Network
+sprites remain deferred. Evidence lives in `temp/svg_enhancement/`; the intake
+binary is retained there for causal comparisons. The final aggregate gate completed with failures outside the focused SVG
+inventory; this checkpoint does not claim a green required gate.
+
+- **Intake:** six existing controls pass 147 assertions on a fresh build. New
+  failing probes isolate individual transforms, CSS paint samples, component
+  transfer and CSS geometry before the corresponding fixes.
+- **Transforms:** SVG paint and DOM matrices share the existing individual
+  transform decoder and composition. The shape/group/local-use mutation and
+  pointer fixture passes; the native matrix unit checks CSS and attribute lists
+  plus percentage reference boxes.
+- **CSS paint/motion:** effect-owned typed samples feed paint and DOM queries;
+  base captures cannot read their own animation samples. SVG leaves receive
+  cascade/motion preparation, sample changes expire presentation caches, and
+  interrupted transitions retarget from the visible sample. Focused keyframe,
+  inheritance, importance, virtual transition and cancellation checks pass;
+  the neighboring native CSS motion suite passes 147 tests.
+- **Component transfer:** all five function types execute on straight channels
+  before repremultiplication with the remapped alpha. Tables belong to compiled
+  program arenas, have a 4,096-value per-channel cap and use existing graph/work
+  budgets. The last function per channel wins. Native arithmetic/alpha/color
+  tests and visible inline/image/filter-chain/mutation controls pass. The new
+  compiler ownership/admission case passes, including pinned-table mutation,
+  last-child selection, invalid input and over-limit rejection.
+- **CSS geometry:** seven appended standard names plus existing width/height
+  keys reach rect/circle/ellipse through the shared contour builder. Typed math,
+  percentages, owner fonts, variables, CSS-wide defaults, two-way auto radii and
+  invalid-substitution defaulting share computation with CSSOM. The geometry
+  and cascade/applicability probes pass. Numeric Mark attributes remain valid.
+- **DOM/frame export:** `render_svg_dom_to_file` reuses `dom_serialize_xml` with
+  an optional projection. It writes selected CSS/SMIL values and inert animation
+  drivers without cloning a live DOM or mutating its attributes. Standalone SVG
+  source saves use this route; ordinary page SVG/PDF retains paint export. The
+  existing render event can select an SVG root with `target.selector`. Edited
+  static and virtual-frame reload probes pass 24 assertions, including unchanged
+  live source/time, subsequent timer advancement and edited frame re-export.
+  Consecutive fixed-frame exports are byte-identical.
+- **Independent evidence:** Chromium 152 agrees with 20 initial transform/motion,
+  13 transfer/geometry and 20 geometry/cancellation checks. The final expanded
+  geometry/resource/font fixtures also pass 32 browser checks. DOM/frame snapshots
+  pass reopened-file qualification at both densities/cache modes and 14 independent
+  Chromium pixel probes; standalone source save retains the filter graph and
+  its four channel elements, with no raster substitution.
+- **Focused qualification:** 16 UI fixtures pass 276 native checks, including
+  the final ownership, resource-bounds and live-font controls. The nine new
+  fixtures pass 36 density/cache runs and 464 assertions on each of AST and MIR.
+  Pause/resume, detach/reinsert and underlying-value restoration are covered.
+  A CSS geometry edit updates object-bounding-box gradient/clip paint and hits;
+  owner/root font edits update em/rem geometry and restore it. The existing SMIL
+  inventory passes 128 runs / 3,864 assertions. Native vector and CSS animation
+  suites pass 169 and 147 tests. Portable export passes 154/156 format checks
+  and all SVG fixtures; the two PDF containment failures reproduce with the
+  saved intake binary at both densities. The initial three SVG export regressions
+  were caused by rejecting unitless CSS geometry; Chromium accepts these values,
+  and the corrected shared validator restores all 18 affected format checks.
+  SVG reload at 2× exposed missing navigation density propagation; the event
+  navigation path now uses the shared document raster-scale synchronizer.
+- **Sanitizer:** six full focused CLI fixtures pass with ASan and leak detection
+  disabled. The frame fixture passes its 15 assertions then reports a shutdown
+  use-after-free at `lib/mem_context.c:203`; an existing HTML animation/navigation
+  control with no SVG export reproduces the same retained-fragment parent-node
+  failure. Separate ASan save and fresh-process reopen pass all 15 frame checks.
+  This records the failure; it does not claim a green single-process lifetime
+  gate. A stale decoder object initially broke the ASan link; rebuilding that
+  profile's `codec_aom.o` from current configuration restored the supported build.
+- **Required aggregate:** `make test-all-baseline` completed (192 runners):
+  **17,795 passed, 359 failed, 160 partial, one skipped**. The core Lambda
+  executable suite passes 1,620 tests; the UI batch passes 640 tests; native
+  Radiant passes 208. Library and validator lanes pass. Failed areas are paged
+  composition, clipboard/paste WPT cases, PDF/fidelity and script-format checks,
+  wiki formatting, concurrency, Node preliminaries and the retired Bash/Ruby
+  inventories. Radiant's lane has 12 failures (seven paged, five clipboard/paste);
+  the PDF visual runner has 24 failures. These remain failures; the scope does
+  not include repairing their other subsystem owners or weakening expectations.
+  The additional owner fixture and extended G controls were qualified separately
+  after the aggregate UI batch; no production changes followed the aggregate
+  build. Preserve `aggregate_summary.json` and `all_baseline_final.log` with the
+  focused receipts. Broader failure attribution is not asserted merely from a
+  passing SVG probe; only the two portable PDF cases have intake-binary A/B
+  evidence here.
+- **Document/tool checks:** generated name checks, layout float-cast lint, formal
+  index regeneration, new local links, diff checks and the module boundary pass.
+  CSS inventory regeneration fails on existing missing PDF-writer evidence
+  (`test/lib/test_pdf_writer_gtest.cpp#TransparencyGroupsBalanceAndRetainNestedVectorResources`);
+  that receipt is not removed or replaced with unrelated SVG evidence.
+
+### SVG save and selected-frame use
+
+`lambda render drawing.svg -o saved.svg` saves the standalone current SVG DOM;
+SVG source dimensions and animation declarations remain authored. Raster output,
+PDF and HTML-page SVG continue to use render/export sizing. Native interactive
+callers use `render_svg_dom_to_file(root, path, freeze)` after their existing
+frame flush; `freeze=true` captures the already-selected virtual frame. The
+existing event/virtual-timer control route exposes the same behavior:
+
+```json
+[
+  {"type":"advance_time","ms":1000,"steps":10},
+  {"type":"render","target":{"selector":"#drawing"},"file":"temp/frame.svg"}
+]
+```
+
+Standard `XMLSerializer.serializeToString(svg)` keeps its ordinary current-DOM
+serialization behavior; it does not freeze animation. Capturing a frame never
+adds a timer, resets the clock or requires a wall-clock sleep. Wider animated
+external-resource/use-instance snapshots remain unqualified under **D2.11.4**;
+network-sprite delivery and wall-clock animation export remain deferred.

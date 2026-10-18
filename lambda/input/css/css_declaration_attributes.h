@@ -418,6 +418,13 @@
     X(page) \
     X(string_set) \
     X(footnote_policy) \
+    X(x) \
+    X(y) \
+    X(cx) \
+    X(cy) \
+    X(r) \
+    X(rx) \
+    X(ry) \
     X(css_float)
 
 #define CSS_STYLE_PROPERTIES_ATTRIBUTES(X) \
@@ -1197,6 +1204,13 @@
     X(string_set, "string-set", "string-set") \
     X(footnote_policy, "footnotePolicy", "footnote-policy") \
     X(footnote_policy, "footnote-policy", "footnote-policy") \
+    X(x, "x", "x") \
+    X(y, "y", "y") \
+    X(cx, "cx", "cx") \
+    X(cy, "cy", "cy") \
+    X(r, "r", "r") \
+    X(rx, "rx", "rx") \
+    X(ry, "ry", "ry") \
     X(css_float, "cssFloat", "float")
 
 #define CSS_FONT_FACE_DESCRIPTORS_FIELDS(X) \

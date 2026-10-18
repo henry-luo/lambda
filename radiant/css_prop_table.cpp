@@ -70,6 +70,12 @@ static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
     {CSS_PROPERTY_BACKGROUND_POSITION_X, ANIM_VAL_BACKGROUND_POSITION, false, false},
     {CSS_PROPERTY_BACKGROUND_POSITION_Y, ANIM_VAL_BACKGROUND_POSITION, false, false},
     {CSS_PROPERTY_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_FILL, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_STROKE, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_FILL_OPACITY, ANIM_VAL_FLOAT, true, false},
+    {CSS_PROPERTY_STROKE_OPACITY, ANIM_VAL_FLOAT, true, false},
+    {CSS_PROPERTY_STROKE_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_STROKE_DASHOFFSET, ANIM_VAL_LENGTH, true, false},
     {CSS_PROPERTY_BORDER_TOP_COLOR, ANIM_VAL_COLOR, true, false},
     {CSS_PROPERTY_BORDER_RIGHT_COLOR, ANIM_VAL_COLOR, true, false},
     {CSS_PROPERTY_BORDER_BOTTOM_COLOR, ANIM_VAL_COLOR, true, false},
@@ -1372,7 +1378,8 @@ String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     } else if (css_property_is_svg_length(id)) {
         CssomSvgScalarWriter writer = {formatter,
             {dom_svg_length_context(declaring), {declaring, 16.0f, 16.0f}},
-            id != CSS_PROPERTY_STROKE_DASHOFFSET, id == CSS_PROPERTY_STROKE_DASHARRAY, false};
+            id != CSS_PROPERTY_STROKE_DASHOFFSET && id != CSS_PROPERTY_X && id != CSS_PROPERTY_Y &&
+                id != CSS_PROPERTY_CX && id != CSS_PROPERTY_CY, id == CSS_PROPERTY_STROKE_DASHARRAY, false};
         CssomFontState root = {}, state = {};
         if (cssom_resolve_font_state(pool, declaring, 0, &root, &state, true)) {
             if (!dom_element_is_svg(declaring)) writer.lengths.svg.font_size = state.font.size_px;
@@ -1598,14 +1605,12 @@ static bool serialize_visibility(const CssPropAccessor*, DomElement* element,
     }
 }
 
-static bool serialize_transform(const CssPropAccessor* accessor, DomElement* element,
-                                 int pseudo_type, StringBuf* out) {
-    if (!accessor || !element || pseudo_type != 0) return false;
-    TransformFunction* functions = element->transform ? element->transform->functions.get() : nullptr;
+static bool format_transform_functions(TransformFunction* functions, float width,
+    float height, StringBuf* out) {
     if (!functions) return copy_text(out, "none");
     // CSS Transforms 1 §4.2 serializes the function product without transform-origin.
     RdtMatrix4 matrix = radiant::compute_transform_matrix_3d(functions,
-        element->width, element->height, 0.0f, 0.0f, 0.0f);
+        width, height, 0.0f, 0.0f, 0.0f);
     const float* values = matrix.values;
     bool is_2d = rdt_matrix4_is_2d(&matrix);
     const int planar_indices[] = {0, 4, 1, 5, 3, 7};
@@ -1621,6 +1626,20 @@ static bool serialize_transform(const CssPropAccessor* accessor, DomElement* ele
     }
     stringbuf_append_char(out, ')');
     return true;
+}
+
+String* css_prop_serialize_transform_functions(Pool* pool, TransformFunction* functions,
+    float width, float height) {
+    StringBuf* output = pool ? stringbuf_new(pool) : nullptr;
+    return output && format_transform_functions(functions, width, height, output)
+        ? stringbuf_to_string(output) : nullptr;
+}
+
+static bool serialize_transform(const CssPropAccessor* accessor, DomElement* element,
+    int pseudo_type, StringBuf* out) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    return format_transform_functions(element->transform ? element->transform->functions.get() : nullptr,
+        element->width, element->height, out);
 }
 
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
@@ -2080,6 +2099,14 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_FILL, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_WIDTH, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_X, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_Y, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CX, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_R, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_RX, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_RY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+
     DERIVED_ROW(CSS_PROPERTY_FILL_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_OPACITY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_DASHARRAY, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
@@ -2400,6 +2427,12 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         // CSSOM font-size is an absolute length even when a preliminary view
         // tree exists but has not yet propagated inherited font properties.
         return serialize_cssom_font_size(element, pseudo_type, out);
+    }
+    if (pseudo_type == 0 && (id == CSS_PROPERTY_WIDTH || id == CSS_PROPERTY_HEIGHT) &&
+        dom_element_is_svg(element) && !strcmp(element->local_name(), "rect")) {
+        dom_ensure_computed(element, false);
+        String* value = serialize_svg_paint_value(out->pool, element, id);
+        return value && copy_text(out, value->chars);
     }
     if (css_property_is_svg_presentation(id) && pseudo_type == 0) {
         dom_ensure_computed(element, false);

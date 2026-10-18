@@ -1,0 +1,177 @@
+{
+  "name": "SVG CSS samples pause, resume, retire on detach, and restart on reinsert",
+  "html": "test/ui/svg_css_motion_lifetime.html",
+  "viewport": {
+    "width": 160,
+    "height": 80
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "fill",
+      "equals": "rgb(191, 0, 64)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "stroke-width",
+      "equals": "3px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 20,
+      "min_r": 226,
+      "max_r": 232,
+      "min_g": 150,
+      "max_g": 156,
+      "min_b": 176,
+      "max_b": 182
+    },
+    {
+      "type": "assert_script",
+      "js": "window.live=document.getElementById('live');window.live.style.setProperty('animation-play-state','paused');true;"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "fill",
+      "equals": "rgb(191, 0, 64)"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 20,
+      "min_r": 226,
+      "max_r": 232,
+      "min_g": 150,
+      "max_g": 156,
+      "min_b": 176,
+      "max_b": 182
+    },
+    {
+      "type": "assert_script",
+      "js": "window.live.style.setProperty('animation-play-state','running');true;"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "fill",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "stroke-width",
+      "equals": "4px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 20,
+      "min_r": 176,
+      "max_r": 182,
+      "min_g": 99,
+      "max_g": 105,
+      "min_b": 176,
+      "max_b": 182
+    },
+    {
+      "type": "assert_script",
+      "js": "window.live.remove();true;"
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 20,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('scene').appendChild(window.live);true;"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "fill",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "stroke-width",
+      "equals": "2px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 201,
+      "max_g": 207,
+      "min_b": 201,
+      "max_b": 207
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "fill",
+      "equals": "rgb(191, 0, 64)"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 48,
+      "y": 20,
+      "expected_selector": "#live"
+    }
+  ]
+}

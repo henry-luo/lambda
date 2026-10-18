@@ -1,5 +1,8 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "svg_animation.hpp"
+#include "radiant.hpp"
+#include "../lambda/dom/dom.h"
 #include "scene3d.hpp"
 #include "view.hpp"
 #include "layout.hpp"
@@ -1161,11 +1164,128 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     return true;
 }
 
+struct SvgDomSnapshot {
+    Pool* pool;
+    DomXmlAttributeOverride* attributes;
+};
+
+static void svg_snapshot_attribute(SvgDomSnapshot* snapshot, const char* name, const char* value) {
+    if (!value) return;
+    DomXmlAttributeOverride* attribute = (DomXmlAttributeOverride*)pool_calloc(snapshot->pool, sizeof(*attribute));
+    attribute->name = pool_strdup(snapshot->pool, name);
+    attribute->value = pool_strdup(snapshot->pool, value);
+    // SMIL's namespaced reference spelling keeps its XML expanded name on export.
+    if (!strncmp(name, "xlink:", 6)) attribute->namespace_uri = "http://www.w3.org/1999/xlink";
+    else if (!strncmp(name, "xml:", 4)) attribute->namespace_uri = "http://www.w3.org/XML/1998/namespace";
+    attribute->next = snapshot->attributes;
+    snapshot->attributes = attribute;
+}
+
+static void svg_snapshot_sample(void* context, const char* name, const char* value, bool css) {
+    // CSS samples use the presentation selector below, including its priority rules.
+    if (!css) svg_snapshot_attribute((SvgDomSnapshot*)context, name, value);
+}
+
+static bool svg_snapshot_include(void*, void* node) {
+    DomElement* element = (DomElement*)node;
+    const char* name = element->local_name();
+    if (!strcmp(name, "script")) return false;
+    return !dom_element_is_svg(element) || (strcmp(name, "animate") && strcmp(name, "set") &&
+        strcmp(name, "animateTransform") && strcmp(name, "animateMotion") && strcmp(name, "discard"));
+}
+
+static void svg_snapshot_style_property(SvgDomSnapshot* snapshot, DomElement* element,
+    StrBuf* style, const char* name, CssPropertyCode id, bool inherits) {
+    char* owned = nullptr;
+    bool from_css = false;
+    const char* value = svg_get_dom_presentation_property(element, name,
+        inherits, nullptr, 0, &from_css, &owned);
+    if (value) {
+        strbuf_append_str(style, name);
+        strbuf_append_char(style, ':');
+        if (id == CSS_PROPERTY_TRANSFORM && !from_css) {
+            SvgLengthContext lengths = dom_svg_length_context(element);
+            RdtMatrix matrix = svg_resolve_local_transform(value, false, nullptr, nullptr, &lengths);
+            strbuf_append_format(style, "matrix(%g,%g,%g,%g,%g,%g)",
+                matrix.e11, matrix.e21, matrix.e12, matrix.e22, matrix.e13, matrix.e23);
+        } else if (css_property_is_svg_length(id)) {
+            // SMIL stores user-unit numbers; CSS lengths in the saved style need px units.
+            CssValue* parsed = css_parse_component_value_text(value, strlen(value), snapshot->pool);
+            String* computed = parsed ? css_prop_serialize_svg_value(snapshot->pool, element, id, parsed) : nullptr;
+            strbuf_append_str(style, computed ? computed->chars : value);
+        } else strbuf_append_str(style, value);
+        strbuf_append_str(style, "!important;");
+    }
+    if (owned) mem_free(owned);
+}
+
+static DomXmlAttributeOverride* svg_snapshot_attributes(void* context, void* node) {
+    SvgDomSnapshot* snapshot = (SvgDomSnapshot*)context;
+    DomElement* element = (DomElement*)node;
+    snapshot->attributes = nullptr;
+    if (dom_element_is_svg(element)) svg_animation_visit_values(element, svg_snapshot_sample, snapshot);
+    StrBuf* style = strbuf_new();
+    const char* authored = element->get_attribute("style");
+    if (authored) strbuf_append_str(style, authored);
+    strbuf_append_str(style, ";animation:none!important;transition:none!important;");
+    // resolve host CSS and inherited presentation before the SVG leaves its document.
+    for (unsigned code = 1; code < CSS_PROPERTY_CUSTOM; code++) {
+        CssPropertyCode id = (CssPropertyCode)code;
+        bool shape_geometry = css_property_is_svg_geometry(id) && !strcmp(element->local_name(), "rect");
+        if (!css_property_is_svg_presentation(id) && !shape_geometry && id != CSS_PROPERTY_COLOR &&
+            id != CSS_PROPERTY_OPACITY && id != CSS_PROPERTY_TRANSFORM &&
+            id != CSS_PROPERTY_TRANSLATE && id != CSS_PROPERTY_ROTATE && id != CSS_PROPERTY_SCALE &&
+            id != CSS_PROPERTY_TRANSFORM_ORIGIN &&
+            id != CSS_PROPERTY_VISIBILITY && id != CSS_PROPERTY_DISPLAY) continue;
+        const CssProperty* property = css_property_get_by_code(id);
+        if (!property || !dom_element_is_svg(element)) continue;
+        svg_snapshot_style_property(snapshot, element, style, property->name, id,
+            property->inheritance == PROP_INHERIT_YES);
+    }
+    if (dom_element_is_svg(element)) {
+        // transform-box has no registered dispatch key; text keeps its host font when reopened.
+        const char* names[] = {"transform-box", "font-family", "font-size", "font-weight", "font-style",
+            "letter-spacing", "word-spacing", "text-decoration", "dominant-baseline", "baseline-shift"};
+        for (const char* name : names)
+            svg_snapshot_style_property(snapshot, element, style, name, css_property_code_from_name(name),
+                strcmp(name, "transform-box") != 0);
+    }
+    svg_snapshot_attribute(snapshot, "style", style->str);
+    strbuf_free(style);
+    return snapshot->attributes;
+}
+
+int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze) {
+    if (!root || !dom_element_is_svg(root) || !filename) return 1;
+    Pool* pool = pool_create();
+    StrBuf* output = strbuf_new();
+    if (!pool || !output) { if (pool) pool_destroy(pool); if (output) strbuf_free(output); return 1; }
+    SvgDomSnapshot snapshot = {pool, nullptr};
+    DomXmlProjection projection = {&snapshot, svg_snapshot_include, svg_snapshot_attributes};
+    bool success = dom_serialize_xml(root, output, freeze ? &projection : nullptr) &&
+        save_svg_to_file(output->str, filename);
+    strbuf_free(output);
+    pool_destroy(pool);
+    return success ? 0 : 1;
+}
+
+int render_svg_source_document_to_file(UiContext* ui, const char* filename) {
+    DomDocument* document = ui ? ui->document : nullptr;
+    DomElement* body = dom_document_body_element(document);
+    for (DomNode* node = body ? body->first_child : nullptr; node; node = node->next_sibling) {
+        if (node->is_element() && dom_element_is_svg(node) && !strcmp(node->as_element()->local_name(), "svg"))
+            return render_svg_dom_to_file(node->as_element(), filename, radiant_document_virtual_clock(ui, nullptr));
+    }
+    return 1;
+}
+
 int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
     if (!session) return 1;
     UiContext* ui_context = session->ui_context;
     DomDocument* doc = session->document;
 
+    if (doc->services.svg_source_document)
+        return render_svg_source_document_to_file(ui_context, svg_file);
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // only the outer dimensions scale; the viewBox retains CSS coordinates for every subscene.

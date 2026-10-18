@@ -400,7 +400,8 @@ bool svg_append_basic_shape_path(DomElement* element, RdtPath* path,
 int svg_resolve_dash_array(const char* value, const SvgLengthContext* lengths,
     float* dashes, int capacity);
 RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
-    const char* origin, const Bound* reference_box, const SvgLengthContext* lengths);
+    const char* origin, const Bound* reference_box, const SvgLengthContext* lengths,
+    const char* const* individual = nullptr);
 // Shared authored cascade/presentation lookup for SVG interaction and resources.
 struct SvgDomStyleScope {
     lam::Up<DomElement> root;
@@ -3901,7 +3902,8 @@ enum RdtSvgFilterKind {
     RDT_SVG_FILTER_MERGE, RDT_SVG_FILTER_MATRIX, RDT_SVG_FILTER_SHADOW,
     RDT_SVG_FILTER_BLEND, RDT_SVG_FILTER_COMPOSITE, RDT_SVG_FILTER_MORPHOLOGY,
     RDT_SVG_FILTER_IMAGE, RDT_SVG_FILTER_TILE, RDT_SVG_FILTER_TURBULENCE,
-    RDT_SVG_FILTER_DISPLACEMENT, RDT_SVG_FILTER_DIFFUSE, RDT_SVG_FILTER_SPECULAR
+    RDT_SVG_FILTER_DISPLACEMENT, RDT_SVG_FILTER_DIFFUSE, RDT_SVG_FILTER_SPECULAR,
+    RDT_SVG_FILTER_TRANSFER
 };
 enum RdtSvgFilterInput {
     RDT_SVG_FILTER_SOURCE = -1, RDT_SVG_FILTER_ALPHA = -2, RDT_SVG_FILTER_EMPTY = -3,
@@ -3915,11 +3917,22 @@ struct RdtSvgFilterLight {
     unsigned kind;
     bool limiting_cone;
 };
+enum RdtSvgTransferKind {
+    RDT_SVG_TRANSFER_IDENTITY, RDT_SVG_TRANSFER_TABLE, RDT_SVG_TRANSFER_DISCRETE,
+    RDT_SVG_TRANSFER_LINEAR, RDT_SVG_TRANSFER_GAMMA
+};
+struct RdtSvgTransferFunction {
+    RdtSvgTransferKind kind;
+    lam::OwnArr<float> table; // program-arena data, shared by every pixel evaluation
+    size_t count;
+    float values[3]; // slope/intercept or amplitude/exponent/offset
+};
 struct RdtSvgFilterNode {
     RdtSvgFilterKind kind;
     lam::Up<Element> element;
     lam::Own<RdtSvgFilterNoise> noise;      // program-arena data
     RdtSvgFilterLight light;
+    RdtSvgTransferFunction transfer[4];
     int input, input2;
     lam::OwnArr<int> merge_inputs;
     size_t merge_count;
@@ -3943,6 +3956,7 @@ struct RdtSvgFilterProgram {
     bool filter_bbox, primitive_bbox, compiled, valid, allocation_failed;
 };
 constexpr size_t RDT_SVG_FILTER_MAX_NODES = 4096;
+constexpr size_t RDT_SVG_FILTER_MAX_TRANSFER_VALUES = 4096;
 // A filter run calls back into the code that owns its source, image and input
 // paint; each callback's context derives from this host type.
 struct RdtSvgFilterHost {};
@@ -4378,6 +4392,8 @@ void render_export_session_end(RenderExportSession* session);
 int render_export_session_to_png(RenderExportSession* session, const char* filename,
                                   bool transparent_background = false);
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
+int render_svg_source_document_to_file(UiContext* ui, const char* filename);
+int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,

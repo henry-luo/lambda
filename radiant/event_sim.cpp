@@ -1938,6 +1938,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "render") == 0) {
         ev->type = SIM_EVENT_RENDER;
+        parse_target(reader, ev);
         const char* file = reader.get("file").cstring();
         if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         else {
@@ -5444,6 +5445,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
+            // navigation must publish the window density before layout and SVG layer capture.
+            ui_context_sync_document_raster_scale(uicon, new_doc);
             layout_html_doc(uicon, new_doc, false);
             render_html_doc(uicon, new_doc->view_tree, nullptr);
             log_info("event_sim: navigated to '%s'", ev->navigate_url);
@@ -5458,6 +5461,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DomDocument* prev_doc = (DomDocument*)ctx->nav_history[--ctx->nav_history_depth];
             uicon->document = lam::up(prev_doc);
+            ui_context_sync_document_raster_scale(uicon, prev_doc);
             layout_html_doc(uicon, prev_doc, false);
             render_html_doc(uicon, prev_doc->view_tree, nullptr);
             log_info("event_sim: navigate_back to previous page (history depth now %d)", ctx->nav_history_depth);
@@ -5526,7 +5530,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
                     // Vector export must prepare its own GPU snapshots without a preceding raster pass.
                     sim_flush_pending_reflow(uicon->document);
-                    if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
+                    if (ev->target_selector) {
+                        View* target = event_sim_find_element(uicon->document, ev->target_selector, ev->target_index);
+                        if (!target || !target->is_element() || render_svg_dom_to_file(target->as_element(),
+                                ev->file_path, radiant_document_virtual_clock(uicon, nullptr)) != 0) ctx->fail_count++;
+                    } else if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
                 } else {
                     render_pending_surface(uicon);
                     // Default to PNG

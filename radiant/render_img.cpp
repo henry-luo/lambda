@@ -273,6 +273,9 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         return 1;
     }
 
+    if (uicon->document->services.svg_source_document)
+        return render_svg_source_document_to_file(uicon, svg_file);
+
     log_info("render_uicontext_to_svg: rendering to %s", svg_file);
 
     // Get content dimensions

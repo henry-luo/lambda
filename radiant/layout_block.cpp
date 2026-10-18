@@ -6467,10 +6467,11 @@ void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsig
             layout_svg_foreign_object(lycon, element, width, height);
         return;
     }
+    // SVG leaves need cascade/motion state even though they create no CSS layout box.
+    if (depth) layout_init_display_contents_view(lycon, element);
     const char* tag = element->tag_name;
     bool is_switch = tag && strcmp(tag, "switch") == 0;
     if (!tag || (strcmp(tag, "svg") != 0 && strcmp(tag, "g") != 0 && strcmp(tag, "a") != 0 && !is_switch)) return;
-    if (depth) layout_init_display_contents_view(lycon, element);
     if (layout_display_is_none(resolve_display_value(element))) return;
     DomNode* selected = is_switch ? (DomNode*)dom_svg_switch_selected_child(element) : nullptr;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {

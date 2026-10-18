@@ -278,6 +278,7 @@ struct DomDocumentServices {
     char* preferred_languages; // document-owned UI preference snapshot, refreshed by the host setter
     lam::Own<char> pragma_language;    // document-owned default retained after a meta insertion
     lam::Own<char> protocol_language;  // document-owned single Content-Language response value
+    bool svg_source_document = false; // standalone SVG source uses DOM serialization on SVG save
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr), ua_focus_stylesheet(nullptr),

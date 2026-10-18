@@ -1,6 +1,6 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Last verified against tree:** 2026-10-08 (shared chart text measurement); 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
+> **Last verified against tree:** 2026-10-18 (§5.4 SVG DOM/frame saves); 2026-10-08 (shared chart text measurement); 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
@@ -252,7 +252,7 @@ synchronous lowering finishes; retained marker copies use the same copy helper
 resolution, and PDF applies output scale to its page CTM with logical tree
 coordinates. `make test-svg-export` verifies the portable output matrix.
 
-CLI exports create the document at time zero and resolve SMIL before recording.
+Rendered-page CLI exports create the document at time zero and resolve SMIL before recording.
 Negative begins and frozen intervals that ended before zero therefore contribute
 their initial sampled state. Delayed animations retain their base paint; SVG
 images start at their own initial time. PNG/SVG/PDF use the same snapshot,
@@ -260,7 +260,23 @@ including external use and animated filter resources. No CLI sample-time option
 is currently exposed. `svg_smil_export_initial` verifies this contract in all
 three formats at both densities.
 
-### 5.4 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
+### 5.4 Current SVG DOM saves and virtual-frame snapshots
+
+**D2.11.3–D2.11.4** distinguish SVG source save from rendered-page export.
+`load_svg_doc` marks standalone source documents; their SVG saves use
+`render_svg_source_document_to_file` / `render_svg_dom_to_file`. The existing
+render control can select an inline SVG root. Both reuse `dom_serialize_xml` in
+the realm-neutral DOM module, which also serves standard XMLSerializer.
+
+A frozen snapshot supplies a serialization projection: current CSS presentation
+and SMIL samples override saved values, and animation/script drivers are inert
+in the output. The live DOM retains its original attributes and declarations.
+The existing frame flush/timer chooses the sample; export adds no clock or sleep.
+General HTML-page SVG/PDF retains the paint route described above. Qualification
+and remaining cases are recorded in the
+[SVG enhancement checkpoint](../../../vibe/impl/Radiant_Impl_SVG_Support.md#13-current-implementation-checkpoint).
+
+### 5.5 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
 
 The `gaussian_blur` capability flag (§2.2) describes the **vector backend's native filter blur**, consumed by the CSS filter/backdrop path (`render_filter.cpp:208`, `render_backend_caps.cpp:10`). Inline SVG's `<feGaussianBlur>` takes a *different* route: `svg_finish_gaussian_blur_filter` records a `box_blur_region` DisplayList op (`svg_box_blur_region`, `render_svg_inline.cpp:239,1317`) that is replayed in **software** by `dl_replay_box_blur_region` (`display_list_replay_effects.cpp:28`), with no `__APPLE__` guard. So inline-SVG blur works on all platforms; only the backend-native CSS-filter blur is `__APPLE__`-limited for ThorVG. The scan digest's blanket claim ("no Gaussian blur on Linux/Windows") over-generalizes and should be read as this narrower statement.
 

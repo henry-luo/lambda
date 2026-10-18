@@ -614,5 +614,12 @@ const WellKnownNameRecord g_well_known_markup_names[] = {
     { { 0x815DFA76u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000262u }, 4u, 0x05u, "page" },
     { { 0xA5D6CCD5u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000263u }, 10u, 0x05u, "string-set" },
     { { 0x41A2492Eu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000264u }, 15u, 0x05u, "footnote-policy" },
+    { { 0xFD0C5087u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000265u }, 1u, 0x05u, "x" },
+    { { 0xFC0C4EF4u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000266u }, 1u, 0x05u, "y" },
+    { { 0x4F29861Eu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000267u }, 2u, 0x05u, "cx" },
+    { { 0x502987B1u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000268u }, 2u, 0x05u, "cy" },
+    { { 0xF70C4715u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000269u }, 1u, 0x05u, "r" },
+    { { 0x55547097u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000026Au }, 2u, 0x05u, "rx" },
+    { { 0x54546F04u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000026Bu }, 2u, 0x05u, "ry" },
 };
 const size_t g_well_known_markup_name_count = sizeof(g_well_known_markup_names) / sizeof(g_well_known_markup_names[0]);
