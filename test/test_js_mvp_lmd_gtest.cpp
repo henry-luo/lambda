@@ -59,6 +59,26 @@ TEST_F(JsFormalMir, PublicEntryRetainsMvpClosureAndCallerHeap) {
     EXPECT_EQ(it2d(result), 41);
 }
 
+TEST_F(JsFormalMir, TypeScriptParameterDefaultsRetainClosuresAndTypeIntrinsic) {
+    const char source[] = R"TS(
+        function make(value: {n: number}, read: () => number = () => value.n): () => number {
+            if (read.name !== 'read' || type(read) !== 'function') throw Error('typed default');
+            return read;
+        }
+        make({n: 42});
+    )TS";
+    Item value = transpile_js_typescript_to_mir_len(&runtime, source,
+        sizeof(source) - 1, "<formal-mir-ts>", &result_home);
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    ASSERT_TRUE(function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD));
+    RootFrame roots(1);
+    Rooted<Item> closure(roots, value);
+    heap_gc_collect();
+    Item result = js_call_function_into(closure.get(), make_js_undefined(), NULL, 0, &result_home);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(it2d(result), 42);
+}
+
 TEST_F(JsFormalMir, PublicScriptsShareLexicalsIntrinsicsAndEscapingClosures) {
     Item value = run("let total=40;var firstArray=Array;function next(){return ++total}next");
     ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
