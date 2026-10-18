@@ -27,7 +27,8 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.backend = "mir";
     request.execution_mode = "module";
     request.ast_abi = 1;
-    request.compiler_abi = 3;
+    // generated environment offsets include the lexical receiver's owned scalar home.
+    request.compiler_abi = 4;
     request.interface_abi = jube_interface_registry_digest();
     request.dependency_digest = jube_interface_registry_digest();
     request.optimize_level = g_js_mir_optimize_level;

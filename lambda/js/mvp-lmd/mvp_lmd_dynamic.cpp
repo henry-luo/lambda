@@ -824,7 +824,7 @@ static Item dynamic_eval(Context*, MvpLmdProgram*, Item* args, uint64_t count, I
     if (get_type_id(args[0]) != LMD_TYPE_STRING) return args[0];
     MvpLmdDynamic* state = (MvpLmdDynamic*)((MvpLmdNativeCallable*)self.function)->state;
     Item shortcut = ItemNull;
-    if (js_eval_source_shortcut(args[0], false, &shortcut, &state->ops)) return shortcut;
+    if (js_eval_source_shortcut(args[0], &shortcut, &state->ops)) return shortcut;
     String* source = args[0].get_string();
     return js_interp_execute_host_source(&state->ops, source->chars, source->len, "<eval>", true);
 }

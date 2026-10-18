@@ -650,7 +650,7 @@ static Item json_write(StrBuf* buffer, Item input, const JsonAncestor* parent, i
             Item key = array ? ItemNull : keys.get().array->items[i];
             uint64_t home = 0;
             value.set(lambda_item_adopt_scalar_home(array ? mvp_lmd_array_index_property(held.get(), i, ItemNull, LMD_PROP_GET) :
-                mvp_lmd_class_property(held.get(), key, ItemNull, LMD_PROP_GET, NULL), &home));
+                mvp_lmd_class_property(held.get(), key, ItemNull, LMD_PROP_GET), &home));
             if (item_is_error(value.get())) return value.get();
             if (mvp_lmd_is_object(value.get()) || get_type_id(value.get()) == LMD_TYPE_DECIMAL) {
                 if (array) key = mvp_lmd_number_to_string(i);
@@ -998,7 +998,7 @@ static Item object_own(Context*, MvpLmdProgram*, Item* args, uint64_t count, Ite
     // hasOwnProperty converts its key before ToObject, unlike Object.hasOwn.
     owner.set(mvp_lmd_box_primitive(owner.get()));
     if (item_is_error(owner.get())) return owner.get();
-    return mvp_lmd_class_property(owner.get(), key.get(), ItemNull, LMD_PROP_OWN, NULL);
+    return mvp_lmd_class_property(owner.get(), key.get(), ItemNull, LMD_PROP_OWN);
 }
 Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
     return mvp_lmd_is_object(receiver) ? receiver : mvp_lmd_box_primitive(receiver);
@@ -1097,7 +1097,7 @@ static Item object_projection(Context*, MvpLmdProgram*, Item* args, uint64_t cou
     if (item_is_error(owner.get())) return owner.get();
     if (operation == 3) {
         keys.set(mvp_lmd_property_key(count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}));
-        return item_is_error(keys.get()) ? keys.get() : mvp_lmd_class_property(owner.get(), keys.get(), ItemNull, LMD_PROP_OWN, NULL);
+        return item_is_error(keys.get()) ? keys.get() : mvp_lmd_class_property(owner.get(), keys.get(), ItemNull, LMD_PROP_OWN);
     }
     if (get_type_id(owner.get()) == LMD_TYPE_FUNC) {
         Item status = mvp_lmd_function_prepare(owner.get());
@@ -1327,7 +1327,7 @@ extern "C" Item mvp_lmd_property_read(MvpLmdProgram* program, Item owner, Item n
             result.item = i2it(lambda_num_sized_item_to_lane(result.item));
     } else {
         result = mvp_lmd_class_property(object.get(), key.get(), ItemNull,
-            callee ? LMD_PROP_CALLEE : LMD_PROP_GET, NULL);
+            callee ? LMD_PROP_CALLEE : LMD_PROP_GET);
     }
     // a getter may return the primitive receiver's C-local home; publish it before roots unwind.
     return js_retain_scalar(result);
@@ -2323,7 +2323,7 @@ extern "C" Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_o
         } else {
             String* key = heap_create_name(name, strlen(name));
             if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            callable.set(mvp_lmd_class_property(owner.get(), Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, NULL));
+            callable.set(mvp_lmd_class_property(owner.get(), Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET));
             if (item_is_error(callable.get())) return callable.get();
             if (!mvp_lmd_is_callable(callable.get())) continue;
             result.set(mvp_lmd_class_invoke(callable.get(), owner.get(), NULL, 0, Item{.item = ITEM_JS_UNDEFINED}));

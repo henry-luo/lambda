@@ -496,12 +496,11 @@ Item js_dynamic_async_generator_function_call_body(Item callee,
         Item this_value, Item* args, int argc, uint64_t* result_home);
 Item js_dynamic_async_generator_function_construct_body(Item callee,
         Item* args, int argc, Item new_target, uint64_t* result_home);
-Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+Item js_builtin_eval(Item code_item);
 void js_eval_private_push_frame(void);
 void js_eval_private_pop_frame(void);
 void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 Item js_eval_private_resolve(Item unscoped_key);
-Item js_eval_private_frame_pairs(void);
 int64_t js_262_eval_script_is_active(void);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_create_regex_literal(const char* pattern, int pattern_len, const char* flags, int flags_len);
@@ -1281,11 +1280,6 @@ void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t
 Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
-Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
-int64_t js_eval_local_has_var_binding(Item key);
-void js_eval_local_export_var(Item key, Item value);
-int64_t js_eval_local_has_lexical_binding(Item key);
-int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 extern const char* const js_array_unscopable_names[];
 typedef struct JsWithBindingOps {
@@ -1305,12 +1299,6 @@ Item js_probe_with_binding_from(Item key, int64_t minimum_depth);
 Item js_capture_with_binding_from(Item key, int64_t minimum_depth);
 Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
-int64_t js_eval_env_has_binding(Item key);
-int64_t js_eval_global_lexical_has_binding(Item key);
-Item js_eval_global_lexical_get_or_fallback(Item key, Item fallback);
-Item js_eval_global_lexical_set_if_exists(Item key, Item value);
-int64_t js_eval_env_is_active(void);
-
 // URL constructor
 Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);

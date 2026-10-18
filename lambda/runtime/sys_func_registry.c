@@ -2695,7 +2695,6 @@ JitImport jit_runtime_imports[] = {
     // Ruby block lowering imports the JS/Lambda function pointer bridge directly.
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
-    {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_create_regex_literal", FPTR(js_create_regex_literal)},
     {"js_create_regex_literal_items", FPTR(js_create_regex_literal_items)},
@@ -2990,10 +2989,6 @@ JitImport jit_runtime_imports[] = {
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_global_lexical_declare_module_slot", FPTR(js_global_lexical_declare_module_slot), JIT_IMPORT_VOID_PRESERVES},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
-    {"js_eval_private_push_frame", FPTR(js_eval_private_push_frame), JIT_IMPORT_VOID_PRESERVES},
-    {"js_eval_private_pop_frame", FPTR(js_eval_private_pop_frame), JIT_IMPORT_VOID_PRESERVES},
-    {"js_eval_private_bind", FPTR(js_eval_private_bind), JIT_IMPORT_VOID_PRESERVES},
-    {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},

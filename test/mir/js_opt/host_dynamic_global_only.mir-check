@@ -24,7 +24,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_shape_field_to_item": 3,
+        "call\tmap_shape_field_to_item": 2,
         "call\tmvp_lmd_to_primitive": 3,
         "call\tmvp_lmd_class_property": 3,
         "call\tmvp_lmd_string_concat": 4

@@ -1392,6 +1392,74 @@ TEST(JsInterpreter, NativeAndMirJsonNumbersAndCssNamespaceUseSharedContracts) {
     }
 }
 
+TEST(JsInterpreter, EvalContextUsesBoundFactsAcrossBackends) {
+    const char* sources[] = {
+        "class C { value=eval('({arguments:42}).arguments'); } new C().value===42;",
+        "class C { value=eval('(function(){return arguments[0]})(42)'); } new C().value===42;",
+        "class C { value=eval('/arguments/.source'); } new C().value==='arguments';",
+        "class C { value=(0,eval)('({arguments:42}).arguments'); } new C().value===42;",
+        "class C { value=eval('argum\\\\u0065nts'); }"
+        "let caught=false;try{new C()}catch(e){caught=e instanceof SyntaxError}caught;",
+        "class C { value=eval('`${arguments}`'); }"
+        "let caught=false;try{new C()}catch(e){caught=e instanceof SyntaxError}caught;",
+        "let touched=false,caught=false;try{eval('touched=true;new.target')}"
+        "catch(e){caught=e instanceof SyntaxError}caught&&!touched;",
+        "function C(){this.value=eval('new.target')}new C().value===C;",
+        "class B { constructor(){this.value=42} }"
+        "class C extends B { constructor(){eval('super()')} }new C().value===42;"
+    };
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        for (const char* source : sources) {
+            SCOPED_TRACE(source);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            Item result = transpile_js_to_mir(&runtime, source, "eval-context-facts.js", NULL);
+            EXPECT_EQ(result.item, ITEM_TRUE);
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, DirectEvalRetainsLiveCellsWithoutProjectionJournals) {
+    const char source[] =
+        "let value=100;function make(value){const fixed=7;"
+        "eval('var added=2');let read=eval('()=>value+added');"
+        "eval('value+=3;added+=4');"
+        "let rejected=false;try{eval('fixed++')}catch(e){rejected=e instanceof TypeError}"
+        "if(!rejected||eval('fixed')!==7)throw 1;return read}"
+        "let read=make(33);gc();read()===42&&value===100&&typeof added==='undefined';";
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Item result = transpile_js_to_mir(&runtime, source, "eval-live-cells.js", NULL);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
+    const char source[] =
+        "let make=Function('\"use strict\";return ()=>this');let saved=[];"
+        "for(let i=0;i<32;i++)saved.push(make.call(i/7));"
+        "let zero=make.call(-0);gc();let ok=Object.is(zero(),-0);"
+        "for(let i=0;i<32;i++)ok=ok&&saved[i]()===i/7;"
+        "function strict(){'use strict';return eval('()=>this')}"
+        "let a=strict.call(1/3),b=strict.call(2/3);gc();ok&&a()===1/3&&b()===2/3;";
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Item result = transpile_js_to_mir(&runtime, source, "escaped-numeric-this.js", NULL);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, AutoMvpPromotionsPreserveRealmBindingsAndCallableIdentity) {
     const char* sources[] = {
         "var counter=1;function f(n){counter+=n;return counter}"

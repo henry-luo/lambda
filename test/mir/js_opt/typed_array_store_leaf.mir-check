@@ -52,7 +52,7 @@
       ],
       "count": {
         "call\tmvp_lmd_object_new": 2,
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_property_key": 2,
         "call\tmvp_lmd_to_primitive": 2,
         "call\tmvp_lmd_primitive_to_number": 1,
@@ -64,7 +64,7 @@
         "call\tmvp_lmd_string_concat": 2,
         "i32:(": 2,
         "u32:(": 2,
-        "d:(": 6
+        "d:(": 4
       }
     },
     {
@@ -73,9 +73,9 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_class_property": 1,
-        "d:(": 2
+        "d:(": 0
       }
     },
     {

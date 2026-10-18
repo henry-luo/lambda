@@ -33,7 +33,7 @@ typedef struct JsInterpEnv {
     // Class evaluation publishes this lexical private-name owner for member
     // bodies, field initializers, static blocks, and their nested closures.
     uint64_t private_home_class;
-    // Flat [source name, identity key] pairs exported to a direct-eval bridge.
+    // Flat [source name, identity key] pairs retained by direct eval's lexical scope.
     uint64_t private_bindings;
     // Flat [name, value] pairs declared by direct eval in this variable
     // environment. Closures retain this GC-owned record after the caller exits.
@@ -56,14 +56,20 @@ typedef struct JsInterpEnv {
     // arguments aliases may detach; lexical and receiver cell ownership does not.
     uint8_t host_cells;
     uint8_t binding_role; // projects shared source slots into the activation record
-    // arguments is mutable and can outlive a caller-owned numeric payload.
+    // mutable metadata owns scalar payloads just like the ordinary lexical slots.
     uint64_t arguments_scalar_home;
+    uint64_t this_scalar_home;
     uint64_t slots[1];
 } JsInterpEnv;
 
 static inline void js_interp_env_arguments_store(JsInterpEnv* env, Item value) {
     if (env) *(Item*)(void*)&env->arguments_object = lambda_item_adopt_scalar_home(value,
         &env->arguments_scalar_home);
+}
+
+static inline void js_interp_env_this_store(JsInterpEnv* env, Item value) {
+    if (env) *(Item*)(void*)&env->lexical_this = lambda_item_adopt_scalar_home(value,
+        &env->this_scalar_home);
 }
 
 // JS adds lexical metadata to the common durable Item/scalar slot storage.

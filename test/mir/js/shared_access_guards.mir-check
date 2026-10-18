@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2: packed field and numeric-index guards retain the formal descriptor/prototype fallback.",
+  "description": "D8.4.1v2: packed field and numeric-index guards retain the formal descriptor/prototype fallback. D8.4.1v2: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",
       "expect": [
         "call\tmvp_lmd_property_get_fixed",
-        "call\tmap_shape_field_to_item",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
@@ -15,8 +15,10 @@
       "expect": [
         "call\tmvp_lmd_property_set_fixed",
         "call\tmvp_lmd_property_get_fixed",
-        "call\tmap_field_store",
         "call\tmvp_lmd_class_property"
+      ],
+      "forbid": [
+        "call\tmap_field_store"
       ]
     },
     {

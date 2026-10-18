@@ -2979,7 +2979,9 @@ TEST_F(JsMvpLmd, CoreGlobalBindings) {
     boolean("globalThis.loopBinding=0;let total=0;for(let i=0;i<12;i++){globalThis.loopBinding=i;total+=loopBinding}total===66");
     mir = dump("temp/mvp_lmd_loop_global.mir");
     ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
+    // D8.4.1v2: repeated globals use shared dispatch without a site-cache decoder.
+    EXPECT_EQ(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_class_property\n"), nullptr);
     mem_free(mir);
     boolean(R"JS(
         globalThis.cacheProbe=1;
@@ -4475,6 +4477,7 @@ TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
     ASSERT_NE(allocation, nullptr);
     char* fallback = strstr(allocation, "mvp_lmd_class_invoke");
     ASSERT_NE(fallback, nullptr); *fallback = 0;
+    // shared descriptor guards preload native inputs before allocating the result.
     EXPECT_EQ(strstr(allocation, "mvp_lmd_class_property"), nullptr);
     mem_free(mir);
     boolean(R"JS(
@@ -6208,6 +6211,33 @@ TEST_F(JsMvpLmd, PropertyExpansionLambdaBoundary) {
     EXPECT_EQ(it2d(mvp_lmd_array_own_item(result.array, 1000000000)), 5e-324);
     EXPECT_TRUE(item_is_error(array_get(result.array, 1000000000)));
     EXPECT_TRUE(item_is_error(array_item_read(result.array, 1000000000)));
+}
+
+TEST_F(JsFormalMir, NativeOwnStoresRejectForeignDeclaredLayouts) {
+    Item result = run("class C{constructor(){this.x=3.5}}function write(o){o.x=7.5;return o.x}"
+        "let o=new C();write(o);o.x=3.5;[o,write]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> values(roots, result);
+    Map* object = values.get().array->items[0].map;
+    Item argument = {.map = object};
+    Item absent = {.item = ITEM_JS_UNDEFINED};
+    Item own_write = mvp_lmd_class_invoke(values.get().array->items[1], absent, &argument, 1, absent);
+    ASSERT_FALSE(item_is_error(own_write));
+    ASSERT_TRUE(map_shape_set(object, heap_create_name("x", 1), push_d(3.5)));
+    TypeMap* shape = (TypeMap*)object->type;
+    ShapeEntry* field = typemap_hash_lookup(shape, "x", 1);
+    ASSERT_NE(field, nullptr);
+    TypeMap foreign_shape = *shape;
+    TypeNominal foreign_nominal = *shape->nominal;
+    foreign_nominal.extension = NULL;
+    foreign_shape.nominal = &foreign_nominal;
+    object->type = &foreign_shape;
+    Item written = mvp_lmd_class_invoke(values.get().array->items[1], absent, &argument, 1, absent);
+    object->type = shape;
+    EXPECT_TRUE(item_is_error(written));
+    EXPECT_EQ(it2d(map_shape_field_to_item(object->data, field)), 3.5);
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionComputedHooks) {

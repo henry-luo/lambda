@@ -1028,17 +1028,6 @@ static void js_eval_native_rows_clear(ArrayList** rows) {
     *rows = NULL;
 }
 
-static void js_eval_local_frames_clear(JsEvalLocalState* local) {
-    if (!local) return;
-    js_eval_native_rows_clear(&local->frame_marks);
-}
-
-static void js_eval_binding_journal_clear(JsEvalBindingJournal* journal) {
-    if (!journal) return;
-    js_eval_native_rows_clear(&journal->bindings);
-    js_eval_native_rows_clear(&journal->frames);
-}
-
 static void js_eval_private_journal_clear(JsEvalPrivateJournal* journal) {
     if (!journal) return;
     js_eval_native_rows_clear(&journal->frames);
@@ -1051,10 +1040,7 @@ void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
 
 void js_eval_state_vectors_destroy(JsEvalState* state) {
     if (!state) return;
-    js_eval_binding_journal_clear(&state->bridge.env);
-    js_eval_binding_journal_clear(&state->bridge.global_lexical);
-    js_eval_private_journal_clear(&state->bridge.private_names);
-    js_eval_local_frames_clear(&state->local);
+    js_eval_private_journal_clear(&state->private_names);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_DESTROY, state)
 }
 
@@ -1062,29 +1048,14 @@ void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_CLEAR, state)
-    js_eval_binding_journal_clear(&state->bridge.env);
-    js_eval_binding_journal_clear(&state->bridge.global_lexical);
-    js_eval_private_journal_clear(&state->bridge.private_names);
-    js_eval_local_frames_clear(&state->local);
+    js_eval_private_journal_clear(&state->private_names);
 }
 
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (!state) return;
     const char* name = reset_name ? reset_name : "reset";
-    int env_frame_depth = state->bridge.env.frames ? state->bridge.env.frames->length : 0;
-    int global_lexical_frame_depth = state->bridge.global_lexical.frames
-        ? state->bridge.global_lexical.frames->length : 0;
-    int private_frame_depth = state->bridge.private_names.frames
-        ? state->bridge.private_names.frames->length : 0;
-    if (env_frame_depth != 0 || global_lexical_frame_depth != 0 ||
-        private_frame_depth != 0) {
-        log_error("js-eval-state: %s left bridge depths env=%d lexical=%d private=%d", name,
-            env_frame_depth, global_lexical_frame_depth, private_frame_depth);
-    }
-    int local_frame_depth = state->local.frame_marks ? state->local.frame_marks->length : 0;
-    if (local_frame_depth != 0) {
-        log_error("js-eval-state: %s left local frame depth=%d", name, local_frame_depth);
-    }
+    int depth = state->private_names.frames ? state->private_names.frames->length : 0;
+    if (depth != 0) log_error("js-eval-state: %s left private-name depth=%d", name, depth);
 }
 
 struct JsErrorTextParts {

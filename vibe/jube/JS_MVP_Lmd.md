@@ -1154,6 +1154,11 @@ earlier gate instability and remaining scope are in
 
 ## 25. Guarded numeric regions
 
+**Retirement note (2026-10-18; D8.4.1v2):** the measurements below are
+historical. The cache-dependent admission and `guard_property_cache` are
+removed; §36.10 records the replacement using shared storage descriptors and
+source-predicted guards.
+
 Reduce CD's repeated generic coercions and call/root boundaries by guarding
 receiver/argument layouts once around a pure numeric body. Reuse Lambda shape
 identity and packed lanes (**D3.4.3v5**), numeric emitters and precise root analysis
@@ -2105,7 +2110,7 @@ the existing live array-chain proof before constructing keys for absent indices.
 Typed-array ancestors, foreign and exotic chains retain semantic lookup; no
 container-wide `is_normal` flag is introduced.
 
-The internal `MvpLmdPropertyCache::find_shape` lookup consolidates existing cache
+The then-existing `MvpLmdPropertyCache::find_shape` lookup consolidated cache
 searches; no exported C runtime helper is added. The historical `divrec` control
 used the removed self-tail-call loop, so matching that result cannot justify
 restoring tail-call elimination contrary to JC24. Qualification and paired,
@@ -2228,3 +2233,107 @@ text search measures **+0.2–0.7%**, with both intervals including no change,
 and the earlier map-lookup slowdown does not reproduce. The earlier aggregate/
 recount results and final scoped reruns remain separate in the report; this
 is not a full 88-workload sweep.
+
+### 36.9 Disable per-site optimization caches
+
+**2026-10-18; D8.4.1v2:** disable mutable property/global cache cells,
+property-reading numeric regions that require learned slots, and constructor
+allocation-site shape/argument variants. The compiler policy is fixed off;
+no runtime switch or new runtime helper is introduced. Open property calls
+pass a null cache pointer. Scalar-only numeric regions, source-predicted
+constructor/method guards, shared own-field lookup/decoding, and shared
+TypeMap/constructor metadata remain available (**D3.4.3v5, D3.4.7**).
+Template-object identity storage remains part of JS semantics.
+
+Compare the same-source cache-enabled release against the disabled release
+using pinned MIR, accepted workload/oracle contracts and self-reported time.
+Measure the 84 non-jq workloads afresh; retain the four jq rows solely as
+historical evidence at the user's request. Capture provenance, timing samples,
+MIR output and qualification under
+[`temp/js_mvp_no_site_cache_20261018/`](../../temp/js_mvp_no_site_cache_20261018/).
+
+All **84/84** fresh output/backend contracts pass. The complete three-round
+screen is **15.9% slower** geometrically; with six-round follow-ups on seven
+rows and thirty-round follow-ups on seven numeric rows, the selected medians
+are **16.1% slower**, with the median workload unchanged and **70/84** within
+±5%. CD is **4.66×**, NBody **4.26×**, Richards **4.10×**, Prettier AST **1.22×**
+and log-pipeline **1.16×** slower. HashMap is roughly unchanged (**364.807 ms
+versus 370.371 ms**, intervals include no change). All **10,210** emitted
+property-kernel call sites in **98** captured candidate MIR files pass null
+cache pointers. Raw captures and the full table are retained in the report
+directory above; Result10 remains its original snapshot.
+
+Final affected checks pass **824/824** MVP runtime, **107/107** optimizer,
+**32/32** JS MIR emission and **20/20** unchanged MIR budgets. The finalized-MIR
+harness rejects non-null cache operands; cache-only decoder expectations were
+updated while retaining JS behavior checks. The complete selected Test262
+property-access/constructor/reflection groups pass **415/415** on pinned MIR.
+The initial aggregate and affected reruns are reported separately: the broader
+baseline retains its missing Python PIL dependency, and the optional full
+Test262 recount was not completed. See the
+[`report`](../../temp/js_mvp_no_site_cache_20261018/REPORT.md) for scope and limits.
+
+### 36.10 Remove cache machinery and reuse Lambda field specialization
+
+**2026-10-18; D8.4.1v2, D3.4.6:** remove the disabled property/global
+cache cells, cache-fill paths, cache-pointer ABI arguments, constructor-site
+variants and their invalidation epoch. The former shared prototype ring also
+uses ordinary TypeMap lookup, so its cache-entry representation can disappear.
+Template identity, compiled-module reuse and canonical shape transitions keep
+their existing semantic roles.
+
+Follow untyped Lambda's inferred-field route: compare source-predicted shapes
+where available, then use packed fields; otherwise obtain the live descriptor
+through Lambda's shared lookup. Keep lookup results in invocation-local
+registers. Numeric regions share receiver admission/data bases and preload
+only checked own data fields. Arithmetic consumers and matching writable
+scalar stores use native lanes without intermediate Item boxing. Reuse
+`typemap_hash_lookup_key`, `shape_entry_storage` and `map_shape_field_to_item`;
+the additions are compiler emission helpers, with no new runtime helper.
+The shared lookup arm also imports the existing `mvp_lmd_owns_properties`
+admission so native stores cannot bypass foreign Lambda layout protection.
+Known function receivers skip Map guards; private static initializer call
+edges prove that `this` is the class constructor.
+Generic array/string `length` reads keep their sequence heads and compact
+semantic miss; only a known Map receiver gains the extra own-field arm.
+The reference is Lambda's inferred member lowering in
+`lambda/runtime/transpile-mir.cpp`: `em_guard_map_shape` with a shared
+`fn_member_by_id` miss. JS additionally checks ownership, descriptors and live
+prototype values because its objects are mutable.
+
+Bounded source-class method candidates guard nominal identity, own shadowing
+and the live prototype shape. Read the current function before arguments;
+the closed-unit proof can use the class's registered prototype directly.
+Reflective units inspect the live link through the existing prototype kernel.
+Prototype-literal and class candidates share the guarded packed method load.
+
+Accessors, missing fields, nullable/native mismatches, non-writable stores,
+indexed arguments aliases, lazy globals and exotic receivers retain semantic
+fallback. Inherited-method preloading remains unadmitted without a source
+prototype proof. Numeric-region admission still requires the existing closed
+unit effect proof; the formal open-realm path retains its reflective semantics.
+
+Validate emitted ABI/state absence and JS behavior separately. Compare pinned
+release MIR against the previous cache-disabled build using accepted self
+timers, keeping Result10 and the four historical jq rows unchanged. Evidence
+is recorded under
+[`temp/js_mvp_shared_dispatch_20261018/`](../../temp/js_mvp_shared_dispatch_20261018/).
+
+Retained release evidence: all **84/84** fresh non-jq workload contracts pass,
+with **5.2% less self-reported time** geometrically than the previous
+cache-disabled release. Six-round medians measure CD **751.974 → 419.904 ms**,
+NBody **184.282 → 143.250 ms**, Richards **290.744 → 222.944 ms**, and Havlak
+**3,419.244 → 2,654.389 ms**. Compact length admission removes the text-search
+increase; its retained screen is **1.4% faster**. No slowdown is confirmed
+against both identical controls; smaller differences remain uncertain. Keep
+the four jq rows as historical evidence and preserve Result10.
+
+Final gates pass **825/825** runtime, **107/107** optimizer, **34/34** JS MIR,
+**20/20** unchanged size budgets, **315/315** forced-GC cases, **10,162/10,162**
+selected class/property Test262 cases on pinned MIR, and **22/22** release
+semantic/ownership checks. The affected size probe shrinks **693 instructions**;
+the MIR audit finds **9,739** property calls with the four-argument ABI and no
+site-state operand. The initial aggregate's missing Python PIL dependency and
+the final focused reruns remain separate. See the
+[`report`](../../temp/js_mvp_shared_dispatch_20261018/REPORT.md) for raw captures,
+provenance, intervals, all 84 rows and qualification limits.
