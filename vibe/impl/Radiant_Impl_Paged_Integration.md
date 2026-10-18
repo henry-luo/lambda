@@ -2428,3 +2428,66 @@ platform precedence, legacy fallback and rejection of incorrect geometry.
 No engine behavior changed. This harness/fixture correction does not requalify
 the earlier paged-media or global aggregate limits. Evidence:
 `temp/css_text_failures/qualification.json` and `wpt_pixel_validation.json`.
+
+### Terminal masters and continued auxiliary flows (2026-10-18)
+
+The seven remaining paged-media failures had separate causes. Width replay kept
+the preceding master's measure after terminal selection changed; note
+continuations rejected a changed area width; terminal feedback retained a body
+paragraph even when the actual tail was a note or float. The old table rejection,
+two-pass expectation and folio-font assertion also described the retired item
+engine rather than the shared-layout contracts in §3–§4.
+
+`PagedFlowWidth` now distinguishes the current layout's input width from the next
+replay's discovered measure and owns the selected master's name in the reference
+session. A replaced master invalidates that measure; ordinary deferred boxes
+retain their first selected area. This preserves moved grids, atomic image sizes
+and first-area percentage bindings while avoiding the former eight-pass lag.
+An explicit top-level run boundary can provisionally select the last master,
+including all of its columns, before ordinary pagination expands the remaining
+material. Whole-document convergence still checks the resulting master choices.
+
+Notes reuse the same inline-width replay and geometry collection as body text.
+Their published slices retain source order and original computed indents
+while wrapping at each selected note area's measure. Terminal feedback records
+the actual auxiliary tail: a note retains its last legal content contribution,
+excluding the trailing half-leading after the final glyph; an indivisible float
+can require an empty last sheet to take its ordinary alternative first. Earlier
+columns are never restyled by that operation. The existing page budget and
+reference budget bound retries, and publication/retention keep the ownership
+required by **D4.5.1v4 / D4.1.4v5**. These implement existing page-model behavior;
+no formal ruling changes.
+
+The table fixture now verifies successful natural furniture, exactly-once text
+coverage, failed one-page admission and a retained two-page preview.
+[CSS Tables 3 §6.2](https://www.w3.org/TR/2025/WD-css-tables-3-20251216/#repeated-headers)
+does not require repeating groups taller than a quarter of the fragmentainer.
+An independent Chromium 154 PDF also succeeds with two pages and each header,
+body and footer string once; exact row allocation parity is not asserted.
+The narrow terminal fixture expects four whole-document observations (ordinary
+extent, narrower trial, retained tail, stable replay), retaining its original
+three-page geometry and one-pass-budget failure. Folio measurement uses the
+glyph run's captured font rather than the retired per-fragment CSS-style field.
+An additional note regression checks wrapping across 140px/70px areas, the
+original 14px indent and every source byte once. The following-sequence control
+also checks that the call remains on page one.
+
+Fresh final native runs pass **491/491 paged-media** and **124/124 view-reuse**
+cases. Integer-cast lint and `git diff --check` pass. The Radiant aggregate ran
+the final engine and reported 6,030 cases: 5,870 pass, 158 accepted partial, one
+skip and one failure. Its sole failure was the new source-coverage helper reading
+a generated footnote marker. Capturing the authored text node before layout
+corrected that helper; the subsequent whole 491-case run passes. Every other
+aggregate component passed, including UI, view, input events, layout, snapshots
+and render visual checks. The raw aggregate report is preserved, not rewritten.
+
+The full PDF/export suite reports **285/309**. All 24 failing cases reproduce
+with exactly the same assertion messages on an isolated CLI built with the HEAD
+pagination source and the same remaining objects and build flags. No new export
+failure profile appears; the PDF baseline hash is unchanged. These remain broader
+qualification limits rather than part of this seven-case repair. Receipts:
+`temp/paged_qualification.json`, `paged_media_final.xml`, `paged_reuse_final.xml`,
+`paged_radiant_baseline_summary.json`, `paged_pdf_visual_final.xml` and the
+`paged_pdf_base_*.xml` / `paged_pdf_import_base.xml` controls. The isolated build's
+commands and source/binary hashes are retained under the same `temp/paged_*`
+prefix.
