@@ -53,6 +53,15 @@ boundary (**D7.3.3–D7.3.4**); exporting never introduces another animation clo
 The frame-copy step projects the selected animation state onto SVG DOM content;
 ordinary SVG source export uses direct DOM serialization.
 
+The implemented **D2.11.4** projection gives rendered local/file-backed `use`
+instances separate frozen definitions, rewrites their local IDs/references and
+retains sibling paint definitions. This preserves event-dependent differences
+between instances. Local SVG image imports embed a frozen SVG document sampled
+at the picture's existing time. Neither path changes the live source or clock.
+Nested resource closure, image imports inside use templates and complete host
+inheritance combinations remain unqualified; network sprites retain their
+explicit deferral. See the [follow-up receipt](../impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up).
+
 **2026-10-18 implementation:** `dom_serialize_xml` is the shared walk used by
 XMLSerializer and SVG source saves. Standalone SVG saves select that route;
 targeted interactive saves call `render_svg_dom_to_file`. Frozen captures use a

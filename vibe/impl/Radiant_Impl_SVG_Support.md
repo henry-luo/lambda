@@ -587,3 +587,70 @@ serialization behavior; it does not freeze animation. Capturing a frame never
 adds a timer, resets the clock or requires a wall-clock sleep. Wider animated
 external-resource/use-instance snapshots remain unqualified under **D2.11.4**;
 network-sprite delivery and wall-clock animation export remain deferred.
+
+## 14 Outstanding work follow-up
+
+**2026-10-18, base `c3505c090`:** follow-up to §13. The selected feature work is
+implemented; required aggregate qualification and unavailable platform execution
+remain separately reportable. Evidence: `temp/svg_outstanding/`.
+
+| Item | Delivered behavior and verification |
+|---|---|
+| Lifetime blocker, **D4.2.1v3** | `MemContext` follows explicit backing-child edges across contexts and reparenting, rather than assuming reverse registration/context order. Subtree unregistration uses the same allocation-free traversal. Seventeen context and seven factory tests pass with ASan; the full frame-export/reopen and independent HTML navigation reproducers exit without the former use-after-free. |
+| **F3.3** | A named color-matrix → blur → composite → component-transfer chain filters a group containing SVG text and an image. Both source types paint correctly and change after a channel edit; native and Chromium controls pass. PNG/SVG/PDF pass at 1×/2×. |
+| **G4.5** | Initial and live edited rect/circle/ellipse geometry matches independently authored literal-attribute references byte-for-byte in PNG/SVG/PDF at 1×/2× with caches off/eager: 24 actual/reference format pairs. The existing export runner now supports live event sequences and reference documents. Comparing exports at the same origin avoids unrelated translated-curve rasterization differences. |
+| Live capture | PDF render events now borrow the settled current edition through the existing Lambda PDF exporter (**S2.6.6v3**). HTML-page SVG capture carries raster density into its outer dimensions, retaining CSS-unit viewBox coordinates. Source saves retain **D2.11.3**. |
+| Broader **D2.11.4** inventory | Rendered local/file-backed `use` instances serialize separate sampled definitions with rewritten local IDs/references and sibling paint definitions. Generated prefixes avoid authored-ID collisions. Local SVG image imports embed a frozen SVG sampled at the existing picture time. Export/reopen preserves independent click-triggered instance states, the image frame and filter resources; later timer advancement still works. Repeated fixed-frame files are byte-identical. Chromium passes 20 reopened pixel checks plus unique-ID/reference/driver checks at both densities. |
+| CSS inventory | Reconciled four references to the removed native PDF writer with the current **S2.6.6v3** PDF implementation. Removed stale native-Form/ink-tracking/ASan qualification claims, retaining the old visual cases for requalification. The current isolated-alpha PDF case and opacity UI controls pass. Added bounded SVG geometry qualification; generation/check now pass. TSV trailing empty fields retain their delimiters. |
+
+**Focused receipt:** six fixtures pass 24 density/cache runs and 224 assertions
+on each of AST and MIR. Five full CLI fixtures pass under the supported ASan
+profile, including the imported-resource frame and live edited PDF capture;
+leak detection is disabled. Memory-tracker leak reports remain and are not a
+leak-free qualification. The separate memory unit runners are ASan-instrumented.
+Layout float-cast lint, module-boundary validation, CSS inventory and diff checks
+pass. No production source changes followed the final qualification build.
+
+**Required qualification:** the restricted aggregate completed 172 runners
+before repeated macOS graphics/XPC denials made the viewer case pool unproductive.
+Its results remain in `aggregate.log` and the original `test_output/`; the
+unfinished 20 runners then completed with native graphics/loopback access and a
+separate `remaining_results/` directory. This is a failed aggregate qualification,
+not a green continuous run. Both batches use the same final binary
+`b74a5fcf8c669c2e9decc34679adeab9d9e1034137b4b69ecc30239e7d760afe`.
+
+The remaining batch reports 7,410 passed, 171 failed, 160 partial and one skipped.
+Core Lambda passes 1,620/1,620; viewer cases 208/208; UI 644/644; DOM UI 160/160;
+paged media 491/491; vector 169/169; CSS motion 147/147; forced-GC 313/313.
+Layout meets its recorded baseline with partial support retained. Its failed
+owners are Node preliminaries (158), script-format round trips (12) and one
+15-second kitchen-sink page-load timeout. That page subsequently passes three
+isolated replays with the same limit (4.54/3.51/3.48 seconds); its original timeout
+is not removed. Five local database-server failures and the platform-trust-store
+failure pass all seven scoped controls with required access. The restricted
+video runner stops at its first decoded frame; all 14 video cases pass when
+replayed with native media access.
+
+Other recorded owners remain wiki formatting, retired Bash/Ruby inventories,
+PDF schema validation and runtime context/cache/concurrency. The 306 export-parity
+cases execute before the restricted PDF runner stalls on WebGL; all 22 failed
+parity case names occur in the earlier receipt. A scoped WebGL rerun completes
+with graphics access but retains its existing PDF pixel failures. The two PDF
+input cases prevented by that stall are replayed separately: one passes and the
+Poppler page comparison fails. Case identity alone is not broad causal attribution;
+no assertions, goldens, skip lists or support floors were weakened.
+
+**Portable gate:** 178/180 format checks pass, including **all 162 SVG-fixture
+checks**. Only `css_containment_boxes` PDF at 1×/2× remains failed, matching the
+two intake-binary comparisons in §13. The 24 live geometry/reference format pairs
+pass against the final binary. The independent imported-frame browser check,
+AST/MIR density/cache matrices and scoped ASan receipts also use that source.
+`qualification_summary.json` links the separate run results without rewriting
+the failed gate.
+
+**Remaining scope:** Linux/Windows runtime/export smoke is pending; macOS cannot
+establish it. Nested resource closure, SVG images inside use templates, complete
+use-host inheritance and other resource combinations remain unqualified under
+**D2.11.4**. These require named, finite workloads before further expansion.
+Network sprites retain the user’s deferral; wall-clock capture remains outside
+the requirement. No new design ruling is needed for the delivered follow-up.

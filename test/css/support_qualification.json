@@ -2,7 +2,9 @@
   "version": 1,
   "families": [
     {
-      "properties": ["user-select"],
+      "properties": [
+        "user-select"
+      ],
       "qualification": "partial",
       "scope": "computed none/auto/text values, pointer and double-click suppression, auto descendants, explicit text overrides, retained button focus, editable fields and Finder item selection",
       "evidence": [
@@ -510,19 +512,16 @@
         "opacity"
       ],
       "qualification": "partial",
-      "scope": "flat HTML opacity-only PDF effects retain native isolated transparency Forms and composite each complete group once; overlapping rectangle interiors, nested groups, primitive alpha, coloured backdrops, translated overflow clips and following opaque paint match independent controls at 1x/2x in PNG/SVG/PDF; writer group balance, nested resources, parent font restoration and open-group teardown pass scoped ASan; computed opacity and live parent/child restyle and density changes pass 38 assertions per runtime (CI-18 / D4.5.1v4 / D4.1.4v5); completed source ink expands native/semantic captures; opt-in PDF writer tracking includes painted path/stroke/image extents through nested groups and restores cached pen/font state, excluding unpainted clipping paths; overflowing glyph/decoration references pass at both densities; dirty element and pseudo numeric math use the declaring font state, including dimensional cancellation; percentages, range clamping, invalid variables, inheritance and restoration share computation with layout and SVG scalar serialization; 24 causal browser/live checks include direct pseudo and companion paint",
+      "scope": "computed opacity and live parent/child restyle and density changes; dirty element and pseudo numeric math use the declaring font state, including dimensional cancellation; percentages, range clamping, invalid variables, inheritance and restoration share computation with layout and SVG scalar serialization; CSS group and pseudo opacity fixtures cover causal geometry/paint; the current Lambda PDF exporter preserves the tested isolated alpha through an image and soft mask (S2.6.6v3; D4.5.1v4 / D4.1.4v5)",
       "evidence": [
         "test/test_pdf_render_visual_gtest.cpp#OpacityGroupsCompositeOverlappingInteriorsOnce",
-        "test/lib/test_pdf_writer_gtest.cpp#TransparencyGroupsBalanceAndRetainNestedVectorResources",
-        "test/lib/test_pdf_writer_gtest.cpp#DestroyDocumentWithOpenNestedTransparencyGroups",
-        "test/lib/test_pdf_writer_gtest.cpp#TransparencyGroupRestoresParentFontSelection",
         "test/ui/css_group_opacity.json",
         "test/test_pdf_render_visual_gtest.cpp#EffectsRetainOverflowingGlyphAndDecorationInk",
-        "test/lib/test_pdf_writer_gtest.cpp#TrackedGroupInkIncludesPaintedOverflowAndRestoredStrokeState",
         "test/test_css_animation_gtest.cpp#OpacityMathUsesDeclarationFontsAndSharedNumericRanges",
-        "test/ui/css_pseudo_opacity_computed.json"
+        "test/ui/css_pseudo_opacity_computed.json",
+        "test/test_pdf_render_visual_gtest.cpp#PdfOpacityGroupPreservesIsolatedAlpha"
       ],
-      "limits": "arbitrary effect/mask/blend/clip ordering, deep nesting beyond the PDF effect stack and independent/paged/lifetime breadth remain open; coincident union perimeter AA differs in two 2x PDF comparisons; pure percentage quotient/product cancellation remains outside the current affine math representation"
+      "limits": "the native PDF writer and its four referenced unit cases were removed when PDF generation moved to the pure Lambda package (S2.6.6v3); their native transparency-Form, ink-tracking and writer-ASan qualifications no longer apply; retained overlapping-group and overflowing-ink visual cases require requalification against the current PDF exporter; arbitrary effect/mask/blend/clip ordering, deep nesting and independent/paged/lifetime breadth remain open; pure percentage quotient/product cancellation remains outside the affine math representation"
     },
     {
       "properties": [
@@ -758,6 +757,27 @@
         "test/ui/css_motion_math_transition.json"
       ],
       "limits": "numeric literal linear stops are qualified; broader calculated stop grammar, additive/accumulative composition, timelines/ranges, motion paths, discrete transitions, complete Web Animations reflection and transform-transition expansion remain outside this increment; aggregate Radiant/CSS/Lambda failures retain their independently recorded owners"
+    },
+    {
+      "properties": [
+        "x",
+        "y",
+        "cx",
+        "cy",
+        "r",
+        "rx",
+        "ry"
+      ],
+      "qualification": "partial",
+      "scope": "CSS geometry on rect/circle/ellipse uses the shared contour for paint, bounds, object-bounding-box paint resources and pointer hits; numeric/px/percentage, em/rem, linear math, custom properties, CSS-wide values, auto radii and causal font edits have focused controls; initial and live edited shapes match independently authored literal attributes byte-for-byte in PNG/SVG/PDF at 1x/2x with caches off/eager; rect width/height reuse their existing CSS identities (D4.6.1v4)",
+      "evidence": [
+        "test/ui/svg_css_geometry.json",
+        "test/ui/svg_css_geometry_cascade.json",
+        "test/ui/svg_css_geometry_export.json",
+        "test/ui/svg_css_geometry_export_edited.json",
+        "test/ui/svg_css_geometry_export_reference.html"
+      ],
+      "limits": "geometry for image, foreignObject, root/nested SVG sizing and use/symbol viewports, geometry animation, path data and exhaustive newer units remain outside the qualified scope"
     }
   ]
 }

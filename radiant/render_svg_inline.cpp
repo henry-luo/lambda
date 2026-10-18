@@ -7966,6 +7966,23 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                                           id_scope, image_document, image_time);
 }
 
+bool render_svg_picture_snapshot(RdtPicture* picture, StrBuf* output) {
+    Element* source = picture ? rdt_picture_get_svg_root(picture) : nullptr;
+    if (!source || !output) return false;
+    float width = 0.0f, height = 0.0f;
+    rdt_picture_get_size(picture, &width, &height);
+    SvgStyleContext style = {};
+    if (!svg_style_init(&style, source, width, height, nullptr,
+        rdt_picture_get_source_path(picture), true)) return false;
+    // sample an isolated export document; the live picture keeps its clock and base tree.
+    SvgAnimationSourceScope scope(style.document);
+    svg_animation_prepare(style.document->root);
+    svg_animation_set_document_time(style.document, rdt_picture_animation_time(picture));
+    bool success = render_svg_dom_snapshot(style.document->root, output);
+    svg_style_destroy(&style);
+    return success;
+}
+
 void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
                                ScratchArena* scratch, FontContext* font_ctx,
                                RasterRenderContext* glyph_rdcon, RdtPicture* picture,

@@ -75,6 +75,22 @@ int render_export_session_to_pdf(RenderExportSession* session, const char* filen
     return render_lambda_pdf(session, filename, nullptr) ? 0 : 1;
 }
 
+int render_uicontext_to_pdf(UiContext* ui, const char* filename) {
+    if (!ui || !ui->document || !ui->document->view_tree) return 1;
+    // borrow the settled live edition; capture must not reload scripts or clocks.
+    RenderExportSession session = {};
+    session.ui_context = lam::own(ui);
+    session.document = lam::up(ui->document.get());
+    session.output_scale = ui_context_raster_scale(ui);
+    session.content_width = ui->viewport_width;
+    session.content_height = ui->viewport_height;
+    calculate_content_bounds(ui->document->view_tree->root,
+        &session.content_width, &session.content_height);
+    session.content_width += 50;
+    session.content_height += 50;
+    return render_export_session_to_pdf(&session, filename);
+}
+
 int render_html_to_pdf(const char* source, const char* filename, int width,
         int height, float scale, bool paged, float device_scale) {
     RenderExportSession session = {};

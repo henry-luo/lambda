@@ -1,0 +1,242 @@
+{
+  "name": "Use-instance and imported SVG image snapshots preserve selected frames and resources",
+  "html": "test/ui/svg_frame_use_export.html",
+  "viewport": {
+    "width": 240,
+    "height": 80
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "x": 20,
+      "y": 20
+    },
+    {
+      "type": "click",
+      "x": 120,
+      "y": 20
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 55,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_script",
+      "js": "window.frameTime=performance.now();window.frameSource=new XMLSerializer().serializeToString(document.getElementById('drawing'));true;"
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_outstanding/frame_use.svg"
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_outstanding/frame_use_repeat.svg"
+    },
+    {
+      "type": "assert_script",
+      "js": "performance.now()===window.frameTime && new XMLSerializer().serializeToString(document.getElementById('drawing'))===window.frameSource"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 55,
+      "min_r": 60,
+      "max_r": 68,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 188,
+      "max_b": 196
+    },
+    {
+      "type": "navigate",
+      "url": "../../temp/svg_outstanding/frame_use.svg"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 55,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "advance_time",
+      "ms": 3000,
+      "steps": 3
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 20,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 55,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('animate,set,script').length===0"
+    }
+  ]
+}

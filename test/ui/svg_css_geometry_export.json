@@ -1,0 +1,90 @@
+{
+  "name": "Initial CSS geometry matches literal attributes in live exports",
+  "html": "test/ui/svg_css_geometry_export.html",
+  "viewport": {
+    "width": 240,
+    "height": 120
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 130,
+      "y": 30,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    }
+  ],
+  "export_events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('box').getBBox().x===50"
+    }
+  ],
+  "pixel_oracles": {
+    "1": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 2,
+        "min_g": 0,
+        "max_g": 2,
+        "min_b": 253,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 130,
+        "y": 30,
+        "min_r": 253,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 2,
+        "min_b": 0,
+        "max_b": 2
+      }
+    ],
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 2,
+        "min_g": 0,
+        "max_g": 2,
+        "min_b": 253,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 130,
+        "y": 30,
+        "min_r": 253,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 2,
+        "min_b": 0,
+        "max_b": 2
+      }
+    ]
+  },
+  "export_reference": "test/ui/svg_css_geometry_export_reference.html"
+}

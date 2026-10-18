@@ -561,6 +561,7 @@ const char* rdt_picture_get_source_path(RdtPicture* pic);
 double      rdt_picture_animation_time(RdtPicture* pic);
 void        rdt_picture_set_animation_time(RdtPicture* pic, double seconds);
 bool        render_svg_picture_has_animation(RdtPicture* pic);
+bool        render_svg_picture_snapshot(RdtPicture* picture, StrBuf* output);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
@@ -4243,6 +4244,7 @@ int render_document_transform_to_jpeg(const char* document_file,
 // Render existing UiContext with state (caret/selection) to image file
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
 int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
+int render_uicontext_to_pdf(UiContext* uicon, const char* pdf_file);
 
 // Batch render command: reads jobs from stdin, shares one UiContext
 int cmd_render_batch(int argc, char** argv);
@@ -4394,6 +4396,7 @@ int render_export_session_to_png(RenderExportSession* session, const char* filen
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
 int render_svg_source_document_to_file(UiContext* ui, const char* filename);
 int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze);
+bool render_svg_dom_snapshot(DomElement* root, StrBuf* output);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
