@@ -3844,13 +3844,24 @@ TEST_F(SecondaryViewTest, FixedTableTracksUseFirstVisualRowAndRemeasureAtChanged
     expect_table_cell_track(changed, first, 10.0f, 220.0f * 0.5f + 6.0f, 3, 1, nullptr, 3.0f);
 }
 
-TEST_F(SecondaryViewTest, ImpossibleTableRowRejectsTheEditionWithoutPublishingHeaderOnlyPages) {
+TEST_F(SecondaryViewTest, TallTableFurnitureStaysNaturalAndPageBudgetFailureDoesNotPublish) {
     stylesheet("@page { size: 240px 70px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
         "td { padding: 2px; border: 1px solid black; vertical-align: top }");
-    ASSERT_NE(fixed_table(1), nullptr);
+    DomElement* table = fixed_table(1); ASSERT_NE(table, nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
-    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    // CSS Tables 3 §6.2 does not require repeats above a quarter of the fragmentainer height.
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    for (DomNode* group = table->first_child; group; group = group->next_sibling)
+        for (DomNode* row = group->as_element()->first_child; row; row = row->next_sibling)
+            for (DomNode* cell = row->as_element()->first_child; cell; cell = cell->next_sibling)
+                expect_source_range_coverage(tree, cell->as_element()->first_child);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    options.max_pages = 1; ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
     EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_TRUE(retained->model->committed); EXPECT_EQ(retained->model->page_count, 2u);
 }
 
 TEST_F(SecondaryViewTest, AutoTableWidthsIncludeLaterRowsAndFootersAndCenterTheDecoratedTable) {
@@ -10879,6 +10890,35 @@ TEST_F(SecondaryViewTest, PercentageIndentsRetainTheFirstNoteReferenceAreaAcross
     EXPECT_EQ(bytes, text->length);
 }
 
+TEST_F(SecondaryViewTest, ContinuedNotesRewrapAtEachAreaWithoutRecomputingTheirOriginalIndent) {
+    stylesheet("@page{size:160px 80px;margin:10px;@footnote{max-height:24px}}@page :left{size:90px 80px}"
+        "p,div,span{margin:0;font:10px/12px Arial;orphans:1;widows:1}span::footnote-marker{content:''}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* call = block("Body", nullptr, "div"); ASSERT_NE(call, nullptr);
+    DomElement* note = block(nullptr, "float:footnote;footnote-policy:line", "span", call); ASSERT_NE(note, nullptr);
+    DomElement* child = block("Start\nAlpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda "
+        "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda "
+        "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda\nTail",
+        "white-space:pre-line", "div", note); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(child->set_attribute("r:start-indent", "10%"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_GT(tree->model->page_count, 2u);
+    expect_source_range_coverage(tree, child->first_child);
+    ViewNodeState* text = view_tree_node_state(tree, child->first_child, false); ASSERT_NE(text, nullptr);
+    bool narrow = false;
+    for (LayoutViewNode* part = text->first_occurrence; part; part = part->next_occurrence) {
+        if (!part->glyph_run) continue;
+        uint32_t number = occurrence_page(part); ASSERT_GT(number, 0u);
+        const ViewPageBox* page = tree->model->pages.get()[number - 1];
+        EXPECT_FLOAT_EQ(part->rect.x, 24.0f);
+        EXPECT_LE(part->rect.x + part->rect.width, page->content_rect.x + page->content_rect.width + 0.01f);
+        narrow |= page->content_rect.width == 70.0f;
+    }
+    EXPECT_TRUE(narrow);
+}
+
 TEST_F(SecondaryViewTest, FoReferenceIndentsRetainTheirAncestryAndDiagnoseUnsupportedGridRefinement) {
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='90pt'><f:region-body/>"
@@ -15143,7 +15183,8 @@ TEST_F(SecondaryViewTest, NativeTerminalWidthCanRequireAnAdditionalPageWithoutCo
     for (size_t i = 0; i < 6; i++) { content[i] = block("Alpha Beta Gamma Delta", nullptr, "div", seq); ASSERT_NE(content[i], nullptr); }
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_EQ(diagnostic.reference_passes, 2u);
+    // whole-document replay observes the ordinary extent, narrower trial, retained tail, then stable pages.
+    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_EQ(diagnostic.reference_passes, 4u);
     EXPECT_STREQ(tree->model->pages.get()[1]->name, "normal"); EXPECT_STREQ(tree->model->pages.get()[2]->name, "last");
     EXPECT_EQ(occurrence_page(view_tree_node_state(tree, content[4]->first_child, false)->first_occurrence), 2u);
     EXPECT_EQ(occurrence_page(view_tree_node_state(tree, content[5]->first_child, false)->first_occurrence), 3u);
@@ -15603,6 +15644,7 @@ TEST_F(SecondaryViewTest, NativeTerminalMasterWaitsForActualNoteContinuationAndD
     DomElement* sequence = terminal_sequence("size:200px 100px; margin:10px", "size:120px 60px; margin:10px"); ASSERT_NE(sequence, nullptr);
     DomElement* call = block("Call ", nullptr, "div", sequence); ASSERT_NE(call, nullptr);
     DomElement* note = block("A\nB\nC\nD\nE\nF\nG\nH", "float:footnote", "span", call); ASSERT_NE(note, nullptr);
+    DomNode* note_text = note->first_child;
     DomElement* following = page_sequence("normal", "20"); ASSERT_NE(following, nullptr);
     ASSERT_NE(block("Following", nullptr, "div", following), nullptr);
     ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
@@ -15611,6 +15653,8 @@ TEST_F(SecondaryViewTest, NativeTerminalMasterWaitsForActualNoteContinuationAndD
     EXPECT_STREQ(tree->model->pages.get()[0]->name, "normal"); EXPECT_STREQ(tree->model->pages.get()[1]->name, "last");
     EXPECT_EQ(tree->model->pages.get()[0]->sequence.get(), tree->model->pages.get()[1]->sequence.get());
     EXPECT_EQ(tree->model->pages.get()[2]->sequence->source.address, following); EXPECT_EQ(tree->model->pages.get()[2]->folio, 20u);
+    LayoutViewNode* call_box = source_fragment(tree, call, VIEW_FRAGMENT_BODY, true); ASSERT_NE(call_box, nullptr);
+    EXPECT_EQ(occurrence_page(call_box), 1u); expect_source_range_coverage(tree, note_text);
     ViewNodeState* notes = view_tree_node_state(tree, note, false); ASSERT_NE(notes, nullptr);
     size_t occurrences = 0;
     for (LayoutViewNode* node = notes->first_occurrence; node; node = node->next_occurrence) if (node->role == VIEW_FRAGMENT_NOTE && node->paint_box) {
@@ -15657,7 +15701,8 @@ TEST_F(SecondaryViewTest, NativeTerminalFloatPagesReinsertAnIndivisibleTailAndMe
     EXPECT_EQ(occurrence_page(source_fragment(tree, tail, VIEW_FRAGMENT_FLOAT, true)), 3u);
     LayoutViewNode* number = source_fragment(tree, folio, VIEW_FRAGMENT_FLOAT, false); ASSERT_NE(number, nullptr);
     ASSERT_NE(number->glyph_run, nullptr); EXPECT_STREQ(number->glyph_run->text, "IX");
-    EXPECT_FLOAT_EQ(number->rect.width, font_measure_text(number->computed_style->font.font_handle, "IX", 2).width);
+    const FontBox* font = paint_glyph_run_font(number->glyph_run); ASSERT_NE(font, nullptr);
+    EXPECT_FLOAT_EQ(number->rect.width, font_measure_text(font_box_handle(font), "IX", 2).width);
 }
 
 TEST_F(SecondaryViewTest, NativeNoteFolioMeasurementOverflowsWithItsFormattedAtomicQuery) {

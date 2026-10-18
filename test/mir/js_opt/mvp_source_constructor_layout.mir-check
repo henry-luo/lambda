@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2: source constructor entry and realm guards precede shared allocation and TypedItem stores; inherited effects retain ordinary construction.",
+  "args": ["--runtime=mvp-lmd"],
+  "checks": [{
+    "in_func": "mvp_lmd_f1",
+    "expect": ["mvp_lmd_f2", "call\tmvp_lmd_class_invoke"],
+    "count": {"call\tmvp_lmd_object_from_constructor": 1, "call\tmap_field_store": 2},
+    "expect_seq": [
+      "mov\t{{r:entry}}, i64:16({{r:constructor}})",
+      ", {{r:entry}}, mvp_lmd_f2",
+      "mov\t{{r:context}}, i64:40({{r:constructor}})",
+      ", {{r:context}}, runtime",
+      "call\tmvp_lmd_object_from_constructor",
+      "call\tmap_field_store",
+      "call\tmap_field_store",
+      "call\tmvp_lmd_class_invoke"
+    ]
+  }]
+}

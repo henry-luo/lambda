@@ -373,7 +373,8 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index);
 Item mvp_lmd_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
 extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item value, int64_t operation);
 Item mvp_lmd_object_create(MvpLmdProgram* program, Item prototype);
-Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback);
+extern "C" Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback,
+    int64_t source_layout = 0);
 Item mvp_lmd_box_primitive(Item value, Item prototype = Item{.item = ITEM_JS_UNDEFINED});
 MvpLmdClass* mvp_lmd_class_record(Item owner);
 enum MvpLmdFailure { LMD_MVP_CAPABILITY, LMD_MVP_REFERENCE, LMD_MVP_TYPE,
