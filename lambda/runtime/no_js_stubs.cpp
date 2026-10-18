@@ -63,15 +63,19 @@ void dom_shutdown(void) {}
 
 // --- GC hooks: only JS-layout objects carry payloads these would visit ---
 
-extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
-extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
-extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
-    (void)map; (void)seen_native;
-}
-extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
-    (void)map; (void)seen_native;
-}
+#define NO_JS_MAP_TRACE(entry) \
+    extern "C" void entry(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
+NO_JS_MAP_TRACE(js_async_frame_map_gc_trace)
+NO_JS_MAP_TRACE(js_collection_map_gc_trace)
+NO_JS_MAP_TRACE(js_weak_map_gc_trace)
+#undef NO_JS_MAP_TRACE
+#define NO_JS_MAP_DESTROY(entry) \
+    extern "C" void entry(Map* map, gc_native_seen_t* seen_native) { (void)map; (void)seen_native; }
+NO_JS_MAP_DESTROY(js_regex_map_heap_destroy)
+NO_JS_MAP_DESTROY(js_collection_map_heap_destroy)
+#undef NO_JS_MAP_DESTROY
 extern "C" void js_async_frame_map_heap_destroy(Map* map) { (void)map; }
+extern "C" void js_weak_map_heap_destroy(Map* map) { (void)map; }
 // 0 = not a JS function layout; the collector falls through to Lambda tracing
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) { (void)data; (void)gc; return 0; }
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) { (void)data; (void)gc; return 0; }
@@ -158,6 +162,9 @@ void jube_register_builtin_modules(void) {}
 int jube_static_module_count(void) { return 0; }
 const JubeModuleDef* jube_static_module_at(int index) { (void)index; return NULL; }
 const JubeModuleDef* jube_find_static_module(const char* name) { (void)name; return NULL; }
+// this profile excludes modules, so registration and activation must fail.
+int jube_register_static_module(const JubeModuleDef* module) { (void)module; return -1; }
+bool jube_activate_module(const JubeModuleDef* module) { (void)module; return false; }
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type) { (void)host_type; return NULL; }
 void jube_modules_runtime_reset(void) {}
 void jube_interface_runtime_reset(void) {}

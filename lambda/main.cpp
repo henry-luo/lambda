@@ -1910,23 +1910,6 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_mdx(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &MARKDOWN_RULES);
-        } else if (strcmp(to_format, "math-ascii") == 0) {
-            formatted_output = format_math_ascii(input->pool, input->root);
-        } else if (strcmp(to_format, "math-latex") == 0) {
-            formatted_output = format_math_latex(input->pool, input->root);
-        } else if (strcmp(to_format, "math-typst") == 0) {
-            formatted_output = format_math_typst(input->pool, input->root);
-        } else if (strcmp(to_format, "math-mathml") == 0) {
-            // The package owns conversion; XML serialization stays in IO (D7.2.8).
-            const LambdaDocumentTransformConfig transform = {
-                "math", "lambda.doc.math.mathml", "export_file",
-                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
-            LambdaDocumentTransformOption options[] = {
-                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
-                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
-                    flavor_string ? flavor_string->chars : "", false},
-            };
-            full_doc_output = run_document_transform_markup(input_file, &transform, options, 2, true);
         } else if (strcmp(to_format, "mark") == 0) {
             // Use print_root_item to format as mark representation
             StrBuf* sb = strbuf_new_cap(1024);

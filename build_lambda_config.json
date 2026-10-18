@@ -1767,6 +1767,27 @@
         "image-codecs",
         "pthread"
       ],
+      "macos": {
+        "additional_libraries": [
+          "CoreFoundation",
+          "Security",
+          "CoreServices",
+          "SystemConfiguration",
+          "Cocoa",
+          "IOKit",
+          "CoreVideo",
+          "AVFoundation",
+          "CoreMedia",
+          "GL",
+          "Foundation",
+          "CoreGraphics",
+          "Accelerate",
+          "CoreText",
+          "AppKit",
+          "Carbon",
+          "WebKit"
+        ]
+      },
       "linux": {
         "additional_libraries": [
           "GL",
@@ -5114,7 +5135,8 @@
             "source": "test_math_ascii_gtest.cpp",
             "name": "ASCII Math Roundtrip Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -6787,7 +6809,8 @@
             "source": "test/test_math_gtest.cpp",
             "name": "Math Roundtrip Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "radiant"
             ],
             "libraries": [
               "gtest",

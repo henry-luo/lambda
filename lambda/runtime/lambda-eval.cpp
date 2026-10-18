@@ -6664,15 +6664,21 @@ Item fn_format2(Item item, Item type) {
     }
 
     TypeId type_id = get_type_id(type);
-    String* type_str = NULL;
-    String* flavor_str = NULL;
+    // converting symbol options allocates: root the source and each option before
+    // converting the next, including the options map itself (D5.3.3).
+    RootFrame format_roots(5);
+    Rooted<Item> source(format_roots, item);
+    Rooted<String*> rooted_type(format_roots, nullptr);
+    Rooted<String*> rooted_flavor(format_roots, nullptr);
+    Rooted<Item> rooted_options(format_roots, type);
+    Rooted<Item> script_target(format_roots, ItemNull);
 
     if (type_id == LMD_TYPE_NULL) {
-        type_str = NULL;  // use default
+        rooted_type.set(nullptr);  // use default
     }
     else if (is_text_type_id(type_id)) {
         // Legacy behavior: type is a simple string or symbol
-        type_str = fn_string(type);
+        rooted_type.set(fn_string(rooted_options.get()));
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("format type is a map");
@@ -6683,32 +6689,33 @@ Item fn_format2(Item item, Item type) {
         bool is_found;
         Item format_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
         if (!is_found || !format_type.item || format_type._type_id == LMD_TYPE_NULL) { // missing 'type' key
-            type_str = NULL;
+            rooted_type.set(nullptr);
         } else {
             TypeId type_value_type = get_type_id(format_type);
             if (is_text_type_id(type_value_type)) {
-                type_str = fn_string(format_type);
+                rooted_type.set(fn_string(format_type));
             }
             else {
                 log_debug("format type must be a string or symbol, got type: %s", get_type_name(type_value_type));
                 // todo: push error
-                type_str = NULL;  // format type ignored
+                rooted_type.set(nullptr);  // format type ignored
             }
         }
 
         // Extract 'flavor' from map
+        options_map = rooted_options.get().map;
         Item format_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
         if (!is_found || !format_flavor.item || format_flavor._type_id == LMD_TYPE_NULL) { // missing 'flavor' key
-            flavor_str = NULL;
+            rooted_flavor.set(nullptr);
         } else {
             TypeId flavor_value_type = get_type_id(format_flavor);
             if (is_text_type_id(flavor_value_type)) {
-                flavor_str = fn_string(format_flavor);
+                rooted_flavor.set(fn_string(format_flavor));
             }
             else {
                 log_debug("format flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
                 // todo: push error
-                flavor_str = NULL;  // format flavor ignored
+                rooted_flavor.set(nullptr);  // format flavor ignored
             }
         }
     }
@@ -6718,39 +6725,19 @@ Item fn_format2(Item item, Item type) {
         return ItemError;
     }
 
-    log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    RootFrame format_roots(6);
-    Rooted<Item> source(format_roots, item);
-    Rooted<Item> converted(format_roots, ItemNull);
-    Rooted<String*> rooted_type(format_roots, type_str);
-    Rooted<String*> rooted_flavor(format_roots, flavor_str);
-    Rooted<Item> rooted_options(format_roots, type);
-    Rooted<Item> script_target(format_roots, ItemNull);
-    ScriptFormatRoute route = script_format_route(type_str ? type_str->chars : nullptr,
-        flavor_str ? flavor_str->chars : nullptr);
+    log_debug("format item type: %s, flavor: %s", rooted_type.get() ? rooted_type.get()->chars : "null",
+        rooted_flavor.get() ? rooted_flavor.get()->chars : "null");
+    ScriptFormatRoute route = script_format_route(rooted_type.get() ? rooted_type.get()->chars : nullptr,
+        rooted_flavor.get() ? rooted_flavor.get()->chars : nullptr);
     if (route.target) {
         // Package evaluation can allocate; keep all arguments precisely rooted (D5.3.3).
-        script_target.set(Item{.item = s2it(heap_strcpy(route.target, strlen(route.target)))});
+        String* target_string = heap_strcpy(route.target, strlen(route.target));
+        script_target.set(Item{.item = s2it(target_string)});
         Item args[3] = {source.get(), script_target.get(),
             type_id == LMD_TYPE_MAP ? rooted_options.get() : ItemNull};
         return interp_call_package_export(context->runtime,
             route.package, "format_native", args, 3);
     }
-#ifndef LAMBDA_NO_MATH_FORMAT
-    if (type_str && ((strcmp(type_str->chars, "math") == 0 && flavor_str &&
-            strcmp(flavor_str->chars, "mathml") == 0) ||
-            strcmp(type_str->chars, "math-mathml") == 0)) {
-        // D7.1.1/D7.2.8: invoke conversion here, never from lambda-io.
-        Item args[2] = {source.get(), ItemNull};
-        converted.set(interp_call_package_export(context->runtime,
-            "lambda.doc.math.mathml", "to_mathml", args, 2));
-        if (item_is_error(converted.get())) return converted.get();
-        // The package result is XML; normalize the legacy compound spelling too.
-        source.set(converted.get());
-        rooted_type.set(heap_strcpy("xml", 3));
-        rooted_flavor.set(nullptr);
-    }
-#endif
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
         set_runtime_error(ERR_FORMAT_ERROR, "format: could not format a %s value",
