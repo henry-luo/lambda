@@ -415,6 +415,24 @@ static void svg_filter_unpack(uint32_t pixel, float values[4]) {
     for (unsigned channel = 0; channel < 4; channel++) values[channel] = (float)((pixel >> (channel * 8)) & 255u) / 255.0f;
 }
 
+static float svg_filter_transfer_value(const RdtSvgTransferFunction* function, float value) {
+    switch (function->kind) {
+    case RDT_SVG_TRANSFER_TABLE: case RDT_SVG_TRANSFER_DISCRETE: {
+        if (!function->count) return value;
+        bool discrete = function->kind == RDT_SVG_TRANSFER_DISCRETE;
+        float position = clamp_unit(value) * (float)(function->count - (discrete ? 0u : 1u));
+        size_t index = (size_t)floorf(position); // INT_CAST_OK: bounded transfer table index
+        if (index >= function->count - 1) return clamp_unit(function->table[function->count - 1]);
+        float result = function->table[index];
+        if (!discrete) result += (position - (float)index) * (function->table[index + 1] - result);
+        return clamp_unit(result);
+    }
+    case RDT_SVG_TRANSFER_LINEAR: return clamp_unit(function->values[0] * value + function->values[1]);
+    case RDT_SVG_TRANSFER_GAMMA: return clamp_unit(function->values[0] * powf(value, function->values[1]) + function->values[2]);
+    default: return value;
+    }
+}
+
 static uint32_t svg_filter_composite(uint32_t a, uint32_t b, unsigned operation, const float* coefficients) {
     float first[4], second[4], result[4]; svg_filter_unpack(a, first); svg_filter_unpack(b, second);
     float fa = 1.0f, fb = 1.0f - first[3];
@@ -730,7 +748,8 @@ static bool svg_filter_evaluate_node(const RdtSvgFilterProgram* program, size_t 
     size_t pixels = (size_t)result->surface->width * (size_t)result->surface->height;
     SvgFilterNoiseFrame noise = node->kind == RDT_SVG_FILTER_TURBULENCE ? svg_filter_noise_frame(node, result->region, scale_x, scale_y,
         execution->run->geometry, program->primitive_bbox) : SvgFilterNoiseFrame{};
-    size_t operations = node->kind == RDT_SVG_FILTER_MATRIX ? 25 : node->kind == RDT_SVG_FILTER_MERGE ? node->merge_count + 1 :
+    size_t operations = node->kind == RDT_SVG_FILTER_MATRIX ? 25 : node->kind == RDT_SVG_FILTER_TRANSFER ? 32 :
+        node->kind == RDT_SVG_FILTER_MERGE ? node->merge_count + 1 :
         node->kind == RDT_SVG_FILTER_TURBULENCE ? 4 * (size_t)node->values[2] + 1 :
         node->kind == RDT_SVG_FILTER_DIFFUSE || node->kind == RDT_SVG_FILTER_SPECULAR ? 80 :
         node->kind == RDT_SVG_FILTER_TILE ? 4 : 1;
@@ -782,6 +801,14 @@ static bool svg_filter_evaluate_node(const RdtSvgFilterProgram* program, size_t 
                 for (unsigned component = 0; component < 4; component++) values[channel] += node->values[channel * 5 + component] * source[component];
                 values[channel] = clamp_unit(values[channel]);
             }
+            for (unsigned channel = 0; channel < 3; channel++) values[channel] *= values[3];
+            pixel = svg_filter_pack(values); break;
+        }
+        case RDT_SVG_FILTER_TRANSFER: {
+            float source[4], values[4]; svg_filter_unpack(first, source);
+            // transfer functions operate on straight channels; restore premultiplication with the remapped alpha.
+            for (unsigned channel = 0; channel < 3; channel++) source[channel] = source[3] > 0.0f ? source[channel] / source[3] : 0.0f;
+            for (unsigned channel = 0; channel < 4; channel++) values[channel] = svg_filter_transfer_value(&node->transfer[channel], source[channel]);
             for (unsigned channel = 0; channel < 3; channel++) values[channel] *= values[3];
             pixel = svg_filter_pack(values); break;
         }

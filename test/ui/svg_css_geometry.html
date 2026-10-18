@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+body{margin:0;background:white}svg{display:block}
+#box{--left:50px;x:var(--left);y:20px;width:40px;height:20px;rx:4px}
+#circle{cx:130;cy:30px;r:15}
+#ellipse{cx:190px;cy:30px;rx:20px;ry:10px}
+</style>
+<svg width="240" height="80">
+  <defs>
+    <linearGradient id="geometry-paint"><stop offset=".75" stop-color="blue"/><stop offset=".75" stop-color="lime"/></linearGradient>
+    <clipPath id="geometry-clip" clipPathUnits="objectBoundingBox"><rect width=".875" height="1"/></clipPath>
+  </defs>
+  <rect id="box" x="5" y="10" width="10" height="10" fill="url(#geometry-paint)" clip-path="url(#geometry-clip)"/>
+  <circle id="circle" cx="5" cy="60" r="3" fill="red"/>
+  <ellipse id="ellipse" cx="10" cy="65" rx="3" ry="2" fill="green"/>
+</svg>
+<button id="move">move</button>
+<script>document.getElementById('move').addEventListener('click',function(){document.getElementById('box').style.setProperty('--left','80px');});</script>

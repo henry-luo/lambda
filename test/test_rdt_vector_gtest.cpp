@@ -3,8 +3,34 @@
 
 #include "../radiant/render.hpp"
 #include "../lib/image_process.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lib/memtrack.h"
 #include <string.h>
+
+TEST(SvgTransformTest, IndividualPropertiesComposeBeforeCssAndAttributeLists) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    SvgLengthContext lengths = {200.0f, 100.0f, 16.0f, 8.0f};
+    Bound box = {0.0f, 0.0f, 200.0f, 100.0f};
+    const char* individual[] = {"100px 20px", "90deg", "2 1"};
+    const char* lists[] = {"translateX(5px)", "translate(5 0)"};
+    for (unsigned index = 0; index < 2; index++) {
+        RdtMatrix matrix = svg_resolve_local_transform(lists[index], index == 0,
+            nullptr, &box, &lengths, individual);
+        EXPECT_NEAR(matrix.e11, 0.0f, .0001f);
+        EXPECT_NEAR(matrix.e12, -1.0f, .0001f);
+        EXPECT_NEAR(matrix.e21, 2.0f, .0001f);
+        EXPECT_NEAR(matrix.e22, 0.0f, .0001f);
+        EXPECT_NEAR(matrix.e13, 100.0f, .0001f);
+        EXPECT_NEAR(matrix.e23, 30.0f, .0001f);
+    }
+    box = {10.0f, 20.0f, 30.0f, 30.0f};
+    const char* percentage[] = {"50% 25%", "none", "none"};
+    RdtMatrix matrix = svg_resolve_local_transform(nullptr, false, "center", &box, &lengths, percentage);
+    EXPECT_FLOAT_EQ(matrix.e13, 10.0f);
+    EXPECT_FLOAT_EQ(matrix.e23, 2.5f);
+    pool_destroy(pool);
+}
 
 TEST(ImageProcessTest, RunningBoxMatchesIndependentNeighborhoods) {
     struct Rows { double input[70], output[70]; } rows={};
@@ -1009,6 +1035,52 @@ TEST_F(SvgAnimationLifetimeTest, HtmlBoundariesOwnIndependentFragmentClocksAndPr
     EXPECT_STREQ(svg_animation_value(inner_shape, "x"), "35");
 }
 
+TEST_F(SvgAnimationLifetimeTest, ComponentTransferTablesAreOwnedBoundedAndRetiredAcrossMutation) {
+    MarkBuilder builder(authored_input());
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .child(builder.element("filter").attr("id", "transfer")
+            .child(builder.element("feComponentTransfer")
+                .child(builder.element("feFuncR").attr("type", "linear").attr("slope", "0").final())
+                .child(builder.element("feFuncR").attr("type", "table").attr("tableValues", "0 .25 1").final())
+                .final()).final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* filter = svg->first_child->as_element(); ASSERT_NE(filter, nullptr);
+    DomElement* primitive = filter->first_child->as_element(); ASSERT_NE(primitive, nullptr);
+    DomElement* channel = primitive->last_child->as_element(); ASSERT_NE(channel, nullptr);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    RdtSvgFilterProgram* original = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(original, nullptr); ASSERT_TRUE(original->valid); ASSERT_EQ(original->count, 1u);
+    ASSERT_TRUE(original->nodes[0].valid);
+    const RdtSvgTransferFunction& old = original->nodes[0].transfer[0];
+    EXPECT_EQ(old.kind, RDT_SVG_TRANSFER_TABLE); ASSERT_EQ(old.count, 3u);
+    EXPECT_FLOAT_EQ(old.table[1], .25f);
+    ASSERT_TRUE(channel->set_attribute("tableValues", "1 0"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    RdtSvgFilterProgram* changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_NE(changed, original);
+    ASSERT_TRUE(changed->nodes[0].valid); ASSERT_EQ(changed->nodes[0].transfer[0].count, 2u);
+    EXPECT_FLOAT_EQ(changed->nodes[0].transfer[0].table[0], 1.0f);
+    // pinned programs retain their tables after the authored attribute and active program change.
+    EXPECT_FLOAT_EQ(old.table[1], .25f);
+    render_svg_filter_program_release(changed);
+    StrBuf* oversized = strbuf_new(); ASSERT_NE(oversized, nullptr);
+    for (size_t index = 0; index <= RDT_SVG_FILTER_MAX_TRANSFER_VALUES; index++) strbuf_append_str(oversized, "0 ");
+    ASSERT_TRUE(channel->set_attribute("tableValues", oversized->str));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    strbuf_free(oversized);
+    changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_FALSE(changed->nodes[0].valid);
+    render_svg_filter_program_release(changed);
+    ASSERT_TRUE(channel->set_attribute("tableValues", "0 invalid 1"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_FALSE(changed->nodes[0].valid);
+    render_svg_filter_program_release(changed); render_svg_filter_program_release(original);
+    scratch_release(&scratch); arena_destroy(arena);
+}
+
 TEST_F(SvgAnimationLifetimeTest, FilterProgramsTrackClockChangesWithoutDomMutation) {
     DomElement* offset = element("feOffset", svg); ASSERT_NE(offset, nullptr);
     ASSERT_NE(animate(offset, "dx", "0", "100"), nullptr);
@@ -1871,6 +1943,69 @@ static bool svg_filter_test_source(RdtSvgFilterHost* host, const RdtSvgFilterRun
     for (size_t index = 0, count = (size_t)output->width * (size_t)output->height; index < count; index++)
         ((uint32_t*)output->pixels)[index] = 0xff808080u;
     return true;
+}
+
+TEST(SvgFilterTest, ComponentTransferUsesStraightChannelsAndRemappedAlpha) {
+    DomDocument document; Element element = {};
+    RdtSvgFilterProgram* program = svg_filter_test_program(&document, &element, 1, 1.0f, 1.0f);
+    ASSERT_NE(program, nullptr);
+    RdtSvgFilterNode* node = program->nodes;
+    node->kind = RDT_SVG_FILTER_TRANSFER; node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
+    ImageSurface* source = image_surface_create(1, 1); ASSERT_NE(source, nullptr);
+    Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
+    run.source_bounds = run.geometry = {0.0f, 0.0f, 1.0f, 1.0f};
+    run.lengths = {1.0f, 1.0f, 16.0f, 8.0f}; run.frame = rdt_matrix_identity(); run.density = 1.0f;
+    node->transfer[0].table = lam::own_arr((float*)arena_calloc(program->arena, 3 * sizeof(float)));
+    ASSERT_NE(node->transfer[0].table, nullptr);
+    const struct { RdtSvgTransferKind kind; float values[3], table[3]; size_t count; unsigned red; } cases[] = {
+        {RDT_SVG_TRANSFER_IDENTITY, {}, {}, 0, 102},
+        {RDT_SVG_TRANSFER_TABLE, {}, {0.0f, .5f, 1.0f}, 3, 102},
+        {RDT_SVG_TRANSFER_DISCRETE, {}, {.1f, .6f, 1.0f}, 3, 153},
+        {RDT_SVG_TRANSFER_LINEAR, {.5f, .25f}, {}, 0, 115},
+        {RDT_SVG_TRANSFER_GAMMA, {2.0f, 2.0f, .1f}, {}, 0, 107},
+        {RDT_SVG_TRANSFER_TABLE, {}, {}, 0, 102},
+        {RDT_SVG_TRANSFER_TABLE, {}, {.25f}, 1, 64}
+    };
+    ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.kind);
+        ((uint32_t*)source->pixels)[0] = 0xffcc3366u;
+        node->transfer[0].kind = item.kind; node->transfer[0].count = item.count;
+        memcpy(node->transfer[0].values, item.values, sizeof(item.values));
+        memcpy(node->transfer[0].table.get(), item.table, sizeof(item.table));
+        ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+        uint32_t pixel = ((uint32_t*)result->pixels)[0];
+        EXPECT_NEAR(pixel & 255u, item.red, 1);
+        EXPECT_EQ((pixel >> 8) & 255u, 51u); EXPECT_EQ((pixel >> 16) & 255u, 204u);
+        EXPECT_EQ(pixel >> 24, 255u);
+        image_surface_destroy(result);
+    }
+    node->transfer[0].kind = RDT_SVG_TRANSFER_LINEAR;
+    node->transfer[0].values[0] = .5f; node->transfer[0].values[1] = .25f;
+    node->transfer[3].kind = RDT_SVG_TRANSFER_LINEAR; node->transfer[3].values[0] = .5f;
+    ((uint32_t*)source->pixels)[0] = 0x80661933u;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    uint32_t pixel = ((uint32_t*)result->pixels)[0];
+    EXPECT_NEAR(pixel & 255u, 29u, 1); EXPECT_NEAR((pixel >> 8) & 255u, 13u, 1);
+    EXPECT_NEAR((pixel >> 16) & 255u, 51u, 1); EXPECT_EQ(pixel >> 24, 64u);
+    image_surface_destroy(result);
+    node->transfer[3].values[0] = 0.0f; node->transfer[3].values[1] = .5f;
+    ((uint32_t*)source->pixels)[0] = 0;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    pixel = ((uint32_t*)result->pixels)[0];
+    EXPECT_NEAR(pixel & 255u, 32u, 1); EXPECT_EQ((pixel >> 8) & 65535u, 0u); EXPECT_EQ(pixel >> 24, 128u);
+    image_surface_destroy(result);
+    node->transfer[3] = {};
+    node->transfer[0].kind = RDT_SVG_TRANSFER_GAMMA;
+    node->transfer[0].values[0] = 1.0f; node->transfer[0].values[1] = 2.0f; node->transfer[0].values[2] = 0.0f;
+    node->linear = true; ((uint32_t*)source->pixels)[0] = 0xffcc3366u;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    // the shared filter pipeline quantizes linear intermediates to eight-bit surfaces.
+    EXPECT_NEAR(((uint32_t*)result->pixels)[0] & 255u, 38u, 1);
+    image_surface_destroy(result); image_surface_destroy(source);
+    scratch_release(&scratch); arena_destroy(arena);
+    render_svg_filter_program_release(program); document.destroy();
 }
 
 TEST(SvgFilterTest, ResourceFontsAndReferencingViewportHaveDistinctLengthBases) {

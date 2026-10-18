@@ -1,5 +1,8 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "svg_animation.hpp"
+#include "radiant.hpp"
+#include "../lambda/dom/dom.h"
 #include "scene3d.hpp"
 #include "view.hpp"
 #include "layout.hpp"
@@ -1161,11 +1164,299 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     return true;
 }
 
+struct SvgDomSnapshot {
+    Pool* pool;
+    DomXmlAttributeOverride* attributes;
+    DomElement* root;
+    DomElement* destination;
+    DomElement* exclude;
+    StrBuf* definitions;
+    const char* prefix;
+    unsigned* sequence;
+    unsigned depth;
+    bool failed;
+};
+
+static const char* svg_snapshot_reference(SvgDomSnapshot* snapshot, const char* value, bool id, bool href) {
+    if (!snapshot->prefix || !value) return value;
+    StrBuf* rewritten = strbuf_new();
+    if (!rewritten) { snapshot->failed = true; return value; }
+    if (id) strbuf_append_str(rewritten, snapshot->prefix);
+    for (const char* cursor = value; *cursor;) {
+        if ((href && cursor == value && *cursor == '#') || !strncmp(cursor, "url(", 4)) {
+            const char* fragment = cursor;
+            if (*cursor != '#') {
+                fragment += 4;
+                while (*fragment == ' ' || *fragment == '\t' || *fragment == '\'' || *fragment == '"') fragment++;
+            }
+            if (*fragment == '#') {
+                strbuf_append_str_n(rewritten, cursor, fragment - cursor + 1);
+                strbuf_append_str(rewritten, snapshot->prefix);
+                cursor = fragment + 1;
+                continue;
+            }
+        }
+        strbuf_append_char(rewritten, *cursor++);
+    }
+    const char* result = pool_strdup(snapshot->pool, rewritten->str);
+    if (!result) snapshot->failed = true;
+    strbuf_free(rewritten);
+    return result;
+}
+
+static void svg_snapshot_attribute(SvgDomSnapshot* snapshot, const char* name, const char* value) {
+    if (!value) return;
+    const char* rewritten = svg_snapshot_reference(snapshot, value,
+        !strcmp(name, "id"), !strcmp(name, "href") || !strcmp(name, "xlink:href"));
+    if (!rewritten) return;
+    for (DomXmlAttributeOverride* attribute = snapshot->attributes; attribute; attribute = attribute->next)
+        if (!strcmp(attribute->name, name)) {
+            attribute->value = pool_strdup(snapshot->pool, rewritten);
+            if (!attribute->value) snapshot->failed = true;
+            return;
+        }
+    DomXmlAttributeOverride* attribute = (DomXmlAttributeOverride*)pool_calloc(snapshot->pool, sizeof(*attribute));
+    if (!attribute) { snapshot->failed = true; return; }
+    attribute->name = pool_strdup(snapshot->pool, name);
+    attribute->value = pool_strdup(snapshot->pool, rewritten);
+    if (!attribute->name || !attribute->value) snapshot->failed = true;
+    // SMIL's namespaced reference spelling keeps its XML expanded name on export.
+    if (!strncmp(name, "xlink:", 6)) attribute->namespace_uri = "http://www.w3.org/1999/xlink";
+    else if (!strncmp(name, "xml:", 4)) attribute->namespace_uri = "http://www.w3.org/XML/1998/namespace";
+    attribute->next = snapshot->attributes;
+    snapshot->attributes = attribute;
+}
+
+static void svg_snapshot_sample(void* context, const char* name, const char* value, bool css) {
+    // CSS samples use the presentation selector below, including its priority rules.
+    if (!css) svg_snapshot_attribute((SvgDomSnapshot*)context, name, value);
+}
+
+static bool svg_snapshot_include(void* context, void* node) {
+    SvgDomSnapshot* snapshot = (SvgDomSnapshot*)context;
+    DomElement* element = (DomElement*)node;
+    const char* name = element->local_name();
+    if (element == snapshot->exclude || !strcmp(name, "script") ||
+        (snapshot->prefix && !strcmp(name, "style"))) return false;
+    return !dom_element_is_svg(element) || (strcmp(name, "animate") && strcmp(name, "set") &&
+        strcmp(name, "animateTransform") && strcmp(name, "animateMotion") && strcmp(name, "discard"));
+}
+
+static DomXmlAttributeOverride* svg_snapshot_attributes(void* context, void* node);
+
+static bool svg_snapshot_append_children(void* context, void* node, StrBuf* output) {
+    SvgDomSnapshot* snapshot = (SvgDomSnapshot*)context;
+    if (node == snapshot->root && snapshot->definitions->length) {
+        strbuf_append_str(output, "<defs xmlns=\"http://www.w3.org/2000/svg\">");
+        strbuf_append_str_n(output, snapshot->definitions->str, snapshot->definitions->length);
+        strbuf_append_str(output, "</defs>");
+    }
+    return !snapshot->failed;
+}
+
+static bool svg_snapshot_prefix_available(DomElement* root, const char* prefix) {
+    size_t length = strlen(prefix);
+    for (DomNode* node = root; node;) {
+        const char* id = node->is_element() ? node->as_element()->get_attribute("id") : nullptr;
+        if (id && !strncmp(id, prefix, length)) return false;
+        DomNode* child = node->is_element() ? node->as_element()->first_child : nullptr;
+        if (child) node = child;
+        else {
+            while (node != root && !node->next_sibling) node = node->parent;
+            node = node == root ? nullptr : node->next_sibling;
+        }
+    }
+    return true;
+}
+
+static void svg_snapshot_use(SvgDomSnapshot* snapshot, DomElement* host) {
+    DomElement* source = svg_animation_use_source(host);
+    const char* id = source ? source->get_attribute("id") : nullptr;
+    if (!id) return;
+    // each rendered instance has its own SMIL sandwich; a shared frozen defs
+    // node would lose event-dependent differences between two uses.
+    if (snapshot->depth >= SVG_USE_DEPTH_MAX) { snapshot->failed = true; return; }
+    char prefix[64];
+    // generated instance IDs must not shadow authored IDs in the saved document.
+    do {
+        snprintf(prefix, sizeof(prefix), "rdt_snapshot_%u_", ++*snapshot->sequence);
+    } while (!svg_snapshot_prefix_available(snapshot->destination, prefix));
+    StrBuf* content = strbuf_new();
+    StrBuf* definitions = strbuf_new();
+    if (!content || !definitions) {
+        if (content) strbuf_free(content);
+        if (definitions) strbuf_free(definitions);
+        snapshot->failed = true; return;
+    }
+    SvgDomSnapshot child = {snapshot->pool, nullptr, nullptr, snapshot->destination, nullptr, definitions,
+        prefix, snapshot->sequence, snapshot->depth + 1, false};
+    DomXmlProjection projection = {&child, svg_snapshot_include, svg_snapshot_attributes, svg_snapshot_append_children};
+    SvgAnimationSourceScope scope(source->doc, source, host);
+    bool success = dom_serialize_xml(source, content, &projection);
+    DomElement* svg = nullptr;
+    for (DomNode* parent = source->parent; parent; parent = parent->parent)
+        if (parent->is_element() && dom_element_is_svg(parent) &&
+            !strcmp(parent->as_element()->local_name(), "svg")) svg = parent->as_element();
+    // retain sibling paint resources, excluding the target already serialized.
+    child.exclude = source;
+    for (DomNode* node = svg ? svg->first_child : nullptr; node && success; node = node->next_sibling)
+        if (node->is_element() && dom_element_is_svg(node) && !strcmp(node->as_element()->local_name(), "defs"))
+            success = dom_serialize_xml(node, content, &projection);
+    strbuf_append_str_n(content, definitions->str, definitions->length);
+    if (success && !child.failed) {
+        strbuf_append_str_n(snapshot->definitions, content->str, content->length);
+        StrBuf* href = strbuf_new();
+        if (!href) { snapshot->failed = true; strbuf_free(content); strbuf_free(definitions); return; }
+        strbuf_append_char(href, '#'); strbuf_append_str(href, prefix); strbuf_append_str(href, id);
+        // the generated reference is already in the destination namespace.
+        const char* saved_prefix = snapshot->prefix; snapshot->prefix = nullptr;
+        svg_snapshot_attribute(snapshot, "href", href->str);
+        if (host->get_attribute("xlink:href")) svg_snapshot_attribute(snapshot, "xlink:href", href->str);
+        snapshot->prefix = saved_prefix;
+        strbuf_free(href);
+    } else snapshot->failed = true;
+    strbuf_free(content); strbuf_free(definitions);
+}
+
+static void svg_snapshot_image(SvgDomSnapshot* snapshot, DomElement* element) {
+    UiContext* ui = (UiContext*)element->doc->js.host_ui_context;
+    const char* href = svg_animation_attribute(element, "href");
+    if (!href) href = svg_animation_attribute(element, "xlink:href");
+    if (!ui || !href) return;
+    Url* resolved = url_parse_path_or_url(href, element->doc->url);
+    bool local = resolved && (resolved->scheme == URL_SCHEME_FILE || resolved->scheme == URL_SCHEME_DATA);
+    if (resolved) url_destroy(resolved);
+    if (!local) return;
+    ImageSurface* image = load_document_image(element->doc, ui, href);
+    if (!image || image->format != IMAGE_FORMAT_SVG || !image->pic) return;
+    StrBuf* content = strbuf_new();
+    if (!content) { snapshot->failed = true; return; }
+    if (render_svg_picture_snapshot(image->pic, content)) {
+        lam::Temp<char> encoded(base64_encode_alloc(content->str, content->length, BASE64_STD));
+        if (encoded) {
+            strbuf_reset(content);
+            strbuf_append_str(content, "data:image/svg+xml;base64,");
+            strbuf_append_str(content, encoded.get());
+            svg_snapshot_attribute(snapshot, "href", content->str);
+            if (element->get_attribute("xlink:href")) svg_snapshot_attribute(snapshot, "xlink:href", content->str);
+        } else snapshot->failed = true;
+    } else snapshot->failed = true;
+    strbuf_free(content);
+}
+
+static void svg_snapshot_style_property(SvgDomSnapshot* snapshot, DomElement* element,
+    StrBuf* style, const char* name, CssPropertyCode id, bool inherits) {
+    char* owned = nullptr;
+    bool from_css = false;
+    const char* value = svg_get_dom_presentation_property(element, name,
+        inherits, nullptr, 0, &from_css, &owned);
+    if (value) {
+        strbuf_append_str(style, name);
+        strbuf_append_char(style, ':');
+        if (id == CSS_PROPERTY_TRANSFORM && !from_css) {
+            SvgLengthContext lengths = dom_svg_length_context(element);
+            RdtMatrix matrix = svg_resolve_local_transform(value, false, nullptr, nullptr, &lengths);
+            strbuf_append_format(style, "matrix(%g,%g,%g,%g,%g,%g)",
+                matrix.e11, matrix.e21, matrix.e12, matrix.e22, matrix.e13, matrix.e23);
+        } else if (css_property_is_svg_length(id)) {
+            // SMIL stores user-unit numbers; CSS lengths in the saved style need px units.
+            CssValue* parsed = css_parse_component_value_text(value, strlen(value), snapshot->pool);
+            String* computed = parsed ? css_prop_serialize_svg_value(snapshot->pool, element, id, parsed) : nullptr;
+            strbuf_append_str(style, computed ? computed->chars : value);
+        } else strbuf_append_str(style, value);
+        strbuf_append_str(style, "!important;");
+    }
+    if (owned) mem_free(owned);
+}
+
+static DomXmlAttributeOverride* svg_snapshot_attributes(void* context, void* node) {
+    SvgDomSnapshot* snapshot = (SvgDomSnapshot*)context;
+    DomElement* element = (DomElement*)node;
+    snapshot->attributes = nullptr;
+    if (snapshot->prefix) {
+        DomAttributeIterator iterator = dom_element_attribute_iterator(element);
+        DomAttributeView attribute;
+        while (dom_element_next_attribute(&iterator, &attribute))
+            if (!strcmp(attribute.local_name, "id") || !strcmp(attribute.local_name, "href") ||
+                (attribute.value && strstr(attribute.value, "url(")))
+                svg_snapshot_attribute(snapshot, attribute.qualified_name, attribute.value);
+    }
+    if (dom_element_is_svg(element)) svg_animation_visit_values(element, svg_snapshot_sample, snapshot);
+    StrBuf* style = strbuf_new();
+    const char* authored = element->get_attribute("style");
+    if (authored) strbuf_append_str(style, authored);
+    strbuf_append_str(style, ";animation:none!important;transition:none!important;");
+    // resolve host CSS and inherited presentation before the SVG leaves its document.
+    for (unsigned code = 1; code < CSS_PROPERTY_CUSTOM; code++) {
+        CssPropertyCode id = (CssPropertyCode)code;
+        bool shape_geometry = css_property_is_svg_geometry(id) && !strcmp(element->local_name(), "rect");
+        if (!css_property_is_svg_presentation(id) && !shape_geometry && id != CSS_PROPERTY_COLOR &&
+            id != CSS_PROPERTY_OPACITY && id != CSS_PROPERTY_TRANSFORM &&
+            id != CSS_PROPERTY_TRANSLATE && id != CSS_PROPERTY_ROTATE && id != CSS_PROPERTY_SCALE &&
+            id != CSS_PROPERTY_TRANSFORM_ORIGIN &&
+            id != CSS_PROPERTY_VISIBILITY && id != CSS_PROPERTY_DISPLAY) continue;
+        const CssProperty* property = css_property_get_by_code(id);
+        if (!property || !dom_element_is_svg(element)) continue;
+        svg_snapshot_style_property(snapshot, element, style, property->name, id,
+            property->inheritance == PROP_INHERIT_YES);
+    }
+    if (dom_element_is_svg(element)) {
+        // transform-box has no registered dispatch key; text keeps its host font when reopened.
+        const char* names[] = {"transform-box", "font-family", "font-size", "font-weight", "font-style",
+            "letter-spacing", "word-spacing", "text-decoration", "dominant-baseline", "baseline-shift"};
+        for (const char* name : names)
+            svg_snapshot_style_property(snapshot, element, style, name, css_property_code_from_name(name),
+                strcmp(name, "transform-box") != 0);
+    }
+    svg_snapshot_attribute(snapshot, "style", style->str);
+    strbuf_free(style);
+    if (dom_element_is_svg(element) && !strcmp(element->local_name(), "use")) svg_snapshot_use(snapshot, element);
+    if (dom_element_is_svg(element) && !strcmp(element->local_name(), "image")) svg_snapshot_image(snapshot, element);
+    return snapshot->attributes;
+}
+
+bool render_svg_dom_snapshot(DomElement* root, StrBuf* output) {
+    if (!root || !dom_element_is_svg(root) || !output) return false;
+    Pool* pool = pool_create();
+    if (!pool) return false;
+    StrBuf* definitions = strbuf_new();
+    if (!definitions) { pool_destroy(pool); return false; }
+    unsigned sequence = 0;
+    SvgDomSnapshot snapshot = {pool, nullptr, root, root, nullptr, definitions, nullptr, &sequence, 0, false};
+    DomXmlProjection projection = {&snapshot, svg_snapshot_include, svg_snapshot_attributes, svg_snapshot_append_children};
+    bool success = dom_serialize_xml(root, output, &projection);
+    strbuf_free(definitions);
+    pool_destroy(pool);
+    return success;
+}
+
+int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze) {
+    if (!root || !dom_element_is_svg(root) || !filename) return 1;
+    StrBuf* output = strbuf_new();
+    if (!output) return 1;
+    bool success = (freeze ? render_svg_dom_snapshot(root, output) : dom_serialize_xml(root, output, nullptr)) &&
+        save_svg_to_file(output->str, filename);
+    strbuf_free(output);
+    return success ? 0 : 1;
+}
+
+int render_svg_source_document_to_file(UiContext* ui, const char* filename) {
+    DomDocument* document = ui ? ui->document : nullptr;
+    DomElement* body = dom_document_body_element(document);
+    for (DomNode* node = body ? body->first_child : nullptr; node; node = node->next_sibling) {
+        if (node->is_element() && dom_element_is_svg(node) && !strcmp(node->as_element()->local_name(), "svg"))
+            return render_svg_dom_to_file(node->as_element(), filename, radiant_document_virtual_clock(ui, nullptr));
+    }
+    return 1;
+}
+
 int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
     if (!session) return 1;
     UiContext* ui_context = session->ui_context;
     DomDocument* doc = session->document;
 
+    if (doc->services.svg_source_document)
+        return render_svg_source_document_to_file(ui_context, svg_file);
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // only the outer dimensions scale; the viewBox retains CSS coordinates for every subscene.

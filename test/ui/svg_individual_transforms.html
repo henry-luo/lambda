@@ -1,0 +1,26 @@
+<!doctype html>
+<style>
+body { margin:0; background:white; }
+svg { display:block; }
+#icon { --dx:40px; translate:var(--dx) 20px; }
+#combined { translate:100px 20px; rotate:90deg; scale:2 1; transform:translateX(5px); }
+#fillbox { transform-box:fill-box; transform-origin:center; translate:50% 25%; }
+#group { translate:180px 20px; }
+#instance { translate:220px 20px; }
+#viewport rect { translate:50% 25%; transform-box:view-box; }
+</style>
+<svg width="320" height="170">
+  <defs><g id="shape"><rect width="10" height="10" fill="blue"/></g></defs>
+  <rect id="icon" x="10" y="10" width="20" height="10" fill="blue"/>
+  <rect id="combined" width="10" height="10" fill="green"/>
+  <rect id="fillbox" x="10" y="80" width="20" height="10" fill="red"/>
+  <g id="group"><rect width="10" height="10" fill="purple"/><rect x="15" width="10" height="10" fill="orange"/></g>
+  <use id="instance" href="#shape"/>
+  <svg id="viewport" y="110" width="80" height="40" viewBox="10 20 80 40"><rect x="10" y="20" width="10" height="10" fill="blue"/></svg>
+</svg>
+<button id="move">move</button>
+<script>
+document.getElementById('move').addEventListener('click', function() {
+  document.getElementById('icon').style.setProperty('--dx','60px');
+});
+</script>

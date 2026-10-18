@@ -3987,6 +3987,9 @@ typedef struct CssAnimState {
     lam::OwnArr<CssAnimValueSample> value_samples;
     int value_sample_count;
     int value_sample_capacity;
+    lam::OwnArr<CssAnimatedProp> presentation_samples;
+    int presentation_sample_count;
+    int presentation_sample_capacity;
     lam::OwnArr<CssPropertyCode> important_properties;
     int important_property_count;
     int important_property_capacity;
@@ -4055,6 +4058,8 @@ typedef struct CssTransitionState {
     CssAnimValueType value_type;
     CssTransitionValue from;
     CssTransitionValue to;
+    CssAnimatedProp presentation_sample;
+    bool presentation_sample_valid;
 } CssTransitionState;
 
 // ============================================================================
@@ -4095,6 +4100,11 @@ void css_animation_finish(AnimationInstance* anim);
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
 bool css_motion_sample_existing(DomElement* element, LayoutContext* lycon);
+bool css_animation_is_sampling_base();
+String* css_animation_svg_presentation_value(Pool* pool, DomElement* element,
+    CssPropertyCode property, bool important);
+String* css_prop_serialize_transform_functions(Pool* pool, TransformFunction* functions,
+    float width, float height);
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property);
 
@@ -4380,6 +4390,9 @@ TransformFunction* resolve_transform_value(LayoutContext* context, const CssValu
     Pool* document_pool = nullptr);
 bool resolve_individual_transform_value(LayoutContext* context, CssPropertyCode property,
     const CssValue* value, TransformFunction* out);
+bool resolve_individual_transform_function_value(CssPropertyCode property,
+    const CssValue* value, TransformFunction* out, TransformLengthResolver resolve_length,
+    void* context);
 void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
     TransformLengthResolver resolve_length, void* context);
 

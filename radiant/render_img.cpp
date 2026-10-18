@@ -273,6 +273,9 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         return 1;
     }
 
+    if (uicon->document->services.svg_source_document)
+        return render_svg_source_document_to_file(uicon, svg_file);
+
     log_info("render_uicontext_to_svg: rendering to %s", svg_file);
 
     // Get content dimensions
@@ -284,9 +287,10 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     content_max_y += 50;
 
     // Render to SVG (now includes caret if present)
+    // density scales the outer dimensions while the viewBox keeps CSS units.
     lam::Temp<char> svg_content(render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
-                                                uicon->document->state));
+                                                uicon->document->state, ui_context_raster_scale(uicon)));
     if (!svg_content) {
         log_error("render_uicontext_to_svg: failed to render view tree");
         return 1;

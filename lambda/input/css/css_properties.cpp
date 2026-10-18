@@ -210,6 +210,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FILL, "fill", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_STROKE, "stroke", PROP_TYPE_COLOR, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_X, "x", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_Y, "y", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CX, "cx", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CY, "cy", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_R, "r", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_RX, "rx", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_RY, "ry", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_STROKE_WIDTH, "stroke-width", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "1px", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FILL_OPACITY, "fill-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_STROKE_OPACITY, "stroke-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
@@ -1247,13 +1254,18 @@ bool css_property_is_svg_resource(CssPropertyCode id) {
         (id >= CSS_PROPERTY_MARKER_START && id <= CSS_PROPERTY_MARKER);
 }
 
+bool css_property_is_svg_geometry(CssPropertyCode id) {
+    return (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) ||
+        id == CSS_PROPERTY_WIDTH || id == CSS_PROPERTY_HEIGHT;
+}
+
 bool css_property_is_svg_presentation(CssPropertyCode id) {
-    return css_property_is_svg_paint(id) ||
+    return css_property_is_svg_paint(id) || (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) ||
         (id >= CSS_PROPERTY_FILL_OPACITY && id <= CSS_PROPERTY_TEXT_ANCHOR);
 }
 
 bool css_property_is_svg_length(CssPropertyCode id) {
-    return id == CSS_PROPERTY_STROKE_WIDTH || id == CSS_PROPERTY_STROKE_DASHARRAY ||
+    return css_property_is_svg_geometry(id) || id == CSS_PROPERTY_STROKE_WIDTH || id == CSS_PROPERTY_STROKE_DASHARRAY ||
         id == CSS_PROPERTY_STROKE_DASHOFFSET;
 }
 
@@ -3248,6 +3260,12 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
             value->type == CSS_VALUE_TYPE_URL ||
             (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE);
+    if (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) {
+        if ((id == CSS_PROPERTY_RX || id == CSS_PROPERTY_RY) &&
+            css_value_keyword_equals(value, CSS_VALUE_AUTO)) return true;
+        // SVG geometry accepts unitless user-unit numbers in CSS as well as presentation attributes.
+        return css_value_is_svg_stroke_width(value, id >= CSS_PROPERTY_R);
+    }
     if (id == CSS_PROPERTY_STROKE_WIDTH) return css_value_is_svg_stroke_width(value);
     if (id == CSS_PROPERTY_STROKE_DASHOFFSET) return css_value_is_svg_stroke_width(value, false);
     if (id == CSS_PROPERTY_STROKE_DASHARRAY) {

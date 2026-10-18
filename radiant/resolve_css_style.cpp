@@ -475,8 +475,9 @@ CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* val
     return computed;
 }
 
-bool resolve_individual_transform_value(LayoutContext* lycon,
-    CssPropertyCode property, const CssValue* value, TransformFunction* out) {
+bool resolve_individual_transform_function_value(CssPropertyCode property,
+    const CssValue* value, TransformFunction* out, TransformLengthResolver resolve_length,
+    void* context) {
     if (!value || !out || !css_property_validate_value(property, value)) return false;
     CssValue* args[4] = {};
     CssValue axis[3] = {};
@@ -515,7 +516,7 @@ bool resolve_individual_transform_value(LayoutContext* lycon,
     CssValue wrapped = {};
     wrapped.type = CSS_VALUE_TYPE_FUNCTION;
     wrapped.data.function = &function;
-    if (!resolve_transform_function_value(&wrapped, out, resolve_layout_transform_length, lycon)) return false;
+    if (!resolve_transform_function_value(&wrapped, out, resolve_length, context)) return false;
     // default Z components remain 2D so ancestor flattening sees the correct transform mode.
     if (out->type == TRANSFORM_TRANSLATE3D && out->params.translate3d.z == 0.0f) {
         out->type = TRANSFORM_TRANSLATE;
@@ -529,6 +530,12 @@ bool resolve_individual_transform_value(LayoutContext* lycon,
         out->params.angle = angle;
     }
     return true;
+}
+
+bool resolve_individual_transform_value(LayoutContext* lycon,
+    CssPropertyCode property, const CssValue* value, TransformFunction* out) {
+    return resolve_individual_transform_function_value(property, value, out,
+        resolve_layout_transform_length, lycon);
 }
 
 static TransformFunction* resolve_transform_function(LayoutContext* lycon,

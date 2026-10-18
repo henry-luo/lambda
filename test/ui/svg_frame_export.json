@@ -1,0 +1,172 @@
+{
+  "name": "SVG snapshots freeze the selected virtual CSS and SMIL frame without changing the live tree",
+  "html": "test/ui/svg_frame_export.html",
+  "viewport": {
+    "width": 200,
+    "height": 100
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_script",
+      "js": "window.savedTime=performance.now();window.baseSvg=new XMLSerializer().serializeToString(document.getElementById('drawing'));\ntrue;"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 20,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_enhancement/frame.svg"
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_enhancement/frame_repeat.svg"
+    },
+    {
+      "type": "assert_script",
+      "js": "performance.now()===window.savedTime && new XMLSerializer().serializeToString(document.getElementById('drawing'))===window.baseSvg"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/svg_enhancement/frame.svg",
+      "contains": "x:50px!important"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/svg_enhancement/frame.svg",
+      "contains": "animation:none!important"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edited').setAttribute('fill','lime')\ntrue;"
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_enhancement/frame_edited.svg"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "navigate",
+      "url": "../../temp/svg_enhancement/frame_edited.svg"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 20,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "advance_time",
+      "ms": 3000,
+      "steps": 3
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 20,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_count",
+      "equals": 0,
+      "target": {
+        "selector": "animate"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('smil').namespaceURI==='http://www.w3.org/2000/svg'"
+    }
+  ]
+}

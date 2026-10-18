@@ -1,0 +1,26 @@
+<!doctype html>
+<style>
+body { margin:0; background:white; }
+svg { display:block; }
+#swatch { fill:red; stroke:blue; fill-opacity:.2; stroke-opacity:.4; stroke-width:2px; stroke-dashoffset:0px;
+  transition:fill 1s linear,stroke 1s linear,fill-opacity 1s linear,stroke-opacity 1s linear,stroke-width 1s linear,stroke-dashoffset 1s linear; }
+#swatch.end { fill:blue; stroke:red; fill-opacity:1; stroke-opacity:1; stroke-width:6px; stroke-dashoffset:20px; }
+@keyframes inherited { from { fill:currentColor; } to { fill:blue; } }
+#inherited { color:red; animation:inherited 2s linear -1s both paused; }
+</style>
+<svg width="240" height="100">
+  <rect id="swatch" x="20" y="20" width="40" height="40"/>
+  <g id="inherited"><rect id="child" x="100" y="20" width="40" height="40"/></g>
+</svg>
+<button id="start">start</button><button id="retarget">retarget</button><button id="priority">priority</button>
+<script>
+document.getElementById('start').addEventListener('click',function() {
+  document.getElementById('swatch').setAttribute('class','end');
+});
+document.getElementById('retarget').addEventListener('click',function() {
+  document.getElementById('swatch').style.setProperty('fill','lime','important');
+});
+document.getElementById('priority').addEventListener('click',function() {
+  document.getElementById('inherited').style.setProperty('fill','lime','important');
+});
+</script>

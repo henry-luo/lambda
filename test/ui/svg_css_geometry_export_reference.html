@@ -1,0 +1,22 @@
+<!doctype html><style>
+body{margin:0;background:white}svg{display:block}
+</style>
+<svg width="240" height="80">
+  <defs>
+    <linearGradient id="paint"><stop offset=".75" stop-color="blue"/><stop offset=".75" stop-color="lime"/></linearGradient>
+    <clipPath id="clip" clipPathUnits="objectBoundingBox"><rect width=".875" height="1"/></clipPath>
+  </defs>
+  <svg id="styled" width="240" height="80">
+    <rect id="box" x="50" y="20" width="40" height="20" rx="4" fill="url(#paint)" clip-path="url(#clip)"/>
+    <circle id="circle" cx="130" cy="30" r="15" fill="red"/>
+    <ellipse id="ellipse" cx="190" cy="30" rx="20" ry="10" fill="green"/>
+  </svg>
+</svg>
+<button id="move">move</button>
+<script>
+document.getElementById('move').onclick=function(){
+  document.getElementById('box').setAttribute('x','80');
+  document.getElementById('circle').setAttribute('cx','145');
+  document.getElementById('ellipse').setAttribute('rx','12');
+};
+</script>
