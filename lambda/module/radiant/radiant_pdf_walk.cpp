@@ -254,10 +254,13 @@ struct PdfPaintBatch {
     ~PdfPaintBatch() { paint_list_destroy(&local); }
 };
 
-bool pdf_walk_simple_boundary(const BoundaryProp* bound) {
+bool pdf_walk_simple_boundary(const BoundaryProp* bound, float width, float height) {
     if (!bound) return true;
+    // calculated radii remain expressions until paint resolves the final border box.
+    Corner radius = bound->border ? bound->border->radius : Corner{};
+    resolve_border_radius_percentages(&radius, width, height);
     if (!render_paint_background_is_simple(bound->background) ||
-        (bound->border && (radiant_corner_has_radius(&bound->border->radius) || bound->border->border_image_type != GRADIENT_NONE || bound->border->border_image_url)) ||
+        (bound->border && (radiant_corner_has_radius(&radius) || bound->border->border_image_type != GRADIENT_NONE || bound->border->border_image_url)) ||
         bound->outline || bound->box_shadow) return false;
     if (bound->border) for (size_t edge = 0; edge < 4; edge++)
         if (bound->border->width.values[edge] > 0 && bound->border->styles[edge] != CSS_VALUE_SOLID) return false;
@@ -271,7 +274,7 @@ void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
     bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
-        pdf_walk_simple_boundary(view->boundary());
+        pdf_walk_simple_boundary(view->boundary(), rect.width, rect.height);
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
     PdfPaintBatch batch(ctx, rect);
     if (!render_paint_boundary_emit_full(batch.paint, ctx->ui_context, view, rect))
@@ -293,13 +296,15 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     ctx->font = *font; ctx->color = color;
     DomElement* parent = view->parent ? view->parent->as_element() : nullptr;
-    const FontProp* style = font->style;
-    bool decorated = style && (style->text_shadow || style->text_emphasis_enabled || style->text_deco_extra ||
-        (style->text_deco && style->text_deco != CSS_VALUE_NONE));
     RenderTextPaintIterator fragments(ctx, view);
     while (!pdf_walk_aborted(ctx)) {
         TextRect* rect = fragments.next(true);
         if (!rect) break;
+        // the iterator selects the ellipsis/inline fragment's font and color.
+        font = &ctx->font; color = ctx->color;
+        const FontProp* style = font->style;
+        bool decorated = style && (style->text_shadow || style->text_emphasis_enabled || style->text_deco_extra ||
+            (style->text_deco && style->text_deco != CSS_VALUE_NONE));
         PaintGlyphRun run = {};
         lam::Temp<char> segment(render_text_rect_glyph_run(view, rect, font, color, x, y, &run,
             fragments.reverses_clusters()));
@@ -600,7 +605,7 @@ bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool enterin
 }
 bool pdf_secondary_boundary(void* data, const BoundaryProp* bound, RdtLogicalRect rect) {
     PdfWalkContext* ctx = (PdfWalkContext*)data;
-    if (!pdf_walk_simple_boundary(bound)) {
+    if (!pdf_walk_simple_boundary(bound, rect.width, rect.height)) {
         // A page fragment borrows committed styles; copy mutable border geometry locally.
         BoundaryProp local = bound ? *bound : BoundaryProp{};
         BorderProp border = bound && bound->border ? *bound->border : BorderProp{};
@@ -839,7 +844,8 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
         // unavailable lazy images keep the native painter's absent-image behavior.
         if (!image->pixels) return ItemNull;
     }
-    return radiant_pdf_surface(image, placement, content);
+    ScaleMode sampling = view ? render_image_scale_mode(view, false) : SCALE_MODE_LINEAR;
+    return radiant_pdf_surface(image, placement, content, sampling, ui_context_raster_scale(frame->ui));
 }
 
 static Item pdf_walk(Item path_item, Item options_item,

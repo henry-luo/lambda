@@ -11,5 +11,8 @@ pn main() {
     return [written > 400, len(parsed.pages) == 1, len(parsed.objects) > 4,
         rejected and saved > 0, preserved == "preserve this file",
         util.pdf_num(1e-12)^ == "0.000000000001", util.pdf_num(-1e25)^ == "-10000000000000000000000000",
-        (util.pdf_num(inf) ^ {true}) == true]
+        (util.pdf_num(inf) ^ {true}) == true,
+        util.pdf_num(9.734375)^ == "9.734375",
+        float(util.pdf_num(1.23456789012345)^) == 1.23456789012345,
+        util.pdf_num(1e-20)^ == "0.00000000000000000001"]
 }

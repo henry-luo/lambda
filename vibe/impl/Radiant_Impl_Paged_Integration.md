@@ -351,7 +351,7 @@ Integer-cast lint and module-boundary validation were repeated successfully for
 the completed tree (`temp/paged_completion_lint_committed.log` and
 `temp/paged_debug_run/temp/qualify_module_boundary_final.log`).
 
-**Final PDF gate:** **280 pass / 30 fail** of 310. Both original paged export
+**PDF gate at P7 (2026-10-18):** **280 pass / 30 fail** of 310. Both original paged export
 failures pass, including all 53 FO/native preview and physical-PDF pairs. Of the
 remaining failures, 21 identities were already present in the earlier full PDF
 baseline; nine additional identities also fail in a control build with only
@@ -363,6 +363,16 @@ output gate, not a release approval. Final receipt:
 `temp/paged_debug_run/temp/qualify_pdf_render_visual.xml`; controls:
 `temp/paged_debug_control/temp/qualify_pdf_control.xml`. The identity inventory
 and control comparison are in `temp/paged_completion_qualification.json`.
+
+**PDF follow-up (2026-10-19):** the complete output gate now passes **314/314**,
+with no skips. Shared export fixes and corrected independent controls close all
+30 failures above; the four existing WebGL modes are separately scheduled and
+one intrinsic-image geometry control was added. Frozen optimized host/harness
+runs measure **633.38 → 184.24 seconds** with four isolated case workers.
+The fixes, companion-corpus reference correction and qualification receipts are
+recorded in [the PDF text implementation follow-up](Radiant_Impl_PDF_Text.md#export-correctness-and-runtime-follow-up-2026-10-19).
+This closes the PDF gate; the separate paged raster-equivalence, composition
+performance and source-size qualifications below remain open.
 
 **Optimized release measurement:** both hosts built with
 `make build-release-compile` (`NDEBUG`, `-O3`, thin LTO); candidate source and

@@ -98,7 +98,9 @@ fn text_fragment(text, color, sequence, invisible = false) map^ {
             if (glyph.missing != null and not hidden) "0 Tr\n"
         }
         "ET\n" if (text.text != null) "EMC\n">;
-    let painted = combine([if (hidden) fragment(commands) else colored(color, "R" ++ string(sequence) ++ "Text", commands)^,
+    // text rendering mode is graphics state and survives ET; an invisible run must not hide later siblings.
+    let painted = combine([if (hidden) fragment(<file format:'pdf', "q\n" commands "Q\n">)
+        else colored(color, "R" ++ string(sequence) ++ "Text", commands)^,
         for (index, glyph in text.glyphs where glyph.missing != null and not invisible)
             fill_rect(glyph.missing_color, glyph.missing[0], glyph.missing[1], glyph.missing[2], glyph.missing[3],
                 "R" ++ string(sequence) ++ "Missing" ++ string(index))^]);
@@ -122,7 +124,15 @@ fn graphic_shapes(shapes, sequence, invisible = false) map^ => combine([for (ind
                 if (clip_shape.evenodd) "W* n\n" else "W n\n"
             }
             numbers(path_shape.matrix)^ " cm\n">;
-        if (path_shape.text != null) {
+        if (path_shape.image != null) {
+            let image = image_data_fragment(path_shape.image, resource_key)^;
+            let translucent = path_shape.opacity != 1.0;
+            {content: <file format:'pdf', "q\n" scope
+                if (translucent) "/" ++ resource_key ++ "Alpha gs\n"
+                image.content "Q\n">,
+                resources: image.resources ++ if (translucent)
+                    [{name: resource_key ++ "Alpha", category: "ExtGState", alpha: path_shape.opacity}] else []}
+        } else if (path_shape.text != null) {
             let text = text_fragment(path_shape.text, color, resource_key, invisible)^;
             {*: text, content: <file format:'pdf', "q\n" scope text.content "Q\n">}
         } else {

@@ -12,7 +12,7 @@
 
 extern "C" Item vmap_new();
 
-Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content) {
+Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content, ScaleMode sampling, float density) {
     RootFrame roots(3);
     Rooted<Item> result(roots, ItemNull), rgb(roots, ItemNull), alpha(roots, ItemNull);
     ImageSurfaceReadScope read_scope;
@@ -20,6 +20,22 @@ Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content) {
     int width = 0, height = 0, stride = 0;
     if (!render_image_resource_pixels(image, placement.width, placement.height, &pixels, &width, &height, &stride) || stride < width)
         return radiant_pdf_error("cannot decode the selected image resource");
+    if (sampling != SCALE_MODE_LINEAR) {
+        // PDF readers choose their own interpolation; resolve authored pixel-preserving sampling first.
+        RdtMatrix scale = rdt_matrix_scale(density, density);
+        Rect viewport = {content.x * density, content.y * density, content.width * density, content.height * density};
+        Rect projected = {}; uint32_t* sampled = nullptr;
+        if (!render_image_project_pixels(pixels, width, height, stride, placement, &scale, viewport,
+                sampling, image->alpha_mode == IMAGE_ALPHA_STRAIGHT, &sampled, &projected))
+            return radiant_pdf_error("cannot prepare selected image sampling");
+        lam::Temp<uint32_t> owned(sampled);
+        if (!sampled) return ItemNull;
+        ImageSurface surface = {};
+        surface.width = (int)projected.width; surface.height = (int)projected.height; // INT_CAST_OK: projected raster extents are bounded integer pixels.
+        surface.pitch = surface.width * 4; surface.pixels = sampled; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        Rect box = {projected.x / density, projected.y / density, projected.width / density, projected.height / density};
+        return radiant_pdf_surface(&surface, box, content);
+    }
     size_t count = 0, bytes = 0;
     if (!math_checked_mul((size_t)width, (size_t)height, &count) ||
             !math_checked_mul(count, 3, &bytes) || bytes > INT64_MAX)
@@ -97,9 +113,10 @@ bool pdf_svg_shapes(PaintList* paint, void* data) {
 bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& paths,
         Rooted<Item>& error, PdfTextResources* text_resources,
         const RdtMatrix* initial, Array* parent_clips, bool text_only, int begin, int end) {
-    RootFrame roots(6);
+    RootFrame roots(7);
     Rooted<Item> clips(roots, {.array = array_plain()}), entry(roots, ItemNull),
-        commands(roots, ItemNull), active_clips(roots, ItemNull), text(roots, ItemNull), rect_commands(roots, ItemNull);
+        commands(roots, ItemNull), active_clips(roots, ItemNull), text(roots, ItemNull), rect_commands(roots, ItemNull),
+        image(roots, ItemNull);
     Color rect_color = {};
     RdtMatrix rect_matrix = rdt_matrix_identity();
     int64_t rect_clip_count = -1;
@@ -183,7 +200,8 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
         Color color = {};
         RdtMatrix placed = matrix;
         const PaintStrokePath* stroke = nullptr;
-        text.set(ItemNull);
+        text.set(ItemNull); image.set(ItemNull);
+        float opacity = 1.0f;
         RdtFillRule rule = RDT_FILL_WINDING;
         switch (command.op) {
         case PAINT_FILL_RECT: {
@@ -212,12 +230,37 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
             color = command.glyph_run.color;
             if (command.glyph_run.has_transform) placed = rdt_matrix_multiply(&matrix, &command.glyph_run.transform);
             break;
+        case PAINT_DRAW_IMAGE_RESOURCE: {
+            const PaintDrawImageResource& picture = command.draw_image_resource;
+            Rect box = {picture.dst_x, picture.dst_y, picture.dst_w, picture.dst_h};
+            image.set(radiant_pdf_surface(picture.image, box, box));
+            opacity = picture.opacity / 255.0f;
+            if (picture.has_transform) placed = rdt_matrix_multiply(&matrix, &picture.transform);
+            break;
+        }
+        case PAINT_DRAW_IMAGE: {
+            const PaintDrawImage& picture = command.draw_image;
+            ImageSurface surface = {};
+            surface.width = picture.src_w; surface.height = picture.src_h;
+            surface.pitch = picture.src_stride * 4; surface.pixels = (void*)picture.pixels.get();
+            surface.alpha_mode = picture.resource_owner ? picture.resource_owner->alpha_mode : IMAGE_ALPHA_PREMULTIPLIED;
+            Rect box = {picture.dst_x, picture.dst_y, picture.dst_w, picture.dst_h};
+            image.set(radiant_pdf_surface(&surface, box, box, picture.scale_mode, ui_context_raster_scale(ui)));
+            opacity = picture.opacity / 255.0f;
+            if (picture.has_transform) placed = rdt_matrix_multiply(&matrix, &picture.transform);
+            break;
+        }
         default: return false;
         }
         struct PathCleanup { RdtPath* path; ~PathCleanup() { if (path) rdt_path_free(path); } } cleanup = {owned};
-        if (!path && get_type_id(text.get()) == LMD_TYPE_NULL) return false;
+        if (get_type_id(image.get()) == LMD_TYPE_ERROR) { error.set(image.get()); return false; }
+        if (!path && get_type_id(text.get()) == LMD_TYPE_NULL && get_type_id(image.get()) == LMD_TYPE_NULL) return false;
         entry.set(vmap_new());
-        if (get_type_id(text.get()) != LMD_TYPE_NULL) radiant_rooted_obj_set(entry, "text", text.get());
+        // retain intrinsic image samples instead of resampling a whole graphic snapshot.
+        if (get_type_id(image.get()) != LMD_TYPE_NULL) {
+            radiant_rooted_obj_set(entry, "image", image.get());
+            radiant_rooted_obj_set(entry, "opacity", push_d(opacity));
+        } else if (get_type_id(text.get()) != LMD_TYPE_NULL) radiant_rooted_obj_set(entry, "text", text.get());
         else {
             RdtMatrix identity = rdt_matrix_identity();
             commands.set(radiant_pdf_path_array(path, &identity));

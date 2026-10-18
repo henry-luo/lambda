@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { createWorkspace } = require('./test_workspace.js');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -32,20 +33,7 @@ function run(command, args, options = {}) {
 
 function layoutWorkspace(check) {
     // the external layout harness clears cwd/temp/layout; give each check its own cwd.
-    fs.mkdirSync(path.join(ROOT, 'temp'), { recursive: true });
-    const workspace = fs.mkdtempSync(path.join(ROOT, 'temp', `radiant-${check}-`));
-    fs.mkdirSync(path.join(workspace, 'temp'));
-    for (const name of ['test', 'lmd', 'ref', 'modules', 'assets', 'utils', 'log.conf', 'build_lambda_config.json', 'lambda.exe']) {
-        const source = path.resolve(ROOT, name === 'lambda.exe'
-            ? process.env.RADIANT_TEST_EXECUTABLE || name : name);
-        if (!fs.existsSync(source)) continue;
-        const destination = path.join(workspace, name);
-        if (fs.statSync(source).isDirectory()) fs.symlinkSync(source, destination, 'junction');
-        // file symlinks on Windows require privileges that directory junctions do not.
-        else if (process.platform === 'win32') fs.copyFileSync(source, destination);
-        else fs.symlinkSync(source, destination, 'file');
-    }
-    return workspace;
+    return createWorkspace(ROOT, `radiant-${check}-`);
 }
 
 function count(output, pattern) {

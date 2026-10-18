@@ -91,6 +91,69 @@ Local evidence: `temp/pdf_text_{interp,jit}_final.log`,
 `temp/pdf_text_radiant_baseline.log` and
 `temp/pdf_text_page_load_rerun{,_independent}.log`.
 
+## Export correctness and runtime follow-up (2026-10-19)
+
+The complete PDF suite exposed shared export defects and outdated controls.
+Calculated corner radii now resolve against the final box before choosing a
+rectangular boundary shortcut. PDF text uses the fragment iterator's selected
+font/color, including RTL ellipses. Invisible text scopes its rendering mode
+so later visible siblings paint normally. Native graphic images retain their
+source samples and alpha; pixel-preserving image sampling uses the shared
+sampler. Decoration subdivision uses local coordinates before placement.
+PDF numeric syntax now retains round-trip precision under **S2.6.6v3**, rather
+than `string()`'s six-significant-digit display spelling.
+
+Export comparisons use Poppler Cairo with the same grayscale antialias mode
+at both densities. Byte-exact PNG/SVG/PDF comparisons remain, with positive
+color-coverage assertions for outline controls. Sharp-effect references use
+independently positioned outline copies: ordinary embedded PDF text is
+font-hinted by the reader. AVIF is a supported codec, so the unsupported-type
+control names an unregistered MIME type. Structural controls now check the
+embedded Unicode text and isolated transparency forms required by the PDF
+output design §4.4, while retaining Unicode extraction and pixel assertions.
+
+The companion corpus's `PrinceCatalogue_page_01` reference was last updated in
+`lambda-test` commit `2150ea571` (2026-05-14), before intrinsic page framing was
+corrected in `04bbbfb2a53` (2026-10-15). Its measurement changes from
+2.30256065% to 2.92722372%; other entries, the 32-level pixel threshold, and the
+0.2-point regression tolerance stay unchanged. A new intrinsic-page control
+independently compares the same source with Cairo: 0.14240791% mismatch,
+below the existing 0.75% intrinsic-geometry limit. The one-row correction and
+source hashes are recorded in `temp/pdf_repair_baseline_correction.json`.
+
+The PDF target now uses the existing shared GTest case queue with four bounded
+workers and isolated scratch directories. Its four WebGL context combinations
+are separate cases; all combinations still run. Tool availability is cached
+per process. `LAMBDA_PDF_TEST_JOBS` controls concurrency, and
+`PDF_TEST_CONFIG=release_native` selects an optimized harness for timing.
+Shared workspace creation also serves the layout/snapshot adapters. Runner
+contract checks cover complete case accounting, isolated fixed filenames,
+the selected host, failure propagation, worker limits and exclusive checks.
+
+The complete macOS suite passes **314/314**, with no skips, versus the original
+**280 pass / 30 fail** of 310. The four existing WebGL context modes became
+separate cases, and one intrinsic-image geometry case was added. A paired run
+with frozen release hosts and harnesses (`NDEBUG`, `-O3`, thin LTO) measures
+**633.38 → 184.24 seconds**, or **3.44× faster / 71% less wall time**. This is
+one before/after pair on the same machine; source/binary hashes, host load and
+raw results are retained in `temp/pdf_repair_release_{before,after}_timing.json`.
+
+All **96 PDF package goldens pass on both interpreter and JIT**. The **59 shared
+runner contract checks**, integer-cast lint and strict module-boundary check
+pass. The Radiant aggregate retains its raw result: **5,891 pass, 158 accepted
+partial, one skip and one Bootstrap page-load timeout** of 6,051, including
+**500/500 paged cases**, with no layout/render baseline regressions. That same
+aggregate-load timeout is recorded in the earlier receipt above. Three isolated
+runs of the exact page CLI, with the same host and unchanged 15-second limit,
+pass in **3.74, 3.54 and 3.64 seconds**, following Developer Guide §7.4. These
+controls do not replace or rescore the aggregate result.
+
+Consolidated evidence is in `temp/pdf_repair_qualification.json`; full PDF
+results are in `temp/pdf_repair_release_after_results/`, the Radiant summary in
+`temp/pdf_repair_radiant_results/test_summary.json`, and the independent page
+controls in `temp/pdf_repair_bootstrap_isolated.json`. Qualification covers
+macOS; sanitizer and other-platform runs remain separate work.
+
 ## Remaining limits
 
 Complete static fonts are embedded; static-font subsetting is a later size

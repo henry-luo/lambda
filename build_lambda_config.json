@@ -5246,6 +5246,9 @@
           {
             "source": "test_pdf_render_visual_gtest.cpp",
             "name": "PDF Render Tests",
+            "case_workers": 4,
+            "case_workers_env": "LAMBDA_PDF_TEST_JOBS",
+            "isolated_cwd": true,
             "dependencies": [
               "lambda-data"
             ],
