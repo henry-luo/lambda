@@ -1536,6 +1536,21 @@ TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
     image_free(preview.pixels);
 }
 
+TEST(RenderOutputParity, PdfTextKeepsUnicodeDecorationsSvgAndSharedPageFontsSearchable) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftotext"));
+    const char* source = "test/html/pdf_text_export.html";
+    for (bool paged : {false, true}) {
+        SCOPED_TRACE(paged);
+        const char* pdf = paged ? "temp/render_output_parity/text_paged.pdf" : "temp/render_output_parity/text_continuous.pdf";
+        ASSERT_TRUE(render_document_fixture(source, pdf, paged ? "--paged" : ""));
+        char command[512];
+        snprintf(command, sizeof(command), "python3 test/pdf_output_check.py %s text %d", pdf, paged ? 2 : 1);
+        CommandResult checked = run_command_capture(command);
+        EXPECT_EQ(checked.exit_code, 0) << checked.output;
+    }
+}
+
 TEST(RenderOutputParity, PdfExportMonospaceUnicodeTextUsesFontFallback) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(command_exists("pdftoppm"));

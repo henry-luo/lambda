@@ -3697,6 +3697,11 @@
             ],
             "additional_sources": [
               "lib/font/font_context_glyph_cache.c",
+              "lib/font/font_export.c",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/mem_alloc.c",
+              "lib/arraylist.c",
               "lib/font/font_family.c",
               "lib/font/font_glyf.c",
               "lib/font/font_gpos.c",

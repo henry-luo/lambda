@@ -15,6 +15,7 @@
 #ifdef __APPLE__
 
 #include "font_internal.h"
+#include "font_export.h"
 #include "../utf.h"
 #include <CoreText/CoreText.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -93,7 +94,7 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
         if (!(traits & kCTFontItalicTrait)) {
             CGAffineTransform skew = CGAffineTransformMake(
                 1.0, 0.0,   // x-axis: identity
-                0.2126, 1.0, // y-axis: shear x by tan(12°)
+                FONT_SYNTHETIC_ITALIC_SHEAR, 1.0, // y-axis: shared synthetic slant
                 0.0, 0.0);
             CTFontRef italic_font = CTFontCreateCopyWithAttributes(
                 ct_font, (CGFloat)size_px, &skew, NULL);

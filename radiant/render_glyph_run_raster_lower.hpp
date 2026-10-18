@@ -91,7 +91,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             RdtPath* path = rdt_path_new();
             if (!path) return;
             rdt_path_add_rect(path, rect.x, rect.y, rect.width, rect.height, 0.0f, 0.0f);
-            dl_fill_path(dl, path, Color{0xFF0000FF}, RDT_FILL_WINDING,
+            dl_fill_path(dl, path, render_text_missing_glyph_color(), RDT_FILL_WINDING,
                 run->has_transform ? &run->transform : nullptr);
             rdt_path_free(path);
             x += space_width;

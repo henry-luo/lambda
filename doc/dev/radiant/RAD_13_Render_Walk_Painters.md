@@ -192,12 +192,21 @@ carry source boxes, rotation and placement through the same adapter.
 
 `radiant_pdf_graphic.cpp` supplies bounded geometric resources, including SVG
 fills/strokes, and owned RGB/alpha snapshots for unsupported resource geometry.
-Whole effect groups capture descendants once and use the shared native replay
-with page backdrop history. Semantic visits continue while captured child paint
-callbacks are suppressed. `PaintList` scope destruction releases owned payloads;
-backdrop recordings retain temporary image resources until their page retires.
-Glyph outlines preserve selected font appearance; searchable embedded-font text
-and ToUnicode output remain separate work.
+Simple opacity groups become PDF transparency forms; other effects use shared
+native replay with page backdrop history and retain an invisible text layer.
+Semantic visits continue while captured child paint callbacks are suppressed.
+Paint-list destruction releases payloads; backdrop recordings retain temporary
+images until their page retires.
+
+Text export (verified 2026-10-18) uses `radiant_pdf_text.cpp`,
+`render_visit_text_run_glyphs` (`render_glyph_path.cpp`) and
+`font_export_face` (`lib/font/font_export.c`). Static TrueType/CFF faces are
+embedded, with collection face extraction. Other native, variable and color
+glyphs use Type 3 font programs. `text_fragment` (`output.ls`) emits positioned
+text-show operators, ToUnicode and logical ActualText; fonts are shared across
+pages. Affine transforms preserve text. Continuous solid SVG text is captured
+before path lowering. Subsetting, complex SVG text paints and warped replacement
+text remain follow-up work; paged inline SVG publication is a separate gap.
 
 ### 8.1 Capability gating
 
@@ -349,7 +358,7 @@ canvas padding and independent/paged producers remain separate limits.
 | `radiant/render_composite.cpp` | `mix-blend-mode` math and backdrop compositors. |
 | `radiant/render.hpp` / `render_painter.cpp` | The `rc_*` gateway → PaintIR → DisplayList lowering seam. |
 | `radiant/render_output.cpp` | Output-target dispatch; raster record→replay; tiled/strip PNG; selective repaint; retained capture. |
-| `radiant/render_pdf.cpp` | `PdfRenderContext`, `pdf_cb_*` callbacks, PaintIR→HPDF lowering, raster fallbacks. |
+| `radiant/render_pdf.cpp` | Lambda PDF package invocation and atomic save of completed bytes. |
 | `radiant/render.hpp` / `render_backend_caps.cpp` | Runtime `RenderBackendCaps` vs static `RenderExportTargetCaps`; filter-chain support. |
 | `radiant/render.hpp` / `render_profiler.cpp` | Per-zone counters, `RenderPathTrace`. |
 | `radiant/surface.cpp` | `ImageSurface` ABGR8888 buffer, lazy decode, tile offsets. |

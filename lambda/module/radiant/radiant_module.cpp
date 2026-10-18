@@ -4937,6 +4937,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_pdf_walk_source(Item source, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk_source},
     {"pdf_glyph_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_glyph_path, JUBE_FN_NONE,
      "Item fn_radiant_pdf_glyph_path(Item context)", (fn_ptr)fn_radiant_pdf_glyph_path},
+    {"pdf_text_run", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_text_run, JUBE_FN_NONE,
+        "Item fn_radiant_pdf_text_run(Item context)", (fn_ptr)fn_radiant_pdf_text_run},
     {"pdf_clip_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_clip_path, JUBE_FN_NONE,
      "Item fn_radiant_pdf_clip_path(Item context)", (fn_ptr)fn_radiant_pdf_clip_path},
     {"pdf_graphic", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_graphic, JUBE_FN_NONE,

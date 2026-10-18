@@ -804,7 +804,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         // share the missing-glyph geometry with offscreen text captures.
                         Rect rect = render_text_missing_glyph_rect(&rdcon->font, x / s, y / s, scaled_space_width / s);
                         rect.x *= s; rect.y *= s; rect.width *= s; rect.height *= s;
-                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, render_text_missing_glyph_color().c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         x += scaled_space_width;
                     }
                     else {
@@ -1894,6 +1894,7 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     run->color = color;
     run->text = lam::up((const char*)content);
     run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    run->logical_text_offset = reverse_clusters ? run->text_len + 1 : 0;
     // vector targets name the selected face; a missing handle keeps the authored family.
     run->font_family = lam::up(font_box_handle(font)
         ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());

@@ -2,6 +2,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "radiant_image_job.hpp"
 #include "radiant_pdf_graphic.hpp"
+#include "radiant_pdf_text.hpp"
 #include "radiant_pdf_source.hpp"
 #include "radiant_pdf_semantics.hpp"
 #include "../../../lib/tagged.hpp"
@@ -73,6 +74,7 @@ struct PdfWalkFrame {
     Bound graphic_bounds;
     RdtMatrix graphic_transform;
     DisplayList* backdrop;
+    PdfTextResources* text_resources;
 };
 #include "pdf_view_schema.inc"
 
@@ -81,6 +83,7 @@ const PdfWalkFrame* pdf_walk_frame(Item context) {
 }
 
 struct PdfWalkContext : RenderContext {
+    PdfTextResources text_resources;
     BinarySchemaOwner* owner;
     const BinarySchema* element;
     const BinarySchema* text_rect;
@@ -761,7 +764,14 @@ RADIANT_C_API Item fn_radiant_pdf_graphic(Item context_item) {
     const PdfWalkFrame* frame = pdf_walk_frame(context.get());
     if (!frame || !frame->graphic || !frame->ui) return radiant_pdf_error("graphic helper requires the active callback context");
     return radiant_pdf_graphic(frame->graphic, frame->ui, frame->graphic_bounds,
-        frame->page_width, frame->page_height, frame->backdrop, &frame->graphic_transform);
+        frame->page_width, frame->page_height, frame->backdrop, &frame->graphic_transform, frame->text_resources);
+}
+
+RADIANT_C_API Item fn_radiant_pdf_text_run(Item context_item) {
+    RootFrame roots(1); Rooted<Item> context(roots, context_item);
+    const PdfWalkFrame* frame = pdf_walk_frame(context.get());
+    if (!frame || !frame->glyph_run) return radiant_pdf_error("text helper requires an active text callback");
+    return radiant_pdf_text(frame->glyph_run, frame->ui, frame->text_resources);
 }
 
 RADIANT_C_API Item fn_radiant_pdf_glyph_path(Item context_item) {
@@ -835,7 +845,8 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
 static Item pdf_walk(Item path_item, Item options_item,
         Item callback_item, Item schemas_item, bool source_html,
         RenderExportSession* existing = nullptr, const ViewPageSelection* page_selection = nullptr) {
-    RootFrame roots(11);
+    RootFrame roots(12);
+    Rooted<Item> fonts(roots, {.array = array_plain()});
     Rooted<Item> links(roots, {.array = array_plain()}), destinations(roots, {.array = array_plain()}), metadata(roots, ItemNull);
     Rooted<Item> path(roots, path_item), options(roots, options_item), callback(roots, callback_item),
         schemas(roots, schemas_item), error(roots, ItemNull), result(roots, ItemNull),
@@ -902,12 +913,15 @@ static Item pdf_walk(Item path_item, Item options_item,
             context->backdrop_arenas.destroy();
             if (context->output) context->output->ops->destroy(context->output);
             if (selection_pool) pool_destroy(selection_pool);
+            // selected handles must retire before their owning UI font context.
+            context->text_resources.clear();
             render_export_session_end(session);
             binary_schema_owner_release(owner);
         }
     } cleanup = {owner, &owned_session, &ctx, selection_pool};
     if (!output || !selection_pool) return radiant_pdf_error("cannot allocate PDF callback byte destination");
     ctx.owner = owner; ctx.output = output; ctx.callback = &callback; ctx.error = &error;
+    ctx.text_resources.fonts = &fonts; ctx.frame.text_resources = &ctx.text_resources;
     ctx.resources = &resources; ctx.pages = &pages; ctx.links = &links; ctx.destinations = &destinations;
     if (!resources.get().array || !pages.get().array) return radiant_pdf_error("cannot allocate PDF resource plan");
     ctx.element = pdf_walk_bind(owner, schemas.get(), "element", &element_schema, error);

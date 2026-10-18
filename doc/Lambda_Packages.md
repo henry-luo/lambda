@@ -1009,7 +1009,7 @@ For PDF export, `hyperref` links and anchors become link annotations and destina
 
 Phase III adds bounded theorem/proof, table, language, TikZ/PGFPlots, `natbib`, `caption`/`subcaption`, English `cleveref`, and unhighlighted `listings` profiles. Raw code and document-local `filecontents` bibliographies are preserved. `hyperref` headings and plain-text `\pdfbookmark` titles become hierarchical PDF outlines. `render_result.assets` records image/bibliography paths, origin, availability and source offsets; availability checks local existence, not successful decoding or remote fetching. See the [sample compatibility report](../test/latex/samples/COMPATIBILITY.md).
 
-For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use font outlines and are not searchable text; full ToUnicode font embedding is a separate host capability. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D7.2.7**).
+For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use searchable text with embedded font programs and ToUnicode maps. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D7.2.7**).
 
 ```lambda
 import latex: lambda.doc.latex.latex
@@ -1097,19 +1097,22 @@ pn main() {
 }
 ```
 
-This experimental output profile supports continuous and selected paged
-output (`{paged: true, pages: "1,3"}`), solid rectangular
-backgrounds and borders, positioned glyph outlines, image pixels with alpha
-masks, translucent fills/text, transforms and shared native clip geometry.
+This output profile supports continuous and selected paged
+output (`{paged: true, pages: "1,3"}`), backgrounds and borders,
+positioned PDF text, image pixels with alpha masks, translucent fills/text,
+transforms and shared native clip geometry.
 The native walker owns traversal; the Lambda schema exposes properties and
 typed nullable references, without sibling/parent links (**S11.5 / D3.5**).
 Lambda writes drawing operators, resources, stream lengths and cross-reference
-offsets. Text outlines preserve appearance but provide no searchable text.
-Rounded or decorated boundaries, decorated text,
-gradients, inline vector scenes, markers, effects, links and document metadata
-are not yet supported by this route. Unsupported drawing callbacks return
-errors before the destination is written. The production `lambda render`
-PDF route remains the native writer while migration continues.
+offsets. Text uses selected embedded fonts, ToUnicode and logical ActualText,
+so ordinary text remains searchable and selectable. Affine transforms remain
+PDF text; native/variable/color fonts may use generated Type 3 font programs.
+Decorated text and simple opacity groups preserve text operators. Complex
+graphics use vector resources or shared native raster captures, with text
+semantics retained where available. Links, metadata, destinations, outlines and
+page labels are written by the package. The production `lambda render` PDF
+route uses this same package (**S2.6.6v3 / D2.6.12v3**). Font subsetting and
+complex SVG text paint coverage remain follow-up work.
 
 Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D7.5.3**, dependency policy under **D7.1.2v2**, and the common selected-page lifetime under **D4.5.1v4 / D4.1.4v5**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
 
