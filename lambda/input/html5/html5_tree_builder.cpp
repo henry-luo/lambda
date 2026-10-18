@@ -410,6 +410,17 @@ Element* html5_parse_n(Input* input, const char* html, size_t length, Html5Parse
     return parser->document;
 }
 
+Element* parse_svg_document(Input* input, const char* source) {
+    if (!input || !source) return nullptr;
+    // external SVG shares HTML foreign-content parsing and its published owner (D2.11.2).
+    Element* document = html5_parse(input, source);
+    input->root = document ? Item{.element = document} : ItemError;
+    ElementReader svg = ElementReader(document).findChildElement("html")
+        .findChildElement("body").findChildElement("svg");
+    if (!svg.isValid()) log_error("svg-document-element: expected an HTML-parsed SVG root");
+    return const_cast<Element*>(svg.element());
+}
+
 // ============================================================================
 // FRAGMENT PARSING
 // For parsing HTML fragments in body context (used by markdown parser)
@@ -1725,22 +1736,16 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // generic end tag handling: pop elements until matching tag found
-        // Use strcasecmp for the match to handle SVG camelCase tags (e.g. clipPath vs clippath)
-        // HTML tags are all lowercase in both tag and elem_tag, so this is safe for HTML too.
+        // keep HTML integration-point descendants from case-folding a foreign ancestor's name.
+        bool foreign_content = html5_current_node_is_foreign(parser);
         for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
             Element* elem = (Element*)parser->open_elements->items[i].element;
             const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
 
-            if (str_icmp_cstr(elem_tag, tag) == 0) {
+            if ((foreign_content ? str_icmp_cstr(elem_tag, tag) : strcmp(elem_tag, tag)) == 0) {
                 // found matching element, generate implied end tags and pop
                 html5_generate_implied_end_tags_except(parser, html5_token_tag_id(token), tag);
-                while (parser->open_elements->length > 0) {
-                    Element* popped = html5_pop_element(parser);
-                    if (str_icmp_cstr(((TypeElmt*)popped->type)->name.str, tag) == 0) {
-                        break;
-                    }
-                }
+                while (parser->open_elements->length > (size_t)i) html5_pop_element(parser);
                 return;
             }
 

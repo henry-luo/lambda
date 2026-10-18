@@ -2107,23 +2107,27 @@ TEST_F(SecondaryViewTest, FoDecorationArithmeticUsesCssExpansionAndAbsoluteLongh
     EXPECT_EQ(tree->model->page_count, 1u);
 }
 
-TEST_F(SecondaryViewTest, SvgXmlIntakeUsesTheExpandedRootName) {
+TEST_F(SecondaryViewTest, SvgIntakeUsesHtmlForeignContentNames) {
+    // xmlns spellings do not override HTML's SVG namespace assignment (D2.11.2).
     const char* admitted[] = {"<svg/>", "<svg xmlns='http://www.w3.org/2000/svg'/>",
-        "<s:svg xmlns:s='http://www.w3.org/2000/svg'/>",
-        "<s:svg xmlns='urn:foreign' xmlns:s='http://www.w3.org/2000/svg'/>"};
+        "<SVG viewbox='0 0 20 10'/>", "<svg xmlns='urn:foreign'/>", "<svg xmlns=\"\"/>"};
     for (const char* xml : admitted) { SCOPED_TRACE(xml); EXPECT_NE(parse_svg_document(input, xml), nullptr); }
-    const char* rejected[] = {"<s:svg/>", "<svg xmlns='urn:foreign'/>",
-        "<s:svg xmlns:s='urn:foreign'/>", "<svg xmlns=''/>", "<s:rect xmlns:s='http://www.w3.org/2000/svg'/>"};
+    const char* rejected[] = {"", "<rect/>", "<s:svg/>",
+        "<s:svg xmlns:s='http://www.w3.org/2000/svg'/>",
+        "<s:rect xmlns:s='http://www.w3.org/2000/svg'/>"};
     for (const char* xml : rejected) { SCOPED_TRACE(xml); EXPECT_EQ(parse_svg_document(input, xml), nullptr); }
 }
 
 TEST_F(SecondaryViewTest, QualifiedSvgGeometryUsesNamespaceMembershipAndNamespacedReferences) {
     init_vector_engine();
-    Element* root = parse_svg_document(input,
+    // qualified SVG already parsed in an XML host keeps that host's namespace semantics.
+    parse_xml(input,
         "<s:svg xmlns='urn:foreign' xmlns:s='http://www.w3.org/2000/svg' xmlns:h='http://www.w3.org/1999/xlink'>"
         "<s:defs><s:rect id='shape' width='20' height='10'/></s:defs><s:use h:href='#shape' x='10' y='5'/>"
         "<s:rect xmlns:s='urn:foreign' width='500' height='500'/>"
-        "<s:g><s:path d='M40 0h10v10h-10z'/></s:g></s:svg>"); ASSERT_NE(root, nullptr);
+        "<s:g><s:path d='M40 0h10v10h-10z'/></s:g></s:svg>");
+    Element* root = const_cast<Element*>(ElementReader(input->root).findChildElement("s:svg").element());
+    ASSERT_NE(root, nullptr);
     doc.root = lam::up(build_dom_tree_from_element(root, &doc, nullptr)); ASSERT_NE(doc.root, nullptr);
     float left, top, right, bottom;
     ASSERT_TRUE(dom_svg_element_geometry_bounds(doc.root, &left, &top, &right, &bottom));
@@ -2141,6 +2145,7 @@ TEST_F(SecondaryViewTest, FoInstreamSvgUsesTheCommonImageOwnerAndTranslationBudg
         "<s:clipPath id='clip'><s:rect width='20' height='10'/></s:clipPath><s:rect id='shape' class='shape' width='20' height='10'/></s:defs>"
         "<s:use link:href='#shape' clip-path='url(#clip)'/><s:rect x='10' width='10' height='10' fill='url(#paint)'/>"
         "<s:rect xmlns:s='urn:foreign' width='20' height='10' fill='green'/>"
+        "<rect xmlns='urn:foreign' width='20' height='10' fill='green'/>"
         "<x:style xmlns:x='urn:foreign'>.shape{fill:green}</x:style></s:svg>"
         "</f:instream-foreign-object></f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
     DomElement* original = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
@@ -2156,7 +2161,7 @@ TEST_F(SecondaryViewTest, FoInstreamSvgUsesTheCommonImageOwnerAndTranslationBudg
     LayoutViewNode* node = source_image_fragment(tree, image); ASSERT_NE(node, nullptr);
     Element* svg_root = rdt_picture_get_svg_root(node->image_box->image->pic); ASSERT_NE(svg_root, nullptr);
     ElementReader svg(svg_root);
-    EXPECT_STREQ(svg.get_attr_string("xmlns:s"), "http://www.w3.org/2000/svg");
+    EXPECT_STREQ(svg.get_attr_string("xmlns"), "http://www.w3.org/2000/svg");
     EXPECT_STREQ(svg.childAt(0).asElement().childAt(0).cstring(), ".shape{fill:url(#paint)}");
     EXPECT_FLOAT_EQ(node->image_box->image_rect.width, 30.0f); EXPECT_FLOAT_EQ(node->image_box->image_rect.height, 15.0f);
     ImageSurface* pixels = render_secondary_page_snapshot(tree, 1, 1.0f); ASSERT_NE(pixels, nullptr);

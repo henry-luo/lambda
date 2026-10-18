@@ -316,6 +316,24 @@ bool html5_is_in_svg_namespace(Html5Parser* parser) {
     return false;
 }
 
+bool html5_current_node_is_foreign(Html5Parser* parser) {
+    if (!parser->open_elements) return false;
+    int current = (int)parser->open_elements->length - 1;
+    // integration points are foreign nodes; only their HTML descendants leave the namespace.
+    for (int i = current; i >= 0; i--) {
+        const char* tag = html5_element_tag((Element*)parser->open_elements->items[i].element);
+        if (strcmp(tag, "svg") == 0 || strcmp(tag, "math") == 0) return true;
+        if (strcmp(tag, "html") == 0) return false;
+        if (i != current &&
+            (strcmp(tag, "foreignObject") == 0 || strcmp(tag, "desc") == 0 ||
+             strcmp(tag, "title") == 0 || strcmp(tag, "mi") == 0 ||
+             strcmp(tag, "mo") == 0 || strcmp(tag, "mn") == 0 ||
+             strcmp(tag, "ms") == 0 || strcmp(tag, "mtext") == 0 ||
+             strcmp(tag, "annotation-xml") == 0)) return false;
+    }
+    return false;
+}
+
 // parser lifecycle
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     if (!pool || !arena || !input) return nullptr;

@@ -670,6 +670,8 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     style->isolated_document = input ? dom_document_create(input) : nullptr;
     style->document = style->isolated_document;
     if (!style->document) { svg_style_destroy(style); return false; }
+    // isolated SVG uses the same namespace/name interpretation as parsed HTML (D2.11.2).
+    style->document->page_kind = DOM_PAGE_KIND_HTML;
     style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
     dom_document_borrow_input_resources(style->document);
     style->document->services.svg_image_document = image_document;

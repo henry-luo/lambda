@@ -1,11 +1,40 @@
 # Radiant SVG2: Unified External and Inline SVG Handling
 
+**Parser rulings:** ratified 2026-10-18 in **D2.11.1–D2.11.2** of
+[Lambda Formal Design](../../doc/Lambda_Formal_Design.md). **D2.11.1** governs
+SVG in HTML; **D2.11.2** governs the shared external-SVG parser and result model.
+XHTML keeps its XML syntax under **D2.10.1**. The wider resource/cache proposal
+below remains partial.
+
+## SVG parsing admission
+
+SVG embedded in `text/html` uses the browser-standard HTML5 tokenizer and SVG
+foreign-content rules (**D2.11.1**). External SVG uses that same parser and
+returns the same namespace-aware Mark `Element` subtree (**D2.11.2**). Share
+the parser, tree construction and rendering model to reduce code size and avoid
+divergent results for identical SVG markup. The external-document wrapper only
+selects the parsed SVG root and retains its owning `Input`.
+
+HTML name adjustments, namespace assignment, integration points and error
+recovery consequently apply to both inputs. XML-only namespace-prefix bindings
+do not select SVG elements in this profile; self-closing XHTML children inside
+`foreignObject` follow HTML rules. This is an intentional Lambda external-SVG
+admission policy, rather than a claim that browsers parse standalone SVG as
+HTML. Explicit XML/XHTML inputs retain their own parsing semantics and enter
+the same Mark/DOM/rendering model after parsing (**D2.10.1**).
+
+The host document still supplies styles to inline SVG, while SVG image documents
+remain isolated. Parser sharing does not enable scripts, input or external
+resources in an isolated image. Network sprites remain deferred by the user.
+The HTML behavior follows the
+[WHATWG foreign-content rules](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign).
+
 ## Goal
 
 Radiant currently has two SVG personalities:
 
 - **Inline SVG** enters through the HTML5 parser and is rendered from the HTML/DOM `Element` tree.
-- **External SVG** enters through image/resource paths and is currently parsed through `parse_xml()` in `input-xml.cpp` before being wrapped as an `RdtPicture` / `ImageSurface`.
+- **External SVG** enters through image/resource paths and reuses HTML5 parsing through `parse_svg_document()` before being wrapped as an `RdtPicture` / `ImageSurface` (**D2.11.2**).
 
 This document proposes one SVG pipeline for all SVG sources:
 
@@ -15,7 +44,10 @@ This document proposes one SVG pipeline for all SVG sources:
 - standalone `.svg` documents
 - external `<svg><use href="external.svg#id">`
 
-The key design principle is: **all SVG markup should be parsed by the same HTML/SVG parser path and rendered by the same SVG rendering backend**. External resources should not be special XML-only islands.
+The key design principle is: **inline HTML SVG and external SVG share the HTML5
+SVG parser, Mark result model and SVG renderer** (**D2.11.1–D2.11.2**). SVG
+already parsed as part of an XML/XHTML document retains that syntax and joins
+the shared model after parsing.
 
 ## Design Decisions
 
@@ -29,7 +61,11 @@ This proposal makes the following decisions explicit:
 
 ## Implementation Status
 
-Status as of 2026-10-03: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table below reconciles the earlier architecture audit with the current SVG behavior work. The larger resource/cache design remains separate from the support proposal.
+Status: **partially implemented**. The 2026-10-03 behavior closeout remains the
+record for the original feature inventory; parser admission is revised by
+**D2.11.1–D2.11.2** on 2026-10-18. The full `SvgDocument` resource/cache
+architecture described below is not yet complete. The larger resource/cache
+design remains separate from the support proposal.
 
 The [SVG support implementation plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
 records six repaired gaps: rectangle radius fallback, default line stroke,
@@ -53,7 +89,7 @@ transfer/convolution, motion/discard animation and Linux/Windows export smoke ar
 explicit residue; this does not complete the larger resource/cache proposal.
 
 **2026-10-03 P12 audit.** The
-[SMIL implementation record](../impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit)
+[SMIL implementation record](../impl/Lambda_Impl_SVG_Support.md#715--p12-smil-clock-dependency-default-and-lifetime-audit)
 adds clock-aware style/filter cache keys, external-use source scope, typed unit
 dependencies, XML implicit values, fragment clocks across HTML integration,
 detach driver guards and deterministic initial exports. Sampled strings are copied
@@ -71,8 +107,8 @@ P13 runtime smoke remains open.
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Parse external SVG as XML | Done | `parse_svg_document()` uses the shared XML parser for case, namespaces, CDATA and self-closing XHTML boundaries. Inline SVG retains the HTML5 foreign-content path. |
-| Standalone `.svg` rendering | Done | Standalone SVG keeps its prebuilt SVG/image view tree and renders through `RdtPicture` / `render_svg_to_vec()`. |
+| Shared HTML5 SVG parsing | Implemented; current qualification is in the follow-on plan | `parse_svg_document()` delegates to the existing HTML5 document parser and selects its SVG subtree, matching inline HTML SVG under **D2.11.1–D2.11.2**. XML/XHTML input remains separate under **D2.10.1**. |
+| Standalone `.svg` rendering | Done | `load_svg_doc()` embeds the source in an HTML document and uses the shared HTML5 parser and SVG painter. |
 | `<img src="foo.svg">` vector-first rendering | Done | `render_image_content()` draws SVG images as `RdtPicture` vector content instead of forcing `render_svg()` rasterization first. |
 | `background-image: url(foo.svg)` vector path | Mostly done | Background SVG tiles draw through duplicated `RdtPicture` instances and `rc_draw_picture()`. It still uses the current `ImageSurface` compatibility wrapper. |
 | Nested SVG `<image href="nested.svg">` | Done for local files/data URIs | SVG data URIs and local `.svg` hrefs route through `RdtPicture`; raster image hrefs still use the existing ThorVG image loader path. Relative file resolution is now source-path aware. |
@@ -107,15 +143,25 @@ External SVG has several entry points:
 - `load_svg_doc()` for standalone `.svg` files
 - `process_svg_resource()` for external `<use href="external.svg#id">`
 
-The first three eventually load an `RdtPicture`. `rdt_picture_load()` reads the file and calls an SVG picture creation path that parses the bytes with `parse_xml()`. The parsed SVG root is then rendered with `render_svg_to_vec()`.
+Image/background/reference entry points load an `RdtPicture` or a referenced
+parsed picture owner. Standalone `load_svg_doc()` instead embeds the source in
+an HTML document and enters the same HTML5 parser and SVG painter directly.
+`rdt_picture_load()` reads the source and calls `parse_svg_document()`, which
+uses the same HTML5 parser and SVG foreign-content rules as inline HTML. Its
+SVG `Element` subtree is rendered with `render_svg_to_vec()` (**D2.11.2**).
 
-That means external SVG and inline SVG now share much of the drawing code, but **do not share the same parser path**. External `<use>` is even less complete: it discovers and downloads the external SVG, but the current handler is mostly a stub that reads the file and logs the target fragment.
+External and inline HTML SVG share parsing and painting; their owning document,
+style scope and permitted resource operations remain distinct. Local external
+`use` already renders by reference; async/network resource integration remains
+outside the implemented inventory.
 
 ## Problems to Fix
 
-1. **Parser divergence**
+1. **Parser parity qualification**
 
-   Inline SVG gets HTML5 foreign-content behavior and SVG tag/attribute correction. External SVG gets XML parser behavior. This can create subtle differences in tag names, attributes, namespace aliases, self-closing handling, and error recovery.
+   Verify that external and inline HTML SVG have equal parsed subtrees for name
+   adjustment, namespaces, CDATA, malformed input and HTML integration points
+   (**D2.11.1–D2.11.2**). Do not add an external-only syntax repair path.
 
 2. **Resource handling divergence**
 
@@ -188,28 +234,26 @@ struct SvgDocumentRef {
 
 The renderer should operate on a document/ref abstraction instead of directly caring whether the source was inline, an image, a background, or a standalone file.
 
-## Parse External SVG as XML
+## Parse external SVG through HTML5
 
-External SVG uses `parse_svg_document()` in `lambda/input/input-xml.cpp`.
-It invokes the shared XML parser and returns the SVG root while keeping the
-parsed document in its Input owner (D4.1.3/D4.2.6). Inline SVG continues through
-HTML5 foreign-content parsing. Both parsers produce Lambda Elements for the
-same renderer; parser choice follows the embedding document's syntax.
+External SVG uses `parse_svg_document()` in
+`lambda/input/html5/html5_tree_builder.cpp`. It invokes the existing HTML5
+document parser and returns the SVG root while keeping the `#document` in its
+Input owner (**D2.11.2 / D4.1.3 / D4.2.6**). Inline HTML SVG uses the same
+foreign-content tokenizer and tree construction (**D2.11.1**).
 
 ```cpp
 Element* parse_svg_document(Input* input, const char* svg_source);
 ```
 
-XML preserves element/attribute case, namespace declarations, CDATA, and
-self-closing XHTML content. The earlier synthetic HTML wrapper was incorrect:
-an XHTML self-closing tag inside foreignObject could absorb the next SVG
-sibling. The P11 namespace/type-selector fixtures reproduce that defect and
-verify the shared XML path. Namespace prefixes remain authored data; layout
-and CSS type selectors use the HTML element's local name.
+Case adjustment, namespace assignment, CDATA and self-closing behavior match
+the same markup embedded in HTML. XML/XHTML-hosted SVG remains governed by its
+host syntax; the external-SVG entry adds no XML compatibility parser.
 
 ```text
 rdt_picture_load(path) / rdt_picture_load_data(bytes)
   -> parse_svg_document(input, bytes)
+  -> shared HTML5 parser and SVG Element subtree
   -> isolated SVG style/document context
   -> shared SVG PaintIR traversal
 ```
@@ -514,7 +558,8 @@ Do not cache rendered pixels as the primary representation. Rendered/rasterized 
 ### Phase 1: Parser Unification
 
 - Add `parse_svg_document()`.
-- Route external SVG through shared XML parsing; retain HTML5 parsing for inline SVG.
+- Route external SVG through the existing HTML5 SVG parsing path and select its
+  SVG subtree; retain the same Mark result model (**D2.11.1–D2.11.2**).
 - Keep `rdt_picture_load()` as a compatibility wrapper initially.
 - Add regression tests comparing inline SVG and external SVG with the same markup.
 
@@ -642,7 +687,7 @@ Useful assertions:
 At the end of this refactor, the pipeline should be simple to reason about:
 
 ```text
-All SVG bytes/elements
+Inline HTML SVG / external SVG bytes
   -> HTML5/SVG Element tree
   -> SvgDocument/SvgDocumentRef
   -> shared resource/cache/id resolver
@@ -650,7 +695,26 @@ All SVG bytes/elements
   -> direct vector draw or explicit off-screen rasterization
 ```
 
-Inline SVG and external SVG should differ only in source ownership, resource isolation, and placement context. They should not differ in parser semantics, attribute normalization, text/font APIs, or drawing backend behavior.
+Inline HTML SVG and external SVG differ in source ownership, resource isolation
+and placement context. They share parser semantics, attribute normalization,
+text/font APIs and drawing behavior (**D2.11.1–D2.11.2**). XML/XHTML trees join
+at the shared Element model without reparsing (**D2.10.1**).
+
+## Superseded parser guidance
+
+- ~~External SVG uses XML parsing while inline SVG uses HTML5; migration Phase 1
+  should retain that split.~~ Superseded by **D2.11.1–D2.11.2** (USER,
+  2026-10-18), which share HTML5 SVG parsing for external and inline HTML SVG.
+  The former split preserved XML case, namespace aliases and self-closing
+  XHTML boundaries, but retained different parsing semantics for identical SVG
+  source. Explicit XML/XHTML inputs continue to preserve those XML semantics.
+- ~~The synthetic HTML path is incorrect because a self-closing XHTML tag in
+  foreignObject can absorb following siblings; external SVG must instead
+  preserve XML namespace aliases, case and self-closing boundaries.~~ This was
+  the original P11 external-image contract. **D2.11.2** (2026-10-18) instead
+  requires external SVG to match inline HTML parsing. XML-only source fixtures
+  describe the retired external profile, while XML/XHTML host tests retain their
+  XML interpretation.
 
 
 ## SVG support implementation progress (2026-10-02)

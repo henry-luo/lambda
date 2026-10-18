@@ -43,6 +43,10 @@ tolerance or imported-PDF baseline was loosened.
 
 Recent implemented areas include namespace/language/direction selectors, live CSSOM declarations and rule interfaces, custom-property computation, typed CSS math and grid tracks, SVG text/references, responsive image selection, and explicit paged HTML/FO/native/PDF output. The remaining gaps are listed in the relevant rows. Detailed implementation history and qualification limits live in the [active CSS support plan](../vibe/impl/Radiant_Impl_CSS_Support.md), [SVG support record](../vibe/impl/Lambda_Impl_SVG_Support.md) and [paged-media record](../vibe/impl/Radiant_Impl_Paged_Media.md).
 
+The proposed [SVG enhancement plan](../vibe/impl/Radiant_Impl_SVG_Support.md)
+prioritizes CSS-driven icons/diagrams and component-transfer filters, with a
+separate CSS geometry extension. It does not change the support statuses below.
+
 To check a feature yourself, lay the page out and read the JSON, or render it and look:
 
 ```bash
@@ -528,6 +532,15 @@ Opacity math accepts numbers or percentages; adding them together is invalid und
 
 Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` in HTML, a standalone `.svg` file given to `lambda render` or `lambda view`, `<img src="x.svg">`, CSS `url(x.svg)`, `data:` SVG URIs, SVG `<image href="x.svg">`, and external `<use href="f.svg#id">`. ThorVG is the rasterizer underneath; its own SVG loader is not used. Design: [RAD_14 — SVG, Vector Graphics & Diagram Layout](dev/radiant/RAD_14_SVG_Vector_Graph.md). SVG *output* is covered in [§17](#17-output-targets).
 
+**Parsing policy (2026-10-18):** SVG embedded in HTML follows browser-standard
+HTML5 foreign-content parsing (**D2.11.1**). External SVG uses that same parser
+and Mark element model (**D2.11.2**), including HTML name adjustments, namespace
+rules and HTML integration points. XML-only prefix bindings and self-closing
+XHTML syntax therefore follow the same behavior as inline HTML SVG. This is
+Lambda's external-SVG admission profile; explicit XML/XHTML documents retain
+their XML syntax (**D2.10.1**). See the
+[shared-parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record).
+
 **2026-10-03 closeout:** the listed geometry, cascade, text, paint-server,
 clip/mask, stroke/marker, filter and embedded-HTML work is implemented. P12 also
 implements access-key/wallclock timing, private local/external/nested use event
@@ -541,7 +554,7 @@ Linux/Windows P13 runtime smoke. Retained source/sample ownership follows
 
 | Element | Status | Notes |
 |---|---|---|
-| SVG namespace identity | ✅ | Qualified SVG names use namespace membership and local names, including geometry/text dispatch, namespaced references and FO instream graphics. Same-named foreign elements are excluded; native namespace controls pass. |
+| SVG namespace identity | ✅ | XML/XHTML-hosted SVG and FO instream graphics retain expanded namespace/local-name identity, including geometry/text dispatch and namespaced references. Inline HTML and external SVG use HTML namespace assignment under **D2.11.1–D2.11.2**. Actual foreign-namespace elements are excluded; native namespace controls pass. |
 | `<svg>`, nested `<svg>` | ✅ | `viewBox` and `preserveAspectRatio` (alignment, `meet`, `slice`, `none`). Default size 300 × 150; with only a `viewBox` it fills the container width at the viewBox ratio. Root and nested overflow follow authored CSS/presentation values; visible ink can extend beyond the viewport, while hidden overflow clips in viewport space. |
 | `<g>` | ✅ | Group opacity composites overlapping shapes once, with or without a root `viewBox`, including nested groups and a nonzero viewBox origin. |
 | `<path>` | ✅ | All commands (`M L H V C S Q T A Z`, absolute and relative), arcs included. Invalid data retains complete preceding segments; incomplete parameter sets are not emitted. |
@@ -554,7 +567,7 @@ Linux/Windows P13 runtime smoke. Retained source/sample ownership follows
 | `<use>`, `<symbol>`, `<defs>` | ✅ | `href` and `xlink:href`, `x`/`y`, the symbol's `viewBox` and `preserveAspectRatio`, external `file.svg#id`, a cycle guard, nesting up to 16 levels. |
 | `<image>` | ✅ | Shared PNG/JPEG/GIF/WebP/SVG and data-URI resources; document-relative URLs, x/y, all aspect alignments, meet/slice/none, transformed clipping and opacity. GIF frames invalidate recorded paint. Referenced SVG images isolate styles and block external file references; standalone SVG has a live document DOM. |
 | `<switch>` | ✅ | First eligible child, conditional language/extension checks, no-match behavior and live mutation. |
-| `<foreignObject>` | ✅ | Transformed/clipped HTML layout, paint, input and mutation, including prefixed XHTML. SVG images use isolated styles and secure image restrictions. |
+| `<foreignObject>` | ✅ | Transformed/clipped HTML layout, paint, input and mutation. Prefixed XHTML names are preserved in XML/XHTML hosts; external SVG follows HTML parsing under **D2.11.2**. SVG images use isolated styles and secure image restrictions. |
 | `<style>` inside SVG | ✅ | Uses the shared CSS parser, selector matcher and cascade, including lists, combinators, specificity and `!important`; external image documents retain isolated styles. |
 | `<title>`, `<desc>` | ✅ | Not painted, as in browsers; no tooltip. |
 | `<linearGradient>`, `<radialGradient>` | ✅ | See the paint-server table below. |

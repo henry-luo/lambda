@@ -1315,6 +1315,22 @@ TEST_F(SvgAnimationLifetimeTest, AttributeNamespaceIdentityUsesAnimationBindings
     EXPECT_EQ(svg_animation_value(target, "xlink:href"), nullptr);
 }
 
+TEST_F(SvgAnimationLifetimeTest, HtmlAnimationBindingsRequireActualXmlnsAttributes) {
+    doc.page_kind = DOM_PAGE_KIND_HTML;
+    DomElement* scope = element("g", svg); ASSERT_NE(scope, nullptr);
+    ASSERT_TRUE(scope->set_attribute("xmlns:a", "http://www.w3.org/1999/xlink"));
+    DomElement* target = element("use", svg); ASSERT_NE(target, nullptr);
+    ASSERT_TRUE(target->set_attribute("id", "target"));
+    DomElement* animation = animate(scope, "a:href", "#red", "#blue"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("href", "#target"));
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, 1.5);
+    EXPECT_EQ(svg_animation_value(target, "xlink:href"), nullptr);
+    ASSERT_TRUE(dom_element_record_namespaced_attribute(scope, "http://www.w3.org/2000/xmlns/",
+        "xmlns:a", "http://www.w3.org/1999/xlink"));
+    svg_animation_set_time(svg, 1.75);
+    EXPECT_STREQ(svg_animation_value(target, "xlink:href"), "#blue");
+}
+
 TEST_F(SvgAnimationLifetimeTest, NonAnimatableAndInapplicableAttributesDoNotProduceSamples) {
     struct Case { const char* tag; const char* name; const char* from; const char* to; bool transform; };
     const Case cases[] = {
