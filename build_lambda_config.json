@@ -1541,8 +1541,21 @@
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
         "lambda/runtime/re2_wrapper.cpp",
-        "lambda/serve/tls_handler.cpp",
         "lambda/serve/serve_utils.cpp",
+        "lambda/serve/serve_types.cpp",
+        "lambda/serve/http_request.cpp",
+        "lambda/serve/http_response.cpp",
+        "lambda/serve/router.cpp",
+        "lambda/serve/middleware.cpp",
+        "lambda/serve/worker_pool.cpp",
+        "lambda/serve/language_backend.cpp",
+        "lambda/serve/body_parser.cpp",
+        "lambda/serve/static_handler.cpp",
+        "lambda/serve/cookie.cpp",
+        "lambda/serve/mime.cpp",
+        "lambda/serve/server.cpp",
+        "lambda/serve/mcp_server.cpp",
+        "lambda/serve/tls_handler.cpp",
         "lambda/runtime/lambda-error.cpp",
         "lambda/runtime/sys_func_registry.c",
         "lambda/runtime/side_stack.c",
@@ -1668,7 +1681,8 @@
       "lang": "c++17",
       "source_files": [
         "lambda/main.cpp",
-        "lambda/main-repl.cpp"
+        "lambda/main-repl.cpp",
+        "lambda/mcp_main.cpp"
       ],
       "libraries": [
         "lambda-rt",
