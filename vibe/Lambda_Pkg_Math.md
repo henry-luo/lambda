@@ -1100,6 +1100,54 @@ paint layers and verifies that the original MathML DOM is retained.
 | Radiant aggregate gate | Remains red: `md_nuxt-readme` element comparison regresses **100.0% → 99.3%**, and four document-editor cases fail (DCT PDF, two EML previews, TSV table). Their causes are not established here. **347** layout cases remain partial. Page snapshots **51/51**, scene tests **28/28** and view tests **193/193** pass with host access. The visual suite hits the runner's idle timeout but subsequently completes with all **211** applicable baseline checks passing. `temp/mathml/radiant-baseline-host.log`, `markdown-baseline-diagnostic.log`, `test_output/test_radiant_render_baseline.log`. |
 | Generated data and layout lint | Operator dictionary/license regenerate identically; `no-int-cast-radiant` and formal-index checks pass. |
 
+### 11.7 Source formatting in the package
+
+The 2026-10-18 migration retires `lambda/format/format-math*.cpp` and their
+shared header. `lambda.doc.math.format` owns LaTeX and AsciiMath writers and
+delegates MathML conversion to `mathml`; `math` re-exports the public writers.
+This applies the existing package namespace and IO-layer rules rather than
+changing language semantics (**D7.1.1**, **D7.2.4v3**, **D7.2.8**).
+
+Runtime `format`, CLI `convert` and procedural `output` share the script-format
+route. Hosts without Radiant load only the font-independent writer modules.
+Native `format_data` rejects math targets as it does other script formats;
+generic XML serialization remains below the runtime. Typst math still returns
+an explicit unsupported error. AsciiMath retains its existing partial
+conversion coverage; arbitrary TeX constructs are not promised lossless output.
+
+The writers share scalar/array traversal and reuse `util.content_items` for
+the separate atoms in array-carried math runs (**S2.6.1v2**). LaTeX preserves
+text escapes, limit placement, environment metadata and command arguments;
+AsciiMath preserves command mappings and function-word/script coalescing.
+The parser's bracket-group root index is unwrapped once, and binomials read
+`numer`/`denom`, correcting the native writers' duplicate brackets and obsolete
+`top`/`bottom` field access.
+
+Compatibility goldens cover both source writers; the native round-trip tests
+now invoke the runtime above IO. `node --test
+test/lambda/math/source_format.test.mjs` exercises interpreter, JIT, automatic
+promotion, forced compacting GC, CLI flavors and procedural output. Select a
+runtime-only host with `LAMBDA_MATH_FORMAT_EXE=./lambda-cli.exe`.
+
+Verification on 2026-10-18: full and runtime-only builds pass; both source-adapter
+suites pass **10/10**, including all tiers and forced GC. MathML integration
+passes **14/14** on the full host and **10/10** applicable checks without
+Radiant. Existing math goldens pass **37/37** under both interpreter and JIT;
+the aggregate's SVG corpus passes **921/921**. The HTML snapshot is identical
+outside the **13** accessible titles corrected by the root/binomial fixes.
+Logs are under `temp/math-format/`.
+
+The required Lambda/Input gate reaches **7,711/7,722**: Input **2,112/2,112**,
+Lambda goldens/native runtime **1,619/1,619**, and GC stress **313/313** pass;
+the remaining **11** failures are TypeScript cases, reproduced standalone
+with the sampled arrow case reporting syntax outside the JS MVP scope.
+`Math_Support.md` examples compile; the package-reference check retains five
+failures also reproduced from its unchanged HEAD examples. The runtime
+format adapter now roots symbol-to-string option conversions before the next
+allocation (**D5.3.3**). Runtime-only qualification also fills missing weak-map
+lifecycle and excluded-module registration/activation boundary definitions;
+unavailable Jube registration/activation still fail (**D7.1.6**).
+
 ## Appendix A. Brief implementation history
 
 This document replaces `Lambda_Pkg_Math2.md`, `Lambda_Pkg_Math3.md`,

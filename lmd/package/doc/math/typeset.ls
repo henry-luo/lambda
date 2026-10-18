@@ -9,6 +9,7 @@ import util: .util
 import graphics: .graphics
 import geometry: .geometry
 import mhchem: .mhchem
+import writer: .format_latex
 
 pub fn render(ast, options) map | error {
     if (not (ast.error is null)) error("math: " ++ string(ast.error))
@@ -23,7 +24,7 @@ pub fn render(ast, options) map | error {
         base_uri: options.base_uri}
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
-    let label = if (ast is string) ast else format(ast, {type: "math", flavor: "latex"})^
+    let label = if (ast is string) ast else writer.to_latex(ast)
     let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label,
         font.stylesheet(profile, result.body));
     {element: output_el, width: result.width / font.UNITS, height: result.height / font.UNITS,

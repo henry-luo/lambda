@@ -22,6 +22,7 @@ extern "C" {
 #include "../lambda/lambda-data.hpp"
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
+#include "math_format_runtime.hpp"
 extern "C" Item input_from_source(char* source, Url* url, String* type, String* flavor);
 extern "C" char* read_text_file(const char* filename);
 // Use the existing function from lib/file.c
@@ -229,6 +230,7 @@ Url* create_test_url(const char* url_string) {
 // Returns true if all tests pass, false if any fail
 bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type,
     const char* flavor, const char* url_prefix, const char*, const char*) {
+    MathFormatTestRuntime runtime;
     String* type_str = create_lambda_string(type);
     String* flavor_str = create_lambda_string(flavor);
 
@@ -270,7 +272,7 @@ bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_case
         }
 
         // Format it back
-        String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
+        String* formatted = runtime.format(input->root, type_str, flavor_str, input->pool);
 
         if (!formatted) {
             printf("Failed to format - skipping case %d\n", i);

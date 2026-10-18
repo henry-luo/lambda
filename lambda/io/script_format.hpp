@@ -3,7 +3,7 @@
 #include <string.h>
 #include "wiki_format.hpp"
 
-// Routing only; all source syntax belongs to lambda.doc.misc (D7.1.1).
+// Routing only; source syntax belongs to the script packages (D7.1.1).
 inline const char* script_format_target(const char* type, const char* flavor = nullptr) {
     if (!type) return nullptr;
     if (!strncmp(type, "markup:", 7)) return script_format_target(type + 7);
@@ -24,6 +24,17 @@ struct ScriptFormatRoute {
 };
 
 inline ScriptFormatRoute script_format_route(const char* type, const char* flavor = nullptr) {
+    // Math conversion runs above IO, including XML serialization via the package.
+#ifndef LAMBDA_NO_MATH_FORMAT
+    if (type && !strcmp(type, "math"))
+        return {"lambda.doc.math.format", flavor && *flavor ? flavor : "latex", "flavor"};
+    if (type && !strncmp(type, "math-", 5)) {
+        const char* target = type + 5;
+        if (!strcmp(target, "latex") || !strcmp(target, "ascii") ||
+                !strcmp(target, "mathml") || !strcmp(target, "typst"))
+            return {"lambda.doc.math.format", target, "flavor"};
+    }
+#endif
     if (const char* target = wiki_format_flavor(type, flavor))
         return {"lambda.doc.wiki", target, "flavor"};
     if (const char* target = script_format_target(type, flavor))

@@ -948,6 +948,15 @@ contains(format(el, 'html'), "<text") // true
 | `stylesheet(options = null)` | Returns `""`; each SVG embeds its required font declarations |
 | `to_mathml(ast, options = null)` | Presentation MathML element tree; optional `display` and inert TeX `source` annotation |
 | `parse_mathml(source)` | Strict MathML XML tree with namespaces validated and token whitespace preserved |
+| `to_latex(ast)` | Writes a TeX/AsciiMath AST as LaTeX source |
+| `to_ascii(ast)` | Writes the existing AsciiMath subset, including command spellings and function-word coalescing |
+| `format(ast, options = null)` | Formats as `latex` (default), `ascii` or `mathml`, selected by `options.flavor`; Typst math returns an error |
+
+`lambda.doc.math.format` exposes the three source-formatting functions without
+importing Radiant. Runtime `format(ast, 'math')`, the `math-latex`, `math-ascii`
+and `math-mathml` targets, procedural `output` and CLI conversion all use this
+package. Native IO retains generic XML serialization; math traversal and
+conversion live entirely in Lambda (**D7.1.1**, **D7.2.4v3**, **D7.2.8**).
 
 The font-independent `lambda.doc.math.mathml` module exposes the same conversion
 and parsing APIs without importing Radiant. Runtime
