@@ -2069,7 +2069,7 @@ static bool markup_flavor_to_format(const char* flavor, MarkupFormat* format) {
     return false;
 }
 
-static bool dispatch_exact_input_parser(const char* effective_type, Input* input, const char* source) {
+bool input_parse_source_exact(const char* effective_type, Input* input, const char* source) {
     for (size_t i = 0; i < sizeof(INPUT_PARSER_MAPPINGS) / sizeof(INPUT_PARSER_MAPPINGS[0]); i++) {
         if (strcmp(effective_type, INPUT_PARSER_MAPPINGS[i].type) == 0) {
             INPUT_PARSER_MAPPINGS[i].parse(input, source);
@@ -2265,7 +2265,7 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif
         else if (input_parse_model(input, source, source_len, effective_type)) {}
-        else if (dispatch_exact_input_parser(effective_type, input, source)) {}
+        else if (input_parse_source_exact(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
             // PDF is binary; use the explicit length we received instead of strlen,

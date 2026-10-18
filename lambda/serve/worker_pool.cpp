@@ -97,7 +97,7 @@ static void worker_execute(uv_work_t *work) {
 
 static void worker_after(uv_work_t *work, int status) {
     WorkerTask *task = (WorkerTask*)work;
-    WorkerPool *pool = (WorkerPool*)task->user_data;
+    WorkerPool *pool = task->pool;
 
     if (pool) {
         pool->active_tasks--;
@@ -139,7 +139,7 @@ int worker_pool_dispatch(WorkerPool *pool,
     if (!pool || !req || !resp) return -1;
 
     // check queue limit
-    if (pool->max_queue_length > 0 && pool->queued_tasks >= pool->max_queue_length) {
+    if (pool->max_queue_length > 0 && pool->active_tasks >= pool->max_queue_length) {
         log_error("worker pool queue full (%d tasks), rejecting request",
                   pool->queued_tasks);
         return -1;
@@ -154,6 +154,7 @@ int worker_pool_dispatch(WorkerPool *pool,
     task->handler_data = handler_data;
     task->middleware = middleware;
     task->on_complete = on_complete;
+    task->pool = pool;
     task->user_data = user_data;
     task->result = BACKEND_ERROR; // default until worker completes
 

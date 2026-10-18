@@ -239,6 +239,10 @@ void print_help() {
     printf("  lambda run <script.ls>              - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
+#ifndef LAMBDA_NO_SERVE
+    fputs("  lambda mcp [--transport stdio] - Serve document tools over MCP stdio\n"
+          "  lambda serve --mcp [--port 8080] - Serve MCP over loopback HTTP\n", stdout);
+#endif
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
     printf("  lambda view [file.pdf|file.html]  - Open a document (default: bundled lambda.doc viewer)\n");

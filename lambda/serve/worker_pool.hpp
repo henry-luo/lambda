@@ -44,6 +44,7 @@ struct WorkerTask {
     void               *handler_data;   // user_data for the handler
     MiddlewareStack    *middleware;      // middleware chain to run
     WorkerCompleteFn    on_complete;    // completion callback
+    struct WorkerPool *pool;           // stats owner, distinct from caller context
     void               *user_data;      // user context for completion
     int                 result;         // execution result (BackendResult)
 };
