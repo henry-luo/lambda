@@ -658,11 +658,19 @@ extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receive
     }
     return object.get();
 }
-Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback) {
-    if (!fallback || !mvp_lmd_is_constructor(new_target)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+extern "C" Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback, int64_t source_layout) {
+    if ((!fallback && !source_layout) || !mvp_lmd_is_constructor(new_target)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, new_target), prototype(roots, ItemNull), object(roots, ItemNull);
+    if (source_layout) {
+        // the emitter proves a local ordinary entry before requesting its immutable source template.
+        Item prepared = mvp_lmd_function_prepare(target.get());
+        if (item_is_error(prepared)) return prepared;
+        fallback = mvp_lmd_class_record(target.get());
+        if (!fallback || !fallback->owner || !fallback->allocation_shape)
+            return Item{.item = ITEM_JS_UNDEFINED};
+    }
     prototype.set(mvp_lmd_constructor_prototype(target.get(),
         mvp_lmd_program_library(fallback->program)->values[LMD_LIBRARY_OBJECT_PROTOTYPE]));
     if (item_is_error(prototype.get())) return prototype.get();
@@ -686,7 +694,26 @@ Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback) {
         }
     }
     MvpLmdClass* allocation = actual ? actual : fallback;
-    object.set(mvp_lmd_object_new(&allocation->shape, 0));
+    if (source_layout) {
+        Item cursor = prototype.get();
+        int depth = 0;
+        MvpLmdLibraryState* library = mvp_lmd_program_library(fallback->program);
+        while (cursor.item != ITEM_NULL) {
+            if (++depth > 32 || get_type_id(cursor) != LMD_TYPE_MAP ||
+                    cursor.map->map_kind != MAP_KIND_PLAIN || mvp_lmd_foreign_candidate(cursor, true))
+                return Item{.item = ITEM_JS_UNDEFINED};
+            TypeMap* shape = (TypeMap*)cursor.map->type;
+            if (!shape || shape->js_meta) return Item{.item = ITEM_JS_UNDEFINED};
+            FOR_EACH_MAP_FIELD(allocation->allocation_shape, field) {
+                // even inherited data is rejected: setters/nonwritable fields must see ordinary Set.
+                if (typemap_hash_lookup(shape, field->name->str, field->name->length))
+                    return Item{.item = ITEM_JS_UNDEFINED};
+            }
+            cursor = mvp_lmd_get_prototype_with_library(cursor, library);
+            if (item_is_error(cursor)) return cursor;
+        }
+    }
+    object.set(mvp_lmd_object_new(source_layout ? allocation->allocation_shape : &allocation->shape, 0));
     if (item_is_error(object.get())) return object.get();
     if (prototype.get().item != mvp_lmd_class_values(allocation)[1].item) {
         Item linked = mvp_lmd_set_prototype(object.get(), prototype.get());

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2: source prototype candidates check own shadowing and live shape, then guard the captured method entry before leaf expansion.",
+  "args": ["--runtime=mvp-lmd"],
+  "checks": [{
+    "in_func": "mvp_lmd_f1",
+    "expect": ["call\ttypemap_hash_lookup_key", "call\tmvp_lmd_class_property", "mvp_lmd_f3"],
+    "count": {"call\tmvp_lmd_get_prototype": 1},
+    "expect_seq": [
+      "mov\t{{r:entry}}, i64:16({{r:constructor}})",
+      ", {{r:entry}}, mvp_lmd_f2",
+      "call\ttypemap_hash_lookup_key",
+      ", mvp_lmd_get_prototype, {{r:prototype}}, {{r:receiver}}",
+      "mov\t{{r:data}}, i64:16({{r:prototype}})",
+      "mov\t{{r:method}}, i64:({{r:data}})",
+      "mvp_lmd_f3"
+    ]
+  }]
+}

@@ -2192,3 +2192,39 @@ regressions. The retry-only count is higher than the prior three-case capture.
 Serial singleton replays pass all ten on both binaries in **24.4/24.5 seconds**
 (control/candidate), consistent with load-sensitive classification; the full
 run retains its ten retry-only cases. The report preserves both records.
+
+### 36.8 Source constructor layouts and prototype method targets
+
+**2026-10-18; D8.4.1v2, D3.4.3v5–D3.4.4v4, D3.4.7, D5.2.1v3:** extend
+static proofs to ordinary function constructors and prototype-assigned methods.
+A small constructor containing only distinct `this.field = parameter/literal`
+initializers can allocate its complete source-defined layout. Guard the live
+constructor entry and realm, and reject inherited-field or exotic-prototype
+interference before allocation. Reuse Lambda's ordinary Map allocation and
+`TypedItem` stores; keep nominal identity per constructor closure. No execution
+feedback or per-site cache is added.
+
+Prototype-literal candidates guard the receiver's nominal owner, absence of an
+own shadow and the live prototype shape. Load the current method before
+arguments; only a bounded leaf body with a matching captured entry and realm
+can inline in a function body or loop. Mutations, accessors, proxies and unproven
+constructors retain existing dispatch. The existing `mvp_lmd_object_from_constructor` gains an
+optional source-layout mode; there is no new runtime helper. Focused semantic,
+GC, emission and matched release-MIR evidence is recorded in
+[`temp/js_mvp_hashmap_static_20261018/REPORT.md`](../../temp/js_mvp_hashmap_static_20261018/REPORT.md).
+
+Keep the proofs in the existing object-plan registry and AST index; ordinary
+compiler function/program records retain their original size. Six balanced,
+source-matched release-MIR rounds measure HashMap at **371.086 ms versus
+463.929 ms** (**20.0% less time**); Node is **15.161 ms**, leaving a **24.5×**
+gap. An unrelated merge affected the initial control, so the final comparison
+rebuilds it from the current common sources. The report preserves that audit
+and the superseded captures. Result10 remains its original snapshot.
+
+All **14/14** screened workload contracts pass. Final affected gates pass
+**824/824** runtime cases, **106/106** optimizer contracts, **20/20** MIR budgets
+and **5/5** forced-GC cases. No slowdown is confirmed against both controls;
+text search measures **+0.2–0.7%**, with both intervals including no change,
+and the earlier map-lookup slowdown does not reproduce. The earlier aggregate/
+recount results and final scoped reruns remain separate in the report; this
+is not a full 88-workload sweep.
