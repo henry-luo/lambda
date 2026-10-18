@@ -275,6 +275,7 @@ struct MvpLmdProgram {
     bool date_observed;
     ArrayList* classes;
     bool receiver_abi;
+    bool function_construction; // source evidence gates optional own-read specialization
     bool deletes_properties;
     bool host_enabled;
     bool host_active;
@@ -1055,6 +1056,11 @@ static void walk(AstNode* n, LmdWalk* state) {
         if (call->interp_has_spread_args) { activate_library(p, n); p->iterators = true; }
         AstNode* target = call->callee;
         AstIdentNode* id = target->node_type == AST_NODE_IDENT ? (AstIdentNode*)target : NULL;
+        if (state->facts && id) {
+            LmdBinding* ctor = identifier_binding(p, id);
+            // native-only units need no function-instance guards in every open read.
+            if (ctor && ctor->target && !ctor->target->home) p->function_construction = true;
+        }
         if (id && named(id->name, "Array")) p->array_holes = true;
         if (id && named(id->name, "Map") && ((AstCallNode*)n)->arguments) {
             activate_library(p, n); p->iterators = true;
@@ -4309,8 +4315,12 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             spelling && operation <= LMD_PROP_SET && repeated_execution(c) && !compact_property_dispatch(c)
             ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
         // existing own-slot guards remain valid in mutable units; misses use semantic Set.
-        MIR_reg_t joined = 0;
-        MIR_label_t done = NULL;
+        MIR_reg_t joined = 0, shared_field = 0, shared_data = 0;
+        MIR_label_t done = NULL, shared_read = NULL;
+        bool own_read = operation == LMD_PROP_GET && cache && !cache_miss &&
+            c->program->function_construction && c->program->property_callbacks && spelling &&
+            !(spelling->len && spelling->chars[0] >= '0' && spelling->chars[0] <= '9');
+        MIR_label_t semantic_read = own_read ? label(c) : NULL;
         if (cache) {
             MIR_label_t miss = label(c), inherited = label(c); done = label(c);
             MIR_label_t nullable_store = operation == LMD_PROP_SET && !native_value && nullable_value ? label(c) : NULL;
@@ -4320,6 +4330,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, field), MIR_T_I64, "cached_field");
             branch(c, MIR_BEQ, operation == LMD_PROP_SET ? miss : inherited, reg(c, field), integer(c, 0));
             MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "cached_data");
+            if (own_read) { shared_field = field; shared_data = data; }
             MIR_reg_t storage = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, storage), MIR_T_U8, "cached_storage");
             MIR_reg_t offset = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, offset), MIR_T_I64, "cached_offset");
             MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
@@ -4338,6 +4349,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     {LMD_TYPE_FLOAT, MIR_T_D, K_NUMBER}, {LMD_TYPE_INT, MIR_T_I64, K_NUMBER},
                     {LMD_TYPE_BOOL, MIR_T_U8, K_BOOL}};
                 MIR_label_t lanes[3] = {label(c), label(c), label(c)}, shared = label(c);
+                if (own_read) shared_read = shared;
                 if (operation == LMD_PROP_SET) {
                     branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
                         offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
@@ -4383,6 +4395,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     // shared readers retain optional layouts; consume/adopt their borrowed scalar before a safepoint.
                     MIR_reg_t loaded = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
                         MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
+                    if (own_read) branch(c, MIR_BEQ, semantic_read, reg(c, loaded), integer(c, ITEM_JS_LAZY_GLOBAL_SENTINEL));
                     if (numeric) { check_error(c, loaded); loaded = to_number(c, boxed(c, loaded)); }
                     move(c, joined, reg(c, loaded), numeric); jump(c, done);
                 }
@@ -4427,6 +4440,41 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         if (cache_miss) {
             // callers with extra lookup semantics own only the miss; slot decoding stays shared.
             jump(c, cache_miss); put_label(c, done); return joined;
+        }
+        if (own_read) {
+            // function-owned instances use shared own lookup after existing fast paths miss.
+            // other families retain ordinary dispatch, including its established slot admission.
+            MIR_label_t missing = label(c);
+            em_guard_container(&c->em, owner, LMD_TYPE_MAP, missing);
+            branch(c, MIR_BNE, missing, reg(c, em_load_at(&c->em, owner,
+                LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "own_map_kind")), integer(c, MAP_KIND_PLAIN));
+            MIR_reg_t shape = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "own_shape");
+            branch(c, MIR_BEQ, missing, reg(c, shape), integer(c, 0));
+            TypeMap marker = {};
+            branch(c, MIR_BNE, missing, reg(c, em_load_at(&c->em, shape,
+                (char*)&marker.js_meta - (char*)&marker, MIR_T_I64, "own_js_meta")), integer(c, 0));
+            MIR_reg_t nominal = em_load_at(&c->em, shape,
+                (char*)&marker.nominal - (char*)&marker, MIR_T_I64, "own_nominal");
+            branch(c, MIR_BEQ, missing, reg(c, nominal), integer(c, 0));
+            branch(c, MIR_BNE, missing, reg(c, em_load_at(&c->em, nominal,
+                offsetof(TypeNominal, extension), MIR_T_I64, "own_extension")),
+                relocated(c, (uint64_t)&mvp_lmd_class_extension));
+            MIR_reg_t cls = em_load_at(&c->em, nominal,
+                offsetof(TypeNominal, extension_data), MIR_T_I64, "own_class");
+            branch(c, MIR_BEQ, missing, reg(c, cls), integer(c, 0));
+            MvpLmdClass class_marker = {};
+            branch(c, MIR_BEQ, missing, reg(c, em_load_at(&c->em, cls,
+                (char*)&class_marker.owner - (char*)&class_marker, MIR_T_I64, "own_constructor")), integer(c, 0));
+            MIR_reg_t field = em_call_2(&c->em, "typemap_hash_lookup_key", MIR_T_P,
+                MIR_T_P, reg(c, shape), MIR_T_P, reg(c, payload(c, name)), true);
+            branch_truth(c, missing, field, false);
+            branch_truth(c, missing, op(c, MIR_AND, reg(c, em_load_at(&c->em, field,
+                offsetof(ShapeEntry, flags), MIR_T_U8, "own_flags")), integer(c, JSPD_IS_ACCESSOR)));
+            // the existing shared decoder also owns optional layouts and numeric consumption.
+            move(c, shared_field, reg(c, field));
+            move(c, shared_data, reg(c, em_load_at(&c->em, owner,
+                LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "own_data")));
+            jump(c, shared_read); put_label(c, missing); put_label(c, semantic_read);
         }
         if (native_value) value = box(c, *native_value).reg;
         MIR_reg_t result = em_call_5(&c->em, c->program->property_callbacks ?

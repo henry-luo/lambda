@@ -1437,6 +1437,18 @@ struct MvpMirTuningCase {
 
 // keep callback-free admission cases separate: reflection would disable their numeric proofs.
 static const MvpMirTuningCase kMvpMirTuningCases[] = {
+    {"ReflectiveOwnDataUsesSharedLookup", "mvp_reflective_own_data", R"JS(
+function read(object) { return object.value; }
+function C(value) { this.value = value; }
+const object = new C(7);
+Object.setPrototypeOf(object, {value: 11});
+if (read(object) !== 7) throw new Error('own data read');
+Object.defineProperty(object, 'value', {get() { return 9; }, configurable: true});
+if (read(object) !== 9) throw new Error('accessor fallback');
+delete object.value;
+if (read(object) !== 11) throw new Error('inherited fallback');
+console.log('OPT_OK');
+)JS"},
     {"BoundedNativeRecursion", "mvp_bounded_native_recursion", R"JS(
 function count(n) {
     let one = 1;

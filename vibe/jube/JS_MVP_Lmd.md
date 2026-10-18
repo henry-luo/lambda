@@ -1427,7 +1427,8 @@ execution, sparse arrays, and proxies including callable/constructable targets.
 Lift the earlier `__proto__` exclusion as part of this phase. The new canonical
 target `jetstream/hashmap` now passes its unchanged oracle and pinned-MIR
 preflight. Recorded coverage expands to **88 workloads** across phase checkpoints:
-84 non-jq contracts pass; the four jq workloads retain historical Result9 evidence.
+84 non-jq contracts pass. The complete output and timing record is published as
+[MVP_Result10](../../test/benchmark/js_mvp_lmd/MVP_Result10.md).
 
 Reuse Lambda functions/storage first (**D1.3v3**). Ordinary objects retain nominal
 Maps and shared shape transitions; accessors reuse object-local `JsAccessorCell`
@@ -1454,8 +1455,9 @@ through a procedural boundary, preserving pure `fn` reads (**S12.1.1v2**).
 Acceptance includes full ordinary descriptors/integrity operations, live
 prototype behavior, sparse-array interactions and all scoped proxy traps,
 focused normal/forced-GC checks, shared Lambda/Test262 gates, and paired release,
-pinned-MIR self-timing checks of all **87 Result9 workloads**. Preserve Result9's
-known gate and timing limitations; record new evidence independently. Disclose
+pinned-MIR self-timing checks of all **88 benchmark contracts**, with matched
+controls where available. Preserve the recorded gate and timing limitations;
+record new evidence independently. Disclose
 new helpers before coding. General async/Node expansion is outside this phase.
 
 The current `array-pair` release passes **162/162** MVP groups normally and
@@ -1480,9 +1482,15 @@ Triangl and Map Iteration also improve. The preceding release's complete
 tuning, Fasta is within noise (**0.882 vs 0.883 ms**), while Raytrace3D remains
 **1.8% slower** (**142.382 vs 139.804 ms**). The latest eight-workload capture
 includes all four sources affected by the final refinement. **Whole-phase
-performance acceptance remains open.** The four jq workloads retain historical
-evidence only. Capability boundaries, exact hashes and evidence are recorded
-in the plan. Results3–9 are unchanged.
+performance acceptance remains open.** Result10 records 88/88 output contracts
+with the activation-pool candidate against the pre-tuning control where
+available. This control differs from the phase-entry control used by the
+31-round capture above. Three repeated rows clear the two-control slowdown
+criterion;
+`jetstream/hashmap` is about 33x slower than Node and has no pre-tuning MVP
+measurement. Four jq rows reuse the latest existing paired/single evidence.
+Capability boundaries, exact hashes and evidence are recorded in the plan.
+Results3–9 are unchanged.
 
 Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
 [implementation plan](../impl/JS_MVP_Lmd_Property_Expansion.md).
@@ -2136,11 +2144,51 @@ Final canonical self-times take **32.4% less time for `jq_records`, 4.2% for
 Records has two matched pairs in opposite orders; the others have one pair each.
 The first experiment's mix slowdown does not reproduce in the final fresh pair;
 reuse order is not an established cause. A seven-round, 12-workload comparison
-finds no slowdown confirmed against both control copies; all **88/88** supported
-output/backend contracts pass. Release validation passes **817/817** MVP tests,
+finds no slowdown within those 12 workloads against both control copies. The
+expanded [Result10](../../test/benchmark/js_mvp_lmd/MVP_Result10.md) capture
+adds 71 three-pair comparisons and flags Towers, `args_ctl` and Ackermann by
+the same two-control criterion. All **88/88** supported output/backend
+contracts pass. Release validation passes **817/817** MVP tests,
 **12/12** activation tests in each of normal and forced-GC/poison modes, and
 **71/71** generator/async/iterator tests with forced GC/poison. The pinned-MIR
 Test262 recount has **40,258 fully passing + three known retry-only cases**,
 zero failures and zero reported regressions. The Lambda aggregate is
 **7,707/7,719**; its 12 failures match prior TypeScript/PIL failures. These
 qualification limits and exact-case attribution remain recorded in the report.
+
+### 36.7 Ackermann and HashMap follow-up
+
+**2026-10-18; D8.4.1v2, D3.4.4v4, D5.2.1v3:** keep tuning on static
+guards and shared lookup. After existing fast paths miss, repeated named
+own-data reads on function-owned ordinary instances guard the carrier, nominal
+owner and descriptor, then reuse Lambda's shape lookup and field decoder.
+Source evidence of ordinary function construction gates emission; both paths
+share the existing decoder block to avoid duplicate calls and code growth in
+units that only use native constructors.
+Misses retain JS semantic dispatch and scalar ownership. Other object families
+retain their established dispatch. No new helper or cache change is retained.
+
+The final five-round release-MIR screen measures HashMap at **467.834 ms versus
+511.945 ms**, **8.6% less time**; fresh Node is **15.351 ms**, leaving a
+**30.5×** gap. The control is rebuilt from the same checkout without this patch;
+Result10 predates unrelated merged runtime changes. All 11 workload contracts
+pass, with no slowdown confirmed against both control copies. An earlier
+text-search slowdown was removed by keeping ordinary objects on their existing
+fast path. HashMap's remaining cost is repeated generic
+property/prototype dispatch and object construction. Ackermann's original
+**+15.3%** signal does not reproduce in 31 paired measurements against the
+pre-activation control; this is a measurement correction, not an Ackermann
+code fix. The final 31-pair current-checkout comparison is **6.572 versus
+6.536 ms**, with no confirmed change. Result10 remains the original snapshot.
+Detailed evidence and qualification are recorded in
+[`temp/js_mvp_ack_hashmap_20261018/REPORT.md`](../../temp/js_mvp_ack_hashmap_20261018/REPORT.md).
+The final build passes **820/820** MVP runtime tests, **104/104** optimizer
+contracts, **20/20** MIR budgets and **4/4** focused forced-GC/poison tests.
+The report separates the earlier aggregate failures from the corrected-suite
+reruns and the 12 known TypeScript/PIL failures.
+The explicit MIR-only Test262 recount has **40,251 fully passing + ten slow
+cases passing only on isolated retry**, zero failures and zero reported
+regressions. The retry-only count is higher than the prior three-case capture.
+Serial singleton replays pass all ten on both binaries in **24.4/24.5 seconds**
+(control/candidate), consistent with load-sensitive classification; the full
+run retains its ten retry-only cases. The report preserves both records.
