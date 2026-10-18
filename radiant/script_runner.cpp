@@ -2622,9 +2622,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             js_microtask_flush();
             log_info("execute_document_scripts: microtasks flushed; timers deferred to host loop");
         } else {
-            // Static one-shot render (make layout, headless smoke): no host loop
-            // will pump later, so drain everything now with the 5s watchdog.
-            js_event_loop_drain();
+            // readiness must finish before the ordinary snapshot drain closes pending timers.
             if (dom_doc->js.auto_close_event_loop && !document_snapshot_is_ready(dom_doc)) {
                 // explicit readiness can require more frames than the ordinary snapshot sample.
                 RuntimeExecutionScope execution_scope(document_context);
@@ -2635,13 +2633,14 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
                     Rooted<Item> event(roots, js_create_event("TestRendered", true, false));
                     dom_dispatch_event(target.get(), event.get());
                 }
-                int settled = js_await_bounded_drain(document_snapshot_ready_predicate, dom_doc,
-                    radiant_script_exec_timeout_seconds(watchdog_source_len) * 1000, 0, 0);
+                int settled = js_event_loop_wait_until(document_snapshot_ready_predicate, dom_doc,
+                    radiant_script_exec_timeout_seconds(watchdog_source_len) * 1000);
                 if (settled < 0) {
                     log_error("script snapshot readiness: explicit wait remains pending after bounded drain");
                     result = ItemError;
                 }
             }
+            js_event_loop_drain();
             log_mem_stage("js: after event loop drain");
             log_info("execute_document_scripts: timer queue drained");
         }

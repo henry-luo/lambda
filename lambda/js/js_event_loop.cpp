@@ -1667,6 +1667,8 @@ static void close_all_timer_handles(void) {
 // no signal handler installation, no interval-timer cleanup. The intent is a
 // brief "hand off control so cross-module promise resolution can happen", not
 // a full event loop run.
+static const int BOUNDED_DRAIN_MAX_TURNS = 64;
+
 extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
                                       int watchdog_ms, int max_no_progress,
                                       int max_turns) {
@@ -1683,7 +1685,7 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 
     if (watchdog_ms <= 0) watchdog_ms = 100;
     if (max_no_progress <= 0) max_no_progress = 3;
-    if (max_turns <= 0) max_turns = 64;
+    if (max_turns <= 0) max_turns = BOUNDED_DRAIN_MAX_TURNS;
 
     uint64_t start_ns = uv_hrtime();
     uint64_t watchdog_ns = (uint64_t)watchdog_ms * 1000000ULL;
@@ -1793,6 +1795,35 @@ static bool event_loop_has_pending_requests(void) {
                 kind == RUNTIME_RESOURCE_DNS_REQUEST) return true;
     }
     return false;
+}
+
+extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_ms) {
+    if (!js_active_runtime_state || !predicate || watchdog_ms <= 0) return -1;
+    uint64_t start_ns = uv_hrtime();
+    double virtual_limit = virtual_clock_ms + watchdog_ms;
+    // retain the existing snapshot work bound as well as its elapsed-time watchdog.
+    for (int turn = 0; turn < BOUNDED_DRAIN_MAX_TURNS; turn++) {
+        js_event_loop_render_checkpoint();
+        if (predicate(user)) return 0;
+        uint64_t elapsed_ms = (uv_hrtime() - start_ns) / 1000000ULL;
+        if (elapsed_ms >= (uint64_t)watchdog_ms) break;
+
+        if (virtual_clock_enabled) {
+            JsTimerHandle* next = virtual_timer_next_due(virtual_limit);
+            bool frame = js_animation_frame_has_pending();
+            if (next || frame) {
+                // explicit readiness follows scheduled work, including delayed action ticks.
+                double delta = next ? next->virtual_due_ms - virtual_clock_ms : 1000.0 / 60.0;
+                if (frame && delta > 1000.0 / 60.0) delta = 1000.0 / 60.0;
+                if (virtual_clock_ms + delta > virtual_limit) break;
+                js_event_loop_advance_virtual_time(delta, frame ? 1 : 0);
+                continue;
+            }
+        }
+        if (!event_loop_has_pending_requests() && !js_event_loop_has_refed_handles()) break;
+        event_loop_pump_native_wait(watchdog_ms - (int)elapsed_ms);
+    }
+    return predicate(user) ? 0 : -1;
 }
 
 static int js_event_loop_drain_impl(bool keep_intervals) {

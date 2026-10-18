@@ -4,11 +4,10 @@
  *
  * Dispatches HTTP request handlers to worker threads via uv_queue_work(),
  * keeping the event loop non-blocking. All handler execution (including
- * Lambda JIT, Python WSGI, Bash CGI) runs on worker threads.
+ * Lambda JIT and JavaScript handlers) runs on worker threads.
  *
  * Compatible with:
  *   PHP-FPM:   pre-forked worker processes → here: libuv thread pool
- *   Gunicorn:  worker processes with sync handlers
  *   Express:   single-threaded (we improve on this with workers)
  *
  * Flow:

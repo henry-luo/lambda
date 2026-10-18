@@ -3,7 +3,7 @@
  * @brief Cookie parsing and Set-Cookie header generation
  *
  * Parses Cookie request headers and generates Set-Cookie response headers.
- * Unified from Express res.cookie() and Flask resp.set_cookie() patterns.
+ * Follows Express res.cookie() patterns.
  */
 
 #pragma once

@@ -1,7 +1,6 @@
 /**
  * @file http_response.hpp
- * @brief HTTP response builder — unified design inspired by
- *        Node.js ServerResponse, Flask Response, and FastAPI Response
+ * @brief HTTP response builder inspired by Node.js ServerResponse
  *
  * Design goals:
  *   - Chainable setters (return pointer to self)
@@ -11,9 +10,6 @@
  *
  * Node.js equivalents:   res.status(200).json({...}), res.set(), res.cookie(),
  *                        res.sendFile(), res.redirect()
- * Flask equivalents:     make_response(), jsonify(), redirect(), send_file()
- * FastAPI equivalents:   JSONResponse, HTMLResponse, FileResponse, RedirectResponse,
- *                        StreamingResponse
  */
 
 #pragma once
@@ -76,11 +72,11 @@ void          http_response_destroy(HttpResponse *resp);
 // ============================================================================
 
 // set status code — returns resp for chaining
-//   Node: res.status(201)     Flask: response.status_code = 201
+//   Node: res.status(201)
 HttpResponse* http_response_status(HttpResponse *resp, int status_code);
 
 // set a response header (replaces existing header with same name)
-//   Node: res.set('X-Custom', 'value')    Flask: response.headers['X-Custom'] = 'value'
+//   Node: res.set('X-Custom', 'value')
 HttpResponse* http_response_set_header(HttpResponse *resp, const char *name, const char *value);
 
 // append a header value (for multi-value headers like Set-Cookie)
@@ -110,32 +106,32 @@ void http_response_write_fmt(HttpResponse *resp, const char *fmt, ...);
 // ============================================================================
 
 // send the complete response (headers + body) and mark as finished
-//   Node: res.end()   Flask: return response
+//   Node: res.end()
 void http_response_send(HttpResponse *resp);
 
 // ============================================================================
-// Convenience Methods (unified from Node/Flask/FastAPI)
+// Convenience Methods (matching Node.js conventions)
 // ============================================================================
 
 // send JSON response with Content-Type: application/json
-//   Node: res.json({...})    Flask: jsonify({...})    FastAPI: JSONResponse
+//   Node: res.json({...})
 void http_response_json(HttpResponse *resp, int status, const char *json_str);
 
 // send HTML response with Content-Type: text/html
-//   Node: res.send('<html>...')   Flask: render_template()   FastAPI: HTMLResponse
+//   Node: res.send('<html>...')
 void http_response_html(HttpResponse *resp, int status, const char *html_str);
 
 // send plain text response
-//   Node: res.type('text').send('...')   FastAPI: PlainTextResponse
+//   Node: res.type('text').send('...')
 void http_response_text(HttpResponse *resp, int status, const char *text);
 
 // send file contents with auto-detected Content-Type
-//   Node: res.sendFile(path)   Flask: send_file(path)   FastAPI: FileResponse
+//   Node: res.sendFile(path)
 int http_response_file(HttpResponse *resp, const char *filepath,
                        const char *content_type = NULL);
 
 // send HTTP redirect
-//   Node: res.redirect(url)   Flask: redirect(url)   FastAPI: RedirectResponse
+//   Node: res.redirect(url)
 void http_response_redirect(HttpResponse *resp, const char *url, int status);
 
 // send error page
@@ -146,12 +142,12 @@ void http_response_error(HttpResponse *resp, int status, const char *message);
 // ============================================================================
 
 // set a cookie (generates Set-Cookie header)
-//   Node: res.cookie('name', 'value', opts)    Flask: resp.set_cookie('name', 'value', ...)
+//   Node: res.cookie('name', 'value', opts)
 void http_response_set_cookie(HttpResponse *resp, const char *name,
                               const char *value, const CookieOptions *opts);
 
 // clear a cookie (set max-age=0)
-//   Node: res.clearCookie('name')   Flask: resp.delete_cookie('name')
+//   Node: res.clearCookie('name')
 void http_response_clear_cookie(HttpResponse *resp, const char *name,
                                 const char *path, const char *domain);
 

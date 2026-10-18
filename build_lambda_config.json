@@ -4082,77 +4082,6 @@
             "icon": "\u26a1"
           },
           {
-            "source": "test_serve_gtest.cpp",
-            "name": "Web Server Module Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "uv",
-              "mbedtls",
-              "mbedx509",
-              "mbedcrypto"
-            ],
-            "additional_sources": [
-              "lambda/serve/serve_types.cpp",
-              "lambda/serve/serve_utils.cpp",
-              "lambda/serve/router.cpp",
-              "lambda/serve/cookie.cpp",
-              "lambda/serve/body_parser.cpp",
-              "lambda/serve/mime.cpp",
-              "lambda/serve/middleware.cpp",
-              "lambda/serve/static_handler.cpp",
-              "lambda/serve/http_request.cpp",
-              "lambda/serve/http_response.cpp",
-              "lambda/serve/rest.cpp",
-              "lambda/serve/openapi.cpp",
-              "lambda/serve/schema_validator.cpp",
-              "lambda/serve/swagger_ui.cpp",
-              "lambda/serve/express_compat.cpp",
-              "lambda/serve/server.cpp",
-              "lambda/serve/tls_handler.cpp",
-              "lambda/serve/worker_pool.cpp",
-              "lambda/serve/language_backend.cpp",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/hashmap.c",
-              "lib/log.c"
-            ],
-            "binary": "test_serve_gtest.exe",
-            "icon": "\ud83c\udf10"
-          },
-          {
-            "source": "test_serve_phase2_gtest.cpp",
-            "name": "Web Server Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "uv"
-            ],
-            "additional_sources": [
-              "lambda/serve/serve_types.cpp",
-              "lambda/serve/serve_utils.cpp",
-              "lambda/serve/mime.cpp",
-              "lambda/serve/middleware.cpp",
-              "lambda/serve/http_request.cpp",
-              "lambda/serve/http_response.cpp",
-              "lambda/serve/schema_validator.cpp",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/hashmap.c",
-              "lib/log.c"
-            ],
-            "binary": "test_serve_phase2_gtest.exe",
-            "icon": "\ud83c\udf10"
-          },
-          {
             "source": "test/test_physics_gtest.cpp",
             "name": "Native Physics Tests",
             "dependencies": [
@@ -6167,6 +6096,49 @@
         "name": "\ud83d\udc11 Lambda Runtime Tests",
         "category": "baseline",
         "tests": [
+          {
+            "source": "test_serve_gtest.cpp",
+            "name": "Web Server Module Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "uv",
+              "mbedtls",
+              "mbedx509",
+              "mbedcrypto"
+            ],
+            "additional_sources": [
+              "lambda/serve/serve_types.cpp",
+              "lambda/serve/serve_utils.cpp",
+              "lambda/serve/router.cpp",
+              "lambda/serve/cookie.cpp",
+              "lambda/serve/body_parser.cpp",
+              "lambda/serve/mime.cpp",
+              "lambda/serve/middleware.cpp",
+              "lambda/serve/static_handler.cpp",
+              "lambda/serve/http_request.cpp",
+              "lambda/serve/http_response.cpp",
+              "lambda/serve/rest.cpp",
+              "lambda/serve/openapi.cpp",
+              "lambda/serve/schema_validator.cpp",
+              "lambda/serve/swagger_ui.cpp",
+              "lambda/serve/express_compat.cpp",
+              "lambda/serve/server.cpp",
+              "lambda/serve/tls_handler.cpp",
+              "lambda/serve/worker_pool.cpp",
+              "lambda/serve/language_backend.cpp",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/mem_alloc.c",
+              "lib/hashmap.c",
+              "lib/log.c"
+            ],
+            "binary": "test_serve_gtest.exe",
+            "icon": "\ud83c\udf10"
+          },
           {
             "source": "test_zip_gtest.cpp",
             "name": "ZIP I/O Tests",

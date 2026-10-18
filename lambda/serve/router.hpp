@@ -12,8 +12,6 @@
  *
  * Compatible with:
  *   Express:  app.get('/users/:id', handler)
- *   Flask:    @app.route('/users/<int:id>')
- *   FastAPI:  @app.get('/users/{user_id}')
  */
 
 #pragma once

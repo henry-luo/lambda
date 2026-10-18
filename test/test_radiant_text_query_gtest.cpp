@@ -3296,6 +3296,10 @@ TEST_F(RadiantTextLayout, ExplicitSnapshotReadinessSettlesLongFrameChains) {
     expect_snapshot_capture("test/html/layout_snapshot_ready.html", 22.0f);
 }
 
+TEST_F(RadiantTextLayout, ExplicitSnapshotReadinessPreservesDelayedTimerChains) {
+    expect_snapshot_capture("test/html/layout_snapshot_timers.html", 41.0f);
+}
+
 TEST_F(RadiantTextLayout, PositionedTableDescendantsSkipStaticTableOffsetParents) {
     DomElement* result = load("test/html/layout_offset_parent_table.html", true);
     ASSERT_NE(result, nullptr);

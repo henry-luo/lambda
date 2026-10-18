@@ -871,6 +871,8 @@ static void pre_run_wpt_dom_events(int jobs) {
 }
 
 int main(int argc, char** argv) {
+    // pre-run progress must reach the shared runner's idle watchdog when stdout is a pipe.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
     int jobs = extract_parallel_jobs(&argc, argv);
     bool filtered = wpt_has_filtered_gtest_arg(argc, argv, "WptDomEvents*");
     if (update_baseline_requested() && BASELINE_PATH[0]) {

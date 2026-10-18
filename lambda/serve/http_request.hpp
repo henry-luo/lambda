@@ -1,7 +1,6 @@
 /**
  * @file http_request.hpp
- * @brief HTTP request representation — unified design inspired by
- *        Node.js IncomingMessage, Flask Request, and FastAPI Request
+ * @brief HTTP request representation inspired by Node.js IncomingMessage
  *
  * Design goals:
  *   - Single struct covers all frameworks' request concepts
@@ -11,10 +10,6 @@
  *
  * Node.js equivalents:     req.method, req.url, req.headers, req.params,
  *                          req.query, req.body, req.cookies, req.ip
- * Flask equivalents:       request.method, request.path, request.args,
- *                          request.form, request.json, request.cookies
- * FastAPI equivalents:     request.method, request.url, request.headers,
- *                          request.path_params, request.query_params, request.body()
  */
 
 #pragma once
@@ -91,7 +86,7 @@ struct HttpRequest {
     HttpHeader *query_params;   // ?key=value pairs
 
     // -- route parameters (populated by router) --
-    //    Express: req.params.id    Flask: <id>    FastAPI: path params
+    //    Express: req.params.id
     HttpHeader *route_params;
 
     // -- cookies (lazy, parsed from Cookie header on first access) --
@@ -128,27 +123,27 @@ HttpRequest* http_request_parse(const char *data, size_t len);
 void http_request_destroy(HttpRequest *req);
 
 // ============================================================================
-// Accessors (unified API matching Node/Flask/FastAPI conventions)
+// Accessors (matching Node.js conventions)
 // ============================================================================
 
 // get request header value (case-insensitive)
-//   Node: req.get('Content-Type')   Flask: request.headers['Content-Type']
+//   Node: req.get('Content-Type')
 const char* http_request_header(HttpRequest *req, const char *name);
 
 // get query parameter value
-//   Node: req.query.page            Flask: request.args.get('page')
+//   Node: req.query.page
 const char* http_request_query(HttpRequest *req, const char *name);
 
 // get route parameter value (set by router after matching)
-//   Node: req.params.id             Flask: view_func(id=...)
+//   Node: req.params.id
 const char* http_request_param(HttpRequest *req, const char *name);
 
 // get cookie value (lazy-parses Cookie header on first call)
-//   Node: req.cookies.session       Flask: request.cookies.get('session')
+//   Node: req.cookies.session
 const char* http_request_cookie(HttpRequest *req, const char *name);
 
 // get raw body pointer (do not free — owned by request)
-//   Node: req.body                  Flask: request.data
+//   Node: req.body
 const char* http_request_body(HttpRequest *req);
 
 // get Content-Type header value

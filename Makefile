@@ -73,6 +73,7 @@ RADIANT_TEST_CONFIG ?= debug_native
 # clean baseline run reports a missing executable. The concurrency and Node
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
+	test_serve_gtest \
 	test_zip_gtest \
 	test_lambda_gtest \
 	test_input_script_cache_gtest \

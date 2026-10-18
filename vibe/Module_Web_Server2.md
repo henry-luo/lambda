@@ -1,5 +1,10 @@
 # Module Web Server — Phase 2 Design Proposal
 
+Current scope follows [WS1](Module_Web_Server.md#current-scope--ws1-2026-10-18-user):
+Python/Bash backends, Flask/WSGI/ASGI, and their IPC/UDS helpers are removed.
+The Python integration sections below are historical. The standalone schema
+tests are consolidated into `test/test_serve_gtest.cpp`.
+
 ## Implementation Status
 
 **Phase 2 is complete.** All C++ modules are implemented, the build config is updated, and unit tests pass.
@@ -11,17 +16,11 @@
 | OpenAPI 3.1 spec generator | ✅ Done | `lambda/serve/openapi.hpp`, `openapi.cpp` |
 | JSON Schema validator | ✅ Done | `lambda/serve/schema_validator.hpp`, `schema_validator.cpp` |
 | Swagger UI handler | ✅ Done | `lambda/serve/swagger_ui.hpp`, `swagger_ui.cpp` |
-| ASGI bridge (C++) | ✅ Done | `lambda/serve/asgi_bridge.hpp`, `asgi_bridge.cpp` |
-| ASGI bridge (Python) | ✅ Done | `lambda/serve/asgi_bridge.py` |
-| WSGI bridge (Python) | ✅ Done | `lambda/serve/wsgi_bridge.py` |
-| UDS transport | ✅ Done | `lambda/serve/uds_transport.hpp`, `uds_transport.cpp` |
 | Express compat | ✅ Done | `lambda/serve/express_compat.hpp`, `express_compat.cpp` |
-| Flask/WSGI compat | ✅ Done | `lambda/serve/flask_compat.hpp`, `flask_compat.cpp` |
-| Shared IPC protocol | ✅ Done | `lambda/serve/ipc_proto.hpp`, `ipc_proto.cpp` |
 | Build config | ✅ Done | `build_lambda_config.json` |
-| Unit tests | ✅ Done | `test/test_serve_phase2_gtest.cpp` — 22/22 passing |
+| Unit tests | Consolidated | `test/test_serve_gtest.cpp` — includes all 22 schema-validation tests |
 
-**Known deferred items**: `server.cpp` has 3 pre-existing API mismatches (unrelated to Phase 2) that block REST/OpenAPI/Express compat tests from linking. These are tracked for Phase 3. The current test suite covers the standalone `schema_validator` module.
+At the original Phase 2 checkpoint, server API mismatches prevented REST/OpenAPI/Express tests from linking. Those modules now link into the consolidated runner, but dedicated behavioral tests for them remain absent. Schema validation keeps all 22 original cases alongside the main serve tests.
 
 ---
 

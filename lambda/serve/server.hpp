@@ -8,8 +8,6 @@
  *
  * Compatible with:
  *   Express:   const app = express(); app.listen(3000)
- *   Flask:     app.run(host='0.0.0.0', port=5000)
- *   FastAPI:   uvicorn.run(app, host='0.0.0.0', port=8000)
  *   PHP-FPM:   php-fpm -y /etc/php-fpm.conf
  *
  * Usage:

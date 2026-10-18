@@ -6,16 +6,12 @@
  * request handlers written in different languages. Each backend implements
  * five operations: init, execute, compile, needs_recompile, shutdown.
  *
- * Built-in backends:
+ * Backend implementations:
  *   - Lambda (JIT via MIR)       — primary backend
- *   - Python (WSGI)              — Phase 4
- *   - Bash   (CGI-style)         — Phase 5
- *   - Node.js/Express (ASGI)     — deferred to Phase 6
+ *   - JavaScript (MIR JIT)       — handler execution pending
  *
  * Compatible with:
  *   Express:    app.engine('pug', require('pug').__express)
- *   Flask:      app.register_blueprint(blueprint)
- *   FastAPI:    pluggable via dependency injection
  *   PHP-FPM:    language-specific worker pool model
  */
 
@@ -42,7 +38,7 @@ enum BackendResult {
 // ============================================================================
 
 struct LanguageBackend {
-    const char *name;           // backend name: "lambda", "python", "bash", "nodejs"
+    const char *name;           // backend name: "lambda", "javascript"
     const char **extensions;    // file extensions this backend handles (e.g. {".ls", NULL})
     int extension_count;
 

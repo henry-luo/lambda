@@ -6,7 +6,6 @@
  * Multipart form data is deferred to a future phase.
  *
  * Express equivalents:  express.json(), express.urlencoded()
- * Flask equivalents:    request.json, request.form
  */
 
 #pragma once
