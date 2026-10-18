@@ -2113,3 +2113,34 @@ unrelated failures; its five introduced emission failures are fixed without
 changing sidecars or budgets. Direct comparison with the frozen pre-fix release
 still confirms Splay at +1.4–1.9%; three inconclusive helper experiments were
 reverted, and this cause remains open. Four jq timings remain deferred.
+
+### 36.6 jq generator-stack reuse
+
+**2026-10-17–18; D1.3v3, D5.1.1v3, D5.2–D5.3:** a fresh release profile of
+canonical `jq_records` identifies repeated idle-stack discard/reclaim as the
+largest native cost. Batch idle-pool trimming at GC boundaries so successive
+generator completions can reuse resident mappings. Keep the process-wide
+32-stack pool, the 16-activation parked warm window, same-address restoration,
+precise owner tracing and scalar adoption on suspension/completion.
+
+The only new production helper is internal `stacks_trim_pool`; JS continues to
+use Lambda's shared activation implementation. Between collections the existing
+pool can retain at most 32 complete 3 MiB mappings (96 MiB of usable storage,
+committed on touch); trimming leaves one warm mapping and the existing
+native-stack prefix in each other idle mapping undiscarded. Teardown releases the pool.
+Canonical jq checksums, pinned release-MIR self-times, peak RSS and normal/forced-GC
+activation and JS checks qualify the change. Results are recorded in
+[`temp/js_mvp_jq_tune_20261017/REPORT.md`](../../temp/js_mvp_jq_tune_20261017/REPORT.md).
+Final canonical self-times take **32.4% less time for `jq_records`, 4.2% for
+`jq_mix`, 23.8% for `jq_bf` and 15.7% for `jq_tree`**, with matching checksums.
+Records has two matched pairs in opposite orders; the others have one pair each.
+The first experiment's mix slowdown does not reproduce in the final fresh pair;
+reuse order is not an established cause. A seven-round, 12-workload comparison
+finds no slowdown confirmed against both control copies; all **88/88** supported
+output/backend contracts pass. Release validation passes **817/817** MVP tests,
+**12/12** activation tests in each of normal and forced-GC/poison modes, and
+**71/71** generator/async/iterator tests with forced GC/poison. The pinned-MIR
+Test262 recount has **40,258 fully passing + three known retry-only cases**,
+zero failures and zero reported regressions. The Lambda aggregate is
+**7,707/7,719**; its 12 failures match prior TypeScript/PIL failures. These
+qualification limits and exact-case attribution remain recorded in the report.
