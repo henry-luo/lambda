@@ -1761,6 +1761,68 @@ TEST_F(ActivationCore, AbandonedParkedActivationsAreReleased) {
     EXPECT_EQ(activation_suspend(ItemNull).item != ItemNull.item, true);
 }
 
+static Item activation_pool_storage_probe(Activation*, Item arg) {
+    // touch multiple pages in every region; a pooled mapping must be reclaimed
+    // before either its native frames or its precise roots are installed.
+    volatile uint8_t native[64 * 1024];
+    RootFrame roots(4096);
+    if (!roots.valid()) return ItemNull;
+    Rooted<Item> held(roots, (Item){.item = s2it(heap_strcpy("pooled-root", 11))});
+    for (size_t i = 1; i < 4096; i++) *roots.slot(i) = held.get().item;
+    uint64_t* numbers = context->side_number_top;
+    for (size_t i = 0; i < 4096; i++) {
+        uint64_t* slot = lambda_side_number_alloc();
+        if (!slot) return ItemNull;
+        *slot = i + arg.item;
+    }
+    for (size_t i = 0; i < sizeof(native); i += 4096) native[i] = (uint8_t)(i / 4096);
+    activation_suspend(arg);
+    String* string = (String*)(uintptr_t)(held.get().item & ~ITEM_HIGH_BYTE_MASK);
+    bool intact = string && string->len == 11 && !memcmp(string->chars, "pooled-root", 11);
+    for (size_t i = 1; i < 4096; i++) intact &= *roots.slot(i) == held.get().item;
+    for (size_t i = 0; i < 4096; i++) intact &= numbers[i] == i + arg.item;
+    for (size_t i = 0; i < sizeof(native); i += 4096) intact &= native[i] == i / 4096;
+    return (Item){.item = b2it(intact)};
+}
+
+TEST_F(ActivationCore, IdlePoolReusesAndTrimsAllThreeRegions) {
+    // exceed the pool bound, then reuse it both before and after a collection.
+    // parked roots survive GC; idle storage is not part of the root region.
+    const int count = 40;
+    Activation* parked[count];
+    for (int round = 0; round < 4; round++) {
+        for (int i = 0; i < count; i++) {
+            parked[i] = activation_create(activation_pool_storage_probe,
+                (Item){.item = i2it(i + round)}, true, NULL);
+            ASSERT_NE(parked[i], nullptr);
+            ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_SUSPENDED);
+        }
+        heap_gc_collect();
+        for (int i = 0; i < count; i++) {
+            ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_DONE);
+            EXPECT_EQ(activation_value(parked[i]).item, (uint64_t)ITEM_TRUE);
+            activation_destroy(parked[i]);
+        }
+        if (round % 2) heap_gc_collect();
+    }
+    EXPECT_EQ(activation_current(), nullptr);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+}
+
+TEST_F(ActivationCore, IdlePoolDoesNotRetainCompletedValues) {
+    concurrency_test_gc->vmap_destroy = observe_completed_result_destroy;
+    completed_result_destroyed = false;
+    Activation* activation = activation_create(completed_managed_result, ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    completed_result_expected = activation_value(activation).vmap;
+    ASSERT_NE(completed_result_expected, nullptr);
+    activation_destroy(activation);
+    // the idle stack still contains its transfer slot, but owns no live roots.
+    heap_gc_collect();
+    EXPECT_TRUE(completed_result_destroyed);
+}
+
 #ifndef _WIN32
 
 // The script code and its import cone are compiled once below.  Every worker
