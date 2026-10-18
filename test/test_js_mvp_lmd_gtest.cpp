@@ -9413,6 +9413,68 @@ TEST_F(JsFormalMir, PrototypeFunctionsRetainMutationAndLifetime) {
         A=null;B=null;gc();return ok&&read(a)===3&&read(b)===5&&method(a)===3&&method(b)===5;
     })())JS").item, ITEM_TRUE);
 }
+TEST_F(JsFormalMir, SourceConstructorLayoutPreservesValuesAndClosureIdentity) {
+    EXPECT_EQ(run(R"JS((function(){
+        function make(){return function C(a,b,c,d){this.a=a;this.b=b;this.c=c;this.d=d}}
+        let A=make(),B=make(),first={keep:7};
+        let a=new A(first,5e-324,-0,2n),b=new B(undefined,null,'text',true);
+        let c=new A();gc();
+        return a.a===first&&a.b===5e-324&&Object.is(a.c,-0)&&a.d===2n&&
+            b.a===undefined&&b.b===null&&b.c==='text'&&b.d===true&&
+            Object.keys(c).join(',')==='a,b,c,d'&&c.a===undefined&&
+            a instanceof A&&!(a instanceof B)&&b instanceof B;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function C(a,b){this.a=a;this.b=b}function create(a,b){return new C(a,b)}
+        let a=create(5e-324,{}),b=create(-0,undefined);C.prototype={tag:9};
+        let c=create('text',null);gc();
+        return a.a===5e-324&&Object.is(b.a,-0)&&c.a==='text'&&c.b===null&&
+            c.tag===9&&a.tag===undefined&&Object.keys(c).join(',')==='a,b';
+    })())JS").item, ITEM_TRUE);
+}
+TEST_F(JsFormalMir, SourceConstructorLayoutRejectsObservableInitialization) {
+    EXPECT_EQ(run(R"JS((function(){
+        function C(a,b){this.a=a;this.b=b}function create(a,b){return new C(a,b)}
+        let seen='';Object.defineProperty(C.prototype,'a',{set(v){seen+=Object.keys(this).join(',')+v},configurable:true});
+        let a=create(7,9);delete C.prototype.a;
+        Object.defineProperty(C.prototype,'b',{value:3,writable:false,configurable:true});
+        let b=create(11,13);delete C.prototype.b;
+        let c=create(17,19);return seen==='7'&&!Object.hasOwn(a,'a')&&a.b===9&&
+            b.a===11&&!Object.hasOwn(b,'b')&&c.a===17&&c.b===19;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function C(a,b){this.a=a;this.b=b}function create(a,b){return new C(a,b)}
+        let calls='';C.prototype=new Proxy({}, {set(t,k,v,r){calls+=k+v;return Reflect.set(t,k,v,r)}});
+        let a=create(3,5);return calls==='a3b5'&&a.a===3&&a.b===5;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function C(a,b){this.a=a;this.b=b}function create(a,b){return new C(a,b)}
+        let first=create(1,2);C=function(a,b){return {other:a+b}};
+        let second=create(3,5);return first.a===1&&first.b===2&&second.other===8;
+    })())JS").item, ITEM_TRUE);
+}
+TEST_F(JsFormalMir, SourcePrototypeMethodsGuardCapturedTargets) {
+    EXPECT_EQ(run(R"JS((function(){
+        function C(value){this.value=value}
+        C.prototype={read:function(x){return this.value+x}};
+        function call(o,x){return o.read(x)}
+        let a=new C(3),ok=call(a,1)===4;
+        C.prototype.read=function(x){return this.value-x};ok=ok&&call(a,1)===2;
+        a.read=function(x){return 20+x};ok=ok&&call(a,2)===22;delete a.read;
+        Object.defineProperty(C.prototype,'read',{get(){gc();return function(x){return this.value*x}},configurable:true});
+        ok=ok&&call(a,4)===12;C.prototype={read:function(x){return this.value+x}};
+        let b=new C(7),captured=b.read((C.prototype.read=function(x){return 100+x},2));
+        return ok&&captured===9&&call(b,2)===102;
+    })())JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS((function(){
+        function factory(n){function C(value){this.value=value}
+            C.prototype={read:function(x){return this.value+n+x}};return C}
+        function call(o,x){return o.read(x)}let A=factory(3),B=factory(5),a=new A(7),b=new B(11);
+        let sum=0;for(let i=0;i<4;i++)sum+=call(a,i)+call(b,i);A=null;B=null;gc();
+        Object.setPrototypeOf(a,new Proxy({read:function(x){return this.value*x}},{}));
+        return sum===116&&call(a,2)===14&&call(b,2)===18;
+    })())JS").item, ITEM_TRUE);
+}
 TEST_F(JsFormalMir, PrototypeLookupRetainsCallState) {
     EXPECT_EQ(run(R"JS((function(){
         function make(n){return {add:function(x){return this.value+n+x}}}

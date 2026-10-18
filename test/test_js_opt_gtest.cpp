@@ -1437,6 +1437,28 @@ struct MvpMirTuningCase {
 
 // keep callback-free admission cases separate: reflection would disable their numeric proofs.
 static const MvpMirTuningCase kMvpMirTuningCases[] = {
+    {"SourceConstructorLayout", "mvp_source_constructor_layout", R"JS(
+function create(a,b) { return new Record(a,b); }
+function Record(a,b) { this.a=a; this.b=b; }
+let one=create(3,5),two=create('text',null);
+Object.defineProperty(Record.prototype,'a',{set(v){this.seen=v},configurable:true});
+let three=create(7,9);
+if (one.a!==3 || one.b!==5 || two.a!=='text' || two.b!==null ||
+    three.seen!==7 || Object.hasOwn(three,'a') || three.b!==9)
+    throw new Error('source constructor layout or inherited setter');
+console.log('OPT_OK');
+)JS"},
+    {"SourcePrototypeMethodTarget", "mvp_source_prototype_method", R"JS(
+function call(o,x) { return o.read(x); }
+function Record(value) { this.value=value; }
+Record.prototype={read:function(x){return this.value+x}};
+let object=new Record(7),total=0;
+for(let i=0;i<4;i++)total+=call(object,i);
+let captured=object.read((Record.prototype.read=function(x){return 100+x},2));
+if(total!==34 || captured!==9 || call(object,3)!==103)
+    throw new Error('source method target or argument order');
+console.log('OPT_OK');
+)JS"},
     {"ReflectiveOwnDataUsesSharedLookup", "mvp_reflective_own_data", R"JS(
 function read(object) { return object.value; }
 function C(value) { this.value = value; }
