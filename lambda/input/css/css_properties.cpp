@@ -3781,9 +3781,9 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             if (value->type == CSS_VALUE_TYPE_KEYWORD) return value->data.keyword == CSS_VALUE_NORMAL;
             if (value->type == CSS_VALUE_TYPE_LENGTH) return css_unit_is_length(value->data.length.unit);
             if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0;
-            // CSS Text 4 percentage tracking is already resolved against the current font size.
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return id == CSS_PROPERTY_LETTER_SPACING;
-            return css_value_is_length_expression(value, id == CSS_PROPERTY_LETTER_SPACING, false);
+            // CSS Text 4 §§8.1–8.2 accepts font-relative percentages for both spacing properties.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+            return css_value_is_length_expression(value, true, false);
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             // CSS Inline: invalid dimensions must not replace a valid inherited line-height.

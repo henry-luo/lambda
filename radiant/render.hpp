@@ -2774,6 +2774,19 @@ inline void radiant_clear_font_family(FontProp* font) {
     font->family = nullptr;
 }
 
+inline void radiant_copy_font_spacing(FontProp* target, const FontProp* source, bool letter) {
+    (letter ? target->letter_spacing : target->word_spacing) =
+        letter ? source->letter_spacing : source->word_spacing;
+    (letter ? target->letter_spacing_length : target->word_spacing_length) =
+        letter ? source->letter_spacing_length : source->word_spacing_length;
+    (letter ? target->letter_spacing_percent : target->word_spacing_percent) =
+        letter ? source->letter_spacing_percent : source->word_spacing_percent;
+    (letter ? target->letter_spacing_is_percent : target->word_spacing_is_percent) =
+        letter ? source->letter_spacing_is_percent : source->word_spacing_is_percent;
+    (letter ? target->letter_spacing_is_set : target->word_spacing_is_set) =
+        letter ? source->letter_spacing_is_set : source->word_spacing_is_set;
+}
+
 inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     if (!target || !source) return;
     if (source->family) radiant_retain_font_family(
@@ -2794,14 +2807,8 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->text_deco_style = source->text_deco_style;
     target->text_deco_thickness = source->text_deco_thickness;
     target->text_underline_offset = source->text_underline_offset;
-    target->letter_spacing = source->letter_spacing;
-    target->letter_spacing_percent = source->letter_spacing_percent;
-    target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-    target->letter_spacing_is_set = source->letter_spacing_is_set;
-    target->word_spacing = source->word_spacing;
-    target->word_spacing_percent = source->word_spacing_percent;
-    target->word_spacing_is_percent = source->word_spacing_is_percent;
-    target->word_spacing_is_set = source->word_spacing_is_set;
+    radiant_copy_font_spacing(target, source, true);
+    radiant_copy_font_spacing(target, source, false);
     target->platform_fallback_family = source->platform_fallback_family;
 }
 
@@ -2842,16 +2849,10 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
         target->text_underline_offset = source->text_underline_offset;
     }
     if (!target->letter_spacing_is_set && target->letter_spacing == 0.0f) {
-        target->letter_spacing = source->letter_spacing;
-        target->letter_spacing_percent = source->letter_spacing_percent;
-        target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-        target->letter_spacing_is_set = source->letter_spacing_is_set;
+        radiant_copy_font_spacing(target, source, true);
     }
     if (!target->word_spacing_is_set && target->word_spacing == 0.0f) {
-        target->word_spacing = source->word_spacing;
-        target->word_spacing_percent = source->word_spacing_percent;
-        target->word_spacing_is_percent = source->word_spacing_is_percent;
-        target->word_spacing_is_set = source->word_spacing_is_set;
+        radiant_copy_font_spacing(target, source, false);
     }
 }
 

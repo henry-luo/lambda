@@ -1,6 +1,7 @@
 # Radiant layout partial passes — October 2026
 
-Status: layout fixes through round 5 implemented and verified, 2026-10-13.
+Status: round 8 spacing fix passes the layout and Radiant baselines,
+2026-10-19. The full input audit is recorded in round 8 below.
 
 ## Scope and initial gate
 
@@ -2638,3 +2639,91 @@ Full Radiant85 passes: **5,727 passed /156 expected partial /1 existing skip /0 
 User wrap-up checkpoint: **85 additional full matches**, independently recomputed against the original round7 inventory, with zero lost full matches. The100-test target remains incomplete. Work is stopped at the user's wrap-up request; the goal service reports no active goal. No diagnostic instrumentation remains. Exact layout and full Radiant gates both pass with zero failures; native92/92, targeted lint and diff checks pass. References, comparison tolerances and baseline skips are unchanged.
 
 Next confirmed diagnosis, not implemented: percentage word spacing is excluded by the shared font-spacing resolver's letter-only percentage condition, its length percentage basis omits word spacing, and the intrinsic path also omits percentage/functions for word spacing. Fresh Chromium resolves the authored100% and calc(50% +0.5em) examples against each element's used font size. CSS Text4 §8.1 requires percentage-preserving inheritance. Complete a shared resolver design, including retained affine calc components and final font-size timing, before changing production; the stable85 source backups and next-investigation notes are under temp.
+
+## Round 8: computed spacing percentages
+
+Fresh starting gate (2026-10-18): **3,138 full /156 partial /0 failed**.
+The tree has changed since round 7; this is the comparison checkpoint.
+
+Priority and outcome: restore percentage word spacing in ordinary text and
+shrink-to-fit measurement. The original case is `word-spacing-percent-001`.
+CSS Text 4 §§8.1–8.2 requires inherited percentages to use the descendant's
+used font size while inherited font-relative lengths retain their declaring
+element's computed length. No Lambda semantic or design ruling changes.
+
+Owner and design: promote the existing font-spacing resolver for reuse by
+intrinsic sizing. Preserve the affine absolute and percentage components of
+spacing values in `FontProp`, copy them with the existing font-value helpers,
+and resolve their used advance only after font-size is complete. Keep zero
+and normal explicit so inheritance cannot restore an earlier nonzero value.
+This milestone covers percentages and affine `calc()` for both spacing
+properties; nonlinear percentage expressions retain their existing resolver
+and are outside this milestone.
+
+Acceptance: native Ahem controls cover absolute expressions, pure and mixed
+percentages, a changed child font size, explicit inheritance, inherited em,
+negative percentages, and normal/zero resets. Browser geometry and PNGs live
+under `temp/layout-analysis/round8/`. During implementation run the native
+spacing control and focused WPT comparison; then run the full native text
+suite, layout baseline, required Radiant baseline, integer-cast lint and diff
+checks once the implementation is stable. Keep reference data and scoring
+unchanged, and record remaining differences instead of forcing a match.
+
+Diagnosis also found the first loss in declaration validation: both literal
+percentages and percentage-bearing expressions were accepted only for letter
+spacing. The shared validator now accepts the CSS Text 4 domain for word
+spacing too; the parser regression checks both properties symmetrically.
+
+Focused evidence: the original WPT case now matches every compared metric.
+All 13 independent native controls match Chromium's widths, including the
+actual text rectangles as well as the shrink-to-fit boxes. All 20 control
+element rectangles match fresh browser x/y/width/height within 0.1px.
+The complete native text/layout suite passes **138/138** and the CSS parser
+suite passes **110/110**. Four affected category inventories retain their
+recorded regression floors; CSS text improves **884→885** full matches.
+Integer-cast lint, generated CSS inventory and diff checks pass.
+
+PNG inspection confirms the intended spacing. The saved 1200×800 images
+still differ in 6,276 RGB channels for the Ahem controls and 25,952 for the
+WPT case (of 2,880,000 channels); geometry equality is not a pixel-equality
+claim. Full Radiant qualification passes **5,885 full /159 expected partial
+/1 existing skip /0 failed** across 6,045 tests, including the complete UI,
+viewer, native layout, paged-media and render selections. Its layout selection
+reports **3,139 full /155 partial /0 failed**. On 2026-10-19 the exact
+`make test-layout-baseline` target independently confirms the same result
+across all 3,294 recorded cases, with no skips.
+
+The broader `make test-input` audit finishes with a qualification limit:
+10 Wiki tests and 24 PDF/export tests fail, along with the 12 prose readback
+checks already documented in `doc/Script_Formats_Support.md`. Its 23 CSS
+suites pass **1,146/1,146**. Keep these ordinary failures visible; no input or
+export expectations were changed for this milestone.
+
+Seven Wiki CLI failures reproduce with the saved 2026-10-18 18:56 executable
+(`temp/svg_enhancement/lambda-intake.exe`), reporting `unknown option
+input_type`. Isolated current/pre-change CLI replays of paged Markdown,
+FO/native page controls, and text-spacing export produce **identical failure
+assertions**: respectively 1, 5 and 4. That executable predates the current
+HEAD's SVG work as well as this spacing change; the replay is supporting
+evidence for these three existing failures, not an attribution of every
+remaining export failure. Logs and the assertion comparison are retained
+under `temp/layout-analysis/round8/`.
+
+The spacing milestone is complete: one recorded partial becomes full,
+the exact layout and required Radiant baselines have zero failures, and the
+new browser-derived geometry controls pass. The completion audit on
+2026-10-19 confirms the executable is newer than the changed engine sources
+and reruns the native spacing contract and original WPT case successfully.
+The long-running goal's zero-failure result is verified; remaining
+input/export failures retain the qualification limit above.
+
+Next investigation: `anonymous-grid-item-001` is not solely an indentation
+error. `collect_grid_item_nodes` collects only element nodes, and direct text
+gets a special layout path only when no element items exist. A conformant
+repair needs anonymous grid items participating in the existing track sizing
+and placement algorithm (CSS Grid §6), rather than a post-layout text offset.
+No grid production change is included in this milestone.
+The follow-up inspection also confirms the grid style pass counts only
+element items and its scratch capacity excludes text. A future implementation
+should promote the existing scratch-lived anonymous-item factory from flex
+instead of copying it, preserving the pass-owned lifetime in D4.5.1v4.

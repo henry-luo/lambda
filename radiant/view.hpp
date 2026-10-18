@@ -835,9 +835,11 @@ struct FontProp {
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
     float letter_spacing_percent;  // authored percentage, retained for inheritance
+    float letter_spacing_length;   // computed absolute term of percentage calc()
     bool letter_spacing_is_percent;
     bool letter_spacing_is_set;  // resolved zero must not be treated as missing
     float word_spacing_percent;  // authored percentage, retained for inheritance
+    float word_spacing_length;
     bool word_spacing_is_percent;
     bool word_spacing_is_set;
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
@@ -879,6 +881,15 @@ inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
     float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;
     return fp->font_size * zoom;
+}
+
+inline void font_prop_resolve_spacing(FontProp* font) {
+    float zoom = font->used_zoom > 0.0f ? font->used_zoom : 1.0f;
+    // percentages inherit intact; calc() lengths retain their declaring font's units.
+    if (font->letter_spacing_is_percent) font->letter_spacing =
+        font->letter_spacing_length * zoom + font->letter_spacing_percent * font_prop_used_size(font) / 100.0f;
+    if (font->word_spacing_is_percent) font->word_spacing =
+        font->word_spacing_length * zoom + font->word_spacing_percent * font_prop_used_size(font) / 100.0f;
 }
 
 inline void font_prop_copy(FontProp* destination, const FontProp* source) {

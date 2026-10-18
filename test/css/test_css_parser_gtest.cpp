@@ -293,9 +293,10 @@ TEST_F(CssEngineParserTest, TextSpacingValidatesTypedLengthsAndNormalBeforeCasca
         for (const char* value : valid) check(property, value, true);
         for (const char* value : invalid) check(property, value, false);
     }
-    for (const char* value : {"10%", "-10%", "calc(10% + 1px)", "min(10%, 2px)"})
-        check("letter-spacing", value, true);
-    check("word-spacing", "10%", false);
+    // CSS Text 4 §§8.1–8.2 gives both properties the same length-percentage domain.
+    for (const char* property : {"letter-spacing", "word-spacing"})
+        for (const char* value : {"10%", "-10%", "calc(10% + 1px)", "min(10%, 2px)"})
+            check(property, value, true);
 }
 
 TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
