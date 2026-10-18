@@ -945,32 +945,33 @@ static Item fo_foreign_copy(FoTranslationContext* context, DomElement* source, s
     if (depth > context->options->max_depth || !fo_translation_charge(context)) {
         fo_failure(context, source, nullptr, "FO translation budget exhausted", TYPESET_BUDGET_EXHAUSTED); return ItemNull;
     }
-    ElementBuilder output = context->builder.element(source->tag_name);
-    if (root) {
-        HashMap* bindings = fo_source_ids_new(16);
-        if (!bindings) { fo_failure(context, source, nullptr, "SVG namespace allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
-        // make the detached SVG self-contained without mutating the original FO namespace scope.
-        for (DomElement* node = source; node; node = node->parent_element()) {
-            int count = 0; const char** names = node->attribute_names(&count);
-            for (int i = 0; i < count; i++) if (!strcmp(names[i], "xmlns") || !strncmp(names[i], "xmlns:", 6)) {
-                FoSourceId key = {names[i], dom_node_ref(node)};
-                if (!hashmap_get(bindings, &key)) { hashmap_set(bindings, &key); output.attr(names[i], node->get_attribute(names[i])); }
-            }
-        }
-        bool oom = hashmap_oom(bindings); hashmap_free(bindings);
-        if (oom) { fo_failure(context, source, nullptr, "SVG namespace allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
-    }
+    const char* uri = dom_element_namespace_uri(source);
+    if (strcmp(uri, "http://www.w3.org/2000/svg") && strcmp(uri, "http://www.w3.org/1999/xhtml")) return ItemNull;
+    // serialize resolved XML-host graphics into the shared HTML SVG syntax (D2.11.2).
+    ElementBuilder output = context->builder.element(source->local_name());
+    if (root) output.attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("xmlns:xlink", "http://www.w3.org/1999/xlink");
     int count = 0; const char** names = source->attribute_names(&count);
     for (int i = 0; i < count; i++) {
-        if (root && (!strcmp(names[i], "xmlns") || !strncmp(names[i], "xmlns:", 6))) continue;
-        output.attr(names[i], source->get_attribute(names[i]));
+        const char* local = nullptr;
+        const char* attr_uri = dom_element_attribute_namespace_uri(source, names[i], &local);
+        if (!attr_uri || !*attr_uri) output.attr(names[i], source->get_attribute(names[i]));
+        else {
+            const char* prefix = !strcmp(attr_uri, "http://www.w3.org/1999/xlink") ? "xlink:" :
+                !strcmp(attr_uri, "http://www.w3.org/XML/1998/namespace") ? "xml:" : nullptr;
+            if (!prefix) continue;
+            FoStyleBuffer name;
+            if (!name.value) { fo_failure(context, source, nullptr, "SVG attribute allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
+            strbuf_append_str(name.value, prefix); strbuf_append_str(name.value, local);
+            output.attr(name.value->str, source->get_attribute(names[i]));
+        }
     }
     for (DomNode* child = source->first_child; child; child = child->next_sibling) {
         if (child->is_text()) output.child(context->builder.createStringItem(child->as_text()->text, child->as_text()->length));
         else if (child->is_element()) {
             Item copied = fo_foreign_copy(context, child->as_element(), depth + 1, false);
             if (context->result->diagnostic.status != TYPESET_OK) return ItemNull;
-            output.child(copied);
+            if (get_type_id(copied) == LMD_TYPE_ELEMENT) output.child(copied);
         }
     }
     return output.final();
@@ -992,8 +993,10 @@ static const char* fo_foreign_image(FoTranslationContext* context, DomElement* s
     if (!svg) { fo_failure(context, source, nullptr, "instream foreign object requires exactly one SVG root"); return nullptr; }
     Item copied = fo_foreign_copy(context, svg, depth + 1, true);
     if (context->result->diagnostic.status != TYPESET_OK) return nullptr;
-    String* xml = format_xml(context->document->document_pool, copied);
-    char* encoded = xml ? url_encode_component(xml->chars, xml->len) : nullptr;
+    StringBuf* html = stringbuf_new(context->document->document_pool);
+    if (html) format_html_to_strbuf(html, copied);
+    String* serialized = html ? stringbuf_to_string(html) : nullptr;
+    char* encoded = serialized ? url_encode_component(serialized->chars, serialized->len) : nullptr;
     if (!encoded) { fo_failure(context, source, nullptr, "SVG serialization allocation failed", TYPESET_OUT_OF_MEMORY); return nullptr; }
     FoStyleBuffer buffer;
     if (buffer.value) { strbuf_append_str(buffer.value, "data:image/svg+xml,"); strbuf_append_str(buffer.value, encoded); }

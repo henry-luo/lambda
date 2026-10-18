@@ -41,6 +41,8 @@ String* format_mark(Pool* pool, Item root_item);
 
 // StringBuf variants (internal — prefer String* versions above)
 void format_json_to_strbuf(StringBuf* sb, Item root_item);
+// emits the supplied nodes without format_html's automatic document wrapper.
+void format_html_to_strbuf(StringBuf* sb, Item root_item);
 void format_markdown(StringBuf* sb, Item root_item);
 void format_rst(StringBuf* sb, Item root_item);
 void format_org(StringBuf* sb, Item root_item);

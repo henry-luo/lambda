@@ -983,8 +983,9 @@ Item mvp_lmd_object_string(Item receiver) {
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 static Item object_own(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item receiver, Item) {
+    // native maps retain their descriptor owner instead of using packed-map reflection.
     if (count && get_type_id(args[0]) == LMD_TYPE_STRING && get_type_id(receiver) == LMD_TYPE_MAP &&
-            receiver.map->map_kind != MAP_KIND_PROXY &&
+            mvp_lmd_property_map(receiver) &&
             utf8_key_is_canonical(args[0].get_string()->chars, args[0].get_string()->len)) {
         // a canonical string and passive own-map lookup need no coercion roots or guest dispatch.
         return mvp_lmd_property_has(receiver, args[0], 0);

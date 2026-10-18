@@ -974,23 +974,6 @@ static Html5Token* html5_emit_null_character(Html5Parser* parser, const char* er
         HTML5_REPLACEMENT_CHAR_UTF8, 3);
 }
 
-static bool html5_tokenizer_allows_cdata(Html5Parser* parser) {
-    if (!parser->open_elements) return false;
-    int current = (int)parser->open_elements->length - 1;
-    // An integration point itself is foreign content; its HTML descendants are not.
-    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-        const char* tag = html5_element_tag((Element*)parser->open_elements->items[i].element);
-        if (strcmp(tag, "svg") == 0 || strcmp(tag, "math") == 0) return true;
-        if (strcmp(tag, "html") == 0) return false;
-        if (i != current &&
-            (strcmp(tag, "foreignObject") == 0 || strcmp(tag, "mi") == 0 ||
-             strcmp(tag, "mo") == 0 || strcmp(tag, "mn") == 0 ||
-             strcmp(tag, "ms") == 0 || strcmp(tag, "mtext") == 0 ||
-             strcmp(tag, "annotation-xml") == 0)) return false;
-    }
-    return false;
-}
-
 // main tokenizer function - returns next token
 Html5Token* html5_tokenize_next(Html5Parser* parser) {
     while (true) {
@@ -1546,7 +1529,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE);
                 }
                 // check for "[CDATA["
-                else if (c == '[' && html5_tokenizer_allows_cdata(parser) &&
+                else if (c == '[' && html5_current_node_is_foreign(parser) &&
                          parser->pos + 6 <= parser->length &&
                          strncmp(&parser->html[parser->pos], "CDATA[", 6) == 0) {
                     parser->pos += 6;

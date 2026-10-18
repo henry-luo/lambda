@@ -9,6 +9,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/input/input-parsers.h"
+#include "../lambda/format/format.h"
 #include "../lib/mime-detect.h"
 #include "../lib/arena.h"
 #include "../lib/strbuf.h"
@@ -1030,6 +1031,78 @@ TEST_F(HtmlParserTest, WhitespacePreservation) {
     EXPECT_TRUE(strview_equal(&type->name, "pre"));
 }
 
+
+TEST_F(HtmlParserTest, ExternalSvgSharesHtmlForeignContentModel) {
+    // compare the complete subtree, including recovery and HTML integration points (D2.11.2).
+    const char* sources[] = {
+        "<SVG viewbox='0 0 40 20'><lineargradient id='paint'><stop offset=0/></lineargradient>"
+        "<rect width=40 height=20 fill=red FILL=blue/></SVG>",
+        "<svg><g><path d='M0 0h10v10z'></svg>",
+        "<svg><foreignObject><div/><p>label</p></foreignObject></svg>",
+        "<svg xmlns='urn:foreign' xmlns:s='http://www.w3.org/2000/svg'>"
+        "<s:rect width='10'/><circle r='5'/></svg>",
+        "<svg><text> a <![CDATA[<b>&]]> z </text></svg>"
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        Input* external = Input::create(pool);
+        Input* embedded = Input::create(pool);
+        ASSERT_NE(external, nullptr);
+        ASSERT_NE(embedded, nullptr);
+        Element* actual = parse_svg_document(external, source);
+        ASSERT_NE(actual, nullptr);
+        Element* document = html5_parse(embedded, source);
+        ASSERT_NE(document, nullptr);
+        Element* expected = findElementByTag(Item{.element = document}, "svg");
+        ASSERT_NE(expected, nullptr);
+        String* actual_xml = format_xml(pool, Item{.element = actual});
+        String* expected_xml = format_xml(pool, Item{.element = expected});
+        ASSERT_NE(actual_xml, nullptr);
+        ASSERT_NE(expected_xml, nullptr);
+        EXPECT_STREQ(actual_xml->chars, expected_xml->chars);
+    }
+}
+
+TEST_F(HtmlParserTest, ExternalSvgUsesHtmlNamesAndDocumentOwner) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    strbuf_append_str(source, "\xEF\xBB\xBF<?xml version='1.0'?>"
+        "<SVG viewbox='0 0 20 10'><foreignobject><div/><p>kept</p></foreignobject></SVG>");
+    Element* svg = parse_svg_document(input, source->str);
+    strbuf_free(source);
+    ASSERT_NE(svg, nullptr);
+    EXPECT_TRUE(ElementReader(input->root).hasTag("#document"));
+    EXPECT_STREQ(ElementReader(svg).get_attr_string("viewBox"), "0 0 20 10");
+    Element* foreign = findElementByTag(Item{.element = svg}, "foreignObject");
+    ASSERT_NE(foreign, nullptr);
+    Element* div = findElementByTag(Item{.element = foreign}, "div");
+    ASSERT_NE(div, nullptr);
+    ASSERT_EQ(div->length, 1);
+    EXPECT_TRUE(ElementReader(div->items[0]).hasTag("p"));
+    EXPECT_STREQ(div->items[0].element->items[0].get_string()->chars, "kept");
+}
+
+TEST_F(HtmlParserTest, SvgHtmlIntegrationEndTagsDoNotCaseFoldForeignAncestors) {
+    Item document = parseHtml5Document("<svg><foreignObject><h:div/></foreignObject>"
+        "<foreignObject><div class='second'/></foreignObject></svg>");
+    Element* svg = findElementByTag(document, "svg");
+    ASSERT_NE(svg, nullptr);
+    ASSERT_EQ(svg->length, 1);
+    ElementReader foreign(svg->items[0]);
+    EXPECT_TRUE(foreign.hasTag("foreignObject"));
+    ElementReader literal = foreign.findChildElement("h:div");
+    ASSERT_TRUE(literal.isValid());
+    ElementReader html_foreign = literal.findChildElement("foreignobject");
+    ASSERT_TRUE(html_foreign.isValid());
+    EXPECT_TRUE(html_foreign.findChildElement("div").isValid());
+    document = parseHtml5Document("<svg><foreignObject><div></div></foreignObject><circle r='5'/></svg>");
+    svg = findElementByTag(document, "svg");
+    ASSERT_NE(svg, nullptr);
+    ASSERT_EQ(svg->length, 2);
+    EXPECT_TRUE(ElementReader(svg->items[1]).hasTag("circle"));
+}
 
 TEST_F(HtmlParserTest, XhtmlUsesHtmlDocumentAndInternedNames) {
     const char* source = "<?xml version=\"1.0\"?><!DOCTYPE h:html>"
