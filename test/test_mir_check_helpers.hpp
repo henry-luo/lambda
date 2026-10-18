@@ -1201,6 +1201,27 @@ inline int count_matches(const std::vector<MirLine>& lines, const std::string& p
     return total;
 }
 
+inline void expect_js_no_site_caches(const char* mir) {
+    // D8.4.1v2: property kernels have four semantic arguments and no site-state operand.
+    const char* prefix = ", mvp_lmd_class_property";
+    for (const char* line = mir; *line;) {
+        const char* end = strchr(line, '\n');
+        if (!end) end = line + strlen(line);
+        const char* start = line;
+        while (start < end && (*start == ' ' || *start == '\t')) start++;
+        const char* target = !strncmp(start, "call\t", 5) ? strstr(start, prefix) : NULL;
+        if (target && target < end) {
+            const char* name_end = target + strlen(prefix);
+            if (*name_end == ',' || !strncmp(name_end, "_fixed,", 7)) {
+                int commas = 0;
+                for (const char* p = start; p < end; p++) if (*p == ',') commas++;
+                EXPECT_EQ(commas, 6) << "D8.4.1v2: obsolete JS property cache operand at " << target;
+            }
+        }
+        line = *end ? end + 1 : end;
+    }
+}
+
 // run one fixture: compile, slice, evaluate. Failures are reported through
 // GTest with the sidecar path, the resolved scope, and the scoped MIR text so
 // a broken expectation can be diagnosed without re-running by hand.
@@ -1216,6 +1237,11 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
         << "fixture " << script_path << "\nsidecar " << sidecar_path
         << "\n" << compiled.error
         << "\n--- lambda.exe output ---\n" << compiled.output;
+
+    if (language == LANG_JS) {
+        for (size_t i = 0; i < compiled.dump.all_lines.size(); i++)
+            expect_js_no_site_caches(compiled.dump.all_lines[i].text.c_str());
+    }
 
     size_t applicable_groups = 0;
     for (size_t c = 0; c < sidecar.checks.size(); c++) {

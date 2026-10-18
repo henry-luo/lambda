@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D1.3, D3.4.7, D8.4.1v2: local nonescaping literals can fold; open returned/argument/class receivers retain packed-field guards and canonical descriptor/transition fallback.",
+  "description": "D1.3, D3.4.7, D8.4.1v2: local nonescaping literals can fold; open returned/argument/class receivers retain packed-field guards and canonical descriptor/transition fallback. D8.4.1v2: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
@@ -28,16 +28,16 @@
       "expect": [
         "call\tmvp_lmd_signature,",
         "call\tmvp_lmd_property_get_fixed",
-        "call\tmap_shape_field_to_item",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
       "in_func": "mvp_lmd_f5",
       "expect": [
         "call\tmvp_lmd_property_get_fixed",
-        "call\tmap_shape_field_to_item",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
@@ -58,8 +58,8 @@
       "in_func": "mvp_lmd_f16",
       "expect": [
         "call\tmvp_lmd_property_get_fixed",
-        "call\tmap_shape_field_to_item",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {

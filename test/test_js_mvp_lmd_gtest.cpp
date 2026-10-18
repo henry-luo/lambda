@@ -24,6 +24,8 @@
 #include <math.h>
 #include <string.h>
 
+// keep MIR, ABI, storage and ownership regressions here; share feature checks
+// with the existing focused cases (vibe/impl/JS_MVP_Test_Consolidation.md).
 class JsFormalMir : public ::testing::Test {
 protected:
     Runtime runtime = {};
@@ -318,7 +320,7 @@ TEST_F(JsFormalMir, LegacyForInInitializerRunsBeforeSourceEvenWhenEmpty) {
     Item result = run(R"JS(
         (function(){let effects=0,stored,count=0;
             for(var key=(++effects,-1) in (stored=key,{a:0,b:1})){count++;}
-            for(var empty=42 in {}){}
+            for(var empty=42 in {}){count++;}
             return effects===1&&stored===-1&&count===2&&empty===42;})()
     )JS");
     ASSERT_FALSE(item_is_error(result));
@@ -2832,10 +2834,10 @@ TEST_F(JsMvpLmd, CoreClassFieldsAndStaticBlocks) {
     boolean(R"JS(
         let log='';
         class A {a=(log+='a',1);constructor(){log+='b'}get x(){return this.a}static value(){return 5}}
-        class B extends A {b=(log+='c',super.x+1);static v=super.value();static {this.w=super.value()+1}
+        class B extends A {b=(log+='c',super.x+1);a=3;static v=super.value();static {this.w=super.value()+1}
             constructor(){super();log+='d'}read(){return super.x}}
         let b=new B();
-        log==='abcd'&&b.a===1&&b.b===2&&b.read()===1&&B.v===5&&B.w===6&&b instanceof A&&b instanceof B;
+        log==='abcd'&&b.a===3&&b.b===2&&b.read()===3&&B.v===5&&B.w===6&&b instanceof A&&b instanceof B;
     )JS");
     boolean(R"JS(
         function Base(v){this.v=v}Base.prototype.read=function(){return this.v};
@@ -2847,6 +2849,10 @@ TEST_F(JsMvpLmd, CoreClassFieldsAndStaticBlocks) {
     boolean("class C { f=function(){}; c=class {static n=this.name}; static g=()=>1; static d=class {static n=this.name}}let c=new C();c.f.name==='f'&&c.c.n==='c'&&C.g.name==='g'&&C.d.n==='d'");
     boolean("function Base(v){this.v=v}let C=class extends Base {};new C(7).v===7");
     error("let C=class extends null {};new C();", "TypeError");
+    boolean("class A{static a=new A();x=3;}A.a.x===3");
+    boolean("let count=0;class A{x=++count;y=this.x+1;z;}let a=new A(),b=new A();a.x===1&&b.x===2&&a.y===2&&b.y===3&&Object.hasOwn(a,'z')&&a.z===undefined");
+    boolean("class A{x=1;}class B extends A{y=2;}class C extends B{}let c=new C();c.x===1&&c.y===2");
+    boolean("let value=1;class A{x=value;fn=()=>this.x;}value=2;let a=new A();a.x===2&&a.fn()===2");
 }
 TEST_F(JsMvpLmd, PrivateClassFieldsAndBrands) {
     boolean(R"JS(
@@ -2979,7 +2985,9 @@ TEST_F(JsMvpLmd, CoreGlobalBindings) {
     boolean("globalThis.loopBinding=0;let total=0;for(let i=0;i<12;i++){globalThis.loopBinding=i;total+=loopBinding}total===66");
     mir = dump("temp/mvp_lmd_loop_global.mir");
     ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
+    // D8.4.1v2: repeated globals use shared dispatch without a site-cache decoder.
+    EXPECT_EQ(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_class_property\n"), nullptr);
     mem_free(mir);
     boolean(R"JS(
         globalThis.cacheProbe=1;
@@ -3030,6 +3038,9 @@ TEST_F(JsMvpLmd, CoreGlobalBindings) {
     error("'use strict';globalThis.present=1;Object.defineProperty(globalThis,'present',{writable:false});present=2;", "TypeError");
     error("'use strict';globalThis.x=1;missing=2;", "ReferenceError");
     error("let Object=Object;", "ReferenceError");
+    numeric("let Object={keys:()=>7};Object.keys({})", 7);
+    numeric("let Map=()=>7;Map()", 7);
+    error("let Map=()=>7;new Map()", "TypeError");
 }
 TEST_F(JsMvpLmd, GlobalReceiverAndLocalComputedKeys) {
     auto check = [&](const char* change, int expected, bool exposed) {
@@ -3911,6 +3922,7 @@ TEST_F(JsMvpLmd, DataDescriptorTransitionsAndPrototypeReflection) {
     error("'use strict';let a={};Object.defineProperty(a,'x',{value:1});delete a.x", "TypeError");
 }
 TEST_F(JsMvpLmd, ExplicitCatchFinallyCompletions) {
+    numeric("try{1}catch(e){2}", 1);
     boolean(R"JS(
         let trace='';
         function pass(value){throw value;}
@@ -4032,13 +4044,6 @@ TEST_F(JsMvpLmd, CollectionIteratorAndSet) {
     error("new Set().values.call(new Map())", "TypeError");
     error("let s=new Set();new Map().keys.call(s)", "TypeError");
 }
-TEST_F(JsMvpLmd, PublicInstanceFields) {
-    boolean("class A{static a=new A();x=3;}A.a.x===3");
-    boolean("let count=0;class A{x=++count;y=this.x+1;z;}let a=new A(),b=new A();a.x===1&&b.x===2&&a.y===2&&b.y===3&&Object.hasOwn(a,'z')&&a.z===undefined");
-    boolean("let order='';class A{x=(order+='a',1);constructor(){order+='b';}}class B extends A{x=(order+='c',2);constructor(){super();order+='d';}}let b=new B();order==='abcd'&&b.x===2&&b instanceof A&&b instanceof B");
-    boolean("class A{x=1;}class B extends A{y=2;}class C extends B{}let c=new C();c.x===1&&c.y===2");
-    boolean("let value=1;class A{x=value;fn=()=>this.x;}value=2;let a=new A();a.x===2&&a.fn()===2");
-}
 TEST_F(JsMvpLmd, LibraryVisitorsAndStringPrimitives) {
     boolean("let map=Array.prototype.map;map.call('abc',(v,i)=>v+i).join(',')==='a0,b1,c2'&&map.call({0:2,2:4,length:3},x=>x*2).join(',')==='4,,8'");
     boolean("let a=[1,,2,3];a.filter(x=>x%2).join(',')==='1,3'&&a.indexOf(undefined)===-1&&a.indexOf(2)===2&&[NaN].indexOf(NaN)===-1");
@@ -4105,6 +4110,9 @@ TEST_F(JsMvpLmd, Utf16RangesSearchAndSplit) {
         'a'.split(',',0).length===0 && 'abc'.toUpperCase()==='ABC' &&
         Number(' 12.5 ')===12.5 && String(-0)==='0';
     )JS");
+    boolean("'a' + 1 === 'a1' && 'x' + null === 'xnull' && '' + undefined === 'undefined'");
+    boolean("'' + 1e21 === '1e+21' && '' + 1e-7 === '1e-7' && '' + -0 === '0'");
+    boolean("'😀' === ('\\uD83D' + '\\uDE00') && '😀' < '\\uE000'");
 }
 TEST_F(JsMvpLmd, MapCallbackSharesLiveTraversal) {
     boolean(R"JS(
@@ -4380,20 +4388,6 @@ TEST_F(JsMvpLmd, PolymorphicMethodExpansionHasCallerBudget) {
     EXPECT_LT(strlen(mir), 20000000u);
     mem_free(mir);
 }
-TEST_F(JsMvpLmd, MathNamespaceCallsAndSpread) {
-    boolean("let m=Math;m.abs=function(x){return 'changed'};Math.abs(-3)==='changed'&&Object.keys(Math).length===0");
-    boolean("Math.PI=0;Math.PI>3&&delete Math.PI===false");
-    error("'use strict';Math.PI=0", "TypeError");
-    boolean(R"JS(
-        let methods=['sqrt','abs','floor','min','max']; let sum=0;
-        for(let method of methods){if(method in Math)sum+=Math[method](4,9);}
-        let round=Math.round, minimum=Math.min;
-        sum===23 && Math.max(...[1,7,3])===7 && minimum()===Infinity &&
-          minimum(3,NaN)!==minimum(3,NaN) && 1/minimum(0,-0)===-Infinity &&
-          round(-1.5)===-1 && 1/round(-0.1)===-Infinity &&
-          typeof Math.sqrt==='function';
-    )JS");
-}
 TEST_F(JsMvpLmd, ShiftPreservesHolesAndScalarOwnership) {
     boolean("[] instanceof Array && new Array(2) instanceof Array && [] instanceof Object && !(Array.prototype instanceof Array) && Array.prototype instanceof Object");
     boolean("let key=Symbol('own'),a=[];a[key]=1;a.hasOwnProperty(key)&&Map.assign===undefined&&Set.keys===undefined&&RegExp.create===undefined");
@@ -4475,6 +4469,7 @@ TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
     ASSERT_NE(allocation, nullptr);
     char* fallback = strstr(allocation, "mvp_lmd_class_invoke");
     ASSERT_NE(fallback, nullptr); *fallback = 0;
+    // shared descriptor guards preload native inputs before allocating the result.
     EXPECT_EQ(strstr(allocation, "mvp_lmd_class_property"), nullptr);
     mem_free(mir);
     boolean(R"JS(
@@ -4781,14 +4776,6 @@ TEST_F(JsMvpLmd, EqualityAndTruth) {
     numeric("let n=0; false && n++; true || n++; null ?? n++; n", 1);
     numeric("let n=0; n ||= 2; n &&= 3; n ?" "?= 4; n", 3);
 }
-TEST_F(JsMvpLmd, StringsUseUtf16) {
-    boolean("'a' + 1 === 'a1' && 'x' + null === 'xnull' && '' + undefined === 'undefined'");
-    boolean("'' + 1e21 === '1e+21' && '' + 1e-7 === '1e-7' && '' + -0 === '0'");
-    boolean("'😀'.length === 2 && '😀'[0] === '\\uD83D' && '😀'[1] === '\\uDE00'");
-    boolean("'😀' === ('\\uD83D' + '\\uDE00') && '😀' < '\\uE000'");
-    boolean("'a\\u0000b'.length === 3 && 'a\\u0000b'[1] === '\\u0000'");
-    boolean("'abc'[3] === undefined && 'abc'['1'] === 'b'");
-}
 TEST_F(JsMvpLmd, ArrayStringBuiltinInferenceAndRowSwaps) {
     boolean("function repeat(s,n){return s.repeat(n)} function code(s,i){return s.charCodeAt(i)} "
         "repeat('ab',3)==='ababab' && code(repeat('x',2),1)===120 && code('x',2)!==code('x',2)");
@@ -4855,7 +4842,7 @@ TEST_F(JsMvpLmd, CharacterCodesAndAsciiReuse) {
         "read('x',Infinity)!==read('x',Infinity)&&read('x',-Infinity)!==read('x',-Infinity)");
     boolean("const s='abc';function f(){return s[1]+s.length}f()==='b3'");
     boolean("const s='abc';function f(i){return s[i]}"
-        "f(3)===undefined&&f('length')===3&&f(1)==='b'");
+        "f(3)===undefined&&f('length')===3&&f(1)==='b'&&f('1')==='b'");
     boolean("const s='abc';let n=0,a=[];for(let i=0;i<4;i++){a.push(s[(n++,i)])}"
         "n===4&&a.join('')==='abc'&&a[3]===undefined");
     boolean("function f(s){let a=[];for(let i=0;i<s.length;i++){a.push(s[i])}return a.join('')}"
@@ -4914,16 +4901,6 @@ TEST_F(JsMvpLmd, DenseArrayAliasesAndMutation) {
     numeric("var n=0; var a=[1]; function key(){n++;return 0} a[key()]++; a[key()]+=2; a[0]+n", 6);
     numeric("var a=[5e-324]; var x=a[0]; a[0]=1e-323; x", 5e-324);
     boolean("var a=[1,2]; a.length=0; a[0]=3; a.length===1 && a[1]===undefined");
-}
-TEST_F(JsMvpLmd, ArrayCapabilityAndRangeFailures) {
-    boolean("var a=[]; a[1]=2; a.length===2 && !(0 in a) && a[0]===undefined");
-    boolean("var a=[]; a.length=1; a.length===1 && !(0 in a)");
-    boolean("var a=[]; a['01']=1; a['01']===1 && a.length===0");
-    boolean("var a=[]; a['-0']=1; a['-0']===1 && a.length===0");
-    boolean("var a=[]; a[4294967295]=1; a[4294967295]===1 && a.length===0");
-    error("var a=[]; a.length=-1", "RangeError");
-    error("var a=[]; a.length=1.5", "RangeError");
-    error("var a=[]; a.length=NaN", "RangeError");
 }
 TEST_F(JsMvpLmd, ClosedParameterKindsAndSnapshots) {
     // complete parameter domains should keep array indexing off the property-name conversion path.
@@ -5069,18 +5046,6 @@ TEST_F(JsMvpLmd, RecursiveCallsPreserveActivationAndArguments) {
     // exhaustion must be checked independently of the host's available recursion depth.
     error("function f(n){if(n===0)return 0;return f(n+1)+1} f(1)", "Stack overflow");
 }
-TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
-    boolean("if(false){({get a(){return 1}})}true");
-    boolean("function f(){return ()=>x; var x=1} f()()===undefined");
-    numeric("{let x=1; function f(){return x}} f()", 1);
-    numeric("function f(a=1){return a} f()", 1);
-    boolean("function f(){return this} f()===f()");
-    boolean("let a=[1,,2];a.length===3&&!Object.hasOwn(a,1)&&a[1]===undefined");
-    numeric("var x=1; with([]){x=2} x", 2);
-    numeric("try{1}catch(e){2}", 1);
-    numeric("async function f(){return 1} 1", 1);
-    numeric("async function* f(){yield 1} 1", 1);
-}
 TEST_F(JsMvpLmd, ExactRootsAndBoundedScalarHomes) {
     numeric("var a=[5e-324]; function f(x){return x} for(let i=0;i<10000;i++){a[0]=f(a[0]);} a[0]", 5e-324);
     ASSERT_NE(context, nullptr);
@@ -5208,6 +5173,7 @@ TEST_F(JsMvpLmd, ObjectProjectionAndCanonicalKeys) {
     boolean("let o={};o['é']=1;o['e\\u0301']=2;o['é']===1 && o['e\\u0301']===2");
     boolean("let o={a:1,b:2};let keys=Object.keys(o);let values=Object.values(o);let entries=Object.entries(o);o.a=9;o.c=3;keys.length===2 && values[0]===1 && entries[0][0]==='a' && entries[0][1]===1 && entries[0]!==entries[1]");
     numeric("let total=0;for(let [k,v] of Object.entries({a:1,b:2})){total+=v}total", 3);
+    boolean("let o={};o[{}]=1;typeof o.toString==='function'&&o['[object Object]']===1");
 }
 TEST_F(JsMvpLmd, MapKeysAndMutation) {
     numeric("let m=new Map();m['set'](1,2);m.get(1)", 2);
@@ -5231,16 +5197,9 @@ TEST_F(JsMvpLmd, MapKeysAndMutation) {
         "ok && m.get(0/0)===4 && m.has(NaN)");
     boolean("let m=new Map();m.set(1,2);m.get(1);function clear(){m.clear();return 1}"
         "m.get(clear())===undefined");
-}
-TEST_F(JsMvpLmd, LiveMapIteration) {
-    numeric("function sum(values){let n=0;for(let [k,v] of values)n+=k+v;return n}let m=new Map();m.set(3,4);sum([[1,2]])+sum(m)", 10);
-    numeric("let m=new Map();m.set('a',1).set('b',2);let sum=0;for(let [k,v] of m){sum+=v}sum", 3);
-    boolean("let m=new Map();m.set('a',1).set('b',2).set('c',3);let s='';for(let [k,v] of m.entries()){s+=k+v;if(k==='a'){m.delete('b');m.set('c',4);m.set('d',5)}}s==='a1c4d5'");
-    boolean("let m=new Map();m.set('a',1).set('b',2);let s='';for(let k of m.keys()){s+=k;if(k==='a'){m.delete('b');m.set('b',3)}}s==='ab'");
-    numeric("let m=new Map();m.set('a',1).set('b',2);let s=0;for(let v of m.values()){s+=v;if(v===1){m.clear();m.set('c',4)}}s", 5);
-    numeric("let m=new Map();m.set(1,1).set(2,2);let n=0;for(let a of m.keys()){for(let b of m.values()){n+=a*b}}n", 9);
-    boolean("let m=new Map();m.set('a',1).set('b',2);let a=[];for(let pair of m){a[a.length]=pair}a[0]!==a[1] && a[0][0]==='a' && a[1][0]==='b'");
-    numeric("let m=new Map();m.set(1,1).set(2,2).set(3,3);let s=0;outer:for(let v of m.values()){if(v===1)continue outer;s+=v;if(v===2)break outer}s", 2);
+    boolean("new Map([]).size===0");
+    boolean("let m=new Map();m.set(1,2);let f=m.get;f.call(m,1)===2");
+    boolean("let m=new Map();m.set=()=>1;m.set()===1&&m.size===0");
 }
 TEST_F(JsMvpLmd, ArrayConstructionDelegatesPreciseOwnership) {
     Item empty = run("new Array()");
@@ -5292,21 +5251,6 @@ TEST_F(JsMvpLmd, KeyProjectionAvoidsGettersAndRetainsDescriptorOrder) {
         Object.getOwnPropertyNames(sparse).join(',')==='3,1000000,length,extra' &&
         Object.keys(typed).join(',')==='0,1,extra' && keys(1,2)==='0';
     )JS");
-}
-TEST_F(JsMvpLmd, ObjectAndMapScopeBoundary) {
-    numeric("({get x(){return 1}}).x", 1);
-    boolean("Object.getPrototypeOf({__proto__:null})===null");
-    boolean("let o={};o.__proto__===Object.prototype");
-    boolean("let o={};o['__'+'proto__']=1;Object.getPrototypeOf(o)===Object.prototype");
-    boolean("new Map([]).size===0");
-    boolean("let m=new Map();m.set(1,2);let f=m.get;f.call(m,1)===2");
-    boolean("let m=new Map();m.set=()=>1;m.set()===1&&m.size===0");
-    boolean("let o={};typeof o.toString==='function'");
-    boolean("let o={};o[{}]=1;o['[object Object]']===1");
-    numeric("let count=0;for(let k in {}){count++;}count", 0);
-    numeric("let Object={keys:()=>7};Object.keys({})", 7);
-    numeric("let Map=()=>7;Map()", 7);
-    error("let Map=()=>7;new Map()", "TypeError");
 }
 static void unexpected_js_native_gc(void*, gc_heap_t*) { js_gc_callback_entries++; }
 static void unexpected_js_native_destroy(void*) { js_gc_callback_entries++; }
@@ -5437,6 +5381,7 @@ TEST_F(JsMvpLmd, MapCursorCleanupAndTombstoneCompaction) {
 }
 
 TEST_F(JsMvpLmd, SharedEscapingClosures) {
+    numeric("{let x=1; function f(){return x}} f()", 1);
     numeric("function f(){let x=1;return ()=>++x} let g=f();g()+g()", 5);
     numeric("function f(){let x=0;return [()=>++x,()=>x]}const a=f();a[0]()+a[1]()", 2);
     numeric("function f(x){return ()=>()=>++x}const g=f(3)();g()+g()", 9);
@@ -5469,22 +5414,6 @@ TEST_F(JsMvpLmd, ClosureIterationBindings) {
         "for(const [k,v] of m)a.push(()=>k+v);a[0]()+a[1]()", 10);
     numeric("let a=[];for(var i=0;i<3;i++)a.push(()=>i);a[0]()+a[1]()+a[2]()", 9);
     numeric("let a=[];for(let i=0;i<3;i++){let j=i*2;a.push(()=>j)}a[0]()+a[1]()+a[2]()", 6);
-}
-TEST_F(JsMvpLmd, ClassesAndLexicalReceivers) {
-    boolean("class A{f(){return 1}}class B extends A{f(){return ()=>super.f()}}new B().f()()===1");
-    boolean("class A{constructor(x){this.x=x}f(){return this.x}static g(){return 4}}"
-        "class B extends A{f(){return super.f()+1}}let b=new B(2);"
-        "b.f()===3 && B.g()===4 && b instanceof B && b instanceof A");
-    boolean("class A{f(){return ()=>this}}let a=new A();a.f()()===a");
-    numeric("class A{constructor(x){this.x=x}f(){return ()=>()=>++this.x}}let a=new A(1);"
-        "let g=a.f()();g()+g()", 5);
-    boolean("class A{}class B extends A{constructor(){let f=()=>this;super();this.f=f}}"
-        "let b=new B();b.f()===b");
-    boolean("class A{constructor(){this.f=()=>new.target}}class B extends A{}"
-        "new B().f()===B && new A().f()===A");
-    error("class A{}class B extends A{constructor(){let f=()=>this;f();super()}}new B()", "ReferenceError");
-    error("class A{}A()", "TypeError");
-    error("class A{}new A().missing()", "TypeError");
 }
 TEST_F(JsMvpLmd, SparseArrayGrowthAndSlice) {
     numeric("function f(){let a=[];for(let i=0;i<20;i++)a[i]=i;let s=0;"
@@ -5527,6 +5456,11 @@ TEST_F(JsMvpLmd, ClassAncestryAndReflection) {
         "b.x===3 && !(b instanceof A) && !(b instanceof B)");
     error("class A{}class B extends A{constructor(){return 3}}new B()", "TypeError");
     error("class A{}class B extends A{constructor(){}}new B()", "ReferenceError");
+    boolean("class A{constructor(x){this.x=x}f(){return this.x}static g(){return 4}}"
+        "class B extends A{f(){return super.f()+1}}let b=new B(2);"
+        "b.f()===3 && B.g()===4 && b instanceof B && b instanceof A");
+    error("class A{}A()", "TypeError");
+    error("class A{}new A().missing()", "TypeError");
 }
 TEST_F(JsMvpLmd, ClassCachedScalarLanesAndRetyping) {
     boolean("class A{constructor(x){this.x=x}get(){return this.x}set(x){this.x=x;return this.x}}"
@@ -5896,6 +5830,9 @@ TEST_F(JsMvpLmd, PropertyExpansionPrototypes) {
     error("let o={};Object.setPrototypeOf(o,o)", "TypeError");
     error("let a={};let b=Object.create(a);Object.setPrototypeOf(a,b)", "TypeError");
     boolean("class A{f(){return 1}}let a=new A();A.prototype.f=function(){return 3};a.f()===3");
+    boolean("Object.getPrototypeOf({__proto__:null})===null");
+    boolean("let o={};o.__proto__===Object.prototype");
+    boolean("let o={};o['__'+'proto__']=1;Object.getPrototypeOf(o)===Object.prototype");
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionDescriptorsAndIntegrity) {
@@ -6000,6 +5937,10 @@ TEST_F(JsMvpLmd, PropertyExpansionSparseArrays) {
     error("let a=[1];Object.freeze(a);a.push(2)", "TypeError");
     error("let a=[];a.length=-1", "RangeError");
     boolean("let a=[];let p=Object.create(Array.prototype);Object.defineProperty(p,'0',{get(){return 9}});Object.setPrototypeOf(a,p);a.length=1;[...a][0]===9&&a.includes(9)&&a.indexOf(9)===0");
+    boolean("var a=[]; a['01']=1; a['01']===1 && a.length===0");
+    boolean("var a=[]; a['-0']=1; a['-0']===1 && a.length===0");
+    error("var a=[]; a.length=1.5", "RangeError");
+    error("var a=[]; a.length=NaN", "RangeError");
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionReflection) {
@@ -6208,6 +6149,33 @@ TEST_F(JsMvpLmd, PropertyExpansionLambdaBoundary) {
     EXPECT_EQ(it2d(mvp_lmd_array_own_item(result.array, 1000000000)), 5e-324);
     EXPECT_TRUE(item_is_error(array_get(result.array, 1000000000)));
     EXPECT_TRUE(item_is_error(array_item_read(result.array, 1000000000)));
+}
+
+TEST_F(JsFormalMir, NativeOwnStoresRejectForeignDeclaredLayouts) {
+    Item result = run("class C{constructor(){this.x=3.5}}function write(o){o.x=7.5;return o.x}"
+        "let o=new C();write(o);o.x=3.5;[o,write]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> values(roots, result);
+    Map* object = values.get().array->items[0].map;
+    Item argument = {.map = object};
+    Item absent = {.item = ITEM_JS_UNDEFINED};
+    Item own_write = mvp_lmd_class_invoke(values.get().array->items[1], absent, &argument, 1, absent);
+    ASSERT_FALSE(item_is_error(own_write));
+    ASSERT_TRUE(map_shape_set(object, heap_create_name("x", 1), push_d(3.5)));
+    TypeMap* shape = (TypeMap*)object->type;
+    ShapeEntry* field = typemap_hash_lookup(shape, "x", 1);
+    ASSERT_NE(field, nullptr);
+    TypeMap foreign_shape = *shape;
+    TypeNominal foreign_nominal = *shape->nominal;
+    foreign_nominal.extension = NULL;
+    foreign_shape.nominal = &foreign_nominal;
+    object->type = &foreign_shape;
+    Item written = mvp_lmd_class_invoke(values.get().array->items[1], absent, &argument, 1, absent);
+    object->type = shape;
+    EXPECT_TRUE(item_is_error(written));
+    EXPECT_EQ(it2d(map_shape_field_to_item(object->data, field)), 3.5);
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionComputedHooks) {
@@ -6630,6 +6598,12 @@ TEST_F(JsMvpLmd, PropertyExpansionNativeMapIteration) {
     boolean("function f(){let m=new Map();m.set(1,2);let n=0;for(let [k,v] of m){for(let pair of m){n+=pair[0]+pair[1];break}break}m.clear();m.set(3,4);for(let [k,v] of m)n+=k+v;return n}f()===10");
     boolean("function f(m){let n=0;for(let [k,v] of m)n+=k+v;return n}let m=new Map();m.set(1,2);f(m)===3&&f([[3,4]])===7");
     boolean("let m=new Map();m.set(1,2);m[Symbol.iterator]=function*(){yield [3,4]};let n=0;for(let [k,v] of m)n+=k+v;n===7");
+    boolean("let m=new Map();m.set('a',1).set('b',2).set('c',3);let s='';for(let [k,v] of m.entries()){s+=k+v;if(k==='a'){m.delete('b');m.set('c',4);m.set('d',5)}}s==='a1c4d5'");
+    boolean("let m=new Map();m.set('a',1).set('b',2);let s='';for(let k of m.keys()){s+=k;if(k==='a'){m.delete('b');m.set('b',3)}}s==='ab'");
+    numeric("let m=new Map();m.set('a',1).set('b',2);let s=0;for(let v of m.values()){s+=v;if(v===1){m.clear();m.set('c',4)}}s", 5);
+    numeric("let m=new Map();m.set(1,1).set(2,2);let n=0;for(let a of m.keys()){for(let b of m.values()){n+=a*b}}n", 9);
+    boolean("let m=new Map();m.set('a',1).set('b',2);let a=[];for(let pair of m){a[a.length]=pair}a[0]!==a[1] && a[0][0]==='a' && a[1][0]==='b'");
+    numeric("let m=new Map();m.set(1,1).set(2,2).set(3,3);let s=0;outer:for(let v of m.values()){if(v===1)continue outer;s+=v;if(v===2)break outer}s", 2);
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionPassiveOwnQuery) {
@@ -6733,7 +6707,6 @@ TEST_F(JsMvpLmd, PropertyExpansionLiteralHome) {
     error("let a={__proto__:null,m(){return super.x}};a.m()", "TypeError");
     boolean("class A{constructor(v){this.x=v}}class B extends A{y=2;constructor(){let init=()=>super(5);init();this.z=this.x+this.y}}let b=new B();b.x===5&&b.y===2&&b.z===7");
     boolean("class A{constructor(v){this.x=v}}class B extends A{constructor(){let init=()=>()=>super(7);init()()}}new B().x===7");
-    error("class A{}class B extends A{constructor(){let f=()=>super.x;f();super()}}new B()", "ReferenceError");
     error("class A{}class B extends A{constructor(){let f=()=>super();f();f()}}new B()", "ReferenceError");
     boolean("class A{constructor(a,b){this.x=a+b}}class B extends A{constructor(){super(...[2,5])}}new B().x===7");
     boolean("class A{constructor(a,b){this.x=a+b}}class B extends A{y=3;constructor(){let init=()=>super(...[2,5]);init();this.z=this.x+this.y}}let b=new B();b.x===7&&b.z===10");
@@ -6796,6 +6769,10 @@ TEST_F(JsMvpLmd, PropertyExpansionReceiverInitialization) {
     *end = '\0';
     EXPECT_EQ(strstr(method, "mvp_lmd_fail"), nullptr);
     mem_free(mir);
+    numeric("class A{constructor(x){this.x=x}f(){return ()=>()=>++this.x}}let a=new A(1);"
+        "let g=a.f()();g()+g()", 5);
+    boolean("class A{constructor(){this.f=()=>new.target}}class B extends A{}"
+        "new B().f()===B && new A().f()===A");
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionPrivatePrototypeKeys) {
@@ -7639,6 +7616,18 @@ TEST_F(JsMvpLmd, MathNamespaceMetadataAndOldLanes) {
     boolean("Math.sqrt(9)===3&&Math.sin(0)===0&&Math.floor(1.9)===1&&Math.trunc(-1.9)===-1&&Math.abs(-4)===4&&Math.min(3,2)===2&&Math.max(3,2)===3&&Math.ceil(1.1)===2&&Math.cos(0)===1&&Math.round(1.5)===2&&Math.pow(2,3)===8");
     boolean("let M=Math;1/M.ceil(-0.1)===-Infinity&&1/M.round(-0.5)===-Infinity&&1/M.min(0,-0)===-Infinity&&1/M.max(-0,0)===Infinity&&M.floor(1e100)===1e100");
     error("new Math.hypot(3,4)", "TypeError");
+    boolean("let m=Math;m.abs=function(x){return 'changed'};Math.abs(-3)==='changed'&&Object.keys(Math).length===0");
+    boolean("Math.PI=0;Math.PI>3&&delete Math.PI===false");
+    error("'use strict';Math.PI=0", "TypeError");
+    boolean(R"JS(
+        let methods=['sqrt','abs','floor','min','max']; let sum=0;
+        for(let method of methods){if(method in Math)sum+=Math[method](4,9);}
+        let round=Math.round, minimum=Math.min;
+        sum===23 && Math.max(...[1,7,3])===7 && minimum()===Infinity &&
+          minimum(3,NaN)!==minimum(3,NaN) && 1/minimum(0,-0)===-Infinity &&
+          round(-1.5)===-1 && 1/round(-0.1)===-Infinity &&
+          typeof Math.sqrt==='function';
+    )JS");
 }
 
 TEST_F(JsMvpLmd, UriSharedEncodingDecodingAndMetadata) {
@@ -7648,6 +7637,7 @@ TEST_F(JsMvpLmd, UriSharedEncodingDecodingAndMetadata) {
     boolean("encodeURI()==='undefined'&&encodeURIComponent(null)==='null'&&decodeURI(123)==='123'&&decodeURIComponent(true)==='true'&&decodeURI('plain')==='plain'");
     boolean("let funcs=[encodeURI,decodeURI,encodeURIComponent,decodeURIComponent],names=['encodeURI','decodeURI','encodeURIComponent','decodeURIComponent'],ok=true;for(let i=0;i<4;i++){let f=funcs[i],n=Object.getOwnPropertyDescriptor(f,'name'),l=Object.getOwnPropertyDescriptor(f,'length'),d=Object.getOwnPropertyDescriptor(globalThis,names[i]);ok=ok&&n.value===names[i]&&!n.writable&&!n.enumerable&&n.configurable&&l.value===1&&!l.writable&&!l.enumerable&&l.configurable&&d.value===f&&d.writable&&!d.enumerable&&d.configurable}ok");
     error("new encodeURI('x')", "TypeError");
+    boolean("decodeURIComponent('%00').length===1&&decodeURIComponent('%00').charCodeAt(0)===0");
 }
 
 TEST_F(JsMvpLmd, UriMalformedAndThrownIdentity) {
@@ -7659,12 +7649,6 @@ TEST_F(JsMvpLmd, UriMalformedAndThrownIdentity) {
     error("decodeURIComponent(Symbol('x'))", "TypeError");
 }
 
-TEST_F(JsMvpLmd, UriWithoutInterpreterRealmCaches) {
-    boolean("decodeURIComponent('%41')==='A'&&decodeURI('%20')===' '&&decodeURIComponent('%3F')==='?'");
-    boolean("decodeURIComponent('%00').length===1&&decodeURIComponent('%00').charCodeAt(0)===0");
-    boolean("decodeURI('%F0%9F%98%80')==='😀'&&decodeURIComponent('%F0%9F%98%80')==='😀'");
-    boolean("let caught=false;try{decodeURIComponent('%')}catch(e){caught=e instanceof URIError}caught");
-}
 
 TEST_F(JsMvpLmd, DynamicSynchronousTemplates) {
     boolean(R"JS(
@@ -8742,6 +8726,7 @@ TEST_F(JsMvpLmd, CollectionIteratorPhysicalBrandAndRetention) {
     boolean("let m=new Map([[1,2]]).values(),s=new Set([3]).values(),mn=m.next,sn=s.next,caught=0;try{mn.call(s)}catch(e){if(e instanceof TypeError)caught++}try{sn.call(m)}catch(e){if(e instanceof TypeError)caught++}Object.setPrototypeOf(m,null);mn.call(m).value===2&&mn.call(m).done&&mn.call(m).done&&caught===2");
     boolean("let m=new Map([[1,2]]).values(),s=new Set([3]).values(),mn=m.next;m.next();m.next();let caught=false;try{mn.call(s)}catch(e){caught=e instanceof TypeError}caught&&mn.call(m).done");
     boolean("let m=new Map([[1,1.25]]).values(),next=m.next,p=Object.getPrototypeOf(m);for(let i=0;i<90;i++){let a=[i,{i}]}next.call(m).value===1.25&&Object.getPrototypeOf(m)===p&&p[Symbol.toStringTag]==='Map Iterator'");
+    boolean("function key(){return 'next'}let m=new Map().keys(),s=new Set().values(),next=m[key()],caught=false;try{next.call(s)}catch(e){caught=e instanceof TypeError}caught&&next.call(m).done");
 }
 
 TEST_F(JsMvpLmd, ClosedGeneratorFamilyIsOptional) {
@@ -8771,11 +8756,6 @@ TEST_F(JsMvpLmd, SymbolDescriptionUsesSharedSymbolIdentity) {
     error("Object.getOwnPropertyDescriptor(Symbol.prototype,'description').get.call(new Proxy(Object(Symbol('x')),{}))", "TypeError");
 }
 
-TEST_F(JsMvpLmd, CollectionIteratorEscapedNextBrand) {
-    boolean("let m=new Map([[1,2]]).values(),s=new Set([3]).values(),mn=m.next;m.next();m.next();let caught=false;try{mn.call(s)}catch(e){caught=e instanceof TypeError}caught&&mn.call(m).done");
-    boolean("function key(){return 'next'}let m=new Map().keys(),s=new Set().values(),next=m[key()],caught=false;try{next.call(s)}catch(e){caught=e instanceof TypeError}caught&&next.call(m).done");
-    boolean("let m=new Map([[1,2]]).values();m.next().value===2&&m.next().done");
-}
 
 TEST_F(JsMvpLmd, DynamicClassPublic) {
     boolean(R"JS(

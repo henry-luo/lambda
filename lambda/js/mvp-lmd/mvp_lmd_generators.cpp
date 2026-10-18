@@ -19,7 +19,7 @@ static bool iterator_object(Item value) {
 }
 static Item iterator_property(Item owner, const char* name) {
     String* key = heap_create_name(name, strlen(name));
-    return key ? mvp_lmd_class_property(owner, Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, NULL) : ItemError;
+    return key ? mvp_lmd_class_property(owner, Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET) : ItemError;
 }
 extern "C" Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source) {
     return mvp_lmd_iterator_get_with_method(program, source, ItemError);
@@ -38,7 +38,7 @@ extern "C" Item mvp_lmd_iterator_method(MvpLmdProgram* program, Item source) {
         method = mvp_lmd_property_with_receiver(boxed.get(), name, ItemNull, LMD_PROP_GET, owner.get());
     } else method = type == LMD_TYPE_ARRAY || type == LMD_TYPE_STRING ?
         mvp_lmd_array_method_value(program, owner.get(), name) :
-        mvp_lmd_class_property(owner.get(), name, ItemNull, LMD_PROP_GET, NULL);
+        mvp_lmd_class_property(owner.get(), name, ItemNull, LMD_PROP_GET);
     if (item_is_error(method)) return method;
     if (method.item == ITEM_NULL || method.item == ITEM_JS_UNDEFINED) return Item{.item = ITEM_JS_UNDEFINED};
     return mvp_lmd_is_callable(method) ? method : mvp_lmd_fail(LMD_MVP_TYPE, 0);

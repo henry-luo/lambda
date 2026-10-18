@@ -38,6 +38,9 @@ descriptor, proxy or prototype-mutation feature is introduced.
 The six new compiler helpers were disclosed before implementation:
 `numeric_region_path`, `numeric_region_read`, `plan_numeric_region`,
 `guard_property_cache`, `guard_numeric_region`, and `scalar_factory_plan`.
+The cache-dependent guard is historical: **D8.4.1v2** retirement on 2026-10-18
+removes it and uses shared descriptor lookup plus source-predicted shape guards;
+see [MVP §36.10](../jube/JS_MVP_Lmd.md#3610-remove-cache-machinery-and-reuse-lambda-field-specialization).
 Constructor and factory handling otherwise extend existing helpers. Read lookup
 reuses bounded function plans; class lookup reuses the existing binding and
 class AST. Program, binding, function and ordinary object-plan records retain

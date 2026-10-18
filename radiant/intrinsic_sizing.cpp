@@ -3387,51 +3387,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             need_font_setup = true;
         }
         if (letter_spacing_decl && letter_spacing_decl->value) {
-            const CssValue* ls_val = letter_spacing_decl->value;
-            if (ls_val->type == CSS_VALUE_TYPE_LENGTH ||
-                ls_val->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                ls_val->type == CSS_VALUE_TYPE_FUNCTION ||
-                (ls_val->type == CSS_VALUE_TYPE_NUMBER && ls_val->data.number.value == 0.0)) {
-                temp_font_prop->letter_spacing =
-                    resolve_length_value(lycon, CSS_PROPERTY_LETTER_SPACING, ls_val);
-                temp_font_prop->letter_spacing_is_set = true;
-                temp_font_prop->letter_spacing_is_percent = ls_val->type == CSS_VALUE_TYPE_PERCENTAGE;
-                temp_font_prop->letter_spacing_percent = temp_font_prop->letter_spacing_is_percent
-                    ? (float)ls_val->data.percentage.value : 0.0f;
-                need_font_setup = true;
-            } else if (ls_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                       ls_val->data.keyword == CSS_VALUE_NORMAL) {
-                temp_font_prop->letter_spacing = 0.0f;
-                temp_font_prop->letter_spacing_is_set = true;
-                temp_font_prop->letter_spacing_is_percent = false;
-                temp_font_prop->letter_spacing_percent = 0.0f;
-                need_font_setup = true;
-            }
-        } else if (lycon->font.style) {
-            temp_font_prop->letter_spacing = lycon->font.style->letter_spacing;
-            temp_font_prop->letter_spacing_is_set = lycon->font.style->letter_spacing_is_set;
+            layout_resolve_font_spacing(lycon, temp_font_prop,
+                CSS_PROPERTY_LETTER_SPACING, letter_spacing_decl->value);
         }
-
         if (word_spacing_decl && word_spacing_decl->value) {
-            const CssValue* ws_val = word_spacing_decl->value;
-            if (ws_val->type == CSS_VALUE_TYPE_LENGTH ||
-                (ws_val->type == CSS_VALUE_TYPE_NUMBER && ws_val->data.number.value == 0.0)) {
-                temp_font_prop->word_spacing =
-                    resolve_length_value(lycon, CSS_PROPERTY_WORD_SPACING, ws_val);
-                temp_font_prop->word_spacing_is_set = true;
-                need_font_setup = true;
-            } else if (ws_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                       ws_val->data.keyword == CSS_VALUE_NORMAL) {
-                temp_font_prop->word_spacing = 0.0f;
-                temp_font_prop->word_spacing_is_set = true;
-                need_font_setup = true;
-            }
-        } else if (lycon->font.style) {
-            temp_font_prop->word_spacing = lycon->font.style->word_spacing;
-            temp_font_prop->word_spacing_is_set = lycon->font.style->word_spacing_is_set;
-            temp_font_prop->word_spacing_percent = lycon->font.style->word_spacing_percent;
-            temp_font_prop->word_spacing_is_percent = lycon->font.style->word_spacing_is_percent;
+            layout_resolve_font_spacing(lycon, temp_font_prop,
+                CSS_PROPERTY_WORD_SPACING, word_spacing_decl->value);
         }
+        font_prop_resolve_spacing(temp_font_prop);
 
         if (need_font_setup) {
             if (!spacing_font_ready) {

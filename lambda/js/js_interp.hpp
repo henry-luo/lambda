@@ -55,18 +55,12 @@ Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
 Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
                                              size_t source_length, const char* filename,
                                              uint64_t* result_home);
-// Execute direct eval code for a MIR caller (JSI35), which has installed the
-// EvalContext bridge; `strict` is the caller's strictness, which the eval code
-// inherits. An interpreted caller links its own environments instead.
-Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
-                                           size_t source_length, const char* filename,
-                                           bool strict, uint64_t* result_home);
 // The eval steps before parsing (js_dynamic_code.cpp): a non-string argument is
 // the result, and a blank source, a V8 native probe, or a lone RegExp literal
 // completes without a script. Returns true when *result holds the completion
 // or the early error that was thrown.
 struct JsInterpHostOps;
-bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result,
+bool js_eval_source_shortcut(Item code_item, Item* result,
                              const JsInterpHostOps* host = NULL);
 // allocation-free shared lexer proof: an empty Script has undefined completion.
 bool js_eval_source_is_blank(String* code_str);

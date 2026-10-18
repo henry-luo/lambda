@@ -3815,6 +3815,8 @@ bool layout_css_value_has_nonzero_percentage(const CssValue* value);
 bool layout_css_value_has_percentage(const CssValue* value);
 CssMathResult layout_evaluate_css_math(LayoutContext* context, uintptr_t property,
     const CssValue* value, bool computed_units = false, bool preserve_percentages = false);
+void layout_resolve_font_spacing(LayoutContext* context, FontProp* font,
+    CssPropertyCode property, const CssValue* value);
 // compute length terms at their owner while retaining percentage terms for the used box.
 void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
     CssPropertyCode property = CSS_PROPERTY_TRANSFORM);

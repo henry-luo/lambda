@@ -400,6 +400,10 @@ after acceptance; preserve Results3–8 and their provenance.
     New static Function properties and ordinary-constructor prototype data use
     shared dispatch and do not populate this state. The pre-existing class-site
     caches remain a formal-design discrepancy; this phase does not sanction them.
+    **2026-10-18 closure (D8.4.1v2):** the cache cells, fill paths, cache-pointer
+    ABI and allocation-site variants are removed. Source guards and shared
+    descriptor lookup replace them; see [MVP §36.10](../jube/JS_MVP_Lmd.md#3610-remove-cache-machinery-and-reuse-lambda-field-specialization)
+    for the implementation and qualification evidence.
 3. **Named array properties:** the audit selected the existing Map attribute face on Array (**D2.6.6v3**), already traced and compacted by GC. Named writes lazily install a shared shape; no extra array fields or side table. Validate index/method fast paths against the control.
 4. **UTF-16 and numeric semantics:** ASCII benchmark success is insufficient
    for admitted public methods. Complete the stated edge matrix or explicitly

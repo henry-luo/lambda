@@ -1505,19 +1505,29 @@ TEST_F(RadiantTextQuery, AligningASplitInlinePreservesItsBlockSiblingAndFragment
     }
 }
 
-TEST_F(RadiantTextQuery, WordSpacingExpressionsRetainLengthAdvances) {
+TEST_F(RadiantTextQuery, FontSpacingRetainsComputedLengthsAndInheritedPercentages) {
     ASSERT_NE(load("test/html/layout_font_spacing.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
     struct Case { const char* id; float width; } cases[] = {
         {"sum", 100.0f}, {"product", 80.0f}, {"length", 100.0f},
+        {"percent", 80.0f}, {"affine", 80.0f},
+        {"inherited-percent", 80.0f}, {"inherited-affine", 150.0f},
+        {"inherited-length", 140.0f}, {"explicit-inherit", 160.0f},
+        {"normal", 60.0f}, {"zero", 60.0f}, {"negative", 55.0f},
+        {"inherited-letters", 110.0f},
     };
     for (const Case& entry : cases) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
         ASSERT_NE(element, nullptr);
         EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+        ASSERT_NE(element->first_child, nullptr) << entry.id;
+        ASSERT_TRUE(element->first_child->is_text()) << entry.id;
+        TextRect* rect = element->first_child->as_text()->rect;
+        ASSERT_NE(rect, nullptr) << entry.id;
+        EXPECT_FLOAT_EQ(rect->width, entry.width) << entry.id;
     }
 }
 

@@ -9976,7 +9976,7 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_decode_uricomponent_body,
     js_decodeURIComponent(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_escape_body, js_escape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_unescape_body, js_unescape(arg0))
-JS_GLOBAL_UNARY_BODY(js_intrinsic_global_eval_body, js_builtin_eval(arg0, 1))
+JS_GLOBAL_UNARY_BODY(js_intrinsic_global_eval_body, js_builtin_eval(arg0))
 static Item js_intrinsic_global_timer_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home, bool is_interval) {
     RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
@@ -26403,7 +26403,7 @@ static Item js_262_eval_script(Item code) {
     if (!agent) return ItemError;
     int64_t saved = agent->eval_script_active;
     agent->eval_script_active = 1;
-    Item result = js_builtin_eval(code, 1);
+    Item result = js_builtin_eval(code);
     agent->eval_script_active = saved;
     return result;
 }

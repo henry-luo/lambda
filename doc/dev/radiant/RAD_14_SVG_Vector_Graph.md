@@ -272,9 +272,14 @@ A frozen snapshot supplies a serialization projection: current CSS presentation
 and SMIL samples override saved values, and animation/script drivers are inert
 in the output. The live DOM retains its original attributes and declarations.
 The existing frame flush/timer chooses the sample; export adds no clock or sleep.
+The projection appends isolated frozen definitions for rendered `use` instances,
+using their existing animation source scopes and collision-free ID prefixes.
+Local SVG images embed a frozen SVG sampled through the existing isolated
+picture document path. A generic optional `DomXmlProjection.append_children`
+hook keeps the namespace-aware tree walk in the DOM module.
 General HTML-page SVG/PDF retains the paint route described above. Qualification
 and remaining cases are recorded in the
-[SVG enhancement checkpoint](../../../vibe/impl/Radiant_Impl_SVG_Support.md#13-current-implementation-checkpoint).
+[SVG enhancement checkpoint](../../../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up).
 
 ### 5.5 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
 

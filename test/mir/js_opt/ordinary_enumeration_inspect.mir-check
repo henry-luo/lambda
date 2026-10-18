@@ -11,7 +11,7 @@
       "count": {
         "call\tarray_reserve_append_slots": 3,
         "call\tmvp_lmd_object_new": 3,
-        "call\tmap_shape_field_to_item": 2,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_primitive_to_number": 6,
         "call\tmvp_lmd_class_property": 6,
         "call\tmvp_lmd_array_index_property": 4,

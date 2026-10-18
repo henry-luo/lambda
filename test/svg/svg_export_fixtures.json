@@ -24,5 +24,7 @@
   "svg_css_motion",
   "svg_component_transfer",
   "svg_css_geometry",
-  "svg_css_geometry_cascade"
+  "svg_css_geometry_cascade",
+  "svg_css_geometry_export",
+  "svg_css_geometry_export_edited"
 ]

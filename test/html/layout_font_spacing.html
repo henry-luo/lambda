@@ -9,4 +9,14 @@ div { display: inline-block; font: 20px/1 Ahem; }
 <div id="sum" style="word-spacing: calc(1ch + 1ch)">A B</div>
 <div id="product" style="word-spacing: calc(0.5 * 2ch)">A B</div>
 <div id="length" style="word-spacing: 40px">A B</div>
+<div id="percent" style="word-spacing: 100%">A B</div>
+<div id="affine" style="word-spacing: calc(50% + 0.5em)">A B</div>
+<div style="word-spacing: 100%; font-size: 10px"><div id="inherited-percent" style="font-size: 20px">A B</div></div>
+<div style="word-spacing: calc(50% + 0.5em)"><div id="inherited-affine" style="font-size: 40px">A B</div></div>
+<div style="word-spacing: 1em"><div id="inherited-length" style="font-size: 40px">A B</div></div>
+<div style="word-spacing: 100%"><div id="explicit-inherit" style="font-size: 40px; word-spacing: inherit">A B</div></div>
+<div style="word-spacing: 100%"><div id="normal" style="word-spacing: normal">A B</div></div>
+<div style="word-spacing: 100%"><div id="zero" style="word-spacing: 0">A B</div></div>
+<div id="negative" style="word-spacing: -25%">A B</div>
+<div style="letter-spacing: calc(25% + 5px)"><div id="inherited-letters" style="font-size: 40px">AB</div></div>
 </body>

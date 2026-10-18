@@ -188,6 +188,64 @@ TEST_F(MemContextTest, CascadeDestroyChildContextsFirst) {
     EXPECT_EQ(destroyed.load(), 2);
 }
 
+struct DependencyTeardownProbe {
+    bool alive;
+    DependencyTeardownProbe* backing;
+};
+
+static void check_backing_alive(void* allocator) {
+    DependencyTeardownProbe* probe = (DependencyTeardownProbe*)allocator;
+    EXPECT_TRUE(probe->alive);
+    if (probe->backing) EXPECT_TRUE(probe->backing->alive);
+    probe->alive = false;
+}
+
+TEST_F(MemContextTest, CascadeDestroysDependentsAcrossContextBoundaries) {
+    MemContext* root = mem_context_root();
+    MemContext* doc = mem_context_create(root, MEM_ROLE_VIEW, "document");
+    DependencyTeardownProbe arena = {true, nullptr};
+    DependencyTeardownProbe scratch = {true, &arena};
+    MemNode* backing = mem_register(doc, MEM_KIND_ARENA, MEM_ROLE_RENDER,
+        "fragment", &arena, nullptr, nullptr, check_backing_alive);
+    mem_register(root, MEM_KIND_SCRATCH, MEM_ROLE_RENDER,
+        "display-list", &scratch, backing, nullptr, check_backing_alive);
+    mem_context_destroy(doc);
+    EXPECT_FALSE(scratch.alive);
+    EXPECT_FALSE(arena.alive);
+    EXPECT_EQ(mem_context_live_count(root), 0u);
+}
+
+TEST_F(MemContextTest, CascadeFollowsReparentedDependenciesInsteadOfBirthOrder) {
+    MemContext* doc = mem_context_create(nullptr, MEM_ROLE_VIEW, "document");
+    DependencyTeardownProbe arena = {true, nullptr};
+    DependencyTeardownProbe scratch = {true, &arena};
+    MemNode* dependent = mem_register(doc, MEM_KIND_SCRATCH, MEM_ROLE_RENDER,
+        "scratch", &scratch, nullptr, nullptr, check_backing_alive);
+    MemNode* backing = mem_register(doc, MEM_KIND_ARENA, MEM_ROLE_RENDER,
+        "arena", &arena, nullptr, nullptr, check_backing_alive);
+    mem_reparent(dependent, backing);
+    mem_context_destroy(doc);
+    EXPECT_FALSE(scratch.alive);
+    EXPECT_FALSE(arena.alive);
+}
+
+TEST_F(MemContextTest, UnregisterSubtreeRetiresCrossContextTrackingOnly) {
+    MemContext* root = mem_context_root();
+    MemContext* doc = mem_context_create(root, MEM_ROLE_VIEW, "document");
+    DependencyTeardownProbe arena = {true, nullptr};
+    DependencyTeardownProbe scratch = {true, &arena};
+    MemNode* backing = mem_register(doc, MEM_KIND_ARENA, MEM_ROLE_RENDER,
+        "arena", &arena, nullptr, nullptr, check_backing_alive);
+    mem_register(root, MEM_KIND_SCRATCH, MEM_ROLE_RENDER,
+        "scratch", &scratch, backing, nullptr, check_backing_alive);
+    mem_unregister_subtree(backing);
+    EXPECT_EQ(mem_context_live_count(doc), 0u);
+    EXPECT_EQ(mem_context_live_count(root), 0u);
+    mem_context_destroy(doc);
+    EXPECT_TRUE(arena.alive);
+    EXPECT_TRUE(scratch.alive);
+}
+
 // ============================================================================
 // Document URL registry
 // ============================================================================

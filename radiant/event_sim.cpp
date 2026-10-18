@@ -5535,6 +5535,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                         if (!target || !target->is_element() || render_svg_dom_to_file(target->as_element(),
                                 ev->file_path, radiant_document_virtual_clock(uicon, nullptr)) != 0) ctx->fail_count++;
                     } else if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
+                } else if (ext && (strcmp(ext, ".pdf") == 0 || strcmp(ext, ".PDF") == 0)) {
+                    sim_flush_pending_reflow(uicon->document);
+                    if (render_uicontext_to_pdf(uicon, ev->file_path) != 0) ctx->fail_count++;
                 } else {
                     render_pending_surface(uicon);
                     // Default to PNG

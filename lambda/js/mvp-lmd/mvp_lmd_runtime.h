@@ -48,7 +48,6 @@ struct MvpLmdClass {
     TypeMap* allocation_shape;
     String** nullable_initializers;
     int nullable_initializer_count;
-    uint64_t allocation_epoch;
     bool reusable_layout;
     bool dynamic;              // definition needs fresh per-evaluation nominal metadata
     Function* owner;             // ordinary callable; nonmoving GC object, traced from nominal instances
@@ -173,27 +172,6 @@ int mvp_lmd_error_kind(const TypeNominal* nominal, const MvpLmdLibraryState* lib
 enum MvpLmdPrimitiveKind { LMD_PRIMITIVE_STRING, LMD_PRIMITIVE_NUMBER,
     LMD_PRIMITIVE_BOOLEAN, LMD_PRIMITIVE_BIGINT, LMD_PRIMITIVE_COUNT };
 extern const char* const mvp_lmd_primitive_names[LMD_PRIMITIVE_COUNT];
-struct MvpLmdPropertyCacheEntry {
-    TypeMap* shape;
-    ShapeEntry* field;
-    Item inherited;
-    int64_t offset;
-    uint64_t pointer_tag;
-    TypeId storage;
-    uint8_t pointer_lane;
-    bool writable;
-    bool nullable_initializer;
-};
-enum { MVP_LMD_PROPERTY_CACHE_SIZE = 4 };
-struct MvpLmdPropertyCache {
-    MvpLmdPropertyCacheEntry entries[MVP_LMD_PROPERTY_CACHE_SIZE];
-    uint8_t next;
-    MvpLmdPropertyCacheEntry* find_shape(TypeMap* shape) {
-        for (MvpLmdPropertyCacheEntry& entry : entries)
-            if (entry.shape == shape) return &entry;
-        return NULL;
-    }
-};
 struct MvpLmdLibraryState {
     Item* values;
     TypeMap* object_shape;
@@ -253,7 +231,6 @@ struct MvpLmdLibraryState {
     NameRef arguments_key;      // private Array of aliases to existing mutable parameter cells
     int abort_kind;             // one-based non-JS failure, retained across finally completions
     int64_t abort_site;
-    MvpLmdPropertyCache prototype_links; // immutable shape fields only; prototype values stay live
     Item* atomics_value;        // optional namespace in a registered program slot
     MvpLmdLibraryState* default_realm; // unstamped native arrays belong to this realm
 };
@@ -335,9 +312,7 @@ Item mvp_lmd_get_own_property(Item owner, Item key, JsPropertyDescriptor* descri
 Item mvp_lmd_define_own_property(Item owner, Item key, const JsPropertyDescriptor* descriptor);
 Item mvp_lmd_descriptor_from_object(Item object, JsPropertyDescriptor* descriptor, uint64_t* home);
 Item mvp_lmd_descriptor_object(const JsPropertyDescriptor* descriptor, bool null_prototype = false);
-Item mvp_lmd_set_completion(Item owner, Item key, Item value, Item receiver, MvpLmdPropertyCache* cache = NULL);
-void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
-    ShapeEntry* field, Item inherited, bool writable, bool nullable_initializer = false);
+Item mvp_lmd_set_completion(Item owner, Item key, Item value, Item receiver);
 Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_arguments_list(Item source, bool property_keys = false);
 Item mvp_lmd_own_keys(Item owner);
@@ -525,8 +500,6 @@ Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t derived);
 Item mvp_lmd_instanceof(Item value, Item constructor, int64_t ordinary = 0);
 Item mvp_lmd_throw(Item value, int64_t error_constructor);
 Item mvp_lmd_property_with_receiver(Item owner, Item name, Item value, int64_t operation, Item receiver);
-Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
-    MvpLmdPropertyCache* cache);
-Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation,
-    MvpLmdPropertyCache* cache);
+Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation);
+Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation);
 }

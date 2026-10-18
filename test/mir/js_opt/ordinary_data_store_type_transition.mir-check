@@ -21,7 +21,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_field_store": 1,
+        "call\tmap_field_store": 0,
         "call\tmvp_lmd_class_property": 1,
         "call\tmvp_lmd_array_index_property": 1
       }
@@ -32,7 +32,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_field_store": 1,
+        "call\tmap_field_store": 0,
         "call\tmap_shape_field_to_item": 1,
         "call\tmvp_lmd_class_property": 2,
         "call\tmvp_lmd_array_index_property": 1

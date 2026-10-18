@@ -5842,6 +5842,10 @@ extern "C" bool dom_serialize_xml(void* opaque, StrBuf* output, const DomXmlProj
                 continue;
             }
             if (!frame->fragment) {
+                if (projection && projection->append_children &&
+                    !projection->append_children(projection->context, frame->element, output)) {
+                    pool_destroy(pool); return false;
+                }
                 strbuf_append_str(output, "</");
                 dom_xml_append_name(output, frame->prefix, frame->element->local_name());
                 strbuf_append_char(output, '>');
@@ -5968,7 +5972,8 @@ extern "C" bool dom_serialize_xml(void* opaque, StrBuf* output, const DomXmlProj
                 replacement->name, local, replacement->value};
             dom_xml_append_attribute(&context, attribute, opened->inherited_bindings);
         }
-        if (!opened->child && (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
+        if (!opened->child && !(projection && projection->append_children) &&
+            (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
             strbuf_append_str(output, dom_serializes_html_void(element) ? " />" : "/>");
             context.bindings = opened->inherited_bindings;
             pool_free(pool, opened);

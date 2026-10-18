@@ -27,7 +27,7 @@
       ],
       "count": {
         "dadd\t": 2,
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_property_key": 16,
         "call\tmvp_lmd_to_primitive": 1,
         "call\tmvp_lmd_primitive_to_number": 7,

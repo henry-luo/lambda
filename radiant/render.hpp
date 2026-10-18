@@ -562,6 +562,7 @@ const char* rdt_picture_get_source_path(RdtPicture* pic);
 double      rdt_picture_animation_time(RdtPicture* pic);
 void        rdt_picture_set_animation_time(RdtPicture* pic, double seconds);
 bool        render_svg_picture_has_animation(RdtPicture* pic);
+bool        render_svg_picture_snapshot(RdtPicture* picture, StrBuf* output);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
@@ -2776,6 +2777,19 @@ inline void radiant_clear_font_family(FontProp* font) {
     font->family = nullptr;
 }
 
+inline void radiant_copy_font_spacing(FontProp* target, const FontProp* source, bool letter) {
+    (letter ? target->letter_spacing : target->word_spacing) =
+        letter ? source->letter_spacing : source->word_spacing;
+    (letter ? target->letter_spacing_length : target->word_spacing_length) =
+        letter ? source->letter_spacing_length : source->word_spacing_length;
+    (letter ? target->letter_spacing_percent : target->word_spacing_percent) =
+        letter ? source->letter_spacing_percent : source->word_spacing_percent;
+    (letter ? target->letter_spacing_is_percent : target->word_spacing_is_percent) =
+        letter ? source->letter_spacing_is_percent : source->word_spacing_is_percent;
+    (letter ? target->letter_spacing_is_set : target->word_spacing_is_set) =
+        letter ? source->letter_spacing_is_set : source->word_spacing_is_set;
+}
+
 inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     if (!target || !source) return;
     if (source->family) radiant_retain_font_family(
@@ -2796,14 +2810,8 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->text_deco_style = source->text_deco_style;
     target->text_deco_thickness = source->text_deco_thickness;
     target->text_underline_offset = source->text_underline_offset;
-    target->letter_spacing = source->letter_spacing;
-    target->letter_spacing_percent = source->letter_spacing_percent;
-    target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-    target->letter_spacing_is_set = source->letter_spacing_is_set;
-    target->word_spacing = source->word_spacing;
-    target->word_spacing_percent = source->word_spacing_percent;
-    target->word_spacing_is_percent = source->word_spacing_is_percent;
-    target->word_spacing_is_set = source->word_spacing_is_set;
+    radiant_copy_font_spacing(target, source, true);
+    radiant_copy_font_spacing(target, source, false);
     target->platform_fallback_family = source->platform_fallback_family;
 }
 
@@ -2844,16 +2852,10 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
         target->text_underline_offset = source->text_underline_offset;
     }
     if (!target->letter_spacing_is_set && target->letter_spacing == 0.0f) {
-        target->letter_spacing = source->letter_spacing;
-        target->letter_spacing_percent = source->letter_spacing_percent;
-        target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-        target->letter_spacing_is_set = source->letter_spacing_is_set;
+        radiant_copy_font_spacing(target, source, true);
     }
     if (!target->word_spacing_is_set && target->word_spacing == 0.0f) {
-        target->word_spacing = source->word_spacing;
-        target->word_spacing_percent = source->word_spacing_percent;
-        target->word_spacing_is_percent = source->word_spacing_is_percent;
-        target->word_spacing_is_set = source->word_spacing_is_set;
+        radiant_copy_font_spacing(target, source, false);
     }
 }
 
@@ -4247,6 +4249,7 @@ int render_document_transform_to_jpeg(const char* document_file,
 // Render existing UiContext with state (caret/selection) to image file
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
 int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
+int render_uicontext_to_pdf(UiContext* uicon, const char* pdf_file);
 
 // Batch render command: reads jobs from stdin, shares one UiContext
 int cmd_render_batch(int argc, char** argv);
@@ -4398,6 +4401,7 @@ int render_export_session_to_png(RenderExportSession* session, const char* filen
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
 int render_svg_source_document_to_file(UiContext* ui, const char* filename);
 int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze);
+bool render_svg_dom_snapshot(DomElement* root, StrBuf* output);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
