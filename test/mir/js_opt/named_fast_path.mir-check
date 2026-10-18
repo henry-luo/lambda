@@ -11,7 +11,7 @@
       "count": {
         "dadd\t": 3,
         "call\tmvp_lmd_object_new": 1,
-        "call\tmap_field_store": 1,
+        "call\tmap_field_store": 0,
         "call\tmap_shape_field_to_item": 2,
         "call\tmvp_lmd_to_primitive": 4,
         "call\tmvp_lmd_primitive_to_number": 5,
@@ -27,7 +27,7 @@
       ],
       "count": {
         "dadd\t": 1,
-        "call\tmap_field_store": 1,
+        "call\tmap_field_store": 0,
         "call\tmap_shape_field_to_item": 2,
         "call\tmvp_lmd_to_primitive": 1,
         "call\tmvp_lmd_primitive_to_number": 1,

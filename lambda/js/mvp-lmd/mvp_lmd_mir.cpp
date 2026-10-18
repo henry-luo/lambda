@@ -85,7 +85,7 @@ struct LmdNumericRegion;
 struct LmdDenseArrayLoopPlan;
 struct LmdWithLookup;
 struct LmdRegionRead { LmdNumericRegion* region; int parent; String* name;
-    unsigned kind; int index; MvpLmdPropertyCache cache; LmdFunction* target; };
+    unsigned kind; int index; LmdFunction* target; LmdShapeSet shapes; };
 struct LmdNumericRegion {
     LmdFunction* function; int parameters; unsigned kinds[8];
     int count; LmdRegionRead reads[16]; int nodes; bool calls; bool allocates; bool computes;
@@ -191,9 +191,6 @@ struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape;
     LmdFunction* prototype_owner; };
 struct LmdScalarFactoryPlan { LmdObjectPlan object; LmdFunction* function; AstNode* value; };
 struct LmdDeletedShapePlan { LmdObjectPlan object; LmdObjectPlan* source; ShapeEntry* removed; };
-struct LmdAllocationSite { TypeMap* shape; uint64_t epoch; };
-struct LmdAllocationVariant { LmdAllocationSite site; uint64_t key; };
-struct LmdAllocationVariants { LmdAllocationVariant entries[4]; uint64_t next; };
 struct MvpLmdRealm;
 struct MvpLmdCode {
     atomic_int32 references;
@@ -2854,8 +2851,7 @@ static MIR_reg_t guard_function_instance(LmdCompiler* c, MIR_reg_t owner, MIR_la
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
     MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL, bool numeric = false,
-    const LmdValue* native_value = NULL, MvpLmdPropertyCache* shared_cache = NULL, bool plain = false,
-    bool nullable_value = true, MIR_label_t cache_miss = NULL);
+    const LmdValue* native_value = NULL, bool plain = false, unsigned owner_kind = K_ANY);
 static void branch_condition(LmdCompiler* c, AstNode* node, MIR_label_t target, bool yes = true);
 static void statement(LmdCompiler* c, AstNode* n);
 static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t inferred_name = 0);
@@ -3858,18 +3854,6 @@ static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write
         MIR_reg_t found = property_access(c, LMD_PROP_HAS, owner, name);
         check_error(c, found); return found;
     }
-    // straight-line script sites run once; duplicating the full cache decoder only inflates JIT work.
-    MvpLmdPropertyCache* cache = !write && repeated_execution(c) && !compact_property_dispatch(c) ?
-        (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
-    MIR_reg_t joined = 0;
-    MIR_label_t done = NULL;
-    if (cache) {
-        MIR_label_t miss = label(c); done = label(c);
-        joined = em_new_reg(&c->em, "cached_global_binding", MIR_T_I64);
-        MIR_reg_t loaded = property_access(c, LMD_PROP_GET, owner, name, 0, NULL, false,
-            NULL, cache, false, true, miss);
-        move(c, joined, reg(c, loaded)); jump(c, done); put_label(c, miss);
-    }
     // strict writes still resolve presence before the assignment; checked reads share their own lookup.
     if (write && c->strict && !allow_missing) {
         MIR_reg_t found = property_access(c, LMD_PROP_HAS, owner, name);
@@ -3878,15 +3862,13 @@ static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write
         branch(c, MIR_BEQ, present, reg(c, found), integer(c, ITEM_TRUE));
         fail(c, LMD_MVP_REFERENCE, site); put_label(c, present);
     }
-    MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+    MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_class_property", MIR_T_I64,
         MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, name),
         MIR_T_I64, write ? reg(c, value) : integer(c, ITEM_NULL),
         MIR_T_I64, integer(c, write ? LMD_PROP_SET | (c->strict ? LMD_PROP_STRICT : 0) :
-            allow_missing ? LMD_PROP_GET : LMD_PROP_GET_BINDING),
-        MIR_T_P, relocated(c, (uint64_t)cache), true);
+            allow_missing ? LMD_PROP_GET : LMD_PROP_GET_BINDING), true);
     check_error(c, result);
-    if (!done) return result;
-    move(c, joined, reg(c, result)); put_label(c, done); return joined;
+    return result;
 }
 static LmdReference with_reference(LmdCompiler* c, LmdBinding* binding, AstNode* site);
 static LmdValue with_reference_operation(LmdCompiler* c, LmdReference ref, AstNode* site,
@@ -4305,26 +4287,70 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
         type == LMD_TYPE_FLOAT ? MIR_T_D : type == LMD_TYPE_BOOL || type == LMD_TYPE_UNDEFINED ? MIR_T_U8 : MIR_T_I64, stored);
     return true;
 }
-static MIR_reg_t guard_property_cache(LmdCompiler* c, MIR_reg_t owner,
-        MvpLmdPropertyCache* cache, MIR_label_t miss, MIR_reg_t shape = 0) {
+// D8.4.1v2: shared shape lookup produces invocation-local metadata, never site feedback.
+static MIR_reg_t own_data_field(LmdCompiler* c, MIR_reg_t owner, MIR_reg_t name,
+        MIR_label_t miss, MIR_reg_t shape = 0, const LmdShapeSet* predicted = NULL, String* spelling = NULL) {
     if (!shape) {
-        MIR_reg_t pointer = em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
-        shape = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "property_shape");
+        em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
+        branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, owner,
+            LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "own_map_kind")), integer(c, MAP_KIND_PLAIN));
+        shape = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "own_shape");
     }
-    MIR_reg_t address = em_new_reg(&c->em, "cache_entry", MIR_T_I64);
-    MIR_label_t matched = label(c);
-    for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++) {
-        move(c, address, relocated(c, (uint64_t)&cache->entries[i]));
-        MIR_reg_t expected = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, shape), MIR_T_I64, "cached_shape");
-        if (i + 1 == MVP_LMD_PROPERTY_CACHE_SIZE) branch(c, MIR_BNE, miss, reg(c, shape), reg(c, expected));
-        else branch(c, MIR_BEQ, matched, reg(c, shape), reg(c, expected));
+    MIR_reg_t field = 0;
+    MIR_label_t found = NULL;
+    if (predicted && spelling) for (int i = 0; i < predicted->count; i++) {
+        LmdObjectPlan* plan = predicted->plans[i];
+        ShapeEntry* entry = typemap_hash_lookup(plan->blueprint, spelling->chars, spelling->len);
+        if (!entry || entry->byte_offset < 0 || (entry->flags & JSPD_IS_ACCESSOR)) continue;
+        if (!field) { field = em_new_reg(&c->em, "own_field", MIR_T_I64); found = label(c); }
+        MIR_label_t next = label(c);
+        // Lambda's inferred-shape route: compare a source recipe, never an execution-learned cell.
+        branch(c, MIR_BNE, next, reg(c, shape), reg(c, planned_shape(c, plan)));
+        move(c, field, relocated(c, (uint64_t)entry)); jump(c, found); put_label(c, next);
     }
-    put_label(c, matched); return address;
+    // foreign declared layouts retain the adapter's ownership and import rules.
+    branch(c, MIR_BEQ, miss, reg(c, shape), integer(c, 0));
+    MIR_reg_t owned = em_call_1(&c->em, "mvp_lmd_owns_properties", MIR_T_I64,
+        MIR_T_I64, reg(c, owner), true);
+    branch_truth(c, miss, op(c, MIR_AND, reg(c, owned), integer(c, UINT8_MAX)), false);
+    MIR_reg_t resolved = em_call_2(&c->em, "typemap_hash_lookup_key", MIR_T_P,
+        MIR_T_P, reg(c, shape), MIR_T_P, reg(c, payload(c, name)), true);
+    if (field) { move(c, field, reg(c, resolved)); put_label(c, found); }
+    else field = resolved;
+    branch_truth(c, miss, field, false);
+    branch_truth(c, miss, op(c, MIR_AND, reg(c, em_load_at(&c->em, field,
+        offsetof(ShapeEntry, flags), MIR_T_U8, "own_flags")), integer(c, JSPD_IS_ACCESSOR)));
+    branch(c, MIR_BLT, miss, reg(c, em_load_at(&c->em, field,
+        offsetof(ShapeEntry, byte_offset), MIR_T_I64, "own_offset")), integer(c, 0));
+    return field;
+}
+static MIR_reg_t field_storage(LmdCompiler* c, MIR_reg_t field, MIR_label_t miss) {
+    // D3.4.6: Lambda's canonical descriptor owns physical storage, including optional lanes.
+    MIR_reg_t descriptor = em_call_1(&c->em, "shape_entry_storage", MIR_T_P,
+        MIR_T_P, reg(c, field), true);
+    branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, descriptor,
+        offsetof(LaneStorageDesc, nullable), MIR_T_U8, "field_nullable")), integer(c, 0));
+    return descriptor;
+}
+static MIR_reg_t native_number_field(LmdCompiler* c, MIR_reg_t data, MIR_reg_t field,
+        MIR_reg_t descriptor, MIR_label_t miss) {
+    MIR_reg_t storage = em_load_at(&c->em, descriptor, offsetof(LaneStorageDesc, kind), MIR_T_U8, "number_storage");
+    MIR_reg_t offset = em_load_at(&c->em, field, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "number_offset");
+    MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
+    MIR_label_t integral = label(c), done = label(c);
+    MIR_reg_t value = em_new_reg(&c->em, "field_number", MIR_T_D);
+    branch(c, MIR_BEQ, integral, reg(c, storage), integer(c, LANE_STORAGE_INT));
+    branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LANE_STORAGE_FLOAT64));
+    move(c, value, reg(c, em_load_at(&c->em, slot, 0, MIR_T_D, "field_float")), true);
+    jump(c, done); put_label(c, integral);
+    MIR_reg_t lane = em_load_at(&c->em, slot, 0, MIR_T_I64, "field_int");
+    em_branch_int53_outside(&c->em, lane, miss);
+    move(c, value, reg(c, to_number(c, {lane, K_NUMBER, false, 0, true})), true);
+    put_label(c, done); return value;
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_reg_t name, MIR_reg_t value, String* spelling, bool numeric,
-        const LmdValue* native_value, MvpLmdPropertyCache* shared_cache, bool plain,
-        bool nullable_value, MIR_label_t cache_miss) {
+        const LmdValue* native_value, bool plain, unsigned owner_kind) {
     if (plain && (operation == LMD_PROP_CREATE_DATA || (!c->program->receiver_abi &&
             (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)))) {
         // literal CreateDataProperty targets are fresh and unexposed, with default own descriptors.
@@ -4347,161 +4373,69 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         LmdFunction* active = c->inlining ? c->inlining->function : c->function;
         bool initializing = !c->program->property_callbacks && operation == LMD_PROP_SET && active->home &&
             active->id == active->home->constructor_id;
-        // one-shot script sites cannot hit their new cache; retain guards only where execution can repeat.
-        MvpLmdPropertyCache* cache = shared_cache ? shared_cache :
-            spelling && operation <= LMD_PROP_SET && repeated_execution(c) && !compact_property_dispatch(c)
-            ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
-        // existing own-slot guards remain valid in mutable units; misses use semantic Set.
-        MIR_reg_t joined = 0, shared_field = 0, shared_data = 0;
-        MIR_label_t done = NULL, shared_read = NULL;
-        bool own_read = operation == LMD_PROP_GET && cache && !cache_miss &&
-            c->program->function_construction && c->program->property_callbacks && spelling &&
+        // array/string length heads already cover the common path; keep their open miss compact.
+        bool sequence_length = named(spelling, "length") && (owner_kind & (K_ARRAY | K_STRING));
+        bool own_read = operation == LMD_PROP_GET && (owner_kind & (K_OBJECT | K_MAP)) &&
+            !sequence_length && repeated_execution(c) && !compact_property_dispatch(c) &&
+            spelling &&
             !(spelling->len && spelling->chars[0] >= '0' && spelling->chars[0] <= '9');
-        MIR_label_t semantic_read = own_read ? label(c) : NULL;
-        if (cache) {
-            MIR_label_t miss = label(c), inherited = label(c); done = label(c);
-            MIR_label_t nullable_store = operation == LMD_PROP_SET && !native_value && nullable_value ? label(c) : NULL;
-            MIR_reg_t actual = 0;
-            joined = em_new_reg(&c->em, "cached_property", numeric ? MIR_T_D : MIR_T_I64);
-            MIR_reg_t address = guard_property_cache(c, owner, cache, miss);
-            MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, field), MIR_T_I64, "cached_field");
-            branch(c, MIR_BEQ, operation == LMD_PROP_SET ? miss : inherited, reg(c, field), integer(c, 0));
-            MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "cached_data");
-            if (own_read) { shared_field = field; shared_data = data; }
-            MIR_reg_t storage = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, storage), MIR_T_U8, "cached_storage");
-            MIR_reg_t offset = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, offset), MIR_T_I64, "cached_offset");
-            MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
-            if (native_value) {
-                TypeId type = semantic(*native_value) == K_BOOL ? LMD_TYPE_BOOL :
-                    native_value->integer ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
-                branch(c, MIR_BNE, miss, reg(c, storage), integer(c, type));
-                branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
-                    offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
-                // the RHS is already evaluated; matching lanes need neither an Item nor a scalar home.
-                em_store_at(&c->em, slot, 0, type == LMD_TYPE_FLOAT ? MIR_T_D :
-                    type == LMD_TYPE_BOOL ? MIR_T_U8 : MIR_T_I64, native_value->reg);
-                move(c, joined, integer(c, ITEM_JS_UNDEFINED)); jump(c, done);
-            } else {
-                const struct { TypeId type; MIR_type_t lane; unsigned kind; } scalars[] = {
-                    {LMD_TYPE_FLOAT, MIR_T_D, K_NUMBER}, {LMD_TYPE_INT, MIR_T_I64, K_NUMBER},
-                    {LMD_TYPE_BOOL, MIR_T_U8, K_BOOL}};
-                MIR_label_t lanes[3] = {label(c), label(c), label(c)}, shared = label(c);
-                if (own_read) shared_read = shared;
-                if (operation == LMD_PROP_SET) {
-                    branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
-                        offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
-                    actual = tag(c, boxed(c, value));
-                    MIR_label_t tagged = label(c);
-                    branch(c, MIR_BNE, tagged, reg(c, op(c, MIR_URSH, reg(c, value), integer(c, 56))), integer(c, LMD_TYPE_INT));
-                    move(c, actual, integer(c, LMD_TYPE_INT)); put_label(c, tagged);
-                    branch(c, MIR_BNE, nullable_store ? nullable_store : miss, reg(c, actual), reg(c, storage));
-                }
-                MIR_label_t scalar = label(c);
-                // numeric consumers can select the physical scalar lane before inspecting pointer metadata.
-                if (numeric) for (int i = 0; i < 3; i++)
-                    branch(c, MIR_BEQ, lanes[i], reg(c, storage), integer(c, scalars[i].type));
-                MIR_reg_t pointer_lane = em_load_at(&c->em, address,
-                    offsetof(MvpLmdPropertyCacheEntry, pointer_lane), MIR_T_U8, "cached_pointer_lane");
-                branch(c, MIR_BEQ, scalar, reg(c, pointer_lane), integer(c, 0));
-                if (operation == LMD_PROP_SET) {
-                    em_store_at(&c->em, slot, 0, MIR_T_I64, payload(c, value));
-                    move(c, joined, reg(c, value));
-                } else {
-                    MIR_reg_t loaded = em_load_at(&c->em, slot, 0, MIR_T_I64, "cached_pointer");
-                    // shared readers own null canonicalization and legacy raw-header repair.
-                    branch(c, MIR_BEQ, shared, reg(c, loaded), integer(c, 0));
-                    MIR_label_t tagged = label(c);
-                    branch(c, MIR_BEQ, tagged, reg(c, pointer_lane), integer(c, 1));
-                    branch(c, MIR_BEQ, shared, reg(c, em_load_at(&c->em, loaded,
-                        LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "cached_pointer_kind")), integer(c, LMD_TYPE_RAW_POINTER));
-                    put_label(c, tagged);
-                    loaded = op(c, MIR_OR, reg(c, loaded), reg(c, em_load_at(&c->em, address,
-                        offsetof(MvpLmdPropertyCacheEntry, pointer_tag), MIR_T_I64, "cached_pointer_tag")));
-                    move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric);
-                }
-                jump(c, done); put_label(c, scalar);
-                if (!numeric) for (int i = 0; i < 3; i++)
-                    branch(c, MIR_BEQ, lanes[i], reg(c, storage), integer(c, scalars[i].type));
-                put_label(c, shared);
-                if (operation == LMD_PROP_SET) {
-                    MIR_reg_t stored = em_call_3(&c->em, "map_field_store", MIR_T_I64,
-                        MIR_T_P, reg(c, slot), MIR_T_I64, reg(c, value), MIR_T_I64, reg(c, actual), true);
-                    branch(c, MIR_BEQ, miss, reg(c, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX))), integer(c, 0));
-                    move(c, joined, reg(c, value)); jump(c, done);
-                } else {
-                    // shared readers retain optional layouts; consume/adopt their borrowed scalar before a safepoint.
-                    MIR_reg_t loaded = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
-                        MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
-                    if (own_read) branch(c, MIR_BEQ, semantic_read, reg(c, loaded), integer(c, ITEM_JS_LAZY_GLOBAL_SENTINEL));
-                    if (numeric) { check_error(c, loaded); loaded = to_number(c, boxed(c, loaded)); }
-                    move(c, joined, reg(c, loaded), numeric); jump(c, done);
-                }
-                for (int i = 0; i < 3; i++) {
-                    put_label(c, lanes[i]);
-                    bool integral = scalars[i].type == LMD_TYPE_INT;
-                    MIR_reg_t lane;
-                    if (operation == LMD_PROP_SET) {
-                        lane = integral ? em_unbox_finite_int_item(&c->em, value) :
-                            scalars[i].kind == K_NUMBER ? to_number(c, boxed(c, value, K_NUMBER)) : value;
-                        if (integral) em_branch_int53_outside(&c->em, lane, miss);
-                        em_store_at(&c->em, slot, 0, scalars[i].lane, lane);
-                        move(c, joined, reg(c, value));
-                    } else {
-                        lane = em_load_at(&c->em, slot, 0, scalars[i].lane, "cached_scalar");
-                        if (integral) em_branch_int53_outside(&c->em, lane, shared);
-                        LmdValue loaded = {lane, scalars[i].kind, false, 0, integral};
-                        move(c, joined, reg(c, numeric ? to_number(c, loaded) : box(c, loaded).reg), numeric);
-                    }
-                    jump(c, done);
-                }
-                if (operation != LMD_PROP_SET) {
-                    put_label(c, inherited);
-                    MIR_reg_t loaded = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, inherited),
-                        MIR_T_I64, "cached_method");
-                    move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric); jump(c, done);
-                }
-            }
-            if (nullable_store) {
-                // keep the nullable exception off matching numeric/pointer stores' hot path.
-                put_label(c, nullable_store);
-                branch(c, MIR_BNE, miss, reg(c, actual), integer(c, LMD_TYPE_NULL));
-                branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_MAP));
-                if (initializing) branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
-                    offsetof(MvpLmdPropertyCacheEntry, nullable_initializer), MIR_T_U8, "nullable_initializer")), integer(c, 0));
-                // Lambda's packed Map lane uses zero for null, without a shape transition.
-                em_store_at(&c->em, slot, 0, MIR_T_I64, constant(c, 0));
-                move(c, joined, reg(c, value)); jump(c, done);
-            }
-            put_label(c, miss);
-        }
-        if (cache_miss) {
-            // callers with extra lookup semantics own only the miss; slot decoding stays shared.
-            jump(c, cache_miss); put_label(c, done); return joined;
-        }
+        MIR_reg_t joined = 0;
+        MIR_label_t done = NULL, semantic_read = own_read ? label(c) : NULL;
+        auto load_field = [&](MIR_reg_t data, MIR_reg_t field) {
+            // Lambda owns packed/optional decoding; lazy globals retain semantic lookup.
+            MIR_reg_t loaded = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
+                MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
+            if (own_read) branch(c, MIR_BEQ, semantic_read, reg(c, loaded), integer(c, ITEM_JS_LAZY_GLOBAL_SENTINEL));
+            if (numeric) { check_error(c, loaded); loaded = to_number(c, boxed(c, loaded)); }
+            return loaded;
+        };
         if (own_read) {
-            // function-owned instances use shared own lookup after existing fast paths miss.
-            // other families retain ordinary dispatch, including its established slot admission.
+            // this shared own lookup is independent of execution-populated cache state.
+            if (!done) {
+                done = label(c);
+                joined = em_new_reg(&c->em, "own_property", numeric ? MIR_T_D : MIR_T_I64);
+            }
             MIR_label_t missing = label(c);
-            MIR_reg_t shape = guard_function_instance(c, owner, missing);
-            MIR_reg_t field = em_call_2(&c->em, "typemap_hash_lookup_key", MIR_T_P,
-                MIR_T_P, reg(c, shape), MIR_T_P, reg(c, payload(c, name)), true);
-            branch_truth(c, missing, field, false);
-            branch_truth(c, missing, op(c, MIR_AND, reg(c, em_load_at(&c->em, field,
-                offsetof(ShapeEntry, flags), MIR_T_U8, "own_flags")), integer(c, JSPD_IS_ACCESSOR)));
+            MIR_reg_t field = own_data_field(c, owner, name, missing);
             // the existing shared decoder also owns optional layouts and numeric consumption.
-            move(c, shared_field, reg(c, field));
-            move(c, shared_data, reg(c, em_load_at(&c->em, owner,
-                LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "own_data")));
-            jump(c, shared_read); put_label(c, missing); put_label(c, semantic_read);
+            MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "own_data");
+            if (numeric) {
+                MIR_label_t decode = label(c);
+                MIR_reg_t descriptor = field_storage(c, field, decode);
+                move(c, joined, reg(c, native_number_field(c, data, field, descriptor, decode)), true);
+                jump(c, done); put_label(c, decode);
+            }
+            move(c, joined, reg(c, load_field(data, field)), numeric); jump(c, done);
+            put_label(c, missing); put_label(c, semantic_read);
+        }
+        if (native_value && (owner_kind & (K_OBJECT | K_MAP)) && spelling &&
+                repeated_execution(c) && !compact_property_dispatch(c) &&
+                !(spelling->len && spelling->chars[0] >= '0' && spelling->chars[0] <= '9')) {
+            // the evaluated RHS can use an existing writable lane without boxing or a shape transition.
+            done = label(c); joined = constant(c, ITEM_JS_UNDEFINED);
+            MIR_label_t miss = label(c);
+            MIR_reg_t field = own_data_field(c, owner, name, miss);
+            branch_truth(c, miss, op(c, MIR_AND, reg(c, em_load_at(&c->em, field,
+                offsetof(ShapeEntry, flags), MIR_T_U8, "own_writable")), integer(c, JSPD_NON_WRITABLE)));
+            MIR_reg_t descriptor = field_storage(c, field, miss);
+            LaneStorageKind lane = semantic(*native_value) == K_BOOL ? LANE_STORAGE_BOOL :
+                native_value->integer ? LANE_STORAGE_INT : LANE_STORAGE_FLOAT64;
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, descriptor,
+                offsetof(LaneStorageDesc, kind), MIR_T_U8, "own_storage")), integer(c, lane));
+            MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "own_data");
+            MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, em_load_at(&c->em, field,
+                offsetof(ShapeEntry, byte_offset), MIR_T_I64, "own_offset")));
+            em_store_at(&c->em, slot, 0, lane == LANE_STORAGE_FLOAT64 ? MIR_T_D :
+                lane == LANE_STORAGE_BOOL ? MIR_T_U8 : MIR_T_I64, native_value->reg);
+            jump(c, done); put_label(c, miss);
         }
         if (native_value) value = box(c, *native_value).reg;
-        MIR_reg_t result = em_call_5(&c->em, c->program->property_callbacks ?
+        MIR_reg_t result = em_call_4(&c->em, c->program->property_callbacks ?
             "mvp_lmd_class_property" : "mvp_lmd_class_property_fixed", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, name ? reg(c, name) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, integer(c, initializing ? LMD_PROP_INITIALIZE : operation |
-                (c->strict && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE) ? LMD_PROP_STRICT : 0)),
-            MIR_T_P, relocated(c, (uint64_t)cache), true);
+                (c->strict && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE) ? LMD_PROP_STRICT : 0)), true);
         if (numeric) { check_error(c, result); result = to_number(c, boxed(c, result)); }
         if (!done) return result;
         move(c, joined, reg(c, result), numeric); put_label(c, done); return joined;
@@ -5230,6 +5164,65 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         save(field_read(c, candidate)); jump(c, done);
         put_label(c, miss);
     }
+    auto prototype_method = [&](MIR_reg_t prototype, MIR_reg_t expected,
+            ShapeEntry* field, MIR_label_t miss) {
+        em_guard_map_shape(&c->em, prototype, expected, miss, false);
+        LmdReference predicted = {}; predicted.owner = boxed(c, prototype, K_OBJECT);
+        predicted.field = field;
+        LmdValue method = field_read(c, predicted);
+        // a nullable packed function must take canonical decoding rather than publish a zero Item.
+        branch_truth(c, miss, method.reg, false);
+        save(method); jump(c, done);
+    };
+    if (callee && ref.spelling && repeated_execution(c) && !compact_property_dispatch(c)) {
+        MvpLmdClass* classes[4]; ShapeEntry* fields[4]; int count = 0;
+        for (int i = 0; c->program->classes && i < c->program->classes->length; i++) {
+            MvpLmdClass* cls = (MvpLmdClass*)c->program->classes->data[i];
+            ShapeEntry* field = cls->dynamic ? NULL : typemap_hash_lookup(&cls->prototype_shape,
+                ref.spelling->chars, ref.spelling->len);
+            if (!field || field->type->type_id != LMD_TYPE_FUNC || (field->flags & JSPD_IS_ACCESSOR)) continue;
+            if (count == 4) { count = 0; break; }
+            classes[count] = cls; fields[count++] = field;
+        }
+        if (count) {
+            MIR_label_t miss = label(c), admitted = label(c);
+            em_guard_container(&c->em, ref.owner.reg, LMD_TYPE_MAP, miss);
+            MIR_reg_t shape = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "method_shape");
+            branch(c, MIR_BEQ, miss, reg(c, shape), integer(c, 0));
+            TypeMap marker = {};
+            MIR_reg_t nominal = em_load_at(&c->em, shape,
+                (char*)&marker.nominal - (char*)&marker, MIR_T_I64, "method_nominal");
+            for (int i = 0; i < count; i++)
+                branch(c, i + 1 == count ? MIR_BNE : MIR_BEQ, i + 1 == count ? miss : admitted,
+                    reg(c, nominal), relocated(c, (uint64_t)&classes[i]->nominal));
+            put_label(c, admitted);
+            // source nominal identity selects a candidate; a live own shadow still wins.
+            MIR_reg_t own = em_call_2(&c->em, "typemap_hash_lookup_key", MIR_T_P,
+                MIR_T_P, reg(c, shape), MIR_T_P, reg(c, payload(c, reference_name(c, ref))), true);
+            branch_truth(c, miss, own);
+            MIR_reg_t actual = 0;
+            if (c->program->property_callbacks) {
+                actual = em_call_1(&c->em, "mvp_lmd_get_prototype", MIR_T_I64,
+                    MIR_T_I64, reg(c, ref.owner.reg), true);
+                check_error(c, actual);
+            }
+            for (int i = 0; i < count; i++) {
+                MIR_label_t next = i + 1 == count ? miss : label(c);
+                if (count > 1) branch(c, MIR_BNE, next, reg(c, nominal),
+                    relocated(c, (uint64_t)&classes[i]->nominal));
+                MIR_reg_t prototype = actual;
+                if (!prototype) {
+                    // the existing closed-unit proof excludes prototype replacement and foreign newTarget.
+                    MIR_reg_t values = em_load_at(&c->em, relocated_constant(c, (uint64_t)&classes[i]->values),
+                        0, MIR_T_I64, "method_values");
+                    prototype = em_load_at(&c->em, values, sizeof(Item), MIR_T_I64, "method_prototype");
+                }
+                prototype_method(prototype, relocated_constant(c, (uint64_t)&classes[i]->prototype_shape), fields[i], miss);
+                if (next != miss) put_label(c, next);
+            }
+            put_label(c, miss);
+        }
+    }
     if (callee && ref.spelling && c->program->function_construction &&
             repeated_execution(c) && !compact_property_dispatch(c)) {
         LmdObjectPlan* plans[4]; ShapeEntry* fields[4]; int count = 0;
@@ -5260,11 +5253,8 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
             check_error(c, prototype);
             for (int i = 0; i < count; i++) {
                 MIR_label_t next = i + 1 == count ? miss : label(c);
-                em_guard_map_shape(&c->em, prototype, planned_shape(c, plans[i]), next, false);
-                LmdReference predicted = {}; predicted.owner = boxed(c, prototype, K_OBJECT);
-                predicted.plan = plans[i]; predicted.field = fields[i];
-                // load the current value before arguments; a same-shaped replacement stays observable.
-                save(field_read(c, predicted)); jump(c, done);
+                // load the live method before arguments; same-shaped replacements remain observable.
+                prototype_method(prototype, planned_shape(c, plans[i]), fields[i], next);
                 if (next != miss) put_label(c, next);
             }
             put_label(c, miss);
@@ -5286,7 +5276,7 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         move(c, own_value, reg(c, item)); jump(c, own_done); put_label(c, missing);
     }
     MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET,
-        ref.owner.reg, name, 0, ref.spelling, consume, NULL, read ? &read->cache : NULL);
+        ref.owner.reg, name, 0, ref.spelling, consume, NULL, false, k);
     if (own_done) { move(c, own_value, reg(c, value)); put_label(c, own_done); value = own_value; }
     if (consume) { move(c, result, reg(c, value), true); put_label(c, done); return {result, K_NUMBER}; }
     unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
@@ -5469,7 +5459,7 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
     // retain RHS nullability even when an arithmetic result remains boxed.
     MIR_reg_t stored = property_access(c, LMD_PROP_SET, ref.owner.reg,
         reference_name(c, ref), native ? 0 : box(c, value).reg, ref.spelling, false,
-        native ? &value : NULL, NULL, k == K_OBJECT, (semantic(value) & K_NULL) != 0);
+        native ? &value : NULL, k == K_OBJECT, k);
     check_error(c, stored); put_label(c, done);
 }
 
@@ -6152,7 +6142,7 @@ static int numeric_region_path(MvpLmdProgram* p, LmdNumericRegion* region, AstNo
         if (region->reads[i].parent == parent && named(region->reads[i].name, name->chars)) return i;
     if (region->count == 16) return -1;
     int index = region->count++;
-    region->reads[index] = {region, parent, name, K_NUMBER, index, {}, NULL};
+    region->reads[index] = {region, parent, name, K_NUMBER, index, NULL, object_shapes(p, member->object)};
     MvpLmdClass* home = region->function->home;
     if (parent == -2 && home && home->constructor_id >= 0) {
         LmdFunction* constructor = (LmdFunction*)p->functions->data[home->constructor_id];
@@ -6338,6 +6328,8 @@ static void plan_numeric_region(MvpLmdProgram* p, LmdFunction* f, bool calls = f
     }
     LmdInlineBudget budget = {0, true, p, f, true, true, false, &region};
     inline_budget(f->ast->body, &budget);
+    // inherited method paths need a source prototype proof before their inputs can be preloaded.
+    for (int i = 0; i < region.count; i++) if (region.reads[i].target) return;
     // passthrough getters already have a packed load; another guarded version only adds code.
     if (!region.computes && !region.allocates) return;
     // already-native scalar bodies need no second version; retain small scalar methods for inlining.
@@ -6364,59 +6356,34 @@ static void guard_numeric_region(LmdCompiler* c, LmdInlineFrame& frame, LmdValue
         MIR_reg_t owner = read->parent >= 0 ? frame.region_values[read->parent].reg :
             read->parent == -2 ? frame.receiver : box(c, values[-3 - read->parent]).reg;
         if (!owner) { jump(c, miss); return; }
-        // the region proof excludes mutation and these guards contain no GC safepoints.
-        // siblings can share a receiver check and data base, while each retains its own field guard.
-        bool siblings = false;
-        for (int j = 0; j < region->count; j++) if (j != i && region->reads[j].parent == read->parent) {
-            siblings = true;
-            if (j < i) { shapes[i] = shapes[j]; data_slots[i] = data_slots[j]; break; }
+        // the region excludes mutation and callbacks; shared lookup has no GC safepoints.
+        for (int j = 0; j < i; j++) if (region->reads[j].parent == read->parent) {
+            shapes[i] = shapes[j]; data_slots[i] = data_slots[j]; break;
         }
-        if (siblings && !shapes[i]) {
-            // a path can name a guarded method as well as an object; prove the receiver kind here.
+        if (!shapes[i]) {
             em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, owner,
+                LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "region_map_kind")), integer(c, MAP_KIND_PLAIN));
             shapes[i] = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "region_shape");
             data_slots[i] = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "region_data");
         }
-        MIR_reg_t entry = guard_property_cache(c, owner, &read->cache, miss, shapes[i]);
-        MIR_reg_t storage = em_load_at(&c->em, entry, offsetof(MvpLmdPropertyCacheEntry, storage), MIR_T_U8, "region_storage");
-        MIR_reg_t data = data_slots[i] ? data_slots[i] :
-            em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "region_data");
-        MIR_reg_t offset = em_load_at(&c->em, entry, offsetof(MvpLmdPropertyCacheEntry, offset), MIR_T_I64, "region_offset");
-        MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
-        if (read->target) {
-            MIR_label_t inherited = label(c), loaded = label(c);
-            MIR_reg_t value = em_new_reg(&c->em, "region_method", MIR_T_I64);
-            branch(c, MIR_BEQ, inherited, reg(c, em_load_at(&c->em, entry,
-                offsetof(MvpLmdPropertyCacheEntry, field), MIR_T_I64, "region_field")), integer(c, 0));
-            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_FUNC));
-            move(c, value, reg(c, em_load_at(&c->em, slot, 0, MIR_T_I64, "region_function")));
-            jump(c, loaded); put_label(c, inherited);
-            move(c, value, reg(c, em_load_at(&c->em, entry,
-                offsetof(MvpLmdPropertyCacheEntry, inherited), MIR_T_I64, "region_inherited")));
-            put_label(c, loaded);
-            em_guard_container(&c->em, value, LMD_TYPE_FUNC, miss);
-            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, value,
-                offsetof(Function, ptr), MIR_T_I64, "region_entry")), MIR_new_ref_op(c->em.ctx, read->target->forward));
-            frame.region_values[i] = boxed(c, value, K_FUNCTION);
-        } else if (read->kind == K_BOOL) {
-            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_BOOL));
+        MIR_reg_t field = own_data_field(c, owner, relocated_constant(c, s2it(read->name)), miss, shapes[i], &read->shapes, read->name);
+        MIR_reg_t descriptor = field_storage(c, field, miss);
+        MIR_reg_t storage = em_load_at(&c->em, descriptor, offsetof(LaneStorageDesc, kind), MIR_T_U8, "region_storage");
+        MIR_reg_t offset = em_load_at(&c->em, field, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "region_offset");
+        MIR_reg_t slot = op(c, MIR_ADD, reg(c, data_slots[i]), reg(c, offset));
+        if (read->kind == K_BOOL) {
+            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LANE_STORAGE_BOOL));
             frame.region_values[i] = {em_load_at(&c->em, slot, 0, MIR_T_U8, "region_bool"), K_BOOL};
         } else if (read->kind == K_OBJECT) {
-            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_MAP));
+            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LANE_STORAGE_POINTER));
+            branch(c, MIR_BNE, miss, reg(c, em_load_at(&c->em, descriptor,
+                offsetof(LaneStorageDesc, value_domain), MIR_T_U8, "region_domain")), integer(c, LMD_TYPE_MAP));
             MIR_reg_t value = em_load_at(&c->em, slot, 0, MIR_T_I64, "region_object");
             em_guard_container(&c->em, value, LMD_TYPE_MAP, miss);
             frame.region_values[i] = boxed(c, value, K_OBJECT);
         } else {
-            MIR_label_t integral = label(c), done = label(c);
-            MIR_reg_t value = em_new_reg(&c->em, "region_number", MIR_T_D);
-            branch(c, MIR_BEQ, integral, reg(c, storage), integer(c, LMD_TYPE_INT));
-            branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_FLOAT));
-            move(c, value, reg(c, em_load_at(&c->em, slot, 0, MIR_T_D, "region_float")), true);
-            jump(c, done); put_label(c, integral);
-            MIR_reg_t lane = em_load_at(&c->em, slot, 0, MIR_T_I64, "region_int");
-            em_branch_int53_outside(&c->em, lane, miss);
-            move(c, value, reg(c, to_number(c, {lane, K_NUMBER, false, 0, true})), true);
-            put_label(c, done); frame.region_values[i] = {value, K_NUMBER};
+            frame.region_values[i] = {native_number_field(c, data_slots[i], field, descriptor, miss), K_NUMBER};
         }
     }
 }
@@ -7643,7 +7610,15 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             if (named(id->name, "this") && (constructor || c->function->lexical_receiver))
                 check_tdz(c, NULL, value, n);
             // preserve the value of an earlier this read across a later super() call.
-            return boxed(c, op(c, MIR_OR, reg(c, value), integer(c, 0)));
+            unsigned hint = K_ANY;
+            if (named(id->name, "this") && c->function->object_home) {
+                AstNode* parent = ast_index_parent(&c->program->frontend->ast_index, (AstNode*)c->function->ast);
+                // private static initializers receive their class constructor through the sole call edge.
+                if (parent && (parent->node_type == JS_AST_NODE_STATIC_BLOCK ||
+                        (parent->node_type == AST_NODE_FIELD && ((AstClassFieldNode*)parent)->is_static)))
+                    hint = K_FUNCTION;
+            }
+            return boxed(c, op(c, MIR_OR, reg(c, value), integer(c, 0)), hint);
         }
         if ((c->function->home || c->function->object_home || c->function->lexical_super) && named(id->name, "super")) {
             MIR_reg_t receiver = c->receiver_cell ? em_load_at(&c->em,
@@ -7773,7 +7748,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                     (K_ARRAY | K_FUNCTION | K_MAP | K_TYPED_ARRAY)));
             }
             MIR_reg_t deleted = property_access(c, LMD_PROP_DELETE, owner.reg, ref.name,
-                0, NULL, false, NULL, NULL, semantic(owner) == K_OBJECT);
+                0, NULL, false, NULL, semantic(owner) == K_OBJECT);
             check_error(c, deleted); return boxed(c, deleted, K_BOOL);
         }
         if (u->op == OPERATOR_JS_INCREMENT || u->op == OPERATOR_JS_DECREMENT) {
@@ -8060,48 +8035,10 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                     move(c, joined, reg(c, ::call(c, call, &capture).reg)); put_label(c, done);
                     return boxed(c, joined, K_OBJECT);
                 }
-                // recursive records amortize a small variant lookup over their link initialization.
-                bool variants = cls->nullable_initializer_count && count > 0 && count <= 8;
-                void* site = pool_calloc(c->program->frontend->pool,
-                    variants ? sizeof(LmdAllocationVariants) : sizeof(LmdAllocationSite));
-                if (!site) { mem_free(values); diagnostic(c->program, n, "allocation site cache"); return expression(c, NULL); }
                 MIR_label_t slow = label(c), done = label(c), unchanged = label(c);
                 MIR_reg_t joined = em_new_reg(&c->em, "constructed", MIR_T_I64);
                 MIR_reg_t shape_slot = relocated_constant(c, (uint64_t)&cls->allocation_shape);
                 MIR_reg_t shape = em_load_at(&c->em, shape_slot, 0, MIR_T_I64, "allocation_shape");
-                MIR_reg_t epoch = em_load_at(&c->em, relocated_constant(c, (uint64_t)&cls->allocation_epoch), 0, MIR_T_I64, "allocation_epoch");
-                MIR_reg_t site_address = relocated_constant(c, (uint64_t)site);
-                MIR_reg_t variant_key = 0;
-                if (variants) {
-                    variant_key = constant(c, 0);
-                    for (int i = 0; i < count; i++) {
-                        MIR_reg_t type = tag(c, values[i]);
-                        move(c, variant_key, reg(c, op(c, MIR_OR, reg(c, variant_key),
-                            reg(c, op(c, MIR_LSH, reg(c, type), integer(c, i * 8))))));
-                    }
-                    MIR_label_t found = label(c);
-                    for (int i = 0; i < 4; i++) {
-                        move(c, site_address, relocated(c, (uint64_t)&((LmdAllocationVariants*)site)->entries[i]));
-                        branch(c, MIR_BEQ, found, reg(c, variant_key), reg(c, em_load_at(&c->em,
-                            site_address, offsetof(LmdAllocationVariant, key), MIR_T_I64, "allocation_key")));
-                    }
-                    MIR_reg_t table = relocated_constant(c, (uint64_t)site);
-                    MIR_reg_t next = em_load_at(&c->em, table, offsetof(LmdAllocationVariants, next), MIR_T_I64, "allocation_next");
-                    move(c, site_address, reg(c, op(c, MIR_ADD, reg(c, table), reg(c,
-                        op(c, MIR_MUL, reg(c, op(c, MIR_AND, reg(c, next), integer(c, 3))),
-                            integer(c, sizeof(LmdAllocationVariant)))))));
-                    em_store_at(&c->em, table, offsetof(LmdAllocationVariants, next), MIR_T_I64,
-                        op(c, MIR_ADD, reg(c, next), integer(c, 1)));
-                    // a miss may reuse another layout, but normal stores still prove every field lane.
-                    put_label(c, found);
-                }
-                MIR_reg_t cached = em_load_at(&c->em, site_address, offsetof(LmdAllocationSite, shape), MIR_T_I64, "site_shape");
-                MIR_label_t selected = label(c);
-                // sites retain their argument layouts; learned nullable links invalidate stale templates.
-                branch(c, MIR_BEQ, selected, reg(c, cached), integer(c, 0));
-                branch(c, MIR_BNE, selected, reg(c, epoch), reg(c, em_load_at(&c->em,
-                    site_address, offsetof(LmdAllocationSite, epoch), MIR_T_I64, "site_epoch")));
-                move(c, shape, reg(c, cached)); put_label(c, selected);
                 // the first ordinary construction supplies a completed, shared layout.
                 branch(c, MIR_BEQ, slow, reg(c, shape), integer(c, 0));
                 // program slots are installed at execution entry, after MIR generation.
@@ -8124,9 +8061,6 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                         MIR_T_U8, "transition_shape")));
                 branch_truth(c, unchanged, shared, false);
                 em_store_at(&c->em, shape_slot, 0, MIR_T_I64, completed);
-                em_store_at(&c->em, site_address, offsetof(LmdAllocationSite, shape), MIR_T_I64, completed);
-                em_store_at(&c->em, site_address, offsetof(LmdAllocationSite, epoch), MIR_T_I64, epoch);
-                if (variants) em_store_at(&c->em, site_address, offsetof(LmdAllocationVariant, key), MIR_T_I64, variant_key);
                 put_label(c, unchanged); move(c, joined, reg(c, instance)); jump(c, done);
                 put_label(c, slow);
                 for (int i = 0; i < count; i++) values[i] = box(c, values[i]);
@@ -8251,7 +8185,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             fresh &= preserved;
             put_label(c, miss);
             MIR_reg_t stored = property_access(c, LMD_PROP_CREATE_DATA, owner.reg, name.reg,
-                box(c, value).reg, NULL, false, NULL, NULL, true);
+                box(c, value).reg, NULL, false, NULL, true);
             check_error(c, stored); put_label(c, done);
         }
         mem_free(values); return owner;
@@ -8555,9 +8489,9 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t in
             em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, value.reg),
             MIR_T_I64, integer(c, LMD_PRIVATE_METHOD), true) :
-            em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+            em_call_4(&c->em, "mvp_lmd_class_property", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, value.reg),
-            MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA | LMD_PROP_NON_ENUMERABLE), MIR_T_P, integer(c, 0), true);
+            MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA | LMD_PROP_NON_ENUMERABLE), true);
         check_error(c, defined);
     }
     // the private class binding stays in TDZ through computed keys, then initializes before static execution.
@@ -8586,9 +8520,9 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t in
             MIR_reg_t key = em_load_at(&c->em, keys, key_slot * sizeof(Item), MIR_T_I64, "static_field_key");
             MIR_reg_t defined = field->is_private ? em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
                 MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, key), MIR_T_I64, reg(c, box(c, value).reg),
-                MIR_T_I64, integer(c, LMD_PRIVATE_ADD), true) : em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+                MIR_T_I64, integer(c, LMD_PRIVATE_ADD), true) : em_call_4(&c->em, "mvp_lmd_class_property", MIR_T_I64,
                 MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, key), MIR_T_I64, reg(c, box(c, value).reg),
-                MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA), MIR_T_P, integer(c, 0), true);
+                MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA), true);
             check_error(c, defined);
         }
     }
@@ -9493,12 +9427,14 @@ static const LmdImport imports[] = {
     {"heap_calloc_closure_env", (void*)heap_calloc_closure_env, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,SCALAR))},
     {"str_repeat", (void*)str_repeat, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,SCALAR))},
     {"fn_join2", (void*)fn_join2, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
-    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
+    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_dynamic_global", (void*)mvp_lmd_dynamic_global, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,SCALAR))},
     // the closed-unit admission proof excludes guest callbacks; storage and C ABI are shared.
-    {"mvp_lmd_class_property_fixed", (void*)mvp_lmd_class_property_fixed, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
+    {"mvp_lmd_class_property_fixed", (void*)mvp_lmd_class_property_fixed, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_private_names_initialize", (void*)mvp_lmd_private_names_initialize, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,RAW_PTR)|ARG(2,SCALAR))},
     {"map_shape_field_to_item", (void*)map_shape_field_to_item, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,RAW_PTR))},
+    {"mvp_lmd_owns_properties", (void*)mvp_lmd_owns_properties, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
+    {"shape_entry_storage", (void*)shape_entry_storage, AUDIT(JIT_EFFECT_NO_GC, RAW_PTR, ARG(0,RAW_PTR))},
     {"typemap_hash_lookup_key", (void*)typemap_hash_lookup_key, AUDIT(JIT_EFFECT_NO_GC, RAW_PTR, ARG(0,RAW_PTR)|ARG(1,GC_PTR))},
     {"map_field_store", (void*)map_field_store, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"map_shape_set", (void*)map_shape_set, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,ITEM))},
@@ -12679,7 +12615,7 @@ static bool computed_read_is_observation(MvpLmdProgram* p, AstFieldNode* member)
     }
     return used;
 }
-// Inherited-value caches are valid after a passive, nonescaping prototype setup.
+// fixed prototype proofs require a passive, nonescaping setup.
 static bool fixed_prototype_setup(MvpLmdProgram* p) {
     const AstIndex* tree = &p->frontend->ast_index;
     auto same = [&](auto&& equal, AstNode* a, AstNode* b, int depth) -> bool {

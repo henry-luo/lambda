@@ -12,7 +12,7 @@
         "ddiv\t": 1,
         "call\tmvp_lmd_object_new": 4,
         "call\tmap_shape_set": 4,
-        "call\tmap_shape_field_to_item": 2,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_primitive_to_number": 9,
         "call\tmvp_lmd_class_property": 4,
         "call\tmvp_lmd_array_index_property": 1,
@@ -49,7 +49,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_class_property": 1
       }
     },
@@ -70,7 +70,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_field_store": 1,
+        "call\tmap_field_store": 0,
         "call\tmvp_lmd_class_property": 1,
         "call\tmvp_lmd_array_index_property": 1
       }
@@ -81,7 +81,7 @@
         "ret\t"
       ],
       "count": {
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_class_property": 1
       }
     },

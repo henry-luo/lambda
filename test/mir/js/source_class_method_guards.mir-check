@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D2.6.10: source class candidates guard nominal identity, own shadows and live prototype shapes; inherited, replaced, null and accessor methods preserve reference evaluation order.",
+  "checks": [
+    {
+      "in_func": "*",
+      "expect": [
+        "call\ttypemap_hash_lookup_key",
+        "call\tmvp_lmd_get_prototype",
+        "call\tmvp_lmd_class_property"
+      ],
+      "forbid": [
+        "cached_shape",
+        "cache_entry",
+        "site_shape",
+        "allocation_key"
+      ]
+    }
+  ]
+}

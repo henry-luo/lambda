@@ -6,6 +6,7 @@
 // checks; release timing stays free of contract tracing overhead.
 
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -563,6 +564,21 @@ TEST(JsOpt, MirCanonicalizationPreservesTextTagsAndScalarConstants) {
         (unsigned long long)ITEM_FLOAT_P0, (unsigned long long)ITEM_FLOAT_N0);
     EXPECT_STREQ(normalized, expected);
     free(normalized);
+}
+
+TEST(JsOpt, PropertySiteCacheContractRejectsMutableCells) {
+    mir_check::expect_js_no_site_caches(
+        "\tcall\tp, mvp_lmd_class_property, %r1, %r2, %r3, 0, 0\n"
+        "\tcall\tp, mvp_lmd_class_property_fixed, %r1, %r2, %r3, 0, 0\n");
+    EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
+        "\tcall\tp, mvp_lmd_class_property, %r1, %r2, %r3, 0, 0, 123\n"),
+        "D8.4.1v2: obsolete JS property cache operand");
+    EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
+        "\tcall\tp, mvp_lmd_class_property_fixed, %r1, %r2, %r3, 0, 0, %r4\n"),
+        "D8.4.1v2: obsolete JS property cache operand");
+    EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
+        "\tcall\tp, mvp_lmd_class_property, %r1, %r2, %r3, 0, 0, 0\n"),
+        "D8.4.1v2: obsolete JS property cache operand");
 }
 
 TEST(JsOpt, TraceParserFailsClosed) {

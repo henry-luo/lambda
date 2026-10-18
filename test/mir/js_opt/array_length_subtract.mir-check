@@ -27,7 +27,7 @@
       "count": {
         "dadd\t": 1,
         "dsub\t": 1,
-        "call\tmap_shape_field_to_item": 2,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_to_primitive": 2,
         "call\tmvp_lmd_primitive_to_number": 2,
         "call\tmvp_lmd_class_property": 2

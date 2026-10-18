@@ -19,21 +19,15 @@
         "mov\t{{r:kind}}, u8:3({{r:owner}})",
         ", {{r:kind}}, 0",
         "mov\t{{r:shape}}, i64:8({{r:owner}})",
-        ", {{r:shape}}, 0",
-        "mov\t{{r:meta}}, i64:112({{r:shape}})",
-        ", {{r:meta}}, 0",
-        "mov\t{{r:nominal}}, i64:136({{r:shape}})",
-        ", {{r:nominal}}, 0",
-        "mov\t{{r:extension}}, i64:72({{r:nominal}})",
-        ", {{r:extension}},",
-        "mov\t{{r:class}}, i64:80({{r:nominal}})",
-        ", {{r:class}}, 0",
-        "mov\t{{r:constructor}}, i64:688({{r:class}})",
-        ", {{r:constructor}}, 0",
+        "call\tmvp_lmd_owns_properties",
         "call\ttypemap_hash_lookup_key",
         "mov\t{{r:flags}}, u8:57({{r:field}})",
         "and\t{{r:accessor}}, {{r:flags}}, 8",
-        ", {{r:accessor}}"
+        ", {{r:accessor}}",
+        "mov\t{{r:offset}}, i64:16({{r:field}})",
+        ", {{r:offset}}, 0",
+        "call\tmap_shape_field_to_item",
+        "call\tmvp_lmd_class_property"
       ]
     }
   ]

@@ -36,7 +36,7 @@
       ],
       "count": {
         "dadd\t": 2,
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_property_key": 3,
         "call\tmvp_lmd_to_primitive": 2,
         "call\tmvp_lmd_primitive_to_number": 2,
@@ -155,7 +155,7 @@
       "count": {
         "call\tarray_reserve_append_slots": 1,
         "call\tmvp_lmd_object_new": 1,
-        "call\tmap_shape_field_to_item": 1,
+        "call\tmap_shape_field_to_item": 0,
         "call\tmvp_lmd_class_property": 1,
         "call\tmvp_lmd_array_index_property": 1
       }
