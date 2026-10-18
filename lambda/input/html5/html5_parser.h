@@ -367,6 +367,7 @@ bool html5_has_element_in_select_scope(Html5Parser* parser, NameId tag_id, const
 
 // Foreign-content namespace check (defined in html5_parser.cpp)
 bool html5_is_in_svg_namespace(Html5Parser* parser);
+bool html5_current_node_is_foreign(Html5Parser* parser);
 
 // Tree construction helpers
 void html5_generate_implied_end_tags(Html5Parser* parser);

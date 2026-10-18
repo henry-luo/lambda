@@ -2,6 +2,12 @@
 
 **Date:** 2026-10-02
 
+**Follow-on schedule:** [Radiant SVG support enhancement plan](Radiant_Impl_SVG_Support.md)
+proposes bounded CSS transform/motion, component-transfer and geometry work.
+This file retains the original implementation inventory and qualification record.
+Parser admission is revised on 2026-10-18 under **D2.11.1–D2.11.2**; historical
+XML-profile namespace results below do not qualify the new external HTML profile.
+
 **Status:** P1–P12 implementation is complete within the listed inventory, including P12 access-key/wallclock timing, use-instance events and animation DOM operations (§7.16). Final macOS implementation, aggregate and export gates pass. Linux/Windows P13 runtime smoke remains open; the whole proposal is not complete. Broad SVG2/SMIL rows retain their explicit outside-inventory limits.
 
 **Scope:** the missing behavior in §15 of [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md#15-svg), including the limitations inside partial and supported rows; SVG-specific export limitations in §17 are a separate final phase.
