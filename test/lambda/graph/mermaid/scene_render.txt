@@ -1,5 +1,4 @@
 {
-  installed: true,
   retained_runs: 5,
   cases: [["shapes-and-labels", true, true], ["upstream-single-diamond", true, true], ["upstream-single-circle", true, true], ["upstream-shape-data", true, true], ["upstream-inline-label", true, true]],
   diagnostics: []

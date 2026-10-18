@@ -1,0 +1,12 @@
+{
+  "name":"Draw centers and fits the page before the first canvas interaction",
+  "html":"test/demo/draw/draw.ls",
+  "viewport":{"width":1280,"height":820},
+  "events":[
+    {"type":"advance_time","ms":50},
+    {"type":"assert_script","js":"(() => { let s=document.getElementById('stage').getBoundingClientRect(); let p=document.getElementById('paper').getBoundingClientRect(); return Math.abs(s.x+s.width/2-p.x-p.width/2)<1.5 && Math.abs(s.y+s.height/2-p.y-p.height/2)<1.5 && p.width<=s.width-46 && p.height<=s.height-46; })()"},
+    {"type":"assert_attribute","target":{"selector":"#draw"},"attribute":"data-history","equals":"0"},
+    {"type":"assert_attribute","target":{"selector":"#draw"},"attribute":"data-error","equals":""},
+    {"type":"render","file":"temp/draw/startup-centered.png"}
+  ]
+}

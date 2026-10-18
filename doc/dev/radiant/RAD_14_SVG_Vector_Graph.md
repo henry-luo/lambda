@@ -292,6 +292,12 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 
 `graph.transform.paint` converts routed edge points into immutable `<svg>` elements returned as custom-layout `paint_layers`. Radiant roots those elements for the document lifetime and merges generated layers with normal node child views using one stable signed-z sequence. SVG, PDF, and raster backends consume the same sequence; hit testing consumes it in reverse while skipping generated layers, which are initially non-interactive.
 
+Radiant resolves `data-radiant-layout="lambda-graph"` directly to the pure
+`lambda.graph.transform.layout` package export (**D7.5.3v2**). Graph/TikZ
+transforms and render callers do not install callbacks. Static HTML acquires a
+package evaluator lazily; later layout passes reuse module state and compiled
+exports through the same bridge as MathML.
+
 `LambdaDocumentTransformConfig` selects `lambda.graph.document.to_html`; the native loader parses the graph input, passes typed `theme`/`view_key` options, and invokes that public package export. `render`, `view`, `layout`, and generic document loading share this route without generating Lambda source. This is an ordinary shipped-package invocation under **D7.2.1–D7.2.2**. Final SVG/PDF/PNG/JPEG output is produced by normal Radiant rendering; there is no direct C graph-to-SVG path.
 
 ---
@@ -320,7 +326,7 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 | `radiant/render.hpp` / `render_svg.cpp` | View-tree → SVG-text declarations and serializer (`render_view_tree_to_svg`, `svg_make_backend`) with raster fallback for inexpressible effects. |
 | `radiant/render_path.cpp`, `radiant/render_vector_path.cpp` | Rounded-rect/clip path construction and CSS `VectorPathProp` rendering through `rdt_*`. |
 | `lmd/package/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
-| `lmd/package/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
+| `lmd/package/graph/transform.ls`, `transform/*` | Semantic HTML, automatic package layout export, themes, and generated SVG edge layers. |
 | `radiant/graph_format.cpp` / `lmd/package/graph/document.ls` | Graph syntax detection plus the shared configured package transform for render, view, layout, and generic loading. |
 | `radiant/stacking_order.cpp` | Stable signed-z merge of generated layers and measured node views. |
 

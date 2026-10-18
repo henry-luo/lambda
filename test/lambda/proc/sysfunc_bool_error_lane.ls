@@ -22,8 +22,7 @@ pn main() {
         contains(dyn(5), "a"), contains(dyn("ab"), dyn('b')), starts_with(dyn(5), "a")])
     print("\n")
 
-    // the error is falsy where truthiness decides (S7.9.2), and stays an
-    // error in a binding
+    // S3.4/S3.5: conditions and logical operations preserve the error.
     print([if (any(e)) "t" else "f", if (all(e)) "t" else "f",
         if (contains(e, "a")) "t" else "f", if (starts_with(e, "a")) "t" else "f"])
     print("\n")
@@ -31,7 +30,7 @@ pn main() {
     print("\n")
     let a = any(e)
     let c = contains(e, "a")
-    let ok: bool = all(dyn([true, 1])) or false
+    let ok: bool = all(dyn([true, 1])) ^ { false }
     print([a, c, a is error, c is error, ok])
     print("\n")
 

@@ -3,7 +3,7 @@
 // inverses, and chunk rebuilds across boundaries.
 import buf: lambda.edit.source_buffer
 
-fn round_trips(text) => buf.to_text(buf.from_text(text)) == text
+fn round_trips(text) bool | error => buf.to_text(buf.from_text(text)) == text
 
 "round trip:";
 [round_trips(""), round_trips("a"), round_trips("a\n"), round_trips("a\nb"), round_trips("a\r\nb\r\n"), round_trips("a\r\nb\nc"),

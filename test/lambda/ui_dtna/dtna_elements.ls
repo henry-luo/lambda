@@ -22,7 +22,7 @@ let checkbox = content(content(spacer)[1])[0];
     ["nested native checkbox",name(checkbox) == 'label' and content(checkbox)[0].id == "subscribe" and ("checked" at map(content(checkbox)[0]))],
     ["second root template",content(root)[1]["aria-valuenow"] == "64"],
     ["page defaults",apply(<dtna.page "Default">) == ui.page("Default")^],
-    ["page validation",(apply(<dtna.page unknown:true>) or null) == null],
+    ["page validation",(apply(<dtna.page unknown:true>) ^ { null }) == null],
     ["flat constructor attributes",(ui.button({id:"save",variant:'primary'},"Save")^) == <dtna.button id:"save",variant:'primary',"Save">],
     ["tag metadata wins over name attribute",c.kind(<dtna.input name:"email">) == 'input'],
     ["native HTML stays native",apply(<button variant:'dashed',"Native">) == <button variant:'dashed',"Native">],

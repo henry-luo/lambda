@@ -717,7 +717,8 @@ pn main() {
   print(result * 2)             // result is clean here
 }
 ```
-`e or default` rescues any falsy value without seeing it;
+`e or default` defaults `null`, `false`, and `""`; it preserves errors
+(**S7.5.3v2**). Use `e ^ { default }` to recover an error;
 `x is error` tests a soft `T | error` value.
 
 ## Operator Precedence (High to Low)

@@ -110,7 +110,7 @@ struct ModuleRegistry;
 
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
-    uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
+    uint32_t next_module_state_id;  // canonical context allocator; borrowed controllers reuse its counter
     struct hashmap* loaded_script_index;  // canonical path -> current Runtime Script*
     // Immutable images carry logical compilation-unit IDs.  This per-Runtime
     // map assigns each such unit a compact EvalContext module-slab address.
@@ -518,7 +518,6 @@ Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_sour
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home);
 void preamble_state_destroy(JsPreambleState* state);
-void jm_cleanup_deferred_mir();
 
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).

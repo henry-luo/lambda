@@ -4,7 +4,7 @@ import schema: .schema
 import layout: .layout
 import vector: .svg
 
-pub fn supports(spec) => c.text(if (spec.mark.kind!=null) spec.mark.kind else spec.mark.type)=="timeline"
+pub fn supports(spec) => (c.text(if (spec.mark.kind!=null) spec.mark.kind else spec.mark.type)=="timeline") ^ { false }
 
 pub fn specification(spec) {
     let options={*:c.attrs(spec.timeline_options),*:c.attrs(spec.mark.timeline_options)};

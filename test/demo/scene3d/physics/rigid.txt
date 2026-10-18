@@ -1,0 +1,60 @@
+<html
+  <head
+    <link rel: "stylesheet", href: "../demo.css">
+    <title
+      "Lambda physics">
+    <style
+      "body { margin: 24px; background: #171c25; color: #edf2f8; font-family: sans-serif; } scene3d { display: block; }">>
+  <body
+    <nav class: "scene3d-breadcrumbs", aria-label: "Breadcrumb",
+      <a href: "../index.html",
+        "Scene3D">
+      <span class: "scene3d-separator", aria-hidden: "true",
+        "/">
+      <span aria-current: "page",
+        "Basic rigid bodies">>
+    <h1
+      "Native rigid-body physics">
+    <p
+      "Three boxes fall onto the floor. Physics advances at 120 ticks per second.">
+    <p
+      <button id: "play",
+        "Play">
+      " "
+      <button id: "pause",
+        "Pause">
+      " "
+      <button id: "step",
+        "Step">
+      " "
+      <button id: "reset",
+        "Reset">>
+    <p id: "status",
+      "Playing">
+    <scene3d id: "world", width: 720, height: 440, camera: "main", background: "#202936",
+      <physics state: 'playing'>
+      <camera id: "main", type: 'perspective', position: [6, 4, 8], target: [0, 1, 0]>
+      <light type: 'ambient', intensity: 0.4>
+      <light type: 'directional', position: [3, 5, 4], intensity: 0.8>
+      <rigid-body id: "floor", type: 'fixed', position: [0, -0.1, 0],
+        <collider id: "floor-shape", shape: 'box', size: [10, 0.2, 10], friction: 0.7>
+        <mesh
+          <geometry type: 'box', size: [10, 0.2, 10]>
+          <material type: 'lambert', color: "#64748b">>>
+      <rigid-body id: "box-0", type: 'dynamic', position: [-1, 3, 0],
+        <collider id: "shape-0", shape: 'box', size: [1, 1, 1], friction: 0.6, restitution: 0.15>
+        <mesh
+          <geometry type: 'box', size: [1, 1, 1]>
+          <material type: 'lambert', color: "#60a5fa">>>
+      <rigid-body id: "box-1", type: 'dynamic', position: [0, 4, 0],
+        <collider id: "shape-1", shape: 'box', size: [1, 1, 1], friction: 0.6, restitution: 0.15>
+        <mesh
+          <geometry type: 'box', size: [1, 1, 1]>
+          <material type: 'lambert', color: "#34d399">>>
+      <rigid-body id: "box-2", type: 'dynamic', position: [1, 5, 0],
+        <collider id: "shape-2", shape: 'box', size: [1, 1, 1], friction: 0.6, restitution: 0.15>
+        <mesh
+          <geometry type: 'box', size: [1, 1, 1]>
+          <material type: 'lambert', color: "#fbbf24">>>>
+    <script type: "module",
+      "\nimport { operate } from './_control.ls';\nglobalThis.physicsControl = (request) => {\n    globalThis.physicsState = null;\n    return operate(document.getElementById('world'), request).then(value => {\n        globalThis.physicsState = value;\n        document.getElementById('status').textContent = request.operation + (value.tick === undefined ? '' : ' — tick ' + value.tick);\n    }).catch(error => {\n        document.getElementById('status').textContent = error.message;\n        throw error;\n    });\n};\nfor (const operation of ['play','pause','reset']) {\n    document.getElementById(operation).addEventListener('click', () => physicsControl({operation}));\n}\ndocument.getElementById('step').addEventListener('click', () => physicsControl({operation:'step',ticks:1}));\n        ">>>

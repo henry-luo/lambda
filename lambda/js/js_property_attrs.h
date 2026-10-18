@@ -55,16 +55,6 @@ static inline bool jspd_is_deleted(const ShapeEntry* se) {
 // Mutators (must be called only on shapes that are NOT pool-deduplicated, i.e.
 // shapes private to a single map instance). For deduplicated shapes the caller
 // must first transition the map to a fresh shape.
-static inline void jspd_set_configurable(ShapeEntry* se, bool c) {
-    if (!se) return;
-    if (c) se->flags &= (uint8_t)~JSPD_NON_CONFIGURABLE;
-    else   se->flags |= JSPD_NON_CONFIGURABLE;
-}
-static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
-    if (!se) return;
-    if (a) se->flags |= JSPD_IS_ACCESSOR;
-    else   se->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
-}
 // =============================================================================
 // JsAccessorCell allocation and ShapeEntry ownership
 // =============================================================================
@@ -252,7 +242,6 @@ Item js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
 // `js_define_accessor_partial(..., attrs=0)` returning the object Item so MIR
 // emit sites can replace the legacy `js_make_getter_key`+`js_set_key_default`
 // pair with a single call. `is_setter` is an int (0/1) for MIR ABI simplicity.
-Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
 // =============================================================================
 // Walk own + prototype chain for an accessor pair on `name`. Returns the pair

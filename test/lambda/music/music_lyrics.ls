@@ -19,7 +19,7 @@ let note_xml="<score-partwise><part-list><score-part id='P'><part-name>Voice</pa
     "<part id='P'><measure number='1'><attributes><divisions>1</divisions></attributes>"++
     "<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type>";
 fn one(extra) map^ => music.parse(note_xml++extra++"</note></measure></part></score-partwise>")^
-fn rejected(extra) => (one(extra) or "rejected")=="rejected";
+fn rejected(extra) => ((one(extra) ^ { null }) or "rejected")=="rejected";
 [
  len(text)>40,
  verse1.passes==[1] and verse2.passes==[2],

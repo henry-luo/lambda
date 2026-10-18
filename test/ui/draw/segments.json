@@ -1,0 +1,496 @@
+{
+  "name": "Draw connection crosses, segment edits, retained previews and floating controls",
+  "html": "test/demo/draw/draw.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "select_option",
+      "value": "e1",
+      "target": {
+        "selector": "#object-list"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": "#connector-menu button"
+      }
+    },
+    {
+      "type": "assert_style",
+      "property": "display",
+      "equals": "flex",
+      "target": {
+        "selector": "#connector-menu"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edge-to-connection path"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#connector-start-arrow"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#start-arrow-option-none"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_value",
+      "equals": "triangle",
+      "target": {
+        "selector": "#prop-start-arrow"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#connector-start-arrow"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#connector-end-arrow"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-arrow-option-circle"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "circle",
+      "target": {
+        "selector": "#prop-end-arrow"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-routing",
+      "equals": "straight",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-routing",
+      "equals": "curved",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-routing",
+      "equals": "orthogonal",
+      "target": {
+        "selector": "#connector-routing"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.staticShape = document.getElementById('shape-n4'); globalThis.staticEdge = document.getElementById('edge-e3');"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 199,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-drag",
+      "equals": "segment",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 199,
+        "offset_y": 296
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('shape-n4') === globalThis.staticShape && document.getElementById('edge-e3') === globalThis.staticEdge"
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "d",
+      "equals": "M 260 340 L 260 430 L 350 430 L 350 340",
+      "target": {
+        "selector": "#edge-e1 .connector-line"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "5",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 199,
+        "offset_y": 296
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "6",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/draw/segments.json",
+      "clear": true,
+      "target": {
+        "selector": "#file-path"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-error",
+      "equals": "",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#example"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/draw/segments.json",
+      "clear": true,
+      "target": {
+        "selector": "#file-path"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "select_option",
+      "value": "e1",
+      "target": {
+        "selector": "#object-list"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "d",
+      "equals": "M 260 340 L 260 430 L 350 430 L 350 340",
+      "target": {
+        "selector": "#edge-e1 .connector-line"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 199,
+        "offset_y": 296
+      },
+      "pointerType": "mouse",
+      "dx": 0,
+      "dy": -28,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "1",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "d",
+      "equals": "M 260 340 L 260 430 L 350 430 L 350 340",
+      "target": {
+        "selector": "#edge-e1 .connector-line"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "e1"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 243,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-drag",
+      "equals": "to",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 603,
+        "offset_y": 152
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-hover",
+      "equals": "n4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edge-to-connection path"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "n4",
+      "target": {
+        "selector": "#prop-to-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "0",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/draw/connection-cross.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 603,
+        "offset_y": 152
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "n2",
+      "target": {
+        "selector": "#prop-to-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "0",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/draw/connector-menu.png"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.menuTop = document.getElementById('connector-menu').getBoundingClientRect().top;"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#stage"
+      },
+      "dx": -0.4,
+      "dy": -0.4
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('connector-menu').getBoundingClientRect().top - globalThis.menuTop + 20) < 2"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 243,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#draw"
+      },
+      "attribute": "data-drag",
+      "equals": "to"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#connector-menu"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#stage"
+      },
+      "dx": 0,
+      "dy": -0.4
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edge-to-handle"
+      },
+      "attribute": "cx",
+      "equals": "550"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edge-to-handle"
+      },
+      "attribute": "cy",
+      "equals": "160"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#draw"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#connector-menu"
+      },
+      "property": "display",
+      "equals": "flex"
+    }
+  ]
+}

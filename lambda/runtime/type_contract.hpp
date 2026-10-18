@@ -180,6 +180,8 @@ bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id);
 // lambda_type_accepts_error / lambda_type_accepts_null live in the core
 // header (lambda-data.hpp) beside the storage resolver they feed.
 bool lambda_type_has_proven_error(Type* type);
+// S5.1.5: deep comparison can visit error-bearing children; unknowns keep an Item ABI.
+bool lambda_type_comparison_may_error(Type* type, bool deep, bool include_unknown);
 // Native-lane projection of lambda_lane_storage_desc_for: false for contracts
 // that must remain boxed (abstract, heterogeneous, non-nullable wide ints).
 bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out);

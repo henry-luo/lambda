@@ -105,7 +105,7 @@ on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
     if (target == null or c.props(~).disabled) { return 'pass' }
     let rows = flatten(c.props(~).items)^
-    let row = rows[int(dom.get_attribute(target,"data-dtna-tree-node")) or 0]
+    let row = rows[(int(dom.get_attribute(target,"data-dtna-tree-node")) ^ { null }) or 0]
     if (row.disabled) { return 'pass' }
     let action = if (dom.closest(evt.target,"[data-dtna-tree-expand]") != null) 'expand'
         else if (c.props(~).checkable and dom.closest(evt.target,"[data-dtna-tree-check]") != null) 'check' else 'select'
@@ -124,7 +124,7 @@ on keydown(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
     if (target == null or c.props(~).disabled or dom.closest(evt.target,"input,textarea,select,button") != null) { return 'pass' }
     let rows = flatten(c.props(~).items)^
-    let row = rows[int(dom.get_attribute(target,"data-dtna-tree-node")) or 0]
+    let row = rows[(int(dom.get_attribute(target,"data-dtna-tree-node")) ^ { null }) or 0]
     if (row.disabled) { return 'pass' }
     let opened = keys(~,"expanded",expanded)
     let shown = visible(rows,opened)

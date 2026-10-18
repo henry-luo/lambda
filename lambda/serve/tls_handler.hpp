@@ -7,8 +7,6 @@
  *
  * Compatible with:
  *   Express:   https.createServer({key, cert}, app)
- *   Flask:     app.run(ssl_context=('cert.pem', 'key.pem'))
- *   FastAPI:   uvicorn --ssl-keyfile key.pem --ssl-certfile cert.pem
  */
 
 #pragma once

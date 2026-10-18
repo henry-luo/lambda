@@ -29,7 +29,7 @@ pn main() {
     print("\n")
     // the error is falsy where truthiness decides (S7.9.2) and propagates
     // through consumers instead of reading as a 7-character string
-    print([slice("hello", 1.5, 3) or "dflt", string(slice("hello", 0, 2))])
+    print([slice("hello", 1.5, 3) ^ { "dflt" }, string(slice("hello", 0, 2))])
     print("\n")
     // proven-clean sites keep their values
     print([slice("hello", 1, 3), take('abc', 2), drop("hello", 3),

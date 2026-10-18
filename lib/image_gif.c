@@ -175,6 +175,20 @@ static void gif_composite_frame(uint32_t* canvas, int canvas_w, int canvas_h,
     }
 }
 
+static bool gif_find_loop_extension(const ExtensionBlock* blocks, int count, int* loops) {
+    for (int i = 0; i + 1 < count; i++) {
+        const ExtensionBlock* ext = &blocks[i];
+        const ExtensionBlock* sub = &blocks[i + 1];
+        if (ext->Function == APPLICATION_EXT_FUNC_CODE && ext->ByteCount >= 11 &&
+                (!memcmp(ext->Bytes, "NETSCAPE2.0", 11) || !memcmp(ext->Bytes, "ANIMEXTS1.0", 11)) &&
+                sub->ByteCount >= 3 && sub->Bytes[0] == 1) {
+            *loops = sub->Bytes[1] | (sub->Bytes[2] << 8);
+            return true;
+        }
+    }
+    return false;
+}
+
 // Internal: decode all frames from an already-slurped GifFileType.
 // Returns NULL if < 2 frames. Caller must free with image_gif_free().
 static GifFrames* gif_decode_all_frames(GifFileType* gif) {
@@ -203,18 +217,12 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
     result->height = h;
     result->loop_count = 0;  // default: infinite
 
-    // Check for NETSCAPE 2.0 loop extension
-    for (int i = 0; i < gif->ExtensionBlockCount; i++) {
-        ExtensionBlock* ext = &gif->ExtensionBlocks[i];
-        if (ext->Function == APPLICATION_EXT_FUNC_CODE && ext->ByteCount >= 11) {
-            if (memcmp(ext->Bytes, "NETSCAPE2.0", 11) == 0 && (i + 1) < gif->ExtensionBlockCount) {
-                ExtensionBlock* sub = &gif->ExtensionBlocks[i + 1];
-                if (sub->ByteCount >= 3 && sub->Bytes[0] == 1) {
-                    result->loop_count = sub->Bytes[1] | (sub->Bytes[2] << 8);
-                }
-            }
-        }
-    }
+    // giflib associates pre-image extensions with SavedImages, not the file tail.
+    result->has_loop_extension = gif_find_loop_extension(gif->ExtensionBlocks,
+        gif->ExtensionBlockCount, &result->loop_count);
+    for (int i = 0; i < n && !result->has_loop_extension; i++)
+        result->has_loop_extension = gif_find_loop_extension(gif->SavedImages[i].ExtensionBlocks,
+            gif->SavedImages[i].ExtensionBlockCount, &result->loop_count);
 
     result->frames = (GifFrameData*)mem_calloc((size_t)n, sizeof(GifFrameData), MEM_CAT_IMAGE);
     if (!result->frames) {
@@ -276,17 +284,20 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
         }
         memcpy(result->frames[i].pixels, canvas, canvas_bytes);
         result->frames[i].delay_ms = delay_ms;
+        result->frames[i].source_delay_ms = DGifSavedExtensionToGCB(gif, i, &gcb) == GIF_OK ? gcb.DelayTime * 10 : 0;
         result->frames[i].disposal = disposal;
 
         // Apply disposal for next frame
         switch (disposal) {
             case DISPOSE_BACKGROUND: {
-                // Clear the frame area to background
+                // a background palette index marked transparent clears to transparent.
+                uint32_t clear = gcb.TransparentColor != NO_TRANSPARENT_COLOR &&
+                    gcb.TransparentColor == gif->SBackGroundColor ? 0 : bg_pixel;
                 SavedImage* frame = &gif->SavedImages[i];
                 GifImageDesc* desc = &frame->ImageDesc;
                 for (int y = desc->Top; y < desc->Top + desc->Height && y < h; y++) {
                     for (int x = desc->Left; x < desc->Left + desc->Width && x < w; x++) {
-                        canvas[(size_t)y * (size_t)w + (size_t)x] = bg_pixel;
+                        canvas[(size_t)y * (size_t)w + (size_t)x] = clear;
                     }
                 }
                 break;
@@ -383,6 +394,8 @@ ImageStatus image_gif_decode(ImageOperation* op,const ImageSource* source,
         if(image_allocate_pixels(op,(uint32_t)frames->width,(uint32_t)frames->height,result))
             memcpy(result->pixels,frames->frames[options->frame_index].pixels,result->size);
         result->delay_ms=(uint32_t)frames->frames[options->frame_index].delay_ms;
+        result->source_delay_ms=(uint32_t)frames->frames[options->frame_index].source_delay_ms;
+        result->has_loop_extension=frames->has_loop_extension;
         result->loop_count=(uint32_t)frames->loop_count;
         image_gif_free(frames);return op->error->code;
     }
@@ -399,11 +412,14 @@ ImageStatus image_gif_decode(ImageOperation* op,const ImageSource* source,
             if(code==GRAPHICS_EXT_FUNC_CODE&&extension&&extension[0]>=4){
                 if(extension[1]&1)transparent=extension[4];
                 unsigned delay=read_le16(extension+2)*10;result->delay_ms=delay?delay:100;
+                result->source_delay_ms=delay;
             }
             bool loop_extension=code==APPLICATION_EXT_FUNC_CODE&&extension&&extension[0]>=11&&
                 !memcmp(extension+1,"NETSCAPE2.0",11);
-            if(loop_extension&&DGifGetExtensionNext(gif,&extension)==GIF_OK&&extension&&extension[0]>=3&&extension[1]==1)
+            if(loop_extension&&DGifGetExtensionNext(gif,&extension)==GIF_OK&&extension&&extension[0]>=3&&extension[1]==1) {
                 result->loop_count=read_le16(extension+2);
+                result->has_loop_extension=true;
+            }
             while(extension)if(DGifGetExtensionNext(gif,&extension)==GIF_ERROR)break;
         }
         if(image_op_cancelled(op))break;

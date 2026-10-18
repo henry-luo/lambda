@@ -20,15 +20,26 @@ the inspector. Rotate 90°, Flip H and Flip V work on selected shapes; text
 rotates without being mirrored. Snap & grid toggles the
 10-pixel placement grid and its visual guide.
 
-Choose Connect, then click a source and a destination shape. Arrows stay
+Choose Connector (**C**, the bent-arrow icon), then drag between shapes or
+empty points. A live line follows the pointer; release over a shape to attach
+it, or on empty space for a free endpoint. Escape cancels the draft. You can
+also click a source shape and then a destination shape. Each new connector
+creates one undo item. The four-way arrow is Pan (**H**).
+Arrows stay
 attached when either shape moves or resizes. Select a connector to edit its
 label, source/destination shapes, attachment sides, and straight, orthogonal
 or curved routing. Both ends independently offer no arrowhead, triangle,
 open arrow, diamond, circle or bar. Both arrowhead pickers show the actual
 connector graphics, with keyboard navigation and accessible names. Drag a selected connector's blue endpoint
 anywhere on the page to move it freely, or drop it onto another shape to attach.
-The inspector also offers Free endpoint. Drag its gold handle to change the route.
-Reset bend restores automatic routing. Reverse swaps the source and destination
+The inspector also offers Free endpoint. Green circles with a white × mark
+connected endpoints and confirm a valid target as you drag onto its boundary.
+Drag any line segment, or its cyan handle, to move that segment; orthogonal
+segments slide perpendicular to the line while attachments stay fixed. Terminal
+segments gain short connecting stubs. The gold handle still sets a single bend.
+A floating three-icon toolbar configures the start arrowhead, end arrowhead,
+and routing (click the elbow icon to cycle orthogonal, straight, curved).
+Reset bend clears segment edits and restores automatic routing. Reverse swaps the source and destination
 attachments while retaining start/end styles, reversing the arrow direction.
 The label position runs from 0 (source) to 1
 (destination). Deleting a shape also
@@ -62,7 +73,8 @@ all twelve shapes with patterns, outline styles and arrowheads.
 The shape library and inspector scroll independently in short windows, with
 visible scrollbars when their contents overflow. The canvas has horizontal
 and vertical scrollbars for navigating the page, including at high zoom.
-Fit page recenters the diagram; scrolling and panning do not add undo items.
+The page fits and centers automatically on startup. Fit page recenters the
+diagram; scrolling and panning do not add undo items.
 
 | Shortcut | Action |
 | --- | --- |
@@ -83,8 +95,8 @@ Shortcuts leave native text controls alone. File dialogs keep Tab navigation
 inside the dialog and return focus to their opening button when closed.
 Touch pointer drags use the same move/resize path as a mouse.
 
-Save writes an editable version-3 JSON file; Open validates and restores it,
-including styles and edited connector routes. Version-1 and version-2 files remain readable
+Save writes an editable version-4 JSON file; Open validates the demo profile and restores it,
+including styles and segment waypoints. Version-1, version-2 and version-3 files remain readable
 and acquire defaults for styles, free endpoints and orientation.
 Export SVG writes a standalone vector image without the grid or selection
 handles. Paths are editable; defaults are `temp/draw/diagram.json` and
@@ -96,9 +108,20 @@ until saved; closing the window does not autosave.
 
 `draw.ls` owns event procedures and session state. `mod_scene.ls` produces the
 HTML shell and SVG; `mod_present.ls` updates retained controls and the page.
-The shell and pointer-capture owner stay stable while SVG content changes,
+Page sizing publishes first; a requested frame applies the camera against the
+committed layout. Reading bounds immediately after sizing still exposes the
+previous layout, so startup scrolling must wait for that commit (**D7.4.6,
+S12.1.3**).
+Connector previews retain the page, shapes, other edges and inspector. They update
+only the active edge, selection overlay and endpoint fields. Target contours and
+the page transform come from the press snapshot; committing refreshes the full
+inspector and records one edit. The shell and pointer-capture owner stay stable while SVG content changes,
 following **S12.1.3** (pure views, mutations in handlers) and **D4.5.1v4**
-(document-owned native resources). The model uses immutable document values
+(document-owned native resources). Reusable model, shape, paint, SVG scene, geometry, routing, commands, and gesture
+code now lives under `lmd/package/editor/draw/`, exposed through
+[`lambda.editor.draw`](../../../lmd/package/editor/draw/README.md). The demo
+retains its examples, application shell, inspector, file actions, and theme; its
+old helper modules forward to the package. The model uses immutable document values
 (**S1.4**) and reuses `lambda.editor` drawing commands, transactions, history,
 geometry and connector routing. `mod_shapes.ls` shares contour geometry between
 painting, hit tests and boundary attachment; `mod_paint.ls` supplies SVG
@@ -133,3 +156,15 @@ marquee selection, group alignment/duplication, transformed geometry, live
 inspector updates, independent panel scrolling, canvas scrollbar dragging,
 selection immediately after scrolling, and page overflow at high zoom.
 Replay screenshots and generated files go under `temp/draw/`.
+
+Measure connector pointer-handler time with an optimized release host:
+
+```sh
+make build-release-profile
+python3 test/demo/draw/benchmark.py --binary lambda-profile.exe
+```
+
+The benchmark replays the same endpoint drag on 9- and 127-object pages. It
+instruments temporary script copies under `temp/draw/performance/`, measures
+handler time (excluding rendering after the handler), and accepts
+`--reference-dir` plus `--reference-home` for a saved demo/package comparison.

@@ -95,6 +95,8 @@ struct JsScript : Script {
     // Direct eval code (JSI35). A MIR caller projects its bindings through the
     // EvalContext bridge; an interpreted caller links its live environments.
     bool is_direct_eval;
+    // dynamic classic scripts retain global lexicals but never promote their bodies to MIR.
+    bool dynamic_source;
     // The Script of the interpreted frame whose environments this direct eval
     // execution links to (D8.1.3v21); null for every other execution.
     JsScript* eval_caller_script;
@@ -250,22 +252,15 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
                                         uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
-struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
 struct MvpLmdCode;
 
 struct JsPreambleState {
     MvpLmdCode* mvp_code;       // immutable code image; realm metadata is never cached
     bool mvp_realm;             // declarations belong to the persistent public MVP realm
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
-    char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
     int module_var_count;       // number of harness module vars
     uint32_t module_state_id;   // live realm slab that retains those harness vars
-    JsModuleConstEntry* entries;// owned snapshot of harness module_consts
-    int entry_count;
-    PropertyKeySpec* module_property_specs; // sealed spelling image for MIR property names
-    uint32_t module_property_count;
-    uint32_t module_property_bytes_size;
     bool owns_compiled_state;   // clones share the immutable MIR context
 };
 
@@ -280,49 +275,10 @@ struct JsModuleMirArtifact {
     int static_dependency_count;
 };
 
-// Radiant owns only bounded InputManager artifact leases; it does not own a
-// second JavaScript MIR cache.
-struct JsMirLeaseSession;
-
-struct JsMirLeaseSessionStats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t compiles;
-    uint64_t instantiations;
-    size_t retained_entries;
-    size_t retained_metadata_bytes;
-};
-
-JsMirLeaseSession* js_mir_lease_session_create(void);
-void js_mir_lease_session_close(JsMirLeaseSession* session);
-const JsPreambleState* js_mir_lease_session_lookup(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble);
-const JsPreambleState* js_mir_lease_session_adopt(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble, JsPreambleState* compiled_state);
-InputScriptBuildClaim js_mir_lease_session_begin_build(
-    JsMirLeaseSession* session, bool preamble_mode,
-    const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble, InputScriptBuildScope* build);
-const JsPreambleState* js_mir_lease_session_adopt_build(
-    JsMirLeaseSession* session, InputScriptBuildScope* build,
-    JsPreambleState* compiled_state);
-void js_mir_lease_session_complete_build(InputScriptBuildScope* build,
-    bool published, bool poison);
-void js_mir_lease_session_record_instantiation(JsMirLeaseSession* session);
-
-// Direct module artifacts use the same manager-owned opaque MIR slot as
-// document scripts. The returned scope pins a live module image until its
-// Runtime has destroyed the realm that may hold pointers into that code.
+// the returned InputManager scope pins a live module image until its Runtime
+// has destroyed the realm that may hold pointers into that code (D8.5.1v2).
 const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
     size_t source_len, const char* filename, struct InputCacheScope** out_scope);
-const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
-    size_t source_len, const char* filename, JsModuleMirArtifact* compiled,
-    struct InputCacheScope** out_scope);
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
     size_t source_len, const char* filename, InputScriptBuildScope* build);
 const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
@@ -367,12 +323,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state);
 void preamble_state_destroy(JsPreambleState* state);
 
-// Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)
-void jm_cleanup_deferred_mir();
-
-// Get the most recently deferred MIR context (for function pointer lookup after with_preamble compilation)
-void* jm_get_last_deferred_mir_ctx();
-
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
 extern "C" {
@@ -397,8 +347,6 @@ Item js_greater_than(Item left, Item right);
 Item js_compare(int64_t op, Item left, Item right);
 
 // Logical operators
-Item js_logical_and(Item left, Item right);
-Item js_logical_or(Item left, Item right);
 Item js_logical_not(Item operand);
 
 // Bitwise operators
@@ -413,8 +361,6 @@ Item js_unsigned_right_shift(Item left, Item right);
 // Unary operators
 Item js_unary_plus(Item operand);
 Item js_unary_minus(Item operand);
-Item js_increment(Item operand);
-Item js_decrement(Item operand);
 Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
 
@@ -434,13 +380,6 @@ Item js_set_key_default(Item object, Item key, Item value);
 Item js_call_function(Item func, Item this_binding, Item* args, int arg_count);
 Item js_call_function_into(Item func, Item this_binding, Item* args,
                            int arg_count, uint64_t* result_home);
-Item js_call_constructor_body_into(Item func, Item this_binding, Item* args,
-                                   int arg_count, Item new_target,
-                                   uint64_t* result_home);
-Item js_call_constructor_body_prerooted_args_into(Item func, Item this_binding,
-                                                  Item* args, int arg_count,
-                                                  Item new_target,
-                                                  uint64_t* result_home);
 Item js_construct_value(Item callee, Item* args, int arg_count, Item new_target,
                         uint64_t* result_home, bool args_prerooted);
 Item js_init_class_instance_fields_after_super(Item callee, Item object);

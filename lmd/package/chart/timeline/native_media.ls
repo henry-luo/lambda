@@ -11,7 +11,7 @@ fn live(value, current) => current.media_session!=null and value.token==current.
     value.revision==current.media_session.revision and value.event_id==current.media_session.event_id
 fn result(value, status) => {type:"media_event",event_id:value.event_id,id:value.id,
     token:value.token,revision:value.revision,status:status,origin:"native"}
-pn player(host, value) {
+fn player(host, value) {
     [for (node in dom.query_selector_all(host,"[data-timeline-player]") where
         events.attribute(node,"data-timeline-player-event")==value.event_id and
         events.attribute(node,"data-timeline-player-id")==value.id) node][0]

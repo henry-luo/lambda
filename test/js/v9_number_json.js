@@ -1,4 +1,5 @@
 // v9 Number static methods, Array.from
+import { wide_integer } from "./_lambda_data_map.ls";
 
 // Number.isInteger
 console.log("isInteger 5:", Number.isInteger(5));
@@ -14,7 +15,10 @@ console.log("isNaN 42:", Number.isNaN(42));
 console.log("isSafe 42:", Number.isSafeInteger(42));
 
 // Lambda int64 host values egress to JS BigInt, never Number
-let hostInt64 = JSON.parse("9007199254740993");
+let hostInt64 = wide_integer();
+const jsonWide = JSON.parse("9007199254740993");
+console.log("json wide number:", typeof jsonWide, jsonWide === 9007199254740992);
+console.log("json negative zero:", 1 / JSON.parse("-0") === -Infinity);
 console.log("host int64 typeof:", typeof hostInt64);
 console.log("host int64 ctor:", hostInt64.constructor === BigInt);
 console.log("host int64 isInteger:", Number.isInteger(hostInt64));

@@ -15,12 +15,8 @@ bundled document viewer with its startup splash (D7.2.4).
 | `word` | `word/word.ls` | [Word](word/README.md) |
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
 | `note` | `note/note.ls` | [Notes](note/README.md) |
-| `cellscope` | `cellscope/cellscope.ls` | [CellScope](cellscope/README.md) |
-| `scene3d`, `ringworld` | `scene3d/ringworld.ls` | [Native 3D](scene3d/README.md) |
-| `observatory` | `scene3d/observatory.html` | [Native 3D](scene3d/README.md) |
-| `three-gallery` | `scene3d/three-gallery.html` | [Native 3D](scene3d/README.md) |
-| `asset-gallery` | `scene3d/asset-gallery.ls` | [Native 3D](scene3d/README.md) |
-| `shared-animation` | `scene3d/shared-animation.html` | [Native 3D](scene3d/README.md) |
+| `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |
+| `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
 | `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
 | `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
 
@@ -36,10 +32,10 @@ Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 The games and Ringworld include an **Auto Play** button. Direct `lambda view`
 commands and individual test/replay commands remain available in each guide.
 
-The [physics playground](physics/README.md) contains four interactive native
+The [physics experiments](scene3d/physics/README.md) include four interactive native
 Scene3D experiments: a domino cascade, compound bodies in zero gravity, a
-marble sorter and a bounce comparison with trajectory charts. Open its gallery
-with `./lambda.exe view test/demo/physics/index.ls`.
+marble sorter and a bounce comparison with trajectory charts. Open `./lambda.exe demo scene3d` and choose any of the four experiment tiles directly. The same index
+also contains CellScope, Ringworld, Crystal garden, Observatory, and Shared Animation.
 
 ## Readability extraction
 

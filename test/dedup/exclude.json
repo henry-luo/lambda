@@ -915,7 +915,6 @@
         {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinGlobalKind {", "end": "};"},
         {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinGlobalId {", "end": "};"},
         {"file": "lambda/js/js_class.h", "start": "enum JsClass : uint8_t {", "end": "};"},
-        {"file": "lambda/format/format-math-latex.cpp", "start": "enum MathLatexSlot {", "end": "};"},
         {"file": "lambda/lambda.h", "start": "enum EnumTypeId {", "end": "};"},
         {"file": "lambda/lambda.h", "start": "enum EnumNumSizedType {", "end": "};"},
         {"file": "lambda/lambda.h", "start": "enum EnumArrayNumElemType {", "end": "};"},

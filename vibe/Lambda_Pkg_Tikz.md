@@ -12,6 +12,12 @@
 
 **Implemented slice:** `parse(source, {type: "tikz"})` builds a bounded Mark syntax tree; `lambda.doc.tikz.tikz.render(source)` and `.render_ast(island)` render simple 2D line paths, positioned labels, named rectangular/rounded/diamond nodes, named-node line connections with `-{Latex}` arrow tips, coordinate/function and parametric plots, scatter plots, linear/log axes, grids, legends, and clipped plot segments. A bounded subset of local styles, inherited `every axis` options, named axis coordinates, path arrows, and plot annotations is supported. The LaTeX bridge preserves raw `tikzpicture` source, embeds successful pictures and plots, and shows a source-bearing diagnostic when rendering fails. Named-node boxes use Radiant's measured label dimensions to place shapes and resolve boundary endpoints; the package reuses chart scale/SVG helpers and the math package's measured box entry point under **D7.2.1–D7.2.4v3**. This is narrower than the proposed first plotting release in §4: general TikZ scope/style execution, arbitrary named coordinates and anchors, richer paths, inline tables, explicit tick policy, portable math-label SVG, and measured plain-text labels on the simple-path renderer remain unimplemented. Unsupported constructs fail visibly rather than being approximated.
 
+Named-node pictures emit `data-radiant-layout="lambda-tikz"`. Radiant connects
+that name automatically to the pure `lambda.doc.tikz.named.layout` export;
+`render()` performs no callback registration (**D7.5.3v2**). Reflow uses the
+shared package bridge and retained evaluator, with document-owned paint roots
+(**D5.3.3**).
+
 ## 1. Recommendation
 
 Add **`lambda.doc.tikz`**, with TikZ and PGFPlots as two front ends sharing one drawing pipeline:

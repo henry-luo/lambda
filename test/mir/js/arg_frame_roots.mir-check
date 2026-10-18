@@ -1,18 +1,35 @@
 {
   "schema_version": 1,
-  "description": "Dynamic JS calls address fixed argument-root slots in the generated function frame and do not pay a per-call save, push, or restore protocol.",
+  "description": "D5.3/D5.4, D6.2.2v2, D8.1.3v25: formal MIR uses one fixed rooted argument span for guarded MVP entry and semantic fallback; no per-call argument stack protocol.",
   "checks": [
     {
-      "in_func": "_js_callDynamic_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect_seq": [
-        { "pattern": "add\t{{r}}, {{r}}, 0" },
-        { "pattern": "mov\t{{r:target}}, js_call" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}" }
+        {
+          "pattern": "mov\t{{r:entry}}, i64:16({{r:callee}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:args}}),"
+        },
+        {
+          "pattern": "call\tmvp_lmd_class_invoke_p_r6_n1_a5, mvp_lmd_class_invoke,"
+        },
+        {
+          "pattern": "mov\ti64:80(runtime), {{r}}"
+        },
+        {
+          "pattern": "call\tmvp_lmd_signature, {{r:entry}}, {{r}}, runtime, {{r}}, {{r:args}},"
+        }
       ],
+      "count": {
+        "call\tmvp_lmd_signature,": 1
+      },
       "forbid": [
         "js_args_save",
         "js_args_push",
-        "js_args_restore"
+        "js_args_restore",
+        "js_call_function_into",
+        "js_call_function_prerooted_args_into"
       ]
     }
   ]

@@ -16,8 +16,8 @@ fn binding_acknowledgment() int^ {
   binding
 }
 
-fn or_acknowledgment() int {
-  risky(0 - 1) or 2
+fn handler_default_acknowledgment() int {
+  (risky(0 - 1) ^ { null }) or 2
 }
 
 fn parameter_acknowledgment() int {

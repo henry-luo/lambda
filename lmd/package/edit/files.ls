@@ -37,7 +37,7 @@ pub let focus_surface = controller.focus
 
 // The live text of a dialog field. A click on a label targets its text node;
 // `root_node` answers for any connected node.
-pub pn field_value(node, id) {
+pub fn field_value(node, id) {
   let input_node = dom.get_element_by_id(dom.root_node(node), id)
   if (input_node == null) "" else string(dom.get_state(input_node, "value") or "")
 }

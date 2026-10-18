@@ -1,11 +1,13 @@
 #include "js_interp.hpp"
 #include "js_source_module.hpp"
 #include "../runtime/activation.h"
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
+#include "../core/lambda-decimal.hpp"
 
 #include <limits.h>
 
 #include "js_interp_env.h"
+#include "mvp-lmd/mvp_lmd.h"
 #include "js_state_guards.h"
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
@@ -226,6 +228,8 @@ struct JsInterpLoopHandoff {
 };
 
 static inline void js_interp_count_backedge(uint32_t* backedges) {
+    if (js_active_runtime_state && js_runtime_state.test262_agent &&
+            js_runtime_state.test262_agent->member) js_agent_checkpoint();
     if (backedges && *backedges != UINT32_MAX) (*backedges)++;
 }
 
@@ -727,6 +731,7 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     copy->with_object = source->with_object;
     copy->function_node = source->function_node;
     copy->eval_script = source->eval_script;
+    copy->source_module = source->source_module;
     copy->arguments_are_mapped = source->arguments_are_mapped;
     copy->has_lexical_this = source->has_lexical_this;
     copy->host_cells = source->host_cells;
@@ -1227,7 +1232,7 @@ static JsInterpLookup js_interp_lookup_name_from(JsInterpEnv* env, JsScript* scr
             continue;
         }
         NameEntry* entry = js_interp_env_find_name(env, name);
-        if (js_interp_host && entry && !entry->is_lexical &&
+        if (js_interp_host && entry && !entry->is_lexical && env->binding_role != JS_INTERP_ENV_MODULE &&
                 (env->binding_role == JS_INTERP_ENV_GLOBAL_OBJECT ||
                  (entry->scope == script->global_scope &&
                   js_interp_eval_vars(script) == JS_INTERP_EVAL_VARS_GLOBAL))) {
@@ -1278,6 +1283,8 @@ static JsInterpLookup js_interp_lookup_name(const JsInterpFrame* frame,
 // hosted mapped arguments alias these owned cells, not a snapshot of a
 // parameter slot; lexical access keeps using that cell after detachment.
 static Item js_interp_binding_slot_read(JsInterpEnv* env, NameEntry* entry) {
+    if (env->source_module)
+        return js_module_environment_binding(env->source_module, entry, ItemNull, false);
     Item value = js_interp_env_slot_read(env, entry->slot, js_interp_host != NULL);
     if (!js_interp_host) return value;
     return ((env->host_cells & JS_INTERP_CELL_ALL) ||
@@ -1286,6 +1293,8 @@ static Item js_interp_binding_slot_read(JsInterpEnv* env, NameEntry* entry) {
 }
 
 static Item js_interp_binding_slot_store(JsInterpEnv* env, NameEntry* entry, Item value) {
+    if (env->source_module)
+        return js_module_environment_binding(env->source_module, entry, value, true);
     if (js_interp_host && ((env->host_cells & JS_INTERP_CELL_ALL) ||
             ((env->host_cells & JS_INTERP_CELL_PARAMETERS) && entry->is_parameter))) {
         Item cell = js_interp_env_slot_read(env, entry->slot, false);
@@ -3246,10 +3255,10 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
 // the eval code links to this frame's environments rather than a bridge.
 static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     if (js_interp_host) {
-        if (get_type_id(code) != LMD_TYPE_STRING) return js_retain_scalar(code);
+        Item shortcut = ItemNull;
+        if (js_eval_source_shortcut(code, true, &shortcut, js_interp_host))
+            return js_retain_scalar(shortcut);
         String* source = code.get_string();
-        // empty eval code has no declarations or captured state to retain.
-        if (js_eval_source_is_blank(source)) return make_js_undefined();
         bool function_context = frame->active_function &&
             !(frame->active_function->flags & JS_FUNC_FLAG_ARROW);
         for (JsInterpEnv* env = frame->env; env && !function_context; env = env->outer)
@@ -4626,10 +4635,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                 if (value.kind != JS_INTERP_NORMAL) return value;
                 value_root.set(value.value);
             }
-            bool is_proto_literal = !pair->computed && !pair->method &&
-                !pair->is_getter && !pair->is_setter && !pair->shorthand &&
-                pair->key && pair->value && pair->key != pair->value &&
-                js_ast_is_proto_literal_key((JsAstNode*)pair->key);
+            bool is_proto_literal = js_ast_property_is_proto_setter(pair);
             if (js_interp_host && (is_proto_literal || pair->method ||
                     pair->is_getter || pair->is_setter)) {
                 if (!is_proto_literal) {
@@ -6109,9 +6115,7 @@ static uint32_t js_interp_policy_threshold(const char* name, uint32_t fallback) 
 static Runtime* js_interp_promotion_policy(void) {
     Runtime* runtime = context ? context->runtime : NULL;
     if (!runtime || runtime->js_promotion_policy_resolved) return runtime;
-    // D8.1.3v25: the legacy satellite ABI cannot publish MVP entries. Keep
-    // AUTO definitions interpreted until the MVP promotion adapter is admitted.
-    runtime->js_promotion_auto = false;
+    runtime->js_promotion_auto = js_execution_auto_requested();
     runtime->js_promotion_call_threshold = js_interp_policy_threshold(
         "JS_FUNC_JIT_THRESHOLD", JS_FUNC_JIT_THRESHOLD);
     runtime->js_promotion_backedge_threshold = js_interp_policy_threshold(
@@ -6126,11 +6130,12 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     JsScript* script = js_fn_ast_script(function);
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!script || !definition || !script->source || script->is_module ||
-            script->is_eval_script ||
+            script->is_eval_script || script->dynamic_source ||
             (definition->node_type != AST_NODE_FUNC &&
              definition->node_type != AST_NODE_FUNC_EXPR)) {
         return "definition shape";
     }
+    if (definition->is_generator || definition->is_async) return "suspended definition";
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
     AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
         ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
@@ -6155,6 +6160,13 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     if (scan.reject_reason) return scan.reject_reason;
     if (out_function_id) *out_function_id = function_id;
     return NULL;
+}
+
+static Item js_interp_mvp_body(Item function, Item receiver, Item* arguments,
+        int count, uint64_t* result_home) {
+    auto* owner = (JsFunction*)function.function;
+    return owner && owner->code ? mvp_lmd_call_function_satellite(owner->code->compiled_body,
+        function, receiver, arguments, count, result_home) : ItemError;
 }
 
 bool js_interp_promote_function_if_hot(JsFunction* function) {
@@ -6183,13 +6195,20 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
         return false;
     }
     promotion->state = FN_PROMOTION_COMPILING;
-    void* entry = NULL;
     JsScript* script = js_fn_ast_script(function);
-    if (!js_mir_compile_function_satellite(context ? context->runtime : NULL,
-            script, function_id, &entry) ||
-            !js_function_promote_ast_body(function, entry)) {
+    RootFrame roots(1);
+    if (!roots.valid()) { promotion->state = FN_PROMOTION_PINNED_INTERP; return false; }
+    Rooted<Item> compiled(roots, mvp_lmd_compile_function_satellite(context ? context->runtime : NULL,
+        script, function_id));
+    if (item_is_error(compiled.get()) || !heap_try_register_gc_root(&code->compiled_body.item)) {
         promotion->state = FN_PROMOTION_PINNED_INTERP;
         log_error("js-p2: satellite compilation failed");
+        return false;
+    }
+    code->compiled_body = compiled.get();
+    void* entry = (void*)js_interp_mvp_body;
+    if (!js_function_promote_ast_body(function, entry)) {
+        promotion->state = FN_PROMOTION_PINNED_INTERP;
         return false;
     }
     promotion->boxed_entry = entry;
@@ -6469,11 +6488,14 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
 
     log_debug("js-loop-handoff: continuation source: %s",
         text->str + script->source_length);
-    void* entry = NULL;
-    bool compiled = js_mir_compile_loop_continuation(context ? context->runtime : NULL,
-        script, text->str, text->length, name, &entry);
+    RootFrame roots(1);
+    if (!roots.valid()) { strbuf_free(text); return "out of memory"; }
+    Rooted<Item> compiled(roots, mvp_lmd_compile_loop_satellite(context ? context->runtime : NULL,
+        script, text->str, text->length, name));
     strbuf_free(text);
-    if (!compiled || !entry) return "continuation compile failed";
+    if (item_is_error(compiled.get()) || !heap_try_register_gc_root(&function->code->compiled_loop_body.item))
+        return "continuation compile failed";
+    function->code->compiled_loop_body = compiled.get();
 
     NameEntry** live = (NameEntry**)pool_calloc(script->pool,
         sizeof(NameEntry*) * (size_t)(scan.count > 0 ? scan.count : 1));
@@ -6482,7 +6504,7 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     cell->loop_live_ins = live;
     cell->loop_live_in_count = (uint8_t)scan.count;
     cell->loop_ordinal = ordinal;
-    cell->loop_entry = entry;
+    cell->loop_entry = (void*)compiled.get().function->ptr;
     cell->loop_state = FN_LOOP_HANDOFF_READY;
     log_info("js-loop-handoff: compiled loop=%u live_ins=%d", (unsigned)ordinal,
         scan.count);
@@ -6513,19 +6535,10 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
     }
     int count = cell->loop_live_in_count;
     RootFrame roots(3);
-    Rooted<Item> callee_root(roots, js_new_function_mir(cell->loop_entry, count));
+    Rooted<Item> callee_root(roots, handoff->function->code->compiled_loop_body);
     Rooted<Item> this_root(roots, js_interp_frame_this(frame));
     Rooted<Item> result_root(roots, ItemNull);
     if (get_type_id(callee_root.get()) != LMD_TYPE_FUNC) return false;
-    // The wrapper is cached by entry. Like a P2 publication, it uses the
-    // compiled-context call ABI; the kernel coerces `this` for a sloppy
-    // callee, so a strict original's continuation must be strict too.
-    JsFunction* continuation = (JsFunction*)callee_root.get().function;
-    if (!(continuation->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)) {
-        continuation->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI |
-            (handoff->function->flags & JS_FUNC_FLAG_STRICT);
-        js_function_finalize_capabilities(continuation);
-    }
     RootSpan arguments((size_t)(count > 0 ? count : 1));
     for (int i = 0; i < count; i++) {
         NameEntry* entry = cell->loop_live_ins[i];
@@ -6536,7 +6549,8 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
         if (value.item == ITEM_JS_TDZ) return false;
         arguments.items()[i] = value;
     }
-    Item result = js_call_from_ast(callee_root.get(), this_root.get(),
+    Item result = mvp_lmd_call_function_satellite(callee_root.get(),
+        (Item){.function = (Function*)handoff->function}, this_root.get(),
         arguments.items(), count, result_root.home());
     result = scalar_storage_read(result, false);
     if (!cell->loop_entered) {
@@ -6558,7 +6572,7 @@ static Item js_interp_configure_function_metadata(Item function_item) {
 
 // JC20: shared null [[HomeObject]] home for callees without a payload; the
 // frame only reads it.
-static uint64_t js_interp_no_home_class = ITEM_NULL_VAL;
+static uint64_t js_interp_no_home_class = ITEM_NULL;
 
 Item js_interp_initialize_body_vars(JsInterpEnv* body, JsInterpEnv* parameters) {
     if (!body || body == parameters) return make_js_undefined();
@@ -7134,20 +7148,6 @@ extern "C" Item js_interp_module_async_body(Activation* self, Item unused) {
     return js_interp_module_async_reject(state, result.value);
 }
 
-// A MIR module with a top-level await runs its js_main (state_fn) once on the
-// same carrier; js_await_park parks it there (RA1). js_main itself completes
-// the module's async evaluation at its end.
-extern "C" Item js_mir_module_async_body(Activation* self, Item unused) {
-    (void)unused;
-    JsAsyncContextStateRecord* state =
-        (JsAsyncContextStateRecord*)activation_user(self);
-    JsOwnedCallActivation call_facts;
-    JsModuleBodyScope module_scope(state);
-    Item result = js_mir_execute_compiled_entry(state->state_fn);
-    if (!item_is_error(result)) return make_js_undefined();
-    return js_interp_module_async_reject(state, result);
-}
-
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         uint64_t* result_home) {
     if (!runtime || !script || !script->ast_root) return ItemError;
@@ -7368,7 +7368,7 @@ static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
     bool cacheable = !is_direct_eval ||
         (source && !memchr(source, '#', source_length));
     JsScript* script = js_interp_prepare_script_mode(runtime, source,
-        source_length, filename, strict, JS_PARSE_AUTO, cacheable);
+        source_length, filename, strict, dynamic_source ? JS_PARSE_SCRIPT : JS_PARSE_AUTO, cacheable);
     if (!script) {
         // Parse and early-error rejection must enter JavaScript as SyntaxError.
         // Dynamic Function invokes this entry beneath a user catch handler.
@@ -7384,6 +7384,7 @@ static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
             !js_interp_capture_origin(script, context ? context->current_file : NULL)) return ItemError;
     js_interp_set_script_role(script, role == JS_INTERP_SOURCE_MODULE, is_eval_script,
         is_direct_eval, strict, test262_native_harness, NULL);
+    script->dynamic_source = dynamic_source;
     return js_interp_execute_script(runtime, script, result_home);
 }
 
@@ -7809,7 +7810,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         module->loading = false;
         return star_validation;
     }
-    Rooted<Item> frame_root(roots, js_async_context_create_module(script, NULL,
+    Rooted<Item> frame_root(roots, js_async_context_create_module(script,
         script->module_state_id, module->specifier_item));
     if (item_is_error(frame_root.get())) {
         module->evaluation_error = frame_root.get();

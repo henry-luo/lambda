@@ -90,7 +90,7 @@ pub fn enclosing_tag_in(editor, tags) {
   if (len(found) == 0) null else found[0]
 }
 
-pub fn inside_tag(editor, tag) => contains(enclosing_tags(editor), tag) or false
+pub fn inside_tag(editor, tag) => contains(enclosing_tags(editor), tag) ^ { false }
 
 // ---------------------------------------------------------------------------
 // History

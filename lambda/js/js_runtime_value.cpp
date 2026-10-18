@@ -882,76 +882,6 @@ extern "C" int64_t js_is_nullish(Item value) {
 // js_typeof_is: returns 1 if typeof(value) matches the pooled type name.
 // Resolving the NameId here keeps generated MIR independent of compiler-pool
 // pointers while preserving the allocation-free typeof fast path (D5.4.3).
-extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
-    NameRef type_name = name_pool_resolve_id(context ? context->name_pool : NULL,
-        type_name_id);
-    const char* type_str = type_name ? type_name->chars : NULL;
-    if (!type_str || type_name->len == 0) return 0;
-    TypeId type = get_type_id(value);
-    switch (type_str[0]) {
-    case 'n':
-        if (type_str[1] == 'u') {
-            // "number"
-            if (js_number_like_type(type)) {
-                return 1;
-            }
-            return 0;
-        }
-        return 0;
-    case 's':
-        if (type_str[1] == 't') return (type == LMD_TYPE_STRING) ? 1 : 0;  // "string"
-        if (type_str[1] == 'y') return js_is_symbol(value) ? 1 : 0;  // "symbol"
-        return 0;
-    case 'b':
-        if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
-        if (type_str[1] == 'i') return js_is_bigint_egress(value) ? 1 : 0;  // "bigint"
-        return 0;
-    case 'u': return (type == LMD_TYPE_UNDEFINED) ? 1 : 0;  // "undefined"
-    case 'o':
-        // "object": null, map (non-class), array, element, or other non-function
-        if (type == LMD_TYPE_NULL) return 1;
-        if (type == LMD_TYPE_MAP) {
-            // Proxy wrapping callable → "function", not "object"
-            if (js_is_proxy(value)) {
-                Item t = js_typeof(value);
-                String* ts = it2s(t);
-                return (ts && ts->len == 6 && memcmp(ts->chars, "object", 6) == 0) ? 1 : 0;
-            }
-            // Function.prototype is callable per spec
-            if (js_class_id(value) == JS_CLASS_FUNCTION) {
-                bool own_proto = false;
-                js_map_shape_lookup_ext(value.map, "__is_proto__", 12, &own_proto);
-                if (own_proto) return 0;  // "function", not "object"
-            }
-            return 1;
-        }
-        if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
-            type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
-            js_is_symbol(value)) return 0;
-        if (js_number_like_type(type)) return 0;
-        return 1;  // arrays, elements, etc. are "object"
-    case 'f':
-        // "function"
-        if (type == LMD_TYPE_FUNC) return 1;
-        if (type == LMD_TYPE_MAP) {
-            // Proxy wrapping callable → "function"
-            if (js_is_proxy(value)) {
-                Item t = js_typeof(value);
-                String* ts = it2s(t);
-                return (ts && ts->len == 8 && memcmp(ts->chars, "function", 8) == 0) ? 1 : 0;
-            }
-            // Function.prototype is callable per spec
-            if (js_class_id(value) == JS_CLASS_FUNCTION) {
-                bool own_proto = false;
-                js_map_shape_lookup_ext(value.map, "__is_proto__", 12, &own_proto);
-                if (own_proto) return 1;
-            }
-            return 0;
-        }
-        return 0;
-    default: return 0;
-    }
-}
 
 // v23b / Tune8 §2.1: Comparison facade returning raw int64_t 0/1 for direct use
 // in MIR_BF/BT. Eliminates the box→unbox→branch cycle when a comparison is used
@@ -1010,20 +940,6 @@ static Item js_compare_boxed(int64_t op, Item left, Item right) {
     return invert ? (Item){.item = b2it(!it2b(result))} : result;
 }
 
-extern "C" int64_t js_eq_raw(Item left, Item right) {
-    if (left.item == right.item) {
-        TypeId type = get_type_id(left);
-        if (type == LMD_TYPE_FLOAT && isnan(it2d(left))) return 0;
-        return 1;
-    }
-    if (get_type_id(left) == LMD_TYPE_STRING && get_type_id(right) == LMD_TYPE_STRING) {
-        String* left_str = it2s(left);
-        String* right_str = it2s(right);
-        return left_str->len == right_str->len &&
-            memcmp(left_str->chars, right_str->chars, left_str->len) == 0;
-    }
-    return (int64_t)it2b(js_strict_equal(left, right));
-}
 
 // Strict equality cannot call guest code, so its raw branch facade remains
 // valid; coercing equality and relational comparisons carry Item completions.
@@ -1236,15 +1152,7 @@ extern "C" Item js_decrement_numeric(Item numeric) {
 
 // Increment and decrement implement the complete ECMAScript ToNumeric step.
 // MIR uses the numeric entries only when it must retain the postfix value.
-extern "C" Item js_increment(Item value) {
-    JS_ASSIGN_OR_RETURN(numeric, js_to_numeric(value));
-    return js_increment_numeric(numeric);
-}
 
-extern "C" Item js_decrement(Item value) {
-    JS_ASSIGN_OR_RETURN(numeric, js_to_numeric(value));
-    return js_decrement_numeric(numeric);
-}
 
 // Number() function call: ES2020 §21.1.1.1 — calls ToNumeric, then converts BigInt to Number
 extern "C" Item js_number_function(Item value) {
@@ -1324,13 +1232,6 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
     return -1;
 }
 
-extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp) {
-    if (cp < 0x10000 || cp > 0x10FFFF ||
-            !js_string_concat_caches_ensure_roots()) return;
-    g_last_four_byte_uri_escape_string = str_item;
-    g_last_four_byte_uri_escape_cp = (uint32_t)cp;
-    g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
-}
 
 // The URI cache affects only `%X`/`%XX` growth or a complete 12-byte escaped
 // code point. Keep its root registration out of ordinary string concatenation.
@@ -1417,7 +1318,6 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     }
     return result_item;
 }
-JS_FORWARD_ITEM(js_string_concat, (Item left, Item right), js_concat_strings_fast, (it2s(left), it2s(right)))
 
 extern "C" Item js_add(Item left, Item right) {
     Item number_result = ItemNull;
@@ -1843,21 +1743,7 @@ JS_FORWARD_ITEM(js_greater_than, (Item left, Item right), js_compare, (1, left, 
 // Logical Operators
 // =============================================================================
 
-extern "C" Item js_logical_and(Item left, Item right) {
-    // Returns left if falsy, otherwise right
-    if (!js_is_truthy(left)) {
-        return left;
-    }
-    return right;
-}
 
-extern "C" Item js_logical_or(Item left, Item right) {
-    // Returns left if truthy, otherwise right
-    if (js_is_truthy(left)) {
-        return left;
-    }
-    return right;
-}
 JS_FORWARD_EXPRESSION(Item, js_logical_not, (Item operand), ((Item){.item = b2it(!js_is_truthy(operand))}))
 
 // =============================================================================

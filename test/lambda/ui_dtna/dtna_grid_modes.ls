@@ -18,11 +18,11 @@ let flex = ui.render(ui.flex({flex:2,gap:"8px"},"Child")^);
     ["spacing lengths",contains(space.style,"gap:2em 1rem;") and contains(flex.style,"flex:2 2 auto;")],
     ["nonnegative CSS lengths",all([for (value in [0,"0",".5rem","1e2px","12%","2VH","0.5in"]) c.css_length(value)])],
     ["reject invalid CSS lengths",all([for (value in [null,true,-1,"-1px","red","1garbagepx","1e999px","2px;color:red","calc(1rem + 2px)"]) not c.css_length(value)])],
-    ["column shift bounds",(ui.col({push:25}) or null) == null and (ui.col({pull:-1}) or null) == null and (ui.col({md:{push:1.5}}) or null) == null],
-    ["flex validation",all([for (value in [-1,inf,"1garbage","-1 0 auto","1 0 red","1 0 0 0",true]) (ui.col({flex:value}) or null) == null])],
-    ["alignment validation",(ui.row({align:{md:'missing'}}) or null) == null and (ui.row({justify:{tablet:'center'}}) or null) == null and (ui.row({align:{}}) or null) == null],
-    ["empty and invalid gutters",(ui.row({gutter:{}}) or null) == null and (ui.row({gutter:"red"}) or null) == null and (ui.row({gutter:{md:"-1rem"}}) or null) == null],
-    ["skeleton dimension validation",(ui.skeleton_input({width:"red"}) or null) == null and (ui.skeleton({paragraph:{width:["100%","-1px"]}}) or null) == null],
-    ["icon dimension validation",(ui.icon({width:"red"}) or null) == null and (ui.icon({height:true}) or null) == null],
+    ["column shift bounds",((ui.col({push:25}) ^ { null }) or null) == null and ((ui.col({pull:-1}) ^ { null }) or null) == null and ((ui.col({md:{push:1.5}}) ^ { null }) or null) == null],
+    ["flex validation",all([for (value in [-1,inf,"1garbage","-1 0 auto","1 0 red","1 0 0 0",true]) ((ui.col({flex:value}) ^ { null }) or null) == null])],
+    ["alignment validation",((ui.row({align:{md:'missing'}}) ^ { null }) or null) == null and ((ui.row({justify:{tablet:'center'}}) ^ { null }) or null) == null and ((ui.row({align:{}}) ^ { null }) or null) == null],
+    ["empty and invalid gutters",((ui.row({gutter:{}}) ^ { null }) or null) == null and ((ui.row({gutter:"red"}) ^ { null }) or null) == null and ((ui.row({gutter:{md:"-1rem"}}) ^ { null }) or null) == null],
+    ["skeleton dimension validation",((ui.skeleton_input({width:"red"}) ^ { null }) or null) == null and ((ui.skeleton({paragraph:{width:["100%","-1px"]}}) ^ { null }) or null) == null],
+    ["icon dimension validation",((ui.icon({width:"red"}) ^ { null }) or null) == null and ((ui.icon({height:true}) ^ { null }) or null) == null],
     ["zero and fractional flex",contains(ui.render(ui.col({flex:0})^).style,"flex:0 0 auto;") and contains(ui.render(ui.col({flex:0.5})^).style,"flex:0.5 0.5 auto;")]
 ]

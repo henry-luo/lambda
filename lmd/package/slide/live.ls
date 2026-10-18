@@ -205,10 +205,10 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools) {
     var displayed = {problem: null, painted: null}
     present(owner, plan, before, result.ps, options, painted, tools) ^ { displayed = {problem: ^.message, painted: null} } ~
         { displayed = {problem: null, painted: ~} }
-    let scheduled = if (result.problem == null and displayed.problem == null and player.needs_frame(result.ps)) dom.request_frame(owner, "slide_frame") else 0
-    let problem = if (result.problem != null) result.problem else if (displayed.problem != null) displayed.problem
+    let scheduled = if (result.problem is null and displayed.problem is null and player.needs_frame(result.ps)) dom.request_frame(owner, "slide_frame") else 0
+    let problem = if (not (result.problem is null)) result.problem else if (not (displayed.problem is null)) displayed.problem
         else if (player.needs_frame(result.ps) and scheduled == 0) "slide: player.frame: host refused frame delivery" else null
-    if (problem != null) {
+    if (not (problem is null)) {
         dom.set_attribute(owner, "data-slide-error", problem)
         dom.set_attribute(owner, "data-slide-paused", "true")
         set_text(dom.query_selector(owner, ".slide-status"), problem)
@@ -216,7 +216,7 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools) {
         dom.remove_attribute(owner, "data-slide-error")
         set_text(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
     }
-    return {ps: if (problem != null) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem == null) displayed.painted else null}
+    return {ps: if (not (problem is null)) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem is null) displayed.painted else null}
 }
 
 pn show(node, visible, display = "block", interactive = true) {
@@ -307,7 +307,7 @@ pn action(owner, plan, session, command, value, now_ms, options) {
     var event = {command: command, time_ms: now_ms}
     if (command == "go") {
         let picked = presenter.destination(plan, value) ^ { {problem: ^.message, index: null} } ~ { {problem: null, index: ~} }
-        if (picked.problem != null) {
+        if (not (picked.problem is null)) {
             set_text(dom.query_selector(owner, ".slide-status"), picked.problem)
             return session
         }

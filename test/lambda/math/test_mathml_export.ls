@@ -37,8 +37,8 @@ let checks=[
     {name:"physical lengths retain the TeX point conversion",ok:abs(float(replace(nodes("a\\hspace{2pt}b",'mspace')^[0].width,"pt",""))^ - 2.0*72.0/72.27)<0.00001},
     {name:"matrices preserve rows and cells",ok:len(nodes("\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}",'mtr')^)==2 and len(nodes("\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}",'mtd')^)==4},
     {name:"annotation is data and display is explicit",ok:annotation.display=="block" and svg.nodes(annotation,'annotation')[0].encoding=="application/x-tex" and contains(format(annotation,'xml')^,"x &lt; y &amp; z")},
-    {name:"unknown commands fail instead of disappearing",ok:(convert("\\undefinedcommand") or "invalid")=="invalid"},
-    {name:"parser diagnostics remain visible",ok:(m.to_mathml(<math error:"bad input">) or "invalid")=="invalid"},
-    {name:"unsupported extensions fail",ok:(convert("\\includegraphics{x.png}") or "invalid")=="invalid"}
+    {name:"unknown commands fail instead of disappearing",ok:((convert("\\undefinedcommand") ^ { null }) or "invalid")=="invalid"},
+    {name:"parser diagnostics remain visible",ok:((m.to_mathml(<math error:"bad input">) ^ { null }) or "invalid")=="invalid"},
+    {name:"unsupported extensions fail",ok:((convert("\\includegraphics{x.png}") ^ { null }) or "invalid")=="invalid"}
 ];
 [for (check in checks where check.ok!=true) check.name]

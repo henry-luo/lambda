@@ -4,6 +4,7 @@
 <button id="double">double click</button>
 <input id="selection" value="alpha">
 <textarea id="menu">menu</textarea>
+<div id="plain"><span id="label">filename.txt</span></div>
 <div id="log"></div>
 <script>
   var log = document.getElementById('log');
@@ -18,6 +19,10 @@
   });
   document.getElementById('menu').addEventListener('contextmenu', function(event) {
     note('contextmenu:' + event.button);
+    event.preventDefault();
+  });
+  document.getElementById('plain').addEventListener('contextmenu', function(event) {
+    note('text-contextmenu:' + event.target.id);
     event.preventDefault();
   });
 </script>

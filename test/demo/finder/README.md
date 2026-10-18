@@ -2,6 +2,9 @@
 
 A native Lambda/Radiant file browser inspired by macOS Finder.
 
+Design, tuning history and large-directory measurements:
+[Finder demo design](../../../vibe/Lambda_Demo_Finder.md).
+
 From the repository root:
 
 ```sh
@@ -32,6 +35,18 @@ and hidden-file settings apply across columns. Sidebar and Go to Folder destinat
 outside the displayed branch start a new column root. Switching views keeps the
 current folder and file selection.
 
+ZIP files combine file details with folder navigation. Select one to see its
+archive kind, byte size and modification time; double-click it in icon or list
+view, or single-click it in column view, to browse its contents. The archive's
+details remain visible until you select a member. Nested folders and ZIPs support
+the same navigation, breadcrumbs, Back/Forward and refresh. Opening an archive
+does not extract it. Its contents are read-only; creation, rename, move, deletion
+and drag-and-drop into or out of the archive are disabled. The outer ZIP file
+keeps normal filesystem operations when selected in its containing folder.
+Member previews render HTML, Markdown and images, show bounded text for source
+and data files, and otherwise show metadata. Embedded HTML uses its own markup;
+relative links to other archive members are not resolved by the preview.
+
 Image tiles load thumbnails progressively in icon, list and column views. PNG, JPEG,
 GIF, WebP, AVIF, BMP, TIFF (`.tif` / `.tiff`) and ICO use the shared image decoder;
 SVG stays on the vector rendering path. Thumbnails preserve aspect ratio and
@@ -40,10 +55,20 @@ Transparent images use a checkerboard. Corrupt or unsupported images retain
 their file icon; hover the graphic for the decoder diagnostic.
 
 Click an item to select it; Cmd/Ctrl-click toggles it and Shift-click selects a
-range. The preview pane shows metadata, images and text. Space opens Quick Look,
-including when the preview pane is hidden or the window is narrow. Text previews
-admit files up to 128 KiB and show at most 6,000 characters. Other types show their
-metadata. Files are read as explicit text or image resources; scripts are not executed.
+range. Filenames and app controls select whole items rather than text. Text remains
+selectable in editable fields, document previews and metadata values.
+The preview pane shows metadata, images and rendered documents. Markdown,
+HTML, PDF, DOCX, EPUB, LaTeX, diagrams and other native viewer formats use Lambda's
+document loader, including `.ls` documents. Source files without a native document
+view, such as JavaScript and C++, show text up to 128 KiB and 6,000 characters.
+Other types show metadata. Space opens the same rendered view in Quick Look,
+including when the preview pane is hidden or the window is narrow.
+
+Drag the divider beside the preview pane to resize it. With the divider focused,
+Left/Right adjusts its width, Home/End selects the smallest/largest size, and Escape
+cancels an active drag. Resizing reflows the embedded document's text and responsive
+styles while retaining its state, and preserves room for the file list when the
+window shrinks. Secondary text uses darker grey throughout.
 
 Right-click a file, folder or folder background to open the context menu. The
 **File actions** toolbar button opens the same menu for the current selection.
@@ -56,7 +81,12 @@ Drag files or folders onto a folder row, a column background, a breadcrumb or
 a sidebar destination to move them. Dragging a selected item moves the current
 selection together; dragging an unselected item moves just that item. A drop
 target highlights while dragging. **Move to…** provides the same operation
-through a destination-path dialog. Escape cancels a drag before the drop.
+through a destination dialog with a path input and folder browser. Open folders
+in the browser or use its breadcrumbs, Parent, Home and Current folder controls;
+the path input follows the browsed destination. **Browse path** opens a typed path.
+The selector lists folders and disables the items being moved and their contents.
+Browsing leaves the file selection unchanged; **Move** confirms the operation.
+Escape cancels a drag before the drop.
 Moves use atomic filesystem renames and
 currently require source and destination to be on the same filesystem.
 Moving an open ancestor updates the displayed branch and navigation paths.
@@ -75,8 +105,8 @@ remain outside this demo's scope.
 | Enter / Cmd/Ctrl + Down | Open the selected folder or Quick Look a file |
 | Space / Escape | Toggle / close Quick Look; Escape also clears selection |
 | Arrow keys / Shift + arrows | Move / extend the selection |
-| Home / End | Select the first / last visible item |
-| Cmd/Ctrl + A | Select all visible items |
+| Home / End | Select the first / last matching item |
+| Cmd/Ctrl + A | Select all matching items |
 | Cmd/Ctrl + 1 / 2 | Icon / list view |
 | Cmd/Ctrl + 3 | Column view |
 | Left / Right in column view | Previous column / open selected folder |
@@ -109,6 +139,14 @@ scroll events from retained columns, relaying them to the Lambda viewport handle
 It also relays native drag-and-drop gestures. Navigation, operation validation,
 filesystem effects and thumbnail scheduling remain in the Lambda session.
 
+Archive navigation retains a captured native `fs` tree (**S12.4.1v3**); member
+payloads are read and checked lazily when opened or previewed (**S14.3.1v3**).
+Member reads use their native nodes, including explicit `zip` input for nested
+archives. Joined paths serve only as Finder row/navigation keys. History stores
+small member locators, allowing a branch to reopen after its captured tree is
+released. Archive image tiles retain file icons until selected, avoiding eager
+payload decoding during directory listing.
+
 `mod_thumbnails.ls` measures the visible scrollport plus one surrounding row,
 prioritizes Quick Look and the selected preview, and submits one raster decode
 at a time through `radiant.image_job`'s thumbnail channel. Native jobs copy paths
@@ -118,12 +156,31 @@ Offscreen canvases release their pixels, and retired regions are cleared before
 replacement. Folder generations and native job tokens reject stale completions;
 window closure cancels and joins workers.
 
-Large listings use CSS size/layout containment on the flex-sized scrollport, so
-ancestor sizing does not repeatedly measure every file. New markup includes
-selection/focus attributes; later selection and dialog updates reuse the published
-listing (**S12.1.3**). Thumbnail polling reuses measured slot geometry until
-publication, scrolling or resizing invalidates it. The full folder remains
-searchable and accessible through keyboard navigation.
+Large listings retain the full directory in the model and render the viewport
+plus one surrounding row in icon, list and column views. JavaScript measures the
+CSS row height, gaps, padding and column count; spacer heights preserve the full
+scroll range. Icon labels reserve two lines so short and wrapped names share a
+row height. Window resizing and preview-divider changes remeasure the layout.
+Search, sorting, range selection, Select All and keyboard navigation use every
+matching entry; Home/End bring the first/last matching entry into the viewport.
+List stripes follow the entry's global position while scrolling.
+
+Ordered rows are cached by directory snapshot revision and filter/sort settings.
+Revision keys avoid structural equality on lazy archive nodes, which would force
+member payloads (**S14.3.1v3**). Selection and dialogs retain the published rows
+while their window is stable (**S12.1.3**, **D4.5.1v4**). Thumbnail polling reuses
+measured slot geometry until publication, scrolling or resizing invalidates it.
+The flex-sized scrollport uses CSS size/layout containment. Radiant derives auto
+grid height from its final tracks, allowing provisional height to shrink after
+rewrapping; inherited cursor values also reach filename glyphs.
+
+Radiant's post-reflow state cleanup collects matching keys before deleting them,
+so hash-table compaction does not restart a full scan for each focus flag or
+orphan. Registered owners validate their address and follow their parent chain
+instead of searching the document once per state entry (**D4.5.1v4**).
+Detached state is still removed and live values, focus and form caches survive;
+`StateStoreDomMutationTest.BulkPruningPreservesLiveValuesAndRebuildsFocusPath`
+checks bulk removal alongside retained state.
 
 The document owns a 128-entry LRU cache, including negative results. Its
 32 MiB retained-pixel budget reserves the app's canvas pixels and the pending
@@ -137,41 +194,66 @@ those of the shared image library; a small thumbnail does not bypass them.
 Verification:
 
 ```sh
-make -C build/premake config=debug_native test_lambda_gtest
+make -C build/premake config=debug_native test_lambda_gtest test_state_store_gtest
 ./test/test_lambda_gtest.exe --gtest_filter='*tests_finder_*'
 LAMBDA_EXEC_BACKEND=interp ./test/test_lambda_gtest.exe --gtest_filter='*tests_finder_*'
 LAMBDA_EXEC_BACKEND=jit ./test/test_lambda_gtest.exe --gtest_filter='*tests_finder_*'
 ./test/test_ui_automation_gtest.exe --suite finder --jobs 1
+./test/test_state_store_gtest.exe
 python3 test/demo/finder/tests/run_thumbnails.py
 python3 test/demo/finder/tests/run_operations.py
 LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 python3 test/demo/finder/tests/run_operations.py
 ```
 
-The model, column-navigation, action-validation and I/O golden scripts and their expected `.txt` files are in `tests/`. The
+The model, column-navigation, action-validation, archive and I/O golden scripts and their expected `.txt` files are in `tests/`. The
 registered native UI fixtures are in `test/ui/finder/`. They cover the original
 navigation, context menus, operation dialogs and compact layouts, retained column branches and keyboard
-navigation, eight raster formats, view-switch cache reuse and tile geometry. The thumbnail-job fixture runs under forced collection
+navigation, ZIP navigation in all three views, nested archives, lazy corruption
+errors, read-only controls and member previews, eight raster formats, view-switch
+cache reuse and tile geometry. The archive and thumbnail-job fixtures run under forced collection
 and poisoning, and covers file replacement, invalidation, errors, cancellation
 and closure. The Python replay creates a real scrolling folder under `temp/`
 and checks offscreen release, Unicode/fragment-like filenames, EXIF rotation and
 refresh. Captures are written under `temp/finder/`.
 
+`column_context_menu.json` right-clicks filename text, icons and folder chevrons,
+including a scrolled branch, and checks visible menus and the Rename target.
+
 The operation replay creates a unique disposable directory under
 `temp/finder/operations/`, then uses real native mouse drags and keyboard input
 to create, rename, move and delete files and nested folders in all three views.
 It checks collisions, invalid destinations, cancellation, Unicode names, moves
-of open ancestors and multi-selection. Filesystem checks independently verify
+of open ancestors and multi-selection. ZIP cases cover uppercase extensions,
+Unicode member names, PNG previews, read-only drag sources and destinations,
+and rename/move/delete of the outer archive. Filesystem checks independently verify
 the final directory tree and preserved file contents. `--log` retains native
 diagnostics beside the replay. Bundled demo files are never mutated by these tests.
 The native drag transport retains its target and event across callback allocation
 (**D5.3.3**); the forced-GC drag fixture checks cancellation and drop delivery
 without changing bundled files.
 
-`large_directory.json` opens `./test`, checks that navigation avoids per-row
-attribute writes, and exercises retained selection, sorting, filtering,
-Home/End scrolling and resizing. Column replays also check single-click opening,
+`large_directory.json` opens `./test`, checks bounded row counts and retained
+selection, sorting, filtering, whole-folder Select All, Home/End scrolling,
+last-row padding and resizing. Native text-query regressions check final grid
+height, inherited pointer cursors and computed gap longhands. Column replays also check single-click opening,
 ancestor selection, history, filtering and horizontal scrolling in compact windows.
 The thumbnail UI also runs under forced GC and freed-memory poisoning.
+
+`preview_panel.json` checks text contrast, pointer and keyboard resizing, responsive
+limits, document widths and text wrapping, retained iframe identity, rendered Markdown/HTML/Lambda documents, source
+fallback and Quick Look cleanup. `preview_formats.json` checks native PDF, DOCX
+and EPUB presentation. Removing an embedded document defers its teardown until
+between event turns, preserving the caller's evaluator ownership (**D5.4.1**);
+`dom_iframe_retire.json` covers replacement under forced GC and poisoning.
+`dom_iframe_resize.json` checks widening and narrowing asynchronously loaded HTML,
+Markdown and Lambda documents, plus inline `srcdoc` content. Viewport units and
+media queries follow the iframe's content box; document state survives, and resize
+does not repeat its initial load handler (**D4.5.1v4 / D5.4.1**).
+`item_selection.json` checks filename presses and Shift/Cmd/Ctrl selection in all
+three views, while rename fields and document previews still allow text selection.
+The shared mouse policy honors the cascaded `user-select` value through CSSOM
+(**S12.1.3 / D7.2.5**); `dom_user_select_pointer.json` checks inherited `auto`,
+explicit `text` overrides, button focus and editable inputs.
 
 Measure directory navigation through the next animation-frame callback with a
 release host, optionally comparing the previous implementation:
@@ -187,3 +269,52 @@ On macOS with 463 visible entries in `./test`, median opening latency fell from
 2,944 ms to 558 ms (5.3×); selection fell from 1,579 ms to 722 ms. These are three
 release runs per version on this checkout, including script and layout work;
 viewer startup is excluded and timings vary with host load.
+
+For a larger folder or another view:
+
+```sh
+python3 test/demo/finder/benchmark.py --directory ./temp --view columns --repetitions 3
+```
+
+`--reference-dir` accepts a saved Finder source directory, and
+`--reference-binary` selects its release host for native-code comparisons.
+`--output-dir` keeps separate comparisons' artifacts. Timing markers are scoped
+to their procedures, and Ctrl-click selects without opening a child in column view.
+The replay checks the full matching entry count and selection, including when
+only a viewport of rows is mounted.
+
+The state-cleanup change was measured on macOS with 2,157 visible entries in
+`./temp`, identical Finder sources and three alternating release runs per host:
+
+| View | Open before → after | Select before → after |
+| --- | --- | --- |
+| Icons | 7,801 → 3,267 ms | 11,834 → 3,029 ms |
+| List | 6,243 → 1,806 ms | 10,576 → 1,747 ms |
+| Columns | 8,999 → 3,121 ms | 14,565 → 2,806 ms |
+
+These medians include filesystem reads, script publication and the next frame;
+startup is excluded. Those measurements predate viewport rendering.
+
+Viewport rendering was measured on the same release host using a frozen
+2,997-entry snapshot of `./temp` (regular files hard-linked, directories empty),
+three alternating runs per version and view:
+
+| View | Open before → after | Select before → after |
+| --- | --- | --- |
+| Icons | 4,496 → 66 ms | 4,350 → 47 ms |
+| List | 2,604 → 68 ms | 2,379 → 43 ms |
+| Columns | 4,343 → 70 ms | 3,973 → 45 ms |
+
+Opening includes filesystem snapshot capture, publication and layout through the
+following frame callbacks; process startup is excluded. Selection targets the
+first row without opening it. The reference uses the saved full-listing scripts
+on the same host, isolating the app's windowing and row-cache changes. Artifacts
+are under `temp/finder/responsiveness/verified-{icons,list,columns}/`. File IO and
+sorting still scale with directory size; mounted rows and routine layout scale
+with the viewport. Timings vary with machine load.
+
+The viewport changes pass the Finder golden scripts in all three execution tiers,
+Finder UI checks, real scrolling-thumbnail and forced-GC filesystem replays, and
+the native text/layout runner (137 tests). The broader Radiant gate still has
+existing failures; its layout classification remains 3,103 passing, 154 partial
+and 37 failing, and the view-reuse failure set is unchanged.

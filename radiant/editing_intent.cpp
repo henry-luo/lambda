@@ -195,14 +195,13 @@ bool input_intent_from_name(const char* name, InputIntent* out) {
 
     // Clipboard snapshots belong to the execution waist, not to key policy.
     if (type == INPUT_INTENT_INSERT_FROM_PASTE) {
-        const char* html = clipboard_store_read_mime("text/html");
-        if (html && html[0]) {
-            out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
-            out->html_data = out->owned_html_data;
+        if (!clipboard_store_read_paste(&out->owned_html_data, &out->owned_data)) {
+            const char* text = clipboard_get_text();
+            if (!text || !text[0]) return false;
+            mem_free(out->owned_data);
+            out->owned_data = mem_strdup(text, MEM_CAT_TEMP);
         }
-        const char* clip = clipboard_get_text();
-        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
-        out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
+        out->html_data = out->owned_html_data;
         out->data = out->owned_data;
         out->data_mime = (out->html_data && out->html_data[0])
             ? "text/html" : "text/plain";

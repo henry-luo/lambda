@@ -10,6 +10,13 @@
 static void* g_layout_pass_test_resource = nullptr;
 static int g_layout_pass_test_init_count = 0;
 static int g_layout_pass_test_cleanup_count = 0;
+static const char* g_package_layout_test_module = nullptr;
+
+bool radiant_package_layout_callback(const CustomLayoutContext*, CustomLayoutResult*,
+                                     const char* module) {
+    g_package_layout_test_module = module;
+    return true;
+}
 
 // this isolated runner exercises custom paint lists, never the CSS stacking-context host.
 const char* render_clip_css_value(ViewElement*) {
@@ -122,6 +129,24 @@ static bool custom_layout_test_negative_bounds(const CustomLayoutContext* contex
     if (!context || !result || context->child_count != 2) return false;
     return custom_layout_result_place(result, 0, -10.0f, 5.0f) &&
         custom_layout_result_place(result, 1, 40.0f, 20.0f);
+}
+
+TEST_F(CustomLayoutTest, ShippedPackagesResolveWithoutRegistration) {
+    const char* names[] = {"lambda-graph", "lambda-tikz"};
+    const char* modules[] = {"lambda.graph.transform", "lambda.doc.tikz.named"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        // clearing document/test registrations cannot disconnect shipped layouts.
+        custom_layout_registry_clear();
+        CustomLayoutFn callback = custom_layout_lookup(names[i]);
+        ASSERT_NE(callback, nullptr);
+        CustomLayoutContext context = {};
+        context.layout_name = lam::up(names[i]);
+        CustomLayoutResult result = {};
+        g_package_layout_test_module = nullptr;
+        EXPECT_TRUE(callback(&context, &result));
+        EXPECT_STREQ(g_package_layout_test_module, modules[i]);
+    }
+    EXPECT_EQ(custom_layout_lookup("unknown-layout"), nullptr);
 }
 
 static bool custom_layout_test_explicit_size(const CustomLayoutContext* context,

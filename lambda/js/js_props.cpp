@@ -461,13 +461,6 @@ extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len)
 }
 
 // Tri-state own-slot status; see the header for the caller contract.
-extern "C" JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len) {
-    JS_PROPS_ASSERT_KEY(name, name_len);
-    JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
-    if (status == JS_SHAPE_SLOT_DELETED) return JS_HAS_DELETED;
-    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return JS_HAS_PRESENT;
-    return JS_HAS_ABSENT;
-}
 
 // Ordinary HasProperty; proxy and builtin fallbacks stay with their callers.
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {

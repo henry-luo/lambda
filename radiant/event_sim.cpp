@@ -1595,12 +1595,17 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         }
     }
     // F6 (Radiant_Design_Form_Input.md §3.6): clipboard helpers.
-    else if (strcmp(type_str, "paste_text") == 0) {
+    else if (strcmp(type_str, "paste_text") == 0 || strcmp(type_str, "paste_image") == 0) {
         ev->type = SIM_EVENT_PASTE_TEXT;
         const char* text = reader.get("text").cstring();
         if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
         const char* html = reader.get("html").cstring();
         if (html) ev->clipboard_html = mem_strdup(html, MEM_CAT_LAYOUT);
+        if (strcmp(type_str, "paste_image") == 0) {
+            const char* path = reader.get("file").cstring();
+            if (!path) return parse_sim_event_fail(ev);
+            ev->file_path = mem_strdup(path, MEM_CAT_LAYOUT);
+        }
         parse_target(reader, ev);
     }
     else if (strcmp(type_str, "set_prompt") == 0) {
@@ -1615,6 +1620,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         parse_assertion_strings(reader, ev, false);
         const char* mime = reader.get("mime").cstring();
         if (mime) ev->clipboard_mime = mem_strdup(mime, MEM_CAT_LAYOUT);
+        const char* path = reader.get("file").cstring();
+        if (path) ev->file_path = mem_strdup(path, MEM_CAT_LAYOUT);
     }
     // F7 (Radiant_Design_Form_Input.md §4.1): IME composition driver.
     //   {"type":"ime_compose","phase":"begin"}
@@ -4228,7 +4235,28 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             const char* text = ev->input_text ? ev->input_text : "";
             log_info("event_sim: paste_text len=%zu", strlen(text));
-            if (ev->clipboard_html) {
+            if (ev->file_path) {
+                char* bytes = nullptr;
+                size_t length = 0;
+                if (!file_read_all(ev->file_path, MEM_CAT_LAYOUT, &bytes, &length)) {
+                    log_error("event_sim: cannot read clipboard image %s", ev->file_path);
+                    sim_record_assertion(ctx, false);
+                    break;
+                }
+                const ImageCapabilities* codec = image_codec_capabilities(image_detect((const uint8_t*)bytes, length));
+                if (!codec) {
+                    mem_free(bytes);
+                    sim_record_assertion(ctx, false);
+                    break;
+                }
+                ArrayList* items = arraylist_new(1);
+                ClipboardItem* item = clipboard_item_new();
+                clipboard_item_add(item, codec->mime, bytes, length);
+                arraylist_append(items, item);
+                clipboard_store_write_items(items);
+                clipboard_items_free(items);
+                mem_free(bytes);
+            } else if (ev->clipboard_html) {
                 clipboard_store_write_html(ev->clipboard_html, text);
             } else {
                 clipboard_copy_text(text);
@@ -4252,6 +4280,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_CLIPBOARD: {
+            if (ev->file_path) {
+                char* expected = nullptr;
+                size_t length = 0;
+                bool loaded = file_read_all(ev->file_path, MEM_CAT_LAYOUT, &expected, &length);
+                ArrayList* items = clipboard_store_read_items();
+                ClipboardEntry* entry = clipboard_items_find(items, ev->clipboard_mime ? ev->clipboard_mime : "image/png");
+                bool passed = loaded && entry && entry->data_len == length && memcmp(expected, entry->data, length) == 0;
+                clipboard_items_free(items);
+                mem_free(expected);
+                sim_record_assertion(ctx, passed);
+                if (!passed) log_error("event_sim: clipboard bytes differ from %s", ev->file_path);
+                break;
+            }
             const char* clip = ev->clipboard_mime
                 ? clipboard_store_read_mime(ev->clipboard_mime)
                 : clipboard_get_text();

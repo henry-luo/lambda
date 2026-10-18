@@ -21,7 +21,8 @@ on timeline_request(value) {
     } else if (value.kind=="cancel_resource") { cancels=cancels+1 }
 }
 on timeline_resource(value) {
-    if (value.error!=null) { deadlines=deadlines+1 } else { completions=completions+1 }
+    // classify error outcomes without propagating them through comparisons (S7.9.1).
+    if (not (value.error is null)) { deadlines=deadlines+1 } else { completions=completions+1 }
 }
 on click(evt) {
     let key=dom.get_attribute(evt.target,"id");

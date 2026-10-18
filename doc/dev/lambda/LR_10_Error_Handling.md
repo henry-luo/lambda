@@ -28,7 +28,7 @@ Every error Item carries the same high byte (`LMD_TYPE_ERROR`, value 14, `lambda
 
 **The rich heap representation** is a `LambdaError*` boxed into the same tagged word by `err2it(LambdaError*)` (`lambda.h:969`), which ORs the `LMD_TYPE_ERROR` tag onto the pointer; `it2err(Item)` (`lambda.h:975`) recovers it by checking the tag and masking with `0x00FFFFFFFFFFFFFF`. A `LambdaError` (`lambda-error.h:180`) is a full diagnostic record: `code`, an `is_heap` flag, an owned `message` string, a `SourceLocation`, a `StackFrame*` chain, optional `help`/`details`, and a chained `cause`. So an `LMD_TYPE_ERROR` Item is *either* the null-pointer sentinel *or* a tagged pointer to one of these structs, and `it2err` returning `NULL` is exactly the test that tells the two apart.
 
-The two representations share one ABI byte, which is what lets `GUARD_ERROR*` (§4) propagate either kind without inspecting the payload, and lets `is_truthy` treat both as falsy (§4). The choice of which to produce is made at the raise site: `fn_error` returns the boxed rich form when a GC heap is available and falls back to the bare sentinel otherwise (§5).
+The two representations share one ABI byte, which is what lets `GUARD_ERROR*` (§4) propagate either kind without inspecting the payload, and lets `is_truthy` classify both as `BOOL_ERROR` (§4). The choice of which to produce is made at the raise site: `fn_error` returns the boxed rich form when a GC heap is available and falls back to the bare sentinel otherwise (§5).
 
 ---
 
@@ -48,7 +48,14 @@ Lambda has no unwinding. Propagation is done explicitly, in C, by the `GUARD_ERR
 
 The family has return-type-specific variants for builtins that do not return a plain `Item`, because each must yield an error in *its own* return representation: `GUARD_BOOL_ERROR1/2` return `BOOL_ERROR` (`lambda.hpp:322`,`:324`), used by comparison and boolean ops whose result is a `Bool`; `GUARD_DATETIME_ERROR1/2/3` return `DATETIME_MAKE_ERROR()` (`lambda.hpp:329`–`337`), the in-band datetime error sentinel (`lambda.h:848`); and `GUARD_ERROR_RI1/2` return `item_to_ri(a)` (`lambda.hpp:315`,`:317`) for the `RetItem`-returning `can_raise` calling convention. These sentinels are themselves recognized as errors downstream: `b2it` collapses any `bool_val >= BOOL_ERROR` to `ITEM_ERROR` (`lambda.h:875`), and `op_and`/`op_or` short-circuit to `ITEM_ERROR` when either input is `>= BOOL_ERROR` (`lambda-eval.cpp:168`,`:172`), so a `BOOL_ERROR` re-boxes back into the unified error Item when it crosses back into Item-space.
 
-**Errors are falsy.** `is_truthy` (`lambda-eval.cpp:154`) returns `BOOL_FALSE` for `LMD_TYPE_ERROR` (`:158`) just as it does for `LMD_TYPE_NULL`. Error tests use the explicit `is error` predicate; the retired prefix `^e` shorthand is historical only under **S7.6.5v2**.
+**Errors have no truth value (S3.1v2, S3.4–S3.5).** `is_truthy` returns
+`BOOL_ERROR` for an error. Interpreter and MIR branches preserve the condition
+Item before taking a Boolean branch. Language equality, negation and identity
+use `fn_eq_value`, `fn_ne_value`, `fn_not_value`, and `fn_ref_eq_value` so a
+visited error retains its payload; native predicate adapters still return
+`Bool`. Recursive equality threads an `EqualityContext` rather than storing a
+failure in TLS (S5.1.5). Explicit handlers perform recovery; `or` acknowledges
+no enforcing channel (S7.5.3v2). Collection-consumer policies remain SO50.
 
 The `RetItem` path deserves one note: `item_to_ri` (`lambda.h:1139`) splits an Item into a `{value, err}` pair and, when the value is a *pointer-less* error sentinel (`it2err` returns `NULL`), sets `.err` to the non-NULL placeholder `(LambdaError*)1` so that callers checking `ri.err != NULL` still see an error even though there is no rich payload to point at. This is the bridge that lets the typed `can_raise` convention (`RetBool`/`RetInt64`/`RetFloat`/… , `lambda.h:989`) coexist with the bare sentinel.
 
@@ -125,7 +132,7 @@ The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOL
 | `lambda/lambda-error.cpp` | `error_code_table[]` + linear-scan lookups, `err_create`/`err_create_heap`/`err_createf`, enrichment, `err_capture_stack_trace` (FP walk), `lookup_debug_info`, formatting (`err_format*`), GC hooks (`err_gc_trace`/`err_gc_destroy`), `find_errors` CST diagnostics. |
 | `lambda/lambda.h` | `ItemError`/`ITEM_ERROR`, `err2it`/`it2err`, `DATETIME_MAKE_ERROR`, `INT64_ERROR`, the `Ret*` structs and `item_to_ri`. |
 | `lambda/lambda.hpp` | The `GUARD_ERROR*` / `GUARD_BOOL_ERROR*` / `GUARD_DATETIME_ERROR*` / `GUARD_ERROR_RI*` propagation macros. |
-| `lambda/lambda-eval.cpp` | `fn_error` (raise), `set_runtime_error`/`set_runtime_error_no_trace`, `is_truthy` (errors falsy), `op_and`/`op_or` error collapse. |
+| `lambda/lambda-eval.cpp` | `fn_error` (raise), `set_runtime_error`/`set_runtime_error_no_trace`, `is_truthy` (errors have no truth value), `op_and`/`op_or` error collapse. |
 | `lambda/lambda-mem.cpp` | GC-hook registration (`error_trace`/`error_destroy`) and `err_set_heap_allocator(heap_calloc)`. |
 | `lambda/mir.c` | `build_debug_info_table` — the address-sorted `FuncDebugInfo` table the trace walker binary-searches. |
 

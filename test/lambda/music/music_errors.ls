@@ -2,9 +2,9 @@ import music: lambda.music
 import t: lambda.music.time
 fn document(body) => "<score-partwise version='4.0'><part-list><score-part id='P'><part-name>Test</part-name></score-part></part-list><part id='P'><measure number='1'><attributes><divisions>12</divisions></attributes>"++body++"</measure></part></score-partwise>"
 let quarter="<note><pitch><step>C</step><octave>4</octave></pitch><duration>12</duration><type>quarter</type></note>"
-fn rejected(source) => (music.parse(source) or "rejected")=="rejected"
+fn rejected(source) => ((music.parse(source) ^ { null }) or "rejected")=="rejected"
 fn bad(body) => rejected(document(body))
-fn bad_layout(body) => (music.layout(music.parse(document(body))^) or "rejected")=="rejected";
+fn bad_layout(body) => ((music.layout(music.parse(document(body))^) ^ { null }) or "rejected")=="rejected";
 [
  rejected("<score-partwise><broken></score-partwise>"),
  rejected(document(quarter)++"<extra/>"),
@@ -28,10 +28,10 @@ fn bad_layout(body) => (music.layout(music.parse(document(body))^) or "rejected"
  bad(replace(quarter,"<pitch><step>C</step><octave>4</octave></pitch>","<rest/>")++replace(quarter,"<note>","<note><chord/>")),
  bad_layout(replace(quarter,"</note>","<tie type='start'/></note>")++quarter++
      replace(quarter,"</note>","<tie type='stop'/></note>")),
- (music.parse(document(quarter++"<harmony/>"),{strict:true}) or "rejected")=="rejected",
+ ((music.parse(document(quarter++"<harmony/>"),{strict:true}) ^ { null }) or "rejected")=="rejected",
  len(music.parse(document(quarter++"<harmony/>"))^.diagnostics)==1,
- (t.ratio(1,0) or "rejected")=="rejected",
- (t.from_decimal("1e2") or "rejected")=="rejected",
+ ((t.ratio(1,0) ^ { null }) or "rejected")=="rejected",
+ ((t.from_decimal("1e2") ^ { null }) or "rejected")=="rejected",
  t.from_decimal("0.125")^=={num:1,den:8},
  t.add(t.ratio(1,3)^,t.ratio(1,6)^)^=={num:1,den:2}
 ]

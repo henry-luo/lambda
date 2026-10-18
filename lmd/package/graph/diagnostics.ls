@@ -35,9 +35,10 @@ pub fn from_element(value) =>
     if (value.message != null) value.message else "Graph parse error",
     null,
     source_of(value)
-  ) or {
+  ) ^ {
+    {
     code: "graph.parse", severity: "error", message: "Graph parse error",
-    path: null, source: null
+    path: null, source: null}
   }
 
 pub fn has_errors(values) =>

@@ -109,7 +109,7 @@ fn element_by_id(elements, id) => first([
 fn reference_matches(entry, reference) => string(entry.id) == string(reference) or
   string(entry.identifier) == string(reference) or
   string(graph_model.optional(entry, "local-identifier")) == string(reference) or
-  ends_with(string(entry.identifier), "." ++ string(reference)) or false
+  ends_with(string(entry.identifier), "." ++ string(reference)) ^ { false }
 
 fn reference_entries(elements, reference) => [
   for (entry in elements where reference_matches(entry, reference)) entry

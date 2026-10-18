@@ -185,6 +185,9 @@ void js_ast_visit_binding_pattern_children(JsAstNode* node,
 bool js_ast_any_binding_pattern_child(JsAstNode* node,
     JsAstChildPredicate predicate, void* ctx);
 JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter);
+// retain TS type metadata while sharing the executable binding/default shape.
+JsAstNode* js_ast_parameter_pattern(JsAstNode* parameter);
+JsAstNode* js_ast_parameter_default_value(JsAstNode* parameter);
 // assignment elements resolve this reference before iterator/GetV effects.
 JsAstNode* js_ast_pattern_reference_target(JsAstNode* pattern);
 JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters);
@@ -228,6 +231,7 @@ enum JsSuspensionKind {
 bool js_ast_index_can_suspend(const AstIndex* index, AstNodeId root_id,
     AstNodeId begin_id, AstNodeId end_id, JsSuspensionKind kind);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
+bool js_ast_property_is_proto_setter(const JsPropertyNode* property);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are
 // already traversed by ast_visit_core_children(); this reports only the JS

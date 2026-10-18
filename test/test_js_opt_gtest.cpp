@@ -1,9 +1,9 @@
 // Focused JavaScript optimization-contract tests.
 //
-// These tests run one small JS fixture per child process with JS_OPT_TRACE=1
-// and assert the selected optimization path in addition to the semantic
-// result. The profile-enabled child is intentional: release timing captures
-// must remain free of contract tracing overhead.
+// Formal MIR fixtures retain their JS behavior and trace-on/off differential,
+// with physical lowering contracts in test/mir/js_opt. Retained AST kernel
+// tests use runtime trace counters. Profile-enabled children are functional
+// checks; release timing stays free of contract tracing overhead.
 
 #include <gtest/gtest.h>
 
@@ -28,6 +28,8 @@ extern "C" {
 }
 
 #include "../lambda/js/js_exec_profile.h"
+#include "../lambda/lambda.h"
+#include "test_mir_check_helpers.hpp"
 
 namespace {
 
@@ -233,19 +235,37 @@ static char* canonicalize_mir(const char* input) {
             size_t line_start = start;
             while (line_start > 0 && input[line_start - 1] != '\n') line_start--;
             const char* line_end = strchr(input + line_start, '\n');
-            const char* stack_guard = strstr(input + line_start,
-                "lambda_stack_overflow_error,");
-            bool is_stack_guard_pointer = stack_guard &&
-                (!line_end || stack_guard < line_end);
+            // bound the search to this line; rescanning the remaining artifact per register is quadratic.
+            bool is_stack_guard_pointer = false;
+            static const char guard[] = "lambda_stack_overflow_error,";
+            const char* limit = line_end ? line_end : input + size;
+            for (const char* scan = input + line_start; scan + sizeof(guard) - 1 <= limit; scan++) {
+                if (*scan == guard[0] && memcmp(scan, guard, sizeof(guard) - 1) == 0) {
+                    is_stack_guard_pointer = true; break;
+                }
+            }
             // MIR pointer operands have host-dependent decimal widths. AArch64
             // static-recipe addresses may sit above 2^48; tagged Items start
             // at 2^56, so this still preserves language-value constants.
             bool is_user_pointer = value >= 4300000000ULL &&
                 value < 72057594037927936ULL;
-            if (is_stack_guard_pointer || is_user_pointer) {
-                const char* token = "<ptr>";
-                memcpy(output + out, token, 5);
-                out += 5;
+            uint64_t tag = value >> 56;
+            uint64_t payload = value & UINT64_C(0x00ffffffffffffff);
+            static const struct { uint64_t tag; const char* token; } tagged_pointers[] = {
+                {LMD_TYPE_STRING, "<string-ptr>"},
+                {LMD_TYPE_SYMBOL, "<symbol-ptr>"},
+                {LMD_TYPE_FLOAT, "<float-ptr>"},
+            };
+            const char* tagged_token = NULL;
+            if (payload >= 4300000000ULL)
+                for (const auto& entry : tagged_pointers)
+                    if (tag == entry.tag) { tagged_token = entry.token; break; }
+            if (is_stack_guard_pointer || is_user_pointer || tagged_token) {
+                // subnormal literals retain a float-home pointer; packed +/-0 and inline scalars are constants.
+                const char* token = tagged_token ? tagged_token : "<ptr>";
+                size_t length = strlen(token);
+                memcpy(output + out, token, length);
+                out += length;
             } else {
                 memcpy(output + out, input + start, digits);
                 out += digits;
@@ -355,7 +375,8 @@ static const char* opt_executable() {
 static bool run_fixture_mode_backend(const char* name, const char* source,
                                      bool trace_enabled, const char* backend,
                                      TraceResult* trace, char* output,
-                                     size_t output_size, int timeout_ms = 30000) {
+                                     size_t output_size, int timeout_ms = 30000,
+                                     bool standalone = false) {
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
@@ -373,7 +394,8 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
     // MIR dumping is intentionally gated by --no-log. Keep logging enabled for
     // this child so the finalized artifact is available for the differential
     // contract below; the child writes diagnostics to its normal log sink.
-    const char* args[] = {executable, "js", script_path, NULL};
+    // benchmark units are closed scripts; ordinary entry keeps the shared realm's globals reflective.
+    const char* args[] = {executable, "js", script_path, standalone ? "--runtime=mvp-lmd" : NULL, NULL};
     ShellEnvEntry env[5] = {};
     int env_count = 0;
     // This suite contracts the finalized MIR lowering. AUTO now selects the
@@ -436,22 +458,30 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
 
 static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
                              TraceResult* trace, char* output, size_t output_size,
-                             int timeout_ms = 30000) {
+                             int timeout_ms = 30000, bool standalone = false) {
     return run_fixture_mode_backend(name, source, trace_enabled, NULL, trace,
-        output, output_size, timeout_ms);
+        output, output_size, timeout_ms, standalone);
 }
 
 static bool run_fixture(const char* name, const char* source, TraceResult* trace,
-                        char* output, size_t output_size) {
-    return run_fixture_mode(name, source, true, trace, output, output_size);
+                        char* output, size_t output_size, bool standalone = false) {
+    bool ok = run_fixture_mode(name, source, true, trace, output, output_size, 30000, standalone);
+    if (ok) {
+        // shared emission checks replace retired LJS trace hooks; retain the exact behavioral fixture.
+        char script[512], sidecar[512];
+        snprintf(script, sizeof(script), "%s/%s.js", kOptDir, name);
+        snprintf(sidecar, sizeof(sidecar), "test/mir/js_opt/%s.mir-check", name);
+        mir_check::run_fixture(script, sidecar, mir_check::LANG_JS);
+    }
+    return ok;
 }
 
 static void expect_trace_off_same(const char* name, const char* source,
                                   const char* trace_output,
-                                  const char* backend = NULL) {
+                                  const char* backend = NULL, bool standalone = false) {
     char output[4096];
     ASSERT_TRUE(run_fixture_mode_backend(name, source, false, backend, NULL,
-        output, sizeof(output)));
+        output, sizeof(output), 30000, standalone));
     char normalized_trace_output[4096];
     char normalized_output[4096];
     normalize_child_output(trace_output, normalized_trace_output,
@@ -515,151 +545,25 @@ static void expect_ok_output(const char* output) {
     ASSERT_NE(strstr(output, "OPT_OK"), nullptr) << output;
 }
 
-static char* read_fixture_mir(const char* name) {
-    char mir_path[512];
-    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir, name);
-    return read_text(mir_path);
-}
-
-static const char* find_mir_function(const char* mir, const char* marker,
-        const char** end_out, const char* required_line_text = NULL) {
-    if (end_out) *end_out = NULL;
-    if (!mir || !marker) return NULL;
-    const char* candidate = mir;
-    while ((candidate = strstr(candidate, marker))) {
-        const char* line = candidate;
-        while (line > mir && line[-1] != '\n') line--;
-        const char* line_end = strchr(line, '\n');
-        const char* function = strstr(line, ":\tfunc\t");
-        const char* required = required_line_text
-            ? strstr(line, required_line_text) : line;
-        if (function && (!line_end || function < line_end) &&
-                required && (!line_end || required < line_end)) {
-            const char* end = strstr(function, "\n\tendfunc");
-            if (!end) return NULL;
-            if (end_out) *end_out = end;
-            return line;
-        }
-        candidate++;
-    }
-    return NULL;
-}
-
-static const char* find_last_before(const char* begin, const char* end,
-        const char* pattern) {
-    if (!begin || !end || !pattern || begin >= end) return NULL;
-    const char* last = NULL;
-    const char* cursor = begin;
-    while ((cursor = strstr(cursor, pattern)) && cursor < end) {
-        last = cursor;
-        cursor++;
-    }
-    return last;
-}
-
-static bool mir_branch_join_has_defined_carrier(const char* mir,
-        const char* function_prefix, const char* branch_anchor,
-        const char* branch_opcode) {
-    const char* function = mir && function_prefix
-        ? strstr(mir, function_prefix) : NULL;
-    const char* function_end = function ? strstr(function, "\n\tendfunc") : NULL;
-    const char* anchor = function ? strstr(function, branch_anchor) : NULL;
-    char branch_pattern[16];
-    snprintf(branch_pattern, sizeof(branch_pattern), "\n\t%s\tL", branch_opcode);
-    const char* branch = anchor ? strstr(anchor, branch_pattern) : NULL;
-    if (!function || !function_end || !anchor || !branch ||
-            branch >= function_end) return false;
-
-    const char* branch_label = branch + strlen(branch_pattern) - 1;
-    const char* branch_label_end = strchr(branch_label, ',');
-    if (!branch_label_end || branch_label_end >= function_end) return false;
-    char branch_marker[40];
-    char branch_marker_crlf[40];
-    int branch_label_len = (int)(branch_label_end - branch_label);
-    if (branch_label_len <= 0 || branch_label_len + 3 >=
-            (int)sizeof(branch_marker)) return false;
-    if (branch_label_len + 4 >= (int)sizeof(branch_marker_crlf)) return false;
-    branch_marker[0] = '\n';
-    memcpy(branch_marker + 1, branch_label, (size_t)branch_label_len);
-    branch_marker[branch_label_len + 1] = ':';
-    branch_marker[branch_label_len + 2] = '\n';
-    branch_marker[branch_label_len + 3] = '\0';
-    // Windows MIR dumps use CRLF; accept both line endings when locating labels.
-    branch_marker_crlf[0] = '\n';
-    memcpy(branch_marker_crlf + 1, branch_label, (size_t)branch_label_len);
-    branch_marker_crlf[branch_label_len + 1] = ':';
-    branch_marker_crlf[branch_label_len + 2] = '\r';
-    branch_marker_crlf[branch_label_len + 3] = '\n';
-    branch_marker_crlf[branch_label_len + 4] = '\0';
-
-    const char* branch_target = strstr(branch_label_end, branch_marker);
-    if (!branch_target) branch_target = strstr(branch_label_end, branch_marker_crlf);
-    if (!branch_target || branch_target >= function_end) return false;
-    const char* join_jump = find_last_before(branch_label_end, branch_target,
-        "\n\tjmp\tL");
-    const char* merge_move = find_last_before(branch_label_end, join_jump,
-        "\n\tmov\t%");
-    if (!merge_move || !join_jump) return false;
-
-    const char* destination = merge_move + strlen("\n\tmov\t");
-    const char* destination_end = strchr(destination, ',');
-    if (!destination_end || destination_end >= function_end) return false;
-    char merged[32];
-    int merged_len = (int)(destination_end - destination);
-    if (merged_len <= 0 || merged_len >= (int)sizeof(merged)) return false;
-    memcpy(merged, destination, (size_t)merged_len);
-    merged[merged_len] = '\0';
-
-    const char* label = join_jump + strlen("\n\tjmp\t");
-    const char* label_end = strchr(label, '\n');
-    if (!label_end || label_end >= function_end) return false;
-    char join_marker[40];
-    char join_marker_crlf[40];
-    int label_len = (int)(label_end - label);
-    if (label_len > 0 && label[label_len - 1] == '\r') label_len--;
-    if (label_len <= 0 || label_len + 3 >= (int)sizeof(join_marker)) return false;
-    if (label_len + 4 >= (int)sizeof(join_marker_crlf)) return false;
-    join_marker[0] = '\n';
-    memcpy(join_marker + 1, label, (size_t)label_len);
-    join_marker[label_len + 1] = ':';
-    join_marker[label_len + 2] = '\n';
-    join_marker[label_len + 3] = '\0';
-    join_marker_crlf[0] = '\n';
-    memcpy(join_marker_crlf + 1, label, (size_t)label_len);
-    join_marker_crlf[label_len + 1] = ':';
-    join_marker_crlf[label_len + 2] = '\r';
-    join_marker_crlf[label_len + 3] = '\n';
-    join_marker_crlf[label_len + 4] = '\0';
-
-    const char* join = strstr(branch_target, join_marker);
-    if (!join) join = strstr(branch_target, join_marker_crlf);
-    const char* error_test = join ? strstr(join, "\n\tursh\t") : NULL;
-    if (error_test && error_test < function_end) {
-        const char* first_comma = strchr(error_test, ',');
-        if (!first_comma || first_comma >= function_end) return false;
-        const char* carrier = first_comma + 1;
-        while (*carrier == ' ' || *carrier == '\t') carrier++;
-        size_t carrier_len = 0;
-        while (carrier[carrier_len] && carrier[carrier_len] != ',' &&
-                carrier[carrier_len] != '\n') carrier_len++;
-        if (carrier_len == strlen(merged) &&
-                strncmp(carrier, merged, carrier_len) == 0) {
-            return true;
-        }
-    }
-
-    // A branch may already have routed every fallible helper before its
-    // normal edge. In that form D8.4.3 still requires the right arm to
-    // define the same merged result rather than leaking an arm-local value.
-    char right_move[40];
-    int move_len = snprintf(right_move, sizeof(right_move), "\n\tmov\t%s,",
-        merged);
-    if (move_len <= 0 || move_len >= (int)sizeof(right_move)) return false;
-    const char* right_publish = strstr(branch_target, right_move);
-    return right_publish && right_publish < join;
-}
-
 }  // namespace
+
+TEST(JsOpt, MirCanonicalizationPreservesTextTagsAndScalarConstants) {
+    char text[256];
+    snprintf(text, sizeof(text), "%llu %llu %llu %llu %llu %llu 42 360287974484639744",
+        (unsigned long long)(((uint64_t)LMD_TYPE_STRING << 56) | UINT64_C(0x123456789)),
+        (unsigned long long)(((uint64_t)LMD_TYPE_SYMBOL << 56) | UINT64_C(0x123456789)),
+        (unsigned long long)UINT64_C(0x123456789),
+        (unsigned long long)(((uint64_t)LMD_TYPE_FLOAT << 56) | UINT64_C(0x123456788)),
+        (unsigned long long)ITEM_FLOAT_P0, (unsigned long long)ITEM_FLOAT_N0);
+    char* normalized = canonicalize_mir(text);
+    ASSERT_NE(normalized, nullptr);
+    char expected[256];
+    snprintf(expected, sizeof(expected),
+        "<string-ptr> <symbol-ptr> <ptr> <float-ptr> %llu %llu 42 360287974484639744",
+        (unsigned long long)ITEM_FLOAT_P0, (unsigned long long)ITEM_FLOAT_N0);
+    EXPECT_STREQ(normalized, expected);
+    free(normalized);
+}
 
 TEST(JsOpt, TraceParserFailsClosed) {
     const char* source = "console.log('OPT_OK');\n";
@@ -715,7 +619,6 @@ TEST(JsOpt, RegexCompileCacheHit) {
     ASSERT_TRUE(run_fixture("regex_compile_cache_hit", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_REGEX_COMPILE_CACHE_HIT][1], 0u);
     expect_trace_off_same("regex_compile_cache_hit", source, output);
     free(source);
 }
@@ -735,7 +638,6 @@ TEST(JsOpt, RegexMediumCaptureFreeLoopReusesCompiledMatcher) {
     ASSERT_TRUE(run_fixture("regex_medium_capture_free_loop", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_REGEX_PERMANENT_CACHE_HIT][1], 16u);
     expect_trace_off_same("regex_medium_capture_free_loop", source, output);
 }
 
@@ -749,9 +651,6 @@ TEST(JsOpt, RegexShortCaptureUsesFreshWrapper) {
     ASSERT_TRUE(run_fixture("regex_short_capture", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_REGEX_FRESH_WRAPPER][1], 0u);
-    EXPECT_GT(trace.reasons[JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX], 0u);
-    EXPECT_EQ(trace.events[JS_OPT_REGEX_KEYLESS_REJECT][1], 0u);
     expect_trace_off_same("regex_short_capture", source, output);
 }
 
@@ -809,7 +708,6 @@ TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     ASSERT_TRUE(run_fixture("array_dense_store", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_FAST_HIT][1], 0u);
     expect_trace_off_same("array_dense_store", source, output);
 }
 
@@ -831,8 +729,6 @@ TEST(JsOpt, NumberIndexOwnReadKeepsDescriptorAndHoleFallback) {
     ASSERT_TRUE(run_fixture("number_index_own_read", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1], 0u);
     expect_trace_off_same("number_index_own_read", source, output);
 }
 
@@ -957,15 +853,6 @@ TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
     ASSERT_TRUE(run_fixture("mir_number_plan", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_NUMBER_ADMITTED][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_NUMBER_FALLBACK][2], 0u);
-
-    char* mir = read_fixture_mir("mir_number_plan");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "dadd"), nullptr);
-    EXPECT_NE(strstr(mir, "dlt"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
-    free(mir);
     expect_trace_off_same("mir_number_plan", source, output);
 }
 
@@ -998,19 +885,6 @@ TEST(JsOpt, BoxedLoopNumberPairKeepsCoercingFallback) {
     ASSERT_TRUE(run_fixture("boxed_loop_number_pair", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("boxed_loop_number_pair");
-    ASSERT_NE(mir, nullptr);
-    const char* end = NULL;
-    const char* body = find_mir_function(mir, "_js_pair_", &end,
-        "_body:\tfunc");
-    ASSERT_NE(body, nullptr);
-    ASSERT_NE(end, nullptr);
-    EXPECT_GT(trace.events[JS_OPT_MIR_BOXED_LOOP_PAIR][1], 0u);
-    const char* number = strstr(body, "\n\tdadd\t");
-    EXPECT_TRUE(number && number < end);
-    const char* fallback = strstr(body, "\n\tcall\tjs_add");
-    EXPECT_TRUE(fallback && fallback < end);
-    free(mir);
     expect_trace_off_same("boxed_loop_number_pair", source, output);
 }
 
@@ -1050,24 +924,6 @@ TEST(JsOpt, GuardedNumericPeerCarriesNumberThroughLoopState) {
     ASSERT_TRUE(run_fixture("guarded_numeric_peer", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("guarded_numeric_peer");
-    ASSERT_NE(mir, nullptr);
-    const char* end = NULL;
-    const char* native = find_mir_function(mir, "_js_orbit_", &end);
-    ASSERT_NE(native, nullptr);
-    ASSERT_NE(end, nullptr);
-    EXPECT_NE(strstr(native, "d:%p0, d:%p1, d:%p2, d:%p3, d:%p4"), nullptr);
-    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
-    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
-        "js_cmp_raw"};
-    for (const char* helper : helpers) {
-        char marker[64];
-        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
-        const char* boxed_call = strstr(native, marker);
-        EXPECT_FALSE(boxed_call && boxed_call < end) << helper;
-    }
-    free(mir);
     expect_trace_off_same("guarded_numeric_peer", source, output);
 }
 
@@ -1110,30 +966,6 @@ TEST(JsOpt, NumericBindingProofSeparatesInitializersFromLoopWrites) {
     ASSERT_TRUE(run_fixture("numeric_binding_cycle", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("numeric_binding_cycle");
-    ASSERT_NE(mir, nullptr);
-    const char* rotate_end = NULL;
-    const char* rotate = find_mir_function(mir, "_js_rotate_", &rotate_end);
-    ASSERT_NE(rotate, nullptr);
-    ASSERT_NE(rotate_end, nullptr);
-    EXPECT_NE(strstr(rotate, "\n\tdmul\t"), nullptr);
-    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
-        "js_cmp_raw"};
-    for (const char* helper : helpers) {
-        char marker[64];
-        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
-        const char* boxed_call = strstr(rotate, marker);
-        EXPECT_FALSE(boxed_call && boxed_call < rotate_end) << helper;
-    }
-    const char* mutable_end = NULL;
-    const char* mutable_body = find_mir_function(mir, "_js_mutableSource_",
-        &mutable_end, "_body:\tfunc");
-    ASSERT_NE(mutable_body, nullptr);
-    ASSERT_NE(mutable_end, nullptr);
-    const char* generic_add = strstr(mutable_body, "\n\tcall\tjs_add");
-    EXPECT_TRUE(generic_add && generic_add < mutable_end);
-    free(mir);
     expect_trace_off_same("numeric_binding_cycle", source, output);
 }
 
@@ -1156,20 +988,6 @@ TEST(JsOpt, NativeNumberUpdatesKeepPostfixAndGenericSemantics) {
     ASSERT_TRUE(run_fixture("native_number_update", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("native_number_update");
-    ASSERT_NE(mir, nullptr);
-    const char* native_end = NULL;
-    const char* native = find_mir_function(mir, "_js_nativeUpdate_", &native_end);
-    ASSERT_NE(native, nullptr);
-    ASSERT_NE(native_end, nullptr);
-    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
-    EXPECT_NE(strstr(native, "\n\tdsub\t"), nullptr);
-    const char* increment = strstr(native, "\n\tcall\tjs_increment");
-    const char* decrement = strstr(native, "\n\tcall\tjs_decrement");
-    EXPECT_FALSE(increment && increment < native_end);
-    EXPECT_FALSE(decrement && decrement < native_end);
-    free(mir);
     expect_trace_off_same("native_number_update", source, output);
 }
 
@@ -1212,40 +1030,6 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
     ASSERT_TRUE(run_fixture("native_alias_compound", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("native_alias_compound");
-    ASSERT_NE(mir, nullptr);
-    const char* native_end = NULL;
-    const char* native = find_mir_function(mir, "_js_subtractLoop_", &native_end);
-    ASSERT_NE(native, nullptr);
-    ASSERT_NE(native_end, nullptr);
-    EXPECT_NE(strstr(native, "\n\tdsub\t"), nullptr);
-    const char* subtract = strstr(native, "\n\tcall\tjs_subtract");
-    EXPECT_FALSE(subtract && subtract < native_end);
-    const char* chained_end = NULL;
-    const char* chained = find_mir_function(mir, "_js_chainedSubtract_",
-        &chained_end);
-    ASSERT_NE(chained, nullptr);
-    ASSERT_NE(chained_end, nullptr);
-    EXPECT_NE(strstr(chained, "\n\tdsub\t"), nullptr);
-    const char* chained_subtract = strstr(chained, "\n\tcall\tjs_subtract");
-    EXPECT_FALSE(chained_subtract && chained_subtract < chained_end);
-    const char* assigned_end = NULL;
-    const char* assigned = find_mir_function(mir, "_js_assignedSubtract_",
-        &assigned_end);
-    ASSERT_NE(assigned, nullptr);
-    ASSERT_NE(assigned_end, nullptr);
-    EXPECT_NE(strstr(assigned, "\n\tdsub\t"), nullptr);
-    const char* assigned_subtract = strstr(assigned, "\n\tcall\tjs_subtract");
-    EXPECT_FALSE(assigned_subtract && assigned_subtract < assigned_end);
-    const char* overwritten_end = NULL;
-    const char* overwritten = find_mir_function(mir, "_js_overwrittenAlias_",
-        &overwritten_end);
-    ASSERT_NE(overwritten, nullptr);
-    ASSERT_NE(overwritten_end, nullptr);
-    const char* overwritten_compare = strstr(overwritten, "\n\tcall\tjs_compare");
-    EXPECT_TRUE(overwritten_compare && overwritten_compare < overwritten_end);
-    free(mir);
     expect_trace_off_same("native_alias_compound", source, output);
 }
 
@@ -1267,18 +1051,6 @@ TEST(JsOpt, NativeForInitializerAliasKeepsGenericSemantics) {
     ASSERT_TRUE(run_fixture("native_for_initializer_alias", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("native_for_initializer_alias");
-    ASSERT_NE(mir, nullptr);
-    const char* native_end = NULL;
-    const char* native = find_mir_function(mir, "_js_sumUntil_", &native_end);
-    ASSERT_NE(native, nullptr);
-    ASSERT_NE(native_end, nullptr);
-    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
-    EXPECT_NE(strstr(native, "\n\tdlt\t"), nullptr);
-    const char* add = strstr(native, "\n\tcall\tjs_add");
-    EXPECT_FALSE(add && add < native_end);
-    free(mir);
     expect_trace_off_same("native_for_initializer_alias", source, output);
 }
 
@@ -1301,25 +1073,6 @@ TEST(JsOpt, BoxedBodyClosedNumberLocalKeepsDynamicArgumentsGeneric) {
     ASSERT_TRUE(run_fixture("boxed_closed_number_local", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("boxed_closed_number_local");
-    ASSERT_NE(mir, nullptr);
-    const char* count_end = NULL;
-    const char* count = find_mir_function(mir, "_js_countTo_", &count_end,
-        "_body:\tfunc");
-    ASSERT_NE(count, nullptr);
-    ASSERT_NE(count_end, nullptr);
-    EXPECT_NE(strstr(count, "\n\tdadd\t"), nullptr);
-    const char* increment = strstr(count, "\n\tcall\tjs_increment");
-    EXPECT_FALSE(increment && increment < count_end);
-    const char* add_end = NULL;
-    const char* add = find_mir_function(mir, "_js_addOne_", &add_end,
-        "_body:\tfunc");
-    ASSERT_NE(add, nullptr);
-    ASSERT_NE(add_end, nullptr);
-    const char* generic_add = strstr(add, "\n\tcall\tjs_add");
-    EXPECT_TRUE(generic_add && generic_add < add_end);
-    free(mir);
     expect_trace_off_same("boxed_closed_number_local", source, output);
 }
 
@@ -1345,18 +1098,6 @@ TEST(JsOpt, RuntimeHelperCensusKeepsGenericCoercionAndIndexSemantics) {
     ASSERT_TRUE(run_fixture("runtime_helper_census", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_TO_NUMERIC_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_INCREMENT_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_DECREMENT_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_BOXED_COMPARE_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL][1], 0u);
-    uint64_t classified_number_reads =
-        trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1] +
-        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_NUMERIC_ARRAY][1] +
-        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_ARRAY][1] +
-        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TYPED_ARRAY][1] +
-        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_OTHER][1];
-    EXPECT_GT(classified_number_reads, 0u);
     expect_trace_off_same("runtime_helper_census", source, output);
 }
 
@@ -1376,23 +1117,6 @@ TEST(JsOpt, DiscardedGenericUpdateFusesToNumericAndUpdate) {
     ASSERT_TRUE(run_fixture("discarded_generic_update", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_TO_NUMERIC_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_INCREMENT_CALL][1], 0u);
-
-    char* mir = read_fixture_mir("discarded_generic_update");
-    ASSERT_NE(mir, nullptr);
-    const char* generic_end = NULL;
-    const char* generic = find_mir_function(mir, "_js_genericLoop_", &generic_end,
-        "_body:\tfunc");
-    ASSERT_NE(generic, nullptr);
-    ASSERT_NE(generic_end, nullptr);
-    const char* update = strstr(generic, "\n\tcall\tjs_increment");
-    EXPECT_TRUE(update && update < generic_end);
-    const char* numeric_update = strstr(generic, "\n\tcall\tjs_increment_numeric");
-    EXPECT_FALSE(numeric_update && numeric_update < generic_end);
-    const char* numeric = strstr(generic, "\n\tcall\tjs_to_numeric");
-    EXPECT_FALSE(numeric && numeric < generic_end);
-    free(mir);
     expect_trace_off_same("discarded_generic_update", source, output);
 }
 
@@ -1415,21 +1139,6 @@ TEST(JsOpt, CompanionDenseReadPreservesHoles) {
     ASSERT_TRUE(run_fixture("companion_dense_read", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1], 0u);
-
-    char* mir = read_fixture_mir("companion_dense_read");
-    ASSERT_NE(mir, nullptr);
-    const char* middle_end = NULL;
-    const char* middle = find_mir_function(mir, "_js_middle_", &middle_end,
-        "_body:\tfunc");
-    ASSERT_NE(middle, nullptr);
-    ASSERT_NE(middle_end, nullptr);
-    const char* companion = strstr(middle,
-        "js_array_get_existing_own_dense_with_props_or_missing");
-    EXPECT_TRUE(companion && companion < middle_end);
-    const char* fallback = strstr(middle, "js_elements_get_number");
-    EXPECT_TRUE(fallback && fallback < middle_end);
-    free(mir);
     expect_trace_off_same("companion_dense_read", source, output);
 }
 
@@ -1476,16 +1185,6 @@ TEST(JsOpt, MirNativeNumberIndexKeepsKeyUnboxed) {
     ASSERT_TRUE(run_fixture("mir_native_index", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_NATIVE_INDEX_ADMITTED][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_NATIVE_INDEX_FALLBACK][2], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("mir_native_index");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_elements_get_number"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
-    EXPECT_NE(strstr(mir, "\tlsh\t"), nullptr);
-    free(mir);
     expect_trace_off_same("mir_native_index", source, output);
 }
 
@@ -1516,21 +1215,6 @@ TEST(JsOpt, BoxedNumericArrayKeyKeepsDenseReadAndPropertyFallback) {
     ASSERT_TRUE(run_fixture("boxed_numeric_array_key", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("boxed_numeric_array_key");
-    ASSERT_NE(mir, nullptr);
-    const char* repeated_end = NULL;
-    const char* repeated = find_mir_function(mir, "_js_repeatedRead_",
-        &repeated_end, "_body:\tfunc");
-    ASSERT_NE(repeated, nullptr);
-    ASSERT_NE(repeated_end, nullptr);
-    const char* dense = strstr(repeated,
-        "call\tjs_array_get_existing_own_dense_with_props_or_missing");
-    EXPECT_TRUE(dense && dense < repeated_end);
-    const char* fallback = strstr(repeated, "call\tjs_get_reference");
-    EXPECT_TRUE(fallback && fallback < repeated_end);
-    free(mir);
     expect_trace_off_same("boxed_numeric_array_key", source, output);
 }
 
@@ -1554,7 +1238,6 @@ TEST(JsOpt, ArrayLengthExpansionInvalidatesPackedIndexedRead) {
     ASSERT_TRUE(run_fixture("array_length_packed_hole", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
     expect_trace_off_same("array_length_packed_hole", source, output);
 }
 
@@ -1612,14 +1295,6 @@ TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
     ASSERT_TRUE(run_fixture("mir_literal_field", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("mir_literal_field");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_new_literal_object_with_typemap"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("mir_literal_field", source, output);
 }
 
@@ -1685,12 +1360,6 @@ TEST(JsOpt, ExactMathMaxCallKeepsGetArgumentsAndFallback) {
     ASSERT_TRUE(run_fixture("exact_math_max_call", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("exact_math_max_call");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_builtin_callable_is_id"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tfn_max2_u"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_call"), nullptr);
-    free(mir);
     expect_trace_off_same("exact_math_max_call", source, output);
 }
 
@@ -1732,17 +1401,6 @@ TEST(JsOpt, GuardedNumericWhileKeepsIndexedReadsAndGenericEntry) {
     ASSERT_TRUE(run_fixture("guarded_numeric_while", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("guarded_numeric_while");
-    ASSERT_NE(mir, nullptr);
-    const char* probe_end = NULL;
-    const char* probe = find_mir_function(mir, "_js_probe_", &probe_end,
-        "_body:\tfunc");
-    ASSERT_NE(probe, nullptr);
-    ASSERT_NE(probe_end, nullptr);
-    const char* fallback = strstr(probe, "call\tjs_increment");
-    const char* native = strstr(probe, "\tdadd\t");
-    EXPECT_TRUE(native && fallback && native < fallback && fallback < probe_end);
-    free(mir);
     expect_trace_off_same("guarded_numeric_while", source, output);
 }
 
@@ -1765,15 +1423,174 @@ TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
     ASSERT_TRUE(run_fixture("recursive_literal_field", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("recursive_literal_field");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_new_literal_object_with_typemap"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("recursive_literal_field", source, output);
 }
+
+namespace {
+
+struct MvpMirTuningCase {
+    const char* name;
+    const char* fixture;
+    const char* source;
+    bool standalone = true;
+};
+
+// keep callback-free admission cases separate: reflection would disable their numeric proofs.
+static const MvpMirTuningCase kMvpMirTuningCases[] = {
+    {"ReflectiveOwnDataUsesSharedLookup", "mvp_reflective_own_data", R"JS(
+function read(object) { return object.value; }
+function C(value) { this.value = value; }
+const object = new C(7);
+Object.setPrototypeOf(object, {value: 11});
+if (read(object) !== 7) throw new Error('own data read');
+Object.defineProperty(object, 'value', {get() { return 9; }, configurable: true});
+if (read(object) !== 9) throw new Error('accessor fallback');
+delete object.value;
+if (read(object) !== 11) throw new Error('inherited fallback');
+console.log('OPT_OK');
+)JS"},
+    {"BoundedNativeRecursion", "mvp_bounded_native_recursion", R"JS(
+function count(n) {
+    let one = 1;
+    if (n === 0) return one;
+    return one + count(n - 1);
+}
+function rotate(n, a, b) {
+    if (n === 0) return 100 * a + b;
+    return rotate(n - 1, b, a);
+}
+if (count(40) !== 41 || rotate(7, 2, 3) !== 302)
+    throw new Error('recursive scalar result or argument snapshot');
+console.log('OPT_OK');
+)JS"},
+    {"BoundedMethodRecursion", "mvp_bounded_method_recursion", R"JS(
+class Counter {
+    constructor(value) { this.value = value; }
+    sum(n) {
+        if (n === 0) return this.value;
+        let total = 0;
+        for (let i = 0; i < 2; i++) total += this.sum(n - 1);
+        return total;
+    }
+}
+const a = new Counter(2), b = new Counter(7);
+if (a.sum(3) !== 16 || a.value !== 2 || b.sum(2) !== 28 || b.value !== 7)
+    throw new Error('recursive method receiver or local snapshot');
+console.log('OPT_OK');
+)JS"},
+    {"NonrecursiveEarlyReturnKeepsCall", "mvp_nonrecursive_early_return", R"JS(
+function scan(n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) total += i;
+    if (total > 0) return total;
+    return 0;
+}
+function driver(n) { return scan(n); }
+if (driver(10) !== 45 || driver(0) !== 0)
+    throw new Error('nonrecursive early return');
+console.log('OPT_OK');
+)JS"},
+    {"ClosedImplicitGlobalNumericKey", "mvp_implicit_numeric_key", R"JS(
+function fill() {
+    const values = [0, 0, 0];
+    for (implicitIndex = 0; implicitIndex < 3; implicitIndex++)
+        values[implicitIndex] = implicitIndex + 1;
+    return values[0] + values[1] + values[2];
+}
+if (fill() !== 6) throw new Error('implicit numeric key');
+console.log('OPT_OK');
+)JS"},
+    {"ImplicitKeyDestructuringRejectsNumericProof", "mvp_implicit_destructured_key", R"JS(
+function fill() {
+    const values = [1];
+    implicitKey = 0;
+    [[implicitKey]] = [['named']];
+    values[implicitKey] = 7;
+    return values[0] === 1 && values.named === 7;
+}
+if (!fill()) throw new Error('destructuring bypassed key inventory');
+console.log('OPT_OK');
+)JS"},
+    {"ReflectiveGlobalRetainsPropertyFallback", "mvp_reflective_global_key", R"JS(
+function fill() {
+    const values = [1];
+    implicitKey = 0;
+    globalThis.implicitKey = 'named';
+    values[implicitKey] = 7;
+    return values[0] === 1 && values.named === 7;
+}
+if (!fill()) throw new Error('reflective global bypassed key fallback');
+console.log('OPT_OK');
+)JS", false},
+    {"UnknownArrayNumericConsumer", "mvp_unknown_array_numeric_consumer", R"JS(
+function product(a, b) { return a[0] * b[0]; }
+function difference(a, b) { return a[0] - b[0]; }
+if (product(['7'], [2]) !== 14 || difference([[7]], [2]) !== 5 ||
+    product([5e-324], [2]) !== 1e-323 || !isNaN(product([], [2])) ||
+    !isNaN(difference([undefined], [2])))
+    throw new Error('numeric element conversion or absence');
+console.log('OPT_OK');
+)JS"},
+    {"NumericConsumerRetainsCallbacksAndOwnership", "mvp_numeric_consumer_callbacks", R"JS(
+function product(a, b) { return a[0] * b.value; }
+let order = '';
+const a = [{ valueOf() { order += 'a'; return 7; } }];
+const b = { get value() { order += 'b'; return 2; } };
+if (product(a, b) !== 14 || order !== 'ba')
+    throw new Error('operand coercion order');
+const wide = [5e-324];
+const mutating = { get value() { wide[0] = 1; return 2; } };
+if (product(wide, mutating) !== 1e-323)
+    throw new Error('scalar element lifetime');
+const hole = new Array(1);
+Array.prototype[0] = 9;
+const inherited = product(hole, { value: 2 });
+delete Array.prototype[0];
+if (inherited !== 18) throw new Error('prototype element fallback');
+console.log('OPT_OK');
+)JS"},
+    {"RepeatedDeferredNumericKey", "mvp_repeated_deferred_numeric_key", R"JS(
+const keys = [0];
+function put(owner) {
+    for (let i = 0; i < 2; i++) owner[keys[0]] = i + 10;
+}
+const array = [], object = {};
+put(array); keys[0] = 1; put(array);
+keys[0] = true; put(object); keys[0] = null; put(object);
+keys[0] = 1.5; put(object); keys[0] = -0; put(array);
+if (array.length !== 2 || array[0] !== 11 || array[1] !== 11 ||
+    object.true !== 11 || object.null !== 11 || object['1.5'] !== 11)
+    throw new Error('deferred Number or named key');
+console.log('OPT_OK');
+)JS"},
+    {"DeferredObjectKeyKeepsRhsOrder", "mvp_deferred_object_key_order", R"JS(
+function put(owner, key) { owner[key] = rhs(); }
+function rhs() { order += 'r'; index = 1; return 7; }
+let order = '', index = 0;
+const key = { toString() { order += 'k'; return index; } };
+const array = [];
+put(array, key);
+if (order !== 'rk' || array[0] !== undefined || array[1] !== 7)
+    throw new Error('deferred key converted before RHS');
+console.log('OPT_OK');
+)JS"},
+};
+
+class JsMvpMirOpt : public ::testing::TestWithParam<MvpMirTuningCase> {};
+
+TEST_P(JsMvpMirOpt, EmissionAndSemantics) {
+    const MvpMirTuningCase& test = GetParam();
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture(test.fixture, test.source, &trace, output, sizeof(output), test.standalone));
+    expect_ok_output(output);
+    expect_trace_off_same(test.fixture, test.source, output, NULL, test.standalone);
+}
+
+INSTANTIATE_TEST_SUITE_P(Tuning, JsMvpMirOpt, ::testing::ValuesIn(kMvpMirTuningCases),
+    [](const ::testing::TestParamInfo<MvpMirTuningCase>& info) { return info.param.name; });
+
+}  // namespace
 
 TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     const char* source =
@@ -1796,16 +1613,6 @@ TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     ASSERT_TRUE(run_fixture("string_leaves", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SEARCH_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SEARCH_UNICODE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_UNICODE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SLICE_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SLICE_UNICODE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_CHAR_ACCESS_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_CHAR_ACCESS_UNICODE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_UNICODE][1], 0u);
     expect_trace_off_same("string_leaves", source, output);
 }
 
@@ -1830,8 +1637,6 @@ TEST(JsOpt, TaggedAsciiSplitKeepsElementAndLimitSemantics) {
     ASSERT_TRUE(run_fixture("tagged_ascii_split", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_ASCII][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_UNICODE][1], 0u);
     expect_trace_off_same("tagged_ascii_split", source, output);
 }
 
@@ -1851,19 +1656,6 @@ TEST(JsOpt, MirAsciiStringCallsKeepCapabilityFallback) {
     ASSERT_TRUE(run_fixture("mir_ascii_string_call", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("mir_ascii_string_call");
-    ASSERT_NE(mir, nullptr);
-    const char* scan_end = NULL;
-    const char* scan = find_mir_function(mir, "_js_scan_", &scan_end,
-        "_body:\tfunc");
-    ASSERT_NE(scan, nullptr);
-    ASSERT_NE(scan_end, nullptr);
-    const char* leaf = strstr(scan, "js_try_ascii_string_builtin_no_gc");
-    EXPECT_TRUE(leaf && leaf < scan_end);
-    const char* fallback = strstr(scan, "\n\tcall\tjs_call");
-    EXPECT_TRUE(fallback && fallback < scan_end);
-    free(mir);
     expect_trace_off_same("mir_ascii_string_call", source, output);
 }
 
@@ -1878,8 +1670,6 @@ TEST(JsOpt, AsciiSubstringValueCacheReusesLeaves) {
     ASSERT_TRUE(run_fixture("ascii_substring_cache", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ASCII_SUBSTRING_CACHE_MISS][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_ASCII_SUBSTRING_CACHE_HIT][1], 0u);
     expect_trace_off_same("ascii_substring_cache", source, output);
 }
 
@@ -1892,8 +1682,6 @@ TEST(JsOpt, NonExtensibleArrayFallsBack) {
     ASSERT_TRUE(run_fixture("array_non_extensible", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_GUARD_FAIL][2], 0u);
-    EXPECT_GT(trace.reasons[JS_OPT_REASON_NOT_EXTENSIBLE], 0u);
     expect_trace_off_same("array_non_extensible", source, output);
 }
 
@@ -1908,16 +1696,6 @@ TEST(JsOpt, Result29NumberIndexedLaneUsesSharedReferenceSemantics) {
     ASSERT_TRUE(run_fixture("result29_number_indexed_lane", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("result29_number_indexed_lane");
-    ASSERT_NE(mir, nullptr);
-    // D1.3: known Number keys use the native-key element kernel; the write
-    // stays on the canonical Set completion path.
-    EXPECT_NE(strstr(mir, "js_elements_get_number"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set"), nullptr);
-    EXPECT_EQ(strstr(mir, "js_get_number_reference"), nullptr);
-    EXPECT_EQ(strstr(mir, "js_set_number_assignment"), nullptr);
-    free(mir);
     expect_trace_off_same("result29_number_indexed_lane", source, output);
 }
 
@@ -1935,16 +1713,6 @@ TEST(JsOpt, Result29TypedArrayUsesSharedReferenceSemantics) {
     ASSERT_TRUE(run_fixture("result29_typed_array_guard", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("result29_typed_array_guard");
-    ASSERT_NE(mir, nullptr);
-    // D1.3: the guarded setter delegates typed-index semantics to one runtime
-    // leaf; a non-typed receiver still uses the shared generic Set fallback.
-    EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
-    EXPECT_EQ(strstr(mir, "js_typed_array_matches_type"), nullptr);
-    free(mir);
     expect_trace_off_same("result29_typed_array_guard", source, output);
 }
 
@@ -1962,8 +1730,6 @@ TEST(JsOpt, Result29TypedArrayGuardRejectsShadowedConstructor) {
     ASSERT_TRUE(run_fixture("result29_shadowed_typed_array", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    // D6.2.2v2: a builtin-looking identifier is not a capability fact when
-    // the lexical binding can be shadowed; semantics must remain generic.
     expect_trace_off_same("result29_shadowed_typed_array", source, output);
 }
 
@@ -1987,7 +1753,6 @@ TEST(JsOpt, OrdinaryEnumerationInspectsDescriptorsWithoutMaterializingThem) {
     ASSERT_TRUE(run_fixture("ordinary_enumeration_inspect", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_OWN_ENUMERABILITY_INSPECT][1], 0u);
     expect_trace_off_same("ordinary_enumeration_inspect", source, output);
 }
 
@@ -2006,14 +1771,6 @@ TEST(JsOpt, StaticNumericArrayLiteralUsesCompactInitializer) {
     ASSERT_TRUE(run_fixture("static_numeric_array_literal", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_GC_ITEMS_ALLOC][1], 0u);
-    EXPECT_EQ(trace.events[JS_OPT_ARRAY_RUNTIME_ITEMS_INSTALL][1], 0u);
-
-    char* mir = read_fixture_mir("static_numeric_array_literal");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_array_new_from_static_items"), nullptr);
-    free(mir);
     expect_trace_off_same("static_numeric_array_literal", source, output);
 }
 
@@ -2034,12 +1791,6 @@ TEST(JsOpt, StaticPrimitiveObjectLiteralUsesCompactInitializer) {
     ASSERT_TRUE(run_fixture("static_primitive_object_literal", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_STATIC_OBJECT_INITIALIZER][1], 0u);
-
-    char* mir = read_fixture_mir("static_primitive_object_literal");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_object_new_from_static_properties"), nullptr);
-    free(mir);
     expect_trace_off_same("static_primitive_object_literal", source, output);
 }
 
@@ -2061,7 +1812,6 @@ TEST(JsOpt, StaticCompositeLiteralRecipePreservesFreshNestedValues) {
     ASSERT_TRUE(run_fixture("static_composite_literal_recipe", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
     expect_trace_off_same("static_composite_literal_recipe", source, output);
 }
 
@@ -2085,13 +1835,6 @@ TEST(JsOpt, ConstructorAssignedFieldsUseGuardedLayout) {
     ASSERT_TRUE(run_fixture("constructor_assigned_fields", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("constructor_assigned_fields");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("constructor_assigned_fields", source, output);
 }
 
@@ -2122,14 +1865,6 @@ TEST(JsOpt, PlainFunctionEntryFieldsUseGuardedLayout) {
     ASSERT_TRUE(run_fixture("plain_function_entry_fields", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("plain_function_entry_fields");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("plain_function_entry_fields", source, output);
 }
 
@@ -2169,14 +1904,6 @@ TEST(JsOpt, PlainFunctionHashMapPrefixUsesGuardedLayout) {
     ASSERT_TRUE(run_fixture("plain_function_hashmap_prefix", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("plain_function_hashmap_prefix");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("plain_function_hashmap_prefix", source, output);
 }
 
@@ -2203,13 +1930,6 @@ TEST(JsOpt, PlainFunctionFieldsFollowLocalAliases) {
     ASSERT_TRUE(run_fixture("plain_function_local_alias_fields", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("plain_function_local_alias_fields");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
-    free(mir);
     expect_trace_off_same("plain_function_local_alias_fields", source, output);
 }
 
@@ -2238,13 +1958,6 @@ TEST(JsOpt, PlainFunctionFieldsUseSeparatelyAssignedPrototypeMethods) {
     ASSERT_TRUE(run_fixture("plain_function_separate_prototype_fields", source,
         &trace, output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("plain_function_separate_prototype_fields");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
-    free(mir);
     expect_trace_off_same("plain_function_separate_prototype_fields", source,
         output);
 }
@@ -2281,14 +1994,6 @@ TEST(JsOpt, DynamicConstructorFieldsReuseReservedShapeTransitions) {
     ASSERT_TRUE(run_fixture("dynamic_constructor_fields", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_STORE][2], 0u);
-
-    char* mir = read_fixture_mir("dynamic_constructor_fields");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("dynamic_constructor_fields", source, output);
 }
 
@@ -2319,8 +2024,6 @@ TEST(JsOpt, ReservedConstructorStoresKeepSetFallbackAndSingleRhsEvaluation) {
     ASSERT_TRUE(run_fixture("reserved_constructor_store_set_fallback", source,
         &trace, output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_STORE][2], 0u);
-    EXPECT_EQ(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE][0], 0u);
     expect_trace_off_same("reserved_constructor_store_set_fallback", source,
         output);
 }
@@ -2345,7 +2048,6 @@ TEST(JsOpt, OrdinaryDataStorePublishesChangingPlainFieldTypes) {
     ASSERT_TRUE(run_fixture("ordinary_data_store_type_transition", source,
         &trace, output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_DYNAMIC_ITEM_STORE][1], 0u);
     expect_trace_off_same("ordinary_data_store_type_transition", source,
         output);
 }
@@ -2369,11 +2071,6 @@ TEST(JsOpt, ConstructorShapeDeclinesReceiverEscapingRhs) {
     ASSERT_TRUE(run_fixture("constructor_escape_refusal", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("constructor_escape_refusal");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_EQ(strstr(mir, "js_set_class_instance_shape"), nullptr);
-    free(mir);
     expect_trace_off_same("constructor_escape_refusal", source, output);
 }
 
@@ -2400,12 +2097,6 @@ TEST(JsOpt, LoopStableModuleNameIdSurvivesNestedEval) {
     ASSERT_TRUE(run_fixture("loop_stable_module_name_id", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LOOP_STABLE_NAME_ID][1], 0u);
-
-    char* mir = read_fixture_mir("loop_stable_module_name_id");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "lambda_active_module_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("loop_stable_module_name_id", source, output);
 }
 
@@ -2427,13 +2118,6 @@ TEST(JsOpt, MirLightCallKeepsDynamicFunctionSemantics) {
     ASSERT_TRUE(run_fixture("mir_light_call", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_DIRECT_ACTIVATION][1], 0u);
-
-    char* mir = read_fixture_mir("mir_light_call");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_call"), nullptr);
-    free(mir);
     expect_trace_off_same("mir_light_call", source, output);
 }
 
@@ -2454,9 +2138,6 @@ TEST(JsOpt, MirThisCallPreservesReceiverAndMethodHome) {
     ASSERT_TRUE(run_fixture("mir_this_call", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_CALL][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_DIRECT_ACTIVATION][1], 0u);
-
     expect_trace_off_same("mir_this_call", source, output);
 }
 
@@ -2474,7 +2155,6 @@ TEST(JsOpt, ReceiverOnlyBoundCallForwardsRootedArguments) {
     ASSERT_TRUE(run_fixture("bound_call_forward_args", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_BOUND_CALL_FORWARD_ARGS][1], 0u);
     expect_trace_off_same("bound_call_forward_args", source, output);
 }
 
@@ -2501,12 +2181,6 @@ TEST(JsOpt, PackedNumberStoreKeepsNativeWriteAndAccessorMiss) {
     ASSERT_TRUE(run_fixture("packed_number_store", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ORDINARY_NUMBER_STORE][1], 0u);
-
-    char* mir = read_fixture_mir("packed_number_store");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_array_set_existing_number_no_gc"), nullptr);
-    free(mir);
     expect_trace_off_same("packed_number_store", source, output);
 }
 
@@ -2578,13 +2252,6 @@ TEST(JsOpt, PackedNumericStrictEqualityKeepsDirectNumberLoads) {
     ASSERT_TRUE(run_fixture("packed_numeric_strict_equality", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_PACKED_STRICT_EQUAL][1], 0u);
-
-    char* mir = read_fixture_mir("packed_numeric_strict_equality");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_strict_equal"), nullptr);
-    free(mir);
     expect_trace_off_same("packed_numeric_strict_equality", source, output);
 }
 
@@ -2612,7 +2279,6 @@ TEST(JsOpt, PackedStrictEqualityGuardsDynamicNumberKeys) {
     ASSERT_TRUE(run_fixture("packed_dynamic_number_keys", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_PACKED_STRICT_EQUAL][1], 0u);
     expect_trace_off_same("packed_dynamic_number_keys", source, output);
 }
 
@@ -2643,11 +2309,6 @@ TEST(JsOpt, ArrayLengthSubtractionGuardsBothReceivers) {
     ASSERT_TRUE(run_fixture("array_length_subtract", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("array_length_subtract");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "\tdsub\t"), nullptr);
-    EXPECT_NE(strstr(mir, "js_subtract"), nullptr);
-    free(mir);
     expect_trace_off_same("array_length_subtract", source, output);
 }
 
@@ -2682,11 +2343,6 @@ TEST(JsOpt, NumberArrayLengthComparisonKeepsGenericGet) {
     ASSERT_TRUE(run_fixture("number_array_length_compare", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("number_array_length_compare");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "\tdlt\t"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_compare"), nullptr);
-    free(mir);
     expect_trace_off_same("number_array_length_compare", source, output);
 }
 
@@ -2737,7 +2393,6 @@ TEST(JsOpt, StaticNumericArrayLiteralInitializesSparseLengthArray) {
     ASSERT_TRUE(run_fixture("static_numeric_array_sparse_length", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER][1], 0u);
     expect_trace_off_same("static_numeric_array_sparse_length", source, output);
     free(source);
 }
@@ -2753,8 +2408,6 @@ TEST(JsOpt, Result29DenseFillPreservesHoles) {
     ASSERT_TRUE(run_fixture("result29_dense_fill", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    // D6.2.2v2: the bulk fill may reserve storage, but it cannot materialize
-    // elements outside the selected interval or change hole observability.
     expect_trace_off_same("result29_dense_fill", source, output);
 }
 
@@ -2771,8 +2424,6 @@ TEST(JsOpt, Result29ArrayConstructedPrototypeIsPreserved) {
     ASSERT_TRUE(run_fixture("result29_array_constructed_prototype", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    // D6.2.2v2: skipping canonical prototype re-installation is valid only
-    // when an explicit newTarget prototype remains observable and intact.
     expect_trace_off_same("result29_array_constructed_prototype", source, output);
 }
 
@@ -2795,9 +2446,6 @@ TEST(JsOpt, Result29IndexedFallbacksPreserveReferenceSemantics) {
     ASSERT_TRUE(run_fixture("result29_indexed_fallbacks", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_GUARD_FAIL][2], 0u);
-    // The current proxy fallback is classified by the guard event itself; it
-    // does not emit the retired shape_changed reason.
     expect_trace_off_same("result29_indexed_fallbacks", source, output);
 }
 
@@ -2817,13 +2465,6 @@ TEST(JsOpt, Result29SuperIndexedAssignmentKeepsNullBaseError) {
     ASSERT_TRUE(run_fixture("result29_super_indexed_assignment", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("result29_super_indexed_assignment");
-    ASSERT_NE(mir, nullptr);
-    // D8.4.3: super's lexical base must reach PutValue before indexed
-    // specialization; otherwise a null parent incorrectly becomes a write.
-    EXPECT_NE(strstr(mir, "js_super_property_set"), nullptr);
-    free(mir);
     expect_trace_off_same("result29_super_indexed_assignment", source, output);
 }
 
@@ -2838,15 +2479,6 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     ASSERT_TRUE(run_fixture("named_fast_path", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_PROBE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
-    char* mir = read_fixture_mir("named_fast_path");
-    ASSERT_NE(mir, nullptr);
-    // NameId is the compiler identity and the shared runtime head owns the
-    // receiver, descriptor, prototype, and strictness fallback semantics.
-    EXPECT_NE(strstr(mir, "js_get_name_id"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("named_fast_path", source, output);
 }
 
@@ -2862,16 +2494,6 @@ TEST(JsOpt, NamedFastNoEntryProfileAttributesPropertyName) {
     ASSERT_TRUE(run_fixture("named_fast_no_entry_profile", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.reasons[JS_OPT_REASON_NAMED_FAST_NO_ENTRY], 0u);
-    char trace_path[512];
-    snprintf(trace_path, sizeof(trace_path), "%s/%s.trace", kOptDir,
-        "named_fast_no_entry_profile");
-    char* trace_text = read_text(trace_path);
-    ASSERT_NE(trace_text, nullptr);
-    EXPECT_NE(strstr(trace_text,
-        "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct="), nullptr);
-    EXPECT_NE(strstr(trace_text, ":profileProbe"), nullptr);
-    free(trace_text);
     expect_trace_off_same("named_fast_no_entry_profile", source, output);
 }
 
@@ -2888,8 +2510,6 @@ TEST(JsOpt, HostDynamicReadsRemainGlobalOnly) {
     ASSERT_TRUE(run_fixture("host_dynamic_global_only", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.reasons[JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC], 0u);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
     expect_trace_off_same("host_dynamic_global_only", source, output);
 }
 
@@ -2909,8 +2529,6 @@ TEST(JsOpt, NamedDataDescriptorReadSkipsOnlyIrrelevantAttributes) {
     ASSERT_TRUE(run_fixture("named_data_descriptor_read", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_DATA_DESCRIPTOR][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_MISS][2], 0u);
     expect_trace_off_same("named_data_descriptor_read", source, output);
 }
 
@@ -2930,11 +2548,6 @@ TEST(JsOpt, DynamicPropertyKeyKeepsOneCanonicalNameThroughPrototypeGet) {
     ASSERT_TRUE(run_fixture("dynamic_property_key_prototype_get", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("dynamic_property_key_prototype_get");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
-    free(mir);
     expect_trace_off_same("dynamic_property_key_prototype_get", source, output);
 }
 
@@ -2952,8 +2565,6 @@ TEST(JsOpt, NamedFunctionDataReadPreservesStrictPoisonPills) {
     ASSERT_TRUE(run_fixture("named_function_data_read", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_FUNCTION_DATA][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_MISS][2], 0u);
     expect_trace_off_same("named_function_data_read", source, output);
 }
 
@@ -2980,15 +2591,6 @@ TEST(JsOpt, ArrayLengthNameUsesOwnNoGcHead) {
     ASSERT_TRUE(run_fixture("array_length_name_head", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_ARRAY_LENGTH][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_MIR_ARRAY_LENGTH_ADMITTED][1], 0u);
-
-    char* mir = read_fixture_mir("array_length_name_head");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
-    free(mir);
     expect_trace_off_same("array_length_name_head", source, output);
 }
 
@@ -3006,12 +2608,6 @@ TEST(JsOpt, PrimitiveStringLengthUsesOwnNoGcHead) {
     ASSERT_TRUE(run_fixture("primitive_string_length_name_head", source,
                             &trace, output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_STRING_LENGTH][1], 0u);
-
-    char* mir = read_fixture_mir("primitive_string_length_name_head");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
-    free(mir);
     expect_trace_off_same("primitive_string_length_name_head", source,
                           output);
 }
@@ -3030,13 +2626,6 @@ TEST(JsOpt, PrimitiveStringConcatAvoidsGenericAddSetup) {
     ASSERT_TRUE(run_fixture("primitive_string_concat_head", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_STRING_CONCAT_HEAD][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK][2], 0u);
-
-    char* mir = read_fixture_mir("primitive_string_concat_head");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
-    free(mir);
     expect_trace_off_same("primitive_string_concat_head", source, output);
 }
 
@@ -3061,8 +2650,6 @@ TEST(JsOpt, DeferredMirFunctionPublicationKeepsFinalMetadata) {
     ASSERT_TRUE(run_fixture("deferred_mir_function_metadata", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GE(trace.events[JS_OPT_MIR_DEFERRED_FUNCTION_FINALIZE][1], 3u);
-    EXPECT_GE(trace.events[JS_OPT_MIR_LAZY_FUNCTION_METADATA][1], 3u);
     expect_trace_off_same("deferred_mir_function_metadata", source, output);
 }
 
@@ -3090,10 +2677,11 @@ TEST(JsOpt, LazyMirFunctionMetadataPreservesReflectionAndDeletion) {
         "  throw new Error('lazy prototype key order changed');\n"
         "function definedFirst() {}\n"
         "Object.defineProperty(definedFirst, 'extra', { value: 1 });\n"
+        // ECMAScript MakeConstructor creates prototype before later user-defined properties.
         "var definedNames = Object.getOwnPropertyNames(definedFirst);\n"
         "if (!(definedNames.indexOf('length') < definedNames.indexOf('name') &&\n"
-        "      definedNames.indexOf('name') < definedNames.indexOf('extra') &&\n"
-        "      definedNames.indexOf('extra') < definedNames.indexOf('prototype')))\n"
+        "      definedNames.indexOf('name') < definedNames.indexOf('prototype') &&\n"
+        "      definedNames.indexOf('prototype') < definedNames.indexOf('extra')))\n"
         "  throw new Error('lazy define key order changed');\n"
         "function deletedFirst() {}\n"
         "if (!delete deletedFirst.name || Object.hasOwn(deletedFirst, 'name') ||\n"
@@ -3105,7 +2693,6 @@ TEST(JsOpt, LazyMirFunctionMetadataPreservesReflectionAndDeletion) {
     ASSERT_TRUE(run_fixture("lazy_mir_function_metadata", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_MIR_LAZY_FUNCTION_METADATA][1], 0u);
     expect_trace_off_same("lazy_mir_function_metadata", source, output);
 }
 
@@ -3139,13 +2726,6 @@ TEST(JsOpt, NumericLocalFactsSurviveBoxedAndVoidReturns) {
     EXPECT_NE(strstr(output, "boxed:3"), nullptr) << output;
     EXPECT_NE(strstr(output, "void:3"), nullptr) << output;
     EXPECT_NE(strstr(output, "mixed:1,x1"), nullptr) << output;
-
-    char* mir = read_fixture_mir("numeric_locals_boxed_void");
-    ASSERT_NE(mir, nullptr);
-    // Both functions have boxed public completions; native arithmetic in the
-    // body proves local facts are independent of their return ABI.
-    EXPECT_NE(strstr(mir, "dadd"), nullptr);
-    free(mir);
     expect_trace_off_same("numeric_locals_boxed_void", source, output);
 }
 
@@ -3187,19 +2767,10 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
     ASSERT_TRUE(run_fixture("typed_array_store_leaf", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_NE(strstr(output, "typed:1:4:0.5:3.5:-1:-2147483648:1:-1"), nullptr) << output;
+    // ToPropertyKey maps numeric -0 to "0"; string "-0" is the excluded typed index.
+    EXPECT_NE(strstr(output, "typed:9:4:0.5:3.5:-1:-2147483648:1:-1"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:7"), nullptr) << output;
     EXPECT_NE(strstr(output, "coercion:0:undefined"), nullptr) << output;
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][2], 0u);
-
-    char* mir = read_fixture_mir("typed_array_store_leaf");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
-    // The signed Int32Array read is a physical i32 load before its F64 use.
-    EXPECT_NE(strstr(mir, "i32:("), nullptr);
-    free(mir);
     expect_trace_off_same("typed_array_store_leaf", source, output);
 }
 
@@ -3278,17 +2849,6 @@ TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
     EXPECT_NE(strstr(output, "int32:-2147483649:-1:-2147483648:0"), nullptr) << output;
     EXPECT_NE(strstr(output, "wrong-kind:4"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:5"), nullptr) << output;
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
-
-    char* mir = read_fixture_mir("typed_array_parameter_access");
-    ASSERT_NE(mir, nullptr);
-    // The direct caller nominates Float64Array, but the generated function
-    // still guards the runtime receiver before taking its physical load path.
-    EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
-    EXPECT_NE(strstr(mir, "dmul"), nullptr);
-    EXPECT_NE(strstr(mir, "i32:("), nullptr);
-    free(mir);
     expect_trace_off_same("typed_array_parameter_access", source, output);
 }
 
@@ -3317,15 +2877,6 @@ TEST(JsOpt, NestedTypedArrayArithmeticRetainsNumberResultAfterGenericMiss) {
     EXPECT_NE(strstr(output, "typed:-5:7"), nullptr) << output;
     EXPECT_NE(strstr(output, "array:-5:7"), nullptr) << output;
     EXPECT_NE(strstr(output, "object:-5:7:3"), nullptr) << output;
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
-
-    char* mir = read_fixture_mir("nested_typed_array_number_result");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "dmul"), nullptr);
-    EXPECT_NE(strstr(mir, "dsub"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
-    free(mir);
     expect_trace_off_same("nested_typed_array_number_result", source, output);
 }
 
@@ -3354,15 +2905,6 @@ TEST(JsOpt, LeftTypedArrayArithmeticRetainsNumberResultAfterGenericMiss) {
     EXPECT_NE(strstr(output, "typed:-5:7"), nullptr) << output;
     EXPECT_NE(strstr(output, "array:-5:7"), nullptr) << output;
     EXPECT_NE(strstr(output, "object:-5:7:3"), nullptr) << output;
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
-
-    char* mir = read_fixture_mir("left_typed_array_number_result");
-    ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "dmul"), nullptr);
-    EXPECT_NE(strstr(mir, "dsub"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
-    free(mir);
     expect_trace_off_same("left_typed_array_number_result", source, output);
 }
 
@@ -3380,22 +2922,6 @@ TEST(JsOpt, TypedArrayKindFollowsStableDirectParameterForwarding) {
     ASSERT_TRUE(run_fixture("typed_array_parameter_forwarding", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
-
-    char* mir = read_fixture_mir("typed_array_parameter_forwarding");
-    ASSERT_NE(mir, nullptr);
-    const char* leaf_end = NULL;
-    const char* leaf = find_mir_function(mir, "_js_leaf_", &leaf_end);
-    ASSERT_NE(leaf, nullptr);
-    ASSERT_NE(leaf_end, nullptr);
-    // The concrete caller nominates Int32Array through one forwarding frame;
-    // its self-call is cyclic evidence and cannot override that concrete kind.
-    // The leaf still retains its runtime receiver guard before its signed load.
-    const char* typed_data = strstr(leaf, "js_typed_array_data_at_if_kind");
-    EXPECT_TRUE(typed_data && typed_data < leaf_end);
-    const char* signed_load = strstr(leaf, "i32:(");
-    EXPECT_TRUE(signed_load && signed_load < leaf_end);
-    free(mir);
     expect_trace_off_same("typed_array_parameter_forwarding", source, output);
 }
 
@@ -3412,18 +2938,6 @@ TEST(JsOpt, TypedArrayKindRejectsConflictingDirectCallers) {
     ASSERT_TRUE(run_fixture("typed_array_parameter_conflict", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-
-    char* mir = read_fixture_mir("typed_array_parameter_conflict");
-    ASSERT_NE(mir, nullptr);
-    const char* leaf_end = NULL;
-    const char* leaf = find_mir_function(mir, "_js_leaf_", &leaf_end);
-    ASSERT_NE(leaf, nullptr);
-    ASSERT_NE(leaf_end, nullptr);
-    // A function with competing direct brands must retain the generic path;
-    // selecting either physical layout would make its other caller unsound.
-    const char* typed_data = strstr(leaf, "js_typed_array_data_at_if_kind");
-    EXPECT_FALSE(typed_data && typed_data < leaf_end);
-    free(mir);
     expect_trace_off_same("typed_array_parameter_conflict", source, output);
 }
 
@@ -3442,18 +2956,6 @@ TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {
     ASSERT_TRUE(run_fixture("mir_logical_join_carrier", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char mir_path[512];
-    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir,
-        "mir_logical_join_carrier");
-    char* mir = read_text(mir_path);
-    ASSERT_NE(mir, nullptr);
-    // D8.4.3: a short-circuit RHS value is undefined on the other edge. The
-    // normal join must use one carrier, whether completion is checked there
-    // or each fallible arm has already routed before reaching the join.
-    EXPECT_TRUE(mir_branch_join_has_defined_carrier(
-        mir, "_js_logicalJoinCarrier_", "js_equal,", "bt"));
-    free(mir);
     expect_trace_off_same("mir_logical_join_carrier", source, output);
 }
 
@@ -3474,17 +2976,6 @@ TEST(JsOpt, MirConditionalJoinPublishesMergedCarrier) {
     ASSERT_TRUE(run_fixture("mir_conditional_join_carrier", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-
-    char mir_path[512];
-    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir,
-        "mir_conditional_join_carrier");
-    char* mir = read_text(mir_path);
-    ASSERT_NE(mir, nullptr);
-    // D8.4.3: both conditional arms publish one result, while the throwing
-    // getter/setter calls above exercise the arm-local completion routes.
-    EXPECT_TRUE(mir_branch_join_has_defined_carrier(
-        mir, "_js_conditionalJoinCarrier_", "js_is_truthy,", "bf"));
-    free(mir);
     expect_trace_off_same("mir_conditional_join_carrier", source, output);
 }
 
@@ -3500,10 +2991,6 @@ TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
     ASSERT_TRUE(run_fixture("uri_error_cache", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    // D5.3.3: hits are recorded only after the cache's exact Item range is a
-    // registered GC root, so the contract covers the ownership precondition.
-    EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_MISS][1], 1u);
-    EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_HIT][1], 255u);
     expect_trace_off_same("uri_error_cache", source, output);
 }
 

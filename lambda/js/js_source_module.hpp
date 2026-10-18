@@ -99,6 +99,10 @@ struct JsSourceModuleRecord {
 };
 
 // Existing resolution/source-cache services, promoted without a second loader.
+void jm_resolve_module_path(const char* base, const char* specifier, int length,
+    char* output, int capacity);
+bool jm_resolve_document_module_path(Runtime*, const char* reference,
+    const char* specifier, int length, char* output, int capacity);
 const char* jm_document_script_base_url(Runtime* runtime, const char* script_reference);
 void js_resolve_script_module_path(Runtime* runtime, const char* reference,
     const char* specifier, int length, char* output, int capacity);
@@ -119,6 +123,8 @@ void js_module_source_complete(JsSourceModuleRecord* record, Item completion);
 JsSourceBindingStatus js_module_resolve_binding(JsSourceModuleRecord* record,
     String* name, JsResolvedModuleBinding* output);
 Item js_module_binding_get(const JsResolvedModuleBinding* binding);
+Item js_module_environment_binding(JsSourceModuleRecord* record, NameEntry* entry,
+    Item value, bool write);
 Item js_module_namespace_create(JsSourceModuleRecord* record);
 
 enum JsModuleNamespaceOperation { JS_MODULE_NAMESPACE_GET, JS_MODULE_NAMESPACE_HAS,

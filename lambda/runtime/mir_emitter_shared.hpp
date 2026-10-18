@@ -235,7 +235,7 @@ static inline void mir_append_emit_label(MIR_context_t ctx,
 // MirEmitter — bundled emit state shared by both transpilers (Lambda + JS).
 // Holds the immutable MIR context handle plus the per-function emit cursor
 // (current function item/reg-alloc target, register + label counters) and the
-// import cache. Both MirTranspiler and JsMirTranspiler embed one and route
+// import cache. Lambda MirTranspiler and MVP LmdCompiler embed one and route
 // their primitive emit helpers (new_reg / emit_insn / emit_label / calls)
 // through the em_* functions below, so the primitives exist once instead of
 // once per transpiler (Unified-AST plan Phase 0, P0.1).

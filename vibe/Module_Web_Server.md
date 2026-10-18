@@ -1,5 +1,18 @@
 # Module Web Server — Design Proposal
 
+## Current scope — WS1 (2026-10-18, USER)
+
+Python and Bash handler backends and Flask/WSGI/ASGI integration are removed
+from `lambda/serve`, including their Python scripts and unused IPC/UDS helpers.
+Lambda and JavaScript backend sources and Express compatibility remain. This
+does not claim that their pending handler execution is implemented.
+All serve unit tests, including schema validation, live in
+`test/test_serve_gtest.cpp`; the separate Phase 2 runner is removed.
+The consolidated runner belongs to `make test-lambda-baseline`, replacing
+its previous membership in the library suite.
+
+The proposal below is historical where it describes the removed integrations.
+
 ## Executive Summary
 
 This proposal extends the existing HTTP server (migrating from `lib/serve/` to `lambda/serve/` as C+ `.cpp` code) into a **full-featured web application server** capable of serving static files, executing request handlers via a **worker pool** (PHP-FPM style) for Lambda Script, Python, Bash, and other languages, and providing a high-level routing/middleware API comparable to **Express.js** and **Flask**. The server is built on **libuv** for event-driven I/O and **mbedTLS** for TLS, both already integrated.

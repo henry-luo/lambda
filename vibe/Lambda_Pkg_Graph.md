@@ -31,7 +31,7 @@ responsibilities:
   relationships. It owns ranking, ordering, node coordinates, edge routing,
   clipping, and graph bounds.
 - `lambda.graph.transform` converts graph data into a semantic HTML
-  element tree, installs the Radiant custom layout callback, and converts routed
+  element tree, exports the automatically resolved Radiant layout callback, and converts routed
   edge geometry into generated SVG paint layers.
 
 The primary output is HTML, not a pre-laid-out SVG. Radiant first lays out the
@@ -88,7 +88,7 @@ lambda/graph/
   graph.ls                 compatibility facade
   layout.ls                public graph geometry API
   dagre.ls                 initial layered algorithm and orthogonal routing
-  transform.ls             public HTML transform and installation API
+  transform.ls             public HTML transform and automatic layout export
   transform/
     html.ls                semantic graph HTML construction
     paint.ls               routed geometry to SVG paint layers
@@ -124,14 +124,13 @@ Its edge output is geometry and styling metadata, not markup.
 The public transform API is:
 
 ```lambda
-transform.install() -> bool
-
 transform.to_html(graph, opts = null) -> element
 ```
 
-`install()` explicitly registers the `lambda-graph` custom layout function with
-Radiant. Registration is an orchestration side effect performed before layout;
-the registered callback itself remains a pure `fn`.
+Radiant automatically resolves the generated HTML's `lambda-graph` layout to
+`lambda.graph.transform.layout(parent, children, ctx)` (**D7.5.3v2**).
+No application or document-loader installation call is required. The export is
+a pure `fn`; the host owns module loading, retained execution and paint roots.
 
 `to_html()` is a pure graph-data transformation. It returns a Lambda HTML
 element tree, not a serialized HTML string. Keeping the element tree in the
@@ -447,53 +446,31 @@ coordinates, and Radiant lowers that fragment through its existing SVG renderer.
 whose node dimensions are already known. It is not the rich-content path and is
 not required for the first release.
 
-## 12. Registration, Runtime, and Caching
+## 12. Automatic Connection, Runtime, and Caching
 
-The graph package is installed explicitly:
+Under **D7.5.3v2**, graph HTML carries `data-radiant-layout="lambda-graph"`;
+Radiant automatically invokes the package's pure `layout` export after measuring
+the children. This works for package rendering, native document loading and
+serialized HTML opened in a fresh process. There is no public registration or
+`install()` API.
 
-```lambda
-import graph_transform: lambda.graph.transform
+The host resolves the callback on the document's retained evaluator. A static
+HTML document acquires an evaluator lazily, and a synchronous render from Lambda
+shares the caller's live evaluator. Existing window-loader ownership remains
+unchanged. Reflow reuses imported module state and compiled code; it does not
+require an application to reinstall a callback. Module lifetime replaces the
+former separately rooted callback registry and per-heap cleanup slots.
 
-let installed = graph_transform.install()
-graph_transform.to_html(graph_data)
-```
+Generated SVG layers retain explicit roots on the owning heap and replace their
+previous layer set on reflow (**D5.3.3**). Closing one document must not disconnect
+another document's graph layout or release its generated paint.
 
-The normal Lambda document loader already retains the Lambda runtime, GC heap,
-JIT code, and registered function while the resulting `DomDocument` is alive.
-Repeated resize, interaction, animation, edit, and mutation layouts must call
-the retained compiled function rather than reparsing or recompiling the package.
-
-Registration is runtime/document scoped. The native custom-layout registry keeps
-one stable bridge per name, while the Lambda callback is resolved by:
-
-```text
-(document.lambda_runtime, layout_name)
-```
-
-rather than by `layout_name` alone. The implementation keys registrations by the
-retained runtime heap reached from the parent view's `DomDocument`, preventing
-one live document from replacing another document's `lambda-graph` function.
-
-The callback and its JIT code remain rooted for that heap across every reflow.
-The Jube module receives a per-heap cleanup notification immediately before
-runtime heap destruction, unregisters the callback root, and makes the stable
-registry slot reusable. Generated SVG layer roots are likewise registered and
-unregistered directly against the document runtime's owning heap, including
-when document teardown occurs outside the callback's thread-local context.
-
-The low-level native registry may keep one stable bridge for the name, but that
-bridge must select the Lambda callback using the parent view's owning document
-and retained runtime.
-
-The pure graph result may later be cached using node ids, node border-box sizes,
-edge data, options, writing direction, and the graph package/version identity.
-The cache entry must include both placements and generated paint layers.
 
 ## 13. Standalone HTML
 
 `to_html()` initially returns an in-memory Lambda element tree. This is enough
 for Lambda scripts, `render`, `view`, and `layout`, because their document loader
-retains the runtime that installed the callback.
+retains the evaluator that executes the package layout export (**D7.5.3v2**).
 
 Serializing that tree to a standalone `.html` file loses the retained Lambda
 runtime. CSS such as `display: layout(lambda-graph)` names a callback but does
@@ -503,7 +480,7 @@ that opts into a trusted Lambda layout package.
 
 Until that loader exists, standalone output should be one of:
 
-- a Lambda script/document that imports and installs the graph transform;
+- a Lambda script/document that imports the graph transform;
 - final SVG/PDF/PNG/JPEG rendered from the in-memory HTML document;
 - a future eager static SVG produced after explicit node sizes are known.
 
@@ -522,7 +499,6 @@ The graph bridge uses the postfix handler surface required by
 import graph_transform: lambda.graph.transform
 
 let graph = input("diagram.mmd", {type: "mermaid"}) ^ { null }
-let installed = graph_transform.install()
 graph_transform.to_html(graph, {theme: "zinc-dark"})
 ```
 
@@ -820,7 +796,7 @@ lambda/graph/
     shapes.ls                  shape bounds and endpoint clipping
     clusters.ls                recursive subgraph geometry
     labels.ls                  edge and cluster label placement
-  transform.ls                 public installation and HTML API
+  transform.ls                 public layout export and HTML API
   transform/
     html.ls                    Mark Graph IR to semantic HTML
     content.ls                 safe rich-label/content lowering
@@ -1019,7 +995,7 @@ make test-graph-mermaid
 The native runner uses project `lib/` containers and strings rather than `std::`
 types. It owns the parsed manifest and Mark input state for the suite. The
 in-process transform/layout/render stages run in a paired Lambda integration
-fixture, which installs the compiled callback once and renders multiple cases in
+fixture, which resolves the package callback automatically and renders multiple cases in
 one Lambda runtime. The focused Make target runs both layers; it does not start a
 new `lambda.exe` process for every manifest entry.
 
@@ -1317,7 +1293,7 @@ The initial Stage 2 tranche is implemented as follows:
 - `graph.transform.render_svg()` and `render_scene()` run HTML parsing, Radiant
   measurement, the cached custom layout callback, generated paint, SVG lowering,
   and scene adaptation in one process. The paired `scene_render.ls` fixture
-  renders multiple Mermaid cases after one callback installation and exercises
+  renders multiple Mermaid cases with automatic package connection and exercises
   both accepted and rejected geometry tolerances;
 - `reference/mermaid_svg_adapter.mjs` adapts a live Mermaid browser SVG DOM to
   the same scene vocabulary, flattening transforms and normalizing labels,
@@ -1343,7 +1319,7 @@ The initial Stage 2 tranche is implemented as follows:
   applies a target's platform library exclusions consistently to consuming
   tests.
 - the retained `scene_render.ls` fixture is manifest-driven: it discovers every
-  `scene-semantic` case, installs the compiled layout callback once, renders all
+  `scene-semantic` case, resolves the layout package automatically, renders all
   selected cases in one runtime, and compares five reviewed semantic scene
   fixtures without per-case process startup.
 
@@ -2151,8 +2127,7 @@ target: make test-graph-graphviz
 
 The native runner dynamically registers every manifest case and checks parser
 diagnostics, source spans, source-stage structure, and canonical expectations.
-The Lambda fixture filters all render policies, installs the compiled layout
-callback once, and renders every selected case in one retained runtime.
+The Lambda fixture filters all render policies, resolves the layout package automatically, and renders every selected case in one retained runtime.
 
 Policies are shared with Mermaid and extended where necessary:
 
@@ -2450,7 +2425,7 @@ adaptation.
   round trips, including quoted, numeric, and HTML IDs plus Graphviz backslash
   label escapes;
 - `lambda.graph.conformance` now owns manifest discovery, comparison
-  policy defaults, retained installation, render/compare execution, and final
+  policy defaults, retained package execution, render/compare execution, and final
   scene sanity checks. Mermaid and Graphviz retain only their format-specific
   source/reference adapters.
 
@@ -2567,3 +2542,11 @@ Stage 3 implementation and corpus selection use these upstream sources:
 The checked-in `UPSTREAM_COMMIT`, grammar revision, reference-tool version, and
 license files become the reproducibility authority once Stage 3 implementation
 starts. Moving upstream documentation does not silently change conformance.
+
+## Superseded callback installation
+
+~~The original public API required `graph_transform.install()`, which called
+`radiant.register_layout("lambda-graph", callback)`.~~ Superseded by automatic
+package-export connection (**D7.5.3v2**, user ruling 2026-10-16). The old native
+bridge selected separately rooted functions by layout name and runtime heap;
+the retained module export now supplies the callback and its lifetime.

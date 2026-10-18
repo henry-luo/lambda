@@ -316,6 +316,42 @@ TEST(JubeDom4, ConcurrentInterfacePublicationKeepsAllModuleRecords) {
     EXPECT_EQ(jube_interface_registry_digest(), before);
 }
 
+TEST(JubeDom4, CatalogueMembersPreserveColours) {
+    jube_register_builtin_modules();
+    const JubeModuleDef* radiant = jube_find_static_module("radiant");
+    ASSERT_NE(radiant, nullptr);
+    ASSERT_TRUE(jube_activate_module(radiant));
+
+    // a member door must preserve its catalogue row's colour (D7.4.6).
+    static const struct { const char* iface; const char* name; bool is_proc; } colours[] = {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+        {#iface, (member)[0] ? member : #name, (sig)[0] == 'p'},
+#include "../lambda/dom/dom_api.def"
+#undef DOM_OP
+    };
+    for (const auto& entry : colours) {
+        if (strcmp(entry.iface, "none") == 0) continue;
+        const JubeTypeDef* type = jube_iface_type_by_name(entry.iface,
+            (uint32_t)strlen(entry.iface));
+        ASSERT_NE(type, nullptr) << entry.iface;
+        int ordinal = jube_member_ordinal(type, entry.name, (uint32_t)strlen(entry.name));
+        ASSERT_GE(ordinal, 0) << entry.iface << "." << entry.name;
+        EXPECT_EQ(jube_member_is_proc_at(type, ordinal), entry.is_proc)
+            << entry.iface << "." << entry.name;
+    }
+}
+
+TEST(JubeDom4, LayoutRegistrationIsNotPublic) {
+    jube_register_builtin_modules();
+    for (const char* name : {"radiant", "dom"}) {
+        const JubeModuleDef* module = jube_find_static_module(name);
+        ASSERT_NE(module, nullptr);
+        for (int32_t i = 0; i < module->function_count; i++) {
+            EXPECT_STRNE(module->functions[i].name, "register_layout") << name;
+        }
+    }
+}
+
 TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1723,6 +1759,68 @@ TEST_F(ActivationCore, AbandonedParkedActivationsAreReleased) {
     }
     EXPECT_EQ(activation_current(), nullptr);
     EXPECT_EQ(activation_suspend(ItemNull).item != ItemNull.item, true);
+}
+
+static Item activation_pool_storage_probe(Activation*, Item arg) {
+    // touch multiple pages in every region; a pooled mapping must be reclaimed
+    // before either its native frames or its precise roots are installed.
+    volatile uint8_t native[64 * 1024];
+    RootFrame roots(4096);
+    if (!roots.valid()) return ItemNull;
+    Rooted<Item> held(roots, (Item){.item = s2it(heap_strcpy("pooled-root", 11))});
+    for (size_t i = 1; i < 4096; i++) *roots.slot(i) = held.get().item;
+    uint64_t* numbers = context->side_number_top;
+    for (size_t i = 0; i < 4096; i++) {
+        uint64_t* slot = lambda_side_number_alloc();
+        if (!slot) return ItemNull;
+        *slot = i + arg.item;
+    }
+    for (size_t i = 0; i < sizeof(native); i += 4096) native[i] = (uint8_t)(i / 4096);
+    activation_suspend(arg);
+    String* string = (String*)(uintptr_t)(held.get().item & ~ITEM_HIGH_BYTE_MASK);
+    bool intact = string && string->len == 11 && !memcmp(string->chars, "pooled-root", 11);
+    for (size_t i = 1; i < 4096; i++) intact &= *roots.slot(i) == held.get().item;
+    for (size_t i = 0; i < 4096; i++) intact &= numbers[i] == i + arg.item;
+    for (size_t i = 0; i < sizeof(native); i += 4096) intact &= native[i] == i / 4096;
+    return (Item){.item = b2it(intact)};
+}
+
+TEST_F(ActivationCore, IdlePoolReusesAndTrimsAllThreeRegions) {
+    // exceed the pool bound, then reuse it both before and after a collection.
+    // parked roots survive GC; idle storage is not part of the root region.
+    const int count = 40;
+    Activation* parked[count];
+    for (int round = 0; round < 4; round++) {
+        for (int i = 0; i < count; i++) {
+            parked[i] = activation_create(activation_pool_storage_probe,
+                (Item){.item = i2it(i + round)}, true, NULL);
+            ASSERT_NE(parked[i], nullptr);
+            ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_SUSPENDED);
+        }
+        heap_gc_collect();
+        for (int i = 0; i < count; i++) {
+            ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_DONE);
+            EXPECT_EQ(activation_value(parked[i]).item, (uint64_t)ITEM_TRUE);
+            activation_destroy(parked[i]);
+        }
+        if (round % 2) heap_gc_collect();
+    }
+    EXPECT_EQ(activation_current(), nullptr);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
+}
+
+TEST_F(ActivationCore, IdlePoolDoesNotRetainCompletedValues) {
+    concurrency_test_gc->vmap_destroy = observe_completed_result_destroy;
+    completed_result_destroyed = false;
+    Activation* activation = activation_create(completed_managed_result, ItemNull, true, NULL);
+    ASSERT_NE(activation, nullptr);
+    ASSERT_EQ(activation_resume(activation, ItemNull), ACTIVATION_DONE);
+    completed_result_expected = activation_value(activation).vmap;
+    ASSERT_NE(completed_result_expected, nullptr);
+    activation_destroy(activation);
+    // the idle stack still contains its transfer slot, but owns no live roots.
+    heap_gc_collect();
+    EXPECT_TRUE(completed_result_destroyed);
 }
 
 #ifndef _WIN32

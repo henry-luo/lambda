@@ -37,7 +37,7 @@ let midnight = t'2025-01-01' ! date;
 fn only_raises(msg: string) none^ { raise error(msg) }
 fn passes_through(x) none => x;
 let r = passes_through(1);
-[r is error, only_raises("boom") or "handled"];
+[r is error, (only_raises("boom") ^ { null }) or "handled"];
 "-- a none arm never matches --";
 fn classify(x) => match x { case none: "none" case int: "int" default: "other" };
 [classify(5), classify(null), classify("s")]

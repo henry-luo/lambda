@@ -6,6 +6,8 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_source_module.hpp"
+#include "js_interp.hpp"
+#include "../../lib/uv_loop.h"
 #include "js_object_meta.h"
 #include "../input/input.hpp"
 #include "js_host_hooks.h"
@@ -49,7 +51,6 @@ struct JsGeneratorStateRecord;
 extern "C" Item js_interp_generator_body(Activation* self, Item generator);
 extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
-extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 
 static thread_local JsExecutionInterruptCheck js_execution_interrupt_check = NULL;
 const char* const js_array_unscopable_names[] = {
@@ -246,29 +247,10 @@ static void js_set_native_span_method(Item object, const char* name,
 
 JS_FORWARD_STATIC_VOID( js_runtime_set_native_span_method, (Item object, const char* name,         JsNativeSpan target), js_set_native_span_method, (object, name, target))
 
-template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_key, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
 
-template <typename Target>
-static void js_set_native_rest_key_rooted(Item object, Item key, Target target) {
-    js_publish_native_function(object, [key]() { return key; }, [target]() {
-        return js_new_native_rest_function(target);
-    });
-}
 
-template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_rest_key, (Item object, Item key, Target target), js_set_native_rest_key_rooted, (object, key, target))
 
-template <typename Target>
-static void js_set_native_constructor_key_rooted(Item object, Item key,
-        Target target) {
-    js_publish_native_function(object, [key]() { return key; }, [target]() {
-        return js_new_native_constructor(target);
-    });
-}
 
-template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_constructor_key, (Item object, Item key, Target target), js_set_native_constructor_key_rooted, (object, key, target))
 
 extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING || !buf || buf_size <= 0) return NULL;
@@ -290,11 +272,12 @@ extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructo
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 
-static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
+
+static bool js_runtime_owner_is_current(Context* runtime, const char* boundary) {
     EvalContext* owner = (EvalContext*)runtime;
     if (!owner || !eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
-        // Retained MIR owners validate routing; they must never authorize a
+        // retained runtime owners validate routing; they must never authorize a
         // native callback to replace this thread's evaluator.
         log_error("%s: compiled owner is not current", boundary);
         return false;
@@ -331,22 +314,10 @@ extern "C" Item js_suspended_activation_step(JsSuspendedActivation* record,
     return faulted ? js_throw_range_error("Maximum call stack size exceeded") : result;
 }
 
-typedef Item (*JsMirStateFn)(Context*, Item*, Item, int64_t);
 
 // JSCU44: a state machine resolves names against the chain captured where its
 // generator or async frame was created, not the caller's. It is entered once,
 // on the activation's own stack, for the body's lifetime.
-static Item js_mir_state_body(Activation* self, Item input) {
-    JsSuspendedActivation* record = (JsSuspendedActivation*)activation_user(self);
-    JsOwnedCallActivation call_facts;
-    JsWithFrame inherited = {};
-    JsWithFrame* saved_head = js_with_activation_enter(record->with_env,
-        record->with_depth, &inherited);
-    Item result = ((JsMirStateFn)record->state_fn)((Context*)context,
-        record->env, input, 0);
-    js_with_activation_leave(saved_head);
-    return result;
-}
 
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
@@ -409,19 +380,6 @@ bool js_host_object_prototype(Item object, Item* out) {
     return false;
 }
 
-extern "C" Item js_using_dispose(Item resource) {
-    if (resource.item == 0 || resource.item == ITEM_NULL ||
-            get_type_id(resource) == LMD_TYPE_UNDEFINED) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    Item name = js_runtime_make_string_item("dispose", 7);
-    Item dispose_key = js_symbol_well_known(name);
-    Item dispose = js_get_key_default(resource, dispose_key);
-    if (!js_is_callable(dispose)) {
-        return js_throw_type_error("Object is not disposable");
-    }
-    return js_call_function(dispose, resource, NULL, 0);
-}
 
 struct JsArrayRuntimeItemsHeader {
     JsArrayRuntimeItemsHeader* previous;
@@ -866,22 +824,6 @@ extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
         key, ItemNull, false, (int)index, module_state_id);
 }
 
-extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
-        const int* indices, int count) {
-    js_global_var_binding_refresh();
-    if (!keys || !indices || count <= 0) return;
-    JsGlobalEnvironment* environment = js_global_environment_current();
-    if (!environment) return;
-    uint32_t module_state_id = lambda_active_module_state_id();
-    for (int i = 0; i < count; i++) {
-        Item key = keys[i];
-        int index = indices[i];
-        if (get_type_id(key) != LMD_TYPE_STRING || index < 0) continue;
-        if (!js_global_environment_upsert(environment,
-                JS_GLOBAL_BINDING_MODULE_VAR, key, ItemNull, false, index,
-                module_state_id)) return;
-    }
-}
 
 extern "C" void js_release_global_var_module_bindings_from(
         uint32_t first_module_state_id) {
@@ -1040,37 +982,9 @@ extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
     return js_private_key_for_class_environment(environment_root.get(), binding_name);
 }
 
-extern "C" Item js_private_key_for_current_class(Item source_name) {
-    if (js_current_private_home_class.item == 0 ||
-        js_current_private_home_class.item == ItemNull.item) {
-        Item eval_key = js_eval_private_resolve(source_name);
-        if (js_private_key_string(eval_key)) {
-            return eval_key;
-        }
-        return js_throw_type_error("Private name used outside its declaring class");
-    }
-    return js_private_key_for_class(js_current_private_home_class, source_name);
-}
 
-extern "C" Item js_private_home_class_enter(Item class_item) {
-    Item previous = js_current_private_home_class;
-    // Field initializer code is emitted at the construction site rather than
-    // through a method wrapper, so establish its lexical class explicitly.
-    js_current_private_home_class = class_item;
-    return previous;
-}
 
-extern "C" void js_private_home_class_leave(Item previous_class) {
-    js_current_private_home_class = previous_class;
-}
 
-extern "C" Item js_private_home_class_leave_result(Item previous_class, Item result) {
-    // Restoring the lexical private home through a void call clears the MIR
-    // transient exception lane; return the already-computed result through the
-    // restore call so an abrupt field/key evaluation remains observable.
-    js_private_home_class_leave(previous_class);
-    return result;
-}
 
 extern "C" Item js_bound_function_target(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
@@ -1093,16 +1007,6 @@ static Item js_bound_function_effective_new_target(Item callee, Item new_target)
 
 static bool js_is_class_constructor(Item object);
 
-extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC || get_type_id(target) != LMD_TYPE_MAP) return;
-    Item home = ItemNull;
-    Item ctor = js_get_name_key(target, "constructor", 11);
-    if (get_type_id(ctor) == LMD_TYPE_FUNC && js_is_class_constructor(ctor)) {
-        home = ctor;
-    }
-    if (home.item == ItemNull.item || home.item == 0) return;
-    js_set_function_home_class(fn_item, home);
-}
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
@@ -1197,107 +1101,8 @@ extern "C" Item js_new_object() {
     return (Item){.map = m};
 }
 
-extern "C" Item js_object_new_from_static_properties(
-        const JsStaticObjectProperty* properties, int length) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, js_new_object());
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-    if (!roots.valid() || get_type_id(object_root.get()) != LMD_TYPE_MAP) {
-        return ItemNull;
-    }
-    if (!properties || length <= 0) return object_root.get();
 
-    for (int index = 0; index < length; index++) {
-        const JsStaticObjectProperty* property = &properties[index];
-        if (!property->key_chars || property->key_len < 0) return ItemNull;
-        key_root.set(js_make_string_len(property->key_chars, property->key_len));
-        if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return ItemNull;
-        if (property->value_kind == JS_STATIC_OBJECT_VALUE_STRING) {
-            if (!property->string_chars || property->string_len < 0) return ItemNull;
-            value_root.set(js_make_string_len(property->string_chars,
-                property->string_len));
-            if (get_type_id(value_root.get()) != LMD_TYPE_STRING) return ItemNull;
-        } else if (property->value_kind == JS_STATIC_OBJECT_VALUE_IMMEDIATE) {
-            value_root.set((Item){.item = property->immediate});
-        } else {
-            return ItemNull;
-        }
-        Item result = js_create_data_property(object_root.get(), key_root.get(),
-            value_root.get());
-        if (item_is_error(result)) return result;
-    }
-    js_opt_trace_record(JS_OPT_STATIC_OBJECT_INITIALIZER, JS_OPT_REASON_NONE,
-        JS_OPT_OUTCOME_TAKEN);
-    return object_root.get();
-}
 
-static Item js_static_literal_materialize(const JsStaticLiteralRecipe* recipe) {
-    if (!recipe) return ItemError;
-    switch ((JsStaticLiteralKind)recipe->kind) {
-    case JS_STATIC_LITERAL_IMMEDIATE:
-        return (Item){.item = recipe->immediate};
-    case JS_STATIC_LITERAL_STRING: {
-        if (!recipe->string_chars || recipe->string_len < 0) return ItemError;
-        Item string = js_make_string_len(recipe->string_chars, recipe->string_len);
-        return get_type_id(string) == LMD_TYPE_STRING ? string : ItemError;
-    }
-    case JS_STATIC_LITERAL_ARRAY: {
-        if (recipe->length < 0 || (recipe->length > 0 && !recipe->children)) {
-            return ItemError;
-        }
-        RootFrame roots(2);
-        Rooted<Item> array_root(roots, js_array_new(recipe->length));
-        Rooted<Item> value_root(roots, ItemNull);
-        if (!roots.valid() || get_type_id(array_root.get()) != LMD_TYPE_ARRAY) {
-            return ItemError;
-        }
-        for (int index = 0; index < recipe->length; index++) {
-            const JsStaticLiteralRecipe* child = &recipe->children[index];
-            if ((JsStaticLiteralKind)child->kind == JS_STATIC_LITERAL_HOLE) continue;
-            value_root.set(js_static_literal_materialize(child));
-            if (item_is_error(value_root.get())) return value_root.get();
-            Item result = js_array_define_dense_element_direct(array_root.get(),
-                (int64_t)index, value_root.get());
-            if (item_is_error(result)) return result;
-        }
-        return array_root.get();
-    }
-    case JS_STATIC_LITERAL_OBJECT: {
-        if (recipe->length < 0 || (recipe->length > 0 && !recipe->children)) {
-            return ItemError;
-        }
-        RootFrame roots(3);
-        Rooted<Item> object_root(roots, js_new_object());
-        Rooted<Item> key_root(roots, ItemNull);
-        Rooted<Item> value_root(roots, ItemNull);
-        if (!roots.valid() || get_type_id(object_root.get()) != LMD_TYPE_MAP) {
-            return ItemError;
-        }
-        for (int index = 0; index < recipe->length; index++) {
-            const JsStaticLiteralRecipe* property = &recipe->children[index];
-            if (!property->key_chars || property->key_len < 0) return ItemError;
-            key_root.set(js_make_string_len(property->key_chars, property->key_len));
-            if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return ItemError;
-            value_root.set(js_static_literal_materialize(property));
-            if (item_is_error(value_root.get())) return value_root.get();
-            Item result = js_create_data_property(object_root.get(), key_root.get(),
-                value_root.get());
-            if (item_is_error(result)) return result;
-        }
-        return object_root.get();
-    }
-    case JS_STATIC_LITERAL_HOLE:
-        return ItemError;
-    }
-    return ItemError;
-}
-
-extern "C" Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe) {
-    // D8.5.1v3: recipe storage belongs to the sealed code image; this call
-    // creates the distinct mutable graph required by each literal evaluation.
-    return js_static_literal_materialize(recipe);
-}
 
 static TypeMap* js_object_type_for_class_impl(int class_id) {
     if (!js_input || !js_input->pool || class_id <= JS_CLASS_NONE ||
@@ -2639,49 +2444,6 @@ extern "C" void js_init_class_instance_field_metadata(Item class_item, int count
     }
 }
 
-extern "C" void js_set_class_instance_field_metadata_name_id_range(
-    Item class_item, int index, uint32_t module_name_base, int count,
-    uint64_t method_mask) {
-    if ((get_type_id(class_item) != LMD_TYPE_MAP &&
-            get_type_id(class_item) != LMD_TYPE_FUNC) || index < 0 || count <= 0 ||
-            !context || !context->active_module_state) return;
-    LambdaModuleState* state = context->active_module_state;
-    if (!state->property_keys || module_name_base > state->property_key_count ||
-            (uint32_t)count > state->property_key_count - module_name_base) return;
-    RootFrame roots(4);
-    Rooted<Item> class_root(roots, class_item);
-    Rooted<Item> environment_root(roots, ItemNull);
-    if (!roots.valid()) return;
-
-    bool keys_found = false;
-    bool kinds_found = false;
-    Item keys = js_class_internal_property(class_root.get(), "__if_keys__", 11,
-        &keys_found);
-    Item kinds = js_class_internal_property(class_root.get(), "__if_kinds__", 12,
-        &kinds_found);
-    if (!keys_found || get_type_id(keys) != LMD_TYPE_ARRAY ||
-            index + count > keys.array->length) return;
-    for (int offset = 0; offset < count; offset++) {
-        NameId source_name_id = state->property_keys[module_name_base + (uint32_t)offset];
-        NameRef source_name = name_pool_resolve_id(context->name_pool, source_name_id);
-        if (!source_name) return;
-        bool private_source = js_private_source_name((Item){.item = s2it(source_name)});
-        if (private_source && get_type_id(environment_root.get()) != LMD_TYPE_MAP) {
-            environment_root.set(js_private_environment_for_class(class_root.get(), true));
-            if (get_type_id(environment_root.get()) != LMD_TYPE_MAP) return;
-        }
-        Item key = private_source
-            ? js_private_key_for_class_environment(environment_root.get(), source_name)
-            : (Item){.item = s2it(source_name)};
-        if (item_is_error(key) || key.item == ItemNull.item) return;
-        keys.array->items[index + offset] = key;
-        if (kinds_found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
-                index + offset < kinds.array->length) {
-            kinds.array->items[index + offset] = (Item){.item = i2it(
-                (method_mask >> offset) & 1u)};
-        }
-    }
-}
 
 extern "C" void js_set_class_instance_field_metadata_value(
         Item class_item, int index, Item value) {
@@ -3801,27 +3563,7 @@ extern "C" void js_set_class_constructor(Item class_function, Item constructor_b
     js_function_root_item_if_needed(fn, &klass->constructor);
 }
 
-extern "C" void js_set_class_instance_shape(Item class_function,
-        TypeMap* shape) {
-    if (get_type_id(class_function) != LMD_TYPE_FUNC ||
-            !js_constructor_instance_shape_is_admissible(shape)) return;
-    JsFunction* fn = (JsFunction*)class_function.function;
-    if (!fn) return;
-    JsClassData* klass = js_fn_class_ensure(fn);
-    if (!klass) return;
-    // The recipe belongs to the retained compiler Input, never to this class.
-    klass->instance_shape = shape;
-}
 
-extern "C" void js_set_function_instance_shape(Item function, TypeMap* shape) {
-    if (get_type_id(function) != LMD_TYPE_FUNC ||
-            !js_constructor_instance_shape_is_admissible(shape)) return;
-    JsFunction* fn = (JsFunction*)function.function;
-    // Pending MIR functions already own their definition record. Do not make
-    // this post-finalization publication allocate across an unrooted boundary.
-    if (!fn || !fn->code) return;
-    fn->code->instance_shape = shape;
-}
 
 #define JS_SET_CLASS_ITEM(name, field) \
 extern "C" void name(Item class_function, Item value) { \
@@ -3837,14 +3579,6 @@ JS_SET_CLASS_ITEM(js_set_class_instance_prototype, instance_prototype)
 JS_SET_CLASS_ITEM(js_set_class_superclass, superclass)
 #undef JS_SET_CLASS_ITEM
 
-extern "C" Item js_get_class_superclass(Item class_function) {
-    if (get_type_id(class_function) != LMD_TYPE_FUNC || !class_function.function) {
-        return ItemNull;
-    }
-    JsFunction* fn = (JsFunction*)class_function.function;
-    return (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) != 0
-        ? js_fn_class(fn)->superclass : ItemNull;
-}
 
 static Item js_typed_array_species_constructor_property(Item exemplar) {
     Item ctor_key = js_name_item("constructor", 11);
@@ -4010,16 +3744,7 @@ extern "C" Item js_typed_array_species_create_with_ops(Item exemplar, Item* args
     return result.get();
 }
 
-extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
-    Item argument = {.item = i2it(length)};
-    return js_typed_array_species_create_with_ops(exemplar, &argument, 1, NULL);
-}
 
-extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer,
-        int byte_offset, int length, bool length_tracking) {
-    Item args[3] = {buffer, Item{.item = i2it(byte_offset)}, Item{.item = i2it(length)}};
-    return js_typed_array_species_create_with_ops(exemplar, args, length_tracking ? 2 : 3, NULL);
-}
 
 extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     if (!js_input || !tm || !typemap_ptr_is_plausible(tm) || tm == &EmptyMap ||
@@ -5156,8 +4881,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (receiver_root.get().item == 0) receiver_root.set(object);
     receiver = receiver_root.get();
     TypeId type = get_type_id(object);
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
     if ((type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) ||
-            (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
+            (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
         // D6.2.2v2: host callers must not read the legacy callable tail.
         key_root.set(mvp_lmd_property_key(key));
         return item_is_error(key_root.get()) ? key_root.get() :
@@ -6711,23 +6437,6 @@ extern "C" bool js_array_try_get_existing_own_dense_no_gc(Item object,
     return true;
 }
 
-extern "C" Item js_array_get_existing_own_dense_with_props_or_missing(
-        Item object, int64_t index) {
-    if (get_type_id(object) != LMD_TYPE_ARRAY || !object.array ||
-            !js_array_has_props(object.array) || object.array->extra != 0) {
-        return (Item){.item = JS_DELETED_SENTINEL_VAL};
-    }
-    Item value = ItemNull;
-    if (!js_array_try_get_existing_own_dense_no_gc(object, index, &value)) {
-        return (Item){.item = JS_DELETED_SENTINEL_VAL};
-    }
-    // The caller cannot allocate to re-home a borrowed wide scalar. Let the
-    // complete Get establish its transient scalar ownership instead (D5.3.4).
-    if (lambda_item_uses_scalar_home(value)) {
-        return (Item){.item = JS_DELETED_SENTINEL_VAL};
-    }
-    return value;
-}
 
 // Fast path for writing an existing own dense data element of a normal Array.
 // Per ES OrdinarySet, an own writable data property is written directly without
@@ -8306,55 +8015,8 @@ static Item js_super_lookup_base(Item receiver) {
 // and exact generic fallback into one runtime boundary. This preserves the
 // ordinary property semantics when a flow fact is stale, including expandos,
 // prototypes, and nullish errors.
-extern "C" Item js_jube_member_get_by_ordinal(Item receiver, int64_t slot,
-                                               int64_t ordinal, Item key) {
-    RootFrame roots(3);
-    Rooted<Item> receiver_root(roots, receiver);
-    Rooted<Item> key_root(roots, key);
-    Item out = ItemNull;
-    if (slot >= 0 && ordinal >= 0 &&
-            jube_member_get_by_ordinal(receiver_root.get(), (int)slot,
-                (uint32_t)ordinal, &out)) {
-        return out;
-    }
-    return js_get_reference(receiver_root.get(), key_root.get());
-}
 
-extern "C" Item js_jube_member_set_by_ordinal(Item receiver, int64_t slot,
-                                               int64_t ordinal, Item key,
-                                               Item value, int64_t strict) {
-    RootFrame roots(4);
-    Rooted<Item> receiver_root(roots, receiver);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Item out = ItemNull;
-    if (slot >= 0 && ordinal >= 0 &&
-            jube_member_set_by_ordinal(receiver_root.get(), (int)slot,
-                (uint32_t)ordinal, value_root.get(), &out)) {
-        return js_assignment_set_result(value_root.get(), key_root.get(), out,
-            strict, receiver_root.get());
-    }
-    return js_set_key_policy(receiver_root.get(), key_root.get(),
-        value_root.get(), strict);
-}
 
-extern "C" Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
-                                                int64_t ordinal, Item key,
-                                                Item* args, int64_t argc) {
-    RootFrame roots(4);
-    Rooted<Item> receiver_root(roots, receiver);
-    Rooted<Item> key_root(roots, key);
-    Item out = ItemNull;
-    if (slot >= 0 && ordinal >= 0 &&
-            jube_member_call_by_ordinal(receiver_root.get(), (int)slot,
-                (uint32_t)ordinal, args, argc > 0 ? (int)argc : 0, &out)) {
-        return out;
-    }
-    Rooted<Item> fn_root(roots, js_get_reference(receiver_root.get(), key_root.get()));
-    if (item_is_error(fn_root.get())) return fn_root.get();
-    return js_call_function(fn_root.get(), receiver_root.get(), args,
-        argc > 0 ? (int)argc : 0);
-}
 
 // A super reference snapshots its base before ToPropertyKey can run user code.
 // Keep that base explicit for callers that already performed the snapshot.
@@ -8414,9 +8076,6 @@ extern "C" Item js_super_get_base(Item receiver) {
 
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),
 // but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
-extern "C" Item js_super_property_get(Item receiver, Item key) {
-    return js_super_property_get_from_base_impl(receiver, js_super_lookup_base(receiver), key);
-}
 
 extern "C" Item js_super_property_get_from_base(Item receiver, Item base, Item key) {
     return js_super_property_get_from_base_impl(receiver, base, key);
@@ -8424,38 +8083,6 @@ extern "C" Item js_super_property_get_from_base(Item receiver, Item base, Item k
 
 // Like js_super_property_get but for instance method context:
 // receiver.__proto__.__proto__ = ParentClass.prototype (skip current class override).
-extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
-    // Level 1: receiver.__proto__ = CurrentClass.prototype
-    Item cur_proto = js_get_prototype(receiver);
-    if (cur_proto.item == ItemNull.item) cur_proto = js_get_prototype_of(receiver);
-    if (cur_proto.item == ItemNull.item) return make_js_undefined();
-    // Level 2: CurrentClass.prototype.__proto__ = ParentClass.prototype
-    Item parent_proto = js_get_prototype(cur_proto);
-    if (parent_proto.item == ItemNull.item) parent_proto = js_get_prototype_of(cur_proto);
-    if (parent_proto.item == ItemNull.item) return make_js_undefined();
-
-    Item proto = parent_proto;
-    TypeId type = get_type_id(proto);
-    if (type != LMD_TYPE_MAP) return js_get_key_default(proto, key);
-
-    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
-
-    // Stage A1.3c: own-property + IS_ACCESSOR on proto via shared kernel.
-    {
-        Item ord_val = ItemNull;
-        JsOwnGetStatus st = js_ordinary_get_own(proto, key, receiver, &ord_val);
-        if (st == JS_OWN_READY) return ord_val;
-        // NOT_FOUND / DELETED: fall through to legacy __get_X probe + chain.
-    }
-
-    // A2-T7: legacy __get_X marker fallback retired. js_ordinary_get_own above
-    // already handles IS_ACCESSOR on `proto` via the modern shape path.
-    Item result;
-    result = js_prototype_lookup(proto, key);
-    if (result.item != ItemNull.item) return result;
-
-    return js_get_key_default(proto, key);
-}
 
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
@@ -8522,11 +8149,6 @@ static Item js_super_property_set_from_base_impl(Item receiver, Item proto, Item
     return js_set_key_default(receiver, key, value);
 }
 
-static Item js_super_property_set_impl(Item receiver, Item key, Item value,
-        bool strict_reference) {
-    return js_super_property_set_from_base_impl(receiver, js_super_lookup_base(receiver),
-        key, value, strict_reference);
-}
 
 extern "C" Item js_super_property_set_from_base(Item receiver, Item base, Item key,
         Item value, int64_t strict) {
@@ -8537,7 +8159,6 @@ extern "C" Item js_super_property_set_from_base(Item receiver, Item base, Item k
 // a single entry with an explicit strict flag (passed as a constant operand by
 // the JIT lowering). Both call paths are cold; the runtime branches once on
 // the flag.
-JS_FORWARD_ITEM(js_super_property_set, (Item receiver, Item key, Item value, int64_t strict), js_super_property_set_impl, (receiver, key, value, strict != 0))
 
 enum {
     JS_NAMED_FAST_RECEIVER_MAP = 0,
@@ -8738,73 +8359,9 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
     return true;
 }
 
-static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
-        Item value) {
-    if (!entry || !entry->type) return false;
-    TypeId field_type = entry->type->type_id;
-    TypeId value_type = get_type_id(value);
-    return field_type == LMD_TYPE_NULL || field_type == value_type ||
-        (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) ||
-        (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT);
-}
 
-static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
-        Item value) {
-    if (!entry || !entry->type || !data) return false;
-    TypeId field_type = entry->type->type_id;
-    TypeId value_type = get_type_id(value);
-    void* field_ptr = (char*)data + entry->byte_offset;
-    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-        *(double*)field_ptr = lambda_int_item_value(value);
-        return true;
-    }
-    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
-        return true;
-    }
-    if (field_type == LMD_TYPE_NULL) {
-        bool stored = map_field_store_dynamic_item(field_ptr, value);
-        js_opt_trace_record(JS_OPT_DYNAMIC_ITEM_STORE, JS_OPT_REASON_NONE,
-            stored ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
-        return stored;
-    }
-    if (field_type != value_type) return false;
-    return map_field_store(field_ptr, value, value_type);
-}
 
-static bool js_named_fast_reserved_constructor_slot_is_next(Map* map,
-        ShapeEntry* entry) {
-    if (!map || !entry || !map_ctor_offset_is_reserved(map,
-            entry->byte_offset)) {
-        return false;
-    }
-    // A prior source assignment can publish a later reserved field through an
-    // RHS or initializer. fn_map_set then detaches and repairs enumeration
-    // order; retain that path whenever such an out-of-order publication exists.
-    const TypeMap* tm = (const TypeMap*)map->type;
-    for (ShapeEntry* next = typemap_next_field(tm, entry); next;
-            next = typemap_next_field(tm, next)) {
-        if (!map_ctor_offset_is_reserved(map, next->byte_offset)) return false;
-    }
-    return true;
-}
 
-static bool js_named_fast_store_reserved_constructor_slot(Item object, Item key,
-        Map* map, ShapeEntry* entry, Item value) {
-    if (!map || !entry || !map->data ||
-            !js_named_fast_store_can_write_same_slot(entry, value) ||
-            !js_named_fast_reserved_constructor_slot_is_next(map, entry) ||
-            !js_ordinary_reserved_constructor_slot_can_initialize(object, key,
-                entry)) {
-        return false;
-    }
-    bool stored = js_named_fast_store_same_slot(entry, map->data, value);
-    js_opt_trace_record(JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE,
-        JS_OPT_REASON_NONE, stored ? JS_OPT_OUTCOME_TAKEN :
-            JS_OPT_OUTCOME_FALLBACK);
-    if (stored) map_ctor_initialize_offset(map, entry->byte_offset);
-    return stored;
-}
 
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
     js_named_fast_profile_probe();
@@ -8879,61 +8436,6 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
     return js_get_reference(object, key_item);
 }
 
-extern "C" Item js_set_name_id(Item object, NameId name_id,
-        Item value, int64_t strict) {
-    js_named_fast_profile_probe();
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
-        name_id);
-    if (!key) {
-        js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_NO_KEY);
-        return ItemNull;
-    }
-    Item key_item = (Item){.item = s2it(key)};
-    Map* map = NULL;
-    ShapeEntry* entry = NULL;
-    JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
-    bool named_fast_lookup = js_named_fast_lookup(object, key, name_id, &map,
-            &entry, NULL, NULL, &reason, false);
-    if (named_fast_lookup &&
-            js_named_fast_store_can_write_same_slot(entry, value) &&
-            js_named_fast_store_same_slot(entry, map->data, value)) {
-        // The shared admission rejects host-dynamic receivers, so this direct
-        // ordinary-slot hit needs no DOM/global preparation. The sole
-        // remaining observer is the real global object binding mirror.
-        if (js_is_global_this_object_value(object)) {
-            js_sync_global_var_module_binding(object,
-                (Item){.item = s2it(key)}, value);
-        }
-        js_named_fast_profile_hit();
-        return value;
-    }
-    if (!named_fast_lookup && reason == JS_OPT_REASON_NAMED_FAST_RESERVED &&
-            js_named_fast_store_reserved_constructor_slot(object, key_item,
-                map, entry, value)) {
-        js_named_fast_profile_hit();
-        return value;
-    }
-    if (reason == JS_OPT_REASON_NONE) {
-        reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
-    }
-    js_named_fast_profile_miss(reason);
-    if (reason == JS_OPT_REASON_NAMED_FAST_NO_ENTRY) {
-        js_opt_trace_named_fast_no_entry(key->chars, key->len);
-    }
-    // T10-3: try the ordinary-add kernel here rather than three frames deeper.
-    // Reaching it through js_set_key_policy -> js_set_key_default ->
-    // js_set_completion_with_key re-derives facts this frame already has and
-    // costs 22-26% of `new P(x,y)`. The kernel proves every premise itself, so
-    // it is offered every miss, not just NAMED_FAST_NO_ENTRY: a receiver whose
-    // map was never admissible (an empty object still has data == NULL) misses
-    // as NO_RECEIVER, and an existing-but-unwritable slot misses with the entry
-    // present, which the kernel's own-absence test rejects. Both strictness
-    // modes complete a successful add with the assigned value.
-    if (js_ordinary_add_own_data_property(object, key_item, value)) {
-        return value;
-    }
-    return js_set_key_policy(object, key_item, value, strict);
-}
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
 // Returns the byte offset of the code unit at utf16_idx, or str_len if out of range.
@@ -9081,45 +8583,7 @@ static void js_utf16_seek(String* string, int64_t index,
     *out_unit_offset = unit_offset;
 }
 
-extern "C" Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver,
-        Item* args, int argc) {
-    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function ||
-            !js_fn_is_js_layout(callee.function) ||
-            get_type_id(receiver) != LMD_TYPE_STRING || !args || argc != 1) {
-        return ItemNull;
-    }
-    const JsFunction* function = (const JsFunction*)callee.function;
-    const JsCallableCode* code = js_fn_code(function);
-    String* source = it2s(receiver);
-    if (!code || !source || !source->is_ascii) return ItemNull;
 
-    if (code->catalog_id == JS_BUILTIN_STR_INDEX_OF) {
-        if (get_type_id(args[0]) != LMD_TYPE_STRING) return ItemNull;
-        String* needle = it2s(args[0]);
-        if (!needle || !needle->is_ascii) return ItemNull;
-        if (needle->len == 0) return (Item){.item = i2it(0)};
-        if (source->len < needle->len) return (Item){.item = i2it(-1)};
-        size_t found = str_find(source->chars, source->len, needle->chars,
-            needle->len);
-        return (Item){.item = i2it(found == STR_NPOS ? -1 : (int64_t)found)};
-    }
-
-    if (code->catalog_id == JS_BUILTIN_STR_CHAR_CODE_AT) {
-        if (get_type_id(args[0]) != LMD_TYPE_INT) return ItemNull;
-        int64_t index = it2i(args[0]);
-        if (index < 0 || index >= source->len) return ItemNull;
-        return (Item){.item = i2it((unsigned char)source->chars[index])};
-    }
-
-    return ItemNull;
-}
-
-extern "C" int64_t js_builtin_callable_is_id(Item callee, int64_t catalog_id) {
-    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function ||
-            !js_fn_is_js_layout(callee.function)) return 0;
-    const JsCallableCode* code = js_fn_code((JsFunction*)callee.function);
-    return code && code->catalog_id == catalog_id;
-}
 
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
 Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
@@ -9404,31 +8868,6 @@ static Item js_array_new_sparse_length(int64_t length) {
 }
 JS_FORWARD_ITEM(js_array_new, (int length), js_array_new_sparse_length, ((int64_t)length))
 
-extern "C" Item js_array_new_from_static_items(const Item* items, int length) {
-    Item result = js_array_new(length);
-    if (!items || length <= 0 || get_type_id(result) != LMD_TYPE_ARRAY ||
-            !result.array || result.array->extra != 0) {
-        return result;
-    }
-
-    Array* array = result.array;
-    if (!array->items) {
-        // A complete literal cannot retain `new Array(length)`'s sparse holes.
-        // Install the one owned buffer rather than populating the sparse map
-        // element-by-element, whose generic setter preserves those holes.
-        int64_t capacity = (int64_t)length + 4;
-        Item* dense_items = js_array_runtime_items_alloc(capacity);
-        if (!dense_items) return result;
-        js_array_install_runtime_items(array, dense_items, capacity);
-    }
-    // The compiler admits only inline Number Items, so this direct copy has no
-    // borrowed scalar tail and completes the fresh dense array at once.
-    memcpy(array->items, items, (size_t)length * sizeof(Item));
-    container_set_js_elements_kind((Container*)array, JS_ELEMENTS_PACKED_TAGGED);
-    js_opt_trace_record(JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER,
-        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-    return result;
-}
 
 extern "C" Item js_array_new_with_class(int length, int class_id) {
     Item result = js_array_new(length);
@@ -9619,34 +9058,6 @@ extern "C" Item js_elements_get(Item array, Item index) {
     return js_array_get_index(array, idx, index, false);
 }
 
-extern "C" Item js_elements_get_number(Item array, double index) {
-    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL, JS_OPT_REASON_NONE,
-        JS_OPT_OUTCOME_TAKEN);
-    bool array_index = isfinite(index) && index >= 0.0 &&
-        floor(index) == index && index <= (double)0xFFFFFFFE;
-    if (array_index) {
-        // A present own tagged element is already an Item. Use the shared
-        // no-GC admission before creating a root frame; wide scalar elements
-        // still need the normal Get to establish a transient home (D5.3.4).
-        Item own = ItemNull;
-        if (js_array_try_get_existing_own_dense_no_gc(array, (int64_t)index,
-                &own) && !lambda_item_uses_scalar_home(own)) {
-            return own;
-        }
-    }
-    RootFrame roots(2);
-    Rooted<Item> array_root(roots, array);
-    Rooted<Item> key_root(roots, ItemNull);
-    // ES ToPropertyKey(-0) is "0". A bounded integral Number can therefore
-    // retain its F64 carrier until the element kernel consumes its index.
-    if (array_index) {
-        return js_elements_get_int(array_root.get(), (int64_t)index);
-    }
-    // Fractional, non-finite, and non-index Number keys remain observable
-    // named properties. Materialize only on this semantic fallback.
-    key_root.set(js_make_number(index));
-    return js_get_reference(array_root.get(), key_root.get());
-}
 
 // P10e: Fast array access with native int index (no js_get_number overhead)
 extern "C" Item js_string_get_int(Item str_item, int64_t index) {
@@ -10012,44 +9423,6 @@ extern "C" bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t in
     return true;
 }
 
-extern "C" bool js_array_set_existing_number_no_gc(Item array, double index,
-        double value) {
-    // A canonical existing index is an own writable data property in either
-    // packed representation. Holes, growth, and descriptor overlays must keep
-    // the full Set path because they can observe extensibility or prototypes.
-    if (!isfinite(index) || index < 0.0 || index > 4294967294.0 ||
-            floor(index) != index) return false;
-    int64_t integer_index = (int64_t)index;
-    if (js_is_ordinary_numeric_array(array)) {
-        ArrayNum* numeric = array.array_num;
-        if (!numeric || numeric->get_elem_type() != ELEM_FLOAT64 ||
-                integer_index >= numeric->length ||
-                integer_index >= container_dense_capacity((Array*)numeric) ||
-                js_array_companion_has_numeric_slot((Array*)numeric,
-                    integer_index)) {
-            return false;
-        }
-        {
-            AutoAssertNoGC no_gc;
-            numeric->float_items[integer_index] = value;
-        }
-    } else {
-        uint64_t bits;
-        memcpy(&bits, &value, sizeof(bits));
-        // `flt2it` allocates a scalar home for this out-of-band encoding.
-        // The no-GC leaf accepts only the direct Item encodings it can store.
-        if (value != 0.0 && !(bits & ITEM_DBL_MASK)) return false;
-        Item number = {.item = value == 0.0
-            ? ITEM_FLOAT_P0 | (bits >> 63) : bits};
-        if (!js_array_try_set_existing_own_dense_no_gc(array, integer_index,
-                number)) {
-            return false;
-        }
-    }
-    js_opt_trace_record(JS_OPT_ORDINARY_NUMBER_STORE, JS_OPT_REASON_NONE,
-        JS_OPT_OUTCOME_TAKEN);
-    return true;
-}
 
 extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
                                                  Item value) {
@@ -10796,7 +10169,7 @@ JsBodyEntry js_function_select_body_entry(const JsFunction* fn) {
     if (!func_ptr) return js_body_entry_absent;
     // JC16: a compiled function's C-reachable entry is its MIR span entry,
     // which already has the body-entry shape.
-    if (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) return (JsBodyEntry)func_ptr;
+    if (fn->flags & JS_FUNC_FLAG_COMPILED_BODY) return (JsBodyEntry)func_ptr;
     return js_body_entry_hosted;
 }
 
@@ -14502,6 +13875,10 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
                 return js_throw_type_error("is not a constructor");
             Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
                 callee_root.get(), make_js_undefined(), args, arg_count, target_root.get()));
+            if (item_is_error(result)) {
+                MvpLmdRealmScope realm(mvp_lmd_property_program(callee_root.get()));
+                result = realm.complete(result, true);
+            }
             return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
         }
         JsFunction* fn = (JsFunction*)callee_root.get().function;
@@ -14668,7 +14045,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // satellite; no AST activation is resumed or transferred.
     if (construct_new_target.item == 0 && fn && fn->code &&
             fn->code->p2_promotion.state == FN_PROMOTION_COMPILED &&
-            (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) == 0 &&
+            (fn->flags & JS_FUNC_FLAG_COMPILED_BODY) == 0 &&
             !js_function_promote_ast_body(fn,
                 fn->code->p2_promotion.boxed_entry)) {
         log_error("js-p2: failed to refresh promoted definition");
@@ -14786,11 +14163,11 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
 #endif
     if (!fn->body) {
         log_error("js-body-entry: function has no finalized body entry");
-    } else if ((fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) &&
+    } else if ((fn->flags & JS_FUNC_FLAG_COMPILED_BODY) &&
             fn->body == (JsBodyEntry)js_fn_func_ptr(fn) &&
             (js_fn_runtime_context(fn) != (Context*)context ||
              js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) &&
-            !js_mir_owner_is_current(js_fn_runtime_context(fn), "js-invoke-fn")) {
+            !js_runtime_owner_is_current(js_fn_runtime_context(fn), "js-invoke-fn")) {
         // O3: a compiled body runs on the Context that compiled it; a retained
         // owner must never route a call onto another evaluator. The two
         // thread-local compares are the whole check on the common path; the
@@ -14834,41 +14211,7 @@ Item js_call_entry_generic(Item func_item, Item this_val, Item* args,
         args_prerooted, (Item){0}, false);
 }
 
-static bool js_call_mir_light_is_active(Item func_item) {
-    if (get_type_id(func_item) != LMD_TYPE_FUNC || !func_item.function ||
-            !js_active_runtime_state) return false;
-    JsFunction* fn = (JsFunction*)func_item.function;
-    if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_mir_light ||
-            !fn->body || js_runtime_state.with_head ||
-            js_fn_runtime_context(fn) != (Context*)context ||
-            js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
-        return false;
-    }
-    uint32_t module_state_id = js_fn_module_state_id(fn);
-    if (module_state_id != UINT32_MAX &&
-            module_state_id != lambda_active_module_state_id()) return false;
-    Item home_global = fn->home_global;
-    return home_global.item == 0 || get_type_id(home_global) != LMD_TYPE_MAP ||
-        home_global.item == js_get_global_this().item;
-}
 
-static bool js_call_mir_this_is_active(Item func_item) {
-    if (get_type_id(func_item) != LMD_TYPE_FUNC || !func_item.function ||
-            !js_active_runtime_state) return false;
-    JsFunction* fn = (JsFunction*)func_item.function;
-    if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_mir_this ||
-            !fn->body || js_runtime_state.with_head ||
-            js_fn_runtime_context(fn) != (Context*)context ||
-            js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
-        return false;
-    }
-    uint32_t module_state_id = js_fn_module_state_id(fn);
-    if (module_state_id != UINT32_MAX &&
-            module_state_id != lambda_active_module_state_id()) return false;
-    Item home_global = fn->home_global;
-    return home_global.item == 0 || get_type_id(home_global) != LMD_TYPE_MAP ||
-        home_global.item == js_get_global_this().item;
-}
 
 // The finalizer admits this entry only for code bodies that cannot observe an
 // activation-local fact. Keep the callee and borrowed argument span rooted,
@@ -14876,7 +14219,51 @@ static bool js_call_mir_this_is_active(Item func_item) {
 // while D8.4.1v2 permits removing a protocol step after its guard proves it
 // unobservable. `this_val` stays an ABI operand for the compiled body even
 // though the admission contract has proven the body cannot read it.
-static Item js_call_mir_light_direct(Item func_item, Item this_val, Item* args,
+
+
+// A strict compiled body that reads `this` still needs its receiver and method
+// home, but does not need the generic call kernel's arguments/new.target/eval
+// activation. The finalized flags and runtime state guard make that reduced
+// activation explicit; every unsupported or stale shape resumes generically.
+
+
+static bool js_call_compiled_light_is_active(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC || !func_item.function ||
+            !js_active_runtime_state) return false;
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_compiled_light ||
+            !fn->body || js_runtime_state.with_head ||
+            js_fn_runtime_context(fn) != (Context*)context ||
+            js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
+        return false;
+    }
+    uint32_t module_state_id = js_fn_module_state_id(fn);
+    if (module_state_id != UINT32_MAX &&
+            module_state_id != lambda_active_module_state_id()) return false;
+    Item home_global = fn->home_global;
+    return home_global.item == 0 || get_type_id(home_global) != LMD_TYPE_MAP ||
+        home_global.item == js_get_global_this().item;
+}
+
+static bool js_call_compiled_this_is_active(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC || !func_item.function ||
+            !js_active_runtime_state) return false;
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_compiled_this ||
+            !fn->body || js_runtime_state.with_head ||
+            js_fn_runtime_context(fn) != (Context*)context ||
+            js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
+        return false;
+    }
+    uint32_t module_state_id = js_fn_module_state_id(fn);
+    if (module_state_id != UINT32_MAX &&
+            module_state_id != lambda_active_module_state_id()) return false;
+    Item home_global = fn->home_global;
+    return home_global.item == 0 || get_type_id(home_global) != LMD_TYPE_MAP ||
+        home_global.item == js_get_global_this().item;
+}
+
+static Item js_call_compiled_light_direct(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
@@ -14896,9 +14283,9 @@ static Item js_call_mir_light_direct(Item func_item, Item this_val, Item* args,
     return result;
 }
 
-Item js_call_entry_mir_light(Item func_item, Item this_val, Item* args,
+Item js_call_entry_compiled_light(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
-    if (!js_call_mir_light_is_active(func_item)) {
+    if (!js_call_compiled_light_is_active(func_item)) {
         return js_call_entry_generic(func_item, this_val, args, arg_count,
             result_home, args_prerooted);
     }
@@ -14906,15 +14293,11 @@ Item js_call_entry_mir_light(Item func_item, Item this_val, Item* args,
         JS_OPT_OUTCOME_TAKEN);
     js_opt_trace_record(JS_OPT_MIR_LIGHT_DIRECT_ACTIVATION,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-    return js_call_mir_light_direct(func_item, this_val, args, arg_count,
+    return js_call_compiled_light_direct(func_item, this_val, args, arg_count,
         result_home, args_prerooted);
 }
 
-// A strict compiled body that reads `this` still needs its receiver and method
-// home, but does not need the generic call kernel's arguments/new.target/eval
-// activation. The finalized flags and runtime state guard make that reduced
-// activation explicit; every unsupported or stale shape resumes generically.
-static Item js_call_mir_this_direct(Item func_item, Item this_val, Item* args,
+static Item js_call_compiled_this_direct(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
@@ -14946,9 +14329,9 @@ static Item js_call_mir_this_direct(Item func_item, Item this_val, Item* args,
     return result;
 }
 
-Item js_call_entry_mir_this(Item func_item, Item this_val, Item* args,
+Item js_call_entry_compiled_this(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
-    if (!js_call_mir_this_is_active(func_item)) {
+    if (!js_call_compiled_this_is_active(func_item)) {
         return js_call_entry_generic(func_item, this_val, args, arg_count,
             result_home, args_prerooted);
     }
@@ -14956,9 +14339,10 @@ Item js_call_entry_mir_this(Item func_item, Item this_val, Item* args,
         JS_OPT_OUTCOME_TAKEN);
     js_opt_trace_record(JS_OPT_MIR_THIS_DIRECT_ACTIVATION, JS_OPT_REASON_NONE,
         JS_OPT_OUTCOME_TAKEN);
-    return js_call_mir_this_direct(func_item, this_val, args, arg_count,
+    return js_call_compiled_this_direct(func_item, this_val, args, arg_count,
         result_home, args_prerooted);
 }
+
 
 // JC21 guard: the facts that let an AST call site enter the kernel's direct
 // instance. Every excluded shape keeps its full kernel step on the generic
@@ -15023,6 +14407,11 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
                     owned_args, "js-call-mvp")) return ItemError;
             Item result = lambda_item_resolve_pending_slot(mvp_lmd_class_invoke(
                 callee.get(), receiver.get(), args, arg_count, make_js_undefined()));
+            if (item_is_error(result)) {
+                // native observers need the callee's Error object, including implicit builtin failures.
+                MvpLmdRealmScope realm(mvp_lmd_property_program(callee.get()));
+                result = realm.complete(result, true);
+            }
             return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;
         }
         if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
@@ -15062,32 +14451,13 @@ extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
     return js_call(func_item, this_val, args, arg_count, result_home, false);
 }
 
-extern "C" Item js_call_constructor_body_into(Item func_item, Item this_val,
-        Item* args, int arg_count, Item new_target, uint64_t* result_home) {
-    if (!result_home) {
-        log_error("js-construct-body: missing caller result home");
-        return ItemError;
-    }
-    return js_call_constructor_body(func_item, this_val, args, arg_count,
-        new_target, result_home, false);
-}
 
-extern "C" Item js_call_constructor_body_prerooted_args_into(Item func_item,
-        Item this_val, Item* args, int arg_count, Item new_target,
-        uint64_t* result_home) {
-    if (!result_home) {
-        log_error("js-construct-body-prerooted: missing caller result home");
-        return ItemError;
-    }
-    return js_call_constructor_body(func_item, this_val, args, arg_count,
-        new_target, result_home, true);
-}
 
 static Item js_call_export_into(Function* function, Item* args, int arg_count,
         uint64_t* result_home) {
     Context* runtime = (Context*)context;
     if (!runtime || !function || !result_home) return ItemError;
-    if (!js_mir_owner_is_current(runtime, "js-export-bridge")) return ItemError;
+    if (!js_runtime_owner_is_current(runtime, "js-export-bridge")) return ItemError;
     Item callable = {.function = function};
     bool native_bigint = false;
     if (function_has_abi(function, FN_ENTRY_ABI_MVP_LMD))
@@ -15209,14 +14579,6 @@ static Item js_apply_function_impl(Item func_item, Item this_val, Item args_arra
 }
 JS_FORWARD_ITEM(js_apply_function, (Item func_item, Item this_val, Item args_array), js_apply_function_impl, (func_item, this_val, args_array, NULL))
 
-extern "C" Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
-        uint64_t* result_home) {
-    if (!result_home) {
-        log_error("js_apply_function_into: missing caller result home");
-        return ItemError;
-    }
-    return js_apply_function_impl(func_item, this_val, args_array, result_home);
-}
 
 Item js_intrinsic_function_call_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
@@ -22158,33 +21520,11 @@ static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replac
     return js_replace_nonws_runs(str, s, repl);
 }
 
-static Item js_string_replace_nonws_global_fast_impl(Item str, Item replacement, bool replacement_known_no_dollar) {
-    if (get_type_id(str) != LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
-    }
-    if (get_type_id(replacement) != LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement));
-    }
-    int64_t cached_cp = js_string_last_fromCharCode_cp(str);
-    if (cached_cp >= 0) {
-        return js_regexp_s_whitespace((int)cached_cp) ? str : replacement;
-    }
-    String* s = it2s(str);
-    String* repl = it2s(replacement);
-    if (!s || !repl) return str;
-    if (!replacement_known_no_dollar && js_replacement_has_dollar_pattern(repl)) return str;
-    return js_replace_nonws_runs(str, s, repl);
-}
 
-JS_FORWARD_ITEM(js_string_replace_nonws_global_fast, (Item str, Item replacement),
-    js_string_replace_nonws_global_fast_impl, (str, replacement, false))
 
 // MIR only calls this for literal replacements that were scanned at compile
 // time and contain no '$' patterns. Keeping that fact in the callee avoids
 // rechecking the same literal inside tight test262 scans.
-JS_FORWARD_ITEM(js_string_replace_nonws_global_fast_no_dollar,
-    (Item str, Item replacement), js_string_replace_nonws_global_fast_impl,
-    (str, replacement, true))
 
 // memmem-shaped wrapper over lib's candidate-scan kernel (str_find): macOS
 // memmem is a scalar first-byte loop, 4.7x slower here, and the Windows
@@ -26272,6 +25612,8 @@ extern "C" Item js_get_css_object_value() {
 
     js_realm_intrinsic_slots_ensure_roots();
     js_css_namespace_object = js_new_object_with_class(JS_CLASS_CSS_NAMESPACE);
+    // Web IDL namespace objects inherit the owning realm's ordinary conversion methods.
+    js_namespace_set_object_prototype(js_css_namespace_object);
 
     js_install_builtin_method_specs(js_css_namespace_object, JS_BUILTIN_OWNER_CSS_METHOD);
 
@@ -26803,10 +26145,8 @@ extern "C" Item js_get_console_object_value() {
 #define js_262_eval_script_active (js_runtime_state.test262_agent ? \
     js_runtime_state.test262_agent->eval_script_active : 0)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
-#define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
 #define js_262_agent_report_values (js_runtime_state.test262_agent->report_values)
 #define js_262_agent_report_rows (js_runtime_state.test262_agent->reports)
-#define js_262_agent_current_slot (js_runtime_state.test262_agent->current_slot)
 
 static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
     if (!state) return;
@@ -26816,7 +26156,6 @@ static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
 void js_test262_agent_state_destroy(JsTest262AgentState* state) {
     if (!state) return;
     js_262_agent_report_rows_clear(state);
-    root_vector_destroy(&state->callbacks);
     root_vector_destroy(&state->report_values);
 }
 
@@ -26833,18 +26172,13 @@ static bool js_262_agent_report_rows_ensure(void) {
     return true;
 }
 
-static Item js_262_agent_callback_at(int64_t slot) {
-    Item* callback = root_vector_at(&js_262_agent_callbacks, slot);
-    return callback ? *callback : ItemNull;
-}
-
 static Item js_262_agent_report_value(const JsTest262AgentReport* row) {
     Item* value = row ? root_vector_at(&js_262_agent_report_values,
         row->root_slot) : NULL;
     return value ? *value : ItemNull;
 }
 
-static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
+static bool js_262_agent_enqueue_report(Item report) {
     if (!js_262_agent_report_rows_ensure()) return false;
     RootFrame roots(1);
     Rooted<Item> report_root(roots, report);
@@ -26852,7 +26186,6 @@ static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
         sizeof(JsTest262AgentReport), MEM_CAT_JS_RUNTIME);
     if (!row) return false;
     row->root_slot = root_vector_count(&js_262_agent_report_values);
-    row->waiter_id = waiter_id;
     if (!root_vector_push(&js_262_agent_report_values, report_root.get())) {
         mem_free(row);
         return false;
@@ -26867,14 +26200,12 @@ static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
     return true;
 }
 
-static bool js_262_agent_remove_report(int index, Item* report,
-        int* waiter_id) {
+static bool js_262_agent_remove_report(int index, Item* report) {
     if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
             index < 0 || index >= js_262_agent_report_rows->length) return false;
     JsTest262AgentReport* row = (JsTest262AgentReport*)
         js_262_agent_report_rows->data[index];
     if (report) *report = js_262_agent_report_value(row);
-    if (waiter_id) *waiter_id = row->waiter_id;
     int64_t tail_slot = root_vector_count(&js_262_agent_report_values) - 1;
     JsTest262AgentReport* tail_row = NULL;
     for (int i = 0; i < js_262_agent_report_rows->length; i++) {
@@ -26901,29 +26232,171 @@ static bool js_262_agent_remove_report(int index, Item* report,
     return true;
 }
 
+// Test262 agents share only SAB storage and the context's precise-root service.
+// Their stacks, globals, jobs and retained-source controllers are independent.
+struct JsAgentMember {
+    JsAgentGroup* group;
+    JsRuntimeState* state;
+    Runtime runtime;
+    Activation* activation;
+    RootVector values; // callback, broadcast buffer, broadcast token
+    double wake_at;
+    bool pending_broadcast;
+    bool leaving;
+};
+struct JsAgentGroup {
+    JsRuntimeState* parent;
+    Runtime* runtime;
+    ArrayList* members;
+    RootVector error;
+    bool pumping;
+};
+
+static JsAgentGroup* js_agent_group_ensure() {
+    JsTest262AgentState* state = js_test262_agent_state_ensure(&js_runtime_state);
+    if (!state) return NULL;
+    if (state->group) return state->group;
+    if (!context || !context->runtime) return NULL;
+    auto* group = (JsAgentGroup*)mem_calloc(1, sizeof(JsAgentGroup), MEM_CAT_JS_RUNTIME);
+    if (!group) return NULL;
+    group->parent = js_active_runtime_state;
+    group->runtime = context->runtime;
+    runtime_module_state_owner(context, group->runtime);
+    if (!group->runtime->scripts) group->runtime->scripts = arraylist_new(8);
+    group->members = arraylist_new(4);
+    root_vector_init(&group->error, (Context*)context, "Test262 agent failure");
+    if (!group->runtime->scripts || !group->members || !root_vector_push(&group->error, ItemNull)) {
+        if (group->members) arraylist_free(group->members);
+        root_vector_destroy(&group->error); mem_free(group); return NULL;
+    }
+    state->group = group;
+    return group;
+}
+
+JsRuntimeState* js_agent_state_at(int index) {
+    if (index < 0 || !js_active_runtime_state) return NULL;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    JsAgentGroup* group = agent ? agent->group : NULL;
+    if (!group) return index == 0 ? js_active_runtime_state : NULL;
+    if (!index) return group->parent;
+    return index <= group->members->length
+        ? ((JsAgentMember*)group->members->data[index - 1])->state : NULL;
+}
+
+bool js_agent_pump() {
+    JsTest262AgentState* state = js_active_runtime_state ? js_runtime_state.test262_agent : NULL;
+    JsAgentGroup* group = state ? state->group : NULL;
+    if (!group || group->pumping || state->member) return false;
+    group->pumping = true;
+    bool progressed = false;
+    for (int i = 0; i < group->members->length; i++) {
+        auto* member = (JsAgentMember*)group->members->data[i];
+        if (member->leaving || !member->activation ||
+                activation_status(member->activation) == ACTIVATION_DONE ||
+                member->wake_at > pn_clock() * 1000.0) continue;
+        progressed = true;
+        if (activation_resume(member->activation, make_js_undefined()) == ACTIVATION_DONE) {
+            Item result = activation_value(member->activation);
+            if (item_is_error(result)) {
+                // preserve the actual failure before any later agent allocates.
+                *root_vector_at(&group->error, 0) = result;
+            }
+        }
+    }
+    group->pumping = false;
+    return progressed;
+}
+
+void js_agent_checkpoint() {
+    JsTest262AgentState* state = js_active_runtime_state ? js_runtime_state.test262_agent : NULL;
+    if (!state || !state->group) return;
+    if (state->member && activation_current() == state->member->activation) {
+        activation_suspend(make_js_undefined());
+    } else if (!state->member) js_agent_pump();
+}
+
+static Item js_agent_member_entry(Activation* activation, Item source) {
+    auto* member = (JsAgentMember*)activation_user(activation);
+    js_active_runtime_state = member->state;
+    context->runtime = &member->runtime;
+    JsInterpHostScope interpreter(NULL);
+    MvpLmdRealmScope native_realm(NULL, true);
+    JsOwnedCallActivation call;
+    RootFrame roots(2);
+    Rooted<Item> result(roots, ItemNull), buffer(roots, ItemNull);
+    if (!js_runtime_state_init(context)) return ItemError;
+    String* text = source.get_string();
+    result.set(js_interp_execute_source(&member->runtime, text->chars, text->len,
+        "<test262-agent>", NULL, true));
+    if (item_is_error(result.get())) return result.get();
+    while (!member->leaving) {
+        if (member->pending_broadcast && js_is_callable(*root_vector_at(&member->values, 0))) {
+            buffer.set(js_sharedarraybuffer_clone_with_ops(*root_vector_at(&member->values, 1),
+                &js_buffer_view_default_ops));
+            if (item_is_error(buffer.get())) return buffer.get();
+            Item args[] = {buffer.get(), *root_vector_at(&member->values, 2)};
+            member->pending_broadcast = false;
+            *root_vector_at(&member->values, 1) = ItemNull;
+            result.set(js_call_function(*root_vector_at(&member->values, 0),
+                make_js_undefined(), args, 2));
+            if (item_is_error(result.get())) return result.get();
+        }
+        result.set(js_microtask_flush_result());
+        if (item_is_error(result.get())) return result.get();
+        activation_suspend(make_js_undefined());
+    }
+    return make_js_undefined();
+}
+
+static void js_agent_member_destroy(JsAgentMember* member, Runtime* parent) {
+    if (member->activation) activation_destroy(member->activation);
+    // abandoning a stack invalidates its LIFO call link before timer cleanup.
+    member->state->execution.current_activation = NULL;
+    member->state->with_head = NULL;
+    js_runtime_state_destroy_agent(member->state);
+    root_vector_destroy(&member->values);
+    module_registry_cleanup_for_runtime(&member->runtime);
+    // unreachable AST functions are finalized with the shared heap; keep their
+    // Script metadata until the parent performs its ordinary post-heap cleanup.
+    for (int i = 0; member->runtime.scripts && i < member->runtime.scripts->length; i++) {
+        Script* script = (Script*)member->runtime.scripts->data[i];
+        if (script) {
+            lambda_module_state_release(script->module_state_id);
+            arraylist_append(parent->scripts, script);
+        }
+    }
+    if (member->runtime.scripts) member->runtime.scripts->length = 0;
+    runtime_free_all_scripts(&member->runtime);
+    mem_free(member);
+}
+
+void js_agent_group_shutdown(JsRuntimeState* owner) {
+    JsTest262AgentState* agent = owner ? owner->test262_agent : NULL;
+    JsAgentGroup* group = agent ? agent->group : NULL;
+    if (!group || group->parent != owner) return;
+    agent->group = NULL;
+    for (int i = 0; i < group->members->length; i++)
+        js_agent_member_destroy((JsAgentMember*)group->members->data[i], group->runtime);
+    arraylist_free(group->members);
+    root_vector_destroy(&group->error);
+    mem_free(group);
+}
+
 static void js_262_agent_reset_state() {
     if (!js_runtime_state.test262_agent) return;
-    js_262_agent_object = (Item){.item = ITEM_NULL};
-    root_vector_clear(&js_262_agent_callbacks);
+    js_agent_group_shutdown(js_active_runtime_state);
+    js_262_agent_object = ItemNull;
     js_262_agent_report_rows_clear(js_runtime_state.test262_agent);
-    js_262_agent_current_slot = -1;
     js_atomics_reset_waiters();
 }
 
 void js_reset_262_object() {
-    js_262_object = (Item){.item = ITEM_NULL};
+    js_262_object = ItemNull;
     js_262_agent_reset_state();
 }
 
 extern "C" Item js_get_current_this(void);
-
-extern "C" int64_t js_262_eval_script_is_active() {
-    return js_262_eval_script_active;
-}
-
-extern "C" int js_262_agent_current_slot_for_atomics() {
-    return js_runtime_state.test262_agent ? js_262_agent_current_slot : -1;
-}
+extern "C" int64_t js_262_eval_script_is_active() { return js_262_eval_script_active; }
 
 static Item js_262_eval_script(Item code) {
     JsTest262AgentState* agent = js_test262_agent_state_ensure(&js_runtime_state);
@@ -26936,105 +26409,126 @@ static Item js_262_eval_script(Item code) {
 }
 
 static Item js_262_agent_start(Item code) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     RootFrame roots(1);
-    Rooted<Item> code_root(roots, code);
-    int64_t slot = root_vector_count(&js_262_agent_callbacks);
-    if (!root_vector_push(&js_262_agent_callbacks, ItemNull)) return ItemError;
-    int saved_slot = js_262_agent_current_slot;
-    js_262_agent_current_slot = (int)slot;
-    Item result = js_builtin_eval(code_root.get(), 1);
-    js_262_agent_current_slot = saved_slot;
-    if (item_is_error(result)) return result;
-    return get_type_id(result) == LMD_TYPE_UNDEFINED ? result : make_js_undefined();
+    Rooted<Item> source(roots, js_to_string(code));
+    if (item_is_error(source.get())) return source.get();
+    JsAgentGroup* group = js_agent_group_ensure();
+    if (!group || js_runtime_state.test262_agent->member) return ItemError;
+    auto* member = (JsAgentMember*)mem_calloc(1, sizeof(JsAgentMember), MEM_CAT_JS_RUNTIME);
+    if (!member) return ItemError;
+    member->group = group;
+    member->state = js_runtime_state_create_agent(context);
+    if (!member->state) { mem_free(member); return ItemError; }
+    runtime_init(&member->runtime);
+    member->runtime.eval_context = context;
+    member->runtime.js_ast_backend = true;
+    member->runtime.js_promotion_policy_resolved = true;
+    member->runtime.import_base_dir = group->runtime->import_base_dir;
+    member->runtime.resource_policy = group->runtime->resource_policy;
+    JsTest262AgentState* agent = js_test262_agent_state_ensure(member->state);
+    root_vector_init(&member->values, (Context*)context, "Test262 agent broadcast");
+    bool ready = agent != NULL;
+    for (int i = 0; ready && i < 3; i++) ready = root_vector_push(&member->values, ItemNull);
+    if (ready) {
+        agent->group = group; agent->member = member;
+        member->activation = activation_create(js_agent_member_entry, source.get(), true, member);
+        ready = member->activation && arraylist_append(group->members, member);
+    }
+    if (!ready) { js_agent_member_destroy(member, group->runtime); return ItemError; }
+    js_agent_pump();
+    return make_js_undefined();
 }
 
 static Item js_262_agent_receive_broadcast(Item callback) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
-            root_vector_count(&js_262_agent_callbacks)) {
-        return make_js_undefined();
-    }
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("$262.agent.receiveBroadcast requires a function");
-    }
-    Item* callback_slot = root_vector_at(&js_262_agent_callbacks,
-        js_262_agent_current_slot);
-    if (callback_slot) *callback_slot = callback;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (!agent || !agent->member) return js_throw_type_error("receiveBroadcast requires a child agent");
+    if (!js_is_callable(callback)) return js_throw_type_error("receiveBroadcast requires a function");
+    *root_vector_at(&agent->member->values, 0) = callback;
     return make_js_undefined();
 }
 
-static Item js_262_agent_broadcast(Item value) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
-    for (int64_t i = 0; i < callback_count; i++) {
-        Item callback = js_262_agent_callback_at(i);
-        if (!js_is_callable(callback)) continue;
-        Item args[1] = { value };
-        int saved_slot = js_262_agent_current_slot;
-        js_262_agent_current_slot = (int)i;
-        Item callback_result = js_call_function(callback, js_262_agent_object, args, 1);
-        js_262_agent_current_slot = saved_slot;
-        if (item_is_error(callback_result)) return callback_result;
+static Item js_262_agent_broadcast(Item value, Item token) {
+    RootFrame roots(2);
+    Rooted<Item> buffer(roots, value), number(roots, js_retain_scalar(token));
+    JsArrayBuffer* native = js_get_arraybuffer_ptr_item(buffer.get());
+    if (!native || !js_arraybuffer_shared(native)) return js_throw_type_error("broadcast requires a SharedArrayBuffer");
+    JsAgentGroup* group = js_agent_group_ensure();
+    if (!group) return ItemError;
+    for (int i = 0; i < group->members->length; i++) {
+        auto* member = (JsAgentMember*)group->members->data[i];
+        if (member->leaving) continue;
+        *root_vector_at(&member->values, 1) = buffer.get();
+        *root_vector_at(&member->values, 2) = number.get();
+        member->pending_broadcast = true;
     }
-    return make_js_undefined();
+    for (;;) {
+        js_agent_pump();
+        bool pending = false;
+        for (int i = 0; i < group->members->length; i++) {
+            auto* member = (JsAgentMember*)group->members->data[i];
+            pending |= !member->leaving && member->pending_broadcast;
+        }
+        if (!pending) return make_js_undefined();
+        Item interrupt = js_execution_interrupt_status();
+        if (item_is_error(interrupt)) return interrupt;
+        Item failure = *root_vector_at(&group->error, 0);
+        if (item_is_error(failure)) return failure;
+    }
 }
 
 static Item js_262_agent_report(Item value) {
-    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
-    int waiter_id = js_atomics_report_waiter_for_agent(
-        js_262_agent_current_slot, report);
-    if (!js_262_agent_enqueue_report(report, waiter_id)) return ItemError;
-    return make_js_undefined();
+    RootFrame roots(1);
+    Rooted<Item> message(roots, report);
+    JsRuntimeState* previous = js_active_runtime_state;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (agent && agent->group) js_active_runtime_state = agent->group->parent;
+    bool stored = js_test262_agent_state_ensure(js_active_runtime_state) &&
+        (js_root_vector_ensure_registered(js_runtime_state.test262_agent),
+         js_262_agent_enqueue_report(message.get()));
+    js_active_runtime_state = previous;
+    return stored ? make_js_undefined() : ItemError;
 }
 
 static Item js_262_agent_get_report() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
-    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
-            js_262_agent_report_rows->length == 0) return ItemNull;
-    int ready_offset = -1;
-    for (int offset = 0; offset < js_262_agent_report_rows->length; offset++) {
-        JsTest262AgentReport* row = (JsTest262AgentReport*)
-            js_262_agent_report_rows->data[offset];
-        int waiter_id = row->waiter_id;
-        if (waiter_id <= 0 || js_atomics_report_waiter_ready(waiter_id)) {
-            ready_offset = offset;
-            break;
-        }
-    }
-    if (ready_offset < 0) return ItemNull;
-
+    js_agent_pump();
+    JsAgentGroup* group = js_runtime_state.test262_agent->group;
+    if (group && item_is_error(*root_vector_at(&group->error, 0))) return *root_vector_at(&group->error, 0);
     Item report = ItemNull;
-    int waiter_id = 0;
-    if (!js_262_agent_remove_report(ready_offset, &report, &waiter_id)) {
-        return ItemNull;
-    }
-    RootFrame roots(1);
-    Rooted<Item> report_root(roots, report);
-    if (waiter_id > 0) {
-        report_root.set(js_atomics_resolve_waiter_report(waiter_id,
-            report_root.get()));
-    }
-    return report_root.get();
+    return js_262_agent_remove_report(0, &report) ? report : ItemNull;
 }
 
 static Item js_262_agent_leaving() {
-    js_atomics_agent_leaving(js_262_agent_current_slot);
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    if (agent && agent->member) agent->member->leaving = true;
     return make_js_undefined();
 }
 
-static Item js_262_agent_sleep(Item ms) {
-    js_atomics_agent_sleep(ms);
+static Item js_262_agent_sleep(Item value) {
+    JS_ASSIGN_OR_RETURN(converted, js_to_number(value));
+    double delay = js_get_number(converted);
+    if (isnan(delay) || delay < 0) delay = 0;
+    if (!isfinite(delay)) delay = INT_MAX;
+    double deadline = pn_clock() * 1000.0 + delay;
+    JsTest262AgentState* agent = js_runtime_state.test262_agent;
+    do {
+        if (agent && agent->member && activation_current() == agent->member->activation) {
+            agent->member->wake_at = deadline;
+            activation_suspend(make_js_undefined());
+        } else {
+            js_agent_pump();
+            double remaining = deadline - pn_clock() * 1000.0;
+            if (remaining > 0) uv_sleep((unsigned int)ceil(fmin(remaining, 1.0)));
+        }
+    } while (pn_clock() * 1000.0 < deadline);
+    if (agent && agent->member) agent->member->wake_at = 0;
     return make_js_undefined();
 }
 
-static Item js_262_get_agent_object() {
+static Item js_262_agent_monotonic_now() { return js_make_number(pn_clock() * 1000.0); }
+
+extern "C" Item js_262_get_agent_object() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
     js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
@@ -27043,7 +26537,7 @@ static Item js_262_get_agent_object() {
     M("start", js_262_agent_start) M("receiveBroadcast", js_262_agent_receive_broadcast) \
     M("broadcast", js_262_agent_broadcast) M("report", js_262_agent_report) \
     M("getReport", js_262_agent_get_report) M("leaving", js_262_agent_leaving) \
-    M("sleep", js_262_agent_sleep) M("monotonicNow", js_atomics_agent_monotonic_now)
+    M("sleep", js_262_agent_sleep) M("monotonicNow", js_262_agent_monotonic_now)
 #define JS_262_INSTALL_AGENT_METHOD(name, target) \
     js_runtime_set_native_method(js_262_agent_object, name, target);
     JS_262_AGENT_METHODS(JS_262_INSTALL_AGENT_METHOD)
@@ -27783,7 +27277,8 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
         return mvp_lmd_get_prototype(object);
     if (get_type_id(object) == LMD_TYPE_ERROR || js_is_resting_error(object)) {
         // LambdaError stores ordinary properties in a side map. A custom
@@ -27864,7 +27359,8 @@ extern "C" Item js_get_prototype(Item object) {
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_object_get_prototype_chain(Item object) {
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
         return mvp_lmd_get_prototype(object);
     TypeId object_type = get_type_id(object);
     if (is_virtual_container_type_id(object_type) && js_host_object_type(object)) {
@@ -27934,7 +27430,8 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
     proto_root.set(js_object_get_prototype_chain(object_root.get()));
     while (proto_root.get().item != ItemNull.item) {
         Item proto = proto_root.get();
-        if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(proto)) {
+        MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(proto));
+        if (mvp_lmd_program_library() && mvp_lmd_owns_properties(proto)) {
             // the MVP chain owns both accessor receivers and its terminal absence.
             if (out_found) *out_found = true;
             property_root.set(mvp_lmd_property_key(property_root.get()));
@@ -28287,7 +27784,7 @@ extern "C" Item js_gen_park(Item value, int64_t kind) {
 extern "C" Item js_generator_create_body(ActivationEntry body, void* func_ptr,
         Item* env, int env_size, int is_async, Item ast_function,
         Item ast_arguments, Item ast_this, TypeMap* shape) {
-    if (!context || !js_mir_owner_is_current((Context*)context, "js-generator-create")) return ItemError;
+    if (!context || !js_runtime_owner_is_current((Context*)context, "js-generator-create")) return ItemError;
     JS_ROOTS(roots, function, ast_function, arguments, ast_arguments,
         receiver, js_retain_scalar(ast_this), owner, ItemNull,
         private_home, js_current_private_home_class);
@@ -28325,14 +27822,12 @@ extern "C" Item js_generator_create_body(ActivationEntry body, void* func_ptr,
     return owner.get();
 }
 
-static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
-        int is_async, Item ast_function, Item ast_arguments, Item ast_this) {
-    JS_ROOTS(roots, obj_root, ItemNull, proto_root, ItemNull, result_root, ItemNull);
-    obj_root.set(js_generator_create_body(get_type_id(ast_function) == LMD_TYPE_FUNC
-        ? js_interp_generator_body : js_mir_state_body, func_ptr, env, env_size,
+static Item js_generator_create_current(int is_async, Item ast_function,
+        Item ast_arguments, Item ast_this) {
+    JS_ROOTS(roots, obj_root, ItemNull, proto_root, ItemNull);
+    obj_root.set(js_generator_create_body(js_interp_generator_body, NULL, NULL, 0,
         is_async, ast_function, ast_arguments, ast_this, NULL));
     if (item_is_error(obj_root.get())) return obj_root.get();
-    JsGenerator* gen = &((JsGeneratorMapCarrier*)obj_root.get().map)->state;
 
     // Set prototype: use the generator function's current .prototype if it's an
     // object (OrdinaryCreateFromConstructor).  Default parameter evaluation can
@@ -28355,44 +27850,12 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
             js_set_prototype(obj_root.get(), proto_root.get());
         }
     }
-    if (get_type_id(ast_function) == LMD_TYPE_FUNC) return obj_root.get();
-
-    // ES spec: parameter binding (FunctionDeclarationInstantiation) runs at
-    // call time, so destructuring errors throw here, not on .next(). The body
-    // parks after binding its parameters.
-    {
-        gen->executing = true;
-        ActivationStatus status = ACTIVATION_DONE;
-        result_root.set(js_generator_step(obj_root.get(), gen, make_js_undefined(),
-            &status));
-        gen->executing = false;
-        if (status != ACTIVATION_SUSPENDED) {
-            gen->done = true;
-            if (item_is_error(result_root.get())) return result_root.get();
-        }
-    }
-
     return obj_root.get();
 }
 
-extern "C" Item js_generator_create_mir(void* func_ptr, Item* env,
-        int env_size, int is_async) {
-    Context* runtime = (Context*)context;
-    if (!runtime) {
-        log_error("js-generator: state machine missing context owner");
-        return ItemError;
-    }
-    return js_generator_create_current(func_ptr, env, env_size, is_async,
-        ItemNull, ItemNull, ItemNull);
-}
-
-JS_FORWARD_ITEM(js_generator_create, (void* func_ptr, Item* env, int env_size, int is_async),
-    js_generator_create_current, (func_ptr, env, env_size, is_async,
-        ItemNull, ItemNull, ItemNull))
-
 extern "C" Item js_generator_create_ast(Item function, Item arguments,
         Item this_value, int is_async) {
-    return js_generator_create_current(NULL, NULL, 0, is_async, function,
+    return js_generator_create_current(is_async, function,
         arguments, this_value);
 }
 
@@ -28547,7 +28010,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         Item result = js_make_iter_result(make_js_undefined(), true);
         return result;
     }
-    if (!js_mir_owner_is_current(gen->runtime_context,
+    if (!js_runtime_owner_is_current(gen->runtime_context,
             "js-generator-next")) return ItemError;
     JS_ROOTS(roots,
         generator_root, generator,
@@ -28679,7 +28142,7 @@ extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
     if (gen && gen->is_async) return js_async_generator_request(generator, 1, value);
     if (gen) {
-        if (!js_mir_owner_is_current(gen->runtime_context,
+        if (!js_runtime_owner_is_current(gen->runtime_context,
                 "js-generator-return")) return ItemError;
         if (gen->executing) return js_promise_throw_type_error("Generator is already running");
         if (!gen->done && !gen->started) {
@@ -28740,7 +28203,7 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
     if (gen && gen->is_async) return js_async_generator_request(generator, 2, error);
     if (gen) {
-        if (!js_mir_owner_is_current(gen->runtime_context,
+        if (!js_runtime_owner_is_current(gen->runtime_context,
                 "js-generator-throw")) return ItemError;
         if (gen->executing) return js_promise_throw_type_error("Generator is already running");
         if (!gen->done && !gen->started) {
@@ -28959,7 +28422,7 @@ extern "C" Item js_async_generator_request(Item generator, int operation, Item v
     JS_ROOTS(roots, held, generator, input, js_retain_scalar(value), promise, js_promise_create_pending(), request, ItemNull);
     if (!js_promise_is(promise.get())) return ItemError;
     JsAsyncGeneratorMapCarrier* carrier = js_async_generator_carrier(held.get());
-    if (!carrier || !js_mir_owner_is_current(carrier->generator.state.runtime_context, "js-async-generator-request")) {
+    if (!carrier || !js_runtime_owner_is_current(carrier->generator.state.runtime_context, "js-async-generator-request")) {
         js_promise_reject_existing(promise.get(), js_promise_error_payload(js_promise_throw_type_error("incompatible async generator receiver")));
         return promise.get();
     }
@@ -29215,7 +28678,8 @@ static Item js_iterator_next_cache(Item iterator, Item next, bool write) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> owner(roots, iterator), method(roots, next);
-    if (js_runtime_state.formal_mir_owner && mvp_lmd_program_library() && mvp_lmd_owns_properties(owner.get())) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(owner.get()));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(owner.get())) {
         NameRef name = mvp_lmd_internal_name(LMD_INTERNAL_ITERATOR_NEXT);
         if (!name) return ItemError;
         Item key = {.item = s2it(name)};
@@ -30637,16 +30101,6 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
 // timing: a plain value settles it now, a thenable adopts it later. Handing
 // back `Promise.resolve(v)` instead collapsed those two cases into one
 // already-settled promise.
-extern "C" Item js_async_wrap_return(Item value) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> promise_root(roots, js_promise_create_pending());
-    if (!js_get_promise(promise_root.get())) return ItemError;
-    js_async_hooks_emit_before_resource(promise_root.get());
-    js_async_hooks_emit_after_resource(promise_root.get());
-    js_promise_resolve_with_value(js_get_promise(promise_root.get()), value_root.get());
-    return promise_root.get();
-}
 
 // Promise reaction job for a missing handler. It preserves the original state
 // while still making pass-through settlement asynchronous.
@@ -31666,7 +31120,7 @@ static Item js_async_reject_handler(Item frame_item, Item reason);
 static void js_async_drive(Item frame_item, Item input) {
     JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
     if (!ctx) return;
-    if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
+    if (!js_runtime_owner_is_current(ctx->runtime_context, "js-async-drive")) {
         return;
     }
     RuntimeModuleStateScope module_state(context);
@@ -31752,7 +31206,7 @@ extern "C" Item js_async_context_create_body(ActivationEntry body, void* fn_ptr,
         log_error("js-async: state machine missing context owner");
         return ItemError;
     }
-    if (!js_mir_owner_is_current(runtime, "js-async-create")) return ItemError;
+    if (!js_runtime_owner_is_current(runtime, "js-async-create")) return ItemError;
     // Allocate the GC-owned frame carrier; a zeroed allocation leaves the
     // continuation lists empty. The frame Item is rooted while the promise
     // allocation below may collect (JSCU10).
@@ -31795,16 +31249,6 @@ extern "C" Item js_async_context_create_body(ActivationEntry body, void* fn_ptr,
     return frame_root.get();
 }
 
-extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
-        int64_t env_size, Item this_val) {
-    Context* runtime = (Context*)context;
-    if (!runtime) {
-        log_error("js-async: state machine missing context owner");
-        return ItemError;
-    }
-    return js_async_context_create_body(js_mir_state_body, fn_ptr, env,
-        env_size, this_val, ItemNull, ItemNull);
-}
 
 extern "C" Item js_async_context_create_ast(Item function, Item arguments,
         Item this_val) {
@@ -31836,11 +31280,11 @@ extern "C" Item js_async_context_create_module_body(ActivationEntry body,
     return frame_root.get();
 }
 
-extern "C" Item js_async_context_create_module(JsScript* script, void* mir_main,
+extern "C" Item js_async_context_create_module(JsScript* script,
         uint32_t module_state_id, Item specifier) {
-    return js_async_context_create_module_body(
-        script ? js_interp_module_async_body : js_mir_module_async_body,
-        mir_main, script, module_state_id, specifier, NULL);
+    if (!script) return ItemError;
+    return js_async_context_create_module_body(js_interp_module_async_body,
+        NULL, script, module_state_id, specifier, NULL);
 }
 
 // Start execution of an async state machine (initial call at state 0)
@@ -32301,12 +31745,7 @@ extern "C" Item js_get_import_meta() {
 // transpile_js_module_to_mir nesting: 1 while compiling the entry module,
 // >= 2 for a nested import, which is what makes a top-level await park rather
 // than drain synchronously, and lets only the entry drain the event loop.
-JS_FORWARD_EXPRESSION(int, js_tla_module_depth_get, (void),
-    js_active_runtime_state ? g_tla_module_depth : 0)
 
-extern "C" void js_tla_enter_module(void) {
-    g_tla_module_depth++;
-}
 
 // A module body waiting on static async dependencies keeps its carrier in its
 // descriptor, in both tiers. Start each only after every such dependency has
@@ -32402,40 +31841,12 @@ extern "C" void js_tla_drain_pending_modules(void) {
     js_tla_drain_post_await_modules();
 }
 
-extern "C" void js_tla_exit_module(void) {
-    if (g_tla_module_depth > 0) g_tla_module_depth--;
-    if (g_tla_module_depth != 0) return;
-    js_tla_drain_post_await_modules();
-}
 
 // Js57 P3 (Track B2): read a live default-binding for the given module
 // specifier. Used by self-imports so that reads of the imported name observe
 // the current state of namespace.default instead of an import-time snapshot.
 // Throws ReferenceError when the value is the TDZ sentinel (pre-initialised at
 // namespace creation for modules whose AST contains `export default`).
-extern "C" Item js_get_live_binding_default(Item specifier) {
-    Item ns = js_module_get(specifier);
-    if (get_type_id(ns) == LMD_TYPE_NULL) {
-        // No module registered — return undefined (mirror snapshot behaviour).
-        return make_js_undefined();
-    }
-    Item key = js_name_item("default", 7);
-    // Spec 16.2.1.7: imported binding is uninitialised until the source
-    // module's `export default <expr>` runs. We detect that state by missing
-    // own property; once exported it is always present (even if exported as
-    // undefined). The TDZ sentinel doesn't survive map storage round-trips
-    // because the underlying map normalises low bits of undefined-typed values
-    // — has_own_property dodges that quirk.
-    Item has = js_has_own_property(ns, key);
-    bool present = (has.item == ITEM_TRUE);
-    if (!present) {
-        Item type_name = js_name_item("ReferenceError", 14);
-        Item msg = js_name_item(
-            "Cannot access 'default' before initialization", 45);
-        return js_throw_value(js_new_error_with_name(type_name, msg));
-    }
-    return js_get_key_default(ns, key);
-}
 
 // Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
 // Helpers used to make dynamic-import promises wait on whatever Promise the
@@ -32564,23 +31975,7 @@ extern "C" void js_module_record_async_evaluation_error(Item specifier,
     }
 }
 
-extern "C" Item js_module_get_evaluation_error(Item specifier) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    return m ? m->evaluation_error : ItemNull;
-}
 
-extern "C" void js_module_set_awaited_target(Item specifier, Item target) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    if (!m) return;
-    // Only the first TLA wins. Subsequent awaits in the same module body are
-    // dropped by P4 anyway.
-    if (get_type_id(m->awaited_target) != LMD_TYPE_NULL) return;
-    JsPromise* p = js_get_promise(target);
-    if (!p) return;  // Non-Promise await — body finished already, no point.
-    if (p->state != JS_PROMISE_PENDING) return;  // No need to defer.
-    m->awaited_target = target;
-    log_debug("P5: module '%s' awaited target captured", js_module_path(m));
-}
 
 extern "C" Item js_module_get_awaited_target(Item specifier) {
     ModuleDescriptor* m = js_module_find(specifier);
@@ -32615,17 +32010,7 @@ extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item de
 // `[[HasTLA]]`, `[[PendingAsyncDependencies]]`, `[[AsyncParentModules]]`.
 // =============================================================================
 
-extern "C" void js_module_mark_has_tla(Item specifier) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    if (!m) return;
-    m->has_tla = 1;
-    log_debug("P7d: module '%s' marked has_tla=1", js_module_path(m));
-}
 
-extern "C" int js_module_get_has_tla(Item specifier) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    return m ? m->has_tla : 0;
-}
 
 static int js_module_append_descriptor(ModuleDescriptor*** entries, int* count,
         int* capacity, ModuleDescriptor* entry, const char* edge_name) {
@@ -32772,11 +32157,6 @@ extern "C" int js_module_pending_async_deps(Item specifier) {
     return m ? m->pending_async_deps : 0;
 }
 
-extern "C" void js_module_mark_post_await_pending(Item specifier) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    if (!m) return;
-    m->post_await_pending = 1;
-}
 
 // Called when a module's body fully completes, at once or after it parked at a
 // top-level await. Notifies async parents by decrementing their
@@ -33944,15 +33324,7 @@ JS_FORWARD_ITEM(js_weakset_new_with_iter, (Item iterable), js_weak_collection_ne
     (iterable, false))
 
 // Public collection type checks (for instanceof)
-extern "C" bool js_is_map_instance(Item obj) {
-    JsCollectionData* cd = js_get_collection_data(obj);
-    return cd && cd->type == JS_COLLECTION_MAP;
-}
 
-extern "C" bool js_is_set_instance(Item obj) {
-    JsCollectionData* cd = js_get_collection_data(obj);
-    return cd && cd->type == JS_COLLECTION_SET;
-}
 
 // =============================================================================
 // Deep batch reset: clear ALL stale state that references pool-allocated data.

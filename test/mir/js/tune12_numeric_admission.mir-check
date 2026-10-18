@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "description": "D2.4.1-D2.4.3/D8.4.1v2/D8.4.3v2: binding-proven accumulator and recursive-component returns use the existing Number-native entry; mixed Number/string comparisons retain a throwing Item completion.",
+  "description": "D8.2.4-D8.2.6, D8.1.3v25: local accumulation uses F64 while open recursive globals retain a guarded Item call; mixed returns stay boxed.",
   "checks": [
     {
-      "in_func": "_js_returnedAccumulator_#_n",
+      "in_func": "mvp_lmd_f1",
       "expect": [
         "dadd",
         "dsub"
@@ -15,10 +15,11 @@
       ]
     },
     {
-      "in_func": "_js_recursiveComponentLeft_#_n",
+      "in_func": "mvp_lmd_f2",
       "expect": [
-        "call\t_js_recursiveComponentRight_",
-        "call\tjs_throw_range_error"
+        "call\tmvp_lmd_dynamic_global",
+        "call\tmvp_lmd_signature,",
+        "call\tlambda_stack_is_exhausted"
       ],
       "forbid": [
         "call\tjs_add",
@@ -26,9 +27,10 @@
       ]
     },
     {
-      "in_func": "_js_mixedNumberOrString_#_body",
+      "in_func": "mvp_lmd_f4",
       "expect": [
-        "call\tjs_compare"
+        "i64:self",
+        "call\tmvp_lmd_to_primitive"
       ],
       "forbid": [
         "dadd"

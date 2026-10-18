@@ -17,7 +17,6 @@ fn first_route_point(edge) {
 
 let source = (input(
   "test/lambda/graph/graphviz/annotations.dot", {type: "graph", flavor: "dot"})) ^ { null }
-let installed = transform.install()
 let rendered = transform.render_scene(source, 640, 480)
 let nodes = children(rendered.scene, "node")
 let edges = children(rendered.scene, "edge")
@@ -37,7 +36,6 @@ let west_offset = (west_start.x - record_node.x) / record_node.width
 let east_offset = (east_start.x - record_node.x) / record_node.width
 
 {
-  installed: installed,
   svg: contains(rendered.svg, "data-graph-role=\"graph\"") and
     contains(rendered.svg, "external") and contains(rendered.svg, "outside"),
   nodes: [for (node in nodes) [node.id, node.width > 0, node.height > 0]],

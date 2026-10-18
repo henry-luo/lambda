@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.4, D5.2.1v3, D8.2.6v2: decode unknown array Items directly into the Number consumer, merge absence as NaN, and retain primitive coercion fallback without an intermediate Item snapshot or ToPrimitive pass.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "expect": [
+        "func\td, i64, p:runtime, p:unit",
+        "dmov\t{{r}}, nan"
+      ],
+      "count": {
+        "dmul\t": 1,
+        "ubge\t": 2,
+        "call\tmvp_lmd_primitive_to_number_fixed": 2
+      },
+      "forbid": [
+        "call\tmvp_lmd_to_primitive",
+        "call\tmvp_lmd_array_index_property",
+        "call\towned_item_slot_store",
+        "\tor\t"
+      ]
+    },
+    {
+      "in_func": "mvp_lmd_f2",
+      "expect": [
+        "func\td, i64, p:runtime, p:unit",
+        "dmov\t{{r}}, nan"
+      ],
+      "count": {
+        "dsub\t": 1,
+        "ubge\t": 2,
+        "call\tmvp_lmd_primitive_to_number_fixed": 2
+      },
+      "forbid": [
+        "call\tmvp_lmd_to_primitive",
+        "call\tmvp_lmd_array_index_property",
+        "call\towned_item_slot_store",
+        "\tor\t"
+      ]
+    }
+  ]
+}

@@ -29,7 +29,7 @@ let control_tags = ["input", "button", "select", "textarea", "fieldset"]
 // Attributes that act: navigation, submission, inline documents.
 let acting_attrs = ["href", "action", "formaction", "srcdoc", "ping"]
 
-fn script_url(value) => starts_with(lower(trim(value)), "javascript:") or false
+fn script_url(value) => starts_with(lower(trim(value)), "javascript:") ^ { false }
 
 fn attr_html(name, value) => " " ++ name ++ "=\"" ++ escape_attr(value) ++ "\""
 

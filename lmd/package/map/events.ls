@@ -7,7 +7,7 @@ import frames: .frame
 
 fn pixels(text) => if (text == null or text == "" or text == "auto") 0.0 else
     float(if (ends_with(text,"px")) slice(text,0,len(text)-2) else text)
-pn edge(node, side) {
+fn edge(node, side) {
     pixels(dom.computed_style(node,"border-" ++ side ++ "-width")) + pixels(dom.computed_style(node,"padding-" ++ side))
 }
 

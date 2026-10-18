@@ -159,7 +159,7 @@ fn dialog_select(id,label,values,current) => <label class:"dialog-field", <span 
     <select id:id, class:"edit-dialog-field", ["aria-label"]:label,
         *[for (entry in values) <option value:string(entry.value), *:if (string(entry.value)==string(current)) {selected:""} else {}, entry.label>]>>
 fn form_dialog(d:map,title:string,description:string,fields:array,action:string,label:string) => files.dialog_frame(string(d.kind),title,description,
-    [if (d.error==null) null else <p id:"dialog-error",role:"alert",d.error>,*fields],
+    [if (d.error is null) null else <p id:"dialog-error",role:"alert",d.error>,*fields],
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
 
 pub fn dialog(dialog,file) => if (dialog == null) null

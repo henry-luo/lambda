@@ -1,0 +1,11 @@
+<html
+  <body id: "result",
+    <div id: "picture",
+      <span class: "tikz-picture tikz-named-picture", data-radiant-layout: "lambda-tikz", style: "position:relative;display:inline-block;vertical-align:bottom;",
+        <span class: "tikz-node-label", data-tikz-kind: "node", data-node-id: "a", data-tikz-spec: "{\n  \"kind\": \"node\",\n  \"id\": \"a\",\n  \"shape\": {\n    \"shape\": \"rectangle\",\n    \"min_width\": 0,\n    \"min_height\": 0,\n    \"radius\": 0\n  },\n  \"at\": {\n    \"x\": 0,\n    \"y\": 0\n  },\n  \"place\": null,\n  \"anchor\": null,\n  \"paint\": {\n    \"stroke\": null,\n    \"fill\": null,\n    \"width\": 1.2,\n    \"dash\": null\n  }\n}", style: "display:inline-block;padding:4px 8px;font-size:16px;line-height:1.3;vertical-align:top;color:black;white-space:nowrap;",
+          <span
+            "Alpha">>
+        <span class: "tikz-node-label", data-tikz-kind: "node", data-node-id: "b", data-tikz-spec: "{\n  \"kind\": \"node\",\n  \"id\": \"b\",\n  \"shape\": {\n    \"shape\": \"rectangle\",\n    \"min_width\": 0,\n    \"min_height\": 0,\n    \"radius\": 0\n  },\n  \"at\": {\n    \"x\": 3,\n    \"y\": 0\n  },\n  \"place\": null,\n  \"anchor\": null,\n  \"paint\": {\n    \"stroke\": null,\n    \"fill\": null,\n    \"width\": 1.2,\n    \"dash\": null\n  }\n}", style: "display:inline-block;padding:4px 8px;font-size:16px;line-height:1.3;vertical-align:top;color:black;white-space:nowrap;",
+          <span
+            "Beta">>
+        <span data-tikz-kind: "edge", data-tikz-spec: "{\n  \"kind\": \"edge\",\n  \"vertices\": [\n    {\n      \"ref\": {\n        \"ref\": \"a\",\n        \"anchor\": null\n      },\n      \"via\": null\n    },\n    {\n      \"ref\": {\n        \"ref\": \"b\",\n        \"anchor\": null\n      },\n      \"via\": null\n    }\n  ],\n  \"paint\": {\n    \"stroke\": \"black\",\n    \"fill\": null,\n    \"width\": 1.2,\n    \"dash\": null\n  },\n  \"visible\": true,\n  \"start_tip\": null,\n  \"end_tip\": {\n    \"kind\": \"latex\",\n    \"length\": 9.38505603985056,\n    \"width\": 7.0387920298879205,\n    \"inset\": 0,\n    \"hollow\": false,\n    \"reversed\": false,\n    \"color\": null,\n    \"fill\": null,\n    \"round\": false,\n    \"line_end\": 9.38505603985056\n  }\n}", style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">>>>>

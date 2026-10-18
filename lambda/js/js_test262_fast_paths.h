@@ -19,5 +19,4 @@
     X(js_donotevaluate) \
     X(js_is_constructor) \
     X(js_test262_build_string) \
-    X(js_test262_decimal_to_percent_hex_string) \
-    X(js_test262_concat_percent_hex)
+    X(js_test262_decimal_to_percent_hex_string)

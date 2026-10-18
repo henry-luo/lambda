@@ -23,11 +23,11 @@ pn main() {
         input([for (m in written where m.name == "hello.txt") m][0], 'text')^ == "hello",
         input([for (m in written where m.name == "data.json") m][0])^.answer == 42,
         len(content([for (m in written where m.name == "empty") m][0])^) == 0,
-        (output(source, "temp/zip-copy.zip", {format: 'zip', mode: 'append'}) or "error") == "error",
-        (output(<fs kind: 'dir', <fs name: "../escape", kind: 'file', "bad">>, "temp/zip-copy.zip", 'zip') or "error") == "error",
+        ((output(source, "temp/zip-copy.zip", {format: 'zip', mode: 'append'}) ^ { null }) or "error") == "error",
+        ((output(<fs kind: 'dir', <fs name: "../escape", kind: 'file', "bad">>, "temp/zip-copy.zip", 'zip') ^ { null }) or "error") == "error",
         len(content(input("temp/zip-copy.zip")^)^) == 7,
         input(captured[1])^.answer == 42,
-        (output(tree, "temp/zip-copy.zip", {format: 'zip', max_expanded_bytes: 1}) or "error") == "error",
+        ((output(tree, "temp/zip-copy.zip", {format: 'zip', max_expanded_bytes: 1}) ^ { null }) or "error") == "error",
         len(content(input("temp/zip-copy.zip")^)^) == 7
     ]
 }

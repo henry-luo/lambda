@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "raster.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -127,6 +128,8 @@ typedef struct ImageDecoded {
     uint32_t representation_index;
     uint32_t delay_ms, loop_count;
     bool full_decode_fallback;
+    uint32_t source_delay_ms;
+    bool has_loop_extension;
 } ImageDecoded;
 typedef struct ImageDecoder ImageDecoder;
 
@@ -209,16 +212,20 @@ typedef struct GifFrameData {
     uint32_t *pixels;
     int delay_ms;
     int disposal;
+    int source_delay_ms; // exact encoded delay; playback may apply its own minimum.
 } GifFrameData;
 typedef struct GifFrames {
     GifFrameData *frames;
     int frame_count;
     int width, height;
     int loop_count;
+    bool has_loop_extension;
 } GifFrames;
 GifFrames *image_gif_load_from_memory(const unsigned char *data, size_t length);
 void image_gif_free(GifFrames *gif);
 int image_gif_frame_count_from_memory(const unsigned char *data, size_t length);
+ImageStatus image_encode_gif_frames(ImageContext* context, const RasterBuffer* const* frames,
+    const uint16_t* delays, uint32_t count, uint32_t plays, ImageEncoded* encoded, ImageError* error);
 
 // file/resource entry points are declared by lambda/io/image_io.h (D7.1.3).
 #ifdef __cplusplus

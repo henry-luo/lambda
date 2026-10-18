@@ -7,6 +7,7 @@
 #include "../js_host_hooks.h"
 #include "../js_source_module.hpp"
 #include "../js_runtime_state.hpp"
+#include "../js_runtime_internal.hpp"
 #include "../../runtime/ast-core.hpp"
 #include "../../runtime/context_capsule.h"
 #include "../../runtime/heap_api.h"
@@ -269,7 +270,7 @@ static JsFunction* dynamic_unwrap(Item function) {
         ? (JsFunction*)underlying.function : NULL;
 }
 static Item dynamic_wrap(void* state, Item function) {
-    return mvp_lmd_dynamic_wrap_function(((MvpLmdDynamic*)state)->program, function);
+    return mvp_lmd_dynamic_import_value(((MvpLmdDynamic*)state)->program, function);
 }
 static Item dynamic_name(Item function, Item name) {
     RootFrame roots(2);
@@ -316,10 +317,20 @@ extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
         }
     }
     bool addition = operation == OPERATOR_ADD;
+    bool compare = operation == OPERATOR_LT || operation == OPERATOR_LE ||
+        operation == OPERATOR_GT || operation == OPERATOR_GE;
+    bool numeric = !addition && !equal && !compare;
     int hint = addition || equal ? 0 : 1;
     if (mvp_lmd_is_object(a.get())) store(a, mvp_lmd_to_primitive(a.get(), hint), &homes[0]);
     if (item_is_error(a.get())) return a.get();
+    // ToNumeric(left) must finish before numeric operators observe the right object's coercion.
+    if (numeric && get_type_id(a.get()) != LMD_TYPE_DECIMAL)
+        store(a, mvp_lmd_primitive_to_number(a.get()), &homes[0]);
+    if (item_is_error(a.get())) return a.get();
     if (mvp_lmd_is_object(b.get())) store(b, mvp_lmd_to_primitive(b.get(), hint), &homes[1]);
+    if (item_is_error(b.get())) return b.get();
+    if (numeric && get_type_id(b.get()) != LMD_TYPE_DECIMAL)
+        store(b, mvp_lmd_primitive_to_number(b.get()), &homes[1]);
     if (item_is_error(b.get())) return b.get();
     if (addition && (get_type_id(a.get()) == LMD_TYPE_STRING || get_type_id(b.get()) == LMD_TYPE_STRING)) {
         store(a, mvp_lmd_primitive_to_string(a.get()), &homes[0]);
@@ -336,17 +347,17 @@ extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right) {
         Item result = js_equal(a.get(), b.get());
         return item_is_error(result) || !invert ? result : Item{.item = b2it(!mvp_lmd_truthy(result))};
     }
-    bool compare = operation == OPERATOR_LT || operation == OPERATOR_LE ||
-        operation == OPERATOR_GT || operation == OPERATOR_GE;
     if (compare && get_type_id(a.get()) == LMD_TYPE_STRING && get_type_id(b.get()) == LMD_TYPE_STRING) {
         int64_t order = mvp_lmd_string_compare(a.get(), b.get());
         return Item{.item = b2it(operation == OPERATOR_LT ? order < 0 : operation == OPERATOR_LE ? order <= 0 :
             operation == OPERATOR_GT ? order > 0 : order >= 0)};
     }
-    store(a, mvp_lmd_primitive_to_number(a.get()), &homes[0]);
-    if (item_is_error(a.get())) return a.get();
-    store(b, mvp_lmd_primitive_to_number(b.get()), &homes[1]);
-    if (item_is_error(b.get())) return b.get();
+    if (!numeric) {
+        store(a, mvp_lmd_primitive_to_number(a.get()), &homes[0]);
+        if (item_is_error(a.get())) return a.get();
+        store(b, mvp_lmd_primitive_to_number(b.get()), &homes[1]);
+        if (item_is_error(b.get())) return b.get();
+    }
     switch (operation) {
     case OPERATOR_ADD: return js_add(a.get(), b.get());
     case OPERATOR_SUB: return js_subtract(a.get(), b.get());
@@ -502,7 +513,13 @@ Item mvp_lmd_dynamic_unwrap_function(Item function) {
 }
 bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         int operation, Item* completion, JsPropertyDescriptor* descriptor) {
-    if (!mvp_lmd_foreign_candidate(owner)) return false;
+    if (!mvp_lmd_foreign_candidate(owner, true)) return false;
+    bool packed_map = get_type_id(owner) == LMD_TYPE_MAP && !((TypeMap*)owner.map->type)->js_meta;
+    // foreign Lambda reads share the membrane; mutation keeps the existing shape/contract admission.
+    if (packed_map && operation != LMD_PROP_GET && operation != LMD_PROP_CALLEE &&
+            operation != LMD_PROP_OWN && operation != LMD_PROP_HAS &&
+            operation != LMD_FOREIGN_DESCRIPTOR && operation != LMD_FOREIGN_PROJECT &&
+            operation != LMD_FOREIGN_GET_PROTOTYPE) return false;
     bool virtual_type = is_virtual_container_type_id(get_type_id(owner));
     bool host = virtual_type && js_host_object_type(owner);
     bool data_map = get_type_id(owner) == LMD_TYPE_VMAP && !host && !js_promise_is(owner) &&
@@ -522,25 +539,24 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     if (!library) return true;
     MvpLmdProgram* program = library->object.program;
     auto expose = [&](Item input) -> Item {
-        if (!mvp_lmd_is_object(input)) return input;
         // host prototypes use the active realm's intrinsic identity. Only
         // already materialized shared identities are inspected here.
         const JsClassId classes[] = {JS_CLASS_OBJECT, JS_CLASS_FUNCTION, JS_CLASS_ARRAY};
         const int slots[] = {LMD_LIBRARY_OBJECT_PROTOTYPE, LMD_LIBRARY_FUNCTION_PROTOTYPE,
             LMD_LIBRARY_ARRAY_PROTOTYPE};
-        for (int i = 0; i < 3; i++) {
+        if (mvp_lmd_is_object(input)) for (int i = 0; i < 3; i++) {
             Item* existing = js_realm_slot_existing(&js_runtime_state.realm_slots,
                 (JsRealmSlotId)(JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE + classes[i]));
             if (existing && existing->item == input.item) return library->values[slots[i]];
         }
-        return mvp_lmd_dynamic_wrap_function(program, input);
+        return mvp_lmd_dynamic_import_value(program, input);
     };
     JsPropertyLane lane = js_property_lane_for_canonical_key(name.get());
     switch (operation) {
     case LMD_PROP_GET: case LMD_PROP_CALLEE: {
         // native Lambda VMaps and resting errors own fields outside the ordinary
         // map payload and the JsClassMeta exotic callback table.
-        if (data_map || js_is_resting_error(object.get())) {
+        if (data_map || packed_map || js_is_resting_error(object.get())) {
             result.set(js_get_key_core(object.get(), name.get(), target.get()));
             break;
         }
@@ -661,8 +677,14 @@ Item mvp_lmd_dynamic_function_source(Item function) {
     return field ? map_shape_field_to_item(properties->data, field)
         : Item{.item = ITEM_JS_UNDEFINED};
 }
-Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram* program, Item function, bool module_export) {
+Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool module_export) {
+    // S4.9.1: native i64/u64 cross as exact BigInts before MIR observes their type.
+    function = lambda_item_resolve_pending_slot(function);
+    if (js_is_native_bigint_egress(function)) return js_native_bigint_to_bigint(function);
     if (get_type_id(function) != LMD_TYPE_FUNC) return function;
+    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+    if (library && library->native_callable_values &&
+            function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION)) return function;
     bool js = function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION);
     if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
             js_has_call_capability(function))) return function;
@@ -759,9 +781,9 @@ Item mvp_lmd_import_host_property(MvpLmdProgram* program, Item owner, Item key,
         if (!map_shape_set(object.get().map, name.get().get_string(), make_js_undefined())) return ItemError;
     }
     value.set(get_type_id(previous.get()) == LMD_TYPE_MAP && value.get().item == previous.get().item
-        ? object.get() : mvp_lmd_dynamic_wrap_function(program, value.get()));
-    getter.set(mvp_lmd_dynamic_wrap_function(program, getter.get()));
-    setter.set(mvp_lmd_dynamic_wrap_function(program, setter.get()));
+        ? object.get() : mvp_lmd_dynamic_import_value(program, value.get()));
+    getter.set(mvp_lmd_dynamic_import_value(program, getter.get()));
+    setter.set(mvp_lmd_dynamic_import_value(program, setter.get()));
     if (item_is_error(value.get()) || item_is_error(getter.get()) || item_is_error(setter.get())) return ItemError;
     JsPropertyDescriptor descriptor = *source;
     descriptor.value = value.get(); descriptor.getter = getter.get(); descriptor.setter = setter.get();
@@ -777,24 +799,33 @@ static Item dynamic_call(Context*, MvpLmdProgram* program, Item* args, uint64_t 
         ? (JsFunction*)underlying.function : NULL;
     if (function && js_fn_body_kind(function) == JS_FUNCTION_BODY_AST)
         return js_interp_call_host_function(&state->ops, self, function, receiver, args, (int)count, target);
+    return mvp_lmd_dynamic_call_native(program, underlying, receiver, args, count, target);
+}
+
+Item mvp_lmd_dynamic_call_native(MvpLmdProgram* program, Item underlying, Item receiver,
+        Item* args, uint64_t count, Item target) {
+    if (count > INT_MAX) return dynamic_fail(LMD_MVP_RANGE);
     // Native callbacks such as Promise resolving functions already belong to
     // this Context's shared service; they must never create another JS realm.
     if (!js_active_runtime_state || !js_runtime_state_thread_matches((EvalContext*)context))
         return dynamic_fail(LMD_MVP_CAPABILITY);
-    RootFrame roots(1);
-    Rooted<Item> result(roots, target.item == ITEM_JS_UNDEFINED
-        ? js_call_function(underlying, mvp_lmd_dynamic_unwrap_function(receiver), args, (int)count)
-        : js_construct_value(underlying, args, (int)count,
-            mvp_lmd_dynamic_unwrap_function(target), NULL, true));
-    return item_is_error(result.get()) ? result.get() : mvp_lmd_dynamic_wrap_function(program, result.get());
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> callee(roots, underlying), self(roots, mvp_lmd_dynamic_unwrap_function(receiver)),
+        new_target(roots, mvp_lmd_dynamic_unwrap_function(target)), result(roots, ItemNull);
+    result.set(new_target.get().item == ITEM_JS_UNDEFINED
+        ? js_call_function(callee.get(), self.get(), args, (int)count)
+        : js_construct_value(callee.get(), args, (int)count, new_target.get(), NULL, true));
+    return item_is_error(result.get()) ? result.get() : mvp_lmd_dynamic_import_value(program, result.get());
 }
 
 static Item dynamic_eval(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
     if (!count) return Item{.item = ITEM_JS_UNDEFINED};
     if (get_type_id(args[0]) != LMD_TYPE_STRING) return args[0];
     MvpLmdDynamic* state = (MvpLmdDynamic*)((MvpLmdNativeCallable*)self.function)->state;
+    Item shortcut = ItemNull;
+    if (js_eval_source_shortcut(args[0], false, &shortcut, &state->ops)) return shortcut;
     String* source = args[0].get_string();
-    if (js_eval_source_is_blank(source)) return make_js_undefined();
     return js_interp_execute_host_source(&state->ops, source->chars, source->len, "<eval>", true);
 }
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram* program) {

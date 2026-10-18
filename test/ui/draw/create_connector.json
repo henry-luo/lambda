@@ -1,0 +1,504 @@
+{
+  "name": "Draw Connector tool creates live free and attached lines with capture, touch and one-step history",
+  "html": "test/demo/draw/draw.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-connect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-tool",
+      "equals": "connect",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "true",
+      "target": {
+        "selector": "#tool-connect"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 100,
+        "offset_y": 100
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-drag",
+      "equals": "connect",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.canvasSVG=document.querySelector('#paper > svg');"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 300,
+        "offset_y": 150
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#connector-draft #edge-e6 .connector-line"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "cx",
+      "equals": "430",
+      "target": {
+        "selector": "#edge-to-handle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "cy",
+      "equals": "220",
+      "target": {
+        "selector": "#edge-to-handle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "1",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#connector-draft #arrow-end-e6"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.draftEdge=document.getElementById('edge-e6');"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 410,
+        "offset_y": 160
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "cx",
+      "equals": "590",
+      "target": {
+        "selector": "#edge-to-handle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "cy",
+      "equals": "230",
+      "target": {
+        "selector": "#edge-to-handle"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edge-e6')===globalThis.draftEdge && document.querySelector('#paper > svg')===globalThis.canvasSVG"
+    },
+    {
+      "type": "render",
+      "file": "temp/draw-connect/free-preview.png"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 410,
+        "offset_y": 160
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "1",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "2",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-tool",
+      "equals": "select",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#connector-draft #edge-e6"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#arrow-end-e6"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "0",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "1",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#example"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-connect"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 125,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#connector-draft #edge-e7"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "n1",
+      "target": {
+        "selector": "#prop-from-shape"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "",
+      "target": {
+        "selector": "#prop-to-shape"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 603,
+        "offset_y": 152
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-hover",
+      "equals": "n4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edge-to-connection path"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "3",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/draw-connect/attached-preview.png"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 603,
+        "offset_y": 152
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "n4",
+      "target": {
+        "selector": "#prop-to-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "5",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-connect"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 125,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "3",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-drag",
+      "equals": "",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#edge-e8"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-connect"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 125,
+        "offset_y": 236
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 130,
+        "offset_y": 240
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 130,
+        "offset_y": 240
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "3",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 381,
+        "offset_y": 111
+      },
+      "pointerType": "touch",
+      "dx": -83,
+      "dy": 125,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-edges",
+      "equals": "5",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-history",
+      "equals": "4",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "",
+      "target": {
+        "selector": "#prop-from-shape"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "n2",
+      "target": {
+        "selector": "#prop-to-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-error",
+      "equals": "",
+      "target": {
+        "selector": "#draw"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/draw-connect/created.png"
+    }
+  ]
+}

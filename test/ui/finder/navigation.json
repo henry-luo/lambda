@@ -1,7 +1,7 @@
 {
   "name": "Finder path dialog, errors, breadcrumbs, images and keyboard navigation",
   "html": "test/demo/finder/finder.ls",
-  "viewport": {"width": 1100, "height": 720},
+  "viewport": {"width":1100,"height":720},
   "events": [
     {"type":"advance_time","ms":70},
     {"type":"click","target":{"selector":"#go"}},
@@ -44,6 +44,7 @@
     {"type":"click","target":{"selector":".crumbs button[title$='/files']"}},
     {"type":"assert_text","target":{"selector":"#folder-title"},"equals":"Demo Files"},
     {"type":"click","target":{"selector":"#place-project"}},
+    {"type":"type","target":{"selector":"#search"},"text":"AGENTS.md","clear":true},
     {"type":"assert_script","js":"Array.from(document.querySelectorAll('#files .file')).some(e=>e.getAttribute('data-name')==='AGENTS.md')"},
     {"type":"click","target":{"selector":"#place-demo"}},
     {"type":"assert_text","target":{"selector":"#folder-title"},"equals":"Demo Files"}

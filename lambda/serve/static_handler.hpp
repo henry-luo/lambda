@@ -11,7 +11,6 @@
  *
  * Compatible with:
  *   Express:  express.static('public', {maxAge: 3600})
- *   Flask:    send_from_directory() / send_file()
  *   Nginx:    location /static/ { root /var/www; }
  */
 

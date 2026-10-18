@@ -21,6 +21,7 @@
 // str.h included via view.hpp
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -2007,6 +2008,18 @@ static void editing_composition_reset(EditingCompositionState* composition) {
     composition->canceled = false;
 }
 
+ModelEditSurfaceBinding* model_edit_surface_find_host(
+        DocState* state, const char* host_key) {
+    if (!state || !host_key || !host_key[0]) return nullptr;
+    for (ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+         binding; binding = binding->next) {
+        if (binding->host_key && strcmp(binding->host_key, host_key) == 0) {
+            return binding;
+        }
+    }
+    return nullptr;
+}
+
 void editing_interaction_set_active_surface(DocState* state,
                                             const EditingSurface* surface) {
     if (!state) return;
@@ -2030,9 +2043,14 @@ void editing_interaction_set_active_surface(DocState* state,
         }
         state->editing.active_surface = *surface;
         state->editing.has_active_surface = true;
+        state->editing.active_model_surface_id = 0;
+        ModelEditSurfaceBinding* binding = surface->owner
+            ? model_edit_surface_find_host(state, surface->owner->id) : nullptr;
+        if (binding) state->editing.active_model_surface_id = binding->handle_id;
     } else {
         editing_surface_clear(&state->editing.active_surface);
         state->editing.has_active_surface = false;
+        state->editing.active_model_surface_id = 0;
         state->editing.composing = false;
         state->editing.composition.active = false;
         editing_surface_clear(&state->editing.composition.surface);
@@ -2877,8 +2895,15 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     return removed;
 }
 
-static bool state_store_tree_contains_node(DomNode* root, void* node) {
-    return node && view_tree_contains_view(root, static_cast<View*>(node));
+static bool state_store_tree_contains_node(DomDocument* doc, DomNode* root, void* node) {
+    if (!node) return false;
+    View* view = static_cast<View*>(node);
+    // registry ownership validates the address before walking its parent path;
+    // searching the whole DOM for every state entry makes large reflows quadratic.
+    if (dom_node_registry_owns(doc, static_cast<DomNode*>(view))) {
+        return view_state_view_is_connected(doc, view);
+    }
+    return view_tree_contains_view(root, view);
 }
 
 static bool editing_surface_is_stale(DomNode* root,
@@ -2902,6 +2927,7 @@ static void doc_state_clear_editing_interaction_surface(DocState* state) {
     if (!state) return;
     editing_surface_clear(&state->editing.active_surface);
     state->editing.has_active_surface = false;
+    // retain the logical model handle; completion resolves its replacement DOM host.
     state->editing.composing = false;
     editing_composition_reset(&state->editing.composition);
 }
@@ -2929,28 +2955,60 @@ static uint32_t view_state_clear_interaction_flag(DocState* state, const char* n
     return changed;
 }
 
-static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
-    if (!state || !state->state_map || !name) return 0;
-    const char* interned = intern_state_name(state, name);
+template<typename Entry, typename Predicate, typename BeforeErase>
+static uint32_t state_map_erase_matching(HashMap* map, Predicate matches,
+                                        BeforeErase before_erase) {
+    // robin-hood deletion moves buckets; collect keys once instead of restarting
+    // a full scan for every removed flag or orphan in a large document.
+    lam::ArrayList<Entry> retired(MEM_CAT_LAYOUT, 0);
+    size_t iter = 0;
+    void* item = nullptr;
+    bool collected_all = true;
+    while (hashmap_iter(map, &iter, &item)) {
+        Entry* entry = (Entry*)item;
+        if (matches(entry) && !retired.append(*entry)) {
+            log_error("state_map_erase_matching: unable to collect remaining retired state keys");
+            collected_all = false;
+            break;
+        }
+    }
     uint32_t removed = 0;
-    bool found_entry = true;
-    while (found_entry) {
-        found_entry = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->state_map, &iter, &item)) {
-            StateEntry* entry = (StateEntry*)item;
-            if (!entry || !entry->key.name) continue;
-            if (entry->key.name != interned && strcmp(entry->key.name, interned) != 0) continue;
-            StateEntry query = { .key = { entry->key.node, interned } };
-            if (hashmap_delete(state->state_map, &query)) {
-                removed++;
-                found_entry = true;
+    for (const Entry& key : retired) {
+        Entry* entry = (Entry*)hashmap_get(map, &key);
+        if (!entry) continue;
+        before_erase(entry);
+        if (hashmap_delete(map, &key)) removed++;
+    }
+    // allocation pressure must not leave stale raw owners behind before retirement.
+    if (!collected_all) {
+        bool erased = true;
+        while (erased) {
+            erased = false;
+            iter = 0;
+            while (hashmap_iter(map, &iter, &item)) {
+                Entry* entry = (Entry*)item;
+                if (!matches(entry)) continue;
+                Entry key = *entry;
+                before_erase(entry);
+                if (hashmap_delete(map, &key)) {
+                    removed++;
+                    erased = true;
+                }
                 break;
             }
         }
     }
     return removed;
+}
+
+static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
+    if (!state || !state->state_map || !name) return 0;
+    const char* interned = intern_state_name(state, name);
+    return state_map_erase_matching<StateEntry>(state->state_map,
+        [interned](const StateEntry* entry) {
+            return entry->key.name && (entry->key.name == interned ||
+                strcmp(entry->key.name, interned) == 0);
+        }, [](StateEntry*) {});
 }
 
 static uint32_t state_map_set_bool_no_assert(DocState* state, void* node,
@@ -3175,15 +3233,9 @@ uint32_t view_state_prune_orphans(DocState* state) {
 
     DomDocument* doc = state->owner_store->document;
     DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
-    uint32_t removed = 0;
     uint32_t owner_changes = doc_state_prune_stale_transient_owners(state, root);
-    bool found_orphan = true;
-    while (found_orphan) {
-        found_orphan = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->view_state_map, &iter, &item)) {
-            ViewStateEntry* entry = (ViewStateEntry*)item;
+    uint32_t removed = state_map_erase_matching<ViewStateEntry>(state->view_state_map,
+        [&](ViewStateEntry* entry) {
             uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
             View* key_live = view_state_entry_resolve_view(state, entry);
             View* state_live = key_live;
@@ -3199,15 +3251,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
                 invalid_live_kind = !elem || (!elem->form && !is_form_control(elem));
             }
             if (!entry->state || !key_live || !state_live || invalid_live_kind) {
-                ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };
-                if (entry->kind == VIEW_STATE_FORM_CONTROL) {
-                    form_control_clear_text_value_cache(key_live, entry->state);
-                }
-                view_state_release_payload(entry->state);
-                hashmap_delete(state->view_state_map, &query);
-                removed++;
-                found_orphan = true;
-                break;
+                return true;
             }
             if (entry->kind == VIEW_STATE_MEDIA) {
                 MediaViewState* media = &entry->state->data.media;
@@ -3231,8 +3275,13 @@ uint32_t view_state_prune_orphans(DocState* state) {
                     }
                 }
             }
-        }
-    }
+            return false;
+        }, [&](ViewStateEntry* entry) {
+            if (entry->kind == VIEW_STATE_FORM_CONTROL) {
+                form_control_clear_text_value_cache(view_state_entry_resolve_view(state, entry), entry->state);
+            }
+            view_state_release_payload(entry->state);
+        });
 
     if (removed > 0 || owner_changes > 0) {
         state->is_dirty = true;
@@ -3247,28 +3296,12 @@ uint32_t view_state_prune_orphans(DocState* state) {
 static uint32_t state_map_prune_orphans(DocState* state, DomNode* root) {
     if (!state || !state->state_map || !root) return 0;
 
-    uint32_t removed = 0;
-    bool found_orphan = true;
-    while (found_orphan) {
-        found_orphan = false;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(state->state_map, &iter, &item)) {
-            StateEntry* entry = (StateEntry*)item;
-            if (!entry || state_store_tree_contains_node(root, entry->key.node)) {
-                continue;
-            }
-            // DOM mutation fallback keeps the DOM tree as the identity source;
-            // only state attached to disconnected nodes is invalid after reflow.
-            StateEntry query = { .key = { entry->key.node, entry->key.name } };
-            if (hashmap_delete(state->state_map, &query)) {
-                removed++;
-                found_orphan = true;
-                break;
-            }
-        }
-    }
-    return removed;
+    // DOM identity remains authoritative; connected nodes keep their values.
+    DomDocument* doc = state->owner_store ? state->owner_store->document : nullptr;
+    return state_map_erase_matching<StateEntry>(state->state_map,
+        [doc, root](const StateEntry* entry) {
+            return !state_store_tree_contains_node(doc, root, entry->key.node);
+        }, [](StateEntry*) {});
 }
 
 uint32_t state_store_prune_after_reflow(DocState* state) {
@@ -5204,18 +5237,19 @@ int form_control_get_selected_index(DocState* state, View* view) {
 }
 
 void form_control_set_selected_index(DocState* state, View* view, int index) {
-    ViewBlock* block = form_block_for_view(view);
-    if (!block) return;
+    // hidden controls retain selection state even when layout releases their box and form properties.
+    FormControlProp* form = form_prop_for_view(view);
+    ViewState* view_state = form_view_state_get(state, view);
+    if (!form && !view_state) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_SELECTED_INDEX, view);
 
-    FormControlProp* form = block->form;
-    form->state_ref = state;
+    if (form) form->state_ref = state;
 
-    // Clamp to valid range: -1 (none) or 0 to option_count-1
+    // the DOM setter has normalized the index when no layout-owned option count is available.
     if (index < -1) index = -1;
-    if (index >= form->option_count) index = form->option_count - 1;
+    if (form && index >= form->option_count) index = form->option_count - 1;
 
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (!view_state) view_state = form_view_state_get_or_create(state, view, form);
     int old_index = view_state ? view_state->data.form.selected_index : form_default_selected_index_from_tree(view);
     if (view_state) {
         if (old_index == index) return;
@@ -8730,19 +8764,23 @@ void clipboard_copy_text(const char* text) {
     // Best-effort GLFW mirror so existing interactive flows keep working
     // in builds where a GLFW window is present. Skip in headless mode to
     // avoid cross-process races on the shared OS pasteboard during tests.
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
+#endif
     log_info("Copied %zu bytes to clipboard", strlen(text));
 }
 
 const char* clipboard_get_text() {
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         const char* s = glfwGetClipboardString(ui_context.window);
         if (s) return s;
     }
+#endif
     return clipboard_store_read_text();
 }
 
@@ -8751,10 +8789,12 @@ void clipboard_copy_html(const char* html) {
     // Write both representations so paste handlers that ask for text/html
     // get rich content and plain-text consumers still see something useful.
     clipboard_store_write_html(html, html);
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);
     }
+#endif
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));
 }
 
@@ -8766,10 +8806,12 @@ void clipboard_copy_rich(const char* html, const char* plain_text) {
     } else {
         clipboard_store_write_text(text);
     }
+#ifndef __APPLE__
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
+#endif
     log_debug("clipboard_copy_rich: wrote html=%zu plain=%zu",
               html ? strlen(html) : 0, strlen(text));
 }

@@ -1,8 +1,8 @@
 '=== error poison ==='
-false
-true
-false
-false
+error
+error
+error
+error
 '=== nan ==='
 false
 true

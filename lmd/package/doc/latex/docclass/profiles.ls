@@ -272,7 +272,7 @@ pub fn points_label(points, bracketed, point_name) {
 }
 
 // a point count as exam prints it: 2, 2.5
-pub fn whole(points) => if (points == float(int(points))) string(int(points)) else string(points)
+pub fn whole(points) => if ((points == float(int(points))) ^ { false }) string(int(points)) else string(points)
 
 // ---- stylesheets ----------------------------------------------------------------------
 

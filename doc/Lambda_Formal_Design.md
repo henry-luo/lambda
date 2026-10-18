@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 37.0.0 (2026-10-18)
+**Spec version:** 38.0.0 (2026-10-18)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1719,10 +1719,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   audit, quotas), a real boundary for scripts and governance for T1.
   *Converts "did someone sneak in an `open()`?" from an unanswerable
   question into a checker rule.* Surface extracted empirically. [JA16]
-- **D7.5.3** Lambda↔Radiant is two explicit contracts: Radiant embeds
+- **D7.5.3v2** Lambda↔Radiant is two explicit contracts: Radiant embeds
   Lambda through a versioned, Jube-aligned embed interface; Lambda
   reaches Radiant only through the `radiant-dom` module; `lambda-rt`
-  never links radiant. [JA15, SM10]
+  never links radiant. Shipped document layouts connect automatically to
+  pure package `layout(parent, children, ctx)` exports on the document's
+  evaluator. Callback registration is host plumbing, absent from the public
+  DOM/Radiant API; callers never install graph, TikZ or MathML layouts.
+  [JA15, SM10; Radiant_Design_Custom_Layout §6]
 
 ## D8 Compilation Pipeline
 

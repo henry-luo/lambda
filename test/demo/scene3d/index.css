@@ -1,0 +1,31 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #090f1a; color: #e7eef8; font-family: Arial, sans-serif; }
+.scene3d-index { max-width: 1200px; margin: 0 auto; padding: 28px 32px; }
+.collection-heading { margin: 16px 0 32px; }
+.eyebrow { margin: 0 0 12px; color: #74ded3; font-size: 11px; letter-spacing: 2px; }
+h1 { margin: 0 0 12px; font-size: 48px; font-weight: 500; letter-spacing: -1.8px; }
+.introduction { margin: 0 0 10px; font-size: 22px; color: #d1ddeb; }
+.collection-note { max-width: 660px; margin: 0; color: #91a6c0; font-size: 14px; line-height: 1.6; }
+.demo-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.demo-tile { display: block; min-width: 0; color: inherit; text-decoration: none; background: #111d2e; border: 1px solid #293b54; border-radius: 12px; overflow: hidden; }
+.demo-tile:hover { border-color: #74ded3; background: #152337; }
+.demo-tile:focus-visible { outline: 2px solid #74ded3; outline-offset: 4px; }
+.demo-preview { height: 180px; overflow: hidden; background: #101b2a; border-bottom: 1px solid #293b54; }
+.demo-preview img { display: block; width: 100%; height: 180px; object-fit: cover; }
+.specimen-preview { background: #eff2f5; }
+.specimen-preview img { object-fit: contain; }
+.demo-copy { padding: 22px; }
+.demo-tag { margin: 0 0 10px; color: #8cabc9; font-size: 10px; letter-spacing: 1.3px; }
+.demo-copy h2 { margin: 0 0 10px; font-size: 22px; font-weight: 500; letter-spacing: -0.4px; }
+.demo-copy > p:not(.demo-tag) { min-height: 63px; margin: 0 0 20px; color: #9eb3cd; font-size: 13px; line-height: 1.6; }
+.demo-open { display: flex; justify-content: space-between; gap: 12px; color: #74ded3; font-size: 12px; }
+.collection-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 28px; padding-top: 20px; border-top: 1px solid #29394f; color: #8096b1; font-size: 11px; }
+@media (max-width: 1000px) { .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) {
+    .scene3d-index { padding: 20px 16px; }
+    .collection-heading { margin: 12px 0 24px; }
+    h1 { font-size: 38px; }
+    .introduction { font-size: 19px; }
+    .demo-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .demo-copy > p:not(.demo-tag) { min-height: 0; }
+}

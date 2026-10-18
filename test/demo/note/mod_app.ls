@@ -9,11 +9,25 @@ import model: .mod_model
 import sample: .mod_sample
 import storage: .mod_io
 
-pub fn initial() => {*:model.initial(sample.notebook()),menu:""}
+pub fn initial() => {*:model.initial(sample.notebook()),menu:"",context:null,picker_value:"",picker_error:"",
+    last_color:model.default_colors.color,last_highlight:model.default_colors.highlight}
+pub pn open_context(st,evt,x=null,y=null) {
+    if (st.dialog!=null) { return st }
+    let row = dom.closest(evt.target,".note-row")
+    let surface = dom.closest(evt.target,"#edit-surface,#image-tools")
+    if (row==null and surface==null) { return st }
+    // a context-menu hit names a pointer position, not a replacement for the existing text range.
+    let has_range = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
+    let next = if (row==null) (if (has_range) st else adopt(st,evt))
+        else command(st,"note.select",{id:dom.get_attribute(row,"data-note")},evt.target)
+    return {*:next,menu:"context",context:{kind:if (row==null) "text" else "note",
+        x:if (x==null) evt.clientX else x,y:if (y==null) evt.clientY else y}}
+}
 pub fn primary(evt) => evt.metaKey==true or evt.ctrlKey==true
 pub pn stamp() { return format(now(),"YYYY-MM-DD HH:mm") }
 pub pn adopt(st,evt) {
     if (st.selected=="" or st.dialog!=null) { return st }
+    if (model.selected_image(st.editor)!=null and dom.closest(evt.target,"#edit-surface")==null) { return st }
     let accepted = controller.adopt(st.editor,evt)
     return if (accepted.changed) {*:st,editor:model.clean(accepted.editor)} else st
 }
@@ -21,6 +35,9 @@ pub pn finish(st,node,restore=false) {
     dom.set_close_guard(node,model.dirty(st))
     dom.set_window_title(node,(if (model.dirty(st)) "● " else "") ++ "Notes")
     controller.restore(st.editor,restore and st.dialog==null and st.selected!="")
+    // a model move rebuilds the image tools; measure their replacement after the outer commit.
+    if (model.selected_image(st.editor)!=null)
+        dom.request_frame(dom.get_element_by_id(dom.root_node(node),"notes"),"note_image_position")
 }
 fn file_dialog(kind,path="") => {kind:kind,title:if (kind=="save") "Save Notebook" else "Open Notebook",
     message:if (kind=="save") "Keep all your notes in a local .note.json notebook." else "Choose a local .note.json notebook.",
@@ -60,7 +77,7 @@ pn dialog_command(st,id,node) {
     if (d.kind=="open") {
         let loaded = storage.read_book(path) ^ { return {*:st,dialog:{*:d,error:^.message}} }
         controller.focus(node)
-        return {*:loaded,menu:"",sidebar:st.sidebar,editor:controller.replace(st.editor,loaded.editor)}
+        return {*:st,*:loaded,menu:"",context:null,picker_error:"",sidebar:st.sidebar,editor:controller.replace(st.editor,loaded.editor)}
     }
     return save_book(st,path,node,d.kind=="overwrite")
 }
@@ -71,14 +88,19 @@ pn edit_command(st,id,params,node) {
         bullets:"insertUnorderedList",table:"insertTable",style:"formatBlock"}
     let action = slice(id,5)
     var next = editor
-    if (id=="edit.checklist") { next = model.checklist(editor) }
+    if (id=="edit.color" or id=="edit.highlight") {
+        next = model.format_color(editor,action,params.color) ^ { return {*:st,picker_error:^.message} }
+    }
+    else if (id=="edit.checklist") { next = model.checklist(editor) }
     else if (id=="edit.task") { next = model.toggle_task(editor,params.path) }
     else {
         let run = controller.request(editor,inputs[action],if (action=="table") {rows:3,cols:2,header:false} else params)
         next = run.editor
     }
     controller.focus(node)
-    return {*:model.update_editor(st,next,stamp()),menu:"",status:"On My Mac"}
+    return {*:model.update_editor(st,next,stamp()),menu:"",status:"On My Mac",picker_error:"",
+        last_color:if (action=="color") model.color_value(next,"color") else st.last_color,
+        last_highlight:if (action=="highlight") model.color_value(next,"highlight") else st.last_highlight}
 }
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,id,node) }
@@ -88,11 +110,26 @@ pub pn command(st,id,params,node) {
         controller.focus(node)
         return {*:model.create(st,stamp()),menu:"",status:"New note"}
     }
+    if (id=="image.resize") {
+        let next = model.resize_image(st.editor,params.path,params.width,params.height) ^ { return {*:st,status:^.message} }
+        controller.focus(node)
+        return {*:model.update_editor(st,next,stamp()),menu:"",status:"Image resized"}
+    }
+    if (id=="image.move") {
+        let next = model.move_image(st.editor,params.path,params.target)
+        controller.focus(node)
+        return if (next==st.editor) st else {*:model.update_editor(st,next,stamp()),menu:"",status:"Image moved"}
+    }
     if (id=="note.select") { return {*:model.select(st,params.id),menu:""} }
     if (id=="folder.select") { return {*:model.scope(st,params.folder),menu:""} }
     if (id=="sidebar.toggle") { return {*:st,sidebar:not st.sidebar} }
     if (id=="list.sort") { return {*:st,sort:if (st.sort=="updated") "title" else "updated"} }
-    if (starts_with(id,"menu.")) { return {*:st,menu:if (st.menu==slice(id,5)) "" else slice(id,5)} }
+    if (starts_with(id,"menu.")) {
+        let kind = slice(id,5)
+        return {*:st,menu:if (st.menu==kind) "" else kind,picker_error:"",
+            picker_value:if (kind=="color" or kind=="highlight") model.color_value(st.editor,kind) else st.picker_value}
+    }
+    if (id=="picker.apply") { return edit_command(st,"edit." ++ st.menu,{color:st.picker_value},node) }
     if (id=="folder.new") { return {*:st,menu:"",dialog:{kind:"folder",title:"New Folder",message:"A little space for related ideas.",value:"",confirm:"Create",error:""}} }
     if (id=="note.pin" and st.selected!="") { return model.change_note(st,{pinned:not model.current(st).pinned}) }
     if (id=="note.move") { return {*:model.move(st,params.folder),menu:"",status:"Note moved"} }
@@ -116,6 +153,7 @@ pub pn command(st,id,params,node) {
 pub pn control_change(st,req) {
     if (req.action=="dialog.value") { return {*:st,dialog:{*:st.dialog,value:req.value,error:""}} }
     if (st.dialog!=null) { return st }
+    if (req.action=="picker.value") { return {*:st,picker_value:req.value,picker_error:""} }
     if (req.action=="search") { return model.reconcile({*:st,query:req.value,menu:""}) }
     if (req.action=="note.move") { return command(st,"note.move",{folder:req.value},req.node) }
     return st

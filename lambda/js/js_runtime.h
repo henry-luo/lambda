@@ -55,41 +55,9 @@ LAMBDA_RT_API bool js_string_equals(Item value, const char* expected);
 bool js_is_vm_context_error(Item value);
 // Returns ItemNull on every non-ASCII or semantically effectful case so the
 // MIR caller can preserve the ordinary capability call on that edge.
-Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver, Item* args,
-                                       int argc);
-int64_t js_builtin_callable_is_id(Item callee, int64_t catalog_id);
 
 const char* js_item_to_cstr(Item value, char* buf, int buf_size);
 
-static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
-    unsigned char c = (unsigned char)s[*index];
-    if (c < 0x80) {
-        (*index)++;
-        return c;
-    }
-    if ((c & 0xE0) == 0xC0 && *index + 1 < len) {
-        int cp = ((c & 0x1F) << 6) | ((unsigned char)s[*index + 1] & 0x3F);
-        *index += 2;
-        return cp;
-    }
-    if ((c & 0xF0) == 0xE0 && *index + 2 < len) {
-        int cp = ((c & 0x0F) << 12) |
-                 (((unsigned char)s[*index + 1] & 0x3F) << 6) |
-                 ((unsigned char)s[*index + 2] & 0x3F);
-        *index += 3;
-        return cp;
-    }
-    if ((c & 0xF8) == 0xF0 && *index + 3 < len) {
-        int cp = ((c & 0x07) << 18) |
-                 (((unsigned char)s[*index + 1] & 0x3F) << 12) |
-                 (((unsigned char)s[*index + 2] & 0x3F) << 6) |
-                 ((unsigned char)s[*index + 3] & 0x3F);
-        *index += 4;
-        return cp;
-    }
-    (*index)++;
-    return c;
-}
 // Maps a well-known Symbol catalog selector to its stable NameId compatibility
 // record, or to the cached core Symbol value. Property storage converts the
 // latter only at the NameId boundary; callers otherwise retain JS identity.
@@ -222,8 +190,8 @@ Item js_compare(int64_t op, Item left, Item right);
 // Logical Operators
 // =============================================================================
 
-Item js_logical_and(Item left, Item right);  // && (returns last evaluated operand)
-Item js_logical_or(Item left, Item right);   // || (returns last evaluated operand)
+  // && (returns last evaluated operand)
+   // || (returns last evaluated operand)
 Item js_logical_not(Item operand);           // !
 
 // =============================================================================
@@ -246,8 +214,6 @@ Item js_unsigned_right_shift(Item left, Item right); // >>>
 Item js_unary_plus(Item operand);   // +x (convert to number)
 Item js_unary_minus(Item operand);  // -x (negate)
 Item js_typeof(Item value);         // typeof x
-Item js_increment(Item operand);
-Item js_decrement(Item operand);
 // Internal MIR/interpreter entries: the caller has already applied ToNumeric.
 Item js_increment_numeric(Item numeric);
 Item js_decrement_numeric(Item numeric);
@@ -277,8 +243,6 @@ typedef struct JsStaticObjectProperty {
     uint8_t value_kind;
 } JsStaticObjectProperty;
 
-Item js_object_new_from_static_properties(const JsStaticObjectProperty* properties,
-    int length);
 // A recursive compiler-owned literal recipe. It represents only side-effect-free
 // literal syntax, while every invocation materializes a fresh JS value graph.
 typedef enum JsStaticLiteralKind {
@@ -300,7 +264,6 @@ typedef struct JsStaticLiteralRecipe {
     uint8_t kind;
 } JsStaticLiteralRecipe;
 
-Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe);
 // An array's companion property map is created on first use — index accessors,
 // non-index keys and attribute bits all live there. Callers that are about to
 // write must go through this; a bare js_array_props() read can be NULL.
@@ -313,14 +276,11 @@ struct TypeMap* js_object_type_for_class(int class_id);
 Item js_new_class_function(void);
 void js_set_class_constructor(Item class_function, Item constructor_body);
 void js_set_class_instance_prototype(Item class_function, Item prototype);
-void js_set_class_instance_shape(Item class_function, struct TypeMap* shape);
-void js_set_function_instance_shape(Item function, struct TypeMap* shape);
 void js_set_class_superclass(Item class_function, Item superclass);
 // ClassDefinitionEvaluation heritage links shared by both tiers: the prototype
 // object's parent (null for `extends null`), then the constructor's parent.
 Item js_class_heritage_prototype_parent(Item superclass);
 void js_set_class_constructor_parent(Item class_function, Item superclass);
-Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
 // canonical typed-array index parsing is shared across frontend property authorities.
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
@@ -345,7 +305,6 @@ Item js_set_error_property_completion(Item target, Item key, Item value);
 // Internal DefineOwn storage write; it never dispatches inherited accessors.
 Item js_define_own_key_storage(Item object, Item key, Item value);
 LAMBDA_RT_API Item js_set_key_cstr(Item object, const char* key, Item value);
-Item js_using_dispose(Item resource);
 Item js_set_key_strict_policy(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
 Item js_set_key_policy(Item object, Item key, Item value, int64_t strict);
@@ -360,7 +319,6 @@ void js_dom_install_interface(Item global, const char* name);
 LAMBDA_RT_API Item js_create_data_property(Item object, Item key, Item value);
 Item js_get_reference(Item object, Item key);
 Item js_get_name_id(Item object, NameId name_id);
-Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
 
 // =============================================================================
 // Array Functions
@@ -369,7 +327,6 @@ Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
 LAMBDA_RT_API Item js_array_new(int length);
 // Build a fresh dense array from compiler-owned inline Number Items. The
 // description is immutable; the returned array and its elements stay ordinary.
-Item js_array_new_from_static_items(const Item* items, int length);
 // Preserve array-literal elisions as absent indexed properties.
 Item js_array_hole(void);
 // Allocate an array with an explicit immutable JS class carrier for branded
@@ -381,7 +338,6 @@ Item js_array_new_from_item(Item arg);
 Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 LAMBDA_RT_API Item js_elements_get_int(Item array, int64_t index);
-Item js_elements_get_number(Item array, double index);
 LAMBDA_RT_API Item js_elements_set_int(Item array, int64_t index, Item value);
 // T12-4: physical own-element heads used before the allocating property
 // kernels. They accept only a present ordinary dense slot and cannot allocate.
@@ -390,13 +346,10 @@ bool js_array_try_get_existing_own_dense_no_gc(Item array, int64_t index,
 // Returns an existing direct Item through an ArrayProps companion, or the
 // internal hole sentinel when scalar homes, descriptors, holes or another array
 // kind require the complete element read.
-Item js_array_get_existing_own_dense_with_props_or_missing(Item array,
-                                                            int64_t index);
 bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t index,
                                                Item value);
 // Stores an already-native Number only into an existing ordinary packed slot.
 // False keeps the caller on the full Set continuation.
-bool js_array_set_existing_number_no_gc(Item array, double index, double value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);
@@ -432,16 +385,6 @@ double js_math_pow_d(double base, double exp);
 // Function Functions
 // =============================================================================
 
-Item js_new_function_mir(void* func_ptr, int param_count);
-Item js_new_distinct_function_mir(void* func_ptr, int param_count);
-Item js_new_method_function_mir(void* func_ptr, int param_count);
-Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
-// Compiler-only factories defer capability/metadata publication until the
-// adjacent js_finalize_function transaction supplies definition-site facts.
-Item js_new_function_mir_pending(void* func_ptr, int param_count);
-Item js_new_distinct_function_mir_pending(void* func_ptr, int param_count);
-Item js_new_closure_mir_pending(void* func_ptr, int param_count, Item* env,
-                                int env_size);
 // Compiler-pending functions preserve ordinary name/length descriptors while
 // avoiding their backing-map allocation until an observable operation needs it.
 bool js_function_materialize_lazy_metadata_property(Item function, Item key);
@@ -471,8 +414,6 @@ Item js_new_interpreted_function(struct AstFuncNode* function,
                                  struct JsInterpEnv* environment,
                                  uint32_t flags);
 void js_set_formal_length(Item fn_item, int length);
-void js_func_cache_suppress_push(void);
-void js_func_cache_suppress_pop(void);
 LAMBDA_RT_API Item* js_alloc_env(int count);
 // Allocate a closure environment and populate it in one step. A native
 // continuation's env is fixed at capture time, so the slot count and the slot
@@ -490,34 +431,7 @@ LAMBDA_RT_API Item* js_alloc_env3(Item a, Item b, Item c);
 
 void js_env_rehome_scalars(Item* env);
 LAMBDA_RT_API void js_set_function_name(Item fn_item, Item name_item);
-void js_set_function_source_known_code(Item fn_item, Item source_item);
 void js_set_function_source(Item fn_item, Item source_item);
-enum {
-    JS_FUNC_INIT_GENERATOR = 1u << 0,
-    JS_FUNC_INIT_ASYNC_GENERATOR = 1u << 1,
-    JS_FUNC_INIT_ASYNC = 1u << 2,
-    JS_FUNC_INIT_ARROW = 1u << 3,
-    JS_FUNC_INIT_STRICT = 1u << 4,
-    // 1u << 5 was MIR_PUBLIC_ABI, retired with the register-operand wrapper
-    // (JC16); CONTEXT_ABI alone now marks a compiled span entry.
-    // The compiled body can leave a dynamic with scope on an early return.
-    // Call dispatch must restore the caller's stack even when both endpoints
-    // were empty on entry.
-    JS_FUNC_INIT_USES_WITH = 1u << 6,
-    // These facts are valid only when compiler analysis completed. Runtime and
-    // dynamically-created wrappers deliberately omit ANALYSIS_KNOWN so the
-    // dispatcher retains the conservative binding path.
-    JS_FUNC_INIT_ANALYSIS_KNOWN = 1u << 7,
-    JS_FUNC_INIT_READS_THIS = 1u << 8,
-    JS_FUNC_INIT_READS_NEW_TARGET = 1u << 9,
-    JS_FUNC_INIT_MIR_CONTEXT_ABI = 1u << 10,
-    JS_FUNC_INIT_CLASS_FIELD_INITIALIZER = 1u << 11,
-    JS_FUNC_INIT_USES_ARGUMENTS = 1u << 12,
-    JS_FUNC_INIT_DIRECT_EVAL = 1u << 13,
-};
-void js_finalize_function(Item fn_item, const char* name_chars,
-                          const char* source_chars, uint64_t span_lengths,
-                          int64_t formal_length, int64_t init_flags);
 void js_set_function_home_class(Item fn_item, Item home_class);
 void js_mark_derived_constructor_func(Item fn_item);
 Item js_get_constructor(Item name_item);
@@ -538,13 +452,6 @@ LAMBDA_RT_API Item js_call_function(Item func_item, Item this_val, Item* args, i
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
-Item js_call_constructor_body_into(Item func_item, Item this_val, Item* args,
-                                   int arg_count, Item new_target,
-                                   uint64_t* result_home);
-Item js_call_constructor_body_prerooted_args_into(Item func_item, Item this_val,
-                                                  Item* args, int arg_count,
-                                                  Item new_target,
-                                                  uint64_t* result_home);
 Item js_call_export_0_into(Function* function, uint64_t* result_home);
 Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
@@ -562,8 +469,6 @@ Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, Item h, uint64_t* result_home);
 void js_set_stack_size_kb(int64_t kb);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
-Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
-                            uint64_t* result_home);
 Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
                               uint64_t* result_home);
 Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
@@ -607,17 +512,12 @@ Item js_regex_exec(Item regex, Item str);
 LAMBDA_RT_API Item js_get_this();
 Item js_get_lexical_this_binding(void);
 Item js_resolve_lexical_this(Item this_val);
-void js_set_this(Item this_val);
 Item js_get_new_target();
-void js_set_direct_new_target(Item target);
-void js_set_pending_call_source(const char* source, int64_t len);
 Item js_super_bind_this(Item this_val, Item construct_result);
 Item js_get_super_this_value(void);
 Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
 Item js_super_get_base(Item receiver);
-Item js_super_property_get(Item receiver, Item key);
 Item js_super_property_get_from_base(Item receiver, Item base, Item key);
-Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
 Item js_super_property_set_from_base(Item receiver, Item base, Item key, Item value,
                                      int64_t strict);
 Item js_build_arguments_object(void);
@@ -625,7 +525,6 @@ Item js_build_arguments_object(void);
 // borrowing the ambient callback's transient call span.
 Item js_build_arguments_object_for_call(Item* args, int argc, int64_t is_strict,
                                         Item callee);
-void js_set_arguments_info(int64_t is_strict);
 
 // Get the native function pointer from a JsFunction Item (handles JsFunction layout)
 void* js_function_get_ptr(Item fn_item);
@@ -807,9 +706,7 @@ void js_console_log_multi(Item* args, int argc);
 // =============================================================================
 
 Item js_instanceof(Item left, Item right);
-Item js_instanceof_classname(Item left, Item classname);
 Item js_in(Item key, Item object);
-Item js_nullish_coalesce(Item left, Item right);
 
 // =============================================================================
 // v5: Object utilities
@@ -1223,7 +1120,6 @@ Item js_error_set_cause(Item error, Item options);
 Item js_error_captureStackTrace(Item target, Item ctor);
 
 // TDZ (Temporal Dead Zone) check for let/const
-Item js_check_tdz(Item value, NameId name_id, int name_len);
 
 // Const assignment error
 Item js_throw_const_assign(NameId name_id, int name_len);
@@ -1247,12 +1143,7 @@ bool js_prepare_eval_context(Runtime* runtime, bool initialize_thread,
 // Module Variable Table
 // =============================================================================
 
-void js_init_module_vars_undefined_bulk(const int* indices,
-    const uint32_t* module_name_indices, const NameId* direct_name_ids,
-    int count, int define_global_var_properties);
-void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
-void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);
 void js_release_global_var_module_bindings_from(uint32_t first_module_state_id);
 
 /**
@@ -1343,7 +1234,6 @@ typedef struct JsMirVolumeCounters {
 } JsMirVolumeCounters;
 
 void js_mir_volume_counters_reset(void);
-void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted);
 void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
@@ -1355,11 +1245,9 @@ bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 Item js_named_native_function_source_item(const String* name);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
-Item js_get_global_property_strict(Item key);
 // Resolve the global environment after an Object Environment Record already
 // performed HasBinding for this identifier.
 Item js_get_global_property_after_with_lookup(Item key);
-Item js_get_global_property_reference(Item key, int64_t strict_reference);
 // Set a global binding after an Object Environment Record already ran HasBinding.
 Item js_set_global_property_after_with_lookup(Item key, Item value, int64_t strict);
 int64_t js_global_binding_exists(Item key);
@@ -1368,51 +1256,35 @@ int64_t js_global_binding_exists_after_with_lookup(Item key);
 // (0 = sloppy implicit global, 1 = strict throw-on-undeclared).
 // js_set_global_property_strict has been removed.
 Item js_set_global_property(Item key, Item value, int64_t strict);
-Item js_set_global_var_property_fast(Item key, Item value);
-Item js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
 void js_define_global_function_property(Item key, Item value);
-void js_global_lexical_declare(Item key, Item value, int64_t immutable);
 void js_global_lexical_declare_module_slot(Item key, int64_t index, int64_t immutable);
 int64_t js_global_lexical_binding_exists(Item key);
 Item js_global_lexical_get_or_fallback(Item key, Item fallback);
 Item js_global_lexical_set_if_exists(Item key, Item value);
 Item js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
-void js_set_method_home_from_target(Item target, Item fn_item);
 Item js_init_class_instance_fields(Item callee, Item object);
 Item js_init_class_instance_fields_after_super(Item callee, Item object);
 void js_init_class_instance_field_metadata(Item class_item, int count);
-void js_set_class_instance_field_metadata_name_id_range(Item class_item,
-    int index, uint32_t module_name_base, int count, uint64_t method_mask);
 void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 void js_set_class_instance_field_metadata_private_method(Item class_item, int index);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
     Item initializer);
 Item js_private_key_for_class(Item class_item, Item source_name);
-Item js_private_key_for_current_class(Item source_name);
 Item js_private_in(Item object, Item private_key);
-Item js_private_home_class_enter(Item class_item);
-void js_private_home_class_leave(Item previous_class);
-Item js_private_home_class_leave_result(Item previous_class, Item result);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
-void js_eval_env_push_frame(void);
-void js_eval_global_lexical_push_frame(void);
-int64_t js_eval_local_push_frame(void);
-void js_eval_local_pop_frame(void);
 Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 int64_t js_eval_local_has_var_binding(Item key);
 void js_eval_local_export_var(Item key, Item value);
-void js_eval_local_note_lexical_binding(Item key);
 int64_t js_eval_local_has_lexical_binding(Item key);
-void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 extern const char* const js_array_unscopable_names[];
@@ -1427,27 +1299,17 @@ Item js_with_binding_is_visible_with_ops(Item key, Item object, Item unscopables
 Item js_with_binding_is_visible(Item key, Item object);
 Item js_with_get_binding_value(Item object, Item key, bool strict);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
-Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);
 Item js_probe_with_binding(Item key);
-Item js_capture_with_binding(Item key);
 Item js_probe_with_binding_from(Item key, int64_t minimum_depth);
 Item js_capture_with_binding_from(Item key, int64_t minimum_depth);
 Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
-void js_eval_env_bind(Item key, Item value);
-void js_eval_env_bridge_journal_vars(void);
-void js_eval_global_lexical_bind(Item key, Item value, int64_t immutable);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_global_lexical_has_binding(Item key);
 Item js_eval_global_lexical_get_or_fallback(Item key, Item fallback);
 Item js_eval_global_lexical_set_if_exists(Item key, Item value);
 int64_t js_eval_env_is_active(void);
-void js_eval_env_pop_frame(void);
-void js_eval_global_lexical_pop_frame(void);
-Item js_check_unresolved_capture(Item value, NameId name_id, int64_t len);
-Item js_check_capture_binding(Item value, NameId name_id, int64_t len);
-Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof);
 
 // URL constructor
 Item js_url_construct(Item input);
@@ -1494,8 +1356,6 @@ Item js_async_generator_request(Item generator, int operation, Item value);
  * The func_ptr is the MIR-compiled generator body (state machine form).
  * env/env_size represent captured closure variables.
  */
-Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
-Item js_generator_create_mir(void* func_ptr, Item* env, int env_size, int is_async);
 Item js_generator_create_ast(Item function, Item arguments, Item this_value,
                              int is_async);
 struct JsGeneratorStateRecord* js_generator_get_ast_state(Item generator);
@@ -1632,14 +1492,12 @@ Item js_await_sync(Item value);
 Item js_retain_scalar(Item value);
 
 // Phase 6: Async state machine runtime
-Item js_async_wrap_return(Item value);           // fresh async-function result promise
+           // fresh async-function result promise
 struct Activation;
 Item js_async_context_create_body(Item (*body)(struct Activation*, Item), void* fn_ptr,
     Item* env, int64_t env_size, Item this_val, Item function, Item arguments);
-Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
-                                 Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
-Item js_async_context_create_module(struct JsScript* script, void* mir_main,
+Item js_async_context_create_module(struct JsScript* script,
     uint32_t module_state_id, Item specifier);
 Item js_async_context_create_module_body(Item (*body)(struct Activation*, Item),
     void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier,
@@ -1670,8 +1528,6 @@ Item js_weakmap_new_with_iter(Item iterable);
 Item js_weakset_new_with_iter(Item iterable);
 
 // Public collection type checks (for instanceof)
-bool js_is_map_instance(Item obj);
-bool js_is_set_instance(Item obj);
 
 // =============================================================================
 // ES6 Proxy
@@ -1779,18 +1635,14 @@ Item js_module_get(Item specifier);
  * specifier. Used by self-imports so reads of the imported name observe the
  * current state of namespace.default; throws ReferenceError on the TDZ sentinel.
  */
-Item js_get_live_binding_default(Item specifier);
 
 /**
  * Module graph depth: 1 while the entry module compiles, >= 2 for a nested
  * import. Exiting depth 0 starts the module bodies whose async dependencies
  * have completed. See js_runtime.cpp for details.
  */
-void js_tla_enter_module(void);
-void js_tla_exit_module(void);
 void js_tla_flush_for_dynamic_import(void);
 void js_tla_flush_for_runtime(struct Runtime* runtime);
-int js_tla_module_depth_get(void);
 
 /**
  * Js57 P5 (fulfillment/rejection-order): TLA awaited-target tracking on the
@@ -1799,7 +1651,6 @@ int js_tla_module_depth_get(void);
  * propagate that wait through static-import edges so siblings end up chained
  * on the same target.
  */
-void js_module_set_awaited_target(Item specifier, Item target);
 Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
 // An async function's await on its own activation: parks it until the promise
@@ -1810,18 +1661,14 @@ void js_module_record_evaluation_error(Item specifier, Item error);
 // async importers, preserving leaf-to-root rejection reaction order.
 void js_module_record_async_evaluation_error(Item specifier, Item error,
                                              Item completion_promise);
-Item js_module_get_evaluation_error(Item specifier);
 
 /* Js57 P7d: per-module TLA evaluation tracking. */
-void js_module_mark_has_tla(Item specifier);
-int  js_module_get_has_tla(Item specifier);
 int  js_module_needs_async_settle(Item specifier);
 void js_tla_drain_pending_modules(void);
 void js_module_register_static_dependency(Item parent_specifier, Item dep_specifier);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
 void js_module_set_deferred_async_frame(Item specifier, Item frame);
 int  js_module_pending_async_deps(Item specifier);
-void js_module_mark_post_await_pending(Item specifier);
 void js_module_complete_tla_body(Item specifier);
 
 /**
@@ -1833,7 +1680,7 @@ Item js_get_import_meta();
 
 /**
  * CJS require() — load and execute a module, return its exports.
- * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
+ * Shared host/module loading is implemented in js_execution.cpp.
  */
 Item js_require(Item specifier);
 Item js_require_at(Item specifier, const char* reference);
@@ -1861,13 +1708,9 @@ bool js_array_immortal_props_store(Array* owner, Map* props);
 void js_array_immortal_props_cleanup_all(void);
 
 // Runtime entry points shared by the JIT import registry and JS subsystems.
-void js_set_strict_mode(int64_t strict);
 Item js_with_push_at(Item* slot, Item obj);
 void js_with_pop(void);
-int js_with_save_depth(void);
-void js_with_restore_depth(int depth);
 Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
-void js_define_global_property_v(int64_t kind, Item key, Item value);
 Item js_evalscript_check_global_var_decl(Item key);
 Item js_evalscript_check_global_function_decl(Item key);
 Item js_object_group_by(Item items, Item callback);
@@ -1889,11 +1732,8 @@ Item js_object_from_entries_with_ops(Item iterable, const JsGroupByOps* properti
 Item js_object_set_prototype_of(Item obj, Item proto);
 void js_set_class_name(Item cls_item, Item name_item);
 void js_set_default_constructor_property(Item proto_item, Item cls_item);
-Item js_check_class_static_field_key(Item key_item);
-int64_t js_typeof_is(Item value, uint32_t type_name_id);
 Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
 Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
-int64_t js_eq_raw(Item left, Item right);
 Item js_assert_same_value(Item actual, Item expected, Item message);
 Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
 Item js_assert_compare_array(Item actual, Item expected, Item message);
@@ -1905,11 +1745,10 @@ Item js_assert_base(Item must_be_true, Item message);
 Item js_donotevaluate(void);
 Item js_is_constructor(Item fn);
 Item js_test262_native_harness_install(void);
+Item js_262_get_agent_object(void);
 Item js_test262_build_string(Item args);
 uint64_t lambda_mir_double_bits(double dval);
 double lambda_mir_bits_double(uint64_t bits);
-void js_private_field_init_begin(void);
-void js_private_field_init_end(void);
 // Runtime entry points shared across JS translation units.
 uint64_t js_get_heap_epoch(void);
 Item js_get_typed_array_base_proto(void);

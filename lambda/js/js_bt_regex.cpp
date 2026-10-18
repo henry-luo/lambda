@@ -515,6 +515,11 @@ static RxNode* parse_class(Parser* ps) {
         // possible range a-b
         if (ps->pos < ps->len && ps->p[ps->pos] == '-' &&
             ps->pos + 1 < ps->len && ps->p[ps->pos + 1] != ']') {
+            // Annex B unions a class escape endpoint with the literal dash and first atom.
+            if (!ps->flags.unicode && ps->pos + 2 < ps->len && ps->p[ps->pos + 1] == '\\' &&
+                    strchr("dDwWsS", ps->p[ps->pos + 2])) {
+                add_range(lo, lo); add_range('-', '-'); ps->pos++; continue;
+            }
             ps->pos++; // -
             uint32_t hi;
             if (ps->p[ps->pos] == '\\' && ps->pos + 1 < ps->len) {

@@ -81,6 +81,19 @@
     "lambda/js/js_direct_scope.cpp",
     "lambda/jube/jube_node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
+    "lambda/serve/serve_types.cpp",
+    "lambda/serve/http_request.cpp",
+    "lambda/serve/http_response.cpp",
+    "lambda/serve/router.cpp",
+    "lambda/serve/middleware.cpp",
+    "lambda/serve/worker_pool.cpp",
+    "lambda/serve/language_backend.cpp",
+    "lambda/serve/body_parser.cpp",
+    "lambda/serve/static_handler.cpp",
+    "lambda/serve/cookie.cpp",
+    "lambda/serve/mime.cpp",
+    "lambda/serve/server.cpp",
+    "lambda/serve/mcp_server.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
   "sqlite_version": "3.45.3",
@@ -519,6 +532,8 @@
       "source_files": [
         "build_temp/image-config/aom_build_config.c",
         "lib/image/giflib/dgif_lib.c",
+        "lib/image/giflib/egif_lib.c",
+        "lib/image/giflib/gif_hash.c",
         "lib/image/giflib/gif_err.c",
         "lib/image/giflib/gifalloc.c",
         "lib/image/giflib/openbsd-reallocarray.c",
@@ -1341,6 +1356,9 @@
         "lambda/core/shape_builder.cpp",
         "lambda/core/lambda-data.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/mcp.cpp",
+        "lambda/io/mcp_client.cpp",
+        "lambda/io/mcp_tools.cpp",
         "lambda/io/archive.cpp",
         "lambda/io/archive_native.cpp",
         "lambda/io/zip_archive.cpp",
@@ -1523,8 +1541,21 @@
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
         "lambda/runtime/re2_wrapper.cpp",
-        "lambda/serve/tls_handler.cpp",
         "lambda/serve/serve_utils.cpp",
+        "lambda/serve/serve_types.cpp",
+        "lambda/serve/http_request.cpp",
+        "lambda/serve/http_response.cpp",
+        "lambda/serve/router.cpp",
+        "lambda/serve/middleware.cpp",
+        "lambda/serve/worker_pool.cpp",
+        "lambda/serve/language_backend.cpp",
+        "lambda/serve/body_parser.cpp",
+        "lambda/serve/static_handler.cpp",
+        "lambda/serve/cookie.cpp",
+        "lambda/serve/mime.cpp",
+        "lambda/serve/server.cpp",
+        "lambda/serve/mcp_server.cpp",
+        "lambda/serve/tls_handler.cpp",
         "lambda/runtime/lambda-error.cpp",
         "lambda/runtime/sys_func_registry.c",
         "lambda/runtime/side_stack.c",
@@ -1650,7 +1681,8 @@
       "lang": "c++17",
       "source_files": [
         "lambda/main.cpp",
-        "lambda/main-repl.cpp"
+        "lambda/main-repl.cpp",
+        "lambda/mcp_main.cpp"
       ],
       "libraries": [
         "lambda-rt",
@@ -1750,6 +1782,7 @@
       ],
       "objcxx_source_files": [
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
@@ -1764,6 +1797,27 @@
         "image-codecs",
         "pthread"
       ],
+      "macos": {
+        "additional_libraries": [
+          "CoreFoundation",
+          "Security",
+          "CoreServices",
+          "SystemConfiguration",
+          "Cocoa",
+          "IOKit",
+          "CoreVideo",
+          "AVFoundation",
+          "CoreMedia",
+          "GL",
+          "Foundation",
+          "CoreGraphics",
+          "Accelerate",
+          "CoreText",
+          "AppKit",
+          "Carbon",
+          "WebKit"
+        ]
+      },
       "linux": {
         "additional_libraries": [
           "GL",
@@ -1959,6 +2013,7 @@
       "description": "Headless full build: Lambda + Radiant + JS linked against the null windowing backend (radiant/headless.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
       "output": "lambda-headless.exe",
       "extra_exclude_source_files": [
+        "radiant/clipboard_mac.mm",
         "radiant/ime_mac.mm",
         "radiant/app_icon_mac.mm",
         "radiant/webview_child_mac.mm",
@@ -2079,6 +2134,7 @@
       "exclude_source_files": [
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
@@ -2735,6 +2791,7 @@
       "exclude_source_files": [
         "lib/clock_compat.c",
         "radiant/app_icon_mac_static.cpp",
+        "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],
@@ -4025,77 +4082,6 @@
             "icon": "\u26a1"
           },
           {
-            "source": "test_serve_gtest.cpp",
-            "name": "Web Server Module Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "uv",
-              "mbedtls",
-              "mbedx509",
-              "mbedcrypto"
-            ],
-            "additional_sources": [
-              "lambda/serve/serve_types.cpp",
-              "lambda/serve/serve_utils.cpp",
-              "lambda/serve/router.cpp",
-              "lambda/serve/cookie.cpp",
-              "lambda/serve/body_parser.cpp",
-              "lambda/serve/mime.cpp",
-              "lambda/serve/middleware.cpp",
-              "lambda/serve/static_handler.cpp",
-              "lambda/serve/http_request.cpp",
-              "lambda/serve/http_response.cpp",
-              "lambda/serve/rest.cpp",
-              "lambda/serve/openapi.cpp",
-              "lambda/serve/schema_validator.cpp",
-              "lambda/serve/swagger_ui.cpp",
-              "lambda/serve/express_compat.cpp",
-              "lambda/serve/server.cpp",
-              "lambda/serve/tls_handler.cpp",
-              "lambda/serve/worker_pool.cpp",
-              "lambda/serve/language_backend.cpp",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/hashmap.c",
-              "lib/log.c"
-            ],
-            "binary": "test_serve_gtest.exe",
-            "icon": "\ud83c\udf10"
-          },
-          {
-            "source": "test_serve_phase2_gtest.cpp",
-            "name": "Web Server Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "uv"
-            ],
-            "additional_sources": [
-              "lambda/serve/serve_types.cpp",
-              "lambda/serve/serve_utils.cpp",
-              "lambda/serve/mime.cpp",
-              "lambda/serve/middleware.cpp",
-              "lambda/serve/http_request.cpp",
-              "lambda/serve/http_response.cpp",
-              "lambda/serve/schema_validator.cpp",
-              "lib/mem_context.c",
-              "lib/memtrack.c",
-              "lib/mem_alloc.c",
-              "lib/hashmap.c",
-              "lib/log.c"
-            ],
-            "binary": "test_serve_phase2_gtest.exe",
-            "icon": "\ud83c\udf10"
-          },
-          {
             "source": "test/test_physics_gtest.cpp",
             "name": "Native Physics Tests",
             "dependencies": [
@@ -5108,7 +5094,8 @@
             "source": "test_math_ascii_gtest.cpp",
             "name": "ASCII Math Roundtrip Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -6110,6 +6097,49 @@
         "category": "baseline",
         "tests": [
           {
+            "source": "test_serve_gtest.cpp",
+            "name": "Web Server Module Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "uv",
+              "mbedtls",
+              "mbedx509",
+              "mbedcrypto"
+            ],
+            "additional_sources": [
+              "lambda/serve/serve_types.cpp",
+              "lambda/serve/serve_utils.cpp",
+              "lambda/serve/router.cpp",
+              "lambda/serve/cookie.cpp",
+              "lambda/serve/body_parser.cpp",
+              "lambda/serve/mime.cpp",
+              "lambda/serve/middleware.cpp",
+              "lambda/serve/static_handler.cpp",
+              "lambda/serve/http_request.cpp",
+              "lambda/serve/http_response.cpp",
+              "lambda/serve/rest.cpp",
+              "lambda/serve/openapi.cpp",
+              "lambda/serve/schema_validator.cpp",
+              "lambda/serve/swagger_ui.cpp",
+              "lambda/serve/express_compat.cpp",
+              "lambda/serve/server.cpp",
+              "lambda/serve/tls_handler.cpp",
+              "lambda/serve/worker_pool.cpp",
+              "lambda/serve/language_backend.cpp",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/mem_alloc.c",
+              "lib/hashmap.c",
+              "lib/log.c"
+            ],
+            "binary": "test_serve_gtest.exe",
+            "icon": "\ud83c\udf10"
+          },
+          {
             "source": "test_zip_gtest.cpp",
             "name": "ZIP I/O Tests",
             "dependencies": [
@@ -6427,7 +6457,6 @@
             ],
             "dependencies": [
               "lambda-rt",
-              "node-core",
               "radiant"
             ],
             "binary": "test_lambda_errors_gtest.exe",
@@ -6556,7 +6585,6 @@
             "name": "JavaScript Script Ownership Tests",
             "dependencies": [
               "lambda-rt",
-              "node-core",
               "radiant"
             ],
             "binary": "test_js_script_gtest.exe",
@@ -6783,7 +6811,8 @@
             "source": "test/test_math_gtest.cpp",
             "name": "Math Roundtrip Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "radiant"
             ],
             "libraries": [
               "gtest",

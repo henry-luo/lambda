@@ -15,7 +15,6 @@ let source = (input(
   {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let graph = structurizr.project(workspace, "All")
-let installed = transform.install()
 let first = transform.render_scene(graph, 800, 600)
 let second = transform.render_scene(graph, 800, 600)
 let comparison = transform.compare_scenes(second.scene, first.scene, {
@@ -27,7 +26,6 @@ let clusters = children(first.scene, "cluster")
 let edges = children(first.scene, "edge")
 
 {
-  installed: installed,
   retained: comparison.equal,
   scene: [first.scene.direction, first.scene.width > 0, first.scene.height > 0,
     len(clusters), len(nodes), len(edges)],

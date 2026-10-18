@@ -8,6 +8,7 @@
 
 struct NameScope;
 struct JsScript;
+struct JsSourceModuleRecord;
 
 enum JsInterpEnvironmentRole {
     JS_INTERP_ENV_ORDINARY,
@@ -15,6 +16,7 @@ enum JsInterpEnvironmentRole {
     JS_INTERP_ENV_BODY_VARS,
     JS_INTERP_ENV_GLOBAL_OBJECT, // vars resolve through the host global property record
     JS_INTERP_ENV_WITH_OBJECT, // interleaved with declarative records for hosted eval
+    JS_INTERP_ENV_MODULE, // live bindings are owned by the shared source-module slab
 };
 
 enum JsInterpHostCells {
@@ -46,6 +48,7 @@ typedef struct JsInterpEnv {
     // caller (D8.1.3v21): its slots hold that eval Script's top-level
     // declarations, and `outer` continues into the caller frame's environments.
     struct JsScript* eval_script;
+    struct JsSourceModuleRecord* source_module; // registry-owned through heap finalization
     uint32_t slot_count;
     uint8_t arguments_are_mapped;
     uint8_t has_lexical_this;

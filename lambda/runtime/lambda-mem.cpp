@@ -282,11 +282,6 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     }
 }
 
-static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
-    if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
-    js_arraybuffer_destroy(ab);
-}
-
 static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
     (void)ta;
     (void)seen_native;
@@ -312,7 +307,8 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     }
     case MAP_KIND_ARRAYBUFFER: {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr(map);
-        gc_finalize_arraybuffer(ab, seen_native);
+        // each carrier owns one handle reference, including shared-buffer clones.
+        js_arraybuffer_destroy(ab);
         break;
     }
     case MAP_KIND_DATAVIEW: {

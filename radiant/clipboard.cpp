@@ -1,18 +1,21 @@
 /**
  * Radiant ClipboardStore — implementation.
  *
- * See radiant/clipboard.hpp + vibe/radiant/Radiant_Design_Clipboard.md.
+ * See clipboard.hpp + vibe/radiant/Radiant_Design_Clipboard.md.
  *
- * Phase 1A scope:
+ * Clipboard mechanisms:
  *   - In-memory canonical store with multi-MIME items.
  *   - Two built-in backends: in-memory (default; used by tests + headless)
  *     and GLFW (plain-text bridge; mirrors the legacy behaviour previously
  *     in state_store.cpp).
- *   - Permission state slots for the upcoming Permissions API.
+ *   - The desktop frontend installs the macOS multi-MIME adapter; headless
+ *     runs retain the in-memory backend and never change the OS clipboard.
+ *   - Owned paste snapshots, with embedded images on the rich HTML waist.
  *   - HTML sanitiser stub that strips <script> / <style> blocks.
  */
 
-#include "event.hpp"
+#include "clipboard.hpp"
+#include "../lib/base64.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -103,7 +106,7 @@ static ClipboardEntry* item_find_entry(ClipboardItem* it, const char* mime) {
 }
 
 // Find the first entry across all items matching the requested MIME.
-static ClipboardEntry* store_find_entry(ArrayList* items, const char* mime) {
+ClipboardEntry* clipboard_items_find(ArrayList* items, const char* mime) {
     if (!items) return NULL;
     for (int i = 0; i < items->length; i++) {
         ClipboardItem* it = (ClipboardItem*)items->data[i];
@@ -111,6 +114,65 @@ static ClipboardEntry* store_find_entry(ArrayList* items, const char* mime) {
         if (e) return e;
     }
     return NULL;
+}
+
+ClipboardItem* clipboard_item_new(void) { return item_new(); }
+void clipboard_item_add(ClipboardItem* item, const char* mime, const void* bytes, size_t length) {
+    if (item) arraylist_append(item->entries, entry_new(mime, (const char*)bytes, length));
+}
+void clipboard_items_free(ArrayList* items) { items_free(items); }
+void clipboard_store_set_backend(ClipboardBackend* backend) {
+    if (!g_store.items) g_store.init();
+    g_store.set_backend(backend);
+}
+
+bool clipboard_store_write_image(const char* uri, const char* html, const char* text) {
+    if (!uri || strncmp(uri, "data:image/", 11) != 0) return false;
+    char mime[64] = {};
+    size_t length = 0;
+    uint8_t* bytes = parse_data_uri(uri, mime, sizeof(mime), &length);
+    if (!bytes || !length) { mem_free(bytes); return false; }
+    ArrayList* items = arraylist_new(1);
+    ClipboardItem* item = item_new();
+    clipboard_item_add(item, mime, bytes, length);
+    if (html) clipboard_item_add(item, "text/html", html, strlen(html));
+    clipboard_item_add(item, "text/plain", text ? text : "", text ? strlen(text) : 0);
+    arraylist_append(items, item);
+    clipboard_store_write_items(items);
+    items_free(items);
+    mem_free(bytes);
+    return true;
+}
+
+bool clipboard_store_read_paste(char** html, char** text) {
+    if (!html || !text) return false;
+    *html = nullptr;
+    *text = nullptr;
+    ArrayList* items = clipboard_store_read_items();
+    ClipboardEntry* markup = clipboard_items_find(items, "text/html");
+    ClipboardEntry* plain = clipboard_items_find(items, "text/plain");
+    if (markup && markup->data_len) *html = mem_strdup(markup->data, MEM_CAT_TEMP);
+    if (plain) *text = mem_strdup(plain->data, MEM_CAT_TEMP);
+    // image bytes use a self-contained HTML representation on the existing rich-paste waist.
+    const char* image_mimes[] = {"image/png", "image/jpeg", "image/tiff"};
+    for (const char* mime : image_mimes) {
+        ClipboardEntry* entry = clipboard_items_find(items, mime);
+        if (*html || !entry || !entry->data_len) continue;
+        char* encoded = base64_encode_alloc(entry->data, entry->data_len, BASE64_STD);
+        if (encoded) {
+            StrBuf* value = strbuf_create("<img src=\"data:");
+            strbuf_append_str(value, mime);
+            strbuf_append_str(value, ";base64,");
+            strbuf_append_str(value, encoded);
+            strbuf_append_str(value, "\" alt=\"\">");
+            *html = mem_strdup(value->str, MEM_CAT_TEMP);
+            strbuf_free(value);
+            mem_free(encoded);
+        }
+    }
+    bool available = (*html && **html) || (*text && **text);
+    items_free(items);
+    return available;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +380,7 @@ const char* ClipboardStore::read_mime(const char* mime) {
             items = fresh;
         }
     }
-    ClipboardEntry* e = store_find_entry(items, mime);
+    ClipboardEntry* e = clipboard_items_find(items, mime);
     return e ? e->data : NULL;
 }
 

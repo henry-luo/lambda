@@ -41,12 +41,13 @@ fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
 // the mounted directory-row components.
 let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
 
-fn path_is_open(open_paths, path) => contains(open_paths, path) or false
+// optional membership checks recover explicitly; logical or propagates errors (S7.9.2v3).
+fn path_is_open(open_paths, path) => contains(open_paths, path) ^ { false }
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
-// An empty-space hit targets the row; absent event classes discharge to false (S7.9.2-3).
+// an empty-space hit targets the row; absent event classes recover independently.
 fn event_hits_tree_row(evt, hit_class) =>
-  (contains(evt["target_class"], hit_class ++ " ") or
-   contains(evt["target_parent_class"], hit_class ++ " ")) or false
+  (contains(evt["target_class"], hit_class ++ " ") ^ { false }) or
+  (contains(evt["target_parent_class"], hit_class ++ " ") ^ { false })
 
 pn reset_document_scroll(target) {
   let root = dom.root_node(target)
@@ -140,9 +141,9 @@ fn is_latex_document(extension) {
 fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
-fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
+fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) ^ { false }
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
-fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) or false
+fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) ^ { false }
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }

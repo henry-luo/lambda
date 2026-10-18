@@ -59,7 +59,7 @@ Reading the union against the core criterion (§3) rather than against surface l
 | **Reducible to core, currently with their own body** | ~150 | `append_child` (= `insert_before(p, n, null)`), `remove` (= `remove_child(parent(n), n)`), `closest`, `first_element_child`, `children`, `text_content`, `has_attribute`, `form_of`, `radio_group`, `check_validity`, `reset`, `range_select_node`, `range_collapse`, `selection_collapse_to_start`, `insert_adjacent_html`, `dom_wrap_range`, … |
 | **Property reflections of core state** | ~110 | `id`/`class_name`/`href`/… (attribute reflections), `checked`/`value`/`selected` (state-store reflections), `offset_width`/`client_height` (geometry reads) — each a fixed derivation from one core read |
 | **JS shape, not DOM** | ~28 | document proxy, prototype values, expandos, live collections, wrapper init (`Lambda_Design_DOM_API.md` ES33 / ESO79) |
-| **Engine, not DOM** | ~28 | `layout`, `render_svg`, `box`, `register_layout`, `velmt_*` — stay `radiant.*` |
+| **Engine, not DOM** | ~28 | `layout`, `render_svg`, `box`, `velmt_*` — stay `radiant.*`; shipped layouts connect automatically (D7.5.3v2) |
 | **Dead / retired** | 26 (F29 measured; 45 was the estimate) | 23 `NULL` slots plus `is_css_namespace`, `item_is_range`, `item_is_selection`; the 24th `NULL` slot, `style_resource_has_property`, survives because a bridge `#define` still names it |
 
 The middle rows are the point: roughly **260 of 388 operations are derivable**, and today almost every one of them has a native body of its own.
@@ -421,7 +421,7 @@ For every `DOM_DERIVED` row with a native fast path, a fixture `test/lambda/dom_
 
 ### ES44 (proposed) — `dom.*` publishes the API; `radiant.*` keeps the engine
 
-`dom.*` publishes every core and derived operation whose `flags` include `NEUTRAL` (works with no JS realm — true of all core except the JS-listener pair, and of every derived op by construction). Its F26 rows are replaced by the expansion, typed `dom_node`. `radiant.*` keeps the engine set (`layout`, `render_svg`, `box`, `register_layout`, `velmt_*`, `poc_attr`, `free`) and, for one release, aliases for the 70 names the package uses; F32 migrates the package to `dom.*` and deletes the aliases (ESO84 decides whether to keep them longer). The JS declared-interface records bind to the same bodies; their `js_name` spellings are metadata, as D7.4.4 already says.
+`dom.*` publishes every core and derived operation whose `flags` include `NEUTRAL` (works with no JS realm — true of all core except the JS-listener pair, and of every derived op by construction). Its F26 rows are replaced by the expansion, typed `dom_node`. `radiant.*` keeps the engine set (`layout`, `render_svg`, `box`, `velmt_*`, `poc_attr`, `free`; package layouts connect automatically under D7.5.3v2) and, for one release, aliases for the 70 names the package uses; F32 migrates the package to `dom.*` and deletes the aliases (ESO84 decides whether to keep them longer). The JS declared-interface records bind to the same bodies; their `js_name` spellings are metadata, as D7.4.4 already says.
 
 ---
 ### ES45 (ruled by the user, 2026-09-03) — JS has no backdoor to the DOM
@@ -591,8 +591,31 @@ callee, so built-in procedures (`print`, `output`, `cmd`, `today`) are also
 rejected in `fn` context (LR12-30, fixed 2026-09-22). The doc examples and the
 three test scripts that relied on the gap moved their effects into a `pn`.
 
-**Not covered.** The `radiant` module's own functions (`free`,
-`register_layout`) are still published as `fn`.
+**Colour audit (2026-10-16, D7.4.6).** Read-only package wrappers, including
+`edit.controller.surface` / `is_control`, dialog values, delegated event
+targets, chart metadata and rendered geometry, are `fn`. Radiant's
+`local_point`, `geomap_snapshot` and `geomap_query_displayed` are reads too;
+their native signatures and map wrappers now agree. `radiant.free` and
+`radiant.layout` are `pn` because they invalidate a live document or change
+its layout state.
+
+DOM member declarations previously labelled every callable `fn`, and Jube's
+interface compiler recognized only that spelling. It now parses both colours,
+retains the signature in the Lambda member adapter, and lets the shared
+dynamic-call guard enforce **S12.1.1v3**. Mutating Range, Selection, tree,
+attribute, CSS, form, event and navigation methods are `pn`; getters and
+detached Range/Event creation stay `fn`. The catalogue/member parity check
+prevents those two doors from drifting again. A regression queries the same
+DOM through `fn` helpers before and after mutation, and a negative regression
+rejects a member setter reached from `fn` on every execution tier.
+
+**Resolved by the subsequent user ruling (2026-10-16; D7.5.3v2).**
+`radiant.register_layout` is removed from the public surface. Radiant connects
+graph and TikZ package `layout` exports automatically through the existing
+MathML package bridge. Pure transforms no longer hide a registry mutation;
+the engine retains module state and generated paint on the owning evaluator.
+The original DOM-colour audit deferred this change; automatic connection is
+implemented separately in `impl/Radiant_Impl_Automatic_Layouts.md`.
 
 #### Class A's last eight are not defects — they are one name over two operations (2026-09-03)
 

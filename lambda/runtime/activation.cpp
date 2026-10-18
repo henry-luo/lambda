@@ -44,6 +44,7 @@ typedef struct ActivationStacks {
     LambdaSideStackRegion root;
     LambdaSideStackRegion number;
     struct ActivationStacks* next_free;
+    bool discarded;
 } ActivationStacks;
 
 // Everything that is per-thread *and* LIFO with the native stack (RA5). The
@@ -130,7 +131,6 @@ static __thread ActivationThread activation_thread;
 // and tear down on another, so the pool is process-wide.
 static pthread_mutex_t stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ActivationStacks* stack_pool = NULL;
-// one idle stack retains its pages for immediate reuse, bounded by one 3 MiB mapping.
 static ActivationStacks* stack_pool_retained = NULL;
 static int stack_pool_count = 0;
 
@@ -262,8 +262,11 @@ static ActivationStacks* stacks_acquire(void) {
     if (pooled) {
         pooled->next_free = NULL;
         // the idle mapping has no live roots; reclaim its discarded regions in one call.
-        if (!retained) fiber_memory_reclaim((void*)pooled->native.low,
-            pooled->native.high - pooled->native.low + pooled->native.tail_bytes);
+        if (pooled->discarded) {
+            fiber_memory_reclaim((void*)pooled->native.low,
+                pooled->native.high - pooled->native.low + pooled->native.tail_bytes);
+            pooled->discarded = false;
+        }
         return pooled;
     }
     ActivationStacks* stacks = (ActivationStacks*)mem_calloc(
@@ -290,30 +293,35 @@ static ActivationStacks* stacks_acquire(void) {
 static void stacks_release(ActivationStacks* stacks) {
     if (!stacks) return;
     pthread_mutex_lock(&stack_pool_mutex);
-    bool full = stack_pool_count >= ACTIVATION_POOL_MAX;
-    if (!full && !stack_pool_retained) {
-        // no live activation owns these slots; acquisition reinstalls the precise root watermarks.
-        stacks->next_free = NULL;
-        stack_pool_retained = stacks;
-        stack_pool_count++;
-        pthread_mutex_unlock(&stack_pool_mutex);
-        return;
-    }
-    pthread_mutex_unlock(&stack_pool_mutex);
-    if (full) { stacks_free(stacks); return; }
-    // A pooled stack keeps its mapping but not the pages a deep run touched.
-    fiber_stack_trim(&stacks->native, ACTIVATION_STACK_KEEP_BYTES, false);
-    // both side segments share this contiguous tail; reclaim only when acquired again.
-    fiber_memory_discard(stacks->root.base, stacks->native.tail_bytes);
-    pthread_mutex_lock(&stack_pool_mutex);
     bool pooled = stack_pool_count < ACTIVATION_POOL_MAX;
     if (pooled) {
-        stacks->next_free = stack_pool;
-        stack_pool = stacks;
+        // no live roots remain; batch trimming at GC instead of discarding a
+        // stack that a nested generator is about to acquire again (D5.1.1v3).
+        // preserve retained-first reuse across nested completion waves.
+        if (!stack_pool_retained) {
+            stacks->next_free = NULL;
+            stack_pool_retained = stacks;
+        } else {
+            stacks->next_free = stack_pool;
+            stack_pool = stacks;
+        }
         stack_pool_count++;
     }
     pthread_mutex_unlock(&stack_pool_mutex);
     if (!pooled) stacks_free(stacks);
+}
+
+static void stacks_trim_pool(void) {
+    pthread_mutex_lock(&stack_pool_mutex);
+    for (ActivationStacks* stacks = stack_pool; stacks; stacks = stacks->next_free) {
+        if (stacks->discarded) continue;
+        // the retained stack stays warm; trim other idle mappings once per
+        // collection, rather than once per completed activation.
+        fiber_stack_trim(&stacks->native, ACTIVATION_STACK_KEEP_BYTES, false);
+        fiber_memory_discard(stacks->root.base, stacks->native.tail_bytes);
+        stacks->discarded = true;
+    }
+    pthread_mutex_unlock(&stack_pool_mutex);
 }
 
 extern "C" void activation_release_pool(void) {
@@ -769,6 +777,7 @@ extern "C" void activation_trace(const Activation* activation, gc_heap_t* gc) {
 }
 
 extern "C" void activation_gc_visit_roots(gc_heap_t* gc) {
+    stacks_trim_pool();
     ActivationThread* thread = &activation_thread;
     EvalContext* owner = context;
     // The base stack and every activation between it and the running one are

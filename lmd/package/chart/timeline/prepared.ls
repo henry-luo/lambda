@@ -6,7 +6,8 @@ import index: .index
 
 // Source indices survive window/selection changes; filters invalidate only visibility.
 pub fn record(raw, snapshot, normalized: map | error, previous = null) {
-    let same=previous!=null and normalized==previous.normalized;
+    // S5.1.5: an error-bearing comparison is a cache miss, handled explicitly.
+    let same=previous!=null and (normalized==previous.normalized) ^ { false };
     let base=if (same) previous.source_normalized else normalized;
     let source_index=if (same) previous.normalized._timeline.index else if (base is error) null else index.build(base);
     let key=if (base is error) null else layout.visibility_key(base,snapshot);

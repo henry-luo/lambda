@@ -60,17 +60,22 @@ def generate_validation_host(module, platform_name: str, dependencies=None) -> s
     return "\n".join(generator.premake_content)
 
 
-def expect_node_core_provider(module, platform_name: str) -> None:
-    generated = generate_validation_host(module, platform_name)
-    if '"node-core",' not in generated:
-        fail(f"{platform_name} runtime-full test omitted the node-core trace provider")
+def expect_static_runtime_providers(module, platform_name: str) -> None:
     option = '-exported_symbols_list,lambda_host_exports.macos.sym' if platform_name == 'macos' \
         else '--dynamic-list=lambda_host_exports.linux.sym'
-    if option not in generated:
-        fail(f"{platform_name} dynamic test host omitted the D7.3.6 export allowlist")
-    static_host = generate_validation_host(module, platform_name, ["lambda-data"])
-    if 'lambda_host_exports.' in static_host:
-        fail(f"{platform_name} static test gained unrelated host exports")
+    for dependencies in (["lambda-runtime-full"], ["lambda-rt", "radiant"]):
+        generated = generate_validation_host(module, platform_name, dependencies)
+        if '"node-core",' in generated:
+            fail(f"{platform_name} static runtime host linked a replaceable Node module")
+        for provider in ('lambda-rt-cpp', 'radiant-cpp'):
+            if f'"{provider}",' not in generated:
+                fail(f"{platform_name} runtime host omitted static provider {provider}")
+        if option not in generated:
+            fail(f"{platform_name} runtime test host omitted the D7.3.6 export allowlist")
+    for dependencies in (["lambda-data"], ["lambda-rt"]):
+        static_host = generate_validation_host(module, platform_name, dependencies)
+        if 'lambda_host_exports.' in static_host:
+            fail(f"{platform_name} minimal static test gained unrelated host exports")
 
 
 def lddeps_of(makefile: Path) -> set[str]:
@@ -167,9 +172,12 @@ def expect_image_source_build(module) -> None:
         generator = linux_validation_generator(module, architecture)
         codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
         sources = codec['source_files']
-        if any('/mux/' in f or '/demux/' in f or f.endswith(('egif_lib.c', 'ratectrl_rtc.cc'))
+        if any('/mux/' in f or '/demux/' in f or f.endswith('ratectrl_rtc.cc')
                for f in sources):
-            fail('image source target includes unused animation or standalone tool providers')
+            fail('image source target includes unused WebP animation or standalone tool providers')
+        # animated GIF output uses both the encoder and its compression hash table.
+        if not {'lib/image/giflib/egif_lib.c', 'lib/image/giflib/gif_hash.c'} <= set(sources):
+            fail(f'{architecture} image target omits required GIF encoding providers')
         if not all((ROOT / f).is_file() for f in sources):
             fail(f'{architecture} image target has missing sources')
         arm_files = any('/arm/' in f or 'aarch64_cpudetect.c' in f for f in sources)
@@ -206,8 +214,8 @@ def main() -> int:
     if not {'archive-readers', 'archive-iconv', 'lzma', 'zstd', 'bzip2'}.issubset(closure):
         fail('source-built archive consumers lost their codec/charset link requirements')
     expect_image_source_build(module)
-    expect_node_core_provider(module, "macos")
-    expect_node_core_provider(module, "linux")
+    expect_static_runtime_providers(module, "macos")
+    expect_static_runtime_providers(module, "linux")
     expect_archive_link_deps(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)

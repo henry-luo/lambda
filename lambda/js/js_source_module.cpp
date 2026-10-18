@@ -630,6 +630,27 @@ Item js_module_binding_get(const JsResolvedModuleBinding* binding) {
         "Module binding is not initialized") : js_retain_scalar(value);
 }
 
+Item js_module_environment_binding(JsSourceModuleRecord* record, NameEntry* entry,
+        Item value, bool write) {
+    if (!record || !entry) return ItemError;
+    JsResolvedModuleBinding binding = {};
+    bool imported = false;
+    for (int index = 0; index < record->imports->length; index++) {
+        auto* candidate = (JsSourceModuleImport*)record->imports->data[index];
+        if (candidate->local != entry) continue;
+        binding = candidate->resolved; imported = true; break;
+    }
+    if (!imported && !record->ops->local_binding(record->owner, record, entry, &binding)) return ItemError;
+    if (!write) return js_module_binding_get(&binding);
+    if (imported || entry->is_const)
+        return module_error(record, JS_SOURCE_MODULE_TYPE, "Module binding is readonly");
+    if (lambda_module_var_at(binding.slab, binding.slot).item == ITEM_JS_TDZ)
+        return module_error(record, JS_SOURCE_MODULE_REFERENCE, "Module binding is not initialized");
+    // direct eval updates the same slab read by MIR and all export/reexport cells.
+    lambda_module_var_store(binding.slab, binding.slot, value);
+    return value;
+}
+
 // Namespace carriers are the module exotic, never the physical representation
 // of an ordinary guest object. The registry owns the record through job shutdown.
 static Item namespace_vmap_get(void*, Item);

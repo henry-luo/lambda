@@ -188,6 +188,7 @@ typedef struct DocumentScriptPhaseTiming {
     uint64_t source_cleanup_us;
     uint64_t source_prefetch_tasks;
     uint64_t source_loaded_tasks;
+    // retain zero-valued legacy cache counters in the layout timing schema.
     uint64_t cache_lookups;
     uint64_t cache_hits;
     uint64_t cache_misses;
@@ -207,8 +208,6 @@ bool radiant_advance_js_event_loop(struct UiContext* uicon, double delta_ms, int
 // true when the document's own JS realm uses a virtual clock; *now_ms gets its time
 bool radiant_document_virtual_clock(struct UiContext* uicon, double* now_ms);
 void script_runner_set_execute_external_scripts(bool execute);
-struct JsMirLeaseSession;
-void script_runner_set_js_mir_lease_session(JsMirLeaseSession* session);
 void collect_and_compile_event_handlers(DomDocument* dom_doc);
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
 void script_runner_cleanup_heap(void);

@@ -131,23 +131,23 @@ on click(evt) {
     let expand_index = dom.get_attribute(target,"data-dtna-table-expand")
     let action = if (sort_index != null) 'sort' else if (filter_index != null) 'filter' else if (page != null) 'page' else if (expand_index != null) 'expand' else 'select'
     if (action == 'sort') {
-        let key = c.props(~).columns[int(sort_index) or 0].key
+        let key = c.props(~).columns[(int(sort_index) ^ { null }) or 0].key
         let old = current_value(~,"sort",sorting)
         sorting = if (old.key == key and old.direction == 'desc') null else {key:key,direction:if (old.key == key and old.direction == 'asc') 'desc' else 'asc'}
         current = 1
     } else if (action == 'filter') {
-        let column = c.props(~).columns[int(filter_index) or 0]
-        let option = int(dom.get_attribute(target,"data-dtna-filter-option")) or 0
+        let column = c.props(~).columns[(int(filter_index) ^ { null }) or 0]
+        let option = (int(dom.get_attribute(target,"data-dtna-filter-option")) ^ { null }) or 0
         filters = {*:current_value(~,"filters",filters),[column.key]:if (option == 0) null else column.filters[option-1].value}
         current = 1
-    } else if (action == 'page') { current = min(data.pages,max(1,int(page) or 1)) }
+    } else if (action == 'page') { current = min(data.pages,max(1,(int(page) ^ { null }) or 1)) }
     else if (action == 'expand') {
-        let entry = rows(c.props(~))^[int(expand_index) or 0]
+        let entry = rows(c.props(~))^[(int(expand_index) ^ { null }) or 0]
         expanded = collection.toggle(current_value(~,"expanded_keys",expanded),entry.key)
     } else {
         let chosen = current_value(~,"selected_keys",selected)
         let candidates = [for (entry in collection.enabled(data.rows)) entry.key]
-        let entry = if (row_index == null) null else rows(c.props(~))^[int(row_index) or 0]
+        let entry = if (row_index == null) null else rows(c.props(~))^[(int(row_index) ^ { null }) or 0]
         if (entry != null and entry.disabled) { return 'pass' }
         selected = if (row_index == null) collection.set_keys(chosen,candidates,not all([for (key in candidates) contains(chosen,key)]))
             else collection.toggle(chosen,entry.key,selection_mode(~)^ == "multiple")

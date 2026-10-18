@@ -13,6 +13,7 @@
 #include "../dom/dom_engine.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "js_interp.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
@@ -359,6 +360,7 @@ typedef struct JsTimerHandle {
     bool       is_interval;
     Heap*      runtime_heap;
     EvalContext* runtime_context;
+    JsRuntimeState* runtime_state;
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
@@ -431,6 +433,7 @@ static void timer_registry_clear(void) {
 typedef struct JsTimerRuntimeScope {
     void* saved_doc;
     bool doc_active;
+    JsRuntimeState* saved_state;
 } JsTimerRuntimeScope;
 
 static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
@@ -459,6 +462,7 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
         th->runtime_name_pool = context->name_pool;
         th->runtime_pool = context->pool;
     }
+    th->runtime_state = js_active_runtime_state;
     th->runtime_doc = dom_get_document();
 }
 
@@ -475,6 +479,10 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
         log_error("js-timer-runtime: could not bind callback owner");
         return false;
     }
+    if (th->runtime_state && th->runtime_state != js_active_runtime_state) {
+        scope->saved_state = js_active_runtime_state;
+        js_active_runtime_state = th->runtime_state;
+    }
     // a quiescent handoff leaves this owner bound; never restore a foreign, possibly retiring document.
     scope->saved_doc = dom_get_document();
     if (th->runtime_doc) {
@@ -490,6 +498,9 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
         dom_set_document(scope->saved_doc);
         scope->doc_active = false;
     }
+    if (scope->saved_state &&
+            scope->saved_state->execution.base_activation_items.owner == (Context*)context)
+        js_active_runtime_state = scope->saved_state;
 }
 
 static void timer_close_cb(uv_handle_t *handle) {
@@ -574,47 +585,50 @@ static void timer_fire_cb(uv_timer_t *handle) {
         log_error("event_loop: timer fired without captured JS runtime");
         return;
     }
-    timer_progress_generation++;
-    bool close_after_fire = th && !th->is_interval;
-    // D5.3/D5.4.3: the timer callback may collect before the saved async
-    // context is restored, so callback results and prior context snapshots
-    // must remain exact roots across the callback boundary.
-    JS_ROOTS(roots,
-        callback_result_root, ItemNull,
-        previous_resource_root, ItemNull,
-        previous_domain_root, ItemNull,
-        arguments_root, th ? th->job.arguments : ItemNull);
-    JsEventLoopCallbackScope callback_scope;
-    previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
-    previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
-    if (js_is_callable(th->job.callback)) {
-        if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
-                arguments_root.get().array->length > 0) {
-            Array* args = arguments_root.get().array;
-            callback_result_root.set(js_als_context_call_args(
-                th->job.context.als_context, th->job.callback, ItemNull,
-                args->items, args->length));
-        } else {
-            callback_result_root.set(js_als_context_call(th->job.context.als_context,
-                th->job.callback, ItemNull, ItemNull, 0));
+    {
+        // callback scopes and resource cleanup leave before restoring another agent's state.
+        timer_progress_generation++;
+        bool close_after_fire = th && !th->is_interval;
+        // D5.3/D5.4.3: the timer callback may collect before the saved async
+        // context is restored, so callback results and prior context snapshots
+        // must remain exact roots across the callback boundary.
+        JS_ROOTS(roots,
+            callback_result_root, ItemNull,
+            previous_resource_root, ItemNull,
+            previous_domain_root, ItemNull,
+            arguments_root, th ? th->job.arguments : ItemNull);
+        JsEventLoopCallbackScope callback_scope;
+        previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
+        previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
+        if (js_is_callable(th->job.callback)) {
+            if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
+                    arguments_root.get().array->length > 0) {
+                Array* args = arguments_root.get().array;
+                callback_result_root.set(js_als_context_call_args(
+                    th->job.context.als_context, th->job.callback, ItemNull,
+                    args->items, args->length));
+            } else {
+                callback_result_root.set(js_als_context_call(th->job.context.als_context,
+                    th->job.callback, ItemNull, ItemNull, 0));
+            }
+        }
+        js_domain_restore_stack(previous_domain_root.get());
+        js_async_hooks_restore_resource(previous_resource_root.get());
+        js_event_loop_capture_error(callback_result_root.get());
+        if (th && th->is_interval && item_is_error(callback_result_root.get()) && !th->closing) {
+            // An interval callback that throws before its clearInterval call can
+            // otherwise re-enter forever and starve the drain watchdog.
+            timer_mark_object_destroyed(th);
+            timer_close_handle(th);
+        }
+        if (close_after_fire && th && !th->closing) {
+            // one-shot timers must close even when their callback throws and an
+            // uncaughtException listener handles it, or the refed handle never drains.
+            timer_mark_object_destroyed(th);
+            timer_close_handle(th);
         }
     }
-    js_domain_restore_stack(previous_domain_root.get());
-    js_async_hooks_restore_resource(previous_resource_root.get());
     timer_runtime_exit(&scope);
-    js_event_loop_capture_error(callback_result_root.get());
-    if (th && th->is_interval && item_is_error(callback_result_root.get()) && !th->closing) {
-        // An interval callback that throws before its clearInterval call can
-        // otherwise re-enter forever and starve the drain watchdog.
-        timer_mark_object_destroyed(th);
-        timer_close_handle(th);
-    }
-    if (close_after_fire && th && !th->closing) {
-        // one-shot timers must close even when their callback throws and an
-        // uncaughtException listener handles it, or the refed handle never drains.
-        timer_mark_object_destroyed(th);
-        timer_close_handle(th);
-    }
     js_event_loop_render_checkpoint();
 }
 static double item_to_ms(Item delay) {
@@ -984,8 +998,12 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
 static Item js_timer_run_string_handler(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return ItemError;
-    // Timer strings execute as a classic script in the captured document realm.
-    return js_builtin_eval(env[0], 1);
+    // classic scripts retain top-level lexicals; indirect eval would discard them after the task.
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, env[0]);
+    String* text = source.get().get_string();
+    return js_interp_execute_source(js_current_runtime(), text->chars, text->len, "<timer>", NULL, true);
 }
 
 extern "C" Item js_timer_normalize_handler(Item handler, Item (*to_string)(Item),
@@ -1012,9 +1030,21 @@ extern "C" Item js_timer_normalize_handler(Item handler, Item (*to_string)(Item)
 
 extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
                               bool has_args, bool is_interval, bool numeric_handle) {
-    RootFrame roots(1);
-    Rooted<Item> callback_root(roots, js_timer_normalize_handler(callback, NULL, NULL, NULL));
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t delay_home = 0;
+    Rooted<Item> callback_root(roots, callback),
+        delay_root(roots, lambda_item_adopt_scalar_home(delay, &delay_home)), arguments_root(roots, args_array);
+    // handler conversion can collect before the later delay conversion or argument publication.
+    callback_root.set(js_timer_normalize_handler(callback_root.get(), NULL, NULL, NULL));
     if (item_is_error(callback_root.get())) return callback_root.get();
+    TypeId delay_type = get_type_id(delay_root.get());
+    if (delay_type == LMD_TYPE_UNDEFINED) delay_root.set(Item{.item = i2it(0)});
+    else if (delay_type != LMD_TYPE_INT && delay_type != LMD_TYPE_FLOAT && delay_type != LMD_TYPE_INT64) {
+        Item converted = js_to_number(delay_root.get());
+        if (item_is_error(converted)) return converted;
+        delay_root.set(lambda_item_adopt_scalar_home(converted, &delay_home));
+    }
     // lazy host scheduling must preserve Promise jobs already queued in this turn.
     if (numeric_handle) {
         if (!lambda_uv_loop() && lambda_uv_init() != 0) return ItemError;
@@ -1024,7 +1054,7 @@ extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
         is_interval ? "setInterval" : "setTimeout");
     if (!loop) return ItemNull;
 
-    uint64_t ms = normalize_timer_delay(delay);
+    uint64_t ms = normalize_timer_delay(delay_root.get());
     if (is_interval && ms < 1) ms = 1;
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
@@ -1035,7 +1065,7 @@ extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
     th->job.kind = RUNTIME_JOB_TIMER;
     th->is_interval = is_interval;
     th->timer.data = th;
-    js_timer_capture_argument_pack(th, args_array, has_args);
+    js_timer_capture_argument_pack(th, arguments_root.get(), has_args);
     return js_timer_finish_create(loop, th, JS_CLASS_TIMEOUT, ms,
         is_interval ? ms : 0, "Timeout", 7, numeric_handle);
 }
@@ -1637,6 +1667,8 @@ static void close_all_timer_handles(void) {
 // no signal handler installation, no interval-timer cleanup. The intent is a
 // brief "hand off control so cross-module promise resolution can happen", not
 // a full event loop run.
+static const int BOUNDED_DRAIN_MAX_TURNS = 64;
+
 extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
                                       int watchdog_ms, int max_no_progress,
                                       int max_turns) {
@@ -1653,7 +1685,7 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 
     if (watchdog_ms <= 0) watchdog_ms = 100;
     if (max_no_progress <= 0) max_no_progress = 3;
-    if (max_turns <= 0) max_turns = 64;
+    if (max_turns <= 0) max_turns = BOUNDED_DRAIN_MAX_TURNS;
 
     uint64_t start_ns = uv_hrtime();
     uint64_t watchdog_ns = (uint64_t)watchdog_ms * 1000000ULL;
@@ -1763,6 +1795,35 @@ static bool event_loop_has_pending_requests(void) {
                 kind == RUNTIME_RESOURCE_DNS_REQUEST) return true;
     }
     return false;
+}
+
+extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_ms) {
+    if (!js_active_runtime_state || !predicate || watchdog_ms <= 0) return -1;
+    uint64_t start_ns = uv_hrtime();
+    double virtual_limit = virtual_clock_ms + watchdog_ms;
+    // retain the existing snapshot work bound as well as its elapsed-time watchdog.
+    for (int turn = 0; turn < BOUNDED_DRAIN_MAX_TURNS; turn++) {
+        js_event_loop_render_checkpoint();
+        if (predicate(user)) return 0;
+        uint64_t elapsed_ms = (uv_hrtime() - start_ns) / 1000000ULL;
+        if (elapsed_ms >= (uint64_t)watchdog_ms) break;
+
+        if (virtual_clock_enabled) {
+            JsTimerHandle* next = virtual_timer_next_due(virtual_limit);
+            bool frame = js_animation_frame_has_pending();
+            if (next || frame) {
+                // explicit readiness follows scheduled work, including delayed action ticks.
+                double delta = next ? next->virtual_due_ms - virtual_clock_ms : 1000.0 / 60.0;
+                if (frame && delta > 1000.0 / 60.0) delta = 1000.0 / 60.0;
+                if (virtual_clock_ms + delta > virtual_limit) break;
+                js_event_loop_advance_virtual_time(delta, frame ? 1 : 0);
+                continue;
+            }
+        }
+        if (!event_loop_has_pending_requests() && !js_event_loop_has_refed_handles()) break;
+        event_loop_pump_native_wait(watchdog_ms - (int)elapsed_ms);
+    }
+    return predicate(user) ? 0 : -1;
 }
 
 static int js_event_loop_drain_impl(bool keep_intervals) {

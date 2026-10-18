@@ -1,0 +1,233 @@
+// mod_router.ls — connector routing for the drawing layer
+// (Radiant Rich Editor, Stage 4 — §9, §13.1).
+//
+// Lambda port of test/editor-js/src/drawing/router.ts. `compute_route(connector,
+// doc)` returns the polyline ([Vec2]) the connector should draw. Strategies:
+//
+//   'straight'   — [from, to]
+//   'orthogonal' — right-angled L-route (single bend); falls back to a Z-route
+//                  (two bends) when the L-corner lands inside an endpoint bbox.
+//   'curved'     — same polyline as orthogonal; the renderer emits arc fillets
+//                  (route_to_curved_svg_path).
+//
+// User waypoints (the connector's `waypoints` attr) are pinned through-points;
+// each consecutive pair is routed independently.
+//
+// Focused port of the parts of maxGraph's mxEdgeStyle needed for the Stage-4 MVP.
+
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.draw.geometry
+
+// ---------------------------------------------------------------------------
+// Endpoint resolution
+//
+// An EndpointAnchor is {point: Vec2, bbox: Rect|null, side: symbol|null}.
+// ---------------------------------------------------------------------------
+
+fn free_anchor(connector, x_key, y_key) {
+  let x = get_shape_attr_number(connector, x_key, 0.0)
+  let y = get_shape_attr_number(connector, y_key, 0.0)
+  {point: v2(x, y), bbox: null, side: null}
+}
+
+fn find_port_at(ports, port_id, bbox, i, n) {
+  if (i >= n) { null }
+  else {
+    let p = ports[i]
+    if (p.id == port_id) {
+      // port coords are normalized 0..1 in shape-local space
+      {x: bbox.x + p.x * bbox.width, y: bbox.y + p.y * bbox.height}
+    } else { find_port_at(ports, port_id, bbox, i + 1, n) }
+  }
+}
+
+fn find_shape_port(shape, port_id) {
+  let ports = attrs_get(shape.attrs, 'ports')
+  let bbox = get_shape_bbox(shape)
+  if (type(ports) != array or bbox == null) { null }
+  else { find_port_at(ports, port_id, bbox, 0, len(ports)) }
+}
+
+fn resolve_anchor(doc, connector, shape_key, port_key, x_key, y_key) {
+  let shape_id = get_shape_attr_string(connector, shape_key, "")
+  if (shape_id == "") { free_anchor(connector, x_key, y_key) }
+  else {
+    let found = find_shape_by_id(doc, shape_id)
+    if (found == null) { free_anchor(connector, x_key, y_key) }
+    else {
+      let shape = found.shape
+      let port_id = get_shape_attr_string(connector, port_key, "")
+      let port = if (port_id == "") { null } else { find_shape_port(shape, port_id) }
+      if (port != null) { {point: port, bbox: get_shape_bbox(shape), side: null} }
+      else {
+        let bbox = get_shape_bbox(shape)
+        if (bbox == null) { free_anchor(connector, x_key, y_key) }
+        else {
+          // closest-edge anchor (fallback): use bbox center for now
+          {point: {x: bbox.x + bbox.width / 2.0, y: bbox.y + bbox.height / 2.0},
+           bbox: bbox, side: null}
+        }
+      }
+    }
+  }
+}
+
+pub fn resolve_endpoint_from(doc, connector) =>
+  resolve_anchor(doc, connector, 'from-shape', 'from-port', 'from-x', 'from-y')
+
+pub fn resolve_endpoint_to(doc, connector) =>
+  resolve_anchor(doc, connector, 'to-shape', 'to-port', 'to-x', 'to-y')
+
+// ---------------------------------------------------------------------------
+// Routing strategies
+// ---------------------------------------------------------------------------
+
+pub fn route_straight(a, b) => [a, b]
+
+// Single-bend L-route; falls back to a Z-route if the L-corner crosses either
+// endpoint's bbox.
+pub fn route_orthogonal(a, b, a_bbox, b_bbox) {
+  if (a.x == b.x or a.y == b.y) { [a, b] }
+  else {
+    let horiz_first = abs(b.x - a.x) >= abs(b.y - a.y)
+    let l_corner = if (horiz_first) { {x: b.x, y: a.y} } else { {x: a.x, y: b.y} }
+    let crosses = (a_bbox != null and rect_contains(a_bbox, l_corner)) or
+                  (b_bbox != null and rect_contains(b_bbox, l_corner))
+    if (not crosses) { [a, l_corner, b] }
+    else if (horiz_first) {
+      let mx = (a.x + b.x) / 2.0;
+      [a, {x: mx, y: a.y}, {x: mx, y: b.y}, b]
+    } else {
+      let my = (a.y + b.y) / 2.0;
+      [a, {x: a.x, y: my}, {x: b.x, y: my}, b]
+    }
+  }
+}
+
+// Curved route shares the orthogonal polyline; arc fillets are applied at render.
+pub fn route_curved(a, b, a_bbox, b_bbox) => route_orthogonal(a, b, a_bbox, b_bbox)
+
+// ---------------------------------------------------------------------------
+// Top-level compute_route
+// ---------------------------------------------------------------------------
+
+fn read_waypoints(connector) {
+  let ws = attrs_get(connector.attrs, 'waypoints')
+  if (type(ws) != array) { [] }
+  else { [for (w in ws) {x: w.x, y: w.y}] }
+}
+
+fn route_one(routing, seg_a, seg_b, a_box, b_box) {
+  if (routing == 'straight') { route_straight(seg_a, seg_b) }
+  else if (routing == 'curved') { route_curved(seg_a, seg_b, a_box, b_box) }
+  else { route_orthogonal(seg_a, seg_b, a_box, b_box) }
+}
+
+fn route_segments_at(points, routing, from_bbox, to_bbox, i, n, acc) {
+  if (i + 1 >= n) { acc }
+  else {
+    let a_box = if (i == 0) { from_bbox } else { null }
+    let b_box = if (i == n - 2) { to_bbox } else { null }
+    let seg = route_one(routing, points[i], points[i + 1], a_box, b_box)
+    // skip the duplicate join point for all but the first segment
+    let added = if (i == 0) { seg } else { list_drop(seg, 1) }
+    route_segments_at(points, routing, from_bbox, to_bbox, i + 1, n, list_concat(acc, added))
+  }
+}
+
+pub fn compute_route(connector, doc) {
+  let from = resolve_endpoint_from(doc, connector)
+  let to   = resolve_endpoint_to(doc, connector)
+  let routing = attrs_get(connector.attrs, 'routing')
+  let r = if (routing == null) { 'orthogonal' } else { routing }
+  let waypoints = read_waypoints(connector)
+  let points = [from.point, *waypoints, to.point]
+  route_segments_at(points, r, from.bbox, to.bbox, 0, len(points), [])
+}
+
+// ---------------------------------------------------------------------------
+// Render helpers
+// ---------------------------------------------------------------------------
+
+pub fn route_to_svg_path(points) => polyline_to_svg_d(points)
+
+// share corner control geometry between SVG emission and geometric selection.
+pub fn curved_corner(prev, cur, next, radius) {
+  let in_dx = sign(cur.x - prev.x)
+  let in_dy = sign(cur.y - prev.y)
+  let out_dx = sign(next.x - cur.x)
+  let out_dy = sign(next.y - cur.y)
+  let in_len = min(radius, hypot(cur.x - prev.x, cur.y - prev.y) / 2.0)
+  let out_len = min(radius, hypot(next.x - cur.x, next.y - cur.y) / 2.0);
+  {entry: {x: cur.x - in_dx * in_len, y: cur.y - in_dy * in_len}, control: cur,
+   exit: {x: cur.x + out_dx * out_len, y: cur.y + out_dy * out_len}}
+}
+
+fn curved_at(points, radius, i, last_i, acc) {
+  if (i >= last_i) { acc }
+  else {
+    let corner = curved_corner(points[i - 1], points[i], points[i + 1], radius)
+    let seg = " L " ++ (corner.entry.x) ++ " " ++ (corner.entry.y) ++
+              " Q " ++ (corner.control.x) ++ " " ++ (corner.control.y) ++
+              " " ++ (corner.exit.x) ++ " " ++ (corner.exit.y)
+    curved_at(points, radius, i + 1, last_i, acc ++ seg)
+  }
+}
+
+pub fn route_to_curved_points(points, radius, steps = 8) {
+  if (len(points) < 3) points
+  else (
+    let count = max(2, min(32, steps)),
+    [points[0], *[for (i in 1 to len(points) - 2)
+      *(let c = curved_corner(points[i - 1], points[i], points[i + 1], radius),
+        [for (j in 0 to count) (let t = j / count,
+          {x: (1-t)*(1-t)*c.entry.x + 2*(1-t)*t*c.control.x + t*t*c.exit.x,
+           y: (1-t)*(1-t)*c.entry.y + 2*(1-t)*t*c.control.y + t*t*c.exit.y})])], points[len(points) - 1]]
+  )
+}
+
+// Curved SVG `d` with quarter-arc corners at each bend.
+pub fn route_to_curved_svg_path(points, radius) {
+  if (len(points) < 2) { "" }
+  else if (len(points) == 2) { polyline_to_svg_d(points) }
+  else {
+    let head = points[0]
+    let body = curved_at(points, radius, 1, len(points) - 1,
+                         "M " ++ (head.x) ++ " " ++ (head.y))
+    let tail = points[len(points) - 1]
+    body ++ " L " ++ (tail.x) ++ " " ++ (tail.y)
+  }
+}
+
+// Tolerance-aware point-on-route check (reuses the polyline distance test).
+pub fn is_point_on_route(p, route, tolerance) => point_near_polyline(p, route, tolerance)
+
+// use the existing segment router for both legacy and normalized waypoints.
+pub fn route_between(points,kind,from_box=null,to_box=null) =>
+  route_segments_at(points,kind,from_box,to_box,0,len(points),[])
+
+// terminal segments gain a perpendicular stub; their attached endpoints stay fixed.
+pub fn move_segment(points,index,delta,orthogonal=true) {
+    let a = points[index]
+    let b = points[index+1]
+    let offset = if (not orthogonal) delta else if (a.y == b.y) {x:0,y:delta.y} else {x:delta.x,y:0}
+    let moved_a = v2_add(a,offset)
+    let moved_b = v2_add(b,offset)
+    let moved = [*slice(points,0,index),
+        *(if (index == 0) [a] else []),moved_a,moved_b,
+        *(if (index+1 == len(points)-1) [b] else []),*slice(points,index+2)];
+    [for (i,p in moved where i == 0 or p != moved[i-1]) p]
+}
+
+// parallel orthogonal routes retain right-angle segments through a shared offset lane.
+pub fn parallel_route(a,b,lane,kind) {
+    let horizontal = abs(b.x-a.x)>=abs(b.y-a.y)
+    let sign = if (horizontal) (if (b.x>=a.x) 1 else -1) else (if (b.y>=a.y) 1 else -1)
+    let middle = if (horizontal) {x:(a.x+b.x)/2,y:(a.y+b.y)/2+lane} else {x:(a.x+b.x)/2+lane,y:(a.y+b.y)/2};
+    if (kind == 'straight') [a,middle,b]
+    else if (horizontal) [a,{x:a.x+sign*20,y:a.y},{x:a.x+sign*20,y:middle.y},
+        {x:b.x-sign*20,y:middle.y},{x:b.x-sign*20,y:b.y},b]
+    else [a,{x:a.x,y:a.y+sign*20},{x:middle.x,y:a.y+sign*20},
+        {x:middle.x,y:b.y-sign*20},{x:b.x,y:b.y-sign*20},b]
+}

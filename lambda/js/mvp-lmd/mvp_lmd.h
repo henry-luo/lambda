@@ -6,6 +6,13 @@ struct MvpLmdExecution;
 struct MvpLmdCode;
 struct Runtime;
 struct JsPreambleState;
+struct JsScript;
+Item mvp_lmd_compile_function_satellite(Runtime*, JsScript*, uint32_t function_id,
+    JsScript* binding_owner = NULL);
+Item mvp_lmd_compile_loop_satellite(Runtime*, JsScript*, const char* source,
+    size_t length, const char* function_name);
+Item mvp_lmd_call_function_satellite(Item compiled, Item source, Item receiver,
+    Item* arguments, int count, uint64_t* result_home);
 void mvp_lmd_runtime_reset();
 void mvp_lmd_code_retain(MvpLmdCode* code);
 void mvp_lmd_code_release(MvpLmdCode* code);
@@ -30,13 +37,16 @@ struct MvpLmdOptions {
     size_t preamble_length = 0;
     bool namespace_result = false; // public module loaders consume the live export namespace
     const MvpLmdCode* cached_code = NULL;
+    bool native_harness = false; // harnessless Test262 batches use the shared callable helpers
+    bool typescript = false;    // parser profile and the existing TS type() intrinsic
 };
 MvpLmdExecution* mvp_lmd_execute_with_options(const char* source, size_t length,
     double* execution_ms, const MvpLmdHost* host, const MvpLmdOptions* options);
 // formal MIR entry: the Runtime retains code and the result's original heap.
 Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t length,
     const char* filename, uint64_t* result_home, bool module = false,
-    const MvpLmdCode* cached_code = NULL);
+    const MvpLmdCode* cached_code = NULL, bool typescript = false,
+    bool native_harness = false);
 
 // the execution owns its AST, MIR, heap and result until destroy (D5.3).
 // optional timing covers only the generated entry, excluding compile/setup and result publication.

@@ -2834,15 +2834,11 @@ class PremakeGenerator:
         libraries = list(libraries or [])
         dependencies = list(dependencies or [])
         if 'lambda-runtime-full' in dependencies:
-            # runtime-full is a host-resolved DSO; validator tests need the
-            # active runtime and Radiant host layers that satisfy its imports.
+            # the static validation front end needs runtime/Radiant providers.
+            # D7.3.4: host-owned trace functions must not bind to a replaceable Node module.
             for host_dependency in ('lambda-rt', 'radiant'):
                 if host_dependency not in dependencies:
                     dependencies.append(host_dependency)
-            if 'node-core' not in dependencies:
-                # The runtime references trace-events on every native platform;
-                # tests need the dynamic Node host that the CLI links at load time.
-                dependencies.append('node-core')
         configured_targets = {
             target.get('name'): target for target in self.config.get('targets', [])
             if target.get('name')
@@ -3346,8 +3342,10 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # host-resolved test DSOs need the same D7.3.6 exports under LTO/dead stripping.
-        if any(configured_targets.get(dep, {}).get('link') == 'dynamic' for dep in dependencies):
+        # runtime test hosts can load modules without linking them (D7.3.4-D7.3.6).
+        if ('lambda-runtime-full' in dependencies or
+                all(dep in dependencies for dep in ('lambda-rt', 'radiant'))) or any(
+                configured_targets.get(dep, {}).get('link') == 'dynamic' for dep in dependencies):
             self.premake_content.extend(self._host_export_link_options())
 
         # Add build options based on source file type

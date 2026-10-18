@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "description": "D1.3: Number-proven reads use the native-key element kernel while writes retain the shared Set completion kernel.",
+  "description": "D8.4.1v2/D8.4.3v2: descriptor-visible indexed reads and writes retain their canonical array and prototype fallback.",
   "checks": [
     {
-      "in_func": "_js_indexedGuards_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_elements_get_number",
-        "call\tjs_set"
+        "call\tmvp_lmd_array_index_property",
+        "call\tmvp_lmd_class_property",
+        "call\tmvp_lmd_array_edit"
       ]
     }
   ]

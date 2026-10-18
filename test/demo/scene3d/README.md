@@ -1,20 +1,44 @@
-# Native 3D demos
+# Scene3D demos
 
-From the worktree root:
+Open the collection from the repository or release root:
 
 ```sh
 ./lambda.exe demo scene3d
-./lambda.exe demo asset-gallery
-./lambda.exe demo observatory
-./lambda.exe demo shared-animation
-./lambda.exe demo three-gallery
+# Equivalent direct entry:
+./lambda.exe view test/demo/scene3d/index.html
 ```
+
+The index has one tile for each demo. Every page shares breadcrumb navigation
+back to **Scene3D**. The four physics experiments are direct tiles on the same
+index, with no intermediate gallery.
+Individual demos retain their own controls and color themes. The collection
+uses one CLI catalog entry; individual pages can still be opened with `view`.
+
+| Tile | Entry point | What to explore |
+| --- | --- | --- |
+| [CellScope](cellscope/README.md) | `cellscope/cellscope.ls` | Cell models, organelle information, and synchronized comparison |
+| [Domino circuit](physics/README.md) | `physics/domino.ls` | A 32-tile cascade and a counter-nudge |
+| [Salvage bay](physics/README.md) | `physics/salvage.ls` | Compound assemblies, impulses, and weightlessness |
+| [Marble sorter](physics/README.md) | `physics/sorter.ls` | A kinematic paddle and three sensor gates |
+| [Bounce lab](physics/README.md) | `physics/bounce.ls` | Restitution and measured trajectory charts |
+| Ringworld | `ringworld.ls` | A procedural planet, rings, moons, and an automatic camera tour |
+| Crystal garden | `three-gallery.html` | Instanced crystals, textures, lighting, and transparency |
+| Kinetic observatory | `observatory.html` | Materials, shadows, satellites, and camera interaction |
+| Shared animation | `shared-animation.html` | Native skinning/morphing and SVG timelines |
+
+The tile previews use local scene captures and the existing Chromium references.
+CellScope bundles its Plant model; its other specimens need a network connection
+on first selection. The other demos use local resources.
 
 `three-gallery.html` runs the official, unmodified Three.js 0.186.1
 `WebGLRenderer` in LambdaJS. It shows 49 instanced crystals, Lambert lighting,
 a repeating data texture, a torus and a transparent halo. Its `ImprovedNoise`
 addon exercises a real ESM import through the document's `three` import map.
-The pinned library, addon, license and source hashes live under `vendor/three/`.
+Drag to orbit, use Pan or Shift-drag to move, and scroll to zoom. The camera
+toolbar also provides orbit, tilt, zoom, and Reset view. Focus the canvas for
+arrow-key panning, Shift-arrow tilting, `+` / `-` zoom, and `R` reset. Camera
+changes redraw the garden on demand through the unmodified OrbitControls addon.
+The pinned library, addons, license and source hashes live under `vendor/three/`.
 
 `ringworld.ls` uses the native `lambda.scene3d` package from Phase I.
 It starts with a spinning storm-banded planet and three orbiting moons, sampled
@@ -42,9 +66,11 @@ Ordinary headless mode returns `null` from `getContext('webgl2')`.
 The explicit GLFW option enables graphics for automated full-host captures;
 the separate headless-C executable excludes graphics (D7.1.4v2).
 
-`reference/three-gallery-chromium.png` is the independent Chromium/SwiftShader
-reference. `reference/manifest.json` records viewport, canvas bounds, fixture
-results, actual calls/queries and hashes of the generated shader corpus.
+`reference/three-gallery-chromium.png` is the original independent
+Chromium/SwiftShader reference, also used for its tile preview. Its manifest
+records the original viewport/canvas bounds, fixture results, calls/queries,
+and shader hashes. Capture a fresh browser reference before comparing the
+current page, whose breadcrumbs change the canvas position.
 See [the WebGL test guide](../../webgl/README.md) for reproduction.
 
 `observatory.html` is the Phase III interactive demo: metallic rings and satellites,
@@ -67,10 +93,8 @@ needs Python Pillow. Phase III fixed-time references and API/shader audit live
 under `reference/phase3/`. See the [implementation record](../../../vibe/impl/Radiant_WebGL_Phase3.md)
 for the declared playback/binding profile, validation and measurements.
 
-`asset-gallery.ls` loads a textured concave OBJ arrow, an animated glTF pennant
-with skinning and morph targets, and an A3D skeletal pennant through
-`lambda.scene3d.load()`. The generated CC0 inputs, binary buffer dependencies and
-images live in `assets/loading/`; run its `_generate.py` with Python 3 to rebuild
-them. glTF animation uses the shared SVG/native engine, including cubic tracks.
-See [the asset-loading design](../../../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes)
-for supported profiles, API options and explicit limitations.
+Imported-asset coverage remains in the integration fixture
+[`test/scene3d/imported-assets.ls`](../../scene3d/imported-assets.ls). Its generated
+CC0 resources and dependencies remain in `assets/loading/`; this fixture is
+not part of the demo index. See [the asset-loading design](../../../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes)
+for supported profiles, API options, and limitations.

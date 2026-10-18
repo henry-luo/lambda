@@ -39,6 +39,8 @@ void js_event_loop_pump_nowait(void);
 // Wait for one JS/libuv event, capped by max_wait_ms. Returns true when work
 // other than the cap timer woke the loop, allowing condition waits to retry.
 bool js_event_loop_pump_wait(int max_wait_ms);
+// Await an explicit host readiness condition before snapshot cleanup retires timers.
+int js_event_loop_wait_until(int (*predicate)(void*), void* user, int watchdog_ms);
 // Deterministic clock used by headless browser fixtures. Advancing it fires
 // due timers and a bounded number of animation frames without sleeping.
 void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms);

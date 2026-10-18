@@ -47,9 +47,9 @@ fn choices(node, active) {
         if (segmented and c.props(node).name != null) <input type:"hidden",name:c.props(node).name,value:c.text(active),
             *:c.boolean_attr("disabled",c.props(node).disabled)> else null]>
 }
-pn clicked(node, evt) {
+fn clicked(node, evt) {
     let target = interaction.target(node, evt, "[data-dtna-choice]")
-    let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) or null);
+    let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) ^ { null });
     if (index == null or c.props(node).disabled or c.props(node).items[index].disabled) null else c.props(node).items[index].key
 }
 pn focus_choice(node, evt, key) {
@@ -134,12 +134,13 @@ fn pagination_simple(node, page, total, labels) =>
             <span "/">,string(total)]>,page_direction_button(page,total,c.props(node).disabled,labels,false)]
 fn pagination_size(node, paging) => c.option(c.props(node),"page_size",paging.page_size)
 fn pagination_current(node, paging) => min(collection.page_count(c.option(c.props(node),"total",0),pagination_size(node,paging)),c.option(c.props(node),"current",paging.current))
+fn pagination_sizes(node, size) => sort(unique([*c.option(c.props(node),"page_size_options",[10,20,50,100]),size]))
 fn pagination_view(node, paging) {
     let size = pagination_size(node,paging)
     let total = collection.page_count(c.option(c.props(node),"total",0),size)
     let page = pagination_current(node,paging)
     let labels = locale.resolve(c.option(c.props(node),"locale","en-US"))^
-    let sizes = sort(unique([*c.option(c.props(node),"page_size_options",[10,20,50,100]),size]));
+    let sizes = pagination_sizes(node,size);
     if (c.props(node).hide_on_single_page and total == 1) null else
     <nav *:c.styled(node), ["aria-label"]:c.option(c.props(node),"label","Pagination"),
         *[if (c.props(node).show_total) <span class:"dtna-page-total",*c.children(c.render(pagination_summary(c.props(node),page,size)^))> else null,
@@ -164,7 +165,7 @@ pn pagination_event(node, evt, paging, event_kind) {
     if (target == null or dom.get_state(target,"disabled")) { return paging }
     let simple = dom.has_attribute(target,"data-dtna-page-simple")
     if ((event_kind == 'blur' and not simple) or (event_kind == 'keydown' and evt.key != "Enter" and not (simple and contains(["ArrowUp","ArrowDown"],evt.key)))) { return paging }
-    let requested = int(if (event_kind == 'click') dom.get_attribute(target,"data-dtna-page") else dom.get_state(target,"value")) or null
+    let requested = int(if (event_kind == 'click') dom.get_attribute(target,"data-dtna-page") else dom.get_state(target,"value")) ^ { null }
     let old_size = pagination_size(node,paging)
     let old_page = pagination_current(node,paging)
     if (not (requested is int) or (requested < 1 and not simple)) {
@@ -184,6 +185,15 @@ pn pagination_event(node, evt, paging, event_kind) {
 
 view dtna_pagination: <dtna.pagination> state paging:{current:c.option(c.props(~),"default_current",1),page_size:c.option(c.props(~),"default_page_size",10)} {
     pagination_view(~,paging)
+}
+on render(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    let field = dom.query_selector(evt.target,"[data-dtna-page-size]")
+    let size = pagination_size(~,paging)
+    let indexes = [for (index,entry in pagination_sizes(~,size) where entry == size) index];
+    // retained native selection needs an explicit write when a controlled request is rejected.
+    if (field != null and dom.selected_index(field) != indexes[0]) dom.set_selected_index(field,indexes[0])
+    'pass'
 }
 on click(evt) { paging = pagination_event(~,evt,paging,'click'); 'pass' }
 on change(evt) { paging = pagination_event(~,evt,paging,'change'); 'pass' }
@@ -234,7 +244,7 @@ view dtna_steps: <dtna.steps> state current:c.option(c.props(~),"default_current
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-step]")
     if (target == null or c.props(~).disabled or dom.get_state(target,"disabled")) { return 'pass' }
-    let index = int(dom.get_attribute(target,"data-dtna-step")) or null
+    let index = int(dom.get_attribute(target,"data-dtna-step")) ^ { null }
     if (index == null or index == c.option(c.props(~),"current",current)) { return 'pass' }
     current = index
     emit("ui_change",c.action(~,'step',index))

@@ -4337,8 +4337,10 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
     int viewport_width, int viewport_height);
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
-void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                float iframe_width, float iframe_height);
+void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
+                                float iframe_width, float iframe_height, bool initial_load = true);
+bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
+                               float viewport_width, float viewport_height);
 bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
 DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
     float viewport_width, float viewport_height);

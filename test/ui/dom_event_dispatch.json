@@ -10,6 +10,8 @@
     {"type": "assert_text", "target": {"selector": "#log"}, "contains": "select:1-4"},
     {"type": "click", "target": {"selector": "#menu"}, "button": 1},
     {"type": "assert_text", "target": {"selector": "#log"}, "contains": "contextmenu:1"},
-    {"type": "assert_state_store", "target": {"selector": "#menu"}, "context_menu_open": false}
+    {"type": "assert_state_store", "target": {"selector": "#menu"}, "context_menu_open": false},
+    {"type": "click", "target": {"selector": "#label", "offset_x": 10, "offset_y": 8}, "button": 1},
+    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "text-contextmenu:label"}
   ]
 }

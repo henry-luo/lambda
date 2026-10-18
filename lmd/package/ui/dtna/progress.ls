@@ -10,7 +10,7 @@ fn gradient_stops(value) array^ {
         let names = c.properties(value,["from","to","direction"],"progress.gradient")^,
         [{offset:0,color:value.from},{offset:100,color:value.to}])
     else [for (key,color in value where string(key) != "direction") {
-        offset:if (ends_with(string(key),"%")) (float(slice(string(key),0,len(string(key))-1)) or null) else null,color:color}];
+        offset:if (ends_with(string(key),"%")) (float(slice(string(key),0,len(string(key))-1)) ^ { null }) else null,color:color}];
     if (len(stops) < 2 or not all([for (stop in stops) c.finite(stop.offset) and stop.offset >= 0 and stop.offset <= 100 and c.css_color(stop.color)]))
         raise c.fail("progress","gradient needs at least two CSS colors with percentage stops from 0 to 100")
     else if (not c.enum_valid(value.direction,["to right","to left","to bottom","to top"])^) raise c.fail("progress","unsupported gradient direction")

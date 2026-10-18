@@ -1,6 +1,6 @@
 // Formal semantics 7.6: errors fall into three families.
 //   1. type family   -- `is error`, `type`, `match`, and `print` -- participate
-//   2. truthy family -- `if`, `not`, `or`, `==` -- participate
+//   2. logical/comparison family -- encountered errors are preserved (S3.4/S5.1.1v2)
 //   3. value family  -- everything else PROPAGATES
 //
 // This pins family 3, which is where errors are easiest to lose. Each of these
@@ -44,7 +44,7 @@ fn t_len() {
 }
 t_len()
 
-'-- but the truthy family still participates: these are the discharge surfaces --'
+'-- logical operations and equality preserve encountered errors --'
 fn t_truthy() {
     let a = fail() ^ { ^ };
     [if (a) "T" else "F", not a, a or "dflt", a == a]

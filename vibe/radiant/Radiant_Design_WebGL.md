@@ -1346,8 +1346,8 @@ A3D quaternion actions use this engine's SLERP interpolation.
 
 ### Verification fixtures
 
-`test/demo/scene3d/asset-gallery.ls` displays all three mesh formats. Its CC0
-assets and dependency files are under `assets/loading/`, with a reproducible
+`test/scene3d/imported-assets.ls` exercises all three mesh formats. Its CC0
+assets and dependency files are under `test/demo/scene3d/assets/loading/`, with a reproducible
 Python standard-library generator. The glTF fixture includes an external buffer
 and an equivalent data-URI version, an interleaved vertex stream, normalized
 byte colors/weights, a sparse morph target, reversed joint order, authored bind

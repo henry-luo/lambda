@@ -2,6 +2,16 @@
   "version": 1,
   "families": [
     {
+      "properties": ["user-select"],
+      "qualification": "partial",
+      "scope": "computed none/auto/text values, pointer and double-click suppression, auto descendants, explicit text overrides, retained button focus, editable fields and Finder item selection",
+      "evidence": [
+        "test/ui/dom_user_select_pointer.json",
+        "test/ui/finder/item_selection.json"
+      ],
+      "limits": "complete all/contain pointer behavior, pseudo-elements and cross-subtree drag boundaries remain outside this increment"
+    },
+    {
       "properties": [
         "container",
         "container-name",

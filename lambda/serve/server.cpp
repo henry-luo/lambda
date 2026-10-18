@@ -19,6 +19,7 @@
 #include "body_parser.hpp"
 #include "mime.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 
 #include <string.h>
 #include "../../lib/mem.h"
@@ -33,6 +34,7 @@ static void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
 static void on_close(uv_handle_t *handle);
 static void on_signal(uv_signal_t *handle, int signum);
 static void on_timeout(uv_timer_t *timer);
+static void process_buffer(ClientConnection* conn);
 
 // ============================================================================
 // Server lifecycle
@@ -79,13 +81,11 @@ Server* server_create_with_loop(const ServerConfig *config, uv_loop_t *loop) {
 
 void server_destroy(Server *server) {
     if (!server) return;
-
-    // close all active connections
-    ClientConnection *conn = server->connections;
-    while (conn) {
-        ClientConnection *next = conn->next;
-        server_connection_close(conn);
-        conn = next;
+    server_stop(server);
+    // close callbacks and queued workers still borrow the server and its pool.
+    if (server->owns_loop) uv_run(server->loop, UV_RUN_DEFAULT);
+    else while (server->connections || worker_pool_active_count(server->worker_pool)) {
+        uv_run(server->loop, UV_RUN_ONCE);
     }
 
     // destroy components
@@ -204,6 +204,7 @@ int server_run(Server *server) {
     // set up signal handlers for graceful shutdown
     uv_signal_init(server->loop, &server->sigint_handle);
     uv_signal_init(server->loop, &server->sigterm_handle);
+    server->signals_initialized = 1;
     server->sigint_handle.data = server;
     server->sigterm_handle.data = server;
     uv_signal_start(&server->sigint_handle, on_signal, SIGINT);
@@ -215,13 +216,6 @@ int server_run(Server *server) {
     return r;
 }
 
-static void on_close_walk(uv_handle_t *handle, void *arg) {
-    (void)arg;
-    if (!uv_is_closing(handle)) {
-        uv_close(handle, NULL);
-    }
-}
-
 void server_stop(Server *server) {
     if (!server || server->shutting_down) return;
     server->shutting_down = 1;
@@ -230,8 +224,12 @@ void server_stop(Server *server) {
              server->connection_count);
 
     // stop signal watchers
-    uv_signal_stop(&server->sigint_handle);
-    uv_signal_stop(&server->sigterm_handle);
+    if (server->signals_initialized) {
+        uv_signal_stop(&server->sigint_handle);
+        uv_signal_stop(&server->sigterm_handle);
+        uv_close((uv_handle_t*)&server->sigint_handle, NULL);
+        uv_close((uv_handle_t*)&server->sigterm_handle, NULL);
+    }
 
     // stop accepting new connections
     if (server->http_listening) {
@@ -251,8 +249,7 @@ void server_stop(Server *server) {
         conn = next;
     }
 
-    // close remaining handles so the loop can exit
-    uv_walk(server->loop, on_close_walk, NULL);
+    // an embedded server must not close handles owned by its host's loop.
 }
 
 // ============================================================================
@@ -344,11 +341,16 @@ void* server_get_app_data(Server *server) {
 // Connection management
 // ============================================================================
 
-ClientConnection* server_connection_add(Server *server, uv_tcp_t *client, int is_tls) {
+ClientConnection* server_connection_accept(Server *server, uv_stream_t *listener, int is_tls) {
     ClientConnection *conn = (ClientConnection*)serve_calloc(1, sizeof(ClientConnection));
     if (!conn) return NULL;
 
-    conn->handle = *client;
+    // libuv registers the handle's address in its loop; an initialized handle cannot move.
+    if (uv_tcp_init(server->loop, &conn->handle) < 0) { serve_free(conn); return NULL; }
+    if (uv_accept(listener, (uv_stream_t*)&conn->handle) < 0) {
+        uv_close((uv_handle_t*)&conn->handle, (uv_close_cb)serve_free);
+        return NULL;
+    }
     conn->handle.data = conn;
     conn->server = server;
     conn->is_tls = is_tls;
@@ -358,6 +360,7 @@ ClientConnection* server_connection_add(Server *server, uv_tcp_t *client, int is
     conn->read_cap = 4096;
     conn->read_buf = (char*)serve_malloc(conn->read_cap);
     conn->read_len = 0;
+    conn->open_handles = 2;
 
     // idle timeout timer
     uv_timer_init(server->loop, &conn->timeout_timer);
@@ -392,14 +395,9 @@ void server_connection_remove(Server *server, ClientConnection *conn) {
     server->connection_count--;
 }
 
-static void on_close(uv_handle_t *handle) {
-    ClientConnection *conn = (ClientConnection*)handle->data;
-    if (!conn) return;
-
-    if (conn->server) {
-        server_connection_remove(conn->server, conn);
-    }
-
+static void connection_maybe_free(ClientConnection* conn) {
+    if (!conn || conn->open_handles || conn->pending_tasks) return;
+    if (conn->server) server_connection_remove(conn->server, conn);
     if (conn->tls) {
         tls_connection_destroy(conn->tls);
     }
@@ -408,13 +406,19 @@ static void on_close(uv_handle_t *handle) {
     serve_free(conn);
 }
 
+static void on_close(uv_handle_t *handle) {
+    ClientConnection* conn = (ClientConnection*)handle->data;
+    if (conn) { conn->open_handles--; connection_maybe_free(conn); }
+}
+
 void server_connection_close(ClientConnection *conn) {
-    if (!conn) return;
+    if (!conn || conn->closing) return;
+    conn->closing = 1;
 
     // stop the timeout timer
     uv_timer_stop(&conn->timeout_timer);
     if (!uv_is_closing((uv_handle_t*)&conn->timeout_timer)) {
-        uv_close((uv_handle_t*)&conn->timeout_timer, NULL);
+        uv_close((uv_handle_t*)&conn->timeout_timer, on_close);
     }
 
     // close the TCP handle
@@ -438,24 +442,36 @@ static const char* find_header_end(const char *buf, size_t len) {
     return NULL;
 }
 
-// parse Content-Length from raw header buffer
-static size_t parse_content_length(const char *headers, size_t headers_len) {
-    const char *cl = "content-length:";
-    size_t cl_len = 15;
-    for (size_t i = 0; i + cl_len < headers_len; i++) {
-        int match = 1;
-        for (size_t j = 0; j < cl_len; j++) {
-            char c = headers[i + j];
-            if (c >= 'A' && c <= 'Z') c += 32;
-            if (c != cl[j]) { match = 0; break; }
+// reject ambiguous/overflowing framing before allocating or dispatching a body.
+static bool parse_content_length(const char* headers, size_t length, size_t* content_length) {
+    *content_length = 0;
+    bool seen = false;
+    size_t offset = 0;
+    while (offset < length) {
+        size_t start = offset;
+        while (offset < length && headers[offset] != '\r' && headers[offset] != '\n') offset++;
+        size_t end = offset;
+        while (offset < length && (headers[offset] == '\r' || headers[offset] == '\n')) offset++;
+        const char* colon = (const char*)memchr(headers + start, ':', end - start);
+        if (!colon) continue;
+        size_t name_length = (size_t)(colon - headers - start);
+        if (str_ieq_const(headers + start, name_length, "transfer-encoding")) return false;
+        if (!str_ieq_const(headers + start, name_length, "content-length")) continue;
+        if (seen) return false;
+        seen = true;
+        size_t at = (size_t)(colon - headers) + 1;
+        while (at < end && (headers[at] == ' ' || headers[at] == '\t')) at++;
+        size_t digits = 0;
+        while (at < end && headers[at] >= '0' && headers[at] <= '9') {
+            size_t digit = (size_t)(headers[at++] - '0');
+            if (*content_length > (SIZE_MAX - digit) / 10) return false;
+            *content_length = *content_length * 10 + digit;
+            digits++;
         }
-        if (match) {
-            const char *val = headers + i + cl_len;
-            while (*val == ' ') val++;
-            return (size_t)atol(val);
-        }
+        while (at < end && (headers[at] == ' ' || headers[at] == '\t')) at++;
+        if (!digits || at != end) return false;
     }
-    return 0;
+    return true;
 }
 
 // ============================================================================
@@ -467,6 +483,17 @@ static void on_request_complete(HttpRequest *req, HttpResponse *resp,
     (void)status;
     ClientConnection *conn = (ClientConnection*)user_data;
     if (!conn) return;
+    conn->pending_tasks--;
+    resp->defer_send = 0;
+    if (resp->send_pending) resp->headers_sent = 0;
+    if (conn->closing) {
+        // disconnect may precede worker completion; discard without writing a closed socket.
+        resp->headers_sent = 1;
+        http_request_destroy(req);
+        http_response_destroy(resp);
+        connection_maybe_free(conn);
+        return;
+    }
 
     // send the response if not already sent
     if (!resp->headers_sent) {
@@ -477,18 +504,28 @@ static void on_request_complete(HttpRequest *req, HttpResponse *resp,
     if (conn->keep_alive && req->_keep_alive &&
         conn->request_count < conn->server->config.max_requests_per_conn) {
         // reset read buffer for next request
-        conn->read_len = 0;
+        size_t remaining = conn->read_len - conn->consumed_bytes;
+        memmove(conn->read_buf, conn->read_buf + conn->consumed_bytes, remaining);
+        conn->read_len = remaining;
+        uv_read_start((uv_stream_t*)&conn->handle, on_alloc, on_read);
         // restart timeout timer
         int timeout = conn->server->config.keep_alive_timeout > 0
                      ? conn->server->config.keep_alive_timeout : 5;
         uv_timer_start(&conn->timeout_timer, on_timeout, timeout * 1000, 0);
     } else {
-        server_connection_close(conn);
+        // drain queued writes before closing a Connection: close response.
+        conn->keep_alive = 0;
+        conn->shutdown.data = conn;
+        if (uv_shutdown(&conn->shutdown, (uv_stream_t*)&conn->handle,
+                [](uv_shutdown_t* request, int) {
+                    server_connection_close((ClientConnection*)request->data);
+                }) < 0) server_connection_close(conn);
     }
 
     // cleanup request/response
     http_request_destroy(req);
     http_response_destroy(resp);
+    if (!conn->closing && conn->keep_alive && conn->read_len) process_buffer(conn);
 }
 
 static void dispatch_request(ClientConnection *conn, const char *raw, size_t raw_len) {
@@ -528,6 +565,7 @@ static void dispatch_request(ClientConnection *conn, const char *raw, size_t raw
         server_connection_close(conn);
         return;
     }
+    resp->defer_send = 1;
 
     // route matching
     HttpHeader *route_params = NULL;
@@ -539,20 +577,20 @@ static void dispatch_request(ClientConnection *conn, const char *raw, size_t raw
     // if no route matched, use a default 404 handler
     if (!handler) {
         http_response_error(resp, HTTP_404_NOT_FOUND, "Not Found");
-        http_request_destroy(req);
-        http_response_destroy(resp);
+        conn->pending_tasks++;
+        on_request_complete(req, resp, 0, conn);
         return;
     }
 
     // dispatch to worker pool: middleware + handler run on worker thread
+    conn->pending_tasks++;
     int r = worker_pool_dispatch(server->worker_pool,
                                  req, resp, handler, handler_data,
                                  server->middleware,
                                  on_request_complete, conn);
     if (r != 0) {
         http_response_error(resp, HTTP_503_SERVICE_UNAVAILABLE, "Service Unavailable");
-        http_request_destroy(req);
-        http_response_destroy(resp);
+        on_request_complete(req, resp, r, conn);
     }
 }
 
@@ -581,20 +619,9 @@ static void on_new_connection(uv_stream_t *server_handle, int status) {
         return;
     }
 
-    uv_tcp_t *client = (uv_tcp_t*)serve_malloc(sizeof(uv_tcp_t));
-    uv_tcp_init(server->loop, client);
-
-    if (uv_accept(server_handle, (uv_stream_t*)client) != 0) {
-        uv_close((uv_handle_t*)client, (uv_close_cb)serve_free);
-        return;
-    }
-
     int is_tls = (server_handle == (uv_stream_t*)&server->https_handle);
-    ClientConnection *conn = server_connection_add(server, client, is_tls);
-    if (!conn) {
-        uv_close((uv_handle_t*)client, (uv_close_cb)serve_free);
-        return;
-    }
+    ClientConnection *conn = server_connection_accept(server, (uv_stream_t*)server_handle, is_tls);
+    if (!conn) return;
 
     // for TLS connections, create TLS wrapper
     if (is_tls && server->tls_ctx) {
@@ -645,26 +672,48 @@ static void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         // enforce max header size
         Server *server = conn->server;
         size_t max_hdr = server->config.max_header_size > 0 ? server->config.max_header_size : 8192;
-        if (new_cap > max_hdr + server->config.max_body_size) {
+        size_t limit = max_hdr + server->config.max_body_size;
+        if (needed > limit) {
             log_error("server request too large, closing connection");
             serve_free(buf->base);
             server_connection_close(conn);
             return;
         }
 
-        conn->read_buf = (char*)serve_realloc(conn->read_buf, new_cap);
+        if (new_cap > limit) new_cap = limit;
+        char* resized = (char*)serve_realloc(conn->read_buf, new_cap);
+        if (!resized) {
+            serve_free(buf->base);
+            server_connection_close(conn);
+            return;
+        }
+        conn->read_buf = resized;
         conn->read_cap = new_cap;
     }
     memcpy(conn->read_buf + conn->read_len, buf->base, (size_t)nread);
     conn->read_len += (size_t)nread;
     serve_free(buf->base);
 
+    process_buffer(conn);
+}
+
+static void process_buffer(ClientConnection* conn) {
+    if (conn->closing || conn->pending_tasks) return;
     // check if we have a complete HTTP message
     const char *header_end = find_header_end(conn->read_buf, conn->read_len);
-    if (!header_end) return; // need more data
+    if (!header_end) {
+        if (conn->read_len > conn->server->config.max_header_size) server_connection_close(conn);
+        return;
+    }
 
     size_t header_len = (size_t)(header_end - conn->read_buf);
-    size_t content_length = parse_content_length(conn->read_buf, header_len);
+    size_t content_length = 0;
+    if (header_len > conn->server->config.max_header_size ||
+            !parse_content_length(conn->read_buf, header_len, &content_length) ||
+            content_length > conn->server->config.max_body_size) {
+        server_connection_close(conn);
+        return;
+    }
     size_t total_expected = header_len + content_length;
 
     if (conn->read_len < total_expected) return; // need more body data
@@ -673,6 +722,8 @@ static void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     uv_timer_stop(&conn->timeout_timer);
 
     // dispatch the request
+    conn->consumed_bytes = total_expected;
+    uv_read_stop((uv_stream_t*)&conn->handle);
     dispatch_request(conn, conn->read_buf, total_expected);
 }
 

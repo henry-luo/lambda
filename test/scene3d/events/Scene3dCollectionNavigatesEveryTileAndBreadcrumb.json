@@ -1,0 +1,262 @@
+{
+  "name": "Scene3dCollectionNavigatesEveryTileAndBreadcrumb",
+  "viewport": {
+    "width": 1200,
+    "height": 1600
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.demo-tile')).every(a=>{const r=a.getBoundingClientRect();return r.width>250&&r.left>=0&&r.right<=1200})"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-index-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"cellscope/cellscope.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"CellScope\""
+    },
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='plant' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelectorAll('#cell-scene geometry').length>0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/domino.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Domino circuit\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='domino'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/salvage.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Salvage bay\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='salvage'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/sorter.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Marble sorter\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='sorter'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/bounce.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Bounce lab\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='bounce'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"ringworld.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Ringworld\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#ringworld[data-ready=true]')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"three-gallery.html\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Crystal garden\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.threeGalleryReady===true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"observatory.html\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Kinetic observatory\""
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.observatoryReady===true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"shared-animation.html\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Shared animation\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#deformation')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    }
+  ]
+}

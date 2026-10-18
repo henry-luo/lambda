@@ -86,5 +86,5 @@ fn lowered(parsed, vertical) => {
 pub fn lower(raw, vertical = false) =>
   // Preserve a renderable, explicitly invalid record when dynamic label text
   // cannot be parsed; callers use valid to decide whether to trust its ports.
-  lowered(parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical) or
+  (lowered(parse_fields(string(raw), 0, false, [frame([], "", false)], true), vertical) ^ { null }) or
   {valid: false, content: record_table([], vertical)}

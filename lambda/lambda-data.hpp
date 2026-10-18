@@ -166,6 +166,8 @@ typedef struct EvalContext : Context {
     LambdaConstPool** const_pools;
     uint32_t const_pool_capacity;
     uint32_t const_pool_count;
+    // borrowing realm controllers share slabs; their temporary selection cannot change the allocator.
+    Runtime* module_state_allocator;
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

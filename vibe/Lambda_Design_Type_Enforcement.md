@@ -2365,14 +2365,36 @@ For collection predicates (`where`, `|:`, `that`, quantifiers) and procedural
 loop conditions, the result boundary on predicate failure still needs an
 explicit policy; it must not be inferred from an implementation's Bool ABI.
 
-**Implementation status and acceptance.** Not implemented in this decision-only
-change. The eventual migration must cover interpreter and MIR evaluation,
-shared truth coercions, native Bool lanes, static acknowledgment/type inference,
-diagnostics, docs and package recovery sites together. Acceptance must show
-preserved error payloads, a single condition evaluation, skipped `if` arms and
-short-circuit operands, fresh fallback errors, ordinary falsy defaults, and
-retained error types/obligations on interp, jit and auto. No engine build is
-needed to validate this record.
+**Implementation status (2026-10-16).** The settled logical/conditional and
+scalar/recursive comparison core is implemented across interpreter, MIR,
+shared runtime helpers, static acknowledgment and type inference. Language
+operator results use Item ABIs when an error can reach them, preserving code,
+message and chained diagnostics; proven scalar cases retain native lanes.
+`or` removes null from its source type but retains errors. Internal open types
+remain deferred at boundaries, and parameter admission checks every successful
+union member while the caller owns error-value flow (**S7.7.3**).
+
+Intentional recovery sites in packages and fixtures now use explicit handlers;
+error-bearing status fields use type classification rather than `!= null`.
+Procedure statement handlers discard their successful value under **S7.6.7v4**;
+when code needs both the result and a default, it first receives the outcome
+in an explicit error-admitting binding and then handles that value.
+
+Regression coverage pins payload retention, skipped effects, normal falsy
+defaults, aliased/nested containers and captures, early mismatch, and retained
+return/acknowledgment obligations on interp, auto and jit. **SO50** and the
+collection-predicate/procedural-loop boundaries above remain pending; no
+canonical map traversal or batch error policy was inferred.
+
+**Validation.** Error tests pass 268/268, structured tests 141/141, MIR emission
+248/248, and Lambda MIR budgets 12/12. The complete script/tier sweep passes
+1530/1531; its sole failure is `binary_js_bridge`, reproduced with the starting
+HEAD binary. Input baseline passes 2112/2112. MusicXML layout passes the native,
+randomized and MIR-interpreter forced-GC schedules. The required full baseline
+was run; pre-existing JS backend emission/profile failures and an idle timeout
+prevent a green aggregate. The revised error-handling document examples and
+tutorial chapter 6 pass their checks. Intentional MIR growth is recorded at
+the comparison/conditional probes in `test/mir/mir_budgets.json`.
 
 ## 8. Phasing
 

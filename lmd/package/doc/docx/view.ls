@@ -4,7 +4,7 @@ import css: .css
 
 pub fn preview(result) element {
     <div class:"docx-preview-content",
-        if (result.error != null) {
+        if (not (result.error is null)) {
             <p class:"preview-error", "Unable to open Word document: " ++ result.error>
         } else {
             if (len(result.diagnostics) > 0) {

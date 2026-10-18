@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch`, `patches/mir-aarch64-long-branches.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch`, `patches/mir-aarch64-long-branches.patch`, `patches/mir-aarch64-memory-validation.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -185,3 +185,21 @@ The basic-block generation path is unchanged.
 Touches only `mir-gen-aarch64.c`. The ARM64 long-branch/label-address test in
 `test/test_mir_emission_gtest.cpp` and the jq replay exercise the repair
 (D8.6.2–D8.6.3). Diagnosis: `temp/mvp_perf_repair_20261015/jq-branch/lldb.log`.
+
+### `mir-aarch64-memory-validation.patch` — validate addresses in byte units
+
+Approved 2026-10-16 after the formal JS migration exposed unencodable packed
+field addresses in Acorn, Joi, Moment and Pretext. A standalone MIR function
+that adds 9 to its pointer and loads i64 reproduces the same matcher failure.
+
+The address-folding predicate used log2(memory size), while the encoder uses
+the byte size. It accepted i64 displacements 9, 33 and 42, which the encoder
+cannot represent, and used zero as the byte-lane divisor. Use the same byte
+scale as instruction matching. Invalid folded addresses retain explicit
+pointer arithmetic; ordinary encodable addresses keep the existing encoding.
+
+Touches only `target_memory_ok_p` in `mir-gen-aarch64.c`. The
+`MirOptimizer.Aarch64PackedMemoryAddressesStayEncodable` test covers signed,
+unsigned, float and double loads/stores at aligned and packed offsets and the
+immediate-range boundary. Reproducer:
+`temp/js_formal_mir_20261016/arm64_address_probe.c` (D8.6.2–D8.6.3).

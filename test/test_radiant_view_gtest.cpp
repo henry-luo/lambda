@@ -100,6 +100,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "test/html/xhtml_names_events.json", true},
     {"RadiantViewTest.LoadsHtmlWithMatchingXhtmlNames", "html_xhtml_names", "test/html/xhtml_names.html",
      "test/html/xhtml_names_events.json", true},
+    {"RadiantViewTest.LoadsPsdLayersAsHeadlessView", "psd_layers", "test/input/image/layered.psd",
+     "test/html/psd_image_events.json", true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -489,7 +491,10 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_EQ(result.exit_code, strcmp(name, "unknown-demo") == 0 ? 1 : 0) << output;
         EXPECT_NE(strstr(output, "Usage: lambda demo [name] [view options]"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/tetris/tetris.ls"), nullptr) << output;
-        EXPECT_NE(strstr(output, "test/demo/scene3d/ringworld.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
+        EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
+        EXPECT_EQ(strstr(output, "three-gallery"), nullptr) << output;
+        EXPECT_EQ(strstr(output, "cellscope"), nullptr) << output;
         if (strcmp(name, "unknown-demo") == 0) EXPECT_NE(strstr(output, "unknown demo 'unknown-demo'"), nullptr) << output;
         shell_result_free(&result);
     }
@@ -514,12 +519,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"tetris", "#tetris[data-mode=ready]"},
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
-        {"scene3d", "#ringworld[data-ready=true]", true},
-        {"ringworld", "#ringworld[data-ready=true]", true},
-        {"observatory", "#status[data-ready=true]", true},
-        {"three-gallery", "#status[data-ready=true]", true},
-        {"asset-gallery", "scene3d", true},
-        {"shared-animation", "#deformation", true},
+        {"scene3d", ".scene3d-index .demo-tile"},
         {"slides", ".slide-player"},
         {"wordcloud", ".gallery .card"},
         {nullptr, "#demo-home-splash", false, custom_home},
@@ -877,10 +877,14 @@ TEST(RadiantViewTest, LoadsHtmlAsHeadlessView) {
 }
 
 TEST(RadiantViewTest, LoadsXhtmlWithHtmlNames) {
-    test_radiant_view_expect_case(g_radiant_view_case_count - 2);
+    test_radiant_view_expect_case(g_radiant_view_case_count - 3);
 }
 
 TEST(RadiantViewTest, LoadsHtmlWithMatchingXhtmlNames) {
+    test_radiant_view_expect_case(g_radiant_view_case_count - 2);
+}
+
+TEST(RadiantViewTest, LoadsPsdLayersAsHeadlessView) {
     test_radiant_view_expect_case(g_radiant_view_case_count - 1);
 }
 

@@ -1,0 +1,139 @@
+{
+  "name": "Scene3dCollectionMobileKeepsTilesAndBreadcrumbsReachable",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.demo-tile')).every(a=>{const r=a.getBoundingClientRect();return r.width>300&&r.left>=0&&r.right<=390})"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-index-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"shared-animation.html\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#deformation').getBoundingClientRect().right<=390 && document.querySelector('.scene3d-breadcrumbs').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/domino.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='domino' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Domino circuit\" && document.getElementById('world').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-physics-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/salvage.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='salvage' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Salvage bay\" && document.getElementById('world').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/sorter.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='sorter' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Marble sorter\" && document.getElementById('world').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"physics/bounce.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='bounce' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Bounce lab\" && document.getElementById('world').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    }
+  ]
+}

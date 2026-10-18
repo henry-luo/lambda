@@ -97,13 +97,13 @@ pub fn int_or(v, fallback) {
 }
 
 // Return a byte from a Lambda string, or 0 for missing/out-of-range bytes.
-pub fn byte_at(s, i) {
+pub fn byte_at(s, i) int {
     if (s == null or i < 0 or i >= len(s)) { 0 }
     // ord is int|null, so its null widened this to int|null and made every
     // downstream int()/float() conversion error-typed. The guard above already
     // proves the index is in range, so `or 0` discharges an unreachable null
     // here and keeps the documented total-int contract for callers.
-    else { ord(s[i]) or 0 }
+    else { (ord(s[i]) ^ { null }) or 0 }
 }
 
 // Extract a PDF name operand value. Content parser name operands are maps,

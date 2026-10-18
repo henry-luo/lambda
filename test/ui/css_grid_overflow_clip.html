@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Grid item overflow clips rounded previews</title>
+<style>
+html, body { margin: 0; background: white; }
+.grid { display: grid; grid-template-columns: repeat(3, 180px); gap: 20px; padding: 60px 20px 20px; }
+.card { box-sizing: border-box; height: 180px; border: 2px solid #293b54; border-radius: 24px; overflow: hidden; background: #111d2e; }
+.preview { height: 90px; overflow: hidden; background: red; }
+.copy { height: 86px; }
+img { display: block; width: 100%; height: 90px; object-fit: cover; }
+#fill, #image { height: auto; min-height: 180px; }
+#clip { overflow: clip; }
+#visible { overflow: visible; }
+#auto { overflow: auto; }
+.ink { width: 210px; height: 210px; background: red; }
+#nested { display: grid; grid-template-rows: 90px 1fr; }
+#resize { position: absolute; left: 20px; top: 10px; }
+</style>
+<button id="resize">Resize grid</button>
+<output id="report" data-hit="none"></output>
+<div class="grid">
+    <a class="card" id="fill"><div class="preview"></div><div class="copy"></div></a>
+    <a class="card" id="image"><div class="preview"><img alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC"></div><div class="copy"></div></a>
+    <div class="card" id="clip"><div class="ink"></div></div>
+    <div class="card" id="visible"><div class="preview"></div></div>
+    <div class="card" id="auto"><div class="ink"></div></div>
+    <div class="card" id="nested"><div class="preview"></div><div class="copy"></div></div>
+</div>
+<script>
+const report = document.getElementById('report');
+document.querySelectorAll('.preview, .ink').forEach(function (ink) {
+    ink.onclick = function () { report.setAttribute('data-hit', ink.parentNode.id); };
+});
+document.getElementById('resize').onclick = function () {
+    document.querySelector('.grid').style.gridTemplateColumns = 'repeat(3, 160px)';
+    report.setAttribute('data-hit', 'none');
+};
+</script>

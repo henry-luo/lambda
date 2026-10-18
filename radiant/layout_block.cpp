@@ -4908,21 +4908,23 @@ bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
     return is_cross_origin;
 }
 
-void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                float iframe_width, float iframe_height) {
-    if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
-    DomDocument* parent_doc = lycon->ui_context->document;
-    float saved_viewport_width = lycon->ui_context->viewport_width;
-    float saved_viewport_height = lycon->ui_context->viewport_height;
-    lycon->ui_context->document = lam::up(doc);
-    lycon->ui_context->viewport_width = iframe_width;
-    lycon->ui_context->viewport_height = iframe_height;
-    process_document_font_faces(lycon->ui_context, doc);
-    layout_html_doc(lycon->ui_context, doc, false);
-    radiant_dispatch_lambda_body_load(lycon->ui_context, doc);
-    lycon->ui_context->document = lam::up(parent_doc);
-    lycon->ui_context->viewport_width = saved_viewport_width;
-    lycon->ui_context->viewport_height = saved_viewport_height;
+void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
+                                float iframe_width, float iframe_height, bool initial_load) {
+    if (!uicon || !doc || !doc->html_root) return;
+    DomDocument* parent_doc = uicon->document;
+    float saved_viewport_width = uicon->viewport_width;
+    float saved_viewport_height = uicon->viewport_height;
+    uicon->document = lam::up(doc);
+    uicon->viewport_width = iframe_width;
+    uicon->viewport_height = iframe_height;
+    process_document_font_faces(uicon, doc);
+    layout_html_doc(uicon, doc, false);
+    // resizing preserves the existing session; load handlers initialize it only once.
+    if (initial_load) radiant_dispatch_lambda_body_load(uicon, doc);
+    else radiant_queue_template_render_events(doc, doc->root);
+    uicon->document = lam::up(parent_doc);
+    uicon->viewport_width = saved_viewport_width;
+    uicon->viewport_height = saved_viewport_height;
 }
 
 struct IframeSourceSnapshot : DomDocumentResourceData {
@@ -4940,6 +4942,28 @@ static IframeSourceSnapshot* iframe_source(DomDocument* doc) {
         if (resource->destroy == iframe_source_destroy)
             return static_cast<IframeSourceSnapshot*>(resource->data.get());
     return nullptr;
+}
+bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
+                               float viewport_width, float viewport_height) {
+    if (!doc || !source_text) return false;
+    IframeSourceSnapshot* snapshot = iframe_source(doc);
+    if (!snapshot) {
+        snapshot = (IframeSourceSnapshot*)mem_calloc(1, sizeof(*snapshot), MEM_CAT_DOM);
+        if (!snapshot) return false;
+        snapshot->text = lam::own(mem_strdup(source_text, MEM_CAT_DOM));
+        if (!snapshot->text || !dom_document_add_resource(doc, snapshot, iframe_source_destroy)) {
+            iframe_source_destroy(snapshot);
+            return false;
+        }
+    } else if (strcmp(snapshot->text, source_text)) {
+        char* replacement = mem_strdup(source_text, MEM_CAT_DOM);
+        if (!replacement) return false;
+        mem_free(snapshot->text);
+        snapshot->text = lam::own(replacement);
+    }
+    snapshot->width = viewport_width;
+    snapshot->height = viewport_height;
+    return true;
 }
 struct IframeContextScope {
     UiContext* ui;
@@ -4971,8 +4995,8 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
         if (snapshot && (snapshot->width != viewport_width || snapshot->height != viewport_height)) {
             snapshot->width = viewport_width;
             snapshot->height = viewport_height;
-            layout_iframe_embedded_doc(lycon, previous,
-                viewport_width, viewport_height);
+            layout_iframe_embedded_doc(lycon->ui_context, previous,
+                viewport_width, viewport_height, false);
         }
         return previous;
     }
@@ -4988,15 +5012,10 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
         layout_load_iframe_src_doc(lycon, src,
             (int)viewport_width, (int)viewport_height); // INT_CAST_OK: loader viewport API uses integer CSS pixels
     if (doc) {
-        snapshot = (IframeSourceSnapshot*)mem_calloc(1, sizeof(*snapshot), MEM_CAT_DOM);
-        if (snapshot) snapshot->text = lam::own(mem_strdup(source_text, MEM_CAT_DOM));
-        if (!snapshot || !snapshot->text || !dom_document_add_resource(doc, snapshot, iframe_source_destroy)) {
-            if (snapshot) iframe_source_destroy(snapshot);
+        if (!layout_iframe_track_source(doc, source_text, viewport_width, viewport_height)) {
             free_document(doc);
             doc = nullptr;
         } else {
-            snapshot->width = viewport_width;
-            snapshot->height = viewport_height;
             if (previous) {
                 // Retire the old generation only after its replacement has loaded successfully.
                 clear_document_interaction_state_before_detach(previous);
@@ -5007,7 +5026,7 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
             block->embed->doc = lam::own(doc);
             dom_document_set_embedding(doc, lycon->ui_context->document, block->as_element());
             radiant_document_ensure_state(doc, "iframe source snapshot");
-            layout_iframe_embedded_doc(lycon, doc,
+            layout_iframe_embedded_doc(lycon->ui_context, doc,
                 viewport_width, viewport_height);
             if (previous) free_document(previous);
             DomDocument* parent = lycon->ui_context->document;

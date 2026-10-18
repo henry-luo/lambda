@@ -346,7 +346,9 @@ static long long count_error_lane_tag_tests(const Lines& lines) {
     long long total = 0;
     for (size_t i = 0; i < lines.size(); i++) {
         const auto& text = lines[i].text;
-        if (text.find("\teq\t") != 0) continue;
+        // the formal JS emitter branches on ERROR directly instead of materializing an eq result.
+        if (text.find("\teq\t") != 0 && text.find("\tbeq\t") != 0 &&
+                text.find("\tbne\t") != 0) continue;
         size_t comma = text.rfind(", 27");
         // D8.4.3's ERROR carrier has tag 27; this metric deliberately pins
         // the emitted comparison, not the retired source-level poll helper.

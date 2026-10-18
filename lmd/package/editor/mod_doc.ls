@@ -75,6 +75,10 @@ fn at_step(node, path, i) {
 }
 pub fn node_at(doc, path) => at_step(doc, path, 0)
 
+// preorder paths are shared by leaf, task and image projections.
+pub fn descendants(n, path=[]) => [{path:path,node:n},
+  *if (is_node(n)) [for (i,child in n.content) for (entry in descendants(child,[*path,i])) entry] else []]
+
 pub fn parent_path(path) =>
   if (len(path) == 0) { [] } else { list_take(path, len(path) - 1) }
 

@@ -96,19 +96,10 @@ extern "C" Item vmap_new(void);
 extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
 Item vmap_get_by_item(VMap* vm, Item key);
 
-#define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
-#define RADIANT_CUSTOM_LAYOUT_NAME_CAP 64
 // Rich graph ports may sit below nested table/tbody/tr wrappers; keep traversal
 // bounded while exposing enough laid-out ancestry for semantic attachment.
 #define RADIANT_VELMT_CHILD_DEPTH 32
 #define RADIANT_VELMT_MAGIC 0x56454c4d54ULL
-
-typedef struct RadiantCustomLayoutEntry {
-    char name[RADIANT_CUSTOM_LAYOUT_NAME_CAP];
-    Heap* owner_heap;
-    Item fn;
-    bool rooted;
-} RadiantCustomLayoutEntry;
 
 typedef struct RadiantVelmtHost {
     uint64_t magic;
@@ -128,8 +119,6 @@ typedef struct RadiantLayoutResource : DomDocumentResourceData {
     UiContext ui_context;
 } RadiantLayoutResource;
 
-static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY];
-static int g_radiant_custom_layout_count = 0;
 static uint64_t g_radiant_velmt_next_pass_id = 1;
 static THREAD_LOCAL uint64_t g_radiant_velmt_active_pass_id = 0;
 
@@ -983,33 +972,11 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
 }
 
 static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context) {
-    // layouts register on the runtime whose packages built the document
+    // generated paint belongs to the evaluator that ran the package layout
     Runtime* runtime = (layout_context && layout_context->parent)
         ? dom_document_loader_runtime(layout_context->parent->doc) : nullptr;
     if (runtime && runtime_heap(runtime)) return runtime_heap(runtime);
     return ::context ? ::context->heap : nullptr;
-}
-
-static RadiantCustomLayoutEntry* radiant_custom_layout_entry(const char* name, Heap* owner_heap) {
-    if (!name || name[0] == '\0') return nullptr;
-    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
-        if (g_radiant_custom_layouts[i].owner_heap == owner_heap &&
-            strcmp(g_radiant_custom_layouts[i].name, name) == 0) {
-            return &g_radiant_custom_layouts[i];
-        }
-    }
-    return nullptr;
-}
-
-static RadiantCustomLayoutEntry* radiant_custom_layout_free_entry(void) {
-    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
-        if (!g_radiant_custom_layouts[i].owner_heap &&
-            !g_radiant_custom_layouts[i].rooted) {
-            return &g_radiant_custom_layouts[i];
-        }
-    }
-    if (g_radiant_custom_layout_count >= RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY) return nullptr;
-    return &g_radiant_custom_layouts[g_radiant_custom_layout_count++];
 }
 
 static bool radiant_custom_layout_parse_result(const CustomLayoutContext* context,
@@ -1086,23 +1053,14 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
     return ok;
 }
 
-static bool radiant_lambda_layout_callback(const CustomLayoutContext* context,
-                                           CustomLayoutResult* result,
-                                           const char* package_module) {
-    if (!context || !result) return false;
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result,
+                                     const char* package_module) {
+    if (!context || !result || !package_module) return false;
     DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
-    Runtime* runtime = package_module ? layout_document_package_runtime(layout_doc, package_module)
-        : dom_document_loader_runtime(layout_doc);
+    Runtime* runtime = layout_document_package_runtime(layout_doc, package_module);
     // Importing the first package installs the native Radiant host API.
-    if (!radiant_host_api || !radiant_host_api->script || (package_module && !runtime)) return false;
-    Heap* owner_heap = radiant_custom_layout_heap(context);
-    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name, owner_heap);
-    if (!package_module && (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC)) {
-        log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s' heap=%p",
-                  context && context->layout_name ? context->layout_name : "(null)", owner_heap);
-        return false;
-    }
-
+    if (!radiant_host_api || !radiant_host_api->script || !runtime) return false;
     uint64_t previous_pass_id = g_radiant_velmt_active_pass_id;
     uint64_t pass_id = g_radiant_velmt_next_pass_id++;
     if (g_radiant_velmt_next_pass_id == 0) g_radiant_velmt_next_pass_id = 1;
@@ -1165,35 +1123,16 @@ static bool radiant_lambda_layout_callback(const CustomLayoutContext* context,
     {
         // A layout callback is reentrant in the document's active script call;
         // handing that EvalContext to a worker tears down the parent activation.
-        RootFrame roots(5);
-        Rooted<Item> rooted_fn(roots, entry ? entry->fn : ItemNull);
+        RootFrame roots(4);
         Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
-        bool retained_callback = runtime && !interp_has_active_state();
-        if (package_module) {
-            Item callback_args[] = {
-                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
-            RuntimeExecutionScope execution_scope(callback_context);
-            rooted_result.set(interp_call_package_export(runtime, package_module,
-                "layout", callback_args, 3));
-        } else if (retained_callback && rooted_fn.get().function->def_module) {
-            Item callback_args[] = {
-                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
-            // Document transforms finish before their retained layout pass. Route
-            // interpreted callbacks through their defining module's retained-call bridge.
-            rooted_result.set(interp_call_runtime_function(runtime, rooted_fn.get().function,
-                callback_args, 3));
-        } else {
-            // MIR callbacks resolve their own module slab, even after the
-            // document activation ends; reentrant calls keep the active scope.
-            RuntimeExecutionScope execution_scope(retained_callback ? callback_context : nullptr);
-            LAMBDA_SCALAR_HOME(callback_result_home);
-            rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
-                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
-                &callback_result_home));
-        }
+        Item callback_args[] = {
+            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
+        RuntimeExecutionScope execution_scope(callback_context);
+        rooted_result.set(interp_call_package_export(runtime, package_module,
+            "layout", callback_args, 3));
         if (get_type_id(rooted_result.get()) == LMD_TYPE_ERROR) {
             log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         } else {
@@ -1206,16 +1145,6 @@ static bool radiant_lambda_layout_callback(const CustomLayoutContext* context,
     g_radiant_velmt_active_pass_id = previous_pass_id;
     input_context = saved_input_context;
     return ok;
-}
-
-static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
-                                                  CustomLayoutResult* result) {
-    return radiant_lambda_layout_callback(context, result, nullptr);
-}
-
-bool radiant_package_layout_callback(const CustomLayoutContext* context,
-                                     CustomLayoutResult* result, const char* package_module) {
-    return radiant_lambda_layout_callback(context, result, package_module);
 }
 
 static DomDocument* radiant_dom_document_from_node(DomNode* node) {
@@ -3076,8 +3005,8 @@ RADIANT_C_API Item fn_radiant_dom_edit_clipboard_write(Item node_item,
     if (!invocation) return radiant_bool_item(false);
     const char* html = fn_to_cstr(html_item);
     const char* text = fn_to_cstr(text_item);
-    if (!text || !text[0]) return radiant_bool_item(false);
-    if (html && html[0]) clipboard_copy_rich(html, text);
+    if ((!text || !text[0]) && (!html || !html[0])) return radiant_bool_item(false);
+    if (html && html[0]) clipboard_copy_rich(html, text ? text : "");
     else clipboard_copy_text(text);
     return radiant_bool_item(true);
 }
@@ -4698,55 +4627,6 @@ RADIANT_C_API Item fn_radiant_poc_attr(Item path_item) {
     return result;
 }
 
-RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
-    const char* name = fn_to_cstr(name_item);
-    if (!name || name[0] == '\0' || get_type_id(fn_item) != LMD_TYPE_FUNC) {
-        log_error("JUBE_RADIANT_REGISTER_LAYOUT: expected name and fn callback");
-        return radiant_bool_item(false);
-    }
-    if (!radiant_host_api || !radiant_host_api->gc) {
-        log_error("JUBE_RADIANT_REGISTER_LAYOUT: radiant host API not initialized");
-        return radiant_bool_item(false);
-    }
-
-    Heap* owner_heap = ::context ? ::context->heap : nullptr;
-    if (!owner_heap) {
-        log_error("JUBE_RADIANT_REGISTER_LAYOUT: no active Lambda heap for '%s'", name);
-        return radiant_bool_item(false);
-    }
-
-    RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(name, owner_heap);
-    if (!entry) {
-        entry = radiant_custom_layout_free_entry();
-        if (!entry) {
-            log_error("JUBE_RADIANT_REGISTER_LAYOUT: registry full for '%s'", name);
-            return radiant_bool_item(false);
-        }
-        size_t name_len = strlen(name);
-        if (name_len >= RADIANT_CUSTOM_LAYOUT_NAME_CAP) {
-            log_error("JUBE_RADIANT_REGISTER_LAYOUT: layout name too long '%s'", name);
-            return radiant_bool_item(false);
-        }
-        memset(entry, 0, sizeof(*entry));
-        // registered layout names outlive the Lambda string argument; keep a
-        // registry-owned key for callbacks triggered by later layout passes.
-        memcpy(entry->name, name, name_len + 1);
-        entry->owner_heap = owner_heap;
-        entry->fn = ItemNull;
-        radiant_host_api->gc->register_root(&entry->fn.item);
-        entry->rooted = true;
-    }
-
-    entry->fn = fn_item;
-    if (!custom_layout_register(entry->name, radiant_lambda_custom_layout_callback)) {
-        log_error("JUBE_RADIANT_REGISTER_LAYOUT: native registry failed for '%s'", entry->name);
-        return radiant_bool_item(false);
-    }
-    log_info("JUBE_RADIANT_REGISTER_LAYOUT: registered custom layout '%s' heap=%p",
-             entry->name, entry->owner_heap);
-    return radiant_bool_item(true);
-}
-
 RADIANT_C_API Item fn_radiant_velmt_tag(Item velmt_item) {
     return radiant_obj_get_alias(velmt_item, "tag", "node_name");
 }
@@ -4847,36 +4727,7 @@ static int radiant_module_init(const JubeHostAPI* host) {
 
 static void radiant_module_shutdown(void) {
     custom_layout_registry_clear();
-    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
-        RadiantCustomLayoutEntry* entry = &g_radiant_custom_layouts[i];
-        if (entry->rooted && radiant_host_api && radiant_host_api->gc) {
-            radiant_host_api->gc->unregister_root(&entry->fn.item);
-        }
-        memset(entry, 0, sizeof(*entry));
-    }
-    g_radiant_custom_layout_count = 0;
     radiant_host_api = nullptr;
-}
-
-static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
-    Heap* heap = (Heap*)heap_ptr;
-    if (!heap) return;
-    for (int i = 0; i < g_radiant_custom_layout_count; i++) {
-        RadiantCustomLayoutEntry* entry = &g_radiant_custom_layouts[i];
-        if (entry->owner_heap != heap) continue;
-        if (entry->rooted && heap->gc) {
-            // Registry slots are process-stable, but callback values are only
-            // valid for the runtime heap that JIT-compiled their functions.
-            gc_unregister_root(heap->gc, &entry->fn.item);
-        }
-        memset(entry, 0, sizeof(*entry));
-    }
-    while (g_radiant_custom_layout_count > 0) {
-        RadiantCustomLayoutEntry* tail =
-            &g_radiant_custom_layouts[g_radiant_custom_layout_count - 1];
-        if (tail->owner_heap || tail->rooted) break;
-        g_radiant_custom_layout_count--;
-    }
 }
 
 #define RADIANT_READONLY_INDEXED (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_INDEXED_READONLY)
@@ -5109,9 +4960,9 @@ static const JubeFuncDef radiant_functions[] = {
     {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,
      "Item fn_radiant_present_content(Item element, Item children)", (fn_ptr)fn_radiant_present_content},
     // F5 editing waist — all offsets in codepoints
-    {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
+    {"free", "pn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
-    {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
+    {"layout", "pn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
     {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
@@ -5123,15 +4974,16 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_geomap_eval_layer(Item layer, Item feature, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_layer},
     {"geomap_eval_features", "fn(layer: element, features: array, zoom: number) -> array|string", (fn_ptr)fn_radiant_geomap_eval_features, JUBE_FN_NONE,
      "Item fn_radiant_geomap_eval_features(Item layer, Item features, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_features},
-    {"local_point", "pn(node: any, x: number, y: number) -> array|null", (fn_ptr)fn_radiant_local_point, JUBE_FN_NONE,
+    // committed geometry reads have the same colour as DOM getters (D7.4.6).
+    {"local_point", "fn(node: any, x: number, y: number) -> array|null", (fn_ptr)fn_radiant_local_point, JUBE_FN_NONE,
      "Item fn_radiant_local_point(Item node, Item x, Item y)", (fn_ptr)fn_radiant_local_point},
     {"geomap_plan", "fn(model: element, width: number, height: number) -> any", (fn_ptr)fn_radiant_geomap_plan, JUBE_FN_NONE,
      "Item fn_radiant_geomap_plan(Item model, Item width, Item height)", (fn_ptr)fn_radiant_geomap_plan},
-    {"geomap_snapshot", "pn(node: any) -> any", (fn_ptr)fn_radiant_geomap_snapshot, JUBE_FN_NONE,
+    {"geomap_snapshot", "fn(node: any) -> any", (fn_ptr)fn_radiant_geomap_snapshot, JUBE_FN_NONE,
      "Item fn_radiant_geomap_snapshot(Item node)", (fn_ptr)fn_radiant_geomap_snapshot},
     {"geomap_query_frame", "fn(frame: any, point: array, options: map) -> any", (fn_ptr)fn_radiant_geomap_query_frame, JUBE_FN_NONE,
      "Item fn_radiant_geomap_query_frame(Item frame, Item point, Item options)", (fn_ptr)fn_radiant_geomap_query_frame},
-    {"geomap_query_displayed", "pn(node: any, point: array, options: map) -> any", (fn_ptr)fn_radiant_geomap_query_displayed, JUBE_FN_NONE,
+    {"geomap_query_displayed", "fn(node: any, point: array, options: map) -> any", (fn_ptr)fn_radiant_geomap_query_displayed, JUBE_FN_NONE,
      "Item fn_radiant_geomap_query_displayed(Item node, Item point, Item options)", (fn_ptr)fn_radiant_geomap_query_displayed},
     {"geomap_svg", "fn(model: element, width: number, height: number) -> string|null", (fn_ptr)fn_radiant_geomap_svg, JUBE_FN_NONE,
      "Item fn_radiant_geomap_svg(Item model, Item width, Item height)", (fn_ptr)fn_radiant_geomap_svg},
@@ -5153,8 +5005,6 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_box(Item node)", (fn_ptr)fn_radiant_box},
     {"poc_attr", "fn(path: string) -> string", (fn_ptr)fn_radiant_poc_attr, JUBE_FN_NONE,
      "Item fn_radiant_poc_attr(Item path)", (fn_ptr)fn_radiant_poc_attr},
-    {"register_layout", "fn(name: string, callback: fn) -> bool", (fn_ptr)fn_radiant_register_layout, JUBE_FN_NONE,
-     "Item fn_radiant_register_layout(Item name, Item callback)", (fn_ptr)fn_radiant_register_layout},
     {"velmt_index", "fn(velmt: velmt) -> int|null", (fn_ptr)fn_radiant_velmt_index, JUBE_FN_NONE,
      "Item fn_radiant_velmt_index(Item velmt)", (fn_ptr)fn_radiant_velmt_index},
     {"velmt_tag", "fn(velmt: velmt) -> string|null", (fn_ptr)fn_radiant_velmt_tag, JUBE_FN_NONE,
@@ -5216,7 +5066,7 @@ static const JubeModuleDef radiant_module = {
     radiant_dom_type_bindings,
     radiant_dom_type_binding_count,
     NULL,
-    radiant_custom_layout_heap_cleanup,
+    NULL,
     &radiant_requirements,
 };
 

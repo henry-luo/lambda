@@ -17,16 +17,24 @@ uses the existing Lambda editor model and DOM mechanisms (**D7.2.5**).
 import controller: lambda.edit.controller
 ```
 
-| Operation | Behavior |
-|---|---|
-| `mount(editor, node, preset="html5_subset", id="edit-surface")` | Bind an existing surface once; an absent surface leaves the editor unmounted. A null preset disables native binding. |
-| `adopt(editor, event, preset, id)` | Return `{editor, changed}` after validating and adopting a document-selection snapshot. The optional preset and ID have the same defaults as `mount`. |
-| `handle(editor, event, read_only=false, preset, id)` | Mount and route native editing input through the existing editor adapter. Read-only input is declined; copy claims a no-op without changing history or state. |
-| `request(editor, input_type, payload={})` | Execute a toolbar request and publish its structured completion to a bound surface. |
-| `replace(previous, next)` | Preserve the logical surface handle and native-selection revision while advancing the model revision for a replacement document. |
-| `restore(editor, enabled=true)` | Publish the model selection through the completion bridge; callers disable it while a dialog owns focus or the surface is read-only. |
-| `focus(node, id="edit-surface")` | Explicitly return focus to the document. |
-| `is_control(node)` | Recognize an input, textarea, select, or its descendant. |
+| Operation | Colour | Behavior |
+|---|---|---|
+| `surface(node, id="edit-surface")` | `fn` | Find the configured native surface. |
+| `mount(editor, node, preset="html5_subset", id="edit-surface")` | `pn` | Bind an existing surface once; an absent surface leaves the editor unmounted. A null preset disables native binding. |
+| `adopt(editor, event, preset, id)` | `pn` | Return `{editor, changed}` after validating and adopting a document-selection snapshot. The optional preset and ID have the same defaults as `mount`. |
+| `handle(editor, event, read_only=false, preset, id)` | `pn` | Mount and route native editing input through the existing editor adapter. Read-only input is declined; copy claims a no-op without changing history or state. |
+| `request(editor, input_type, payload={})` | `pn` | Execute a toolbar request and publish its structured completion to a bound surface. |
+| `replace(previous, next)` | `fn` | Preserve the logical surface handle and native-selection revision while advancing the model revision for a replacement document. |
+| `restore(editor, enabled=true)` | `pn` | Publish the model selection through the completion bridge; callers disable it while a dialog owns focus or the surface is read-only. |
+| `focus(node, id="edit-surface")` | `pn` | Explicitly return focus to the document. |
+| `is_control(node)` | `fn` | Recognize an input, textarea, select, or its descendant. |
+| `selection_snapshot(event, from_surface, from_control, document_selection=null)` | `fn` | Select eligible event position/selection data without reading native DOM state. |
+| `accept_selection(editor, snapshot)` | `fn` | Apply the snapshot to the editor value and report whether it changed. |
+
+`surface` and `is_control` only query the DOM and are `fn`, following native
+getters and queries under **D7.4.6**. Mounting, selection publication and focus
+remain `pn`; callers obey each wrapper's published colour (**S12.1.1v3**).
+See [DOM reads and procedural calls](../Lambda_Func.md#dom-reads-and-procedural-calls).
 
 Applications retain command definitions, file policy, dialogs, and surface
 projection. Their handlers assign the returned editor and decide when focus

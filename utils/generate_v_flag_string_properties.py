@@ -7,10 +7,10 @@ files and emits a C header. Each property becomes an array of UTF-8 byte
 sequences; the rewriter expands \\p{StringProperty} under /v into an
 alternation over these entries.
 
-Source: test/js262/test/built-ins/RegExp/property-escapes/generated/strings/
+Source: ref/test262/test/built-ins/RegExp/property-escapes/generated/strings/
 Output: lambda/js/js_regex_string_properties.inc
 """
-import os, re, sys, json
+import os, re, sys, json, hashlib
 
 PROPS = [
     "Basic_Emoji",
@@ -22,7 +22,7 @@ PROPS = [
     "RGI_Emoji_ZWJ_Sequence",
 ]
 
-SRC_DIR = "test/js262/test/built-ins/RegExp/property-escapes/generated/strings"
+SRC_DIR = "ref/test262/test/built-ins/RegExp/property-escapes/generated/strings"
 OUT = "lambda/js/js_regex_string_properties.inc"
 
 def decode_jsstr(literal):
@@ -119,22 +119,32 @@ def emit_c_string_literal(byts):
 def main():
     out_path = OUT
     properties = {}
+    versions = set()
+    digest = hashlib.sha256()
     for prop in PROPS:
         path = os.path.join(SRC_DIR, prop + ".js")
         if not os.path.exists(path):
             print(f"missing: {path}", file=sys.stderr)
             sys.exit(1)
         strs = parse_match_strings(path)
+        with open(path, 'rb') as source:
+            data = source.read()
+        versions.add(re.search(rb'Unicode v([\d.]+)', data)[1].decode())
+        digest.update(prop.encode() + b'\0' + data)
         print(f"  {prop}: {len(strs)} match strings")
         properties[prop] = strs
+
+    if len(versions) != 1:
+        raise ValueError(f'inconsistent Unicode versions: {versions}')
 
     with open(out_path, 'w') as f:
         f.write("/*\n")
         f.write(" * Js54 P11 — Generated /v-flag string property tables.\n")
         f.write(" * DO NOT EDIT MANUALLY. Regenerate via:\n")
         f.write(" *   python3 utils/generate_v_flag_string_properties.py\n")
-        f.write(" * Source: test262 RegExp/property-escapes/generated/strings/<prop>\n")
-        f.write(" * Unicode version: 16.0.0 (pinned by upstream test262).\n")
+        f.write(" * Source: ref/test262/test/built-ins/RegExp/property-escapes/generated/strings/<prop>\n")
+        f.write(f" * Unicode version: {versions.pop()} (pinned by upstream test262).\n")
+        f.write(f" * Source SHA-256: {digest.hexdigest()}\n")
         f.write(" *\n")
         f.write(" * Each entry is a UTF-8 byte sequence + length. The /v\n")
         f.write(" * rewriter emits these as an alternation of literals.\n")

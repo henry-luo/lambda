@@ -1,6 +1,6 @@
 # JS MVP: activate the formal MIR engine
 
-**Date:** 2026-10-16. **Status:** implementation in progress.
+**Date:** 2026-10-17. **Status:** functional migration complete; benchmark timing deferred.
 **Authority:** D8.1.3v25; [MVP design §36](../jube/JS_MVP_Lmd.md#36-formal-javascript-mir-engine).
 
 ## Contract
@@ -23,12 +23,13 @@ precise roots, shapes and operation kernels (D1.3v3, D3.4, D5.2–D5.3).
    failing/crashing/timed-out records and distinguish them from historical
    selected MVP tests. Diagnose and repair the activated runtime.
 4. Complete the existing full-parity backlog: independent agents, child-realm
-   module ownership, syntax/environment/exotic cases, and the pending Unicode
-   target decision. The last intermediate whole MVP audit is not a score for
+   module ownership, syntax/environment/exotic cases, and Unicode 17
+   (USER decision, 2026-10-16). The last intermediate whole MVP audit is not a score for
    this activation.
-5. Require shared Lambda and Test262 gates, precise-GC checks, and pinned
-   release MIR benchmark comparisons before claiming closure. Existing
-   performance gaps remain open until measured and repaired.
+5. Require shared Lambda and Test262 gates and precise-GC checks for functional
+   migration closure. The user explicitly deferred benchmark timing; pinned
+   release MIR comparisons and any performance acceptance remain separate,
+   open work until timing resumes.
 
 ## Ownership adapter
 
@@ -75,6 +76,11 @@ an optional message; normal function/object allocation layouts are unchanged.
 
 | Pin / gate | Result | Scope |
 |---|---|---|
+| `host77`, release MVP units and focused normal/forced GC | 772/772; 105/105 each | Includes five module-eval lifetime, import and environment checks |
+| `host77`, isolated Script integration and AUTO forced GC | 208/208; 10/10 | Existing AUTO publication and loop-handoff checks remain green |
+| `host74`, release MVP units and focused normal/forced GC | 767/767; 100/100 each | AUTO adapter leaves the existing formal MIR units green |
+| `host74`, isolated Script integration | 208/208 pass | Seven original AUTO failures repaired; three new ownership/identity/handoff cases |
+| `host74`, AUTO normal and forced/poisoned GC | 10/10 each | Seven unchanged publication cases, three new cases; corrected one unrooted C++ result |
 | `host60`, release MVP units | 767/767 pass | Interleaved eval/with records, declaration order, escaped closures, saved receivers, unscopables and Annex B publication |
 | `host60`, focused normal and forced/poisoned GC | 100/100 each | Existing formal-entry/full-parity checks plus eight new environment checks |
 | `host59`, selected host fixtures | 51/51 pass | CLI is byte-identical to `host60`; previous 49 plus original eval/with and closure fixtures, unchanged goldens |
@@ -155,51 +161,29 @@ failures cascade after an early fatal assertion skips runtime cleanup:
 `DirectEvalSharesInterpretedFunctionEnvironment` both pass isolated replay.
 This does not clear the aggregate gate or the real host/promotion gaps.
 
-### Remaining integration work
+### Integration scope and qualification boundary
 
 | Entry | Current implementation |
 |---|---|
 | Ordinary JavaScript CLI/public Script | MVP MIR |
 | JavaScript ES modules | MVP MIR, or explicitly selected AST |
-| Formal MIR Test262 source/harness batches | MVP body plus retained AST harness |
+| Formal MIR Test262 source/harness batches | MVP body; shared native assertion helpers or retained AST harness |
 | `eval` / Function-family dynamic source | Retained AST, as required by D8.1.3v25 |
 | Document/preamble compiled artifacts | MVP MIR; shared code images with fresh realm metadata |
-| Explicit AUTO per-function promotion | Disabled pending MVP publication adapter |
-| TypeScript-specific lowering | Existing path; separate from this JS activation |
+| Explicit AUTO function promotion and loop handoff | MVP satellite bodies through the native callable ABI |
+| TypeScript-specific lowering | Shared C AST admission and MVP parameter initialization; no legacy MIR fallback (D8.1.3v25) |
 
-1. **Cached metadata and document hosts.** Document/preamble and external
-   classic-script compilation now use MVP code images. Fresh realms still
-   parse and lower their own metadata before exact-image code reuse. Removing
-   that repeated frontend work requires an immutable frontend image with
-   execution overlays. DOM/Web host adapters remain incomplete, so activating
-   the document compiler does not establish browser-script compatibility.
-2. **AUTO promotion.** Legacy satellite publication is disabled, because its
-   callable ABI cannot publish MVP entries. Explicit AUTO still interprets
-   supported units and routes whole-unit capability misses to MVP. Per-function
-   MVP promotion remains unimplemented.
-3. **Host API integration.** Native callable/object properties, lazy host
-   namespaces and prepared globals now use the shared services through the
-   adapter described below. Additional DOM/Web integration, CommonJS and process events still need
-   broader validation or adapters. Public timer handles and DOM string handlers
-   now use the shared event loop, as described below. The full
-   fixture failures are retained; no legacy retry or test-harness exclusion
-   hides these gaps.
-4. **Language/environment gaps.** Independent agents and the module direct-eval
-   import-cell bridge remain open. MIR `with`/eval now shares interleaved records,
-   as described below. RegExp legacy match reads and the wide-subject replacement
-   integration failure are repaired in `regexp2` below; broader conformance is
-   recorded separately.
-   The `v9_number_json` fixture also expects the legacy JSON parser's i64-to-
-   BigInt result for a large JSON integer, whereas MVP requests JS Number
-   parsing. S4.9.1 defines actual host numeric crossings; the JSON contract
-   needs resolution before altering either implementation or expectations.
-5. **Unicode and acceptance.** Stored string-property tables are Unicode 16;
-   canonical Test262 expects Unicode 17. That version decision remains pending.
-   Benchmark timing remains deferred; neither no-regression acceptance nor
-   complete formal-engine activation is claimed. Open public Runtime entries
-   currently request the complete mutable realm. Their loss of closed-unit
-   specialization, including ordinary CLI execution, requires measurement and
-   a sound optimization policy before performance acceptance.
+Module/child-realm ownership, interleaved `with`/eval records, host properties,
+CommonJS, timers, process events and cooperative agents are implemented and
+covered by the later evidence below. Unicode 17 is the selected target and its
+generated tables are checked for reproducibility (**S17.7.1, D8.1.3v25**).
+
+Native worker threads and browser-wide DOM/Web compatibility remain separate
+qualification scopes (**D6.3.1-D6.3.2**). Fresh document realms still reconstruct
+frontend metadata before exact-image code reuse. Removing that frontend cost,
+open-realm specialization and benchmark performance acceptance remain deferred;
+none is represented by a functional-suite pass. The final shared Lambda,
+standard Test262 and canonical formal MIR gates are recorded at the end.
 
 ### Module ownership repair
 
@@ -843,3 +827,690 @@ the same 38 pre-existing cases as HEAD. The selected host, Script and small-
 fixture results are recorded above. Full baseline closure, AUTO publication,
 independent agents, module eval import cells, library coverage, the Unicode
 version decision and performance acceptance remain open. Timing stays deferred.
+
+
+### AUTO function publication and loop handoff
+
+The existing definition-owned `FnPromotionCell` now publishes an MVP body
+through the native JsBody ABI. The original callable remains `self`, so named
+recursion, construction, descriptors and equality retain their identity.
+Definition roots retain compiled bodies between closure instances; Runtime
+Script retirement owns their metadata and code (D5.3, D6.2.2v2, D8.1.3v25).
+
+All satellites in an AUTO runtime reuse MVP's existing shared-realm unit
+mechanism. Their library borrows the native realm's intrinsic prototypes and
+preserves native callable values throughout property reads, arrays and return
+values. This avoids duplicate realm-capsule registration and adapter identity
+leaks. Global variables continue through the original slab and global-property
+mirror; lexical cells remain in the original slab. Native property operations
+resolve the owning MVP program from existing callable/nominal metadata, so
+escaped objects and implicit errors retain their realm without a Container
+flag (D3.4.7, D5.3/D5.4, D6.2.2v2).
+
+Helpers announced before coding: `mvp_lmd_compile_function_satellite`,
+`mvp_lmd_call_function_satellite`, `mvp_lmd_compile_loop_satellite`,
+`js_interp_mvp_body`, `mvp_lmd_retain_execution`,
+`mvp_lmd_property_program`, and `mvp_lmd_dynamic_call_native`. The retention
+and native-call helpers extract existing code; loop parsing and publication
+reuse the existing frontend, live-in planner and invoke kernel. Async/generator,
+captured, module and eval-sensitive definitions remain AST-pinned by admission.
+
+Release pin `host74`, SHA-256
+`a2db545b6c81f2b222a9e520fce8eee9b3481d351144e6d3478ccf4fa6947d84`,
+passes all 767 MVP units, both 100-case focused runs, all 208 isolated Script
+cases, and all ten AUTO checks normally and with forced/poisoned GC. One
+original C++ test now roots its managed result across lookup-key allocation;
+its source and expected JS behavior are unchanged. The 2,941 production
+fingerprints and 9,246 verification-input snapshot are recorded under the pin.
+The complete 40,261-case formal MIR recount was interrupted before completion. Broader
+migration and performance acceptance remain open; timing stays deferred.
+
+
+### Module direct eval over live source bindings
+
+The module environment projects the existing source record into the retained
+interpreter, with no copied import values or second export authority. New helper
+announced before coding: `js_module_environment_binding`; it selects the existing
+resolved import or local slab and reuses `js_module_binding_get` and Lambda's
+owned module-slot writer (D5.3, D7.2.1, D8.1.3v25). Imports remain readonly,
+local writes remain live through exports, and reads preserve the target TDZ.
+
+MIR retains one precisely traced environment between module instantiation and
+evaluation. Hoisted functions and eval-created closures retain that same record
+across host calls, awaits, generators and GC. Module vars stay off the global
+object; module eval receives undefined `this`. Ordinary units without direct
+eval allocate no additional environment (D5.3/D5.4, D8.1.3v25).
+
+Release pin `host77`, SHA-256
+`73a4a0cee65b07a8ab29a578ca4e6fa51e80c53add9900c4796271ad0a394097`,
+passes all 772 MVP units, both 105-case focused runs, all 208 isolated Script
+cases and all ten AUTO checks under forced/poisoned GC. The old unit expecting
+module-eval admission failure now requires successful execution of its unchanged
+source. Original fixtures, Test262 metadata and runner are unchanged. All 2,941
+production hashes and the 9,246 verification-input snapshot are retained with
+the pin. The exception census has zero violations; the callable census reports
+the same 38 existing cases as HEAD. Its selected canonical integration audit
+subsequently passed all 3,764 cases with no unresolved results;
+these focused results do not close the broader migration or deferred timing gate.
+
+
+### Primitive and Lambda numeric ingress
+
+Open-program property reads now resolve Boolean and BigInt values through
+their realm prototypes even when a large call site cannot use the compact
+callee path. Missing properties still produce undefined; detached methods
+retain their existing receiver validation (D8.1.3v25).
+
+The existing dynamic callable adapter is renamed
+`mvp_lmd_dynamic_import_value` and also reuses
+`js_native_bigint_to_bigint` for native i64/u64 values. The same ingress serves
+native call results, packed Lambda field reads, descriptors, projections,
+module exports, Promise callbacks and resumed await values. Packed foreign
+maps are admitted only for reads; existing mutation admission remains the
+authority. MVP class resolution is reused to keep ordinary class accesses
+off this foreign path (S4.9.1, D3.4.7, D5.3/D5.4, D8.1.3v25).
+
+Native JSON parsing now uses the existing strict parser's JS Number option,
+including wide integer rounding and negative zero. JSON text does not cross
+the Lambda numeric ABI. The numeric fixture now imports an actual Lambda i64
+export for its FFI check and separately checks JSON Number behavior. The CSS
+namespace uses the existing Object-prototype installer, making its existing
+tag visible to String conversion; its golden reflects that namespace
+contract. Both corrected fixture contracts execute through native AST and
+formal MIR. These are explicit fixture corrections, not Test262 exclusions
+([JSON.parse](https://tc39.es/ecma262/multipage/structured-data.html#sec-json.parse),
+[Web IDL namespace objects](https://webidl.spec.whatwg.org/#namespace-object)).
+
+Release pin `host82`, SHA-256
+`9d7aa5fa4accfc330b4936471e82f1cf954804f1d00a5e0b96314a2fa5eb303d`,
+passes all 774 MVP units, both 107-case focused runs, all 209 isolated Script
+cases and 11 AUTO/interop checks under forced/poisoned GC. The earlier whole Test262 and full fixture
+audits were interrupted and are not complete scores. A standalone MIR probe
+reproduces the Acorn/Joi ARM64 address-optimization failure: validation uses
+log2(size) instead of byte size, admitting unencodable i64 offsets 9 and 42.
+The vendor repair was subsequently approved under AGENTS.md rule 16 and is
+recorded in `patches/mir-aarch64-memory-validation.patch`; the standalone probe
+passes after the fix, and `make verify-mir-patches` confirms exact upstream
+plus patch equivalence. The ten-lane load/store regression test also covers
+packed offsets and the immediate-range boundary. Independent
+agents, the Unicode version decision, aggregate baseline closure and deferred
+performance acceptance remain open.
+
+
+### Shared-buffer carrier ownership
+
+SharedArrayBuffer cloning now creates a distinct destination-realm carrier
+over the same stable `ByteBufferHandle`. A JS-owned native allocation retains
+that handle through Lambda's existing `RefCount`; ordinary buffer data access
+and typed-array loops keep their existing layout and resolver. Growth updates
+the one shared handle, including length-tracking TypedArray and DataView
+clones. Fixed-length views retain their original offset and extent
+(D2.4.1, D5.3/D5.4, D8.1.3v25).
+
+Helpers announced before coding: `js_arraybuffer_allocate_handle`,
+`js_arraybuffer_retain`, and `js_sharedarraybuffer_clone_with_ops`. All native
+handle allocation paths reuse the first helper. Existing wrap operations
+retain a borrowed handle; each GC carrier releases its own reference, so GC
+must not deduplicate releases by handle address. Internal clone construction
+selects intrinsic prototypes through the existing buffer adapters, without
+reading guest constructor properties. The shared clone traversal reuses the
+existing view constructors. No Container flag or second backing-store model
+is added.
+
+Release pin `host84`, SHA-256
+`d312affe179ddac25b2095c4fcf7fd1304e1919125ea067aa598860ad1a3dc93`,
+passes all 775 units, 108/108 focused checks, 210/210 isolated Script cases
+and 13 AUTO/interop/clone checks under forced/poisoned GC. All three MIR
+optimizer tests pass, including
+80 packed/aligned load-store combinations in the new ARM64 regression. Acorn,
+Moment (131 assertions) and Pretext (87 assertions) complete on formal MIR
+with exact original golden output after the approved vendor repair. The
+108-case forced-GC run also passes. Joi subsequently matches its original
+golden output with 92/92 assertions passing. A fresh 40,261-case formal recount
+is still running on that pin. Independent agent execution still needs runtime owners, queues,
+blocking wait scheduling and teardown. Benchmark timing
+remains deferred.
+
+The stripped Test262 cache still contained 459 generated Unicode 16 property
+test bodies. After the Unicode 17 decision, those files were regenerated from
+the pinned canonical corpus through the existing comment stripper; the sibling
+`lambda-test` checkout was clean in that scope. The refresh plan, original and
+generated copies, corpus commit and before/after hashes are retained under
+`temp/js_formal_mir_20261016/unicode17-cache-refresh`. Harness, metadata,
+baseline population and original canonical sources are unchanged. The standard
+baseline is running against that matching cache alongside the separate full
+formal-MIR canonical recount.
+
+
+### Canonical module allocation across borrowed Runtime controllers
+
+A child realm's Lambda import exposed an allocator collision: its private
+Runtime counter assigned module IDs already used by the shared EvalContext's
+JS module slabs. The unchanged import path reported `sealed layout changed`
+and left the import completion pending. The physical table and allocation
+authority must have the same owner (D5.4.3, D7.2.1, D8.5.1v2).
+
+New helper announced before coding: `runtime_module_state_owner`. The
+EvalContext retains its canonical allocator Runtime once, while a borrowed
+controller can still select its own module registry and execution metadata.
+Script registration, direct slab reservation and generation retirement reuse
+that existing owner's counter. No second counter or module table is added;
+the new owner pointer is at the Context tail, preserving established hot
+offsets (D8.1.3v10).
+
+Release pin `host85`, SHA-256
+`a6b4c87d88e265feee707f3376dee55f83c66be9e5f15339df250424ceb1d87f`,
+now completes the original parent/two-child Lambda import reproducer with
+values 42 in all three realms and the correct Array constructor identities.
+A new integration unit also checks top-level await and independent exported
+local cells. The pin passes 776/776 units and both 109-case focused runs, including forced/poisoned GC. The whole formal
+recount remains pinned to `host84`; it must not be reported as a `host85`
+whole-suite score. Legacy JS emission sidecars and size budgets still refer
+to LJS function/ABI shapes and need migration review before aggregate baseline
+closure. Independent agents, remaining library stalls and the Unicode target
+remain open; benchmark timing is deferred.
+
+### Bounded emission for oversized straight-line functions
+
+The BN library exposed optimizer pressure from generic property/arithmetic
+expansion, rather than a proven optimizer cycle. Existing compact dispatch now
+also applies after the existing instruction budget in oversized straight-line
+functions. Lexical loops and known numeric operations retain their established
+emission. Generic arithmetic reuses `mvp_lmd_dynamic_binary` and its stable scalar
+home; coercion order, BigInt errors and possible string results remain observable
+(**D6.2.2v2, D5.3/D5.4, D8.1.3v25**).
+
+Pin `host87` passes 778/778 units and both 110-case focused runs (normal and
+forced/poisoned GC). BN matches its original golden; its largest MIR function
+shrinks from about 314,000 to 108,000 instructions. Ramda (94 assertions) and
+Lodash match their original goldens on the preceding dispatch pin `host86`.
+These are functional/structural results, not benchmark timing evidence.
+
+### Independent agent ownership and scheduling
+
+Pin `host88` passes 778/778 units, both 110-case focused runs and 211/211 isolated
+Script tests. Its new agent-state ownership test passes normally and with forced,
+poisoned GC: globals, queues, timer callbacks and teardown stay with their owner.
+The new `js_runtime_state_create_agent` / `js_runtime_state_destroy_agent` reuse
+realm initialization, queues and exact roots while retaining the shared
+EvalContext (**D5.4, D6.3.1**). Timer capture now retains the execution-state
+selector; activation ambient state also preserves the borrowed Runtime controller.
+
+The next candidate replaces the legacy synchronous agent simulation with strong
+Lambda `Activation`s, independent AST source realms and FIFO reports. Dynamic
+agent strings use the retained interpreter (**D8.1.3v25**). Broadcast clones the
+existing SAB carrier and retains its shared handle; blocking waits park, and
+notifications scan real waiters at the same backing handle and byte offset.
+No report rewriting or substituted atomic values are retained. Announced helpers
+are `js_agent_checkpoint`, `js_agent_pump`, `js_agent_state_at`,
+`js_agent_group_shutdown`, and private group/member lifecycle routines. The
+existing agent factory is shared by both frontends; `MvpLmdRealmScope` gains a
+native-realm option. Functional, forced-GC and canonical agent qualification are
+pending. This cooperative single-context implementation does not claim the
+worker-thread isolation audit in **D6.3.2** is complete.
+
+
+The first real-agent pin (`host89`) passes three integration checks normally and
+under forced/poisoned GC, and the rewritten local agent-state fixture matches
+its existing golden. One unit still asserted that agent access was unsupported;
+it now checks the supported object's identity and callable method instead. The
+canonical slice exposed a separate standalone-owner gap. The existing
+`mvp_lmd_prepare_module_realm` factory is now shared with the lazy agent getter;
+retained native Scripts join the program's existing post-heap metadata owner
+(**D5.4, D8.1.3v25**), rather than being freed while unreachable GC functions can
+still refer to their AST.
+
+Release pin `host90`, SHA-256
+`1ec9873caa8ffb9b648289399b7848529b60fb178a77ece18de37322f954f66d`,
+passes **79/79 canonical agent cases** and **79/79 additional strict variants**
+through the unchanged formal batch harness, with no unresolved cases. It also
+passes **782/782 units** and **114/114 focused checks** normally; the integrated
+forced-GC run is in progress. The final cleanup pin removes obsolete virtual
+clock fields and binds the canonical slab allocator before the first agent.
+A fresh full JS fixture audit has started on that pin. The full formal recount
+remains independently pinned to `host84`; these selected results must not be
+added to that pin's score.
+
+
+#### Agent cleanup pin and complete fixture screen
+
+Pin `host91` (`86f5c4472563176abf36043bf69bdaa534072047f8d6cc5bc20ef6f287a9b144`)
+passes 782/782 MVP units, both 114-case focused runs, 211/211 isolated Script
+cases and 14 AUTO/interop/clone/agent checks under forced/poisoned GC. The
+complete 509-case fixture screen passes 508, with no timeouts. Its only failure
+is `underscore_lib`: 113 of 114 assertions pass, and a minimal local alias of
+`isFinite` reproduces the TypeError. `kind()` incorrectly assigned K_UNDEFINED
+to an unresolved global name, although the runtime reads its live host/global
+property. The next candidate uses K_ANY for this general unresolved-name case;
+no builtin-name special case or new helper is added (**D8.2.4-D8.2.6,
+D8.1.3v25**). Direct replay on `host92` restores Underscore's original 114/114
+golden and passes the local/nested alias reproducer; integrated qualification
+is in progress.
+
+The pre-agent `host84` whole formal recount completed at 39,817/40,261 passes,
+439 failures and five timeouts; 95 outcomes remain unresolved, including
+missing child results. Replaying those 444 nonpasses on `host91` yields 121
+passes, 310 failures and 13 timeouts (49 unresolved). These are distinct pins
+and selections, not a combined current score. A new whole recount remains
+running on `host91`. Remaining failures include generated Unicode RegExp
+cases, legacy constructor/environment cases and inferred function names.
+
+All 31 legacy JS MIR sidecars have been ported to formal MVP scope/ABI
+contracts and pass (32/32 including corpus discovery) on `host91`. Review
+preserves rooted argument spans, callable ABI/context/unit guards, source
+throw versus catch conversion, packed-field and descriptor fallback,
+BigInt result joins and scalar-home ownership (**D5.3/D5.4, D6.2.2v2,
+D8.4.3v2**). Changed contracts are explicit: open Script globals require
+mutable lookup; local hoisted functions use shared closure cells; global
+declaration instantiation precedes the emitted entry; bounded loop counters
+can use the integer lane; for-in yields String keys; nonescaping local
+literals may fold. The size ratchet and aggregate baseline remain open.
+
+### Reference coercion, names and observable iterator families
+
+The agent integration's ambient restoration reverted a module controller
+installed lazily by same-owner async work. Restoration now applies only when
+switching execution owners (**D5.4, D6.3.1**). The paired diagnostic fails on
+`host94` and passes on `host95`; all 101 affected dynamic-import cases and the
+selected top-level-await case pass on `host95`. The complete `host91` recount
+was 39,750/40,261, with 502 failures and nine timeouts (142 unresolved); selected
+repairs are not added to that whole score.
+
+Subsequent candidates repair nullish computed-reference ordering, deferred
+simple-assignment keys, lazy configurable function names, object-to-primitive
+selection before BigInt arithmetic, primitive writes with their original
+receiver, strict unresolved references captured before RHS effects, constructor
+spread, Script arrow receivers, primitive subclass nominal ancestry and
+synchronous generator prototype selection after parameter initialization
+(**D3.4.7, D5.3/D5.4, D6.2.2v2, D8.1.3v25**). The new private compiler helper
+`primitive_operand` was announced before coding and extracts existing
+conversion emission. Function-name definition uses the owning program's
+canonical pool; a shape's `StrView` is never a runtime String.
+
+Optional observable iterator metadata now distinguishes Map, Set and String
+families, while the existing sequence family represents Array iterators.
+Existing descriptor setters install nonenumerable iterator aliases and proper
+tags. String iteration reuses the same carrier and stepping logic after
+RequireObjectCoercible/ToString. No normal-container flag or replacement
+storage is introduced (**D3.4, D5.3**).
+
+Release `host102` (`4e5b3f7e99ab20aedfd27e9a325f03386249a40013ea8d0dafd58648f29ade40`)
+passes **799/799 units**, **131/131 focused checks** normally and under
+forced/poisoned GC, and **164/172 selected canonical cases**, with no unresolved
+selected outcomes. One older unit expected computed key conversion before the
+RHS; its trace now follows the unchanged checked-in Test262 assignment cases.
+Those eight selected failures are repaired in the subsequent checkpoint below.
+Script/fixture requalification, full recount and aggregate gates remain open.
+Benchmark timing remains deferred.
+
+### Generated declarations, Unicode 17 and emission qualification
+
+The selected canonical screen passes **172/172** on `host106`. Template raw
+and cooked values normalize source CR/CRLF in the shared frontend; function
+hoisting replaces parameter bindings while preserving the implicit `arguments`
+binding against Annex B block declarations. Computed anonymous class names
+precede static initialization. Primitive deletion boxes only primitive
+alternatives and retains Array, Function and typed-view carriers in the kind
+proof (**D8.1.3v25, D8.2.4-D8.2.6**).
+
+Unused private names use existing owned module slots instead of allocating a
+closure cell for every spelling. Actual captures retain the shared Lambda
+closure-cell ABI (**D6.2.2v2, D5.4**). Oversized passive module declarations
+use one immutable initialization plan through the new helper
+`mvp_lmd_private_names_initialize`, which calls the existing private-name
+operation and owned-slot store. Private class metadata uses Lambda `array()`
+and append-slot reservation; guest sparse-array policy must not turn an
+internal dense slab into a carrier with a null item buffer (**D5.3**). The
+original 8,326-name canonical class now completes within the unchanged
+10-second deadline. A 9,000-name unit covers the allocation boundary.
+
+**User decision (2026-10-16): upgrade JS Unicode support to 17 during the
+migration.** Properties and string properties regenerate from the pinned
+canonical Test262 Unicode 17 data, with source hashes. The new generator
+`utils/generate_js_unicode_properties.py` replaces the previously unaudited
+range-generation step; lookup functions stay in the shared runtime. Identifier
+validation reads those same ID_Start/ID_Continue tables, removing the manual
+version delta. Shared Lambda simple folding regenerates from official
+[Unicode 17 CaseFolding.txt](https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt)
+(SHA-256 `ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183`),
+preserving **S17.7.1**. The shared case conversion already supplies the new
+mappings. Annex B class ranges with a class-escape endpoint now form a union
+instead of interpreting the escape letter as a range endpoint. No vendor
+dependency or Test262 runner changes are needed.
+
+Release `host107` passes **805/805 units**, **137/137 focused checks** normally
+and with forced/poisoned GC. Its RegExp residual screen passes 144/150, with
+six timeouts; all six pass in the serial residual replay on `host108`.
+Release `host108`
+(`0e4bc64214ee94d19f7619c0d471a7acb1550ac6d2ffcefc8b9b85b07f7b396f`)
+passes **134/134** remaining `host91` nonpasses not covered by the preceding
+successful selected screens. These separate screens do not constitute a new
+whole-corpus score. Fresh integration and whole-corpus qualification are
+running on `host108`.
+
+All 31 JS emission sidecars pass (32 checks including discovery). Seven JS
+size ratchets now select formal `mvp_lmd_program`/`mvp_lmd_fN` scopes, with
+zero slack and reviewed precise frames (**D8.6.1, D5.3/D5.4**). The ERROR-tag
+counter recognizes direct `beq`/`bne` comparisons as well as materialized `eq`,
+preserving the gate across the emitter change (**D8.4.3v2**). Reviewed release
+module instruction counts are:
+
+| Probe | Retired LJS | Formal MIR | Main reason for the changed contract |
+|---|---:|---:|---|
+| numeric inference | 242 | 696 | mutable Script callee lookup and Item entry guards |
+| hoisted closure | 507 | 1,016 | captured closure cells and owned module/activation slots |
+| array methods | 3,727 | 16,622 | complete observable method/callback paths and precise homes |
+| generators | 5,880 | 11,855 | guarded callable and suspension ownership paths |
+| side-stack GC | 8,794 | 22,551 | formal public entry, precise roots and scalar lifetimes |
+| exact collection | 21,474 | 15,762 | shared nominal class metadata and uncapped member plans |
+
+The catch probe pins five physical tag comparisons across generic admission
+and catch conversion. Lambda budgets remain unchanged. All seven JS ratchets
+also pass with `host108` Darwin debug; other platforms are not measured.
+
+### Large constant arrays and optimization-contract migration
+
+The shared RegExp engine's resource failure crossed into a generic MVP
+RangeError and lost its message. Both match and replacement paths now pass the
+existing diagnostic through `mvp_lmd_fail`'s existing detail parameter. The
+original router resource test passes unchanged (**D8.1.3v25, D8.4.3v2**).
+
+Large passive Array literals previously emitted one initialization per element;
+the 10,001-element optimization fixture produced a 99,939-line MIR artifact.
+At the existing compact-emission threshold, primitive literals and elisions
+now use an immutable frontend Item table and Lambda's existing
+`array_copy_owned_items`. Allocation/reservation remains dense and fresh,
+wide scalars copy into destination-owned homes, and hole sentinels retain
+absence. Effectful elements, spread and BigInt allocation keep ordered
+evaluation. No new runtime helper is added (**D5.3/D5.4, D8.2.4-D8.2.6**).
+The same fixture emits a 1,575-line artifact on `host110`; a 7,000-element unit
+checks fresh identity, holes, tiny floats, packed integer identity and GC lifetime.
+
+The old optimization suite asserted retired LJS helper names, native peer
+signatures and runtime trace hooks. Its 84 MIR fixtures now use the existing
+emission checker and reviewed source-scope sidecars under `test/mir/js_opt`;
+the trace-schema fixture has a sidecar too. The checks pin 1,323 arithmetic,
+coercion, field, typed-lane, ownership and fallback counts across the formal
+Item entries. JS operations, output assertions and the trace-on/off semantic
+and MIR differential remain covered; retained AST kernel tests retain their
+runtime counters (**D8.1.3v25, D8.2.4-D8.2.6, D8.6.1**).
+
+Two obsolete expectations are corrected against ECMAScript:
+[MakeConstructor](https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-makeconstructor)
+creates a function's `prototype` before later user properties; numeric `-0`
+becomes the property key `"0"` through
+[ToPropertyKey](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-topropertykey),
+so the typed-array write changes element zero. The normalizer now retains
+String/Symbol tags while removing relocation addresses, and searches for
+stack-guard addresses within each line. Its previous suffix search was
+quadratic in artifact size and stalled large-fixture verification.
+
+Release `host110`
+(`70275be9b03a1dfaaa68a66944e765b25aaac6f40583eed5ef8f46f6c6ad0b49`)
+passes **808/808 units** and **140/140 migration checks** normally and under
+forced/poisoned GC. The ported optimization suite passes **93/93** on its debug
+companion (functional/emission qualification only). `host108` completes
+**211/211 isolated Script cases**, **14/14 GC-stressed AUTO/interop/agent checks**
+and **509/509 fixtures**, with no fixture timeouts. Its partially completed
+whole recount was explicitly superseded after the two production fixes;
+it is not an aggregate result. The complete 40,261-case formal recount, fresh
+fixture replay and aggregate Lambda gate are running on `host110`. Timing
+remains deferred.
+
+### Retained interpreter integration and final recount
+
+The aggregate gate exposed three integration defects after activation:
+
+- The native prototype-reservation assertion observed retired LJS storage.
+  Its original operation now runs in both tiers: the native suffix counter is
+  zero for formal MIR and one for AST, with identical output and a formal MIR
+  sidecar (**D8.1.3v25, D8.6.1**).
+- String timers used indirect eval semantics and discarded top-level lexical
+  declarations. They now execute classic Script source in the retained AST
+  interpreter. Callback conversion precedes delay coercion; receiver arguments,
+  source and converted scalars have precise homes across either conversion
+  (**D5.3/D5.4, D8.1.3v25**). Dynamic classic scripts explicitly remain in AST
+  even at the minimum AUTO function/loop thresholds. The original timer golden
+  passes in both AUTO and AST. `host114` passes all **212 Script tests** and
+  **15 forced/poisoned-GC interpreter/interop/agent checks**.
+- The PDF checker selected Python 3.14 without Pillow. The installed Python
+  3.13/Pillow 12.1.0 passes the unchanged two-tier check; the final aggregate
+  uses that interpreter through a generic PATH prefix.
+
+The generated test-host link rule also incorrectly treated the static runtime
+archive as a module and linked every host to `node-core`. Debug hosts could
+then bind private C++ module symbols that disappear in release modules. The
+generator now uses the static host providers and retains the host export
+allowlist needed by runtime-loaded modules (**D7.3.4-D7.3.6**). The Script and
+Lambda-error test targets also drop their explicit redundant module link in
+`build_lambda_config.json`; CLI/library target configurations are unchanged.
+The generator selftest covers both static runtime entry configurations and
+passes; generated Lua is not edited manually.
+
+The canonical recount exposed repeated parsing of lone RegExp eval literals
+through the MVP interpreter adapter. The existing `js_eval_source_shortcut`
+now accepts the shared host operations: it constructs a fresh realm-local
+RegExp through the existing constructor, with rooted source/pattern/flags.
+Line terminators and other source shapes still receive parser validation;
+other host early errors remain in their realm-local parser. Both direct and
+indirect eval reuse this path without compiling dynamic source (**D8.1.3v25,
+D5.3/D5.4**). No new production helper is introduced. Release `host115`
+(`138f6d9fd20aed882137b70ee2afa914a42be9d37f6155ab810bd856c9a627c4`)
+passes **198/198** original canonical RegExp literal/Annex B cases with the
+unchanged deadline, including the 65,536-iteration eval cases. Its fresh
+whole formal MIR recount is in progress. This pin also passes **809/809 MVP
+units**, **141/141 migration checks** normally and under forced/poisoned GC,
+and **212/212 Script cases** plus **15/15 additional GC checks**.
+
+The preceding standard hybrid Test262 baseline on `host110` completed with
+**40,251 fully passing cases, 10 isolated-retry-only slow classifications,
+zero failed cases and zero regressions**. These categories are retained rather
+than presented as a wholly clean formal MIR recount. The canonical recount
+uses unstripped Unicode 17 source. The sibling generated cache was refreshed
+for 459 Unicode files under the user's Unicode 17 decision; backups and source
+hashes are recorded separately. Benchmark timing remains deferred.
+
+`host115` also completes all **509 formal MIR fixtures**: 508 in the first
+sweep and Joi on an unchanged-binary/harness/deadline replay. Fresh static
+test hosts pass **212/212 Script cases** and **266/266 Lambda-error/PDF cases**;
+their load dependencies contain no `node-core`. The aggregate activation gate
+passes JS optimization **93/93**, Lambda optimization **54/54**, Lambda MIR
+emission **249/249**, JS MIR emission **32/32**, size ratchets **20/20**, shared
+GC stress **313/313**, and default JS fixtures **509/509**.
+
+The complete Lambda aggregate records **5,564/5,565**, with only the LaTeX
+phase-3 corpus reaching its existing 60-second timeout under load. The exact
+same debug executable and unchanged golden harness pass that case alone in
+41.860 seconds. The failed aggregate and timeout-cleanup crash are preserved
+in `host115/shared-baseline`; this replay is not a green aggregate command.
+After the Test262 recount, rerun the actual aggregate with its existing
+`AST_TUNE_BATCH_WORKERS` setting to bound contention, retaining all cases and
+deadlines. Final qualification remains open until that aggregate passes.
+
+### Native assertion path and complete canonical coverage
+
+The actual standard debug runner selects native assertion jobs that the older
+private release runner executed with JavaScript assertion source. Its formal
+MIR path omitted that preamble but had no real `assert` binding. An explicit
+`MvpLmdOptions.native_harness` option now reuses
+`js_test262_native_harness_install` and the existing host-global import
+membrane, in an open Script realm. CLI selection is limited to inline
+harnessless Test262 jobs; file-backed batch profiles retain ordinary globals.
+Helpers are installed before Script declarations, then the existing
+`mvp_lmd_prepare_script_bindings` performs declaration checks/publication, so
+`var assert;` preserves the installed callable (**D8.1.3v25**).
+
+Native assertion callbacks also exposed implicit MVP errors without a resting
+JavaScript payload. Reading their constructor through the native carrier path
+could treat an MVP callable as a legacy `JsFunction`. The existing
+`MvpLmdRealmScope::complete` accepts an error-payload option at the shared
+call/construct adapter. Materialization occurs only for failed returns, in the
+callee's realm; ordinary call results and Lambda interop retain their existing
+flow (**D6.2.2v2, D8.4.3v2, D5.3/D5.4**). An attempted broad native-realm reset
+was rejected after it regressed Lambda integer interop, before qualification.
+
+The earlier whole audit exposed eleven numeric-operator coercion-order failures
+and one prototype-setter function-name failure. The shared scalar bridge
+completes left `ToNumeric` before right object coercion. MIR performs the
+throwing Symbol check at that same point; other primitive Number conversions
+are nonthrowing. Addition and relational comparison retain their distinct
+primitive-conversion order. The new shared AST predicate
+`js_ast_property_is_proto_setter` is announced before addition and reused by
+both front ends: anonymous functions/classes used as `__proto__` setter values
+do not receive property-name inference (**D8.1.3v25**).
+
+Release `host120`
+(`4bed3d327f9b29af01b67b32ad37ee640d7c0fcb031ea56ae87be7981c203bc5`)
+passes the complete **40,261/40,261** canonical formal MIR audit with the current
+debug runner: **16,671 native-harness + 23,590 JavaScript-harness cases**, zero
+failures, timeouts, crashes or lost results. The original metadata, includes,
+negative expectations and deadlines are retained; `test_js_test262_gtest` is
+unchanged. The subsequent declaration-ordering correction on `host121`
+(`f295b66eaa2743fdb2bc80feeb5ea278deaadd39b998d6d999a02d99997baec3`)
+passes **812/812 units**, **144/144 migration checks** normally and with
+forced/poisoned GC, plus **100/100 canonical native assertion cases**. The actual standard Test262 target passes with **40,250 fully passing cases,
+11 isolated-retry-only slow classifications, zero failed cases and zero
+regressions**. Its incomplete follow-up canonical audit is retained and
+superseded by a complete audit of the final guard refinement below. Final
+shared Lambda qualification remains required; benchmark timing is deferred.
+
+### Final coercion guard size review
+
+The shared aggregate exposed four JS MIR size increases from the new early
+Symbol check. Primitive right operands cannot run coercion hooks, so the guard
+is retained only when the right operand can be an object. Its Symbol test uses
+the existing high-byte tag directly: the shared value contract statically
+asserts that Symbol is outside inline-double space (**D2.1.3-D2.1.4, D2.2.1, D8.4.3v2**). This avoids
+generic tag dispatch and a possible container load.
+
+Six of the seven JS size probes retain their exact prior budgets. The generic
+array-methods probe needs **23 instructions** at three multiplication sites:
+5 in an inline reduction and 9 in each of two generic callbacks, including
+existing error/root publication. The reviewed module ceiling is **16,645**
+(previously 16,622), with zero added slack; Lambda budgets are unchanged.
+Typed-number arithmetic and known primitive right operands omit this guard.
+The instruction review is in `host123/ratchets/symbol-guard-review.json`.
+
+Final optimized `host123`
+(`4e1ee20beaacdfbf437b3c76497545b72b7e4d31ff6c73ec25f215726c965ce3`)
+was frozen for integrated qualification. Its complete audit recorded
+**40,241 passing and 20 failing cases**, with zero unresolved results. A fresh
+complete audit of the corrected `host124` below uses
+the unchanged current debug runner, all 40,261 original cases, original
+metadata/includes/negative expectations and the existing deadline. This guard
+refinement adds no production helper. Benchmark timing remains deferred.
+
+### Complete native declaration initialization
+
+The `host123` whole audit found twenty native-harness failures after declaration
+publication was deferred until the shared helpers were installed. The existing
+`mvp_lmd_prepare_script_bindings` incorrectly skipped declared variables marked
+`implicit_write` by destructuring/capture analysis, and skipped all Annex B
+companions. Those analysis facts do not remove source declarations.
+
+The existing initializer now prepares every declared name. Annex B companions
+reuse `mvp_lmd_dynamic_global`'s existing availability probe, skip unavailable
+bindings and declare available companions as variables rather than hoisted
+functions. Helper-preserving `var assert;`, uninitialized destructuring targets,
+catch/block companions and later Script lexical collisions have focused native
+coverage. This changes only declaration setup, adds no helper and does not alter
+the MIR emission budgets (**D8.1.3v25, D8.4.3v2**).
+
+Corrected optimized `host124`
+(`75a7220a9726cb5f350d32250c8fc14854dd124a303198af98a1a4636c7ca16f`)
+passes **20/20** original failed canonical cases, with unchanged metadata,
+expectations and deadlines, plus **812/812 units**, **144/144 migration checks**
+normally and with forced/poisoned GC, and **509/509 formal MIR fixtures** without
+timeouts or retries. Its complete current-runner canonical formal MIR audit
+passes **40,261/40,261**, zero failures, timeouts, crashes or unresolved results.
+The actual quiet shared Lambda baseline passes **5,568/5,568**, including all
+**1,593 Lambda cases**, **20/20 size ratchets**, **93/93 JS optimization** and
+**313/313 shared GC stress** checks. The former LaTeX timeout completes in
+33.703 seconds under its unchanged 60-second deadline. Final Script GC passes **15/15**. The actual standard Test262 target exits zero
+with **40,247 fully passing cases + 14 isolated-retry-only slow classifications**,
+zero failures/regressions and 2,652 unchanged exclusions. The
+failed `host123` audit remains preserved; the focused replay is not added to
+its aggregate score.
+
+## Functional closeout (2026-10-17)
+
+The formal engine is activated and qualified under **D8.1.3v25**. The exact
+optimized `host124` executable is published as the shared `lambda.exe`; its
+SHA-256 is `75a7220a9726cb5f350d32250c8fc14854dd124a303198af98a1a4636c7ca16f`.
+Dynamic source remains in the retained AST interpreter. Unicode property,
+identifier, emoji and simple-fold data use Unicode 17; the existing normalization
+library also reports 17.0.0. Generated tables reproduce from their recorded
+sources, and raw/escaped Unicode 17 identifiers pass MIR/interpreter checks
+(**S17.7.1, D8.1.3v25**).
+
+| Final current-build gate | Result |
+|---|---|
+| Complete canonical formal MIR audit | 40,261/40,261; zero failures, timeouts, crashes or unresolved results |
+| Actual `make test-lambda-baseline` | 5,568/5,568; exit 0 |
+| Actual `make test262-baseline` | 40,247 fully passing + 14 isolated-retry-only slow; zero failures/regressions; exit 0 |
+| Release MVP units | 812/812 |
+| Focused migration checks, normal / forced-poisoned GC | 144/144 each |
+| Script forced-poisoned GC | 15/15 |
+| Formal MIR fixture sweep | 509/509; no timeouts or retries |
+| JS / Lambda optimization checks | 93/93; 54/54 |
+| Lambda / JS MIR emission checks | 249/249; 32/32 |
+| Exact size ratchets / shared GC stress | 20/20; 313/313 |
+
+The standard baseline's 2,652 pre-existing exclusions are not counted as passes.
+The canonical audit retains original bodies, metadata, includes, negative
+expectations and deadlines. The formal Test262 GTest source is unchanged. The
+former LaTeX corpus timeout passes within its original 60-second deadline in
+the complete aggregate, rather than only on isolated replay.
+
+All four Node DSOs were forcibly rebuilt against the current headers and their
+build-local manifest metadata refreshed. Fresh static Script/Lambda-error test
+hosts have no `node-core` load dependency (**D7.3.4-D7.3.6**). No Node baseline
+was run. The approved MIR address-validation delta remains recorded under
+`patches/` and reverse-checks cleanly (**D8.6.2-D8.6.3**).
+
+During validation, concurrent commit `bd2a8ed93` removed only retired Bash/Ruby
+grammars. The original pin's source snapshot and discrepancy are preserved.
+None of the removed paths occurs in the active makefiles or 656 checked release
+dependency files; all **2,918 remaining recorded production inputs** still match
+exactly. That cleanup is retained; no active migration source changed.
+
+Final evidence is under `temp/js_formal_mir_20261016/host124/`:
+`final-qualification.json`, `acceptance-audit.json`, `full-formal-canonical/`,
+`shared-baseline-final/`, `standard-test262-result.json`,
+`unicode17-verification.json`, and `source-audit-resolution.json`.
+
+The earlier native-harness failures and superseded audits remain separate.
+Functional migration is complete. Benchmark timing/performance acceptance,
+native worker threads, broader browser compatibility and other-platform
+qualification retain the boundaries defined above; none is silently inferred
+from these functional results (**D6.3.1-D6.3.2, D8.6.3**).
+
+## TypeScript parameter admission repair (2026-10-18)
+
+The active MIR engine now admits the C parser's retained `TsParameterNode`
+wrappers under **D8.1.3v25**. Eleven existing TypeScript goldens previously
+stopped at admission. The shared child catalog exposed these wrappers only
+to the AST index, leaving ordinary analysis walkers unable to see their
+binding patterns and default expressions. The catalog now describes both
+walks, and shared parameter helpers preserve the executable pattern/default
+shape while retaining annotation metadata. Parameter facts and MIR
+initialization apply the existing JavaScript default, rest, destructuring,
+function-length and closure rules to that shape.
+
+Two exposed cases also aborted during lowering: the TS-only `type()` intrinsic
+already emitted a call to `ts_type_info`, but the active engine's import table
+omitted the helper. Its existing implementation is now registered with an
+Item argument/result and a collecting-call contract; lexical bindings named
+`type` continue through ordinary call dispatch (**D5.3.3, D8.1.3v25**).
+
+Existing goldens and harness expectations are unchanged. The new
+`test/ts/parameter_shapes.ts` golden covers typed defaults, rest, destructuring,
+captured parameter mutation, inferred function names, function length and
+parameter temporal dead zones. A native MIR test retains a typed default
+closure past compilation and collection and checks the `type()` intrinsic.
+The TypeScript suite passes **20/20** normally and with forced collection plus
+freed-memory poisoning; the native regression passes in both configurations.
+The required `make test-lambda-baseline` exits zero with **7,724/7,724** passing
+cases: **2,112/2,112** input cases and **5,612/5,612** runtime cases, including
+**818/818** MVP units and **313/313** GC stress cases. Focused rooting and
+convention lint checks pass. Evidence is under `temp/ts-format-fix/`.

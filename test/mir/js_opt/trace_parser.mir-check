@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "D8.1.3v25: the trace-schema fixture also executes through the formal Item entry.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_program",
+      "expect": [
+        "func\ti64, p:runtime, p:unit, p:arguments, i64:argc",
+        "call\tmvp_lmd_dynamic_global",
+        "ret\t"
+      ]
+    }
+  ]
+}

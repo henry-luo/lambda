@@ -1,1 +1,1 @@
-error[E228]: error from 'risky' must be handled: use 'risky(...)^' to propagate, handle with 'risky(...) ^ { ... }', or recover with 'risky(...) or default'
+error[E228]: error from 'risky' must be handled: use 'risky(...)^' to propagate, or handle with 'risky(...) ^ { ... }'

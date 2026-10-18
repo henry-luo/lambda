@@ -24,8 +24,8 @@ pub fn query_source(model, source_id) => queries.query_source(model,source_id)
 pub fn query_rendered(model, point, options = {}) => queries.query_rendered(model,point,options)
 pub fn plan(model, viewport = null) => frames.plan(model,viewport)
 pub fn render_frame(frame) => frames.render_frame(frame)
-pub pn snapshot(node) { frames.snapshot(node) }
-pub pn query_displayed(node, point_or_box, options = {}) { frames.query_displayed(node,point_or_box,options) }
+pub fn snapshot(node) { frames.snapshot(node) }
+pub fn query_displayed(node, point_or_box, options = {}) { frames.query_displayed(node,point_or_box,options) }
 pub fn to_svg(model, viewport = null) => exports.to_svg(model,viewport)
 
 pub fn model(spec, options = {}) => <geomap_view spec:spec, options:options>

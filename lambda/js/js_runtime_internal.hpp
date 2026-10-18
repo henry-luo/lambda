@@ -56,11 +56,11 @@ extern "C" JsFunction* js_alloc_gc_function_object(void);
 JsBodyEntry js_function_select_body_entry(const JsFunction* fn);
 // The generic dispatcher in its call-entry form; the classifier's fallback
 // stamps this when no narrower finalized protocol covers the function.
+Item js_call_entry_compiled_light(Item fn_item, Item this_val, Item* args, int argc,
+        uint64_t* result_home, bool args_prerooted);
+Item js_call_entry_compiled_this(Item fn_item, Item this_val, Item* args, int argc,
+        uint64_t* result_home, bool args_prerooted);
 Item js_call_entry_generic(Item fn_item, Item this_val, Item* args, int argc,
-        uint64_t* result_home, bool args_prerooted);
-Item js_call_entry_mir_light(Item fn_item, Item this_val, Item* args, int argc,
-        uint64_t* result_home, bool args_prerooted);
-Item js_call_entry_mir_this(Item fn_item, Item this_val, Item* args, int argc,
         uint64_t* result_home, bool args_prerooted);
 Item js_call_entry_bound(Item fn_item, Item this_val, Item* args, int argc,
         uint64_t* result_home, bool args_prerooted);

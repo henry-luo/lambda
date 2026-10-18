@@ -5,6 +5,8 @@ extern "C" {
 #include "../lib/mempool.h"
 }
 #include "../lib/test_utils.h"
+#include "../lib/arraylist.hpp"
+#include "../lib/tagged.hpp"
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -272,6 +274,9 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, live, sizeof(DomElement), false));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
 
     state_set_bool(doc_state, live, "mutation-live-state", true);
     state_set_bool(doc_state, orphan, "mutation-orphan-state", true);
@@ -285,6 +290,51 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) 
 
     EXPECT_TRUE(state_get_bool(doc_state, live, "mutation-live-state"));
     EXPECT_FALSE(state_get_bool(doc_state, orphan, "mutation-orphan-state"));
+    dom_lifecycle_destroy(&doc);
+}
+
+TEST_F(StateStoreDomMutationTest, BulkPruningPreservesLiveValuesAndRebuildsFocusPath) {
+    DocState* doc_state = state();
+    lam::ArrayList<DomElement*> children(MEM_CAT_LAYOUT);
+    state_begin_batch(doc_state);
+    for (int i = 0; i < 512; i++) {
+        DomElement* child = make_element();
+        ASSERT_TRUE(children.append(child));
+        ASSERT_TRUE((i % 2 == 0 ? live : orphan)->append_child(child));
+        state_set_bool(doc_state, child, "retained-value", true);
+        // cascade records false focus flags on controls throughout a large listing.
+        state_set_bool(doc_state, child, STATE_FOCUS_WITHIN, false);
+        state_set_bool(doc_state, child, STATE_FOCUS_VISIBLE, false);
+        view_state_set_active(doc_state, child, true);
+    }
+    state_end_batch(doc_state);
+
+    live->tag_name = lam::up("button");
+    live->tag_id = MARKUP_NAME_BUTTON;
+    doc_state->transition_depth++;
+    focus_set_programmatic(doc_state, live, true);
+    doc_state->transition_depth--;
+    ASSERT_TRUE(root->remove_child(orphan));
+    EXPECT_GT(state_store_prune_after_reflow(doc_state), 0u);
+    EXPECT_EQ(focus_get(doc_state), live);
+    EXPECT_TRUE(state_get_bool(doc_state, live, STATE_FOCUS_WITHIN));
+    EXPECT_TRUE(state_get_bool(doc_state, root, STATE_FOCUS_WITHIN));
+    EXPECT_TRUE(state_get_bool(doc_state, live, STATE_FOCUS_VISIBLE));
+    for (size_t i = 0; i < children.size(); i++) {
+        DomElement* child = children[i];
+        EXPECT_EQ(state_get_bool(doc_state, child, "retained-value"), i % 2 == 0);
+        EXPECT_EQ(view_state_get(doc_state, child) != nullptr, i % 2 == 0);
+        EXPECT_FALSE(state_get_bool(doc_state, child, STATE_FOCUS_WITHIN));
+        EXPECT_FALSE(state_get_bool(doc_state, child, STATE_FOCUS_VISIBLE));
+    }
+    EXPECT_EQ(state_store_prune_after_reflow(doc_state), 0u);
+
+    // release both branches' native state before their borrowed DOM nodes go away.
+    view_state_detach_subtree(doc_state, live);
+    for (DomElement* child : children) {
+        lam::dom_require_element(child->parent)->remove_child(child);
+        delete child;
+    }
 }
 
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowRestoresFocusAssignedBeforeViewIdentity) {
@@ -387,6 +437,29 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     EXPECT_EQ(view_state_get(state(), orphan), before);
     EXPECT_EQ(view_state_get(state(), live), nullptr);
     live->form = orphan->form = nullptr;
+}
+
+TEST_F(StateStoreDomMutationTest, HiddenSelectUpdatesRetainedSelectionWithoutLayoutBox) {
+    FormControlProp form{};
+    form.control_type = FORM_CONTROL_SELECT;
+    form.option_count = 3;
+    live->tag_name = lam::up("select");
+    live->tag_id = MARKUP_NAME_SELECT;
+    live->form = lam::view_prop(&form);
+    form_control_set_selected_index(state(), live, 0);
+    ASSERT_EQ(form_control_get_selected_index(state(), live), 0);
+
+    // display:none removes the layout box while the control and its state remain alive.
+    live->view_type = RDT_VIEW_NONE;
+    form_control_set_selected_index(state(), live, 2);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 2);
+    live->form = nullptr;
+    form_control_set_selected_index(state(), live, 1);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 1);
+    live->view_type = RDT_VIEW_BLOCK;
+    live->form = lam::view_prop(&form);
+    EXPECT_EQ(form_control_get_selected_index(state(), live), 1);
+    live->form = nullptr;
 }
 
 struct MediaLifetimeProbe { unsigned released, paused; };
