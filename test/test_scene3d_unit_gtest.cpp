@@ -314,7 +314,7 @@ protected:
         Runtime* runtime=dom_document_script_runtime(page);
         if(!runtime||!radiant_eval_context_switch(runtime_get_eval_context(runtime))||
            !runtime_context_bind_retained(runtime,runtime_get_eval_context(runtime))||!radiant_bind_document_script_host(&ui,page)) return ItemError;
-        RootFrame roots(1);Rooted<Item> code(roots,make_string_item(source));return js_builtin_eval(code.get(),1);
+        RootFrame roots(1);Rooted<Item> code(roots,make_string_item(source));return js_builtin_eval(code.get());
     }
     ImageSurface* snapshot(float width=128,float height=128,float scale=1) {
         ImageSurface* image=scene3d_snapshot(root,&ui,width,height,scale);

@@ -189,7 +189,7 @@ static bool evaluate(UiContext* ui, const char* source, bool assertion) {
     // the evaluated code and its return value remain precise roots across eval safepoints (D5.3.3).
     RootFrame roots(2);
     Rooted<Item> code(roots, make_string_item(source)), result(roots, ItemNull);
-    result.set(js_builtin_eval(code.get(), 1));
+    result.set(js_builtin_eval(code.get()));
     runtime->dom_doc = document;
     runtime->dom_ui_context = host;
     if (item_is_error(result.get())) return false;

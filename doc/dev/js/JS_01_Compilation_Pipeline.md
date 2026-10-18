@@ -1,9 +1,9 @@
 # LambdaJS — Compilation Pipeline
 
-> **Last verified against tree:** 2026-10-17 (source and release-link inspection; runtime qualification is recorded separately).
+> **Last verified against tree:** 2026-10-18 (interpreter alignment; qualification is recorded separately).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** D8.1.3v25, D8.2.3, D8.5.1v2 and D5.3/D5.4.
+> **Authority:** D8.1.3v26, D8.2.3, D8.5.1v2 and D5.3/D5.4.
 > **Primary sources:** `lambda/js/js_execution.cpp`, `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, `lambda/js/js_code_cache.cpp`, `lambda/js/js_source_module.cpp` and `lambda/js/js_compile_recovery.cpp`.
 
 ## 1. Engines and public entry points
@@ -16,7 +16,12 @@ engine selection for modules.
 
 Explicit AST and AUTO execution retain the shared interpreter. AUTO function
 and loop promotion compile through MVP. Dynamic source (`eval`, Function-family
-constructors and string timer handlers) remains interpreted. A rejected formal
+constructors and string timer handlers) remains interpreted. Direct eval on both
+tiers resolves live `JsInterpEnv` cells and validates context through the shared
+AST facts. The legacy MIR projection journals and bridged-eval entry are removed;
+lexical receiver payloads use Lambda scalar homes owned by the GC environment.
+Explicit AST/native and MVP object/callable profiles remain distinct; see the
+[alignment audit](../../../vibe/impl/JS_Interpreter_MVP_Alignment.md). A rejected formal
 MIR unit does not enter a second JavaScript MIR compiler.
 
 TypeScript uses the first-party parser's existing profile through

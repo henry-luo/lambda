@@ -727,7 +727,7 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     copy->private_home_class = source->private_home_class;
     copy->private_bindings = source->private_bindings;
     copy->eval_bindings = source->eval_bindings;
-    copy->lexical_this = source->lexical_this;
+    js_interp_env_this_store(copy, (Item){.item = source->lexical_this});
     copy->with_object = source->with_object;
     copy->function_node = source->function_node;
     copy->eval_script = source->eval_script;
@@ -1137,9 +1137,8 @@ static int js_interp_lookup_with_minimum_depth(const JsInterpFrame* frame,
 // Lexical declarations of eval code always stay in the eval script's own record.
 enum JsInterpEvalVars : uint8_t {
     JS_INTERP_EVAL_VARS_SCRIPT,   // not eval code, or a $262.evalScript Script
-    JS_INTERP_EVAL_VARS_GLOBAL,   // sloppy global eval code, or eval from MIR top level
-    JS_INTERP_EVAL_VARS_CALLER,   // sloppy direct eval from MIR function code
-    JS_INTERP_EVAL_VARS_LINKED,   // sloppy direct eval from interpreted code
+    JS_INTERP_EVAL_VARS_GLOBAL,   // sloppy global eval code
+    JS_INTERP_EVAL_VARS_LINKED,   // direct eval over live AST or MVP lexical cells
     JS_INTERP_EVAL_VARS_PRIVATE,  // strict eval code
 };
 
@@ -1147,12 +1146,6 @@ enum JsInterpEvalVars : uint8_t {
 // created. Its free names resolve through the caller's live environments.
 static bool js_interp_script_is_linked_eval(const JsScript* script) {
     return script && script->eval_caller_script;
-}
-
-// Direct eval code of a MIR caller, which projects its bindings through the
-// EvalContext bridge and keeps eval-created vars in its activation journal.
-static bool js_interp_script_is_bridged_eval(const JsScript* script) {
-    return script && script->is_direct_eval && !script->eval_caller_script;
 }
 
 static JsInterpEvalVars js_interp_eval_vars(const JsScript* script) {
@@ -1166,26 +1159,9 @@ static JsInterpEvalVars js_interp_eval_vars(const JsScript* script) {
         return JS_INTERP_EVAL_VARS_SCRIPT;
     }
     if (script->strict_mode) return JS_INTERP_EVAL_VARS_PRIVATE;
-    // A linked eval declares into its caller's variable environment. A MIR
-    // caller pushed a function-scope bridge frame instead; its var environment
-    // is that activation's eval journal.
-    if (js_interp_script_is_linked_eval(script)) return JS_INTERP_EVAL_VARS_LINKED;
-    return script->is_direct_eval && js_eval_env_is_active()
-        ? JS_INTERP_EVAL_VARS_CALLER : JS_INTERP_EVAL_VARS_GLOBAL;
-}
-
-// Inside a MIR caller's direct eval code, a binding projected by the bridge is
-// authoritative until the caller writes it back. The journal copy of a bridged
-// eval var is refreshed from the bridge when its frame pops, so reading or
-// writing the journal first would observe or lose a stale value.
-static bool js_interp_eval_bridged(const JsInterpFrame* frame, Item key) {
-    return frame && js_interp_script_is_bridged_eval(frame->script) &&
-        js_eval_env_has_binding(key);
-}
-
-static bool js_interp_eval_annex_b_bridged(const JsInterpFrame* frame,
-        const NameEntry* entry, Item key) {
-    return entry && entry->is_annex_b_companion && js_interp_eval_bridged(frame, key);
+    // both tiers retain the caller's live variable environment through JsInterpEnv.
+    return js_interp_script_is_linked_eval(script)
+        ? JS_INTERP_EVAL_VARS_LINKED : JS_INTERP_EVAL_VARS_GLOBAL;
 }
 
 static NameEntry* js_interp_scope_find_name(NameScope* scope, const String* name) {
@@ -1357,8 +1333,7 @@ static Item js_interp_env_binding_write(JsInterpFrame* frame, JsInterpEnv* env,
 
 // Past every linked record, a name resolves as code of the outermost unlinked
 // Script would: that Script's own top-level bindings — kept in its slab, so it
-// is made the active module state — then its bridge or journal (a MIR
-// caller's eval), then the realm.
+// is made the active module state — then the realm global bindings.
 static bool js_interp_activate_outer_script(RuntimeModuleStateScope* module_state,
         const JsScript* script) {
     return script->module_state_id == lambda_active_module_state_id() ||
@@ -1444,16 +1419,13 @@ static Item js_interp_write_lookup(JsInterpFrame* frame, const JsInterpLookup* l
 }
 
 // Whether a name that no linked record binds still resolves: a top-level binding
-// or import of the outer Script, a bridged MIR caller's eval var, or a global.
+// or import of the outer Script, or a global.
 static bool js_interp_outer_name_exists(JsScript* script, String* name,
         bool with_lookup_completed) {
     Item key = js_interp_name_key(name);
     if (js_interp_host) return js_interp_global_exists(key, false);
     if (js_interp_scope_find_name(script->global_scope, name) ||
             js_interp_import_binding(script, NULL, name)) return true;
-    if (js_interp_script_is_bridged_eval(script) && js_eval_local_has_var_binding(key)) {
-        return true;
-    }
     return with_lookup_completed ? js_global_binding_exists_after_with_lookup(key)
         : js_global_binding_exists(key);
 }
@@ -1599,7 +1571,7 @@ static bool js_interp_host_global_binding(const JsInterpFrame* frame, const Name
 }
 
 // GetValue on a binding the static scope graph resolved: the implicit
-// `arguments`, vars direct eval added, a MIR caller's eval journal, an import,
+// `arguments`, vars direct eval added, an import,
 // a global, then its slab or environment slot.
 static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
         String* unresolved_name, bool with_lookup_completed) {
@@ -1607,20 +1579,11 @@ static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
         JsInterpEnv* arguments_env = js_interp_arguments_env_for_binding(frame, entry);
         if (arguments_env) return js_interp_arguments_read(arguments_env);
     }
-    if (unresolved_name && !js_interp_eval_bridged(frame,
-            js_interp_name_key(unresolved_name))) {
+    if (unresolved_name) {
         Item eval_value = ItemNull;
         if (js_interp_find_eval_binding_env(frame->env, entry,
                 js_interp_name_key(unresolved_name), &eval_value)) {
             return eval_value;
-        }
-        // A MIR caller's direct eval keeps the function-scoped vars it adds in
-        // that activation's eval journal, the authoritative extension of its
-        // function environment.
-        Item key = js_interp_name_key(unresolved_name);
-        if (js_interp_script_is_bridged_eval(frame->script) &&
-                js_eval_local_has_var_binding(key)) {
-            return js_eval_local_get_binding_or_fallback(key, ItemError);
         }
     }
     if (!entry && unresolved_name) {
@@ -1644,8 +1607,7 @@ static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
         }
         if (!js_global_binding_exists(key)) return js_interp_tdz_error(unresolved_name);
         Item global_value = js_get_global_property(key);
-        // A MIR caller's bridge projects its lexical still in its TDZ as the
-        // sentinel; reading it must throw like the binding itself.
+        // a realm lexical still in its TDZ must throw on read.
         if (global_value.item == ITEM_JS_TDZ) return js_interp_tdz_error(unresolved_name);
         return global_value;
     }
@@ -1675,25 +1637,12 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         if (initialize) return value;
         return js_throw_type_error("Assignment to constant variable");
     }
-    if (js_interp_eval_bridged(frame, key)) allow_eval_bindings = false;
-    // Only a MIR caller's direct eval code sees that activation's eval journal.
-    bool journal = js_interp_script_is_bridged_eval(frame->script);
     Item eval_value = ItemNull;
     JsInterpEnv* eval_env = !initialize && allow_eval_bindings ? js_interp_find_eval_binding_env(
         frame->env, entry, key, &eval_value) : NULL;
     if (eval_env) {
         Item stored = js_interp_env_set_eval_binding(eval_env, key, value);
         if (item_is_error(stored)) return stored;
-        if (journal && js_eval_local_has_var_binding(key)) js_eval_local_export_var(key, value);
-        js_interp_publish_export_bindings(frame, entry, value);
-        return value;
-    }
-    // `var`/parameter bindings may have been supplied by a previous direct
-    // eval. Keep subsequent interpreted writes in the shared function journal
-    // instead of accidentally materializing a realm-global property.
-    if (!initialize && allow_eval_bindings && journal && (!entry || !entry->is_const) &&
-            js_eval_local_has_var_binding(key)) {
-        js_eval_local_export_var(key, value);
         js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
@@ -1724,16 +1673,6 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             // Module declarations (including the synthetic CJS wrapper),
             // strict eval declarations, and eval lexicals stay in their
             // private slab; they never publish realm-global records.
-        } else if (!entry->is_lexical && eval_vars == JS_INTERP_EVAL_VARS_CALLER) {
-            // A MIR caller's sloppy direct eval declares into that caller's
-            // variable environment, the activation journal; an Annex-B
-            // companion of a projected caller binding updates the bridge.
-            if (js_interp_eval_annex_b_bridged(frame, entry, key)) {
-                Item bridged = js_set_global_property(key, value, 0);
-                if (item_is_error(bridged)) return bridged;
-            } else {
-                js_eval_local_export_var(key, value);
-            }
         } else if (!entry->is_lexical) {
             if (initialize) {
                 // $262.evalScript evaluates a Script, not an EvalCode
@@ -2501,8 +2440,7 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         out_reference->unresolvable_binding = !out_reference->entry &&
             !out_reference->with_binding && !out_reference->arguments_env &&
             !out_reference->binding_uses_eval &&
-            !(js_interp_script_is_bridged_eval(frame->script) &&
-                js_eval_local_has_var_binding(key)) && !special_binding &&
+            !special_binding &&
             !js_interp_import_binding(frame->script, out_reference->entry,
                 identifier->name) &&
             !js_global_binding_exists_after_with_lookup(key);
@@ -2811,113 +2749,6 @@ struct JsInterpPrivateEvalBridge {
     JsInterpPrivateEvalBridge& operator=(const JsInterpPrivateEvalBridge&) = delete;
 };
 
-// EvalDeclarationInstantiation for a MIR caller's sloppy direct eval: a
-// var-scoped declaration cannot hoist over a lexical binding the caller noted
-// in its activation journal.
-static Item js_interp_eval_var_conflicts_lexical_name(String* name) {
-    if (!name || name->len <= 0) return js_status_ok();
-    Item key = js_name_item(name->chars, name->len);
-    if (!js_eval_local_has_lexical_binding(key)) return js_status_ok();
-    return js_throw_syntax_error(js_name_item("Eval var conflicts with lexical declaration", 43));
-}
-
-static Item js_interp_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
-    if (!node) return js_status_ok();
-    switch (node->node_type) {
-        case AST_NODE_IDENT:
-            return js_interp_eval_var_conflicts_lexical_name(((JsIdentifierNode*)node)->name);
-        case AST_NODE_ASSIGN_PATTERN:
-            return js_interp_eval_var_conflicts_lexical_pattern(((JsAssignmentPatternNode*)node)->left);
-        case AST_NODE_REST_ELEMENT:
-        case AST_NODE_REST_PROPERTY:
-            return js_interp_eval_var_conflicts_lexical_pattern(((JsSpreadElementNode*)node)->argument);
-        case AST_NODE_ARRAY_PATTERN:
-            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next) {
-                JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_pattern(e));
-            }
-            break;
-        case AST_NODE_MAP_PATTERN:
-            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
-                if (p->node_type == AST_NODE_PROPERTY) {
-                    JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value));
-                } else {
-                    JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_pattern(p));
-                }
-            }
-            break;
-        default:
-            break;
-    }
-    return js_status_ok();
-}
-
-static Item js_interp_eval_var_conflicts_lexical_statement(JsAstNode* node);
-
-static Item js_interp_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
-    for (; stmt; stmt = stmt->next) {
-        JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statement(stmt));
-    }
-    return js_status_ok();
-}
-
-static Item js_interp_eval_var_conflicts_lexical_statement(JsAstNode* node) {
-    if (!node) return js_status_ok();
-    switch (node->node_type) {
-        case AST_NODE_VAR_STAM: {
-            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-            if (vd->kind != JS_VAR_VAR) return js_status_ok();
-            for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-                JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id));
-            }
-            break;
-        }
-        case AST_NODE_FUNC:
-            return js_interp_eval_var_conflicts_lexical_name(((JsFunctionNode*)node)->name);
-        case AST_NODE_BLOCK:
-            return js_interp_eval_var_conflicts_lexical_statements(((JsBlockNode*)node)->statements);
-        case AST_NODE_IF_EXPR: {
-            JsIfNode* in = (JsIfNode*)node;
-            JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statement(in->consequent));
-            return js_interp_eval_var_conflicts_lexical_statement(in->alternate);
-        }
-        case AST_NODE_LOOP: {
-            AstLoopControlNode* loop = (AstLoopControlNode*)node;
-            if (loop->form == LOOP_FORM_FOR_C) {
-                JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statement(loop->init));
-            }
-            return js_interp_eval_var_conflicts_lexical_statement(loop->body);
-        }
-        case AST_NODE_FOR_IN_STAM:
-        case AST_NODE_FOR_OF_STAM: {
-            JsForOfNode* fo = (JsForOfNode*)node;
-            JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statement(fo->left));
-            return js_interp_eval_var_conflicts_lexical_statement(fo->body);
-        }
-        case AST_NODE_MATCH_EXPR: {
-            JsSwitchNode* sw = (JsSwitchNode*)node;
-            for (JsAstNode* c = sw->cases; c; c = c->next) {
-                if (c->node_type != AST_NODE_MATCH_ARM) continue;
-                JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent));
-            }
-            break;
-        }
-        case AST_NODE_TRY_STAM: {
-            JsTryNode* tn = (JsTryNode*)node;
-            JS_ASSIGN_OR_RETURN(status, js_interp_eval_var_conflicts_lexical_statement(tn->block));
-            JS_ASSIGN_OR_RETURN_INTO(status, js_interp_eval_var_conflicts_lexical_statement(tn->handler));
-            return js_interp_eval_var_conflicts_lexical_statement(tn->finalizer);
-        }
-        case AST_NODE_CATCH_CLAUSE:
-            return js_interp_eval_var_conflicts_lexical_statement(((JsCatchNode*)node)->body);
-        case JS_AST_NODE_LABELED_STATEMENT:
-            return js_interp_eval_var_conflicts_lexical_statement(((JsLabeledStatementNode*)node)->body);
-        default:
-            break;
-    }
-    return js_status_ok();
-}
-
 // A parsed classic source's execution role. A cache hit is a fresh instance,
 // so these flags belong to this execution alone.
 static void js_interp_set_script_role(JsScript* script, bool is_module,
@@ -2974,18 +2805,17 @@ static Item js_interp_host_check_global_declarations(NameScope* scope, bool scri
 
 // Where a linked sloppy eval's var-scoped declarations bind (D8.1.3v21): the
 // caller's nearest function variable environment; beyond the linked records,
-// the realm, or the eval journal of a bridged MIR caller's activation.
+// the realm.
 enum JsInterpLinkedVarsTarget : uint8_t {
     JS_INTERP_LINKED_VARS_ENV,
     JS_INTERP_LINKED_VARS_GLOBAL,
-    JS_INTERP_LINKED_VARS_JOURNAL,
 };
 
 struct JsInterpLinkedVars {
     JsInterpLinkedVarsTarget target;
     JsInterpEnv* var_env;
     // The outermost unlinked Script, whose lexical record sits between the
-    // eval and the realm or journal.
+    // eval and the realm.
     JsScript* outer_script;
 };
 
@@ -2998,8 +2828,7 @@ static JsInterpLinkedVars js_interp_linked_vars(JsInterpEnv* boundary) {
             return {JS_INTERP_LINKED_VARS_ENV, env, script};
         }
     }
-    return {js_interp_eval_vars(script) == JS_INTERP_EVAL_VARS_CALLER
-        ? JS_INTERP_LINKED_VARS_JOURNAL : JS_INTERP_LINKED_VARS_GLOBAL, NULL, script};
+    return {JS_INTERP_LINKED_VARS_GLOBAL, NULL, script};
 }
 
 enum JsInterpEvalVarClash : uint8_t {
@@ -3044,14 +2873,12 @@ static JsInterpEvalVarClash js_interp_linked_var_clash(const JsInterpFrame* fram
         }
         return clash;
     }
-    // Past the caller's records: the outermost Script's own lexical record,
-    // then a bridged MIR caller's lexicals or the realm's global lexicals.
+    // beyond the caller's records, check the outer Script and realm lexicals.
     NameEntry* entry = js_interp_scope_find_name(vars->outer_script->global_scope, name);
     Item key = js_interp_name_key(name);
-    if ((entry && entry->is_lexical) || (vars->target == JS_INTERP_LINKED_VARS_JOURNAL
-            ? js_eval_local_has_lexical_binding(key)
-            : js_interp_host ? js_is_truthy(js_interp_host_global(key, ItemNull,
-                JS_INTERP_HOST_HAS_LEXICAL)) : js_global_lexical_binding_exists(key))) {
+    if ((entry && entry->is_lexical) || (js_interp_host
+            ? js_is_truthy(js_interp_host_global(key, ItemNull, JS_INTERP_HOST_HAS_LEXICAL))
+            : js_global_lexical_binding_exists(key))) {
         return JS_INTERP_EVAL_VAR_LEXICAL;
     }
     return clash;
@@ -3075,13 +2902,6 @@ static Item js_interp_linked_var_declare(const JsInterpLinkedVars* vars,
     case JS_INTERP_LINKED_VARS_GLOBAL:
         if (js_interp_host) return js_interp_host_global(key, make_js_undefined(), JS_INTERP_HOST_DECLARE);
         js_define_global_eval_var_property(key, make_js_undefined());
-        return js_status_ok();
-    case JS_INTERP_LINKED_VARS_JOURNAL:
-        // The MIR bridge rule: only an Annex-B companion aliases a projected
-        // caller binding; every other eval var lives in the journal.
-        if ((entry->is_annex_b_companion && js_eval_env_has_binding(key)) ||
-                js_eval_local_has_var_binding(key)) return js_status_ok();
-        js_eval_local_export_var(key, make_js_undefined());
         return js_status_ok();
     }
     return js_status_ok();
@@ -3110,13 +2930,6 @@ static Item js_interp_linked_var_set(JsInterpFrame* frame,
             : js_set_global_property(key, value, 0);
         return item_is_error(written) ? written : value;
     }
-    case JS_INTERP_LINKED_VARS_JOURNAL:
-        if (entry->is_annex_b_companion && js_eval_env_has_binding(key)) {
-            Item written = js_set_global_property(key, value, 0);
-            return item_is_error(written) ? written : value;
-        }
-        js_eval_local_export_var(key, value);
-        return value;
     }
     return value;
 }
@@ -3246,6 +3059,16 @@ static Item js_interp_run_linked_eval(JsInterpFrame* caller, JsScript* script) {
         result.kind == JS_INTERP_NORMAL ? completion_root.get() : result.value);
 }
 
+// shared bound-AST facts distinguish references from property names, strings and nested functions.
+static bool js_interp_eval_context_valid(JsScript* script, bool allow_new_target,
+        bool allow_super_property, bool allow_super_call, bool initializer) {
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(NULL, (JsAstNode*)script->ast_root);
+    return (allow_new_target || !(facts.observations & JS_AST_OBSERVES_NEW_TARGET)) &&
+        (allow_super_property || !(facts.observations & JS_AST_OBSERVES_SUPER_PROPERTY)) &&
+        (allow_super_call || (!facts.has_direct_super_call && !facts.has_lexical_super_call)) &&
+        (!initializer || !(facts.observations & JS_AST_OBSERVES_ARGUMENTS));
+}
+
 static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
         const char* source, size_t length, const char* filename, bool strict,
         Item* failure, bool allow_new_target = false, bool allow_super_property = false,
@@ -3256,7 +3079,7 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
 static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     if (js_interp_host) {
         Item shortcut = ItemNull;
-        if (js_eval_source_shortcut(code, true, &shortcut, js_interp_host))
+        if (js_eval_source_shortcut(code, &shortcut, js_interp_host))
             return js_retain_scalar(shortcut);
         String* source = code.get_string();
         bool function_context = frame->active_function &&
@@ -3280,7 +3103,7 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
         return js_interp_run_linked_eval(frame, script);
     }
     Item shortcut = ItemNull;
-    if (js_eval_source_shortcut(code, true, &shortcut)) return shortcut;
+    if (js_eval_source_shortcut(code, &shortcut)) return shortcut;
     String* source = it2s(code);
     JsScript* script = NULL;
     {
@@ -3288,10 +3111,34 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
         // which makes such a parse context-dependent and uncacheable.
         JsInterpPrivateEvalBridge private_bridge(frame);
         script = js_interp_prepare_script_mode(js_current_runtime(), source->chars,
-            source->len, "<eval>", frame->strict, JS_PARSE_AUTO,
+            source->len, "<eval>", frame->strict, JS_PARSE_SCRIPT,
             !memchr(source->chars, '#', source->len));
     }
     if (!script) return js_throw_syntax_error(js_make_string("invalid JavaScript source"));
+    bool initializer = js_private_field_initializing || js_eval_initializer_context;
+    bool function_context = initializer || (frame->active_function &&
+        !(frame->active_function->flags & JS_FUNC_FLAG_ARROW));
+    AstFuncNode* lexical_function = NULL;
+    for (JsInterpEnv* env = frame->env; env; env = env->outer) {
+        if (!env->has_lexical_this) continue;
+        function_context = true;
+        lexical_function = (AstFuncNode*)env->function_node;
+        break;
+    }
+    Item home = js_interp_frame_home_class(frame);
+    bool method_context = home.item && home.item != ItemNull.item;
+    const JsClassData* klass = method_context && get_type_id(home) == LMD_TYPE_FUNC &&
+        function_has_abi(home.function, FN_ENTRY_ABI_JS_FUNCTION)
+        ? js_fn_class((JsFunction*)home.function) : NULL;
+    JsFunction* constructor = klass && get_type_id(klass->constructor) == LMD_TYPE_FUNC
+        ? (JsFunction*)klass->constructor.function : NULL;
+    // the class shell owns the constructor body; only that body's lexical arrows inherit super().
+    bool derived = constructor && (constructor->flags & JS_FUNC_FLAG_DERIVED_CTOR) &&
+        lexical_function == (AstFuncNode*)js_fn_ast_function(constructor);
+    if (!js_interp_eval_context_valid(script, function_context, method_context,
+            derived && !initializer, initializer)) {
+        return js_throw_syntax_error(js_make_string("invalid eval context"));
+    }
     if (!js_interp_capture_origin(script, js_interp_script_origin(frame->script))) return ItemError;
     js_interp_set_script_role(script, false, true, true, frame->strict, false,
         frame->script);
@@ -4313,9 +4160,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                 unresolvable = !has_arguments_binding && !entry &&
                     !js_global_binding_exists(key) &&
                     !js_interp_import_binding(frame->script, entry, identifier->name) &&
-                    !js_interp_find_eval_binding_env(frame->env, entry, key, NULL) &&
-                    !(js_interp_script_is_bridged_eval(frame->script) &&
-                        js_eval_local_has_var_binding(key));
+                    !js_interp_find_eval_binding_env(frame->env, entry, key, NULL);
             }
             if (unresolvable) return js_interp_normal(js_make_string("undefined"));
         }
@@ -4757,26 +4602,13 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
                 !frame->script->is_module &&
                 eval_vars != JS_INTERP_EVAL_VARS_PRIVATE) {
             Item key = js_interp_name_key(entry->name);
-            if (eval_vars == JS_INTERP_EVAL_VARS_CALLER) {
-                // A MIR caller's bridge cannot tell its own bindings from
-                // outer ones, so an eval var starts from an earlier eval's
-                // journal binding or undefined. Only an Annex-B companion
-                // aliases the projected caller binding of its name.
-                if (js_interp_eval_annex_b_bridged(frame, entry, key)) {
-                    initial = js_get_global_property(key);
-                } else if (js_eval_local_has_var_binding(key)) {
-                    initial = js_eval_local_get_binding_or_fallback(key, initial);
-                }
+            // a later classic script reuses its existing global var binding.
+            Item global = js_get_global_this();
+            Item exists = js_has_own_property(global, key);
+            if (item_is_error(exists)) return js_interp_throw(exists);
+            if (js_is_truthy(exists)) {
+                initial = js_get_key_default(global, key);
                 if (item_is_error(initial)) return js_interp_throw(initial);
-            } else {
-                // A later classic script reuses its existing global var binding.
-                Item global = js_get_global_this();
-                Item exists = js_has_own_property(global, key);
-                if (item_is_error(exists)) return js_interp_throw(exists);
-                if (js_is_truthy(exists)) {
-                    initial = js_get_key_default(global, key);
-                    if (item_is_error(initial)) return js_interp_throw(initial);
-                }
             }
         }
         Item stored = js_interp_write_binding(frame, entry, NULL, initial, true);
@@ -6594,8 +6426,9 @@ static Item js_interp_initialize_function_parameters(JsInterpFrame* frame, JsFun
         Item callee, JsInterpEnv* env, Item* args, int arg_count) {
     RootFrame roots(2);
     Rooted<Item> callee_root(roots, callee), arguments_root(roots, ItemNull);
-    // hosted eval inspects the nearest live function record, including bodies without arguments.
-    if (js_interp_host) env->function_node = (AstNode*)js_fn_ast_function(function);
+    // both tiers use the nearest owned function record for direct-eval context checks.
+    if (env && env->scope == js_fn_ast_function(function)->vars)
+        env->function_node = (AstNode*)js_fn_ast_function(function);
     if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast_uses_arguments(function)) {
         bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
         bool mapped = !strict && js_fn_ast_has_simple_params(function);
@@ -6707,13 +6540,8 @@ static Item js_interp_call_function_impl(JsFunction* function, Item* args, int a
         env->has_lexical_this = 1;
         // the kernel bound and coerced this call's receiver before entry.
         Item receiver = js_interp_host ? *host_receiver : js_get_lexical_this_binding();
-        if (js_interp_host && get_type_id(receiver) == LMD_TYPE_FLOAT) {
-            // Escaped arrows retain this binding beyond the host call's scalar home.
-            uint64_t* home = (uint64_t*)pool_calloc(context->pool, sizeof(uint64_t));
-            if (!home) return js_interp_host->fail(JS_INTERP_HOST_MEMORY);
-            receiver = lambda_item_adopt_scalar_home(receiver, home);
-        }
-        env->lexical_this = receiver.item;
+        // escaped arrows own the receiver in their GC environment, not the caller or pool.
+        js_interp_env_this_store(env, receiver);
         if (js_interp_host && js_fn_ast_function(function)->node_type == AST_NODE_METHOD &&
                 ((JsMethodDefinitionNode*)js_fn_ast_function(function))->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR) {
             // constructor [[HomeObject]] is its prototype; super() retains the separate owner.
@@ -6923,7 +6751,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     if (!function_env || !function_env_root.registered) return ItemError;
     if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
         function_env->has_lexical_this = 1;
-        function_env->lexical_this = js_retain_scalar(this_root.get()).item;
+        js_interp_env_this_store(function_env, this_root.get());
     }
     bool separate_parameters = js_fn_ast_definition(function)->has_parameter_expressions;
     if (separate_parameters) function_env->binding_role = JS_INTERP_ENV_PARAMETERS;
@@ -7200,40 +7028,15 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     }
     JsModuleNamespaceScope module_namespace(namespace_obj, script->is_es_module);
     RootFrame roots(4);
-    // ES module code has an undefined top-level this; classic scripts keep
-    // the shared realm receiver. A MIR caller's direct eval code inherits its
-    // raw binding, including a derived constructor's uninitialized `this`.
-    Rooted<Item> this_root(roots, script->is_es_module ? make_js_undefined()
-        : script->is_direct_eval ? js_get_lexical_this_binding()
-        : js_get_global_this());
-    // A MIR caller's direct eval code keeps the undefined new.target the
-    // dynamic-code service has always given it; field initializers rely on it.
-    Rooted<Item> new_target_root(roots, script->is_direct_eval
-        ? make_js_undefined() : js_get_new_target());
+    // direct eval enters with its caller frame; standalone entries use the realm receiver.
+    Rooted<Item> this_root(roots, script->is_es_module ? make_js_undefined() : js_get_global_this());
+    Rooted<Item> new_target_root(roots, js_get_new_target());
     Rooted<Item> home_class_root(roots, ItemNull);
     if (script->test262_native_harness) {
         Item installed = js_test262_native_harness_install();
         if (item_is_error(installed)) return runtime_publish_result(context, installed);
     }
-    // A MIR caller's direct eval code resolves its private names through a
-    // root environment that closures it creates retain after the eval returns.
-    JsInterpEnvRoot eval_env_root;
-    if (script->is_direct_eval) {
-        RootFrame private_roots(1);
-        Rooted<Item> private_pairs(private_roots, js_eval_private_frame_pairs());
-        if (item_is_error(private_pairs.get())) {
-            return runtime_publish_result(context, private_pairs.get());
-        }
-        if (get_type_id(private_pairs.get()) == LMD_TYPE_ARRAY) {
-            JsInterpEnvRoot created(js_interp_env_create(NULL, NULL));
-            if (!created.env || !created.registered) {
-                return runtime_publish_result(context, ItemError);
-            }
-            created.env->private_bindings = private_pairs.get().item;
-            eval_env_root.replace_with(&created);
-        }
-    }
-    JsInterpFrame frame = {script, eval_env_root.env, this_root.home(),
+    JsInterpFrame frame = {script, NULL, this_root.home(),
         new_target_root.home(), home_class_root.home(),
         script->strict_mode, NULL, 0, NULL, false};
     // A classic script's value is its statement completion; eval, Function
@@ -7353,37 +7156,26 @@ enum JsInterpSourceRole : uint8_t {
     JS_INTERP_SOURCE_SCRIPT,
     JS_INTERP_SOURCE_MODULE,           // CommonJS wrapper in a private slab
     JS_INTERP_SOURCE_INDIRECT_EVAL,    // global eval code
-    JS_INTERP_SOURCE_DIRECT_EVAL,      // eval code over a MIR caller's bridge
 };
 
 static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, JsInterpSourceRole role,
         bool strict, bool test262_native_harness, uint64_t* result_home,
         bool dynamic_source = false) {
-    bool is_eval_script = role == JS_INTERP_SOURCE_INDIRECT_EVAL ||
-        role == JS_INTERP_SOURCE_DIRECT_EVAL;
-    bool is_direct_eval = role == JS_INTERP_SOURCE_DIRECT_EVAL;
-    // A direct eval's early errors resolve private names through its caller's
-    // eval-private frame, so such a parse is context-dependent and uncacheable.
-    bool cacheable = !is_direct_eval ||
-        (source && !memchr(source, '#', source_length));
+    bool is_eval_script = role == JS_INTERP_SOURCE_INDIRECT_EVAL;
     JsScript* script = js_interp_prepare_script_mode(runtime, source,
-        source_length, filename, strict, dynamic_source ? JS_PARSE_SCRIPT : JS_PARSE_AUTO, cacheable);
+        source_length, filename, strict, (dynamic_source || is_eval_script) ? JS_PARSE_SCRIPT : JS_PARSE_AUTO, true);
     if (!script) {
         // Parse and early-error rejection must enter JavaScript as SyntaxError.
         // Dynamic Function invokes this entry beneath a user catch handler.
         return js_throw_syntax_error(js_make_string("invalid JavaScript source"));
     }
-    if (is_direct_eval && !strict && script->ast_root &&
-            script->ast_root->node_type == AST_SCRIPT) {
-        Item conflict = js_interp_eval_var_conflicts_lexical_statements(
-            ((JsProgramNode*)script->ast_root)->body);
-        if (item_is_error(conflict)) return conflict;
-    }
+    if (is_eval_script && !js_interp_eval_context_valid(script, false, false, false, false))
+        return js_throw_syntax_error(js_make_string("invalid eval context"));
     if ((dynamic_source || is_eval_script) &&
             !js_interp_capture_origin(script, context ? context->current_file : NULL)) return ItemError;
     js_interp_set_script_role(script, role == JS_INTERP_SOURCE_MODULE, is_eval_script,
-        is_direct_eval, strict, test262_native_harness, NULL);
+        false, strict, test262_native_harness, NULL);
     script->dynamic_source = dynamic_source;
     return js_interp_execute_script(runtime, script, result_home);
 }
@@ -7434,11 +7226,8 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
         runtime_free_script(NULL, script, false);
         *failure = ops->fail(JS_INTERP_HOST_MEMORY); return NULL;
     }
-    JsAstFunctionFacts facts = js_ast_collect_function_facts(NULL, (JsAstNode*)script->ast_root);
-    if ((!allow_new_target && (facts.observations & JS_AST_OBSERVES_NEW_TARGET)) ||
-            (!allow_super_property && (facts.observations & JS_AST_OBSERVES_SUPER_PROPERTY)) ||
-            (!allow_super_call && (facts.has_direct_super_call || facts.has_lexical_super_call)) ||
-            (initializer && (facts.observations & JS_AST_OBSERVES_ARGUMENTS))) {
+    if (!js_interp_eval_context_valid(script, allow_new_target,
+            allow_super_property, allow_super_call, initializer)) {
         runtime_free_script(NULL, script, false);
         *failure = ops->fail(JS_INTERP_HOST_SYNTAX); return NULL;
     }
@@ -7548,13 +7337,6 @@ Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source
         caller_state->eval_initializer_context = eval_initializer;
     }
     return result;
-}
-
-Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
-        size_t source_length, const char* filename, bool strict,
-        uint64_t* result_home) {
-    return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        JS_INTERP_SOURCE_DIRECT_EVAL, strict, false, result_home);
 }
 
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,

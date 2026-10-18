@@ -651,72 +651,22 @@ bool js_root_vector_ensure_registered(RootVector* roots);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
 
-// A direct-eval bridge exists for one generated eval call.  Item columns are
-// structure-of-arrays so each exact GC range excludes the bool metadata.
-// Each binding row keeps the parallel rooted lanes' non-Item facts; frames
-// own their start positions, so neither growth policy uses a second cap.
-struct JsEvalBridgeBinding {
-    bool had_own = false;
-    bool from_journal = false;
-    bool immutable = false;
-};
-
-struct JsEvalBridgeFrame {
-    int binding_mark = 0;
-};
-
-struct JsEvalBindingJournal {
-    RootVector keys = {};
-    RootVector old_values = {};
-    ArrayList* bindings = NULL;
-    ArrayList* frames = NULL;
-};
-
+// parser-only private-name identity scope; live values belong to JsInterpEnv.
 struct JsEvalPrivateJournal {
     RootVector unscoped_keys = {};
     RootVector scoped_keys = {};
     ArrayList* frames = NULL;
 };
 
-struct JsEvalBridgeState {
-    JsEvalBindingJournal env = {};
-    JsEvalBindingJournal global_lexical = {};
+struct JsEvalState {
     JsEvalPrivateJournal private_names = {};
 };
 
-typedef struct JsEvalLocalFrameMarks {
-    int local_mark;
-    int lexical_mark;
-    int immutable_mark;
-} JsEvalLocalFrameMarks;
-
-// Caller-local records survive multiple direct eval calls in one generated
-// function. They deliberately do not share the bridge's depth.
-struct JsEvalLocalState {
-    RootVector keys = {};
-    RootVector values = {};
-    ArrayList* frame_marks = NULL;
-    RootVector lexical_keys = {};
-    RootVector immutable_keys = {};
-};
-
-struct JsEvalState {
-    JsEvalBridgeState bridge = {};
-    JsEvalLocalState local = {};
-};
-
-// One catalog of the eval journals' rooted lanes for init/destroy/clear.
 #define JS_EVAL_STATE_VECTORS(M, state) \
-    M(&(state)->bridge.env.keys, "eval env keys") \
-    M(&(state)->bridge.env.old_values, "eval env old values") \
-    M(&(state)->bridge.global_lexical.keys, "eval global lexical keys") \
-    M(&(state)->bridge.global_lexical.old_values, "eval global lexical old values") \
-    M(&(state)->bridge.private_names.unscoped_keys, "eval private unscoped keys") \
-    M(&(state)->bridge.private_names.scoped_keys, "eval private scoped keys") \
-    M(&(state)->local.keys, "eval local keys") \
-    M(&(state)->local.values, "eval local values") \
-    M(&(state)->local.lexical_keys, "eval lexical keys") \
-    M(&(state)->local.immutable_keys, "eval immutable keys")
+    M(&(state)->private_names.unscoped_keys, "eval private unscoped keys") \
+    M(&(state)->private_names.scoped_keys, "eval private scoped keys")
+
+
 
 void js_eval_state_vectors_init(JsEvalState* state, Context* owner);
 void js_eval_state_vectors_destroy(JsEvalState* state);
