@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font:0/0 sans-serif;background:white}
+.case{position:absolute;width:120px;height:120px}
+table{border-collapse:collapse;table-layout:fixed;width:80px}
+td{padding:0;width:40px;height:40px;vertical-align:top}
+.green{background:lime}
+.red{background:red}
+.blue{background:blue}
+.ink{width:20px;height:20px;background:black}
+.vertical{background-image:linear-gradient(to bottom,red 50%,lime 50%);background-size:100% 40px}
+.horizontal{background-image:linear-gradient(to right,red 50%,lime 50%);background-size:40px 100%}
+.separate{border-collapse:separate;border-spacing:10px;width:110px}
+.hide{empty-cells:hide}
+.image{background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2240%22%3E%3Cpath%20fill%3D%22red%22%20d%3D%22M0%200h20v40H0z%22%2F%3E%3Cpath%20fill%3D%22lime%22%20d%3D%22M20%200h20v40H20z%22%2F%3E%3C%2Fsvg%3E");background-size:40px 40px}
+</style></head>
+<body>
+<div id="result" style="position:relative;width:1200px;height:560px">
+<div class="case" id="empty-later-row" style="left:0px;top:0px"><table><tr><td rowspan="2" class="green"><div class="ink"></div></td></tr><tr class="blue"></tr></table></div>
+<div class="case" id="occupied-later-row" style="left:160px;top:0px"><table><tr><td rowspan="2" class="green"><div class="ink"></div></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="originating-row" style="left:320px;top:0px"><table><tr class="red"><td rowspan="2"><div class="ink"></div></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="cross-cell-ink" style="left:480px;top:0px"><table><tr><td><div class="ink" style="width:60px"></div></td><td class="blue"></td></tr></table></div>
+<div class="case" id="row-gradient" style="left:0px;top:140px"><table><tr class="vertical"><td rowspan="2"></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="column-span" style="left:160px;top:140px"><table><colgroup><col class="horizontal"><col class="blue"></colgroup><tr><td colspan="2"></td></tr><tr><td></td><td></td></tr></table></div>
+<div class="case" id="separated-row" style="left:320px;top:140px"><table class="separate"><tr class="red"><td><div class="ink"></div></td><td></td></tr></table></div>
+<div class="case" id="empty-cell-layers" style="left:480px;top:140px"><table class="separate hide" style="background:yellow"><colgroup style="background:lime"><col><col></colgroup><tbody style="background:blue"><tr class="red"><td></td><td><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case" id="row-opacity" style="left:0px;top:280px"><table><tr class="red" style="opacity:.5"><td rowspan="2" class="green"><div class="ink"></div></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="row-group" style="left:160px;top:280px"><table><tbody class="red"><tr><td rowspan="2"><div class="ink"></div></td><td></td></tr><tr class="blue"><td></td></tr></tbody></table></div>
+<div class="case" id="row-missing-cell" style="left:320px;top:280px"><table><tr><td></td><td></td></tr><tr class="red"><td></td></tr></table></div>
+<div class="case" id="column-under-row" style="left:480px;top:280px"><table><colgroup style="background:lime"><col><col class="blue"></colgroup><tr><td></td><td></td></tr><tr class="red"><td colspan="2"></td></tr></table></div>
+<div class="case" id="column-repeat" style="left:640px;top:0px"><table><colgroup><col span="2" style="background-image:linear-gradient(to right,red 50%,lime 50%)"></colgroup><tr><td></td><td></td></tr></table></div>
+<div class="case" id="column-group-span" style="left:640px;top:140px"><table><colgroup span="2" style="background-image:linear-gradient(to right,red 50%,lime 50%)"></colgroup><tr><td></td><td></td></tr></table></div>
+<div class="case" id="alpha-layers" style="left:640px;top:280px"><table><colgroup style="background:rgba(255,0,0,.5)"><col style="background:rgba(0,255,0,.5)"><col></colgroup><tbody style="background:rgba(0,0,255,.5)"><tr style="background:rgba(255,255,0,.5)"><td style="background:rgba(0,255,255,.5)"></td><td></td></tr></tbody></table></div>
+<div class="case" id="ignored-track-insets" style="left:640px;top:420px"><table style="border-collapse:separate;border-spacing:0"><tr id="ignored-source" class="vertical" style="padding:8px;border:8px solid transparent;background-size:100% 100%"><td rowspan="2"></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="css-table-cell" style="left:800px;top:0px"><div style="display:table;table-layout:fixed;width:80px;border-collapse:collapse"><div class="red" style="display:table-row"><div style="display:table-cell;width:40px;height:40px"></div><div style="display:table-cell;width:40px;height:40px"></div></div></div></div>
+<div class="case" id="nested-alpha" style="left:800px;top:140px"><table><tr style="background:rgba(255,0,0,.5)"><td><table style="width:40px"><tr><td></td></tr></table></td><td></td></tr></table></div>
+<div class="case" id="row-image" style="left:800px;top:280px"><table><tr class="image"><td rowspan="2"></td><td></td></tr><tr class="blue"><td></td></tr></table></div>
+<div class="case" id="zero-row-image" style="left:800px;top:420px"><table><tr id="zero-image-source" class="image"><td rowspan="2"></td></tr><tr></tr></table></div>
+<div class="case" id="zero-row-gradient" style="left:960px;top:0px"><table><tr id="zero-gradient-source" class="vertical"><td rowspan="2"></td></tr><tr></tr></table></div></div>
+</body></html>

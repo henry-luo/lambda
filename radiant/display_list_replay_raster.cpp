@@ -26,7 +26,7 @@ void dl_replay_fill_surface_rect(ImageSurface* surface,
 
     ClipShape shapes[RDT_MAX_CLIP_SHAPES];
     ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
-    int clip_depth = dl_restore_clip_shapes(&fill->clip_shapes, shapes, shape_ptrs);
+    int clip_depth = dl_restore_clip_shapes(fill->clip_shapes, shapes, shape_ptrs);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
     raster_fill_rect(&raster, &rect, fill->color);
 }
@@ -42,7 +42,7 @@ void dl_replay_fill_surface_rect_at_offset(ImageSurface* surface, ScratchArena* 
     ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
     ScratchMark clip_mark = {};
     if (scratch) clip_mark = scratch_mark(scratch);
-    int clip_depth = dl_restore_clip_shapes(&fill->clip_shapes, shapes, shape_ptrs,
+    int clip_depth = dl_restore_clip_shapes(fill->clip_shapes, shapes, shape_ptrs,
                                             scratch, offset_x, offset_y);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
     raster_fill_rect(&raster, &rect, fill->color);
@@ -62,7 +62,7 @@ void dl_replay_blit_surface_scaled(ImageSurface* surface,
 
     ClipShape shapes[RDT_MAX_CLIP_SHAPES];
     ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
-    int clip_depth = dl_restore_clip_shapes(&blit->clip_shapes, shapes, shape_ptrs);
+    int clip_depth = dl_restore_clip_shapes(blit->clip_shapes, shapes, shape_ptrs);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
     raster_blit_surface_scaled(&raster, source, nullptr,
                                &dst_rect, (ScaleMode)blit->scale_mode, blit->opacity);
@@ -82,7 +82,7 @@ void dl_replay_blit_surface_scaled_at_offset(ImageSurface* surface, ScratchArena
     ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
     ScratchMark clip_mark = {};
     if (scratch) clip_mark = scratch_mark(scratch);
-    int clip_depth = dl_restore_clip_shapes(&blit->clip_shapes, shapes, shape_ptrs,
+    int clip_depth = dl_restore_clip_shapes(blit->clip_shapes, shapes, shape_ptrs,
                                             scratch, offset_x, offset_y);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
     raster_blit_surface_scaled(&raster, source, nullptr,

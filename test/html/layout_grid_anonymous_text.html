@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 8px; font: 10px/10px Ahem; }
+.grid { display: grid; margin-bottom: 12px; border: 3px solid black; color: orange; }
+#indent { width: 100px; grid-template-columns: auto auto; text-indent: 50px; }
+#fixed { width: 160px; grid-template-columns: 40px 100px; column-gap: 20px; }
+#before { width: 160px; grid-template-columns: 100px 40px; column-gap: 20px; }
+#only { width: 180px; grid-template-columns: 80px 100px; }
+#aligned { width: 160px; height: 50px; grid-template-columns: 40px 100px; column-gap: 20px; align-items: center; text-align: right; }
+#percent { width: 200px; grid-template-columns: 40px 160px; text-indent: 25%; }
+#contents { width: 160px; grid-template-columns: 40px 100px; column-gap: 20px; }
+.contents { display: contents; }
+#whitespace { width: 160px; grid-template-columns: 40px 100px; white-space: pre; }
+#fits { width: 160px; grid-template-columns: 40px 100px; column-gap: 20px; }
+#baseline { display: inline-grid; width: 160px; grid-template-columns: 40px 100px; column-gap: 20px; align-items: baseline; }
+#baseline div { font: 20px/20px Ahem; background: teal; }
+.item { height: 10px; background: teal; }
+</style>
+<body id="result">
+<div id="indent" class="grid"><div style="width:0"></div>ABCDE ABCDEABCDE</div>
+<div id="fixed" class="grid"><div class="item"></div>ABCDE ABCDEABCDE</div>
+<div id="before" class="grid">ABCDE ABCDEABCDE<div class="item"></div></div>
+<div id="only" class="grid">ABCDE ABCDEABCDE</div>
+<div id="aligned" class="grid"><div class="item"></div>ABCDE</div>
+<div id="percent" class="grid"><div class="item"></div>ABCDE ABCDEABCDE</div>
+<div id="contents" class="grid"><div class="item"></div><span class="contents">ABCDE </span>ABCDEABCDE</div>
+<div id="whitespace" class="grid">  <div class="item"></div>  <div class="item"></div>  </div>
+<div id="fits" class="grid"><div class="item"></div>AB CD</div>
+<div id="baseline" class="grid">B<div id="baseline-large">A</div></div><span id="baseline-reference" style="font:20px/20px Ahem">C</span>
+</body>

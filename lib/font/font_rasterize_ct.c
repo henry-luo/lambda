@@ -225,19 +225,20 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
                                        GlyphRenderMode mode, float bitmap_scale,
                                        float pixel_ratio, Arena* arena) {
     if (!ct_font_ref || !arena) return NULL;
+    UniChar utf16[2]; CGGlyph glyphs[2] = {0, 0};
+    CFIndex count = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (!count || !CTFontGetGlyphsForCharacters((CTFontRef)ct_font_ref, utf16, glyphs, count) ||
+        !glyphs[0]) return NULL;
+    return font_rasterize_ct_render_index(ct_font_ref, glyphs[0], mode,
+        bitmap_scale, pixel_ratio, arena);
+}
+
+GlyphBitmap* font_rasterize_ct_render_index(void* ct_font_ref, uint32_t glyph_index,
+        GlyphRenderMode mode, float bitmap_scale, float pixel_ratio, Arena* arena) {
+    if (!ct_font_ref || !arena || glyph_index > UINT16_MAX) return NULL;
     CTFontRef font = (CTFontRef)ct_font_ref;
-
-    // encode codepoint
-    UniChar utf16[2];
-    CFIndex char_count = utf16_encode(codepoint, (uint16_t*)utf16);
-    if (char_count == 0) return NULL;
-
-    CGGlyph glyphs[2] = {0, 0};
-    if (!CTFontGetGlyphsForCharacters(font, utf16, glyphs, char_count) || glyphs[0] == 0) {
-        return NULL;
-    }
-
-    CGGlyph glyph_id = glyphs[0];
+    // shaped ligatures have no Unicode scalar; use their selected-face ID directly.
+    CGGlyph glyph_id = (CGGlyph)glyph_index;
 
     // get bounding rect to determine bitmap dimensions
     CGRect bbox;

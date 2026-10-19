@@ -83,7 +83,8 @@ static uint64_t bitmap_cache_hash(const void* item, uint64_t seed0, uint64_t see
     const BitmapCacheEntry* entry = (const BitmapCacheEntry*)item;
     // FontHandle addresses are recycled after release, so include its lifetime identity.
     uint64_t data[3];
-    data[0] = ((uint64_t)entry->codepoint << 8) | (uint64_t)entry->mode;
+    data[0] = ((uint64_t)entry->codepoint << 9) | ((uint64_t)entry->mode << 1) |
+        (uint64_t)entry->is_glyph_index;
     data[1] = (uint64_t)(uintptr_t)entry->handle;
     data[2] = entry->handle_identity;
     return hashmap_hash_xxhash3_bytes(data, sizeof(data), seed0, seed1);
@@ -97,6 +98,7 @@ static int bitmap_cache_compare(const void* a, const void* b, void* udata) {
     if (ea->handle_identity != eb->handle_identity) {
         return ea->handle_identity < eb->handle_identity ? -1 : 1;
     }
+    if (ea->is_glyph_index != eb->is_glyph_index) return ea->is_glyph_index ? 1 : -1;
     if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
     if (ea->mode != eb->mode) return ea->mode < eb->mode ? -1 : 1;
     return 0;
@@ -552,118 +554,58 @@ bool font_has_codepoint(FontHandle* handle, uint32_t codepoint) {
 // Glyph rendering (bitmap)
 // ============================================================================
 
-const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
-                                      GlyphRenderMode mode) {
-    if (!handle) return NULL;
-
+static const GlyphBitmap* font_render_bitmap(FontHandle* handle, uint32_t value,
+        GlyphRenderMode mode, bool is_glyph_index) {
+    if (!handle || !handle->ctx) return NULL;
     FontContext* ctx = handle->ctx;
-    if (!ctx) return NULL;
-
     font_context_enforce_glyph_arena_limit(ctx);
+    BitmapCacheEntry key = {.codepoint = value, .is_glyph_index = is_glyph_index,
+        .mode = mode, .handle = handle, .handle_identity = handle->cache_identity};
+    struct hashmap* cache = ensure_bitmap_cache(ctx);
+    BitmapCacheEntry* cached = cache ? (BitmapCacheEntry*)hashmap_get(cache, &key) : NULL;
+    if (cached && cached->bitmap.buffer) return &cached->bitmap;
 
-    // check bitmap cache first
-    struct hashmap* bmp_cache = ensure_bitmap_cache(ctx);
-    if (bmp_cache) {
-        BitmapCacheEntry search = {.codepoint = codepoint, .mode = mode,
-                                   .handle = handle,
-                                   .handle_identity = handle->cache_identity};
-        BitmapCacheEntry* cached = (BitmapCacheEntry*)hashmap_get(bmp_cache, &search);
-        if (cached && cached->bitmap.buffer) {
-            return &cached->bitmap;
-        }
-    }
-
-    GlyphBitmap* backend_bmp = font_backend_render(handle, codepoint, mode, ctx->glyph_arena);
-    if (backend_bmp && (backend_bmp->buffer || backend_bmp->width == 0)) {
-        if (bmp_cache) {
-            int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
-            if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
-                hashmap_clear(bmp_cache, false);
-            }
-            BitmapCacheEntry entry = {
-                .codepoint = codepoint,
-                .mode      = mode,
-                .handle    = handle,
-                .handle_identity = handle->cache_identity,
-                .bitmap    = *backend_bmp,
-            };
-            hashmap_set(bmp_cache, &entry);
-        }
-        return backend_bmp;
-    }
-
+    GlyphBitmap* bitmap = NULL;
+    if (is_glyph_index) {
 #ifdef __APPLE__
-    // CoreText rasterization (sole backend on macOS)
-    if (handle->ct_raster_ref) {
-        float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
-        GlyphBitmap* bmp = font_rasterize_ct_render(handle->ct_raster_ref, codepoint,
-                                                      mode, handle->bitmap_scale,
-                                                      pixel_ratio, ctx->glyph_arena);
-        if (bmp) {
-            // insert into bitmap cache
-            if (bmp_cache) {
-                int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
-                if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
-                    hashmap_clear(bmp_cache, false);
-                }
-                BitmapCacheEntry entry = {
-                    .codepoint = codepoint,
-                    .mode      = mode,
-                    .handle    = handle,
-                    .handle_identity = handle->cache_identity,
-                    .bitmap    = *bmp,
-                };
-                hashmap_set(bmp_cache, &entry);
-            }
-            return bmp;
-        }
+        float density = ctx->config.pixel_ratio > 0.0f ? ctx->config.pixel_ratio : 1.0f;
+        bitmap = font_rasterize_ct_render_index(handle->ct_raster_ref, value, mode,
+            handle->bitmap_scale, density, ctx->glyph_arena);
+#endif
+    } else {
+        // the backend owns native/platform fallback and synthetic-weight handling.
+        bitmap = font_backend_render(handle, value, mode, ctx->glyph_arena);
     }
-    return NULL;  // no FT fallback on macOS
+    if (!bitmap) return NULL;
+    if (cache && (bitmap->buffer || bitmap->width == 0)) {
+        int limit = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+        if (hashmap_count(cache) >= (size_t)limit) hashmap_clear(cache, false);
+        key.bitmap = *bitmap;
+        hashmap_set(cache, &key);
+    }
+    return bitmap;
 }
+
+const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
+        GlyphRenderMode mode) {
+    return font_render_bitmap(handle, codepoint, mode, false);
+}
+
+const GlyphBitmap* font_render_glyph_index(FontHandle* handle, uint32_t glyph_index,
+        GlyphRenderMode mode) {
+    return font_render_bitmap(handle, glyph_index, mode, true);
+}
+
+bool font_visit_face_glyphs(FontHandle* handle, const char* text, int byte_len,
+        FontGlyphVisitFn visitor, void* context, float* advance) {
+#ifdef __APPLE__
+    return handle && font_platform_visit_face_glyphs(handle->ct_raster_ref,
+        text, byte_len, visitor, context, advance);
 #else
-
-    // ThorVG rasterization path (preferred on Linux/WASM)
-    if (handle->tvg_raster_ctx && handle->tables) {
-        float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
-        // synthetic bold: apply stroke when requested weight is significantly heavier
-        // than the actual font file's weight (e.g. CSS bold=700 but only Regular=400 available)
-        float synth_bold_stroke = 0.0f;
-        int req_w = (int)handle->weight;
-        int act_w = (handle->actual_font_weight > 0) ? handle->actual_font_weight : req_w;
-        if (req_w >= 600 && act_w < 550) {
-            // stroke width ≈ size_px/14 ≈ same order as Chrome's synthetic bold
-            synth_bold_stroke = handle->size_px / 14.0f * pixel_ratio;
-            log_debug("font_glyph: synthetic bold stroke=%.2f (req=%d act=%d) for cp=%u",
-                      synth_bold_stroke, req_w, act_w, codepoint);
-        }
-        GlyphBitmap* bmp = font_rasterize_tvg_render(handle->tvg_raster_ctx, handle->tables,
-                                                      codepoint, handle->size_px,
-                                                      handle->bitmap_scale, pixel_ratio,
-                                                      synth_bold_stroke,
-                                                      ctx->glyph_arena);
-        if (bmp && (bmp->buffer || bmp->width == 0)) {
-            // insert into bitmap cache
-            if (bmp_cache) {
-                int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
-                if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
-                    hashmap_clear(bmp_cache, false);
-                }
-                BitmapCacheEntry entry = {
-                    .codepoint = codepoint,
-                    .mode      = mode,
-                    .handle    = handle,
-                    .handle_identity = handle->cache_identity,
-                    .bitmap    = *bmp,
-                };
-                hashmap_set(bmp_cache, &entry);
-            }
-            return bmp;
-        }
-    }
-
-    return NULL;
+    (void)handle; (void)text; (void)byte_len; (void)visitor; (void)context; (void)advance;
+    return false;
+#endif
 }
-#endif // !__APPLE__
 
 // ============================================================================
 // font_load_glyph — glyph loading with automatic codepoint fallback

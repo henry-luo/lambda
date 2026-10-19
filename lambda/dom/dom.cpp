@@ -2359,8 +2359,7 @@ extern "C" const char* dom_element_namespace_uri(void* element) {
 }
 
 extern "C" bool dom_element_is_svg(void* element) {
-    const char* uri = dom_element_namespace_uri(element);
-    return uri && strcmp(uri, "http://www.w3.org/2000/svg") == 0;
+    return dom_element_is_svg((DomElement*)element);
 }
 
 extern "C" const char* dom_document_preferred_languages(void* document) {
@@ -3440,6 +3439,7 @@ struct DomPendingImageEvent {
     DomNodeRef ref;
     bool loaded;
 };
+struct DomPendingLoadDocument;
 struct JsDomForeignDocumentRuntimeState {
     ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
@@ -3454,6 +3454,12 @@ struct JsDomForeignDocumentRuntimeState {
     DomPendingImageEvent* pending_images = nullptr;
     int pending_image_load_count = 0;
     bool iframe_load_drain_scheduled = false;
+    DomPendingLoadDocument* pending_load_documents = nullptr;
+};
+struct DomPendingLoadDocument : DomDocumentResourceData {
+    JsDomForeignDocumentRuntimeState* state;
+    DomDocument* document;
+    DomPendingLoadDocument* next;
 };
 static void dom_foreign_document_capsule_destroy(void* capsule);
 static const ContextCapsuleOps dom_foreign_document_capsule_ops = {
@@ -4203,6 +4209,63 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     return ItemNull;
 }
 
+static void destroy_pending_load_document(DomDocumentResourceData* data) {
+    auto* held = (DomPendingLoadDocument*)data;
+    auto* state = held->state;
+    // either owner can retire first; use the stored capsule without rebinding TLS (D5.4.1).
+    DomPendingLoadDocument** document_link = &state->pending_load_documents;
+    while (*document_link && *document_link != held) document_link = &(*document_link)->next;
+    if (*document_link) *document_link = held->next;
+    int kept = 0;
+    for (int i = 0; i < state->pending_iframe_load_count; i++) {
+        if (state->pending_iframe_docs[i] == held->document) {
+            dom_node_unpin(held->document, state->pending_iframe_refs[i], DOM_NODE_PIN_EVENT_QUEUE);
+        } else {
+            state->pending_iframe_loads[kept] = state->pending_iframe_loads[i];
+            state->pending_iframe_refs[kept] = state->pending_iframe_refs[i];
+            state->pending_iframe_docs[kept++] = state->pending_iframe_docs[i];
+        }
+    }
+    for (int i = kept; i < state->pending_iframe_load_count; i++) {
+        state->pending_iframe_loads[i] = nullptr;
+        state->pending_iframe_refs[i] = {nullptr, 0};
+        state->pending_iframe_docs[i] = nullptr;
+    }
+    state->pending_iframe_load_count = kept;
+    DomPendingImageEvent** image_link = &state->pending_images;
+    while (*image_link) {
+        DomPendingImageEvent* event = *image_link;
+        if (event->document != held->document) {
+            image_link = &event->next;
+            continue;
+        }
+        *image_link = event->next;
+        dom_node_unpin(held->document, event->ref, DOM_NODE_PIN_EVENT_QUEUE);
+        state->pending_image_load_count--;
+        mem_free(event);
+    }
+    mem_free(held);
+}
+
+static bool retain_pending_load_document(DomDocument* document) {
+    auto* state = dom_foreign_document_rt_state;
+    for (auto* held = state->pending_load_documents; held; held = held->next)
+        if (held->document == document) return true;
+    auto* held = (DomPendingLoadDocument*)mem_calloc(
+        1, sizeof(DomPendingLoadDocument), MEM_CAT_JS_RUNTIME);
+    if (!held) return false;
+    held->state = state;
+    held->document = document;
+    // queued native pins must detach before either the document registry or evaluator retires (D5.3.3).
+    if (!dom_document_add_resource(document, held, destroy_pending_load_document, context)) {
+        mem_free(held);
+        return false;
+    }
+    held->next = state->pending_load_documents;
+    state->pending_load_documents = held;
+    return true;
+}
+
 static void _schedule_iframe_load(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
@@ -4211,6 +4274,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
     if (s_pending_iframe_load_count >= 16) return;
     DomNodeRef ref = dom_node_ref((DomNode*)iframe);
     if (!iframe->doc || !dom_node_ref_validate(iframe->doc, ref) ||
+        !retain_pending_load_document(iframe->doc) ||
         !dom_node_pin(iframe->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) return;
     int pending_index = s_pending_iframe_load_count++;
     s_pending_iframe_loads[pending_index] = iframe;
@@ -4244,7 +4308,8 @@ extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
     if(!image->doc||!dom_node_ref_validate(image->doc,ref)) return;
     auto* event=(DomPendingImageEvent*)mem_calloc(1,sizeof(DomPendingImageEvent),MEM_CAT_JS_RUNTIME);
     if(!event) return;
-    if(!dom_node_pin(image->doc,ref,DOM_NODE_PIN_EVENT_QUEUE)) {mem_free(event);return;}
+    if (!retain_pending_load_document(image->doc) ||
+        !dom_node_pin(image->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) {mem_free(event);return;}
     event->image=image;event->document=image->doc;event->ref=ref;event->loaded=loaded;
     *tail=event;s_pending_image_load_count++;
     if(!s_iframe_load_drain_scheduled) {
@@ -4254,21 +4319,16 @@ extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
 }
 
 static void reset_pending_iframe_loads() {
-    if (!dom_foreign_document_state_get()) return;
-    for (int i = 0; i < s_pending_iframe_load_count; i++) {
-        if (s_pending_iframe_docs[i] && s_pending_iframe_refs[i].address) {
-            dom_node_unpin(s_pending_iframe_docs[i], s_pending_iframe_refs[i],
-                           DOM_NODE_PIN_EVENT_QUEUE);
-        }
+    auto* state = dom_foreign_document_state_get();
+    if (!state) return;
+    while (state->pending_load_documents) {
+        auto* held = state->pending_load_documents;
+        dom_document_release_resource(held->document, held);
     }
     memset(s_pending_iframe_loads, 0, sizeof(s_pending_iframe_loads));
     memset(s_pending_iframe_refs, 0, sizeof(s_pending_iframe_refs));
     memset(s_pending_iframe_docs, 0, sizeof(s_pending_iframe_docs));
     s_pending_iframe_load_count = 0;
-    while(s_pending_images) {
-        auto* event=s_pending_images;s_pending_images=event->next;
-        dom_node_unpin(event->document,event->ref,DOM_NODE_PIN_EVENT_QUEUE);mem_free(event);
-    }
     s_pending_image_load_count = 0;
     s_iframe_load_drain_scheduled = false;
 }
@@ -18846,6 +18906,6 @@ static void dom_foreign_document_capsule_destroy(void* capsule) {
     dom_destroy_context_state(capsule,
         state->foreign_doc_cache_count || state->doc_with_window_count ||
         state->iframe_cache_count || state->pending_iframe_load_count ||
-        state->pending_image_load_count,
+        state->pending_image_load_count || state->pending_load_documents,
         "js-dom-foreign-document");
 }

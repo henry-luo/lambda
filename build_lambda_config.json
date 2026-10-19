@@ -307,6 +307,13 @@
       "link": "static"
     },
     {
+      "name": "openjpeg",
+      "description": "JPEG 2000 sample decoding for PDF image XObjects",
+      "include": "/opt/homebrew/opt/openjpeg/include/openjpeg-2.5",
+      "lib": "/opt/homebrew/opt/openjpeg/lib/libopenjp2.a",
+      "link": "static"
+    },
+    {
       "name": "image-codecs",
       "description": "Image I/O codecs built by the Lambda source target",
       "lib": "build/lib/liblambda-image-codecs.a",
@@ -1439,7 +1446,8 @@
         "archive-readers",
         "lzma",
         "bzip2",
-        "archive-iconv"
+        "archive-iconv",
+        "openjpeg"
       ],
       "macos": {
         "exclude_libraries": [
@@ -2470,6 +2478,12 @@
           "link": "static"
         },
         {
+          "name": "openjpeg",
+          "include": "/clang64/include/openjpeg-2.5",
+          "lib": "/clang64/lib/libopenjp2.a",
+          "link": "static"
+        },
+        {
           "name": "lzma",
           "include": "/clang64/include",
           "lib": "/clang64/lib/liblzma.a",
@@ -2530,7 +2544,8 @@
       "output": "lambda.exe",
       "compiler": "clang",
       "pkg_config_includes": [
-        "webkit2gtk-4.1"
+        "webkit2gtk-4.1",
+        "libopenjp2"
       ],
       "exclude_source_files": [
         "lib/clock_compat.c",
@@ -2737,6 +2752,12 @@
           "name": "zlib",
           "description": "Compression library",
           "lib": "-lz",
+          "link": "dynamic"
+        },
+        {
+          "name": "openjpeg",
+          "include": "",
+          "lib": "-lopenjp2",
           "link": "dynamic"
         },
         {
@@ -4176,7 +4197,8 @@
               "radiant/view_transform.cpp",
               "radiant/animation_value.cpp",
               "test/test_display_list_stubs.cpp",
-              "radiant/render_glyph_path.cpp"
+              "radiant/render_glyph_path.cpp",
+              "radiant/text_metrics.cpp"
             ],
             "binary": "test_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
@@ -4561,7 +4583,9 @@
               "gtest_main"
             ],
             "additional_sources": [
-              "radiant/midi_player.cpp"
+              "radiant/midi_player.cpp",
+              "radiant/audio_bus.cpp",
+              "radiant/audio_reverb.cpp"
             ],
             "binary": "test_midi_player_gtest.exe",
             "icon": "\ud83c\udfb5"
@@ -5246,7 +5270,9 @@
           {
             "source": "test_pdf_render_visual_gtest.cpp",
             "name": "PDF Render Tests",
-            "case_workers": 4,
+            "case_workers": 8,
+            "case_batch_size": 16,
+            "case_batch_size_env": "LAMBDA_PDF_TEST_BATCH_SIZE",
             "case_workers_env": "LAMBDA_PDF_TEST_JOBS",
             "isolated_cwd": true,
             "dependencies": [

@@ -5,8 +5,9 @@
 
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
 > **Focus presentation verified:** 2026-10-15 (§4 CSS outlines and editable-only carets).
+> **Scoped source refresh:** 2026-10-19 — shared float paint phases and document/semantic-visit ownership (§2.4).
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree through shared paint phases and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
 > **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, the `RenderContext` base and `RasterRenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (Lambda export/save adapter), `lambda/module/radiant/radiant_pdf_walk.cpp` (schema-backed callbacks), `lmd/package/doc/pdf/output.ls` (PDF generation), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
@@ -74,6 +75,41 @@ layer sequence in [CSS Appendix E](https://www.w3.org/TR/CSS22/zindex.html#paint
 4. `render_walk_positive_z_descendants` collects positive-z positioned descendants (recursing through inline elements) and paints them last in stable ascending order.
 
 Positive/zero stacking is still resolved among siblings: a positioned box nested in a non-positioned block is lifted above that block's other children, not above the block's later siblings. Absolute/fixed children follow in-flow step-8 boxes rather than interleaving with them by tree order. Negative positioned inline spans and complete isolation/flex/grid context rules remain outside the new block-layer path. The shared helper preserves source order for equal z-index entries. `event.cpp` consumes its lists in reverse, testing negative layers after flow children and before the context's own background. `test/ui/negative_stacking.{html,json}` and `RenderOutputParity.NegativeLayersRespectContextFlowAndAncestorClips` cover flow text layers, zero/auto contexts, clipping, hit order and PNG/SVG/PDF parity.
+
+When ordinary blocks or floating descendants require separate layers, `render_walk_children`
+uses `RadiantPaintPhase` in the shared `RenderContext`: ordinary block
+backgrounds/borders, float subtrees, then foreground. Ordinary ancestors remain
+traversable in every phase so offsets, inherited fonts and clips keep their
+original owner. The shared classifiers in `stacking_order.cpp` preserve atomic
+inline-block/inline-table, flex/grid item and stacking-context roots. Each such
+root owns a complete visit. A shared phase bitset omits the float pass when none is present, and
+inline-only sequences keep the single-pass path. The existing positioned-layer
+limits above still apply.
+
+Outermost SVG fragments and `foreignObject` establish stacking contexts under
+[SVG 2 §3.4.1](https://www.w3.org/TR/SVG2/render.html#EstablishingStackingContex).
+The host HTML walk treats the SVG fragment atomically; walking its descendants
+in a host background phase would paint foreign HTML without the SVG transform.
+`svg_draw_foreign_object_html` resets the copied local context to a complete
+paint stack, including when an external SVG image is captured during the host's
+foreground phase. The existing `svg_foreign_object*` UI cases cover backgrounds,
+clipping, transformed input, scrolling, and moving/removing/reinserting content.
+
+Boundary emission, replaced content, outlines/rules and special raster dispatch
+respect the active phase. Embedded documents own a new complete stack inside the
+frame's content layer, rather than inheriting an outer foreground-only visit.
+`visit_element` accompanies foreground once per logical element: repeated scope
+visits must not duplicate PDF destinations, links or callback events. Native
+paint, generic SVG/PDF walking and reverse hit testing share this phase policy.
+The view/style and cached resource ownership remains **D4.5.1v4 /D4.1.4v5**;
+module placement remains **D7.3.3–D7.3.4**.
+
+`layout_float_paint_order.html` exercises opaque/translucent and nested floats,
+overlapping inline ink, positioned overlays, clipping, an opacity owner,
+pointer-events:none, block SVG/HTML content and an embedded document. Native
+checks include two densities, retained repaint, causal background mutation,
+matching hit targets, no-float overlapping backgrounds and one semantic callback visit. Whole-subtree cache
+eligibility for split visits is described in [RAD_12 §6](RAD_12_Paint_IR_Display_List.md#6-retained-incremental-replay).
 
 ### 2.5 Per-node dispatch
 

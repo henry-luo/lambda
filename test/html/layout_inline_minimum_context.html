@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 20px/20px Ahem; overflow-wrap: break-word; }
+table { width: 40px; border-spacing: 0; margin-bottom: 10px; }
+td { padding: 0; background: #eee; }
+code, span { font: inherit; }
+code { background: lime; }
+.plain { font-size: 10px; }
+.small code { font-size: 50%; }
+.decorated code { padding: 0 .4em; }
+.minimum { width: min-content; font-size: 10px; }
+.margins code { margin: 0 4px 0 3px; }
+</style></head><body id="result">
+<table id="plain" class="plain"><tr><td>[<code>aaaaaa</code>]</td></tr></table>
+<table id="mixed" class="small"><tr><td>[<code>aaaaaa</code>]</td></tr></table>
+<table id="decorated" class="small decorated"><tr><td>[<code>aaaaaa</code>]</td></tr></table>
+<table id="nested" class="small decorated"><tr><td>[<span><code>aaaaaa</code></span>]</td></tr></table>
+<table id="split" class="small decorated"><tr><td>[<code>aaa<span>aaa</span></code>]</td></tr></table>
+<table id="prefix" class="plain"><tr><td>aa <code>bbb</code>cccc</td></tr></table>
+<table id="suffix" class="plain"><tr><td><code>aaaa bbb</code>cc</td></tr></table>
+<table id="both" class="plain"><tr><td>aa<code>bbb ccc</code>dd</td></tr></table>
+<table id="spaces" class="plain"><tr><td>[ <code>aaaaaa</code> ]</td></tr></table>
+<table id="forced" class="plain"><tr><td>[<code>aaa<br>aaa</code>]</td></tr></table>
+<table id="atomic" class="plain"><tr><td>[<code style="display:inline-block">aaaaaa</code>]</td></tr></table>
+<table id="nowrap" class="plain" style="white-space:nowrap"><tr><td>[<code>aaaaaa</code>]</td></tr></table>
+<table id="anywhere" class="plain" style="overflow-wrap:anywhere"><tr><td>[<code>aaa<span>aaa</span></code>]</td></tr></table>
+<table id="break-all" class="plain" style="word-break:break-all"><tr><td>[<code>aaa<span>aaa</span></code>]</td></tr></table>
+<table id="out-of-flow" class="plain"><tr><td>[<code>aaa<span style="position:absolute">aaaaaaaaaa</span><span>aaa</span></code>]</td></tr></table>
+<div id="inline-minimum" class="minimum">[<code>aaa<span>aaa</span></code>]</div>
+<table id="empty-hyphen" class="plain"><tr><td>aaa-<span></span>bbb</td></tr></table>
+<table id="optional-break" class="plain"><tr><td><code>aaaa<wbr>bbbb</code></td></tr></table>
+<table id="margin-cell" class="plain margins"><tr><td>[<code>aaa<span>aaa</span></code>]</td></tr></table>
+<div id="margin-minimum" class="minimum margins">[<code>aaa<span>aaa</span></code>]</div>
+</body></html>

@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-19 — system color-face tracking and retained inherited sizes (§3.3); selected-face color and combining-cluster painting (§3.4–§3.5).
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the font layer as seen from Radiant. Its single most important message is a boundary: the real font engine — glyph rasterization, `cmap` lookup, GPOS/`kern` kerning, per-codepoint fallback, the glyph cache, WOFF2 decode, and COLR/CBDT color-emoji handling — is **not** in `radiant/`. It lives in the unified module under `lib/font/` (~30 files). Radiant's `font.cpp` and `font_face.cpp` are a thin CSS→engine bridge: they map a CSS-resolved `FontProp` to the engine's `FontStyleDesc`, resolve and cache the `FontHandle`, parse and register `@font-face` descriptors, and copy engine metrics back onto the `FontProp`. Everything typographic below the handle is the engine's concern.
 >
 > **Primary sources:** `radiant/view.hpp` (font and `@font-face` declarations), `radiant/font.cpp` (`setup_font`, handle caching, metric population), `radiant/font_face.cpp` (`@font-face` parse + `register_font_face` bridge), `radiant/ui_context.cpp` (`FontContext` creation), and — for the boundary — the engine surface in `lib/font/font.h`.
@@ -67,6 +69,92 @@ fallback. See Apple's [font creation options](https://developer.apple.com/docume
 
 ---
 
+### 3.3 System color-font tracking and retained sizes
+
+CoreText's catalog color faces can add automatic unscaled tracking to glyph
+advances. `font_platform_copy_for_css` creates an owned zero-tracking copy for
+color faces; non-color faces retain their existing state. Catalog construction
+and platform fallback installation share that operation. The selected fallback
+face supplies both measurement and paint, and old aliases are released only
+after the new references are retained (**D4.5.1v4 /D4.1.4v5**). Exact document
+font data stays on its existing raw-face path. There are no glyph-width offsets
+or family-specific advance tables. The platform attribute is the same one used
+by [Skia's CoreText copy helper](https://skia.googlesource.com/skia/+/refs/heads/main/src/utils/mac/SkCTFontCreateExactCopy.cpp).
+
+A retained inherited `font-size` is recomputed from the current parent, rather
+than treated as an own declaration. Own CSS and valid HTML size hints retain
+their cascade role; UA scales use `HtmlUaElementDefault`, including ruby.
+`SystemColorGlyphAdvancesExcludeAutomaticTracking` and
+`layout_system_color_font_tracking.html` cover eight independent browser sizes,
+concrete/fallback families, a grapheme cluster, CSS letter spacing and retained
+1×/2× size edits with ASCII/author/HTML/ruby neighbors. Ruby line-box alignment
+still differs in the visual control; correct computed annotation size does not
+establish complete ruby geometry or raster equivalence.
+
+### 3.4 Selected-face color clusters
+
+`font_visit_face_glyphs` shapes through the existing CoreText text-line factory.
+It validates every run against the exact selected native face before visiting
+font-local glyph IDs and CSS positions. Foreign fallback IDs are rejected
+before the first callback. `font_render_glyph_index` sends these IDs through
+the same raster kernel as Unicode glyphs; its cache key explicitly distinguishes
+the two namespaces and retains the handle lifetime identity and render mode.
+Bitmap buffers keep the existing font-context arena/generation lifetime;
+display lists borrow them (**D4.5.1v4 /D4.1.4v5**).
+
+`text_get_emoji_cluster` shares presentation and face-selection inputs between
+layout and painting, including regional pairs and keycaps outside
+Extended_Pictographic. Ordinary text, native shadows, overflow fitting and
+effect raster lowering preserve the selected glyphs and actual shaped advance.
+Unsupported compositions can retain multiple glyphs. Letter spacing is applied
+once per typographic unit, and justification consumes the entire cluster to
+preserve regional-indicator parity and joiner state (CSS Fonts 4 §5.3;
+CSS Text 3 §7.2). Shadow masks sample BGRA alpha and sharp replay retains mask
+mode instead of repainting the color glyph.
+
+The selected-face shaping/indexed bitmap path currently uses CoreText on macOS.
+Other backends retain their existing scalar path; arbitrary contextual-script
+paint and complete SVG text-shadow/color-font export remain separate work.
+`layout_color_cluster_paint.html` and the `TextOverflowPaint` color-cluster,
+cache-namespace and alpha-coverage regressions cover the current core path.
+
+### 3.5 Combining clusters and transformed paint
+
+`text_get_grapheme_cluster` supplies ordinary extended graphemes as well as the
+emoji subset retained by `text_get_emoji_cluster`. `render_text_visit_cluster`
+uses the selected-face shaping/indexed bitmap path for base/mark substitutions
+and positions. Ordinary native paint, native shadow collection, overflow fitting
+and effect raster lowering therefore preserve visible zero-advance marks rather
+than treating zero advance as absence of ink. Letter spacing is added once per
+typographic unit (CSS Fonts 4 §5.3; CSS Text 3 §7.2).
+
+Fallback starts from the captured `FontHandle` through
+`font_resolve_fallback_for_codepoint`, reusing the font engine's existing fallback
+resolver. Re-resolving a missing or generic style family could choose a different
+primary face and fallback lineage. The returned handle is retained and released
+after the synchronous glyph visit; bitmap lifetime remains the cache's ownership
+(**D4.5.1v4 /D4.1.4v5**).
+
+Native CSS transforms reuse the export segment builder with the original word
+context. The transformed bytes belong to a temporary paint segment; DOM text and
+source byte ranges remain unchanged (CSS Text 3 §2.1). Case expansion may create
+multiple typographic units, so every unit is preflighted before any ink is
+emitted. Contextual scripts continue through their existing path: detaching an
+Arabic or Indic grapheme would lose its required shaping context.
+Clusters requiring different faces within one grapheme also retain the existing
+fallback path; rejecting foreign glyph IDs does not establish complete cluster
+font matching.
+
+`layout_combining_cluster_paint.html` covers composed/decomposed Latin, Greek,
+Cyrillic, Kana and symbol overlays, two sizes, letter spacing, shadows and case
+transforms. Native tests compare equivalent ink at 1×/2× through retained repaint
+and a causal size edit; the effect regression checks glyph count and following
+text advance after cache reset and captured-font replacement. Canonical fallback
+for a precomposed scalar, general contextual-script paint, and SVG outline
+cluster placement remain separate work.
+
+---
+
 ## 4. The engine surface Radiant depends on (`lib/font/font.h`)
 
 Radiant calls a small, stable subset of `lib/font/font.h`. Documented here only at the level of "what Radiant asks for"; the implementation is the engine's concern.
@@ -81,6 +169,8 @@ Radiant calls a small, stable subset of `lib/font/font.h`. Documented here only 
 | `font_get_normal_lh_split` | `:306` | `line-height: normal` ascender/descender split (Chrome-compatible). |
 | `font_get_glyph` / `font_load_glyph` | `:152/226` | Per-codepoint advance and metrics; `font_load_glyph` internally does cmap + fallback + cache. |
 | `font_load_glyph_emoji` | `:232` | Force emoji/color presentation after a VS16 (U+FE0F). |
+| `font_visit_face_glyphs` / `font_render_glyph_index` | symbols | Preserve selected-face shaping through color/combining-cluster paint (§3.4–§3.5). |
+| `font_resolve_fallback_for_codepoint` | symbol | Retain fallback relative to a captured face (§3.5). |
 | `font_get_kerning` | `:158` | Codepoint-based GPOS/`kern` pair kerning (codepoint, not glyph-index, for CoreText). |
 | `font_measure_text` | `:246` | The Latin fast-path run measurement in text layout ([RAD_06](RAD_06_Inline_and_Text_Layout.md)). |
 | `font_get_halt_adjustment` | `:166` | `text-spacing-trim` advance adjustment from the OpenType `halt` feature. |

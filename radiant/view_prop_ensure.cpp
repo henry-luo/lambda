@@ -227,9 +227,13 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
             FontProp* initial_font = is_html5
                 ? &lycon->ui_context->default_font
                 : &lycon->ui_context->legacy_default_font;
-            // the active font already carries the cascade's inherited or initial choice.
-            FontProp* family_source = lycon->font.style && lycon->font.style->family
-                ? lycon->font.style.get() : initial_font;
+            FontProp* family_source = lycon->font.style.get();
+            if (!family_source || family_source == value || !family_source->family) {
+                // a retained reset can leave the active font pointing at this cleared group.
+                DomElement* parent = dom_parent_element(this);
+                family_source = parent && parent->font && parent->fontp()->family
+                    ? parent->font.get() : initial_font;
+            }
             value->family = family_source->family;
             value->platform_fallback_family = family_source->platform_fallback_family;
         }

@@ -532,6 +532,51 @@ TEST_F(CssStyleNodeTest, CSS4CascadeLevelsNormalDeclarations) {
     EXPECT_TRUE(winning == animation || winning == transition);
 }
 
+TEST_F(CssStyleNodeTest, BorrowedHtmlHintsRespectOriginsLayersAndAllRollback) {
+    CssValue hint_value = {};
+    hint_value.type = CSS_VALUE_TYPE_KEYWORD;
+    hint_value.data.keyword = CSS_VALUE_MIDDLE;
+    CssDeclaration hint = {};
+    hint.property_code = CSS_PROPERTY_VERTICAL_ALIGN;
+    hint.value = &hint_value;
+    hint.origin = CSS_ORIGIN_AUTHOR_HINT;
+    EXPECT_EQ(style_tree_get_declaration_with_fallback(nullptr,
+        CSS_PROPERTY_VERTICAL_ALIGN, &hint), &hint);
+    struct Sample {
+        CssPropertyCode property; CssOrigin origin; CssEnum value;
+        uint32_t layer; bool important; int winner;
+    } samples[] = {
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_USER, CSS_VALUE_TOP, 0, false, 0},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_USER, CSS_VALUE_TOP, 0, true, 1},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_USER_AGENT, CSS_VALUE_TOP, 0, true, 1},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_AUTHOR, CSS_VALUE_TOP, 0, false, 1},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_AUTHOR, CSS_VALUE_TOP, 1, false, 1},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_AUTHOR, CSS_VALUE_REVERT, 0, false, -1},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_AUTHOR, CSS_VALUE_REVERT_LAYER, 0, false, 0},
+        {CSS_PROPERTY_VERTICAL_ALIGN, CSS_ORIGIN_AUTHOR, CSS_VALUE_REVERT_LAYER, 1, false, 0},
+        {CSS_PROPERTY_ALL, CSS_ORIGIN_AUTHOR, CSS_VALUE_INITIAL, 0, false, 1},
+        {CSS_PROPERTY_ALL, CSS_ORIGIN_AUTHOR, CSS_VALUE_REVERT, 0, false, -1},
+        {CSS_PROPERTY_ALL, CSS_ORIGIN_AUTHOR, CSS_VALUE_REVERT_LAYER, 0, false, 0},
+    };
+    for (const Sample& sample : samples) {
+        CssValue value = {};
+        value.type = CSS_VALUE_TYPE_KEYWORD;
+        value.data.keyword = sample.value;
+        CssDeclaration* declaration = css_declaration_create(sample.property, &value,
+            create_specificity(0, 0, 0, 0, sample.important), sample.origin, pool);
+        ASSERT_NE(declaration, nullptr);
+        declaration->layer_order = sample.layer;
+        ASSERT_NE(style_tree_apply_declaration(style_tree, declaration), nullptr);
+        CssDeclaration* expected = sample.winner < 0 ? nullptr : sample.winner ? declaration : &hint;
+        EXPECT_EQ(style_tree_get_declaration_with_fallback(style_tree,
+            CSS_PROPERTY_VERTICAL_ALIGN, &hint), expected);
+        // a borrowed hint must neither enter the canonical tree nor consume source order.
+        EXPECT_EQ(style_tree->declaration_count, 1);
+        EXPECT_EQ(style_tree->next_source_order, 2);
+        style_tree_clear(style_tree);
+    }
+}
+
 TEST_F(CssStyleNodeTest, CSS4CascadeLevelsImportantDeclarations) {
     // Test CSS4 cascade levels for important declarations (reverse order)
     CssSpecificity same_spec = create_specificity(0, 0, 1, 0, true); // all important

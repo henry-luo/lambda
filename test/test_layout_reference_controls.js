@@ -5,6 +5,7 @@ const assert = require('assert/strict');
 const fs = require('fs').promises;
 const path = require('path');
 const { createHash } = require('crypto');
+const { referenceControlIsValid } = require('./layout/reference_controls');
 
 async function runReferenceControlTests({ RadiantLayoutTester, compactBrowserReference }) {
     const root = path.resolve(__dirname, '..');
@@ -34,6 +35,26 @@ async function runReferenceControlTests({ RadiantLayoutTester, compactBrowserRef
     assert.equal(selected.path, compact);
     const loaded = await tester.loadBrowserReference('sample', 'contracts', html, selected.path);
     assert.deepEqual(loaded.reference_control, reference.reference_control);
+
+    const textControl = { ...reference.reference_control,
+        specification: 'https://www.w3.org/TR/css-text-3/#white-space-processing',
+        reason: 'DOM carriage returns have U+0020 semantics.',
+        text_codepoints: [{ from: 13, to: 32 }] };
+    delete textControl.stylesheet;
+    assert.equal(referenceControlIsValid(textControl), true);
+    for (const text_codepoints of [[null], [], [{ from: 13, to: 13 }], [{ from: 13, to: 0xD800 }],
+            [{ from: -1, to: 32 }], [{ from: 13, to: 32 }, { from: 13, to: 10 }]]) {
+        assert.equal(referenceControlIsValid({ ...textControl, text_codepoints }), false);
+    }
+    const textReference = { ...reference, reference_control: textControl };
+    await fs.writeFile(compact, JSON.stringify(compactBrowserReference(textReference)));
+    assert.deepEqual((await tester.loadBrowserReference('sample', 'contracts', html,
+        compact)).reference_control, textControl);
+    await fs.writeFile(html, source + '<span>changed</span>');
+    await assert.rejects(tester.loadBrowserReference('sample', 'contracts', html,
+        compact), /Stale standards reference/);
+    await fs.writeFile(html, source);
+    await fs.writeFile(compact, JSON.stringify(compactBrowserReference(reference)));
 
     // Source edits invalidate the control even when the old browser capture still exists.
     await fs.writeFile(html, source.replace('&#x2060;', ' '));

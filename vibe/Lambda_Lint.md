@@ -342,12 +342,12 @@ check-int-cast:     ; @$(PYTHON) utils/lint/run.py --rule no-int-cast-radiant
 
 ### 3.5 CI
 
-**Deferred.** For now `make lint` is run manually as a developer/release-time
-check, not wired into any `.github/workflows/*.yml`. When CI integration
-happens later, it should run as its own gate alongside `analyze` / `tidy` /
-`lint-cppcheck` (per `vibe/Lambda_CICD.md` §code-quality), use the official
-**ast-grep GitHub Action** or `sg scan --json` → annotations, and **pin the
-ast-grep version** in CI — matcher behavior can shift across releases.
+**Deferred.** `make lint` remains a manual developer/release-time check. The
+GitHub Actions workflows were removed 2026-10-19; D1.10 still requires
+invariants to have enforcement, and no replacement CI configuration is checked
+into this repository. If CI is restored, run lint as its own gate alongside
+`analyze` / `tidy` / `lint-cppcheck` (per `vibe/Lambda_CICD.md` §code-quality),
+using `sg scan --json` for annotations and pinning the ast-grep version.
 
 ### 3.6 Migration plan (parity-first, low-risk)
 
@@ -597,7 +597,7 @@ Infrastructure deferred (explicit, not blocked):
 
 | Item | Section | Note |
 |------|---------|------|
-| CI integration | §3.5 | `make lint` is manual-only today; will pin ast-grep version and wire `.github/workflows/*.yml` when adopted |
+| CI integration | §3.5 | `make lint` is manual-only; CI configuration was removed 2026-10-19. D1.10 remains the enforcement requirement. |
 | Parse-error diagnostic surfacing | §3.7 | `run.sh` does not currently warn on new ast-grep parse errors. Tail-risk mitigation; add when the rule corpus is large enough that silent drift becomes plausible |
 | Native `// ast-grep-ignore` markers | §3.3 Option A | Status quo (Option B / semantic `*_OK` markers) is working; tool-native form is a reversible later move |
 | §3.6.4 grep backstop | §3.6 | Explicitly skipped — parity-confidence was high enough to not need it |

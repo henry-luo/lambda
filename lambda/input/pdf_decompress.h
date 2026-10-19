@@ -3,10 +3,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../../lib/strbuf.h"
+#include "../../lib/endian.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// callers validate the row extent; PDF samples are MSB-first, including packed and 16-bit data.
+static inline unsigned pdf_read_sample(const uint8_t* data, size_t bit, int bits) {
+    return bits == 16 ? read_be16(data + bit / 8) :
+        (data[bit / 8] >> (8 - bits - bit % 8)) & ((1u << bits) - 1);
+}
 
 /**
  * PDF Stream Decompression Utilities

@@ -7300,9 +7300,9 @@ TEST_F(SecondaryViewTest, UnsupportedTablePoliciesFailBeforePublishingAnEdition)
                 longest = fmaxf(longest, font_measure_text(style->font.font_handle, word, 4).width);
             for (const char* label : {"Head A", "Head B", "Foot A", "Foot B", "Body A", "Body B"})
                 full = fmaxf(full, font_measure_text(style->font.font_handle, label, 6).width);
-            // the existing intrinsic table measure rounds each cell's word contribution and two UA padding edges.
-            EXPECT_FLOAT_EQ(grid->rect.width, 2.0f * ceilf(longest + 2.0f));
-            EXPECT_LT(grid->rect.width, 2.0f * ceilf(full + 2.0f));
+            // CSS intrinsic widths preserve fractional words plus the two UA padding edges.
+            EXPECT_FLOAT_EQ(grid->rect.width, 2.0f * (longest + 2.0f));
+            EXPECT_LT(grid->rect.width, 2.0f * (full + 2.0f));
             EXPECT_LT(grid->rect.width, page->style->content_rect.width);
         }
         auto coverage = [&](ViewTree* edition) {
@@ -17396,6 +17396,25 @@ TEST_F(SecondaryViewTest, PagedFlowPlacesPageFloatsOnTheirAnchorsPage) {
 }
 
 #ifdef __APPLE__
+TEST(FontMetricTest, SystemColorGlyphAdvancesExcludeAutomaticTracking) {
+    struct Case { float size, advance; } cases[] = {
+        {12.0f, 15.0f}, {13.0f, 16.0f}, {15.0f, 19.0f}, {16.0f, 20.0f},
+        {17.0f, 21.0f}, {20.0f, 22.0f}, {32.0f, 32.0f}, {64.0f, 64.0f},
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.size);
+        void* font = font_platform_create_ct_font(
+            "AppleColorEmoji", "Apple Color Emoji", entry.size, 400, FONT_SLANT_NORMAL);
+        ASSERT_NE(font, nullptr);
+        EXPECT_TRUE(font_platform_has_color_glyphs(font));
+        // independent Chromium captures establish advances, including bitmap optical sizing.
+        EXPECT_NEAR(font_platform_get_glyph_advance(font, 0x1F600), entry.advance, 0.01f);
+        TextExtents run = font_platform_measure_text(font, "😀", 4, 0.0f);
+        EXPECT_NEAR(run.width, entry.advance, 0.01f);
+        font_platform_destroy_ct_font(font);
+    }
+}
+
 TEST(FontMetricTest, PlatformLookupDoesNotActivateDownloadableFonts) {
     // downloadable family names from web fonts must not open FontRegistry UI during layout.
     const int weights[] = {400, 600};

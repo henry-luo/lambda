@@ -158,6 +158,7 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-mpdecimal" "Multi-precision decimal l
 install_msys2_package "${TOOLCHAIN_PREFIX}-mbedtls" "mbedTLS - SSL/TLS library"
 # image codecs build from lib/image; retain their shared compression dependency explicitly.
 install_msys2_package "${TOOLCHAIN_PREFIX}-zlib" "Compression library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-openjpeg2" "JPEG 2000 image samples in PDFs"
 
 # Graphics and rendering libraries (for Radiant engine)
 install_msys2_package "${TOOLCHAIN_PREFIX}-glfw" "GLFW window management"

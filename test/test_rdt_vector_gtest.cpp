@@ -6,6 +6,9 @@
 #include "../lambda/dom/dom_observers.h"
 #include "../lib/memtrack.h"
 #include <string.h>
+#include <thorvg_capi.h>
+#include "../radiant/rdt_path_internal.hpp"
+#include "../radiant/render_metrics.hpp"
 
 TEST(SvgTransformTest, IndividualPropertiesComposeBeforeCssAndAttributeLists) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
@@ -614,12 +617,18 @@ TEST(TextOverflowPaint, ExportSlicesKeepTheirWhitespaceProcessingContext) {
         {"ab   cd", 3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
         {"ab   cd", 0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
         {"A\nB", 0, 2, CSS_VALUE_PRE, CSS_VALUE_NONE, "A"},
-        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A"},
+        // a DOM CR is a space before the preserved LF (CSS Text 3 §4).
+        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A \nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A\rB", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A B", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A\rB", 0, 3, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A B"},
         {"A\nB", 0, 2, CSS_VALUE_PRE_LINE, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_NORMAL, CSS_VALUE_NONE, "A "},
     };
     for (const Case& sample : cases) {
+        SCOPED_TRACE(sample.source);
         TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
         lam::Temp<char> visible(render_text_create_export_segment(
             (const unsigned char*)sample.source, &slice, sample.transform, false, sample.white_space));
@@ -674,6 +683,125 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
         font_handle_release(style.font_handle); font_context_destroy(fonts);
     }
 }
+
+TEST(TextOverflowPaint, ColorGlyphShadowUsesAlphaCoverage) {
+    uint8_t pixels[] = {0, 0, 255, 255, 0, 128, 0, 128};
+    GlyphBitmap bitmap = {}; bitmap.buffer = pixels; bitmap.width = 2; bitmap.height = 1;
+    bitmap.pitch = 8; bitmap.pixel_mode = GLYPH_PIXEL_BGRA; bitmap.bitmap_scale = 1.0f;
+    ImageSurface* surface = image_surface_create(2, 1); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, (size_t)surface->pitch);
+    DlDrawGlyph shadow = {}; shadow.bitmap = bitmap;
+    shadow.clip = {0, 0, 2, 1}; shadow.color = Color{.r=0,.g=0,.b=0,.a=255};
+    dl_replay_draw_glyph(surface, &shadow);
+    const uint8_t* result = (const uint8_t*)surface->pixels;
+    for (unsigned channel = 0; channel < 3; channel++) {
+        EXPECT_EQ(result[channel], 0);
+        EXPECT_EQ(result[4 + channel], 127);
+    }
+    image_surface_destroy(surface);
+}
+
+#ifdef __APPLE__
+TEST(TextOverflowPaint, SelectedFaceShapingRejectsForeignGlyphIdsAndKeepsCacheNamespaces) {
+    FontContextConfig config = {}; config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* font = font_resolve(fonts, &description); ASSERT_NE(font, nullptr);
+    const GlyphBitmap* scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(scalar, nullptr); GlyphBitmap expected = *scalar;
+    const GlyphBitmap* indexed = font_render_glyph_index(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(indexed, nullptr);
+    // the same integer names a different glyph in the Unicode and face-local namespaces.
+    EXPECT_TRUE(indexed->width != expected.width || indexed->height != expected.height ||
+        indexed->pitch != expected.pitch || memcmp(indexed->buffer, expected.buffer,
+            (size_t)expected.pitch * expected.height) != 0);
+    scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL); ASSERT_NE(scalar, nullptr);
+    EXPECT_EQ(scalar->width, expected.width); EXPECT_EQ(scalar->height, expected.height);
+    EXPECT_EQ(memcmp(scalar->buffer, expected.buffer, (size_t)expected.pitch * expected.height), 0);
+
+    struct Probe { int calls; uint32_t glyph; } probe = {};
+    auto visit = [](void* pointer, uint32_t glyph, float, float, float) {
+        Probe* value = (Probe*)pointer; value->calls++; value->glyph = glyph;
+    };
+    float advance = -1.0f;
+    const char source[] = "🐕‍🦺";
+    EXPECT_FALSE(font_visit_face_glyphs(font, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 0); EXPECT_FLOAT_EQ(advance, -1.0f);
+    FontHandle* emoji = font_resolve_for_emoji(fonts, &description, 0x1F415);
+    ASSERT_NE(emoji, nullptr);
+    ASSERT_TRUE(font_visit_face_glyphs(emoji, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 1); EXPECT_FLOAT_EQ(advance, 20.0f);
+    EXPECT_NE(probe.glyph, font_get_glyph_index(emoji, 0x1F415));
+    const GlyphBitmap* joined = font_render_glyph_index(emoji, probe.glyph, GLYPH_RENDER_NORMAL);
+    ASSERT_NE(joined, nullptr); EXPECT_EQ(joined->pixel_mode, GLYPH_PIXEL_BGRA);
+    EXPECT_GT(joined->width, 0); EXPECT_GT(joined->height, 0);
+    font_handle_release(emoji); font_handle_release(font); font_context_destroy(fonts);
+}
+
+TEST(TextOverflowPaint, GraphemeClustersPreserveShapedGlyphsAndFollowingTextAdvance) {
+    struct Sample { const char* text; int cluster_glyphs; float advance; };
+    const Sample samples[] = {
+        {"🐕‍🦺M", 1, 20.0f}, {"👨‍👩‍👧‍👦M", 1, 20.0f},
+        {"👩🏽‍💻M", 1, 20.0f}, {"🏳️‍🌈M", 1, 20.0f},
+        {"🇸🇬M", 1, 20.0f}, {"1️⃣M", 1, 20.0f},
+        {"❤️M", 1, 20.0f}, {"😀M", 1, 20.0f},
+        {"🐕‍😀M", 2, 40.0f},
+        {"e\u0301M", 1, 8.90625f}, {"A\u030AM", 1, 10.671875f},
+        {"n\u0303M", 1, 8.90625f}, {"u\u0308\u0301M", 1, 8.90625f},
+        {"ι\u0308\u0301M", 1, 3.5625f}, {"и\u0306M", 1, 8.9375f},
+        {"=\u0338M", 1, 8.78125f}, {"ハ\u309AM", 1, 16.0f},
+    };
+    for (float density : {1.0f, 2.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 16.0f; style.letter_spacing = 3.0f;
+        FontBox box = {lam::up(&style), 16.0f};
+        FontProp replacement = FONT_PROP_DEFAULT;
+        description.size_px = 32.0f;
+        replacement.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(replacement.font_handle, nullptr);
+        replacement.font_size = 32.0f;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            if (pass == 1) font_context_reset_glyph_caches(fonts);
+            for (const Sample& sample : samples) {
+                SCOPED_TRACE(sample.text);
+                SCOPED_TRACE(density);
+                SCOPED_TRACE(pass);
+                PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up(sample.text);
+                run.text_len = (int)strlen(sample.text); run.x = 5.0f; run.baseline_y = 40.0f;
+                DisplayList list = {}; dl_init(&list, arena);
+                PaintList recorded;
+                if (pass == 2) {
+                    paint_glyph_run(&recorded, &run);
+                    box = {lam::up(&replacement), 32.0f};
+                    render_glyph_run_raster_lower(&recorded.data()[0].glyph_run, &list);
+                    box = {lam::up(&style), 16.0f};
+                } else render_glyph_run_raster_lower(&run, &list);
+                // browser controls distinguish one ligature from an unsupported two-glyph composition.
+                EXPECT_EQ(list.item_count(), sample.cluster_glyphs + 1);
+                if (list.item_count() > 0) {
+                    const DlDrawGlyph& marker = list.data()[list.item_count() - 1].draw_glyph;
+                    EXPECT_EQ(marker.bitmap.pixel_mode, GLYPH_PIXEL_GRAY);
+                    float pixel_to_css = render_font_pixel_to_css(style.font_handle, &marker.bitmap);
+                    float actual_x = marker.has_transform ? marker.transform.e13 : (float)marker.x;
+                    float expected_x = roundf(run.x + sample.advance + 3.0f +
+                        (float)marker.bitmap.bearing_x * pixel_to_css);
+                    EXPECT_FLOAT_EQ(actual_x, expected_x);
+                }
+                dl_destroy(&list);
+            }
+        }
+        arena_destroy(arena);
+        font_handle_release(replacement.font_handle);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+#endif
 
 TEST(TextOverflowPaint, SynthesizedPunctuationSpaceKeepsLogicalWidthAcrossDensities) {
     for (float density : {1.0f, 2.0f}) {
@@ -818,6 +946,83 @@ protected:
         return allocations;
     }
 };
+
+TEST_F(SvgAnimationLifetimeTest, PathGeometrySurvivesPaintPlacementAndSourceValueChanges) {
+    MarkBuilder builder(authored_input());
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "200")
+        .child(builder.element("path").attr("d", "M0 0 L20 0 L20 20 Z").attr("fill", "red").final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* path = svg->first_child->as_element(); ASSERT_NE(path, nullptr);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    RdtPathStorage* original = nullptr;
+    for (int iteration = 0; iteration < 5; iteration++) {
+        SCOPED_TRACE(iteration);
+        if (iteration == 1) ASSERT_TRUE(path->set_attribute("fill", "blue"));
+        if (iteration == 2) ASSERT_TRUE(svg->set_attribute("viewBox", "0 0 100 100"));
+        if (iteration == 3) ASSERT_TRUE(path->set_attribute("d", "M0 0 L40 0 L40 20 Z"));
+        if (iteration == 4) ASSERT_TRUE(path->set_attribute("d", "M0 0 L20 0 L20 20 Z"));
+        DisplayList list; PaintList paint;
+        RasterRenderContext context = {}; context.ui_context = lam::up(&ui);
+        context.dl = lam::up(&list); context.paint_list = lam::up(&paint);
+        context.raster_scale = 1; context.block.clip = {0, 0, 200, 200};
+        context.block.x = (float)iteration;
+        scratch_init(&context.scratch, arena);
+        render_svg_begin_paint_pass();
+        render_custom_svg_subscene(&context, dom_element_to_element(svg), 200, 200);
+        const DlFillPath* fill = nullptr;
+        for (size_t i = 0; i < list.size(); i++) if (list[i].op == DL_FILL_PATH) fill = &list[i].fill_path;
+        ASSERT_NE(fill, nullptr) << "commands=" << list.size() << " parses=" << counters.path_parses;
+        if (iteration == 0) original = fill->path->storage;
+        if (iteration == 3) EXPECT_NE(fill->path->storage, original);
+        else EXPECT_EQ(fill->path->storage, original);
+        EXPECT_EQ(counters.path_parses, iteration < 3 ? 1u : 2u);
+        EXPECT_EQ(counters.path_copy_bytes, 0u);
+        dl_destroy(&list); paint_list_destroy(&paint); scratch_release(&context.scratch);
+    }
+    arena_destroy(arena);
+}
+
+TEST_F(SvgAnimationLifetimeTest, BasicShapeCacheSkipsConstructionForPaintAndPlacementChanges) {
+    MarkBuilder builder(authored_input());
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "100")
+        .child(builder.element("rect").attr("width", "50%").attr("height", "20")
+            .attr("rx", "5").attr("fill", "red").final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* rect = svg->first_child->as_element(); ASSERT_NE(rect, nullptr);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    RdtPathStorage* original = nullptr;
+    for (int iteration = 0; iteration < 3; iteration++) {
+        if (iteration == 1) ASSERT_TRUE(rect->set_attribute("fill", "blue"));
+        if (iteration == 2) ASSERT_TRUE(rect->set_attribute("width", "75%"));
+        DisplayList list; PaintList paint;
+        RasterRenderContext context = {}; context.ui_context = lam::up(&ui);
+        context.dl = lam::up(&list); context.paint_list = lam::up(&paint);
+        context.raster_scale = 1; context.block.clip = {0, 0, 300, 100};
+        context.block.x = (float)iteration;
+        scratch_init(&context.scratch, arena);
+        render_svg_begin_paint_pass();
+        render_custom_svg_subscene(&context, dom_element_to_element(svg), 200, 100);
+        const DlFillPath* fill = nullptr;
+        for (size_t i = 0; i < list.size(); i++) if (list[i].op == DL_FILL_PATH) fill = &list[i].fill_path;
+        ASSERT_NE(fill, nullptr);
+        if (iteration == 0) original = fill->path->storage;
+        if (iteration == 1) {
+            EXPECT_EQ(fill->path->storage, original); EXPECT_EQ(counters.basic_shape_builds, 1u);
+            EXPECT_EQ(counters.basic_shape_cache_hits, 1u);
+        }
+        if (iteration == 2) {
+            EXPECT_NE(fill->path->storage, original); EXPECT_EQ(counters.basic_shape_builds, 2u);
+        }
+        dl_destroy(&list); paint_list_destroy(&paint); scratch_release(&context.scratch);
+    }
+    arena_destroy(arena);
+}
 
 TEST_F(SvgAnimationLifetimeTest, WallclockGrammarCalendarZonesAndFractionalSeconds) {
     const double origin = 946684800.25; // 2000-01-01T00:00:00.25Z
@@ -2431,7 +2636,7 @@ TEST(RdtImageTest, AlphaModeSurvivesOwnedImageReleaseAndSeparatesCachedUploads) 
     uint32_t pixels[64];
     for (uint32_t& pixel : pixels) pixel = 0xffffffffu;
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 8, 8, 8);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_NEAR((float)(pixels[36] & 255u), 177.0f, 1.0f);
     EXPECT_NEAR((float)((pixels[36] >> 8) & 255u), 127.0f, 1.0f);
     const uint32_t source = 0x80000064u;
@@ -2462,7 +2667,7 @@ TEST(GradientImagePaintTest, SourceReplacementAndRecordingReleasePreserveDeferre
         ASSERT_EQ(dl.item_count(), 1);
         ASSERT_TRUE(dl_validate(&dl, nullptr));
         RdtVector vector = {}; rdt_vector_init(&vector, pixels, 16, 16, 16);
-        EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+        EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
         rdt_vector_destroy(&vector); dl_destroy(&dl); arena_destroy(arena);
     };
     for (GradientType type : {GRADIENT_LINEAR, GRADIENT_RADIAL, GRADIENT_CONIC})
@@ -2823,7 +3028,7 @@ TEST(SvgStrokeTest, MiterLimitSurvivesRecordingAndChangesCachedStrokeGeometry) {
     EXPECT_FLOAT_EQ(dl.data()[0].stroke_path.miter_limit, 1.0f);
     uint32_t pixels[100 * 120] = {};
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 100, 120, 100);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 100 + 50], 0u);
     memset(pixels, 0, sizeof(pixels));
     rdt_stroke_path(&vector, path, blue, 12.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
@@ -2884,7 +3089,7 @@ TEST(SvgGradientTest, RecordingOwnsStrokeDashesAndReplayPreservesSpread) {
     EXPECT_FLOAT_EQ(gradient->options.dash_array[0], 10.0f);
     uint32_t pixels[80 * 50] = {};
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 80, 50, 80);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 80 + 15], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 35], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 25], 0u);
@@ -2928,7 +3133,7 @@ TEST(SvgGradientTest, RetainedFragmentOwnsStrokeFactsAfterRecordingArenaDies) {
     EXPECT_FLOAT_EQ(gradient->options.dash_array[0], 10.0f);
     uint32_t pixels[80 * 50] = {}; RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 80, 50, 80);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &replay.data()[1], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &replay.data()[1]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 80 + 15], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 35], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 25], 0u);
@@ -3041,13 +3246,13 @@ TEST(SvgImageTest, ReplayRefreshesPixelsAfterSharedDecodePromotion) {
     RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 8, 8, 8);
     rdt_vector_begin_batch(&vector);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(pixels[4 * 8 + 4], 0xffff0000u);
     image_surface_detach_pixels(image); image_surface_destroy(image);
     memset(pixels, 0, sizeof(pixels));
     rdt_vector_begin_batch(&vector);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(pixels[4 * 8 + 4], 0u);
     rdt_vector_destroy(&vector);
@@ -4228,13 +4433,14 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     rdt_fill_rect(&vector, 0.0f, 0.0f, 24.0f, 12.0f, blue);
     rdt_pop_clip(&vector);
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 2u);
-    EXPECT_EQ(pixels[4 * 24 + 4], pixels[4 * 24 + 6]);
-    EXPECT_NE(pixels[4 * 24 + 10], pixels[4 * 24 + 4]);
-    EXPECT_EQ(pixels[4 * 24 + 20], 0u);
 
     rdt_pop_clip(&vector);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 2u);
+    // clip transitions seal their masks; pixels are observable after the batch synchronizes.
+    EXPECT_EQ(pixels[4 * 24 + 4], pixels[4 * 24 + 6]);
+    EXPECT_NE(pixels[4 * 24 + 10], pixels[4 * 24 + 4]);
+    EXPECT_EQ(pixels[4 * 24 + 20], 0u);
 
     rdt_path_free(inner);
     rdt_path_free(outer);
@@ -5154,8 +5360,10 @@ TEST(PaintOwnership, FailedDisplayRecordingLeavesEarlierCommandsAndRecovers) {
             RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
         else dl_push_clip(&list, path, nullptr);
         memtrack_fault_clear();
-        EXPECT_EQ(list.item_count(), 1);
+        EXPECT_EQ(list.item_count(), fail_at == 0 ? 1 : 2);
+        if (op == DL_PUSH_CLIP && fail_at == 1) dl_pop_clip(&list);
         EXPECT_TRUE(dl_validate(&list, nullptr));
+        dl_truncate(&list, 1);
     }
     dl_fill_path(&list, path, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
     EXPECT_EQ(list.item_count(), 2);
@@ -5266,4 +5474,296 @@ TEST(PaintOwnership, PrivateCaptureTrimmingRetainsEveryCoveredPixelAndPublishedB
     EXPECT_FALSE(image_surface_trim_transparent_margin(surface, &x, &y));
     EXPECT_EQ(surface->width, 3); EXPECT_EQ(surface->height, 2);
     image_surface_destroy(surface);
+}
+
+TEST(PaintOwnership, NativePicturesSurviveRepeatedSerialReplayAndSourceRetirement) {
+    rdt_engine_init(0);
+    Tvg_Paint shape = tvg_shape_new(); ASSERT_NE(shape, nullptr);
+    ASSERT_EQ(tvg_shape_append_rect(shape, 4, 4, 20, 18, 0, 0, true), TVG_RESULT_SUCCESS);
+    ASSERT_EQ(tvg_shape_set_fill_color(shape, 240, 30, 10, 180), TVG_RESULT_SUCCESS);
+    ASSERT_EQ(tvg_paint_translate(shape, 2, 3), TVG_RESULT_SUCCESS);
+    RdtPicture* picture = rdt_picture_take_tvg_paint(shape, 32, 32); ASSERT_NE(picture, nullptr);
+    DisplayList list;
+    dl_draw_picture(&list, rdt_picture_dup(picture), 210, nullptr);
+    rdt_picture_free(picture);
+    ASSERT_EQ(list.item_count(), 1);
+    DisplayItem frozen = list.data()[0];
+    uint32_t reference[32 * 32];
+    for (uint32_t background : {0xff000000u, 0xffffffffu}) for (int repeat = 0; repeat < 3; repeat++) {
+        ImageSurface* surface = image_surface_create(32, 32); ASSERT_NE(surface, nullptr);
+        for (size_t i = 0; i < 32 * 32; i++) ((uint32_t*)surface->pixels)[i] = background;
+        RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, 32, 32, surface->pitch / 4);
+        Bound clip = {0, 0, 32, 32}; ScratchArena scratch = {};
+        dl_replay(&list, &vec, surface, &clip, &scratch, 1, nullptr);
+        rdt_vector_destroy(&vec); scratch_release(&scratch);
+        EXPECT_NE(((uint32_t*)surface->pixels)[10 * 32 + 10], background);
+        EXPECT_EQ(((uint32_t*)surface->pixels)[5 * 32 + 5], background);
+        if (repeat == 0) memcpy(reference, surface->pixels, sizeof(reference));
+        else EXPECT_EQ(memcmp(reference, surface->pixels, sizeof(reference)), 0);
+        EXPECT_EQ(memcmp(&frozen, list.data(), sizeof(frozen)), 0);
+        image_surface_destroy(surface);
+    }
+    dl_destroy(&list); rdt_engine_term();
+}
+
+TEST(PaintOwnership, PathSnapshotsShareGeometryAndDetachWithoutChangingPublishedPaint) {
+    RdtPath* source = rdt_path_new(); ASSERT_NE(source, nullptr);
+    rdt_path_move_to(source, 1, 2); rdt_path_line_to(source, 10, 12);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayList list;
+    dl_fill_path(&list, source, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
+    dl_stroke_path(&list, source, Color{0xff00ff00u}, 2, RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
+    ASSERT_EQ(list.item_count(), 2);
+    RdtPath* fill = list.data()[0].fill_path.path;
+    RdtPath* stroke = list.data()[1].stroke_path.path;
+    EXPECT_EQ(fill->storage, stroke->storage); EXPECT_EQ(fill->storage, source->storage);
+    EXPECT_EQ(counters.path_copy_bytes, 0u);
+    uint64_t frozen_hash = rdt_path_hash(fill);
+    memtrack_fault_inject(0); rdt_path_line_to(source, 20, 25); memtrack_fault_clear();
+    EXPECT_EQ(source->storage, fill->storage); EXPECT_EQ(source->count, 2);
+    rdt_path_line_to(source, 20, 25);
+    EXPECT_NE(source->storage, fill->storage); EXPECT_EQ(source->count, 3);
+    EXPECT_EQ(fill->count, 2); EXPECT_EQ(rdt_path_hash(fill), frozen_hash);
+    EXPECT_NE(rdt_path_hash(source), frozen_hash);
+    rdt_path_free(source);
+    float left, top, right, bottom;
+    ASSERT_TRUE(rdt_path_get_bounds(stroke, &left, &top, &right, &bottom));
+    EXPECT_FLOAT_EQ(right, 10); EXPECT_FLOAT_EQ(bottom, 12);
+    dl_destroy(&list);
+}
+
+TEST(PaintOwnership, CopiedBorrowedChunksPinSharedPaintArraysAfterAllSourceOwnersRetire) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    DisplayList source;
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0, 0, 20, 20, 0, 0);
+    RdtGradientStop stops[] = {{0, 220, 30, 10, 200}, {1, 10, 30, 220, 100}};
+    int marker = dl_begin_element(&source, 4200, 0, 0, 20, 20);
+    dl_fill_linear_gradient(&source, path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    dl_end_element(&source, marker); rdt_path_free(path);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 4200); ASSERT_NE(fragment, nullptr);
+    DisplayList borrowed, copied;
+    ASSERT_TRUE(retained_dl_append_fragment(&borrowed, fragment));
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(dl_copy_range(&copied, &borrowed, 0, borrowed.item_count() - 1));
+    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_EQ(counters.shared_array_retains, 1u);
+    EXPECT_EQ(copied[1].fill_linear_gradient.stops, borrowed[1].fill_linear_gradient.stops);
+    retained_dl_cache_destroy(cache); dl_destroy(&source); dl_destroy(&borrowed);
+    EXPECT_EQ(copied[1].fill_linear_gradient.stops[0].r, 220);
+    EXPECT_TRUE(dl_validate(&copied, nullptr));
+    dl_destroy(&copied); pool_destroy(pool);
+}
+
+TEST(PaintOwnership, TransparentCaptureComposesVectorCpuImagesAndGlyphsAcrossBackdrops) {
+    rdt_engine_init(0);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    DisplayList list; dl_init(&list, arena);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_circle(path, 16, 16, 13, 11);
+    dl_push_clip(&list, path, nullptr);
+    dl_fill_rect(&list, 3, 4, 18, 16, Color{0x803020e0u});
+    dl_fill_rounded_rect(&list, 8, 10, 22, 18, 4, 3, Color{0x9040e030u});
+    dl_stroke_path(&list, path, Color{0xa0e04030u}, 3, RDT_CAP_ROUND, RDT_JOIN_ROUND, nullptr, 0, 0, nullptr);
+    RdtGradientStop stops[] = {{0, 220, 20, 50, 90}, {1, 10, 80, 230, 170}};
+    dl_fill_linear_gradient(&list, path, 0, 0, 32, 32, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    dl_pop_clip(&list); rdt_path_free(path);
+    Bound cpu_clip = {2, 2, 30, 30};
+    dl_fill_surface_rect(&list, 2, 8, 18, 13, 0x8030e070u, &cpu_clip, nullptr, 0);
+    ImageSurface* image = image_surface_create(4, 4); ASSERT_NE(image, nullptr);
+    image->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    for (size_t i = 0; i < 16; i++) ((uint32_t*)image->pixels)[i] = i % 2 ? 0x806020c0u : 0x40306090u;
+    dl_blit_surface_scaled(&list, image, 14, 8, 12, 10, SCALE_MODE_LINEAR, &cpu_clip, nullptr, 0, 190);
+    uint8_t coverage[] = {0, 32, 128, 255, 16, 80, 170, 230, 16, 190, 30, 70, 0, 255, 128, 64};
+    GlyphBitmap glyph = {}; glyph.buffer = coverage; glyph.width = glyph.height = glyph.pitch = 4;
+    glyph.pixel_mode = GLYPH_PIXEL_GRAY;
+    dl_draw_glyph(&list, &glyph, 9, 11, Color{0xa0e03010u}, false, &cpu_clip);
+    ASSERT_TRUE(dl_supports_premultiplied_capture(&list));
+    uint32_t layer[32 * 32] = {}, actual[32 * 32];
+    Bound clip = {0, 0, 32, 32}; ScratchArena scratch = {};
+    auto replay = [&](uint32_t* pixels) {
+        ImageSurface surface = {}; surface.width = surface.height = 32;
+        surface.pitch = 32 * 4; surface.pixels = pixels; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        RdtVector vec = {}; rdt_vector_init(&vec, pixels, 32, 32, 32);
+        dl_replay(&list, &vec, &surface, &clip, &scratch, 1, nullptr);
+        rdt_vector_destroy(&vec); scratch_release(&scratch);
+    };
+    replay(layer); EXPECT_NE(layer[16 * 32 + 16], 0u);
+    for (uint32_t background : {0xff000000u, 0xffffffffu, 0xffa03020u, 0x80203040u}) {
+        for (size_t i = 0; i < 32 * 32; i++) actual[i] = background;
+        replay(actual);
+        unsigned largest_error = 0;
+        for (size_t i = 0; i < 32 * 32; i++) {
+            uint32_t composed = render_pixel_source_over_premultiplied_pair(background, layer[i]);
+            for (unsigned shift = 0; shift < 32; shift += 8) {
+                int delta = (int)((composed >> shift) & 255) - (int)((actual[i] >> shift) & 255);
+                unsigned error = (unsigned)(delta < 0 ? -delta : delta);
+                if (error > largest_error) largest_error = error;
+            }
+        }
+        EXPECT_LE(largest_error, 2u) << "background=" << background;
+    }
+    list.back().draw_glyph.is_color_emoji = true;
+    EXPECT_FALSE(dl_supports_premultiplied_capture(&list));
+    list.back().draw_glyph.is_color_emoji = false;
+    dl_save_backdrop(&list, 0, 0, 32, 32);
+    EXPECT_FALSE(dl_supports_premultiplied_capture(&list));
+    dl_destroy(&list); image_surface_destroy(image); arena_destroy(arena); rdt_engine_term();
+}
+
+TEST(PaintOwnership, NestedFramesKeepIndependentPayloadArenasAndReuseOuterCapacity) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session, "<html><body>frame</body></html>", 80, 60, false));
+    UiContext* ui = session.ui_context;
+    ViewTree* tree = ui->document->view_tree;
+    DisplayItem* retained_storage = nullptr;
+    RdtVectorImpl* retained_vector = nullptr;
+    {
+        RenderProfiler profiler = {}; RasterRenderContext first, second;
+        RenderFrameScope outer(&first, ui, tree, &profiler);
+        retained_vector = first.vec.impl;
+        RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+        rdt_path_add_rect(path, 0, 0, 20, 20, 0, 0);
+        RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+        dl_fill_linear_gradient(outer.list(), path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+        ASSERT_TRUE(dl_validate(outer.list(), nullptr));
+        retained_storage = outer.list()->data();
+        {
+            RenderFrameScope inner(&second, ui, tree, &profiler);
+            EXPECT_NE(second.vec.impl.get(), first.vec.impl.get());
+            EXPECT_NE(inner.list()->arena.arena, outer.list()->arena.arena);
+            EXPECT_NE(second.scratch.arena, first.scratch.arena);
+            dl_fill_linear_gradient(inner.list(), path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+            EXPECT_TRUE(dl_validate(inner.list(), nullptr));
+        }
+        EXPECT_TRUE(dl_validate(outer.list(), nullptr)); rdt_path_free(path);
+    }
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope next(&context, ui, tree, &profiler);
+        EXPECT_EQ(next.list()->data(), retained_storage); EXPECT_TRUE(next.list()->empty());
+        EXPECT_EQ(context.vec.impl.get(), retained_vector);
+    }
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, FullFrameAdmissionReclaimsUnusedCaptureCapacity) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0'><svg width='60' height='40'>"
+        "<path d='M2 2 H30 V30 H2 Z' fill='red'/></svg><span>cache</span></body></html>", 80, 60, false));
+    UiContext* ui = session.ui_context;
+    ViewTree* tree = ui->document->view_tree;
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope seed(&context, ui, tree, &profiler);
+        ScratchMark before = scratch_mark(&seed.list()->arena);
+        ASSERT_NE(scratch_alloc(&seed.list()->arena, (size_t)9 << 20), nullptr);
+        scratch_restore(&seed.list()->arena, before);
+    }
+    size_t captured_capacity = arena_total_allocated(tree->display_list_arena);
+    ASSERT_GT(captured_capacity, (size_t)8 << 20);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    for (unsigned i = 0; i < 4; i++) {
+        doc_state_mark_dirty(ui->document->state);
+        ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    }
+    EXPECT_GT(counters.full_frame_reuses, 0u);
+    EXPECT_LT(arena_total_allocated(tree->display_list_arena), captured_capacity);
+    EXPECT_EQ(((uint32_t*)ui->surface->pixels)[10 * ui->surface->width + 10], 0xff0000ffu);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ForcedFramesReuseSettledRecordingAndInvalidateChangedSvgPaint) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0'><svg width='60' height='40'>"
+        "<path id='ink' d='M2 2 H30 V30 H2 Z' fill='red'/></svg><span>cache</span></body></html>", 80, 60, false));
+    UiContext* ui = session.ui_context;
+    ViewTree* tree = ui->document->view_tree;
+    DocState* state = ui->document->state;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    auto render = [&]() {
+        doc_state_mark_dirty(state);
+        return render_output_render_view_tree_to_target(ui, tree, &target);
+    };
+    for (int i = 0; i < 4; i++) ASSERT_EQ(render(), 0);
+    EXPECT_GT(counters.layer_recordings, 0u); // frame reuse must allow default layer admission to warm.
+    EXPECT_GT(counters.full_frame_reuses, 0u);
+    EXPECT_EQ(((uint32_t*)ui->surface->pixels)[10 * ui->surface->width + 10], 0xff0000ffu);
+    DisplayItem* storage = tree->render_list->data();
+    ASSERT_FALSE(tree->render_list->empty());
+    counters = {};
+    ASSERT_EQ(render(), 0);
+    EXPECT_EQ(counters.full_frame_reuses, 1u); EXPECT_EQ(counters.command_copy_bytes, 0u);
+    EXPECT_EQ(counters.path_parses, 0u); EXPECT_EQ(counters.native_canvases, 0u);
+    EXPECT_EQ(tree->render_list->data(), storage);
+    DomElement* ink = dom_find_element_by_id(ui->document->root, "ink"); ASSERT_NE(ink, nullptr);
+    ASSERT_TRUE(ink->set_attribute("fill", "blue"));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, ink, ink->parent, "fill", "red");
+    counters = {};
+    ASSERT_EQ(render(), 0); EXPECT_EQ(counters.full_frame_reuses, 0u);
+    EXPECT_EQ(((uint32_t*)ui->surface->pixels)[10 * ui->surface->width + 10], 0xffff0000u);
+    for (int i = 0; i < 3; i++) ASSERT_EQ(render(), 0);
+    counters = {};
+    target.transparent_background = true;
+    ASSERT_EQ(render(), 0); // background changes cannot reuse backdrop-dependent commands.
+    EXPECT_EQ(counters.full_frame_reuses, 0u);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ClipSegmentsDeferNativeDrawingAndPreserveCpuPainterOrder) {
+    rdt_engine_init(0);
+    uint32_t actual[32 * 32] = {}, expected[32 * 32] = {};
+    auto group = [](DisplayList* list, unsigned index) {
+        RdtPath* clip = rdt_path_new(); RdtPath* paint = rdt_path_new();
+        rdt_path_add_circle(clip, 8 + (float)index * 8, 16, 9, 12);
+        rdt_path_add_rect(paint, 0, 0, 32, 32, 0, 0);
+        dl_push_clip(list, clip, nullptr);
+        Color colors[] = {{0xa00000ffu}, {0xa000ff00u}, {0xa0ff0000u}};
+        dl_fill_path(list, paint, colors[index], RDT_FILL_WINDING, nullptr);
+        dl_pop_clip(list); rdt_path_free(clip); rdt_path_free(paint);
+    };
+    auto replay = [](DisplayList* list, uint32_t* pixels) {
+        ImageSurface surface = {}; surface.pixels = pixels; surface.width = surface.height = 32;
+        surface.pitch = 128; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        RdtVector vector = {}; rdt_vector_init(&vector, pixels, 32, 32, 32);
+        ScratchArena scratch = {}; Bound clip = {0, 0, 32, 32};
+        dl_replay(list, &vector, &surface, &clip, &scratch, 1, nullptr);
+        rdt_vector_destroy(&vector); scratch_release(&scratch);
+    };
+    DisplayList list;
+    for (unsigned i = 0; i < 3; i++) group(&list, i);
+    {
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        replay(&list, actual);
+        EXPECT_EQ(counters.clip_segments, 3u); EXPECT_EQ(counters.batch_flushes, 1u);
+    }
+    for (unsigned i = 0; i < 3; i++) {
+        DisplayList separate; group(&separate, i); replay(&separate, expected); dl_destroy(&separate);
+    }
+    EXPECT_EQ(memcmp(actual, expected, sizeof(actual)), 0); EXPECT_NE(actual[16 * 32 + 16], 0u);
+    dl_destroy(&list); memset(actual, 0, sizeof(actual)); memset(expected, 0, sizeof(expected));
+    for (unsigned i = 0; i < 3; i++) {
+        group(&list, i);
+        DisplayList separate; group(&separate, i); replay(&separate, expected); dl_destroy(&separate);
+        if (i == 1) {
+            dl_fill_surface_rect(&list, 12, 12, 10, 10, 0xffffffffu, nullptr, nullptr, 0);
+            DisplayList cpu;
+            dl_fill_surface_rect(&cpu, 12, 12, 10, 10, 0xffffffffu, nullptr, nullptr, 0);
+            replay(&cpu, expected); dl_destroy(&cpu);
+        }
+    }
+    {
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        replay(&list, actual); EXPECT_EQ(counters.batch_flushes, 2u);
+    }
+    EXPECT_EQ(memcmp(actual, expected, sizeof(actual)), 0);
+    dl_destroy(&list); rdt_engine_term();
 }

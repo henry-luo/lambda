@@ -1161,6 +1161,7 @@ echo "Installing Homebrew dependencies..."
 HOMEBREW_DEPS=(
     "mpdecimal"  # For decimal arithmetic - referenced in build config
     "utf8proc"   # For Unicode processing - referenced in build config
+    "openjpeg"   # JPEG 2000 image samples in PDFs
     "coreutils"  # For timeout command needed by test suite
     "mbedtls"    # For SSL/TLS support - replaced OpenSSL with mbedTLS
 )

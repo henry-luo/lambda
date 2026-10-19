@@ -91,6 +91,7 @@ Color render_document_output_background(View* root_view) {
 }
 
 void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block) {
+    if (rdcon) rdcon->has_foreign_paint_dependencies = true;
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 
@@ -128,6 +129,8 @@ void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block) {
             layout_resolve_scrolled_sticky(doc->view_tree);
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
+                // the embedded document owns a complete paint stack inside the frame's content layer.
+                RadiantPaintPhaseScope embedded_phase(&rdcon->paint_phase, RADIANT_PAINT_ALL);
                 // Save parent context and reset for embedded document
                 FontBox pa_font = rdcon->font;
                 Color pa_color = rdcon->color;
@@ -241,6 +244,7 @@ void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span) {
     else {
     }
     // Inline links use the same deferred CSS outline path as block controls.
-    render_outline_deferred(rdcon, lam::unsafe_view_block_api_span(view_span));
+    if (render_paint_phase_has_content(rdcon->paint_phase))
+        render_outline_deferred(rdcon, lam::unsafe_view_block_api_span(view_span));
     rdcon->font = pa_font;  rdcon->color = pa_color;
 }

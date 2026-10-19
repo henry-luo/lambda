@@ -131,6 +131,7 @@ static bool render_retained_dirty_source_inside(void* userdata, uint32_t source_
 
 bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->dl || !rdcon->retained_dl_cache ||
+        rdcon->paint_phase != RADIANT_PAINT_ALL ||
         !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0 ||
         rdcon->css3d_context) {
         return false;
@@ -183,7 +184,9 @@ bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* b
 
 RenderElementMarkerScope render_element_marker_begin(RasterRenderContext* rdcon, ViewBlock* block) {
     RenderElementMarkerScope scope = { -1 };
-    if (!rdcon || !rdcon->dl || !block || rdcon->element_marker_suppression_depth > 0) {
+    // a partial phase cannot own or replay a complete contiguous subtree fragment.
+    if (!rdcon || !rdcon->dl || !block || rdcon->paint_phase != RADIANT_PAINT_ALL ||
+        rdcon->element_marker_suppression_depth > 0) {
         return scope;
     }
 
@@ -207,8 +210,10 @@ void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerSc
 }
 
 void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
+    if (!render_paint_phase_has_boundary(rdcon->paint_phase, view)) return;
     float s = rdcon->raster_scale;
     Rect rect = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&rdcon->block, view, s));
+    if (!view->bound) { render_background(rdcon, view, rect); return; }
     if (render_paint_boundary_emit_fragmented_simple(rdcon->paint_list, view, rect)) {
         paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
         return;
@@ -225,7 +230,7 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     }
 
     // Render background (gradient, solid color, and background-image) using new rendering system
-    if (view->boundary()->background) {
+    if (view->boundary()->background || render_background_uses_table_layers(view)) {
         render_background(rdcon, view, rect);
     }
 
@@ -403,15 +408,6 @@ static void render_block_log_end() {
     log_leave();
 }
 
-static bool render_block_empty_cell_hides_bound(ViewBlock* block) {
-    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
-    ViewTableCell* cell = lam::view_require_table_cell(block);
-    if (cell->td && cell->td->hide_empty) {
-        return true;
-    }
-    return false;
-}
-
 static void render_block_setup_font(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->font) return;
     uint64_t t1 = time_now_ns();
@@ -446,8 +442,8 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
                                     RenderBlockPhase* phase) {
     if (!rdcon || !block || !phase) return;
 
-    if (!phase->self_hidden && block->bound &&
-        !render_block_empty_cell_hides_bound(block)) {
+    if (!phase->self_hidden && (block->bound || render_background_uses_table_layers(block)) &&
+        !render_paint_boundary_hidden(block)) {
         uint64_t tb1 = time_now_ns();
         render_bound(rdcon, block);
         uint64_t tb2 = time_now_ns();
@@ -455,12 +451,14 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
             time_elapsed_ms_f(tb1, tb2));
     }
 
-    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
+    if (render_paint_phase_has_content(rdcon->paint_phase) &&
+        !phase->self_hidden && !view_contents_are_skipped(block) &&
         block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
-    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
+    if (render_paint_phase_has_content(rdcon->paint_phase) &&
+        !phase->self_hidden && !view_contents_are_skipped(block) &&
         block->form_control()) {
         render_form_control(rdcon, block);
     }
@@ -540,15 +538,16 @@ static void render_block_walk_children_phase(RasterRenderContext* rdcon, ViewBlo
                                              RenderBlockChildrenPhase* phase) {
     if (!rdcon || !block || !phase || !phase->has_children) return;
 
-    render_raster_negative_z_descendants(rdcon, block);
+    bool content_phase = render_paint_phase_has_content(rdcon->paint_phase);
+    if (content_phase) render_raster_negative_z_descendants(rdcon, block);
     bool custom_painted = render_raster_custom_layout_children(rdcon, block);
     if (!custom_painted) {
         render_children(rdcon, block->first_child);
     }
-    if (block->position) {
+    if (content_phase && block->position) {
         render_raster_positioned_children(rdcon, block);
     }
-    if (!custom_painted) {
+    if (content_phase && !custom_painted) {
         render_raster_positive_z_descendants(rdcon, block->first_child);
     }
 }
@@ -611,7 +610,8 @@ static double render_block_finish_children_phase(RasterRenderContext* rdcon, Vie
                 time_elapsed_ms_f(toc1, toc2));
         }
 
-        render_block_deferred_child_outlines(rdcon, block);
+        if (render_paint_phase_has_content(rdcon->paint_phase))
+            render_block_deferred_child_outlines(rdcon, block);
     }
 
     return time_elapsed_ms_f(phase->start_time, time_now_ns());
@@ -627,11 +627,12 @@ static void render_block_finish_phase(RasterRenderContext* rdcon, ViewBlock* blo
                                       RenderBlockPhase* phase) {
     if (!rdcon || !block || !phase) return;
 
-    if (!phase->self_hidden && block->scroller) {
+    if (render_paint_phase_has_content(rdcon->paint_phase) && !phase->self_hidden && block->scroller) {
         render_scroller(rdcon, block, &phase->parent_block);
     }
 
-    if (!phase->self_hidden && block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
+    if (render_paint_phase_has_content(rdcon->paint_phase) && !phase->self_hidden &&
+        block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         render_column_rules(rdcon, block);
     }
 
@@ -677,7 +678,7 @@ static bool raster_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     if (view_contents_are_skipped(block)) return false;
     if (driver->content) {
         RenderBlockPhase* current=(RenderBlockPhase*)phase;
-        if (!current->self_hidden) {
+        if (!current->self_hidden && render_paint_phase_has_content(driver->rdcon->paint_phase)) {
             // replaced pixels belong inside the same CSS transform, clip and opacity group as the box.
             BlockBlot saved=driver->rdcon->block;
             driver->rdcon->block.x=current->parent_block.x;driver->rdcon->block.y=current->parent_block.y;

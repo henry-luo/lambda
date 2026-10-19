@@ -160,7 +160,7 @@ bool flex_item_is_anonymous_text(ViewElement* item) {
 
 bool flex_item_contains_anonymous_text(ViewElement* item, DomText* text) {
     if (!item || !item->fi || !text) return false;
-    for (FlexAnonymousTextRun* run = item->fi->anonymous_text_runs;
+    for (LayoutAnonymousTextRun* run = item->fi->anonymous_text_runs;
          run; run = run->next) {
         if (run->text == text) return true;
     }
@@ -174,16 +174,6 @@ ViewElement* flex_find_anonymous_text_item(FlexContainerLayout* flex, DomText* t
         if (flex_item_contains_anonymous_text(item, text)) return item;
     }
     return nullptr;
-}
-
-static bool flex_text_has_collapsible_edge(DomText* text, bool trailing) {
-    if (!text || white_space_preserves_space_advance(get_white_space_value(
-            static_cast<DomNode*>(text)))) {
-        return false;
-    }
-    const char* data = (const char*)text->text_data();
-    return data && text->length > 0 &&
-        is_space(data[trailing ? text->length - 1 : 0]);
 }
 
 static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
@@ -233,13 +223,13 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
         }
     }
     if (preserve_trailing_space && run.length > 0 &&
-        flex_text_has_collapsible_edge(text, true) &&
+        layout_text_has_collapsible_edge(text, true) &&
         !white_space_preserves_space_advance(item->blk->white_space)) {
         widths.max_content += layout_measure_space_advance(
             lycon, font_box_handle(&lycon->font), lycon->font.style);
     }
     if (preserve_leading_space && run.length > 0 &&
-        flex_text_has_collapsible_edge(text, false) &&
+        layout_text_has_collapsible_edge(text, false) &&
         !white_space_preserves_space_advance(item->blk->white_space)) {
         widths.max_content += layout_measure_space_advance(
             lycon, font_box_handle(&lycon->font), lycon->font.style);
@@ -288,52 +278,20 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     ViewText* text_view = lam::view_require<RDT_VIEW_TEXT>(text);
     if (!text_view) return nullptr;
 
-    // With a scope the item is that caller's temporary; without one it lives
-    // until the enclosing flex pass restores its scratch mark.
-    auto scratch_item_calloc = [&](size_t size) -> void* {
-        return scope ? scratch_scope_calloc(&lycon->scratch, scope, size)
-                     : scratch_calloc(&lycon->scratch, size);
-    };
-    ViewElement* item = (ViewElement*)scratch_item_calloc(sizeof(ViewElement));
+    ViewElement* item = layout_create_anonymous_text_item(lycon, scope, container, text);
     if (!item) return nullptr;
-    // CSS Flexbox §4 generates an anonymous blockified item for each non-empty
-    // direct text run; keeping it pass-local avoids changing the DOM/render tree.
-    item->node_type = DOM_NODE_ELEMENT;
-    item->view_type = RDT_VIEW_BLOCK;
-    item->parent = lam::up((DomNode*)container);
-    item->tag_name = lam::up("anonymous-flex-item");
-    item->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false};
-    // The item's props share its scratch lifetime, so they go when the scratch
-    // is restored; the view-tree pool would keep them until the tree dies.
-    item->mark_scratch_lived();
-    BlockProp* blk = (BlockProp*)scratch_item_calloc(sizeof(BlockProp));
-    BoundaryProp* bound = (BoundaryProp*)scratch_item_calloc(sizeof(BoundaryProp));
-    FlexItemProp* fi = (FlexItemProp*)scratch_item_calloc(sizeof(FlexItemProp));
-    if (!blk || !bound || !fi) return nullptr;
-    memcpy(blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
-    blk->text_align = lycon->block.text_align;
-    blk->direction = lycon->block.direction;
-    blk->white_space = container->blk
-        ? container->block()->white_space : CSS_VALUE_NORMAL;
-    blk->writing_mode = container->blk
-        ? container->block()->writing_mode : WM_HORIZONTAL_TB;
-    memcpy(bound, &BOUNDARY_PROP_DEFAULT, sizeof(BoundaryProp));
+    FlexItemProp* fi = (FlexItemProp*)(scope
+        ? scratch_scope_calloc(&lycon->scratch, scope, sizeof(FlexItemProp))
+        : scratch_calloc(&lycon->scratch, sizeof(FlexItemProp)));
+    if (!fi) return nullptr;
     memcpy(fi, &FLEX_ITEM_PROP_DEFAULT, sizeof(FlexItemProp));
-    item->blk = lam::view_prop(blk);
-    item->bound = lam::view_prop(bound);
     item->set_parent_item_kind(DomElement::PARENT_ITEM_FLEX);
     item->fi = lam::view_prop(fi);
-    // Borrows the text's or container's font: a scratch-lived item never
-    // reaches view-tree teardown (asserted there), so the slot is never freed.
-    item->font = lam::view_prop((FontProp*)(text_view->font ? (FontProp*)text_view->font : (FontProp*)container->font));
     item->fi->anonymous_text = lam::up(text);
-    FlexAnonymousTextRun* first_run =
-        (FlexAnonymousTextRun*)scratch_item_calloc(sizeof(FlexAnonymousTextRun));
+    LayoutAnonymousTextRun* first_run =
+        layout_append_anonymous_text_run(lycon, scope, nullptr, text,
+            preserve_leading_space, preserve_trailing_space, is_whitespace);
     if (!first_run) return nullptr;
-    first_run->text = lam::up(text);
-    first_run->preserve_leading_space = preserve_leading_space;
-    first_run->preserve_trailing_space = preserve_trailing_space;
-    first_run->is_whitespace = is_whitespace;
     item->fi->anonymous_text_runs = first_run;
     item->fi->anonymous_text_preserve_leading_space = preserve_leading_space;
     item->fi->anonymous_text_preserve_trailing_space = preserve_trailing_space;
@@ -380,23 +338,11 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
         return false;
     }
 
-    // appended runs share the anonymous item's scratch owner (D4.5.1v4).
-    FlexAnonymousTextRun* run = (FlexAnonymousTextRun*)(scope
-        ? scratch_scope_calloc(&lycon->scratch, scope, sizeof(FlexAnonymousTextRun))
-        : scratch_calloc(&lycon->scratch, sizeof(FlexAnonymousTextRun)));
+    LayoutAnonymousTextRun* run = layout_append_anonymous_text_run(
+        lycon, scope, item->fi->anonymous_text_runs, text,
+        preserve_leading_space, preserve_trailing_space, is_whitespace);
     if (!run) return false;
-    run->text = lam::up(text);
-    run->preserve_leading_space = preserve_leading_space;
-    run->preserve_trailing_space = preserve_trailing_space;
-    run->is_whitespace = is_whitespace;
-
-    FlexAnonymousTextRun* tail = item->fi->anonymous_text_runs;
-    if (!tail) {
-        item->fi->anonymous_text_runs = run;
-    } else {
-        while (tail->next) tail = tail->next;
-        tail->next = lam::own(run);
-    }
+    if (!item->fi->anonymous_text_runs) item->fi->anonymous_text_runs = run;
 
     bool vertical = item->blk &&
         (item->blk->writing_mode == WM_VERTICAL_LR ||
@@ -421,110 +367,23 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
     return true;
 }
 
-static void preserve_anonymous_flex_text_spacing(LayoutContext* lycon,
-                                                  ViewText* text,
-                                                  bool preserve_leading_space,
-                                                  bool preserve_trailing_space) {
-    if (!lycon || !text || !text->rect ||
-        (!preserve_leading_space && !preserve_trailing_space)) return;
-    float space_width = layout_measure_space_advance(
-        lycon, font_box_handle(&lycon->font), lycon->font.style);
-    if (preserve_leading_space) text->rect->width += space_width;
-    if (preserve_trailing_space) {
-        TextRect* last = text->rect;
-        while (last->next) last = last->next;
-        last->width += space_width;
-    }
-    adjust_text_bounds(text);
-}
-
-static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
-                                       ViewBlock* flex_container) {
-    if (!item || !lycon || !item->fi || !item->fi->anonymous_text) return;
-    FlexAnonymousTextRun* runs = item->fi->anonymous_text_runs;
-    if (!runs) return;
-
-    LayoutContext saved_context = *lycon;
-    if (!item->fi->has_anonymous_text_origin) {
-        item->fi->anonymous_text_origin_x = item->x;
-        item->fi->anonymous_text_origin_y = item->y;
-        item->fi->has_anonymous_text_origin = true;
-    }
-    lycon->view = lam::up(static_cast<View*>(item));
-    lycon->block.content_width = item->width;
-    lycon->block.content_height = item->height;
-    lycon->block.given_width = item->width;
-    lycon->block.given_height = item->height;
-    lycon->block.advance_y = item->y;
-    lycon->block.max_width = item->x + item->width;
-    lycon->block.text_align = CSS_VALUE_LEFT;
-    if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
-    setup_line_height(lycon, lam::view_as_block(item));
-    layout_setup_block_font_metrics(lycon);
-    line_init(lycon, item->x, item->x + item->width);
-
-    for (FlexAnonymousTextRun* run = runs; run; run = run->next) {
-        DomText* text_node = run->text;
-        ViewText* text = text_node
-            ? lam::view_require<RDT_VIEW_TEXT>(text_node) : nullptr;
-        if (!text) continue;
-        if (flex_container && text_node->parent == static_cast<DomNode*>(flex_container) &&
-            !run->is_whitespace) {
-            // Direct text was laid out by layout_final_flex_content; advance
-            // past its existing geometry before laying out flattened runs.
-            preserve_anonymous_flex_text_spacing(
-                lycon, text, run->preserve_leading_space,
-                run->preserve_trailing_space);
-            float text_end = text->x + text->width;
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                text_end = max(text_end, rect->x + rect->width);
-            }
-            lycon->line.advance_x = max(lycon->line.advance_x, text_end);
-            lycon->line.is_line_start = false;
-            continue;
-        }
-        if (run->is_whitespace) {
-            TextRect* rect = lycon->doc && lycon->doc->view_tree
-                ? lycon->doc->view_tree->alloc_text_rect() : nullptr;
-            if (!rect) continue;
-            float space_width = layout_measure_space_advance(
-                lycon, font_box_handle(&lycon->font), lycon->font.style);
-            rect->x = lycon->line.advance_x;
-            rect->y = item->y;
-            rect->width = space_width;
-            rect->height = item->height;
-            rect->length = (int)text_node->length; // INT_CAST_OK: text rectangle source length
-            rect->line_number = lycon->block.line_number;
-            text->rect = lam::view_prop(rect);
-            layout_set_view_geometry(text, rect->x, rect->y,
-                                     rect->width, rect->height);
-            lycon->line.advance_x += space_width;
-            lycon->line.is_line_start = false;
-            lycon->line.has_space = true;
-            continue;
-        }
-
-        layout_text(lycon, static_cast<DomNode*>(text_node));
-        preserve_anonymous_flex_text_spacing(
-            lycon, text, run->preserve_leading_space,
-            run->preserve_trailing_space &&
-                flex_text_has_collapsible_edge(text_node, true));
-    }
-    *lycon = saved_context;
-}
-
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
     if (!flex_layout || !flex_layout->flex_items) return;
 
     for (int i = 0; i < flex_layout->item_count; i++) {
         ViewElement* item = lam::view_as_element(flex_layout->flex_items[i]);
         if (!flex_item_is_anonymous_text(item)) continue;
-        FlexAnonymousTextRun* first_run = item->fi->anonymous_text_runs;
+        LayoutAnonymousTextRun* first_run = item->fi->anonymous_text_runs;
         ViewText* first_text = first_run && first_run->text
             ? lam::view_require<RDT_VIEW_TEXT>(first_run->text) : nullptr;
         if (!first_text) continue;
-        layout_anonymous_flex_text(item, flex_layout->lycon,
-                                   flex_layout->container);
+        if (!item->fi->has_anonymous_text_origin) {
+            item->fi->anonymous_text_origin_x = item->x;
+            item->fi->anonymous_text_origin_y = item->y;
+            item->fi->has_anonymous_text_origin = true;
+        }
+        layout_anonymous_text_runs(item, item->fi->anonymous_text_runs,
+            flex_layout->lycon, flex_layout->container, false);
         bool preserve_text_align = false;
         DomNode* parent = first_text->parent;
         if (parent && parent->is_element()) {
@@ -549,15 +408,7 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
         // translate from the line origin, retaining both leading and authored indentation.
         float dx = preserve_text_align ? 0.0f : item->x - item->fi->anonymous_text_origin_x;
         float dy = preserve_text_align ? 0.0f : item->y - item->fi->anonymous_text_origin_y;
-        for (FlexAnonymousTextRun* run = item->fi->anonymous_text_runs;
-             run; run = run->next) {
-            ViewText* text = run->text
-                ? lam::view_require<RDT_VIEW_TEXT>(run->text) : nullptr;
-            if (!text) continue;
-            text->x += dx;
-            text->y += dy;
-            layout_shift_text_rects(text, dx, dy);
-        }
+        layout_shift_anonymous_text_runs(item->fi->anonymous_text_runs, dx, dy);
         // later baseline passes translate from the already published origin,
         // so the same item movement cannot be applied twice.
         item->fi->anonymous_text_origin_x = item->x;
@@ -1637,89 +1488,11 @@ static void flex_apply_explicit_axis_size(ViewElement* item, bool horizontal) {
     layout_axis_set_size(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y, target);
 }
 
-static bool flex_find_contents_text_edge(DomElement* contents, bool from_start,
-                                          DomNode** out_text) {
-    if (out_text) *out_text = nullptr;
-    if (!contents) return true;
-
-    DomNode* child = from_start ? contents->first_child : contents->last_child;
-    while (child) {
-        if (child->is_text()) {
-            if (layout_text_node_has_content(child)) {
-                if (out_text) *out_text = child;
-                return true;
-            }
-        } else if (child->is_element()) {
-            DisplayValue display = resolve_display_value(child);
-            if (display.outer != CSS_VALUE_CONTENTS) return false;
-            DomNode* edge_text = nullptr;
-            if (!flex_find_contents_text_edge(
-                    child->as_element(), from_start, &edge_text)) {
-                return false;
-            }
-            if (edge_text) {
-                if (out_text) *out_text = edge_text;
-                return true;
-            }
-        }
-        child = from_start ? child->next_sibling : child->prev_sibling;
-    }
-    return true;
-}
-
-static DomNode* flex_adjacent_flattened_text(DomNode* node,
-                                              ViewBlock* container,
-                                              bool following) {
-    if (!node || !container) return nullptr;
-
-    DomNode* current = node;
-    DomNode* container_node = static_cast<DomNode*>(container);
-    while (current && current != container_node) {
-        DomNode* sibling = following ? current->next_sibling : current->prev_sibling;
-        while (sibling) {
-            if (sibling->is_text()) {
-                if (layout_text_node_has_content(sibling)) return sibling;
-            } else if (sibling->is_element()) {
-                DisplayValue display = resolve_display_value(sibling);
-                if (display.outer != CSS_VALUE_CONTENTS) return nullptr;
-                DomNode* edge_text = nullptr;
-                if (!flex_find_contents_text_edge(
-                        sibling->as_element(), !following, &edge_text)) {
-                    return nullptr;
-                }
-                if (edge_text) return edge_text;
-            }
-            sibling = following ? sibling->next_sibling : sibling->prev_sibling;
-        }
-
-        DomNode* parent = current->parent;
-        if (!parent || parent == container_node || !parent->is_element()) return nullptr;
-        DisplayValue parent_display = resolve_display_value(parent);
-        if (parent_display.outer != CSS_VALUE_CONTENTS) return nullptr;
-        current = parent;
-    }
-    return nullptr;
-}
-
-static bool flex_contents_whitespace_is_text_separator(DomNode* text,
-                                                        ViewBlock* container) {
-    if (!text || !container || !text->is_text() ||
-        layout_text_node_has_content(text)) return false;
-    return flex_adjacent_flattened_text(text, container, false) != nullptr &&
-           flex_adjacent_flattened_text(text, container, true) != nullptr;
-}
-
-static bool flex_collect_flattened_text_item(DomNode* text,
-                                             ViewBlock* container) {
-    return layout_text_node_has_content(text) ||
-        flex_contents_whitespace_is_text_separator(text, container);
-}
-
 static int collect_flex_item_nodes(LayoutContext* lycon, ViewBlock* container,
                                    DomNode* first_child, DomNode** nodes,
                                    int capacity, DomElement* rendered_legend) {
     LayoutFlattenedItemPolicy policy = {};
-    policy.include_text = flex_collect_flattened_text_item;
+    policy.include_text = layout_collect_flattened_text_item;
     policy.skipped_element = lam::up(rendered_legend);
     policy.initialize_contents = true;
     // Flattening does not change a DOM child's cascade parent. Preserve its
@@ -1774,15 +1547,15 @@ IntrinsicSizes flex_measure_intrinsic_item_widths(
         if (child->is_text()) {
             bool text_is_whitespace = !layout_text_node_has_content(child);
             if (text_is_whitespace &&
-                !flex_contents_whitespace_is_text_separator(child, container)) {
+                !layout_contents_whitespace_is_text_separator(child, container)) {
                 continue;
             }
             bool preserve_leading_space = !text_is_whitespace &&
-                flex_text_has_collapsible_edge(child->as_text(), false) &&
-                flex_adjacent_flattened_text(child, container, false) != nullptr;
+                layout_text_has_collapsible_edge(child->as_text(), false) &&
+                layout_adjacent_flattened_text(child, container, false) != nullptr;
             bool preserve_trailing_space = !text_is_whitespace &&
-                flex_text_has_collapsible_edge(child->as_text(), true) &&
-                flex_adjacent_flattened_text(child, container, true) != nullptr;
+                layout_text_has_collapsible_edge(child->as_text(), true) &&
+                layout_adjacent_flattened_text(child, container, true) != nullptr;
             // CSS Flexbox §4: adjacent flattened text belongs to one anonymous
             // item, including runs exposed by separate contents pseudo-elements.
             if (text_item && append_anonymous_flex_text_run(
@@ -1848,14 +1621,14 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // contents may also expose a collapsed separator between text runs.
         if (!child->is_element()) {
             if (layout_text_node_has_content(child) ||
-                flex_contents_whitespace_is_text_separator(child, container)) {
+                layout_contents_whitespace_is_text_separator(child, container)) {
                 bool text_is_whitespace = !layout_text_node_has_content(child);
                 bool preserve_leading_space = !text_is_whitespace &&
-                    flex_text_has_collapsible_edge(child->as_text(), false) &&
-                    flex_adjacent_flattened_text(child, container, false) != nullptr;
+                    layout_text_has_collapsible_edge(child->as_text(), false) &&
+                    layout_adjacent_flattened_text(child, container, false) != nullptr;
                 bool preserve_trailing_space = !text_is_whitespace &&
-                    flex_text_has_collapsible_edge(child->as_text(), true) &&
-                    flex_adjacent_flattened_text(child, container, true) != nullptr;
+                    layout_text_has_collapsible_edge(child->as_text(), true) &&
+                    layout_adjacent_flattened_text(child, container, true) != nullptr;
                 if (node_index > 0 && flex_nodes[node_index - 1]->is_text() &&
                     item_count > 0) {
                     ViewElement* previous_item = lam::view_as_element(

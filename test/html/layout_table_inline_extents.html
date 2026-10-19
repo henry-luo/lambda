@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Table-cell line boxes use positioned inline extents</title>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 10px/10px Ahem; }
+table { border-collapse: collapse; margin-bottom: 10px; width: 200px; }
+td { padding: 0; vertical-align: middle; background: silver; }
+.atom { display: inline-block; width: 30px; height: 40px; background: green; }
+.tall { height: 80px; width: 40px; background: teal; }
+.relative { position: relative; top: 20px; }
+.large-strut { font-size: 20px; line-height: 30px; }
+.overflow-ink { font-size: 20px; line-height: 10px; }
+.margins p { margin: 10px 0; }
+</style>
+<body id="result">
+<table id="bare"><tr><td id="bare-cell"><span id="bare-atom" class="atom"></span></td></tr></table>
+<table id="wrapped"><tr><td id="wrapped-cell"><a><span id="wrapped-atom" class="atom"></span></a></td></tr></table>
+<table id="nested"><tr><td id="nested-cell"><a><span><span id="nested-atom" class="atom"></span></span></a></td></tr></table>
+<table id="rowspan"><tr><td id="rowspan-cell" rowspan="2"><a><span id="rowspan-atom" class="atom"></span></a></td></tr><tr></tr></table>
+<table id="break"><tr><td id="break-cell">aa<br><a><span id="break-atom" class="atom"></span></a></td></tr></table>
+<table id="aligned"><tr><td id="aligned-cell"><a><span id="aligned-atom" class="atom"></span></a></td><td><div class="tall"></div></td></tr></table>
+<table id="font-strut"><tr><td id="font-strut-cell">aa<br><span class="large-strut">aa</span></td></tr></table>
+<table id="glyph-overflow"><tr><td id="glyph-overflow-cell">aa<br><span class="overflow-ink">aa</span></td></tr></table>
+<table id="relative"><tr><td id="relative-cell">aa<br><a><span id="relative-atom" class="atom relative"></span></a></td></tr></table>
+<table id="image"><tr><td id="image-cell">aa<br><a><img id="image-atom" class="atom" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkaGD4DwACiQGBU29HsgAAAABJRU5ErkJggg=="></a></td></tr></table>
+<table id="margins" class="margins"><tr><td id="margins-cell" rowspan="2"><p id="margins-first">aa</p><p id="margins-last">bb</p></td></tr><tr></tr></table>
+</body>

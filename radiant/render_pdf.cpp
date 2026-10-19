@@ -2,6 +2,7 @@
 // This adapter lends a committed edition and performs only the final atomic save.
 #include "render.hpp"
 #include "layout.hpp"
+#include "event.hpp"
 #include "view_tree_model.hpp"
 #include "../lambda/module/radiant/radiant_pdf_source.hpp"
 #include "../lambda/runtime/transpiler.hpp"
@@ -16,20 +17,21 @@ extern "C" Item vmap_new();
 static bool render_lambda_pdf(RenderExportSession* session, const char* filename,
         const ViewPageSelection* selection) {
     if (!session || !filename || !session->document || !session->ui_context) return false;
-    Runtime owned = {};
     Runtime* runtime = context ? context->runtime : nullptr;
-    bool own_runtime = !runtime;
-    // D5.4.1: an active evaluator must keep its existing identity.
-    if (own_runtime && context && context->execution_depth) return false;
-    if (own_runtime) { runtime = &owned; runtime_init(runtime); }
-    struct RuntimeCleanup {
-        Runtime* runtime; bool owned;
-        ~RuntimeCleanup() { if (owned) runtime_cleanup(runtime); }
-    } runtime_cleanup_scope = {runtime, own_runtime};
-    if (own_runtime) {
-        Script* package = nullptr;
-        if (!run_lambda_package_module(runtime, "lambda.doc.pdf.output", &package) || !package) {
-            log_error("PDF_LAMBDA_EXPORT: cannot initialize PDF package"); return false;
+    if (!runtime) {
+        // the UI owns cached modules across batch jobs; no Items cross evaluator lifetimes (D5.4.1).
+        if (context && context->execution_depth) return false;
+        runtime = ui_context_loader_runtime(session->ui_context);
+        if (!runtime) return false;
+        EvalContext* existing = runtime_get_eval_context(runtime);
+        // runtime_init reserves the owner before its first package initializes the heap.
+        if (existing && existing->heap) {
+            if (!radiant_eval_context_switch(existing)) return false;
+        } else {
+            Script* package = nullptr;
+            if (!run_lambda_package_module(runtime, "lambda.doc.pdf.output", &package) || !package) {
+                log_error("PDF_LAMBDA_EXPORT: cannot initialize PDF package"); return false;
+            }
         }
     }
     EvalContext* owner = runtime_get_eval_context(runtime);
@@ -66,7 +68,7 @@ bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
     RenderExportSession session = {};
     session.document = lam::up(tree->model->document.get());
     // embedding callers may omit the host already retained by the edition environment.
-    session.ui_context = lam::own(ui ? ui : tree->model->environment.ui_context.get());
+    session.ui_context = lam::up(ui ? ui : tree->model->environment.ui_context.get());
     session.paged_view = lam::up(tree); session.output_scale = 1;
     return render_lambda_pdf(&session, filename, selection);
 }
@@ -79,7 +81,7 @@ int render_uicontext_to_pdf(UiContext* ui, const char* filename) {
     if (!ui || !ui->document || !ui->document->view_tree) return 1;
     // borrow the settled live edition; capture must not reload scripts or clocks.
     RenderExportSession session = {};
-    session.ui_context = lam::own(ui);
+    session.ui_context = lam::up(ui);
     session.document = lam::up(ui->document.get());
     session.output_scale = ui_context_raster_scale(ui);
     session.content_width = ui->viewport_width;

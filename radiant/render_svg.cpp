@@ -389,9 +389,12 @@ static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
-    if (!view->bound) return;
-
     Rect grid = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&ctx->block, view, 1.0f));
+    if (!view->bound) {
+        render_paint_background(svg_active_paint_list(ctx), ctx->ui_context, view, grid, RENDER_EXPORT_TARGET_SVG);
+        svg_lower_paint_list(ctx);
+        return;
+    }
     float x = grid.x, y = grid.y, width = grid.width, height = grid.height;
 
     if (render_paint_boundary_emit_simple(svg_active_paint_list(ctx), view, grid)) {

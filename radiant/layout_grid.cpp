@@ -1,3 +1,4 @@
+#include <float.h>
 #include "layout.hpp"
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
@@ -173,7 +174,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
     // Immediate children bound the pass-local grid item array; scratch arrays are
     // released by the container mark instead of individual heap frees.
-    int item_capacity = layout_count_flattened_item_nodes(container, false);
+    int item_capacity = layout_count_flattened_item_nodes(container, true);
     grid->allocated_items = item_capacity;
     if (item_capacity > 0) {
         grid->grid_items = lam::own_arr((ViewBlock**)scratch_calloc(&lycon->scratch,
@@ -577,12 +578,13 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // The multipass flow calls layout_final_grid_content() after this function returns
 
 }
-// Collect the flattened-tree element nodes that can become grid items.
+// collect flattened element and text nodes that can become grid items.
 int collect_grid_item_nodes(LayoutContext* lycon, ViewBlock* container,
                             DomNode* first_child, DomNode** nodes, int capacity,
                             bool initialize_contents) {
     LayoutFlattenedItemPolicy policy = {};
     policy.initialize_contents = initialize_contents;
+    policy.include_text = layout_collect_flattened_text_item;
     return layout_collect_flattened_item_nodes(
         lycon, container, first_child, nodes, capacity, &policy);
 }
@@ -594,21 +596,48 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 
     int node_capacity = grid_layout->allocated_items > 0
         ? grid_layout->allocated_items : 0;
-    ScratchScope nodes_scope(&grid_layout->lycon->scratch);
+    // collection builds anonymous items, so its buffer shares the grid pass's
+    // lifetime instead of unwinding live item allocations in a nested scope.
     DomNode** nodes = node_capacity > 0
-        ? nodes_scope.array_zero<DomNode*>((size_t)node_capacity) : nullptr;
+        ? (DomNode**)scratch_calloc(&grid_layout->lycon->scratch,
+            sizeof(DomNode*) * (size_t)node_capacity) : nullptr;
     int node_count = nodes
         ? collect_grid_item_nodes(grid_layout->lycon, container,
             container->first_child, nodes, node_capacity, false) : 0;
     int count = 0;
+    ViewBlock* text_item = nullptr;
     for (int node_index = 0; node_index < node_count; node_index++) {
         DomNode* child_node = nodes[node_index];
-        ViewBlock* child = lam::view_require_block(child_node);
-        if (layout_block_is_skipped_container_item(child)) {
-            continue;
+        ViewBlock* child = nullptr;
+        if (child_node->is_text()) {
+            // CSS Grid §6: a flattened child text sequence is one auto-placed item.
+            if (text_item) {
+                layout_append_anonymous_text_run(grid_layout->lycon,
+                    nullptr, text_item->gi->anonymous_text_runs,
+                    child_node->as_text(), false, false, false);
+                continue;
+            }
+            child = lam::view_as_block(layout_create_anonymous_text_item(
+                grid_layout->lycon, nullptr, container,
+                child_node->as_text()));
+            if (!child) continue;
+            GridItemProp* gi = (GridItemProp*)scratch_calloc(
+                &grid_layout->lycon->scratch,
+                sizeof(GridItemProp));
+            if (!gi) continue;
+            memcpy(gi, &GRID_ITEM_PROP_DEFAULT, sizeof(GridItemProp));
+            child->set_parent_item_kind(DomElement::PARENT_ITEM_GRID);
+            child->gi = lam::view_prop(gi);
+            gi->anonymous_text_runs = layout_append_anonymous_text_run(
+                grid_layout->lycon, nullptr, nullptr,
+                child_node->as_text(), false, false, false);
+            text_item = child;
+        } else {
+            text_item = nullptr;
+            child = lam::view_require_block(child_node);
+            if (layout_block_is_skipped_container_item(child)) continue;
         }
-        // The flattened-item counter supplies this scratch capacity; keep the
-        // guard here because malformed DOM trees must not overrun the pass array.
+        // the flattened counter is an upper bound, including text-run fragments.
         if (count >= grid_layout->allocated_items || !grid_layout->grid_items) {
             *items = nullptr;
             grid_layout->item_count = 0;
@@ -619,16 +648,26 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         bool has_explicit_placement = child_gi && (
             child_gi->grid_row_start != 0 || child_gi->grid_row_end != 0 ||
             child_gi->grid_column_start != 0 || child_gi->grid_column_end != 0);
-        if (child_gi && !has_explicit_placement) {
-            child_gi->is_grid_auto_placed = true;
-        }
+        if (child_gi && !has_explicit_placement) child_gi->is_grid_auto_placed = true;
     }
 
-    nodes_scope.end();
 
     if (count == 0) {
         *items = nullptr;
         return 0;
+    }
+
+    for (int index = 0; index < count; index++) {
+        ViewBlock* item = grid_layout->grid_items[index];
+        GridItemProp* gi = grid_item_prop(item);
+        if (!gi || !gi->anonymous_text_runs) continue;
+        radiant::SizeF minimum = layout_measure_anonymous_text(grid_layout->lycon,
+            item, gi->anonymous_text_runs, 0.0f, true);
+        radiant::SizeF maximum = layout_measure_anonymous_text(grid_layout->lycon,
+            item, gi->anonymous_text_runs, FLT_MAX, true);
+        gi->measured_min_width = minimum.width;
+        gi->measured_max_width = maximum.width;
+        gi->has_measured_size = true;
     }
 
     grid_layout->item_count = count;

@@ -442,6 +442,24 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         }
     }
 
+    if (is_row_axis && gi && gi->anonymous_text_runs && lycon) {
+        GridContainerLayout* grid = lycon->grid_container;
+        float width = item->width;
+        if (grid && grid->computed_columns) {
+            // Grid §11.5: wrapping contributions use the resolved column area.
+            int start = gi->computed_grid_column_start - 1;
+            int end = gi->computed_grid_column_end - 1;
+            if (start >= 0 && end > start && end <= grid->computed_column_count) {
+                width = radiant::grid::spanned_tracks_size(
+                    *grid->computed_columns, start, end - start, grid->column_gap);
+            }
+        }
+        radiant::SizeF measured = layout_measure_anonymous_text(
+            lycon, item, gi->anonymous_text_runs, width);
+        sizes.min_content = sizes.max_content = measured.height;
+        return sizes;
+    }
+
     if (is_row_axis &&
         (!item->blk || item->block()->given_height < 0.0f) &&
         item->display.inner != RDT_DISPLAY_REPLACED &&

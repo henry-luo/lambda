@@ -1,3 +1,4 @@
+#include "render_metrics.hpp"
 // ==========================================================================
 // DisplayList storage and lifecycle helpers.
 // ==========================================================================
@@ -11,9 +12,8 @@
 #include <limits.h>
 #include <math.h>
 #include "../lib/generation.h"
+#include "../lib/hashmap_typed.hpp"
 
-#define DL_INITIAL_CAPACITY 2048
-#define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
 
 static const DisplayOpDescriptor DISPLAY_OP_DESCRIPTORS[] = {
 #define DL_OP_DESCRIPTOR(name, flags, owned_kind, owned_offset) \
@@ -34,6 +34,17 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags) {
     return desc && (desc->flags & flags) == flags;
 }
 
+bool dl_supports_premultiplied_capture(const DisplayList* list) {
+    if (!list) return false;
+    for (size_t i = 0; i < list->size(); i++) {
+        const DisplayItem& item = list->data()[i];
+        if (!dl_op_has_flags(item.op, DL_OP_FLAG_PREMULTIPLIED_CAPTURE)) return false;
+        // the color-emoji writer still forces opaque output; coverage glyphs preserve premultiplied alpha.
+        if (item.op == DL_DRAW_GLYPH && item.draw_glyph.is_color_emoji) return false;
+    }
+    return true;
+}
+
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
     if (dl->capacity() == 0 && !dl->reserve(DL_INITIAL_CAPACITY)) return nullptr;
@@ -42,22 +53,103 @@ DisplayItem* dl_alloc_item(DisplayList* dl) {
     return &dl->back();
 }
 
-RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count) {
-    if (!dl || !stops || count <= 0) return nullptr;
-    size_t sz = count * sizeof(RdtGradientStop);
-    RdtGradientStop* copy = (RdtGradientStop*)scratch_alloc(&dl->arena, sz);
-    if (!copy) return nullptr;
-    memcpy(copy, stops, sz);
-    return copy;
+// list indexes pin immutable value buffers; copied chunks acquire the same buffers.
+struct DlSharedArray {
+    RefCount refs;
+    uint64_t hash;
+    size_t bytes;
+    unsigned kind;
+    const void* data;
+};
+struct DlSharedArrayEntry { DlSharedArray* value; uint64_t serial = 0; };
+struct DlSharedArrayKeyOps {
+    static uint64_t hash(const DlSharedArrayEntry& entry, uint64_t first, uint64_t second) {
+        return hashmap_hash_bytes(&entry.value->hash, sizeof(entry.value->hash), first, second);
+    }
+    static bool equals(const DlSharedArrayEntry& a, const DlSharedArrayEntry& b) {
+        return a.value->kind == b.value->kind && a.value->bytes == b.value->bytes &&
+            memcmp(a.value->data, b.value->data, a.value->bytes) == 0;
+    }
+};
+static void dl_shared_array_release(DlSharedArrayEntry* entry) {
+    if (ref_count_release(&entry->value->refs) == REF_COUNT_LAST) mem_free(entry->value);
+}
+struct DlSharedArrayCache {
+    TypedHashMap<DlSharedArrayEntry, DlSharedArrayKeyOps, dl_shared_array_release> index;
+    size_t bytes;
+    uint64_t next_serial;
+};
+
+size_t dl_shared_array_bytes(const DisplayList* list) {
+    const DlSharedArrayCache* cache = list ? list->shared_arrays.get() : nullptr;
+    if (!cache) return 0;
+    const HashMap* map = cache->index.raw();
+    return cache->bytes + sizeof(*cache) + sizeof(*map) + (map->nbuckets + 2) * map->bucketsz;
 }
 
-float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
-    if (!dl || !dashes || count <= 0) return nullptr;
-    size_t sz = count * sizeof(float);
-    float* copy = (float*)scratch_alloc(&dl->arena, sz);
-    if (!copy) return nullptr;
-    memcpy(copy, dashes, sz);
-    return copy;
+uint64_t dl_shared_array_checkpoint(const DisplayList* list) {
+    return list && list->shared_arrays ? list->shared_arrays->next_serial : 0;
+}
+
+void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint) {
+    DlSharedArrayCache* cache = list ? list->shared_arrays.get() : nullptr;
+    if (!cache) return;
+    size_t cursor = 0; DlSharedArrayEntry* entry;
+    while (cache->index.next(&cursor, &entry)) {
+        if (entry->serial < checkpoint) continue;
+        DlSharedArrayEntry removed = *entry;
+        cache->index.erase(removed);
+        cache->bytes -= sizeof(DlSharedArray) + removed.value->bytes;
+        dl_shared_array_release(&removed);
+        cursor = 0; // erasure relocates buckets; overlay additions are bounded to one frame.
+    }
+    cache->next_serial = checkpoint;
+}
+
+template<typename T>
+static const T* dl_share_array(DisplayList* dst, const DisplayList* source, const T* data, int count, unsigned kind) {
+    if (!dst || !data || count <= 0) return nullptr;
+    size_t bytes, allocation;
+    if (!math_checked_mul((size_t)count, sizeof(T), &bytes) ||
+        !math_checked_add(sizeof(DlSharedArray), bytes, &allocation)) return nullptr;
+    if (!dst->shared_arrays) {
+        DlSharedArrayCache* cache = (DlSharedArrayCache*)mem_calloc(1, sizeof(DlSharedArrayCache), MEM_CAT_RENDER);
+        if (!cache) return nullptr;
+        if (!cache->index.init(8)) { mem_free(cache); return nullptr; }
+        dst->shared_arrays = lam::own(cache);
+    }
+    DlSharedArray query = {}; query.bytes = bytes; query.kind = kind; query.data = data;
+    query.hash = hashmap_hash_bytes(data, bytes, kind, 0);
+    DlSharedArrayCache* cache = dst->shared_arrays;
+    if (cache->next_serial == UINT64_MAX) return nullptr;
+    DlSharedArrayEntry* existing = cache->index.get({&query});
+    if (existing) { RENDER_METRIC_ADD(shared_array_hits, 1); return (T*)existing->value->data; }
+    const DlSharedArrayEntry* from = source && source->shared_arrays ? source->shared_arrays->index.get({&query}) : nullptr;
+    DlSharedArray* value;
+    if (from) {
+        value = from->value;
+        if (!ref_count_retain(&value->refs)) return nullptr;
+        RENDER_METRIC_ADD(shared_array_retains, 1);
+    } else {
+        value = (DlSharedArray*)mem_alloc(allocation, MEM_CAT_RENDER);
+        if (!value) return nullptr;
+        *value = query; ref_count_init(&value->refs); value->data = value + 1;
+        memcpy((void*)value->data, data, bytes);
+        RENDER_METRIC_ADD(payload_copy_bytes, bytes);
+    }
+    cache->index.set({value, cache->next_serial});
+    if (cache->index.oom()) { DlSharedArrayEntry entry = {value}; dl_shared_array_release(&entry); return nullptr; }
+    cache->bytes += allocation;
+    cache->next_serial++;
+    return (T*)value->data;
+}
+
+const RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count) {
+    return dl_share_array(dl, nullptr, stops, count, 1);
+}
+
+const float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
+    return dl_share_array(dl, nullptr, dashes, count, 2);
 }
 
 bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
@@ -89,41 +181,39 @@ bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
     return true;
 }
 
-void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
+bool dl_store_clip_shapes(DisplayList* dl, lam::Up<const DlClipShapeStack>* out,
                           ClipShape** clip_shapes, int clip_depth) {
-    if (!dst) return;
-    memset(dst, 0, sizeof(DlClipShapeStack));
-    if (!dl || !clip_shapes || clip_depth <= 0) return;
+    if (!dl || !out) return false;
+    *out = nullptr;
+    if (!clip_shapes || clip_depth <= 0) return true;
     if (clip_depth > RDT_MAX_CLIP_SHAPES) {
         log_warn("[RAD_CAP_DL_CLIP_SHAPES] truncating clip stack from %d to %d shapes",
                  clip_depth, RDT_MAX_CLIP_SHAPES);
         clip_depth = RDT_MAX_CLIP_SHAPES;
     }
+    DlClipShapeStack* dst = (DlClipShapeStack*)scratch_calloc(&dl->arena, sizeof(DlClipShapeStack));
+    if (!dst) return false;
     dst->depth = clip_depth;
     for (int i = 0; i < clip_depth; i++) {
         ClipShape* shape = clip_shapes[i];
         clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
         if (shape && shape->type == CLIP_SHAPE_POLYGON &&
             shape->polygon.count > 0 && shape->polygon.vx && shape->polygon.vy) {
-            int count = shape->polygon.count;
-            size_t sz = count * sizeof(float);
+            size_t sz = (size_t)shape->polygon.count * sizeof(float);
             float* vx = (float*)scratch_alloc(&dl->arena, sz);
             float* vy = (float*)scratch_alloc(&dl->arena, sz);
-            if (!vx || !vy) {
-                dst->type[i] = CLIP_SHAPE_NONE;
-                continue;
-            }
+            if (!vx || !vy) return false;
             memcpy(vx, shape->polygon.vx, sz);
             memcpy(vy, shape->polygon.vy, sz);
-            dst->type[i] = CLIP_SHAPE_POLYGON;
-            dst->polygon_count[i] = count;
+            dst->polygon_count[i] = shape->polygon.count;
             dst->polygon_vx[i] = lam::own_arr(vx);
             dst->polygon_vy[i] = lam::own_arr(vy);
-            continue;
         }
     }
+    // publish only complete stacks; an allocation failure must never discard a clip.
+    *out = lam::up(dst);
+    return true;
 }
-
 
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                            ClipShape** shape_ptrs, ScratchArena* scratch,
@@ -164,13 +254,24 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
     return out_depth;
 }
 
+static void dl_init_scratch(DisplayList* list, Arena* backing_arena) {
+    mem_scratch_init(NULL, &list->arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
+}
+
 void DisplayList::init(Arena* backing_arena) {
     destroy();
-    mem_scratch_init(NULL, &arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
+    dl_init_scratch(this, backing_arena);
+}
+
+bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner) {
+    if (!list || !owner || !ref_count_retain(&owner->refs)) return false;
+    if (list->payload_owners.append(owner)) return true;
+    dl_payload_owner_release(owner);
+    return false;
 }
 
 void dl_item_free_owned_payload(DisplayItem* item) {
-    if (!item) return;
+    if (!item || item->payload_owner) return;
     if (item->op == DL_DRAW_IMAGE && item->draw_image.snapshot_lease) {
         image_surface_snapshot_release(item->draw_image.snapshot_lease);item->draw_image.snapshot_lease=nullptr;
     }
@@ -198,19 +299,38 @@ void DisplayList::clear() {
         dl_item_free_owned_payload(&dl->data()[i]);
     }
     lam::ArrayList<DisplayItem>::clear();
+    for (size_t i = 0; i < payload_owners.size(); i++) dl_payload_owner_release(payload_owners[i]);
+    payload_owners.clear();
+    if (shared_arrays) {
+        shared_arrays->index.destroy(); lam::free_owned(shared_arrays);
+    }
     Arena* backing_arena = dl->arena.arena;
     scratch_release(&dl->arena);
     if (backing_arena) {
         // reusable display lists release scratch nodes on clear; re-register so
         // retained-fragment captures keep mem-dump accounting current.
-        mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER,
-                         "display_list.scratch");
+        dl_init_scratch(dl, backing_arena);
     }
+}
+
+bool dl_trim_empty_arena(DisplayList* list) {
+    if (!list) return false;
+    ScratchArena* scratch = &list->arena;
+    Arena* backing = scratch->arena;
+    if (!backing || !scratch->scope_active || scratch->base.total_used || scratch->head ||
+        scratch->open_scope || arena_active_scope_count(backing) != 1 ||
+        arena_total_used(backing) || arena_chunk_count(backing) <= 1) return false;
+    // a rewound capture can leave megabytes of idle capacity; no live payload or earlier arena data may be reset.
+    scratch_release(scratch);
+    arena_clear(backing);
+    dl_init_scratch(list, backing);
+    return true;
 }
 
 void DisplayList::destroy() {
     clear();
     lam::ArrayList<DisplayItem>::release();
+    payload_owners.release();
     scratch_release(&arena);
 }
 
@@ -789,56 +909,38 @@ ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item) {
 }
 
 // shared cloning/replacement preserves payload ownership for retained lists and deferred effects.
-static void dl_copy_clip_shape_stack(DisplayList* dst,
-                                              DlClipShapeStack* out,
-                                              const DlClipShapeStack* in) {
-    if (!out) return;
-    memset(out, 0, sizeof(DlClipShapeStack));
-    if (!dst || !in || in->depth <= 0) return;
-
-    *out = *in;
-    for (int i = 0; i < out->depth && i < RDT_MAX_CLIP_SHAPES; i++) {
-        if (in->type[i] != CLIP_SHAPE_POLYGON ||
-            in->polygon_count[i] <= 0 ||
-            !in->polygon_vx[i] || !in->polygon_vy[i]) {
-            continue;
-        }
-        size_t sz = (size_t)in->polygon_count[i] * sizeof(float);
-        float* vx = (float*)scratch_alloc(&dst->arena, sz);
-        float* vy = (float*)scratch_alloc(&dst->arena, sz);
-        if (!vx || !vy) {
-            out->type[i] = CLIP_SHAPE_NONE;
-            out->polygon_count[i] = 0;
-            out->polygon_vx[i] = nullptr;
-            out->polygon_vy[i] = nullptr;
-            continue;
-        }
-        memcpy(vx, in->polygon_vx[i], sz);
-        memcpy(vy, in->polygon_vy[i], sz);
-        out->polygon_vx[i] = lam::own_arr(vx);
-        out->polygon_vy[i] = lam::own_arr(vy);
-    }
+static bool dl_copy_clip_shape_stack(DisplayList* dst,
+                                     lam::Up<const DlClipShapeStack>* out,
+                                     const DlClipShapeStack* in) {
+    if (!dst || !out) return false;
+    *out = nullptr;
+    if (!in || in->depth <= 0) return true;
+    ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+    ClipShape* pointers[RDT_MAX_CLIP_SHAPES];
+    int depth = dl_restore_clip_shapes(in, shapes, pointers);
+    return dl_store_clip_shapes(dst, out, pointers, depth);
 }
 
 static bool dl_clone_path(lam::Own<RdtPath>* out, RdtPath* in) {
     if (!out) return false; *out = lam::own(in ? rdt_path_clone(in) : nullptr); return !in || *out;
 }
 
-static bool dl_copy_gradient_stops(DisplayList* dst, lam::OwnArr<RdtGradientStop>* out,
+static bool dl_copy_gradient_stops(DisplayList* dst, const DisplayList* source, lam::Shared<const RdtGradientStop>* out,
                                             const RdtGradientStop* stops, int count) {
-    if (!out) return false; *out = lam::own_arr(dl_copy_stops(dst, stops, count)); return !stops || count <= 0 || *out;
+    if (!out) return false; *out = lam::shared(dl_share_array(dst, source, stops, count, 1)); return !stops || count <= 0 || *out;
 }
 
-static bool dl_copy_dashes(DisplayList* dst, lam::OwnArr<float>* out, const float* dashes, int count) {
-    if (!out) return false; *out = lam::own_arr(dl_copy_dashes(dst, dashes, count)); return !dashes || count <= 0 || *out;
+static bool dl_copy_dashes(DisplayList* dst, const DisplayList* source, lam::Shared<const float>* out, const float* dashes, int count) {
+    if (!out) return false; *out = lam::shared(dl_share_array(dst, source, dashes, count, 2)); return !dashes || count <= 0 || *out;
 }
 
-static bool dl_clone_item_payload(DisplayList* dst,
+static bool dl_clone_item_payload(DisplayList* dst, const DisplayList* source,
                                            DisplayItem* out,
                                            const DisplayItem* in,
                                            int source_start,
                                            int dest_start) {
     if (!dst || !out || !in) return false;
+    if (in->payload_owner && in->payload_owner->commands) source = in->payload_owner->commands;
 
     switch (in->op) {
         case DL_DRAW_IMAGE:
@@ -849,26 +951,26 @@ static bool dl_clone_item_payload(DisplayList* dst,
             break;
         case DL_STROKE_PATH:
             if (!dl_clone_path(&out->stroke_path.path, in->stroke_path.path)) return false;
-            if (!dl_copy_dashes(dst, &out->stroke_path.dash_array,
+            if (!dl_copy_dashes(dst, source, &out->stroke_path.dash_array,
                     in->stroke_path.dash_array, in->stroke_path.dash_count)) return false;
             break;
         case DL_FILL_LINEAR_GRADIENT:
             if (!dl_clone_path(&out->fill_linear_gradient.path,
                     in->fill_linear_gradient.path)) return false;
-            if (!dl_copy_gradient_stops(dst, &out->fill_linear_gradient.stops,
+            if (!dl_copy_gradient_stops(dst, source, &out->fill_linear_gradient.stops,
                     in->fill_linear_gradient.stops, in->fill_linear_gradient.stop_count)) return false;
-            out->fill_linear_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
-                in->fill_linear_gradient.options.dash_array, in->fill_linear_gradient.options.dash_count));
+            out->fill_linear_gradient.options.dash_array = lam::up(dl_share_array(dst, source,
+                in->fill_linear_gradient.options.dash_array.get(), in->fill_linear_gradient.options.dash_count, 2));
             if (in->fill_linear_gradient.options.dash_count > 0 &&
                 !out->fill_linear_gradient.options.dash_array) return false;
             break;
         case DL_FILL_RADIAL_GRADIENT:
             if (!dl_clone_path(&out->fill_radial_gradient.path,
                     in->fill_radial_gradient.path)) return false;
-            if (!dl_copy_gradient_stops(dst, &out->fill_radial_gradient.stops,
+            if (!dl_copy_gradient_stops(dst, source, &out->fill_radial_gradient.stops,
                     in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
-            out->fill_radial_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
-                in->fill_radial_gradient.options.dash_array, in->fill_radial_gradient.options.dash_count));
+            out->fill_radial_gradient.options.dash_array = lam::up(dl_share_array(dst, source,
+                in->fill_radial_gradient.options.dash_array.get(), in->fill_radial_gradient.options.dash_count, 2));
             if (in->fill_radial_gradient.options.dash_count > 0 &&
                 !out->fill_radial_gradient.options.dash_array) return false;
             break;
@@ -881,13 +983,13 @@ static bool dl_clone_item_payload(DisplayList* dst,
             if (!dl_clone_path(&out->push_clip.path, in->push_clip.path)) return false;
             break;
         case DL_FILL_SURFACE_RECT:
-            dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
-                                              &in->fill_surface_rect.clip_shapes);
+            if (!dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
+                                          in->fill_surface_rect.clip_shapes)) return false;
             break;
         case DL_BLIT_SURFACE_SCALED:
             out->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(in->blit_surface_scaled.snapshot_lease));
-            dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
-                                              &in->blit_surface_scaled.clip_shapes);
+            if (!dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
+                                          in->blit_surface_scaled.clip_shapes)) return false;
             break;
         case DL_BEGIN_ELEMENT:
             if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
@@ -930,9 +1032,11 @@ bool dl_copy_range(DisplayList* dst, const DisplayList* src,
             dl_truncate(dst, dest_start);
             return false;
         }
+        RENDER_METRIC_ADD(command_copy_bytes, sizeof(DisplayItem));
         DisplayItem copy = src->data()[i];
+        copy.payload_owner = nullptr; // deep copies acquire independent payload ownership.
         *out = copy;
-        if (!dl_clone_item_payload(dst, out, &src->data()[i], start, dest_start)) {
+        if (!dl_clone_item_payload(dst, src, out, &src->data()[i], start, dest_start)) {
             dl_truncate(dst, dest_start);
             return false;
         }

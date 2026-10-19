@@ -125,6 +125,10 @@ artifacts are under `temp/music/`; no performance claims use these debug runs.
   stop, seek, speed, volume, mute and solo mutate only after joining the
   callback. The callback has no Lambda values, DOM access, GC, locks, resource
   reads or allocation (D4.5.2/D5.3.3). Null device backends are rejected.
+- Since speech M2 (2026-10-19) these transport mutations run under the session's
+  bus voice lock instead of a per-session device stop
+  (`vibe/radiant/Radiant_Design_Speech.md` §3.2). `reverb` sets the session's
+  Freeverb send on the document mix, 0.2 by default.
 - Existing `DocumentAudio` now owns MIDI slots alongside encoded-audio slots.
   Shared token allocation never reuses a session ID. A `DomNodeRef` tracks
   each owner across rebuilds; frame-loop pruning closes disconnected owners,

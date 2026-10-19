@@ -377,6 +377,8 @@ function discoverTests(config) {
                     runnerArgs: t.runner_args || [],
                     caseWorkers: t.case_workers || 1,
                     caseWorkersEnv: t.case_workers_env,
+                    caseBatchSize: t.case_batch_size || 1,
+                    caseBatchSizeEnv: t.case_batch_size_env,
                     caseWorkerArgs: t.case_worker_args || [],
                     isolatedCwd: t.isolated_cwd === true,
                     artifactDirs: t.artifact_dirs || [],
@@ -800,6 +802,8 @@ function runTest(testInfo) {
             }
             const result = parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs);
             result.logFile = logFile;
+            result.exitCode = code;
+            result.signal = signal;
             // A passing JSON file cannot override a crash or a failing child exit.
             const errors = [];
             if (!timedOut && (code !== 0 || signal)) {
@@ -819,7 +823,7 @@ function runTest(testInfo) {
     });
 }
 
-// independent cases own their process group, timeout, artifacts and native working directory.
+// suites may opt into bounded batches to reuse expensive native modules between cases.
 async function runGtestCases(testInfo, workers) {
     const { baseName } = testInfo;
     const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
@@ -874,42 +878,59 @@ async function runGtestCases(testInfo, workers) {
     // start expensive cases first, keeping merged reports in discovery order.
     const queue = names.map((name, index) => ({ name, index })).sort((a, b) =>
         (previousTimes.get(b.name) || 0) - (previousTimes.get(a.name) || 0));
+    const batchSize = Math.max(1, Math.floor(Number(process.env[testInfo.caseBatchSizeEnv] || testInfo.caseBatchSize)) || 1);
+    const batches = Array.from({ length: Math.max(Math.min(workers, names.length), Math.ceil(names.length / batchSize)) },
+        () => ({ cases: [], cost: 0 }));
+    for (const [index, item] of queue.entries()) {
+        const batch = batchSize === 1 ? batches[index] :
+            batches.filter(b => b.cases.length < batchSize).reduce((a, b) => a.cost <= b.cost ? a : b);
+        batch.cases.push(item); batch.cost += Math.max(1, previousTimes.get(item.name) || 0);
+    }
+    batches.sort((a, b) => b.cost - a.cost);
     let next = 0;
     async function worker() {
         const cwd = testInfo.isolatedCwd ? createWorkspace(ROOT_DIR, `${baseName}-`) : undefined;
-        while (next < names.length) {
-            const { name, index } = queue[next++];
-            const workerName = `${baseName}_cases/${index}`;
+        while (next < batches.length) {
+            const batch = batches[next++].cases;
+            const workerName = `${baseName}_cases/${batch[0].index}`;
             const result = await runTest({ ...testInfo, cwd, baseName: workerName, caseWorker: true,
                 minimumPassed: 0, allocatedSlots: 1,
                 env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
-                runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${name}`] });
+                runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${batch.map(c => c.name).join(':')}`] });
             let data;
             try { data = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, `${workerName}_results.json`), 'utf8')); } catch (_) {}
             const rows = Array.isArray(data?.testsuites) ? data.testsuites.flatMap(s =>
                 Array.isArray(s.testsuite) ? s.testsuite.map(tc => ({ suite: s.name, tc })) : []) : [];
-            const dot = name.indexOf('.');
-            const suiteName = name.slice(0, dot), caseName = name.slice(dot + 1);
-            const valid = data?.tests === 1 && rows.length === 1 && rows[0].tc?.status === 'RUN' &&
-                `${rows[0].suite}.${rows[0].tc.name}` === name;
-            const tc = valid ? rows[0].tc : { name: caseName, classname: suiteName, time: '0s',
-                status: 'RUN', result: 'COMPLETED' };
-            if (cwd) tc.workspace = cwd;
-            // a missing, mismatched or crashing child fails its discovered case, even with passing JSON.
-            if (!valid || result.failed) {
-                if (!Array.isArray(tc.failures) || !tc.failures.length) {
-                    tc.failures = [{ failure: (result.failedTests || []).join('\n') ||
-                        `expected exactly ${name} in the worker report (see ${result.logFile})` }];
+            const expected = new Set(batch.map(c => c.name));
+            const returned = new Map(rows.map(row => [`${row.suite}.${row.tc?.name}`, row.tc]));
+            const valid = data?.tests === batch.length && rows.length === batch.length && returned.size === batch.length &&
+                rows.every(row => row.tc?.status === 'RUN' && expected.has(`${row.suite}.${row.tc.name}`));
+            const reportedFailure = rows.some(row => row.tc?.failures?.length);
+            // a normal GTest assertion exit belongs to its case; crashes and invalid reports fail the whole batch.
+            const processFailure = result.failed && (!valid || result.timedOut || result.signal ||
+                result.exitCode !== 1 || !reportedFailure);
+            for (const { name, index } of batch) {
+                const dot = name.indexOf('.');
+                const suiteName = name.slice(0, dot), caseName = name.slice(dot + 1);
+                const tc = valid ? returned.get(name) : { name: caseName, classname: suiteName, time: '0s',
+                    status: 'RUN', result: 'COMPLETED' };
+                if (cwd) tc.workspace = cwd;
+                // a missing, mismatched or crashing child fails its discovered case, even with passing JSON.
+                if (!valid || processFailure) {
+                    if (!Array.isArray(tc.failures) || !tc.failures.length) {
+                        tc.failures = [{ failure: (result.failedTests || []).join('\n') ||
+                            `expected exactly the assigned cases, including ${name}, in the worker report (see ${result.logFile})` }];
+                    }
                 }
+                cases[index] = { suiteName, tc };
             }
-            cases[index] = { suiteName, tc };
             let caseLog;
             try { caseLog = fs.readFileSync(result.logFile, 'utf8'); }
             catch (error) {
                 if (!result.failed) throw error;
                 caseLog = (result.failedTests || []).join('\n');
             }
-            fs.appendFileSync(logFile, `\n[case ${index + 1}/${names.length}] ${name}\n${caseLog}`);
+            fs.appendFileSync(logFile, `\n[cases ${batch.map(c => c.index + 1).join(',')}/${names.length}] ${batch.map(c => c.name).join(':')}\n${caseLog}`);
         }
     }
     // wait for every active child before reporting an artifact I/O failure.

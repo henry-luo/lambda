@@ -78,6 +78,8 @@ typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/l
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 const char* dom_element_namespace_uri(struct DomElement* element);
+// namespace predicates are shared data queries for layout and the public DOM adapter.
+bool dom_element_is_svg(struct DomElement* element);
 NameId dom_element_html_tag(struct DomElement* element);
 // same as dom_element_html_tag(element) == tag, without the namespace walk for other tags
 bool dom_element_is_html_tag(struct DomElement* element, NameId tag);
@@ -271,6 +273,7 @@ struct DomDocumentServices {
     void* style_epoch_manager; // versioned canonical specified-style pools
     void* scene3d_registry;   // document-owned native 3D viewport projections
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
+    void* svg_geometry_cache; // document-owned immutable SVG path resources
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
     void* svg_filter_registry; // document-owned compiled SVG filter programs
     void* svg_animation_registry; // document-owned SMIL clocks and sampled values
@@ -285,7 +288,7 @@ struct DomDocumentServices {
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
-        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
+        svg_geometry_cache(nullptr), svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {

@@ -21,7 +21,9 @@
 
 #include "view.hpp"
 
-static constexpr size_t GL_BYTE_LIMIT = 128u * 1024u * 1024u;
+// per-context GPU budget. 128 MiB could not hold a 2x-scaled 1280x720 4x-MSAA
+// target (132.7 MB) plus any real scene geometry (USER 2026-10-19).
+static constexpr size_t GL_BYTE_LIMIT = 512u * 1024u * 1024u;
 static constexpr unsigned GL_RESOURCE_LIMIT = 4096;
 static constexpr unsigned GL_DIMENSION_LIMIT = 4096;
 static uint64_t native_gl_next_id = 1;
