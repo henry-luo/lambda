@@ -160,8 +160,8 @@ void midi_player_close(MidiPlayer* p) {
     mem_free(p->events); mem_free(p);
 }
 MidiSnapshot midi_player_info(MidiPlayer* p) {
-    if (!p) return {MIDI_ERROR, 0, 0, 1, 0, 0, 0};
-    return {midi_state(p), midi_position(p), p->duration, p->speed, p->volume, p->mute, p->solo};
+    if (!p) return {MIDI_ERROR, 0, 0, 1, 0, 0, 0, 0};
+    return {midi_state(p), midi_position(p), p->duration, p->speed, p->volume, p->mute, p->solo, 0};
 }
 bool midi_player_command(MidiPlayer* p, const char* command, double value) {
     if (!p || !command || !isfinite(value) || midi_state(p) == MIDI_ERROR) return false;

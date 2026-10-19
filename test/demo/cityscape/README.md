@@ -104,6 +104,22 @@ Cues follow the film:
 - one bell per tree ring;
 - the opening motif again at the close.
 
+The score is performed, not just sequenced:
+- **Velocity curves:** phrases rise toward their middle and relax at the close, notes
+  on the beat lean in, rolls build as they climb, and chords voice their top note
+  above the inner ones.
+- **Swells:** held chords on strings, pad, horn and choir breathe through CC11
+  expression. The chapter fades and these swells feed one expression lane per
+  channel, sampled every eighth of a second.
+- **Sustain pedal:** harp and piano play under a legato CC64 pedal that is re-taken
+  just after each harmony change.
+- **Staggered chords:** chord notes spread upward 12 ms apart, and melodic onsets
+  drift by a few milliseconds.
+
+A fixed per-note variation, not randomness, keeps every rendering identical. Each
+session sends a fifth of its sound to the document's Freeverb room on the audio bus.
+`dom.midi_command(owner, token, "reverb", level)` changes that send.
+
 The browser rule applies here too: audio starts only on a click (S12.1.1v2/D7.4.6).
 D7.5.4 would let a local file start sound on its own; this demo still waits for the viewer.
 Press **♪ 声音 · Sound** at the top right to play the film from the start with music.

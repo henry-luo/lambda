@@ -527,6 +527,21 @@ As built in M2 (2026-10-19):
   (`ma_convert_frames`), with marks rescaled. The voice starts the armed
   utterance at its `at` frame within a buffer and keeps a cursor that pause
   freezes.
+- **Reverb (2026-10-19).** `radiant/audio_reverb.cpp` implements Freeverb from
+  Jezar's public-domain design, with one medium-room preset:
+  - eight damped combs and four allpasses per channel, delays scaled to 48 kHz,
+    and a 23-sample stereo spread;
+  - each voice renders into its own buffer, which feeds the dry mix and, scaled
+    by the voice's send (`audio_voice_set_send`), the sub-mix reverb;
+  - the reverb is allocated on the UI thread at the first send above zero, and
+    it keeps running so tails ring out;
+  - MIDI sessions send 0.2 by default and `dom.midi_command(…, "reverb", level)`
+    changes it; speech stays dry.
+
+  `Freeverb.ImpulseGivesADelayedDecayingStereoTailDeterministically` and
+  `MidiPlayback.ReverbSendLeavesATailAfterTheMusicEnds` cover the DSP, and the
+  `test/ui/audio_reverb.json` fixture covers the rows. A 6 s impulse response
+  renders in about 10 ms.
 - **Offline output.** `LAMBDA_AUDIO_OUTPUT=offline` (or
   `audio_bus_set_offline` in tests) opens no device. Each sub-mix then advances
   on its document's frame tick (`radiant_audio_tick`), and

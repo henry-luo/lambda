@@ -2429,6 +2429,7 @@ RADIANT_C_API Item fn_radiant_midi_info(Item node, Item token) {
     radiant_rooted_obj_set(result, "volume", radiant_float_item(snapshot.volume));
     radiant_rooted_obj_set(result, "mute", radiant_int_item(snapshot.mute));
     radiant_rooted_obj_set(result, "solo", radiant_int_item(snapshot.solo));
+    radiant_rooted_obj_set(result, "reverb", radiant_float_item(snapshot.reverb));
     return result.get();
 }
 

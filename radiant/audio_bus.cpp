@@ -7,6 +7,7 @@
 // the audio thread reads is never freed; generations make stale handles inert.
 
 #include "audio_bus.hpp"
+#include "audio_reverb.hpp"
 #include "../lib/log.h"
 
 #define MA_NO_DECODING
@@ -22,6 +23,7 @@
 #include <string.h>
 
 enum { AUDIO_BUS_SUBMIXES = 16, AUDIO_BUS_VOICES = 96 };   // 4 MIDI sessions + speech per document
+enum { MIX_CHUNK = 256 };   // frames mixed per pass; bounds the audio thread's stack buffers
 enum { VOICE_FREE, VOICE_LIVE, VOICE_LOST };
 enum { LOCK_IDLE, LOCK_AUDIO, LOCK_UI };
 
@@ -30,6 +32,7 @@ struct BusSubmix {
     int live;             // atomic
     int lock;             // atomic, LOCK_*
     uint64_t clock;       // atomic; frames rendered
+    AudioReverb* reverb;  // created by the first voice that sends to it; changed under `lock`
 };
 struct BusVoice {
     uint32_t generation;
@@ -38,6 +41,7 @@ struct BusVoice {
     uint32_t submix;      // slot index
     AudioVoiceRender render;
     void* source;
+    float send;           // reverb send level 0..1; changed under `lock`
 };
 struct AudioBus {
     BusSubmix submixes[AUDIO_BUS_SUBMIXES];
@@ -81,15 +85,31 @@ static BusVoice* voice_at(AudioVoiceId id) {
 }
 
 // mixes one sub-mix into `out` (already holding earlier sub-mixes) and advances its clock.
+// Each voice renders into its own buffer, which goes to the dry mix and, scaled by
+// the voice's send, into the sub-mix reverb.
 static void submix_mix(uint32_t index, float* out, uint32_t frames) {
     BusSubmix* s = &bus.submixes[index];
     if (!__atomic_load_n(&s->live, __ATOMIC_ACQUIRE) || !lock_try(&s->lock)) return;
     uint64_t clock = __atomic_load_n(&s->clock, __ATOMIC_ACQUIRE);
-    for (BusVoice& v : bus.voices) {
-        if (v.submix != index || __atomic_load_n(&v.state, __ATOMIC_ACQUIRE) != VOICE_LIVE || !lock_try(&v.lock)) continue;
-        // re-read under the lock: the UI thread may have retired the voice meanwhile.
-        if (__atomic_load_n(&v.state, __ATOMIC_ACQUIRE) == VOICE_LIVE && v.submix == index) v.render(v.source, out, frames, clock);
-        lock_release(&v.lock);
+    float voice[MIX_CHUNK * 2], send[MIX_CHUNK * 2];
+    for (uint32_t done = 0; done < frames;) {
+        uint32_t count = frames - done < MIX_CHUNK ? frames - done : MIX_CHUNK;
+        float* mix = out + (size_t)done * 2;
+        if (s->reverb) memset(send, 0, (size_t)count * 2 * sizeof(float));
+        for (BusVoice& v : bus.voices) {
+            if (v.submix != index || __atomic_load_n(&v.state, __ATOMIC_ACQUIRE) != VOICE_LIVE || !lock_try(&v.lock)) continue;
+            // re-read under the lock: the UI thread may have retired the voice meanwhile.
+            if (__atomic_load_n(&v.state, __ATOMIC_ACQUIRE) == VOICE_LIVE && v.submix == index) {
+                memset(voice, 0, (size_t)count * 2 * sizeof(float));
+                v.render(v.source, voice, count, clock + done);
+                for (uint32_t i = 0; i < count * 2; i++) mix[i] += voice[i];
+                if (s->reverb && v.send > 0) for (uint32_t i = 0; i < count * 2; i++) send[i] += voice[i] * v.send;
+            }
+            lock_release(&v.lock);
+        }
+        // the reverb runs even when nothing sends, so tails ring out after the music stops.
+        if (s->reverb) audio_reverb_process(s->reverb, send, mix, count);
+        done += count;
     }
     __atomic_store_n(&s->clock, clock + frames, __ATOMIC_RELEASE);
     lock_release(&s->lock);
@@ -172,7 +192,10 @@ void audio_submix_destroy(AudioSubmixId id) {
     }
     lock_ui(&s->lock);
     __atomic_store_n(&s->live, 0, __ATOMIC_RELEASE);
+    AudioReverb* reverb = s->reverb;
+    s->reverb = nullptr;
     lock_release(&s->lock);
+    audio_reverb_destroy(reverb);
 }
 uint64_t audio_submix_clock(AudioSubmixId id) {
     BusSubmix* s = submix_at(id);
@@ -197,7 +220,7 @@ AudioVoiceId audio_voice_add(AudioSubmixId id, AudioVoiceRender render, void* so
         if (!audio_bus_offline() && !device_open(error)) return 0;
         lock_ui(&v->lock);
         v->generation++;
-        v->submix = index; v->render = render; v->source = source;
+        v->submix = index; v->render = render; v->source = source; v->send = 0;
         __atomic_store_n(&v->state, VOICE_LIVE, __ATOMIC_RELEASE);
         lock_release(&v->lock);
         bus.voice_count++;
@@ -226,6 +249,28 @@ void audio_voice_unlock(AudioVoiceId id) {
     BusVoice* v = voice_at(id);
     if (v) lock_release(&v->lock);
 }
+bool audio_voice_set_send(AudioVoiceId id, float level) {
+    BusVoice* v = voice_at(id);
+    if (!v || !(level >= 0 && level <= 1)) return false;
+    BusSubmix* s = &bus.submixes[v->submix];
+    // the reverb is allocated here on the UI thread, never on the audio thread.
+    if (level > 0 && !s->reverb) {
+        AudioReverb* reverb = audio_reverb_create(AUDIO_BUS_RATE);
+        if (!reverb) return false;
+        lock_ui(&s->lock);
+        s->reverb = reverb;
+        lock_release(&s->lock);
+    }
+    lock_ui(&v->lock);
+    v->send = level;
+    lock_release(&v->lock);
+    return true;
+}
+float audio_voice_send(AudioVoiceId id) {
+    BusVoice* v = voice_at(id);
+    return v ? v->send : 0;
+}
+
 bool audio_voice_lost(AudioVoiceId id) {
     BusVoice* v = voice_at(id);
     return v && __atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VOICE_LOST;

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../radiant/midi_player.hpp"
 #include "../radiant/audio_bus.hpp"
+#include "../radiant/audio_reverb.hpp"
 #include "../lib/mem.h"
 #include <math.h>
 #include <stdio.h>
@@ -139,6 +140,69 @@ TEST_F(MidiPlayback, OfflineSubmixAdvancesItsClockAndMixesVoices) {
     EXPECT_FALSE(audio_voice_lock(voice));
     EXPECT_FALSE(audio_submix_render(submix,samples,480));
     EXPECT_EQ(audio_submix_clock(submix),0u);
+    audio_bus_set_offline(false);
+}
+static double energy_between(const float* stereo, uint32_t from, uint32_t to) {
+    double e = 0;
+    for (uint32_t i = from * 2; i < to * 2; i++) e += (double)stereo[i] * stereo[i];
+    return e;
+}
+TEST(Freeverb, ImpulseGivesADelayedDecayingStereoTailDeterministically) {
+    const uint32_t frames = AUDIO_BUS_RATE * 6;
+    auto* input = (float*)mem_calloc((size_t)frames * 2, sizeof(float), MEM_CAT_RENDER);
+    auto* a = (float*)mem_calloc((size_t)frames * 2, sizeof(float), MEM_CAT_RENDER);
+    auto* b = (float*)mem_calloc((size_t)frames * 2, sizeof(float), MEM_CAT_RENDER);
+    ASSERT_TRUE(input && a && b);
+    input[0] = input[1] = 1;
+    AudioReverb* first = audio_reverb_create(AUDIO_BUS_RATE);
+    AudioReverb* second = audio_reverb_create(AUDIO_BUS_RATE);
+    ASSERT_TRUE(first && second);
+    // process in uneven blocks, as a device callback would.
+    for (uint32_t done = 0, block = 64; done < frames; done += block, block = block == 64 ? 333 : 64) {
+        uint32_t n = frames - done < block ? frames - done : block;
+        audio_reverb_process(first, input + (size_t)done * 2, a + (size_t)done * 2, n);
+    }
+    audio_reverb_process(second, input, b, frames);
+    // nothing arrives before the shortest comb delay (1116 samples at 44.1 kHz).
+    uint32_t onset = AUDIO_BUS_RATE * 1116 / 44100;
+    EXPECT_EQ(energy_between(a, 0, onset - 8), 0);
+    double early = energy_between(a, AUDIO_BUS_RATE / 10, AUDIO_BUS_RATE / 2);
+    double late = energy_between(a, AUDIO_BUS_RATE * 5, frames);
+    EXPECT_GT(early, 0);
+    EXPECT_LT(late, early * 1e-3);
+    bool stereo = false;
+    for (uint32_t i = 0; i < frames && !stereo; i++) stereo = a[i * 2] != a[i * 2 + 1];
+    EXPECT_TRUE(stereo);
+    EXPECT_EQ(memcmp(a, b, (size_t)frames * 2 * sizeof(float)), 0);
+    audio_reverb_destroy(first); audio_reverb_destroy(second);
+    mem_free(input); mem_free(a); mem_free(b);
+}
+TEST_F(MidiPlayback, ReverbSendLeavesATailAfterTheMusicEnds) {
+    // Radiant_Design_Speech §3.2: a voice's send feeds its sub-mix reverb, which keeps ringing.
+    audio_bus_set_offline(true);
+    MidiEvent events[]={{0,144,60,110},{0.2,128,60,0}};
+    const uint32_t frames = AUDIO_BUS_RATE;
+    auto* mix = (float*)mem_calloc((size_t)frames * 2, sizeof(float), MEM_CAT_RENDER);
+    ASSERT_NE(mix, nullptr);
+    double tail[2] = {0, 0};
+    for (int wet = 0; wet < 2; wet++) {
+        open(events, 2, 0.3);
+        AudioSubmixId submix=audio_submix_create(); ASSERT_NE(submix,0u);
+        AudioVoiceId voice=audio_voice_add(submix,midi_player_mix,player,nullptr); ASSERT_NE(voice,0u);
+        EXPECT_EQ(audio_voice_send(voice), 0.0f);
+        ASSERT_TRUE(audio_voice_set_send(voice, wet ? 0.5f : 0.0f));
+        EXPECT_FALSE(audio_voice_set_send(voice, 1.5f));
+        ASSERT_TRUE(audio_voice_lock(voice)); ASSERT_TRUE(midi_player_command(player,"play",0)); audio_voice_unlock(voice);
+        memset(mix, 0, (size_t)frames * 2 * sizeof(float));
+        ASSERT_TRUE(audio_submix_render(submix, mix, frames));
+        EXPECT_EQ(midi_player_info(player).state, MIDI_ENDED);
+        tail[wet] = energy_between(mix, AUDIO_BUS_RATE / 2, frames);
+        audio_submix_destroy(submix);
+        midi_player_close(player); player = nullptr;
+    }
+    EXPECT_EQ(tail[0], 0);
+    EXPECT_GT(tail[1], 1e-4);
+    mem_free(mix);
     audio_bus_set_offline(false);
 }
 TEST_F(MidiPlayback, LiveDeviceClock) {

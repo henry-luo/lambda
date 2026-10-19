@@ -33,6 +33,10 @@ void audio_voice_remove(AudioVoiceId voice);
 // source; the voice is silent for any buffer rendered meanwhile.
 bool audio_voice_lock(AudioVoiceId voice);
 void audio_voice_unlock(AudioVoiceId voice);
+// the voice's reverb send, 0 (dry) to 1; the sub-mix gets its reverb on the first
+// send above 0. Voices start dry.
+bool audio_voice_set_send(AudioVoiceId voice, float level);
+float audio_voice_send(AudioVoiceId voice);
 // the output device was lost after the voice was added; it stays silent.
 bool audio_voice_lost(AudioVoiceId voice);
 

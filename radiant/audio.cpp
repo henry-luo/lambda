@@ -11,6 +11,7 @@
 #include <string.h>
 
 // a MIDI session plays as a voice of its document's sub-mix (Radiant_Design_Speech §3.2).
+static const float MIDI_DEFAULT_REVERB = 0.2f;
 struct AudioSlot { uint64_t token; RdtAudio* audio; MidiPlayer* midi; AudioVoiceId voice; DomNodeRef owner; };
 struct DocumentAudio : DomDocumentResourceData {
     lam::ArrayList<AudioSlot> slots;
@@ -141,6 +142,8 @@ uint64_t radiant_midi_open(DomElement* owner, const MidiEvent* events, size_t co
     const char* error = nullptr;
     AudioVoiceId voice = audio_voice_add(submix, midi_player_mix, player, &error);
     if (!voice) { log_error("audio: midi_open refused: %s", error ? error : "no voice"); midi_player_close(player); return 0; }
+    // music plays in a light room by default; `reverb` changes the send (Radiant_Design_Speech §3.2).
+    if (!audio_voice_set_send(voice, MIDI_DEFAULT_REVERB)) log_error("audio: midi_open: no memory for the reverb; playing dry");
     return audio_slot_add(audio, {0, nullptr, player, voice, dom_node_ref(owner)});
 }
 bool radiant_midi_command(DomDocument* doc, uint64_t token, const char* command, double value) {
@@ -148,6 +151,8 @@ bool radiant_midi_command(DomDocument* doc, uint64_t token, const char* command,
     if (!slot || !slot->midi) return false;
     // opening and preparing a session is output-free; playing it is audible (D7.5.4).
     if (command && !strcmp(command, "play") && !radiant_document_may_start_audio(doc)) return false;
+    // the reverb send belongs to the session's bus voice, not to the transport.
+    if (command && !strcmp(command, "reverb")) return isfinite(value) && audio_voice_set_send(slot->voice, (float)value);
     if (audio_voice_lost(slot->voice)) midi_player_fail(slot->midi);
     // the lock keeps the audio thread out while the transport changes.
     if (!audio_voice_lock(slot->voice)) return false;
@@ -159,6 +164,7 @@ bool radiant_midi_info(DomDocument* doc, uint64_t token, MidiSnapshot* snapshot)
     AudioSlot* slot = document_audio_slot(doc, token);
     if (!slot || !slot->midi || !snapshot) return false;
     *snapshot = midi_player_info(slot->midi);
+    snapshot->reverb = audio_voice_send(slot->voice);
     return true;
 }
 AudioSubmixId radiant_document_submix(DomDocument* doc) {
