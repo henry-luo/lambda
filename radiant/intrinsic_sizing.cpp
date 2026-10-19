@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_table.hpp"
 
 static bool intrinsic_declared_css_height_is_definite(LayoutContext* lycon,
                                                       DomElement* element);
@@ -739,6 +740,8 @@ static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyCode 
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         return inline_base > 0.0f ? (float)(value->data.percentage.value / 100.0) * inline_base : 0.0f;
     }
+    // cyclic padding resolves percentage terms against zero, including inside substituted math.
+    LayoutContainingBlockScope percentage_base(lycon, LAYOUT_AXIS_X, max(inline_base, 0.0f));
     return resolve_length_value(lycon, property, value);
 }
 
@@ -754,11 +757,29 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
                    : (border ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_PADDING_TOP),
         horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_PADDING_RIGHT)
                    : (border ? CSS_PROPERTY_BORDER_BOTTOM_WIDTH : CSS_PROPERTY_PADDING_BOTTOM)};
+    if (!border) {
+        // cell box probes may run with the table active; substitution belongs to the measured owner (D4.5.1v4).
+        LayoutViewScope owner_scope(lycon);
+        lycon->view = lam::up(static_cast<View*>(element));
+        lycon->elmt = lam::up(element);
+        for (int side = 0; side < 2; side++) {
+            CssDeclaration* declaration = layout_cascaded_physical_declaration(element, side_property[side]);
+            if (!declaration || !declaration->value) continue;
+            CssComputedValueScratch scratch(lycon, declaration->property_code, declaration->value, true);
+            const CssValue* value = layout_resolve_box_component_value(
+                lycon, element, declaration, radiant_css_box_side(side_property[side]));
+            // invalid computed declarations win the cascade and reset non-inherited padding to its initial zero.
+            if (!value) { side_width[side] = 0.0f; continue; }
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT)
+                continue;
+            side_width[side] = intrinsic_resolve_box_length(lycon, side_property[side], value, inline_base);
+        }
+        *start = side_width[0]; *end = side_width[1];
+        return;
+    }
     const CssPropertyCode side_shorthand[2] = {
-        horizontal ? (border ? CSS_PROPERTY_BORDER_LEFT : CSS_PROPERTY_PADDING_LEFT)
-                   : (border ? CSS_PROPERTY_BORDER_TOP : CSS_PROPERTY_PADDING_TOP),
-        horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT : CSS_PROPERTY_PADDING_RIGHT)
-                   : (border ? CSS_PROPERTY_BORDER_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM)};
+        horizontal ? CSS_PROPERTY_BORDER_LEFT : CSS_PROPERTY_BORDER_TOP,
+        horizontal ? CSS_PROPERTY_BORDER_RIGHT : CSS_PROPERTY_BORDER_BOTTOM};
     const int shorthand_index[2] = {
         horizontal ? 3 : 0, horizontal ? 1 : 2};
 
@@ -771,35 +792,22 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
         }
     };
 
-    CssDeclaration* box_decl = style_tree_get_declaration(
-        element->specified_style, border ? CSS_PROPERTY_BORDER : CSS_PROPERTY_PADDING);
+    CssDeclaration* box_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER);
     if (box_decl && box_decl->value) {
-        if (border) {
-            float width = intrinsic_border_width_from_shorthand_value(
-                lycon, CSS_PROPERTY_BORDER_WIDTH, box_decl->value);
-            apply_width(box_decl, width, 0);
-            apply_width(box_decl, width, 1);
-        } else {
-            for (int side = 0; side < 2; side++) {
-                const CssValue* value = css_box_shorthand_side_value(
-                    box_decl->value, shorthand_index[side]);
-                if (!value) continue;
-                apply_width(box_decl, intrinsic_resolve_box_length(
-                    lycon, side_property[side], value, inline_base), side);
-            }
-        }
+        float width = intrinsic_border_width_from_shorthand_value(
+            lycon, CSS_PROPERTY_BORDER_WIDTH, box_decl->value);
+        apply_width(box_decl, width, 0);
+        apply_width(box_decl, width, 1);
     }
 
-    if (border) {
-        CssDeclaration* border_width_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-        if (border_width_decl && border_width_decl->value) {
-            for (int side = 0; side < 2; side++) {
-                apply_width(border_width_decl,
-                    intrinsic_border_width_from_spacing_value(
-                        lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value,
-                        shorthand_index[side]), side);
-            }
+    CssDeclaration* border_width_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+    if (border_width_decl && border_width_decl->value) {
+        for (int side = 0; side < 2; side++) {
+            apply_width(border_width_decl,
+                intrinsic_border_width_from_spacing_value(
+                    lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value,
+                    shorthand_index[side]), side);
         }
     }
 
@@ -807,15 +815,12 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
         CssDeclaration* declaration = style_tree_get_declaration(
             element->specified_style, side_property[side]);
         if (declaration && declaration->value) {
-            float width = border
-                ? resolve_length_value(lycon, side_property[side], declaration->value)
-                : intrinsic_resolve_box_length(
-                    lycon, side_property[side], declaration->value, inline_base);
+            float width = resolve_length_value(lycon, side_property[side], declaration->value);
             apply_width(declaration, width, side);
         }
         CssDeclaration* side_decl = style_tree_get_declaration(
             element->specified_style, side_shorthand[side]);
-        if (border && side_decl && side_decl->value) {
+        if (side_decl && side_decl->value) {
             apply_width(side_decl,
                 intrinsic_border_width_from_shorthand_value(
                     lycon, side_property[side], side_decl->value), side);
@@ -1453,13 +1458,17 @@ static bool intrinsic_text_break_opportunity(uint32_t first, uint32_t last,
     const unsigned char* next, const unsigned char* end,
     const LayoutTextBreaks& native_breaks, size_t offset,
     bool break_anywhere, bool break_all, bool cjk_breaks, CssEnum line_break) {
+    // a text node's end is not a wrap opportunity; its parent resolves the following inline seam.
+    if (next >= end) return false;
     if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(last)) return true;
-    bool letter_boundary = (break_all && is_typographic_letter_unit(first)) ||
+    uint32_t following = 0;
+    const unsigned char* following_text = next;
+    layout_utf8_next_codepoint(&following_text, end, &following);
+    if (layout_text_allows_ascii_opening_break(last, following)) return true;
+    bool letter_boundary = (break_all && is_break_all_text_unit(first)) ||
         (cjk_breaks && has_id_line_break_class(last));
     if (!letter_boundary) return layout_text_native_break_allowed(
         native_breaks, offset, last, next, end, !cjk_breaks);
-    uint32_t following = 0;
-    layout_utf8_next_codepoint(&next, end, &following);
     // intrinsic sizing must retain the same punctuation-attached units as line layout.
     return (!following || utf8proc_grapheme_break(last, following)) &&
         layout_text_allows_letter_break(last, following, line_break,
@@ -1551,12 +1560,44 @@ static bool intrinsic_measure_grapheme_cluster(
     return true;
 }
 
-static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* current) {
+static void intrinsic_append_min_segments(LayoutIntrinsicMinRun* run,
+        const IntrinsicSizes& widths, bool boundary_break) {
+    float first = widths.first_segment_min >= 0.0f
+        ? widths.first_segment_min : widths.min_content;
+    float last = widths.last_segment_min >= 0.0f
+        ? widths.last_segment_min : widths.min_content;
+    bool internal_break = widths.has_min_content_break || widths.has_forced_break;
+    float joined = boundary_break ? first : run->tail + first;
+    // only segments enclosed by two real opportunities become interior contributions.
+    run->interior = max(run->interior, widths.interior_min_content);
+    if (boundary_break) {
+        if (run->has_break) run->interior = max(run->interior, run->tail);
+        if (internal_break) run->interior = max(run->interior, first);
+    } else if (run->has_break && internal_break) {
+        run->interior = max(run->interior, joined);
+    }
+    run->minimum = max(run->minimum, max(widths.min_content, joined));
+    if (run->first < 0.0f) run->first = first;
+    else if (!run->has_break && !boundary_break) run->first += first;
+    run->has_break |= boundary_break || internal_break;
+    run->tail = internal_break ? last : joined;
+}
+
+static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* current,
+                                        bool at_break = true) {
     // indentation affects the first unbreakable segment, while later
     // segments retain their widths independently of that first-line offset.
     if (widths->first_segment_min < 0.0f) widths->first_segment_min = *current;
-    else widths->remaining_min_content = max(widths->remaining_min_content, *current);
+    else {
+        if (widths->last_segment_min >= 0.0f) {
+            widths->interior_min_content = max(widths->interior_min_content, widths->last_segment_min);
+        }
+        widths->last_segment_min = *current;
+        widths->remaining_min_content = max(widths->remaining_min_content, *current);
+    }
     widths->min_content = max(widths->min_content, *current);
+    if (!at_break && widths->last_segment_min < 0.0f) widths->last_segment_min = widths->first_segment_min;
+    widths->has_min_content_break |= at_break;
     *current = 0.0f;
 }
 
@@ -1579,6 +1620,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     if (!text || length == 0) {
         return result;
     }
+    size_t trailing_space_start = length;
+    while (trailing_space_start > 0 && str_is_html_space(text[trailing_space_start - 1])) {
+        trailing_space_start--;
+    }
 
     if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {
         return result;  // min_content=0, max_content=0
@@ -1596,9 +1641,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                     // CSS Text 3 §4.2.2: break-spaces — spaces are not hangable,
                     // contribute to min-content. Break opportunity is AFTER the space.
                     current_word += 4.0f;
-                    intrinsic_record_min_segment(&result, &current_word);
+                    if (i + 1 < length) intrinsic_record_min_segment(&result, &current_word);
                 } else {
-                    intrinsic_record_min_segment(&result, &current_word);
+                    if (i < trailing_space_start) intrinsic_record_min_segment(&result, &current_word);
                 }
                 total_width += 4.0f;  // Space width estimate
             } else {
@@ -1612,7 +1657,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 }
             }
         }
-        intrinsic_record_min_segment(&result, &current_word);
+        intrinsic_record_min_segment(&result, &current_word, false);
 
         result.max_content = total_width;
         return result;
@@ -1640,7 +1685,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         IntrinsicZeroWidthChar zero_width = intrinsic_zero_width_char(str, i, length);
 
         if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
-            intrinsic_record_min_segment(&result, &current_word);
+            if (i + 3 < length) intrinsic_record_min_segment(&result, &current_word);
             is_word_start = true;
             i += 3;
             continue;
@@ -1671,9 +1716,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 // and DO contribute to min-content width. Break opportunity is AFTER
                 // each preserved space, so include space in the preceding segment.
                 current_word += kerning_adj + space_width;
-                intrinsic_record_min_segment(&result, &current_word);
+                if (i + 1 < length) intrinsic_record_min_segment(&result, &current_word);
             } else {
-                intrinsic_record_min_segment(&result, &current_word);
+                // terminal collapsible/hanging spaces do not invent an empty final fragment.
+                if (i < trailing_space_start) intrinsic_record_min_segment(&result, &current_word);
             }
 
             total_width += kerning_adj + space_width;
@@ -1902,7 +1948,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
     }
 
-    intrinsic_record_min_segment(&result, &current_word);
+    intrinsic_record_min_segment(&result, &current_word, false);
 
     // max-content disables wrapping, including line-break:anywhere, to retain whole-run shaping.
     result.max_content = break_all || break_anywhere || break_word
@@ -1923,11 +1969,16 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     const char* line_start = text;
     const char* text_end = text + length;
     bool first_line = true;
+    LayoutIntrinsicMinRun min_run;
     while (line_start <= text_end) {
         const char* newline = preserve_newlines
             ? (const char*)memchr(line_start, '\n', text_end - line_start) : nullptr;
         size_t line_length = newline ? (size_t)(newline - line_start)
             : (size_t)(text_end - line_start);
+        if (newline && !preserve_spaces) {
+            // collapsible separators before a preserved segment break contribute no advance (CSS Text §4.1.1).
+            while (line_length > 0 && is_space((unsigned char)line_start[line_length - 1])) line_length--;
+        }
         TextIntrinsicWidths widths = measure_text_intrinsic_widths(
             lycon, line_start, line_length, options.text_transform, options.font_variant,
             options.white_space, options.overflow_wrap, options.word_break, options.line_break);
@@ -1942,14 +1993,17 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
             widths.min_content = widths.max_content;
             widths.first_segment_min = widths.max_content;
             widths.remaining_min_content = 0.0f;
+            widths.last_segment_min = widths.max_content;
+            widths.has_min_content_break = false;
+            widths.interior_min_content = 0.0f;
         }
-        if (first_line) {
-            result.first_segment_min = widths.first_segment_min;
-            result.remaining_min_content = widths.remaining_min_content;
-        } else {
-            result.remaining_min_content = max(result.remaining_min_content, widths.min_content);
-        }
-        result.min_content = max(result.min_content, widths.min_content);
+        IntrinsicSizes line_sizes = {widths.min_content, widths.max_content};
+        line_sizes.first_segment_min = widths.first_segment_min;
+        line_sizes.last_segment_min = widths.last_segment_min;
+        line_sizes.interior_min_content = widths.interior_min_content;
+        line_sizes.has_min_content_break = widths.has_min_content_break;
+        intrinsic_append_min_segments(&min_run, line_sizes, !first_line);
+        result.min_content = min_run.minimum;
         result.max_content = max(result.max_content, widths.max_content);
         if (first_line) result.first_line_max = widths.max_content;
         result.last_line_max = widths.max_content;
@@ -1963,6 +2017,11 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         first_line = false;
         line_start = newline + 1;
     }
+    result.first_segment_min = min_run.first;
+    result.last_segment_min = min_run.tail;
+    result.interior_min_content = min_run.interior;
+    result.has_min_content_break = min_run.has_break;
+    result.remaining_min_content = min_run.has_break ? max(min_run.interior, min_run.tail) : 0.0f;
     return result;
 }
 
@@ -1984,11 +2043,11 @@ float layout_vertical_text_block_extent(const char* text, size_t length,
         int byte_count = str_utf8_decode(text + offset, length - offset, &codepoint);
         if (byte_count <= 0) byte_count = 1;
         offset += (size_t)byte_count;
-        if (codepoint == '\n' || codepoint == '\r' ||
+        if (layout_text_is_segment_break(codepoint) ||
             text_codepoint_has_zero_advance(codepoint)) {
             continue;
         }
-        bool is_whitespace = codepoint == ' ' || codepoint == '\t' ||
+        bool is_whitespace = layout_text_resolve_css_whitespace(codepoint) == ' ' || codepoint == '\t' ||
             codepoint == '\f' || codepoint == 0x00A0 ||
             utf8proc_category(static_cast<utf8proc_int32_t>(codepoint)) ==
                 UTF8PROC_CATEGORY_ZS;
@@ -2140,7 +2199,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     float line_height,
                                     CssEnum text_transform,
                                     CssEnum font_variant,
-                                    bool preserve_forced_line_breaks) {
+                                    bool preserve_forced_line_breaks,
+                                    LayoutTextLineWidthQuery line_width_query,
+                                    void* line_width_context,
+                                    bool allow_soft_wrap) {
     if (!text || length == 0 || available_width <= 0 || line_height <= 0) {
         return line_height;  // at least one line
     }
@@ -2148,6 +2210,25 @@ float compute_text_height_at_width(LayoutContext* lycon,
     int line_count = 1;
     float current_line_width = 0;
     float current_word_width = 0;
+    float line_width = line_width_query
+        ? line_width_query(line_width_context, 0, 0.0f) : available_width;
+    auto next_line = [&]() {
+        line_count++;
+        current_line_width = 0.0f;
+        line_width = line_width_query
+            ? line_width_query(line_width_context, line_count - 1, 0.0f) : available_width;
+    };
+    auto flush_word = [&]() {
+        if (allow_soft_wrap && current_line_width > 0.0f &&
+            current_line_width + current_word_width > line_width)
+            next_line();
+        if (current_line_width == 0.0f && line_width_query && current_word_width > line_width) {
+            // an empty shortened line may clear its floats before accepting an unbreakable word.
+            line_width = line_width_query(line_width_context, line_count - 1, current_word_width);
+        }
+        current_line_width += current_word_width;
+        current_word_width = 0.0f;
+    };
 
     // Use font metrics if available, otherwise rough estimate
     bool has_font = font_box_handle(&lycon->font) != nullptr;
@@ -2162,14 +2243,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
     for (size_t i = 0; i < length; ) {
         unsigned char ch = str[i];
         if (preserve_forced_line_breaks && ch == '\v') {
-            if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
-                line_count++;
-            }
-            current_line_width = 0.0f;
-            current_word_width = 0.0f;
+            flush_word();
             prev_codepoint = 0;
             is_word_start = true;
-            line_count++;
+            next_line();
             i++;
             continue;
         }
@@ -2177,13 +2254,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
         if (zero_width == INTRINSIC_ZERO_WIDTH_BREAK) {
             // end of break unit - try to fit on current line
-            if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
-                line_count++;
-                current_line_width = current_word_width;
-            } else {
-                current_line_width += current_word_width;
-            }
-            current_word_width = 0;
+            flush_word();
             is_word_start = true;
             i += 3;
             continue;
@@ -2194,13 +2265,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
         // Regular space/whitespace - break opportunity
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-            if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
-                line_count++;
-                current_line_width = current_word_width;
-            } else {
-                current_line_width += current_word_width;
-            }
-            current_word_width = 0;
+            flush_word();
             // add space width
             float space_width = layout_measure_space_advance(
                 lycon, font_box_handle(&lycon->font), lycon->font.style);
@@ -2254,11 +2319,11 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
     // flush last word
     if (current_word_width > 0) {
-        if (current_line_width > 0 && current_line_width + current_word_width > available_width) {
-            line_count++;
-        }
+        flush_word();
     }
 
+    // a final forced break ends its line; the following empty line generates no box.
+    if (preserve_forced_line_breaks && text[length - 1] == '\v' && line_count > 1) line_count--;
     float result = line_count * line_height;
     return result;
 }
@@ -2495,7 +2560,7 @@ static bool intrinsic_node_has_forced_break_at_edge(DomNode* node, bool end) {
             white_space == CSS_VALUE_BREAK_SPACES ||
             white_space == CSS_VALUE_PRE_LINE;
         char edge = text[end ? length - 1 : 0];
-        return preserves_newlines && (edge == '\n' || edge == '\r');
+        return preserves_newlines && layout_text_is_segment_break(edge);
     }
     if (!node->is_element()) return false;
 
@@ -2533,6 +2598,50 @@ static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end
     return false;
 }
 
+static bool intrinsic_min_boundary_break(LayoutContext* lycon, DomNode* previous,
+                                         DomNode* child, bool separator) {
+    if (!previous) return false;
+    if (get_text_wrap_mode_value(child->parent, lycon) == CSS_VALUE_NOWRAP) return false;
+    if (separator) return true;
+    uint32_t before = layout_inline_text_edge_codepoint(previous, true,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE);
+    uint32_t after = layout_inline_text_edge_codepoint(child, false,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE);
+    bool previous_atomic = previous->is_element() &&
+        layout_intrinsic_element_is_atomic_inline(previous->as_element());
+    bool child_atomic = child->is_element() &&
+        layout_intrinsic_element_is_atomic_inline(child->as_element());
+    CssEnum line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
+        &BlockProp::line_break, CSS_VALUE_AUTO, child->parent);
+    if (child_atomic) return layout_atomic_inline_boundary_allows_soft_wrap(lycon, child, true);
+    if (previous_atomic) {
+        return layout_atomic_inline_boundary_allows_soft_wrap(lycon, previous, false) &&
+            layout_text_allows_letter_break(0xFFFC, after, line_break, false, false);
+    }
+    if (!before || !after) return false;
+    if (is_space(before) || is_space(after) || before == 0x200B) return true;
+    CssEnum overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum word_break = CSS_VALUE_NORMAL;
+    layout_resolve_inherited_text_wrap(child->parent, &overflow_wrap, &word_break);
+    char seam[8];
+    size_t boundary = str_utf8_encode(before, seam, sizeof(seam));
+    size_t length = boundary + str_utf8_encode(after, seam + boundary, sizeof(seam) - boundary);
+    LayoutTextBreaks breaks(seam, length, true);
+    // CSS Text 3 §5.5: an element seam uses the text scanner's normal/letter-break rules.
+    return intrinsic_text_break_opportunity(before, before,
+        (const unsigned char*)seam + boundary, (const unsigned char*)seam + length,
+        breaks, boundary, overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE,
+        word_break == CSS_VALUE_BREAK_ALL, word_break != CSS_VALUE_KEEP_ALL, line_break);
+}
+
+void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run) {
+    if (run->first < 0.0f) run->first = run->tail;
+    if (run->has_break) run->interior = max(run->interior, run->tail);
+    run->tail = 0.0f;
+    run->has_break = true;
+    run->previous = nullptr;
+}
+
 static CssEnum intrinsic_element_box_decoration_break(DomElement* element) {
     if (!element || !is_inline_level_element(element)) {
         return CSS_VALUE__UNDEF;
@@ -2548,12 +2657,60 @@ static CssEnum intrinsic_element_box_decoration_break(DomElement* element) {
     return declaration->value->data.keyword;
 }
 
+
+void layout_intrinsic_add_min_segment_edges(IntrinsicSizes* widths, float start, float end,
+        DomElement* element) {
+    if (widths->first_segment_min < 0.0f) return;
+    bool clone = intrinsic_element_box_decoration_break(element) == CSS_VALUE_CLONE;
+    // slice owns only its outer edges; clone repeats both edges on every segment.
+    if (widths->has_min_content_break || widths->has_forced_break) {
+        widths->first_segment_min += clone ? start + end : start;
+        widths->last_segment_min += clone ? start + end : end;
+        if (clone) widths->interior_min_content += start + end;
+    } else {
+        widths->first_segment_min += start + end;
+        widths->last_segment_min += start + end;
+    }
+    widths->min_content = max(widths->interior_min_content,
+        max(widths->first_segment_min, widths->last_segment_min));
+    widths->remaining_min_content = widths->has_min_content_break
+        ? max(widths->interior_min_content, widths->last_segment_min) : 0.0f;
+}
+
+void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun* run,
+        DomNode* child, const IntrinsicSizes& widths, bool separator) {
+    if (child->is_element() && child->tag() == MARKUP_NAME_WBR) {
+        layout_intrinsic_break_min_run(run);
+        return;
+    }
+    bool atomic = child->is_element() &&
+        layout_intrinsic_element_is_atomic_inline(child->as_element());
+    IntrinsicSizes segments = widths;
+    if (atomic) {
+        segments.first_segment_min = segments.last_segment_min = widths.min_content;
+        segments.interior_min_content = 0.0f;
+        segments.has_min_content_break = segments.has_forced_break = false;
+    }
+    bool boundary_break = intrinsic_min_boundary_break(lycon, run->previous, child, separator);
+    intrinsic_append_min_segments(run, segments, boundary_break);
+    // empty inline boxes add decoration without erasing the surrounding text boundary.
+    if (atomic || layout_inline_text_edge_codepoint(child, true)) run->previous = child;
+}
+
+
 static bool intrinsic_element_has_explicit_box_decoration_break(DomElement* element) {
     CssEnum decoration_break = intrinsic_element_box_decoration_break(element);
     return decoration_break == CSS_VALUE_SLICE || decoration_break == CSS_VALUE_CLONE;
 }
 
-static float intrinsic_collapsed_space_width(LayoutContext* lycon) {
+static float intrinsic_collapsed_space_width(LayoutContext* lycon, DomNode* source) {
+    DomNode* text = nullptr;
+    layout_inline_text_edge_codepoint(source, false,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &text);
+    LayoutFontScope font_scope(lycon);
+    DomElement* owner = text && text->parent ? text->parent->as_element() : nullptr;
+    // parent run aggregation must retain the surviving space's own font and spacing.
+    if (owner && owner->font) setup_font(lycon->ui_context, &lycon->font, owner->font);
     float width = layout_measure_space_advance(
         lycon, font_box_handle(&lycon->font), lycon->font.style);
     if (lycon && lycon->font.style) {
@@ -3458,7 +3615,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
             is_table_display = true;
         }
-        if (!is_table_display && element->tag() == MARKUP_NAME_TABLE) is_table_display = true;
+        // a restyled HTML table measures its anonymous grid through normal block children.
     }
 
     bool is_inline_non_replaced = false;
@@ -3695,7 +3852,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 explicit_width = pad_border_width;
             }
             explicit_width = intrinsic_apply_definite_width_constraints(explicit_width);
-            sizes.min_content = explicit_width;
+            // cyclic percentage maxima suppress the content minimum even on this definite-width shortcut (CSS Sizing 3 §5.2.1).
+            sizes.min_content = percentage_width_min_content_zero
+                ? intrinsic_apply_definite_width_constraints(pad_border_width) : explicit_width;
             sizes.max_content = explicit_width;
             return sizes;
         }
@@ -4151,7 +4310,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         ViewBlock* tbl_view = lam::unsafe_view_block_element_storage(element);
         bool is_table_element = intrinsic_element_display_matches(
             element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
-        if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
             // cell percentages are cyclic until the table's intrinsic tracks are sized.
@@ -4166,8 +4324,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (border_collapse) {
                 // CSS 2.1 §17.6.2 suppresses border-spacing for collapsed borders.
                 border_spacing = 0.0f;
-            } else if (element->tb) {
-                border_spacing = element->tb->border_spacing_h;
+            } else if (element->table_prop()) {
+                border_spacing = element->table_prop()->border_spacing_h;
             } else {
                 // Table metadata not yet created during intrinsic measurement.
                 // Read border-spacing from CSS, inherited computed values, or UA defaults.
@@ -4211,29 +4369,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // min/max-content width is the maximum of cell min/max-content
             // widths across all rows in that column.
 
-            // Helper: get colspan for a cell element
-            auto get_cell_colspan = [](DomElement* cell_elem, ViewBlock* cell_view) -> int {
-                // Prefer the resolved td->col_span (set during view pool creation)
-                if (cell_view->td && cell_view->td->col_span > 1) {
-                    return cell_view->td->col_span;
-                }
-                // Fallback: read from HTML attribute
-                const char* cs = cell_elem->get_attribute("colspan");
-                if (cs && *cs) {
-                    int csv = (int)str_to_int64_default(cs, strlen(cs), 0); // INT_CAST_OK: span count
-                    if (csv > 1) return csv;
-                }
-                return 1;
-            };
-
-            auto classify_table_cell = [&get_cell_colspan](DomElement* cell_elem,
-                                                            bool* out_is_cell) -> int {
-                ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
+            auto classify_table_cell = [](DomElement* cell_elem, bool* out_is_cell) -> int {
                 DisplayValue display = resolve_display_value((void*)cell_elem);
                 bool is_cell = !layout_element_is_floated(cell_elem) &&
                     display.inner == CSS_VALUE_TABLE_CELL;
                 if (out_is_cell) *out_is_cell = is_cell;
-                return is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+                return is_cell ? (int)layout_table_cell_colspan(cell_elem) : 1; // INT_CAST_OK: HTML span is bounded to 1000.
             };
 
             enum IntrinsicAnonymousRowContext {
@@ -4447,8 +4588,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // Helper: count columns in a row (accounting for colspan)
             auto count_cells = [&classify_row_item](
-                    DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) -> int {
-                int n = 0;
+                    DomElement* row_elem, IntrinsicAnonymousRowContext anon_context, int* cell_count) -> size_t {
+                size_t n = 0;
                 bool in_non_cell_run = false;
                 bool non_cell_run_last_content_was_text = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
@@ -4459,6 +4600,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                           &non_cell_run_last_content_was_text,
                                           &cell_elem, &is_cell, &span)) {
                         n += span;
+                        (*cell_count)++;
                     }
                 }
                 return n;
@@ -4467,7 +4609,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             auto with_intrinsic_element_font = [&lycon](DomElement* font_element,
                                                         auto&& callback) {
                 IntrinsicFontScope font_scope(lycon, lycon->font);
-                if (!font_element->styles_resolved()) {
+                if (!font_element->styles_resolved() || font_element->needs_style_recompute()) {
                     LayoutViewScope view_scope(lycon);
                     lycon->view = lam::up(static_cast<View*>(font_element));
                     radiant::LayoutRunModeScope run_mode_scope(
@@ -4545,122 +4687,157 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             };
 
-            // Pass 1: determine column count
-            int num_columns = 0;
-            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
-                int n = count_cells(row_elem, anon_context);
-                if (n > num_columns) num_columns = n;
+            int row_count = 0, cell_count = 0, column_capacity = 0;
+            bool capacity_overflow = false;
+            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext context) {
+                if (capacity_overflow) return;
+                size_t columns = count_cells(row_elem, context, &cell_count);
+                if (columns > (size_t)(INT32_MAX - column_capacity)) { capacity_overflow = true; return; }
+                column_capacity += (int)columns; // INT_CAST_OK: capacity admitted before conversion.
+                row_count++;
             });
-
-            // Table column counts come from the DOM, so avoid input-sized stack frames.
-            ScratchScope col_scope(&lycon->scratch);
-            float* col_min = num_columns > 0 ? col_scope.array_zero<float>(num_columns) : nullptr;
-            float* col_max = num_columns > 0 ? col_scope.array_zero<float>(num_columns) : nullptr;
-            if (num_columns > 0 && (!col_min || !col_max)) {
-                log_error("measure_element_intrinsic_widths: failed to allocate %d table column widths", num_columns);
+            if (capacity_overflow) {
+                log_error("intrinsic_table_capacity_overflow");
                 cache_scope.cacheable = false;
                 return sizes;
             }
-
-            // Pass 2: measure single-span cells, update per-column min/max
-            // CSS 2.1 §17.5.2.2: First process cells that span a single column,
-            // then distribute multi-span cells across their spanned columns.
-            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
-                int col = 0;
-                bool in_non_cell_run = false;
-                bool non_cell_run_last_content_was_text = false;
-                for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
-                    DomElement* cell_elem;
+            ScratchScope col_scope(&lycon->scratch);
+            struct IntrinsicTableCell {
+                DomElement* element;
+                IntrinsicSizes sizes;
+                int row, column, rows, columns;
+                bool is_cell;
+            };
+            IntrinsicTableCell* cells = col_scope.array_zero<IntrinsicTableCell>(cell_count);
+            DomElement** rows = col_scope.array_zero<DomElement*>(row_count);
+            DomElement** groups = col_scope.array_zero<DomElement*>(row_count);
+            int* occupied_until = col_scope.array_zero<int>(column_capacity);
+            int* remaining_rows = col_scope.array_zero<int>(row_count);
+            if ((cell_count && !cells) || (row_count && (!rows || !groups || !remaining_rows)) ||
+                    (column_capacity && !occupied_until)) {
+                log_error("intrinsic_table_grid_alloc_failed: rows=%d cells=%d", row_count, cell_count);
+                cache_scope.cacheable = false;
+                return sizes;
+            }
+            int row_index = 0, cell_index = 0;
+            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext context) {
+                if (context == INTRINSIC_ANON_ROW_NONE) rows[row_index] = row_elem;
+                DomElement* parent = row_elem->parent && row_elem->parent->is_element()
+                    ? row_elem->parent->as_element() : nullptr;
+                if (context == INTRINSIC_ANON_ROW_GROUP) groups[row_index] = row_elem;
+                else if (parent && layout_display_is_table_row_group(resolve_display_value(parent).inner))
+                    groups[row_index] = parent;
+                bool in_run = false, last_text = false;
+                for (DomNode* node = row_elem->first_child; node; node = node->next_sibling) {
+                    DomElement* cell_element;
                     bool is_cell = false;
                     int span = 1;
-                    if (!classify_row_item(cell, anon_context, &in_non_cell_run,
-                                           &non_cell_run_last_content_was_text,
-                                           &cell_elem, &is_cell, &span)) continue;
-                    if (col + span > num_columns) break;
-                    if (span == 1) {
-                        IntrinsicSizes cell_sizes = is_cell
-                            ? measure_element_intrinsic_widths(lycon, cell_elem)
-                            : measure_anonymous_cell_run(cell, anon_context);
-                        float extra = is_cell ?
-                            layout_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
-                        float cmin = is_cell
-                            ? ceilf(cell_sizes.min_content + extra)
-                            : cell_sizes.min_content;
-                        float cmax = is_cell
-                            ? ceilf(cell_sizes.max_content + extra)
-                            : cell_sizes.max_content;
-                        if (cmin > col_min[col]) col_min[col] = cmin;
-                        if (cmax > col_max[col]) col_max[col] = cmax;
-                    }
-                    col += span;
+                    if (!classify_row_item(node, context, &in_run, &last_text,
+                            &cell_element, &is_cell, &span)) continue;
+                    IntrinsicTableCell& cell = cells[cell_index++];
+                    cell.element = cell_element;
+                    cell.is_cell = is_cell;
+                    cell.row = row_index;
+                    cell.columns = span;
+                    cell.sizes = is_cell ? measure_element_intrinsic_widths(lycon, cell_element)
+                        : measure_anonymous_cell_run(node, context);
                 }
+                row_index++;
             });
-
-            // Pass 3: distribute multi-span cell widths across spanned columns
-            // CSS 2.1 §17.5.2.2: If the sum of column widths spanned by a multi-span
-            // cell is less than the cell's intrinsic width, distribute the deficit evenly.
-            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
-                int col = 0;
-                bool in_non_cell_run = false;
-                for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
-                    if (!cell->is_element()) continue;
-                    DomElement* cell_elem = cell->as_element();
-                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
-                        in_non_cell_run = false;
-                        continue;
-                    }
-                    bool is_cell = false;
-                    int span = classify_table_cell(cell_elem, &is_cell);
-                    if (!is_cell && in_non_cell_run) continue;
-                    if (col + span > num_columns) break;
-                    in_non_cell_run = !is_cell;
-                    if (span > 1) {
-                        IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                        float extra = is_cell ?
-                            layout_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
-                        float cmin = ceilf(cell_sizes.min_content + extra);
-                        float cmax = ceilf(cell_sizes.max_content + extra);
-
-                        // Sum current column widths + inter-column border-spacing
-                        float current_min = 0, current_max = 0;
-                        for (int j = 0; j < span; j++) {
-                            current_min += col_min[col + j];
-                            current_max += col_max[col + j];
-                        }
-                        current_min += border_spacing * (span - 1);
-                        current_max += border_spacing * (span - 1);
-
-                        // Distribute deficit evenly across spanned columns
-                        if (cmin > current_min) {
-                            float per_col = (cmin - current_min) / span;
-                            for (int j = 0; j < span; j++) {
-                                col_min[col + j] += per_col;
-                            }
-                        }
-                        if (cmax > current_max) {
-                            float per_col = (cmax - current_max) / span;
-                            for (int j = 0; j < span; j++) {
-                                col_max[col + j] += per_col;
-                            }
-                        }
-                    }
-                    col += span;
-                    if (is_cell) in_non_cell_run = false;
-                }
-            });
-
-            // Sum per-column widths to get table intrinsic widths
-            float table_min = 0, table_max = 0;
-            for (int i = 0; i < num_columns; i++) {
-                table_min += col_min[i];
-                table_max += col_max[i];
+            for (int row = row_count - 1; row >= 0; row--) {
+                remaining_rows[row] = row + 1 < row_count && groups[row] == groups[row + 1]
+                    ? remaining_rows[row + 1] + 1 : 1;
             }
-            // CSS 2.1 §17.5.2.1: In the separated borders model, border-spacing
-            // applies between each pair of adjacent columns AND on the left/right
-            // edges of the table. Total horizontal spacing = (N + 1) * h-spacing.
+            int num_columns = 0, column = 0, previous_row = -1;
+            for (int index = 0; index < cell_count; index++) {
+                IntrinsicTableCell& cell = cells[index];
+                if (cell.row != previous_row) { column = 0; previous_row = cell.row; }
+                cell.rows = cell.is_cell
+                    ? (int)layout_table_used_rowspan(layout_table_cell_rowspan(cell.element), remaining_rows[cell.row]) // INT_CAST_OK: bounded row count.
+                    : 1;
+                column = layout_table_place_span(row_count, column_capacity, cell.row, column,
+                    cell.rows, cell.columns,
+                    [&](int r, int c) { return occupied_until[c] > r; },
+                    [&](int r, int c) { occupied_until[c] = max(occupied_until[c], r + 1); },
+                    &cell.column, &num_columns);
+            }
+            LayoutTableBorderGrid grid;
+            if (border_collapse && num_columns > 0) {
+                using FontScopeFn = decltype(with_intrinsic_element_font);
+                layout_table_visit_source_columns(element, &with_intrinsic_element_font,
+                    [](void* context, DomElement* source, size_t, size_t, bool) {
+                        (*static_cast<FontScopeFn*>(context))(source, []() {});
+                    });
+                grid = layout_table_border_grid_create(&col_scope, element, row_count, num_columns);
+                if (!grid.cells) { cache_scope.cacheable = false; return sizes; }
+                for (int row = 0; row < row_count; row++) {
+                    grid.rows[row] = rows[row]; grid.row_groups[row] = groups[row];
+                }
+                for (int index = 0; index < cell_count; index++) {
+                    const IntrinsicTableCell& cell = cells[index];
+                    for (int r = cell.row; r < cell.row + cell.rows; r++)
+                        for (int c = cell.column; c < cell.column + cell.columns; c++)
+                            if (!grid.cell(r, c)) grid.cells[(size_t)r * (size_t)num_columns + (size_t)c] = cell.element;
+                }
+            }
+            float* col_min = col_scope.array_zero<float>(num_columns);
+            float* col_max = col_scope.array_zero<float>(num_columns);
+            if (num_columns && (!col_min || !col_max)) {
+                log_error("intrinsic_table_tracks_alloc_failed: columns=%d", num_columns);
+                cache_scope.cacheable = false;
+                return sizes;
+            }
+            LayoutTableAxis vertical_edges(row_count, num_columns, false);
+            auto cell_contribution = [&](const IntrinsicTableCell& cell) {
+                IntrinsicSizes contribution = cell.sizes;
+                float extra = cell.is_cell ? layout_unresolved_html_cell_horizontal_box_extra(cell.element) : 0.0f;
+                float half_edges = 0;
+                if (border_collapse && cell.is_cell) {
+                    IntrinsicHorizontalBoxEdges edges = intrinsic_horizontal_box_edges(lycon, cell.element, true);
+                    extra -= edges.border_start + edges.border_end;
+                    float left = 0, right = 0;
+                    for (int row = cell.row; row < cell.row + cell.rows; row++) {
+                        left = max(left, layout_table_collapsed_edge(grid, vertical_edges, row, cell.column).width);
+                        right = max(right, layout_table_collapsed_edge(grid, vertical_edges, row, cell.column + cell.columns).width);
+                    }
+                    half_edges = (left + right) / 2.0f;
+                }
+                // intrinsic tracks retain fractional content/padding and share each winning edge by halves.
+                contribution.min_content += extra + half_edges;
+                contribution.max_content += extra + half_edges;
+                return contribution;
+            };
+            // single tracks establish the floor before spanning cells distribute their deficit.
+            for (int pass = 0; pass < 2; pass++) {
+                for (int index = 0; index < cell_count; index++) {
+                    const IntrinsicTableCell& cell = cells[index];
+                    if ((cell.columns == 1) != (pass == 0)) continue;
+                    IntrinsicSizes contribution = cell_contribution(cell);
+                    float current_min = layout_table_span_width(col_min, num_columns, cell.column, cell.columns, border_spacing);
+                    float current_max = layout_table_span_width(col_max, num_columns, cell.column, cell.columns, border_spacing);
+                    float min_extra = max(0.0f, contribution.min_content - current_min) / cell.columns;
+                    float max_extra = max(0.0f, contribution.max_content - current_max) / cell.columns;
+                    for (int col = cell.column; col < cell.column + cell.columns; col++) {
+                        col_min[col] += min_extra;
+                        col_max[col] += max_extra;
+                    }
+                }
+            }
+            float table_min = 0, table_max = 0;
+            for (int col = 0; col < num_columns; col++) {
+                table_min += col_min[col]; table_max += col_max[col];
+            }
             if (num_columns > 0) {
-                table_min += border_spacing * (num_columns + 1);
-                table_max += border_spacing * (num_columns + 1);
+                float outer = border_spacing * (num_columns + 1);
+                if (border_collapse) {
+                    float left = 0, right = 0;
+                    for (int row = 0; row < row_count; row++) {
+                        left = max(left, layout_table_collapsed_edge(grid, vertical_edges, row, 0).width);
+                        right = max(right, layout_table_collapsed_edge(grid, vertical_edges, row, num_columns).width);
+                    }
+                    outer = (left + right) / 2.0f;
+                }
+                table_min += outer; table_max += outer;
             }
             sizes.min_content = max(sizes.min_content, table_min);
             sizes.max_content = max(sizes.max_content, table_max);
@@ -4720,6 +4897,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             }
 
+            // collapsed grid contributions already include winning table borders; padding does not apply.
+            if (border_collapse) pad_left = pad_right = bdr_left = bdr_right = 0.0f;
+
             // Only use table-specific result if we actually found table rows/cells.
             // Tables with only text/block children (no row structure) should fall
             // through to the generic block measurement below (CSS anonymous box wrapping
@@ -4766,8 +4946,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Sum of the current unbreakable inline run
-    float single_run_tail = 0.0f;
-    uint32_t single_run_last = 0;
+    LayoutIntrinsicMinRun inline_min_run;
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     float vertical_block_axis_max = 0.0f;
     float vertical_text_block_axis_max = 0.0f;
@@ -5287,7 +5466,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
                 float margin_sum = margins.left + margins.right;
                 child_sizes.max_content += margin_sum;
-                if (explicit_box_decoration_run_sizing || !margins.used_bound) {
+                if (!layout_intrinsic_element_is_atomic_inline(child_elem) &&
+                    child_sizes.first_segment_min >= 0.0f) {
+                    layout_intrinsic_add_min_segment_edges(
+                        &child_sizes, margins.left, margins.right, child_elem);
+                } else if (explicit_box_decoration_run_sizing || !margins.used_bound) {
                     child_sizes.min_content += margin_sum;
                 }
             }
@@ -5300,13 +5483,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             bool is_collapsible_space_only = intrinsic_node_is_collapsible_space_only(child);
             if (is_collapsible_space_only) {
-                single_run_tail = 0.0f;
-                single_run_last = 0;
+                layout_intrinsic_break_min_run(&inline_min_run);
                 // Recursive inline measurement trims edge spaces inside each inline
                 // box, so the parent must own collapsed whitespace runs across boxes.
                 if (inline_max_sum > 0.0f && !inline_run_ends_with_collapsible_space &&
                     intrinsic_has_inline_boundary_content_in_direction(child, true)) {
-                    inline_max_sum += intrinsic_collapsed_space_width(lycon);
+                    inline_max_sum += intrinsic_collapsed_space_width(lycon, child);
                     inline_run_ends_with_collapsible_space = true;
                 }
                 // A collapsed separator ends the current unbreakable run; it must
@@ -5326,8 +5508,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child->as_element()->node_name() &&
                 strcmp(child->as_element()->node_name(), "br") == 0;
             if (is_br_element) {
-                single_run_tail = 0.0f;
-                single_run_last = 0;
+                layout_intrinsic_break_min_run(&inline_min_run);
                 // Finalize first-line indent and propagation state before flushing.
                 intrinsic_record_first_inline_break(
                     text_indent, first_inline_child_min, nonfirst_inline_min_max,
@@ -5426,44 +5607,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (inline_run_ends_with_collapsible_space &&
                     intrinsic_node_has_collapsible_space_at_edge(child, false)) {
                     inline_max_sum -= min(inline_max_sum,
-                        intrinsic_collapsed_space_width(lycon));
+                        intrinsic_collapsed_space_width(lycon, child));
                 }
                 inline_max_sum += child_sizes.max_content;
                 inline_run_ends_with_collapsible_space =
                     child_sizes.max_content > 0.0f && intrinsic_node_has_collapsible_space_at_edge(child, true);
             }
-            if (explicit_box_decoration_run_sizing) {
-                // CSS Sizing 3 min-content is the widest unbreakable run; explicit
-                // box-decoration-break inline boxes preserve that run across fragments.
-                inline_min_sum += child_sizes.min_content;
-            } else {
-                inline_min_sum = max(inline_min_sum, child_sizes.min_content);
-                CssEnum child_overflow_wrap = CSS_VALUE_NORMAL;
-                layout_resolve_inherited_text_wrap(child,
-                    &child_overflow_wrap, nullptr);
-                // punctuation constraints also apply to normal/keep-all runs;
-                // only anywhere introduces emergency breaks before them.
-                bool single_unbreakable_run = child_overflow_wrap != CSS_VALUE_ANYWHERE &&
-                    !child_is_atomic_inline && !child_sizes.has_forced_break &&
-                    fabsf(child_sizes.max_content - child_sizes.min_content) <= 0.01f &&
-                    !intrinsic_node_has_collapsible_space_at_edge(child, false) &&
-                    !intrinsic_node_has_collapsible_space_at_edge(child, true);
-                uint32_t first = single_unbreakable_run
-                    ? layout_inline_text_edge_codepoint(child, false) : 0;
-                uint32_t last = single_unbreakable_run
-                    ? layout_inline_text_edge_codepoint(child, true) : 0;
-                bool joins_previous = first && single_run_last &&
-                    !layout_text_allows_letter_break(single_run_last, first,
-                        get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
-                            &BlockProp::line_break, CSS_VALUE_AUTO, child),
-                        single_run_last == 0x200D, false);
-                // CSS Text §5.2: an inline boundary cannot create a break
-                // before punctuation; retain adjacent whole unbreakable runs.
-                single_run_tail = joins_previous
-                    ? single_run_tail + child_sizes.min_content : child_sizes.min_content;
-                single_run_last = last;
-                inline_min_sum = max(inline_min_sum, single_run_tail);
-            }
+            layout_intrinsic_append_min_run(lycon, &inline_min_run, child, child_sizes);
+            inline_min_sum = max(inline_min_sum, inline_min_run.minimum);
             // Track first inline child's min-content for text-indent calculation
             if (first_inline_child_min < 0) {
                 first_inline_child_min = child_sizes.first_segment_min >= 0.0f
@@ -5473,8 +5624,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 nonfirst_inline_min_max = max(nonfirst_inline_min_max, child_sizes.min_content);
             }
         } else {
-            single_run_tail = 0.0f;
-            single_run_last = 0;
+            if (!child_is_float) layout_intrinsic_break_min_run(&inline_min_run);
             // Block-level child encountered
             if (!child_is_float) {
                 has_in_flow_block_child = true;
@@ -5720,8 +5870,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Merge inline content measurements
     if (has_inline_content) {
-        sizes.first_segment_min = first_inline_child_min;
-        sizes.remaining_min_content = nonfirst_inline_min_max;
+        sizes.first_segment_min = inline_min_run.first;
+        // block/float constraints remain independent minima beside the inline edge segments.
+        sizes.interior_min_content = max(inline_min_run.interior, sizes.min_content);
+        sizes.remaining_min_content = inline_min_run.has_break
+            ? max(sizes.interior_min_content, inline_min_run.tail) : 0.0f;
+        sizes.last_segment_min = inline_min_run.tail;
+        sizes.has_min_content_break = inline_min_run.has_break;
         // CSS 2.1 §16.1: text-indent applies to the first formatted line.
         // If a forced break (<br>) already flushed the first line with text-indent
         // applied, skip indent here — it only applies to the first line.
@@ -5754,6 +5909,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             sizes.min_content = max(sizes.min_content, block_axis_extent);
             sizes.max_content = max(sizes.max_content, block_axis_extent);
+            // this query returns physical width; vertical inline advances cannot join a parent's word.
+            sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
+            sizes.remaining_min_content = sizes.interior_min_content = 0.0f;
+            sizes.has_min_content_break = false;
         } else {
             sizes.min_content = max(sizes.min_content, inline_min_sum);
             // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
@@ -5780,6 +5939,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Preserved/nowrap inline content has no wrapping opportunities;
             // its min-content contribution is the unwrapped max-content line.
             sizes.min_content = sizes.max_content;
+            // preserved forced lines keep distinct head/tail segments for adjacent siblings.
+            if (!sizes.has_forced_break) {
+                sizes.first_segment_min = sizes.last_segment_min = sizes.min_content;
+                sizes.has_min_content_break = false;
+            }
         }
     }
 
@@ -5837,10 +6001,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     float horiz_padding = pad_left + pad_right;
     float horiz_border = border_left + border_right;
+    bool inline_segments = is_inline_level_element(element) &&
+        !layout_intrinsic_element_is_atomic_inline(element) && sizes.first_segment_min >= 0.0f;
     if (!sizes.replaced_includes_pad_border) {
         sizes.max_content += horiz_padding + horiz_border;
         if (!sizes.replaced_min_excludes_pad_border) {
-            sizes.min_content += horiz_padding + horiz_border;
+            if (inline_segments) {
+                layout_intrinsic_add_min_segment_edges(
+                    &sizes, pad_left + border_left, pad_right + border_right, element);
+            } else {
+                sizes.min_content += horiz_padding + horiz_border;
+            }
         }
     }
 
@@ -6117,16 +6288,23 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     if (node->is_text()) {
         const char* data = reinterpret_cast<const char*>(node->text_data());
         if (!data) return true;
+        CssEnum white_space = get_white_space_value(node);
+        bool collapse = layout_white_space_collapses(white_space);
+        bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
         for (size_t i = 0; data[i] != '\0'; i++) {
-            if (data[i] == ' ' || data[i] == '\t' ||
-                data[i] == '\n' || data[i] == '\r') {
+            char ch = data[i];
+            if (layout_text_is_segment_break(ch) && !collapse_newlines) {
+                strbuf_append_char(output, '\v');
+                *pending_space = false;
+                *has_content = true;
+            } else if (collapse && is_space((unsigned char)ch)) {
                 *pending_space = true;
             } else {
                 if (*pending_space && output->length > 0 &&
                     output->str[output->length - 1] != '\v') {
                     strbuf_append_char(output, ' ');
                 }
-                strbuf_append_char(output, data[i]);
+                strbuf_append_char(output, (char)layout_text_resolve_css_whitespace(ch));
                 *pending_space = false;
                 *has_content = true;
             }
@@ -6160,33 +6338,41 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     return true;
 }
 
-static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
-                                              ViewBlock* view, float width) {
-    if (!lycon || !element || !view || width <= 0.0f) return -1.0f;
-
+StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descendants) {
+    if (!element) return nullptr;
     StrBuf* text = strbuf_new();
-    if (!text) return -1.0f;
+    if (!text) return nullptr;
     bool has_content = false;
     bool pending_space = false;
-    // balance measurement must flatten nested inline runs before probing line count;
-    // ordinary flex intrinsic heights retain their block-flow fallback.
-    bool allow_inline_descendants = lycon->block.text_wrap_style == CSS_VALUE_BALANCE;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!intrinsic_append_inline_text(text, child, &pending_space, &has_content,
                                           allow_inline_descendants)) {
             strbuf_free(text);
-            return -1.0f;
+            return nullptr;
         }
     }
     if (!has_content || text->length == 0) {
         strbuf_free(text);
-        return -1.0f;
+        return nullptr;
     }
 
+    return text;
+}
+
+static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
+                                              ViewBlock* view, float width) {
+    if (!lycon || !element || !view || width <= 0.0f) return -1.0f;
+    // ordinary flex height queries retain their existing complex-flow fallback.
+    StrBuf* text = layout_collect_inline_text(element,
+        lycon->block.text_wrap_style == CSS_VALUE_BALANCE);
+    if (!text) return -1.0f;
+
     float line_height = intrinsic_element_line_height(lycon, element, view);
+    // nowrap can overflow the inline size, but only forced boundaries add lines.
     float height = compute_text_height_at_width(
         lycon, text->str, text->length, width, line_height,
-        get_element_text_transform(element), get_element_font_variant(element), true);
+        get_element_text_transform(element), get_element_font_variant(element), true,
+        nullptr, nullptr, get_text_wrap_mode_value(element, lycon) != CSS_VALUE_NOWRAP);
     height = layout_line_clamp_intrinsic_height(view, height, line_height);
     strbuf_free(text);
     return height;

@@ -943,6 +943,15 @@ inline FontSlant radiant_font_slant_from_css(CssEnum style) {
     return FONT_SLANT_NORMAL;
 }
 
+// a pass-local run in an anonymous flex/grid item's flattened text sequence.
+typedef struct LayoutAnonymousTextRun {
+    lam::Up<DomText> text;
+    bool preserve_leading_space;
+    bool preserve_trailing_space;
+    bool is_whitespace;
+    lam::Own<struct LayoutAnonymousTextRun> next;
+} LayoutAnonymousTextRun;
+
 // tier-2: view-pool, rebuilt each relayout
 struct GridItemProp {
     // Grid item properties (following flex pattern)
@@ -999,6 +1008,9 @@ struct GridItemProp {
     float measured_min_height;     // Minimum content height
     float measured_max_height;     // Maximum content height
     bool has_measured_size;      // Whether measurement pass has been done
+    LayoutAnonymousTextRun* anonymous_text_runs; // scratch, only on anonymous items
+    float anonymous_text_origin_x;
+    float anonymous_text_origin_y;
 };
 
 // Intrinsic size type (shared by flex and grid layout)
@@ -1008,6 +1020,10 @@ typedef struct {
     float max_content;  // Maximum content width (no wrapping)
     float first_segment_min = -1.0f;
     float remaining_min_content = 0.0f;
+    // inline parents join the edge segments without joining across internal wrap opportunities.
+    float last_segment_min = -1.0f;
+    float interior_min_content = 0.0f;
+    bool has_min_content_break = false;
     // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
     // the content spans multiple lines. These fields allow the parent's inline run
     // accumulation to split at forced break points rather than summing all lines.
@@ -1025,15 +1041,6 @@ typedef struct {
     // max-content still gets pad+border added so it represents the full border-box.
     bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
-
-// A pass-local run in an anonymous flex item's flattened text sequence.
-typedef struct FlexAnonymousTextRun {
-    lam::Up<DomText> text;
-    bool preserve_leading_space;
-    bool preserve_trailing_space;
-    bool is_whitespace;
-    lam::Own<struct FlexAnonymousTextRun> next;
-} FlexAnonymousTextRun;
 
 // tier-2: view-pool, retained across incremental relayouts. Memos of a flex
 // item's last committed measurement, hypothetical cross size and content pass;
@@ -1110,7 +1117,7 @@ typedef struct FlexItemProp {
     lam::Up<DomText> anonymous_text;
     // CSS Flexbox flattens display:contents descendants before creating
     // anonymous items; this chain retains all text runs in one item.
-    FlexAnonymousTextRun* anonymous_text_runs;
+    LayoutAnonymousTextRun* anonymous_text_runs;
     // CSS Display flattening can leave a collapsed separator at an anonymous
     // flex item's edge; retain the edge state for final text geometry.
     bool anonymous_text_preserve_leading_space;
@@ -2649,6 +2656,13 @@ struct ViewBlock : ViewSpan {
     // PositionProp* position;
     // ViewBlock* last_child;
 };
+
+// a paint projection borrows its caller's boundary; never retain this stack-only view (D4.5.1v4).
+inline ViewBlock view_with_boundary(ViewBlock* source, BoundaryProp* boundary) {
+    ViewBlock view = *source;
+    view.bound = lam::view_prop(boundary);
+    return view;
+}
 
 // ===== view geometry =====
 

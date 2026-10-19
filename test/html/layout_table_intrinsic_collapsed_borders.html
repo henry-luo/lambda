@@ -1,0 +1,35 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face { font-family:Ahem; src:url("../layout/data/font/Ahem.ttf"); }
+body { margin:0; font:10px/20px Ahem; }
+.case { margin-bottom:10px; width:1100px; }
+table { border-spacing:0; border-collapse:collapse; }
+td,th { font-weight:normal; padding:6px 13px; border:1px solid black; }
+.block { display:block; width:max-content; overflow:auto; }
+.atomic { display:inline-block; width:max-content; overflow:auto; }
+.separate { border-collapse:separate; border-spacing:3px; }
+</style></head><body id="result">
+<style>#thick td{border-width:2px}</style>
+<section class="case"><table id="table-auto" class="" style=""><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="table-max" class="" style="width:max-content"><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="block-five" class="block" style=""><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="atomic-five" class="atomic" style=""><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="block-one" class="block" style=""><tr><td>Latest X</td></tr></table></section>
+<section class="case"><table id="block-two" class="block" style=""><tr><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="thick" class="block"><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="mixed" class="block" style=""><tr><td style="border-right-width:5px">xx</td><td>xx</td><td style="border-left-width:7px">xx</td></tr></table></section>
+<section class="case"><table id="mixed-table" class="" style=""><tr><td style="border-right-width:5px">xx</td><td>xx</td><td style="border-left-width:7px">xx</td></tr></table></section>
+<section class="case"><table id="hidden" class="block" style=""><tr><td>xx</td><td style="border-left-style:hidden">xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="spanning" class="block" style=""><tr><td colspan="2">xxxxxxxxxxxx</td><td>xx</td></tr><tr><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="rowspan" class="block" style=""><tr><td rowspan="2">xxxx</td><td>xx</td><td>xx</td></tr><tr><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="row-border" class="block" style=""><tr id="row-border-row" style="border-left:4px solid black;border-right:6px solid black"><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="columns" class="block" style=""><colgroup><col style="border-left:3px solid black"><col style="border-right:7px solid black"><col></colgroup><tr><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="separate" class="block separate" style=""><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="separate-table" class="separate" style=""><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case"><table id="minimum" class="block" style="width:min-content"><tr><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td><td>Latest X</td></tr></table></section>
+<section class="case" id="table-border-parent" style="width:max-content"><table id="table-border" style="width:max-content;border:5px solid black"><tr><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="block-border" class="block" style="border:5px solid black"><tr><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="row-group" class="block"><tbody style="border-left:4px solid black;border-right:6px solid black"><tr><td>xx</td><td>xx</td><td>xx</td></tr></tbody></table></section>
+<section class="case"><table id="column-group" class="block"><colgroup span="3" style="border-left:4px solid black;border-right:6px solid black"></colgroup><tr><td>xx</td><td>xx</td><td>xx</td></tr></table></section>
+<section class="case"><table id="shifted-span" class="block"><tr><td rowspan="2">xx</td><td>xx</td></tr><tr><td colspan="2">xxxxxxxx</td></tr></table></section>
+<section class="case"><table id="fractional" class="block"><tr><td style="padding-inline:13.25px">Latest X</td><td style="padding-inline:13.25px">Latest X</td><td style="padding-inline:13.25px">Latest X</td><td style="padding-inline:13.25px">Latest X</td><td style="padding-inline:13.25px">Latest X</td></tr></table></section>
+</body></html>

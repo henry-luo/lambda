@@ -1220,9 +1220,8 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* params = js_c_link_non_type_parameter_children(nodes,
             parameter_start, body_index);
-        bool declaration =
-            (reduction->flags & JS_REDUCTION_FLAG_DECLARATION) != 0 &&
-            (reduction->flags & JS_REDUCTION_FLAG_NAMED) != 0;
+        // anonymous default exports are hoisted declarations too.
+        bool declaration = (reduction->flags & JS_REDUCTION_FLAG_DECLARATION) != 0;
         JsAstNode* function = return_type
             ? build_js_function_with_return_type_from_children(
                 sink->transpiler, reduction->span, name, params,

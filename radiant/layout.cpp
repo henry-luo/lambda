@@ -1550,9 +1550,18 @@ float layout_br_line_box_extent(LayoutContext* lycon, FontHandle* handle) {
 
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback) {
-    if (!element || !element->specified_style) return fallback;
-    CssDeclaration* declaration =
-        style_tree_get_declaration(element->specified_style, property);
+    if (!element) return fallback;
+    CssEnum keyword = layout_html_replaced_alignment_hint(element, property);
+    CssValue hint_value = {};
+    hint_value.type = CSS_VALUE_TYPE_KEYWORD;
+    hint_value.data.keyword = keyword;
+    CssDeclaration hint = {};
+    hint.property_code = property;
+    hint.value = &hint_value;
+    hint.origin = CSS_ORIGIN_AUTHOR_HINT;
+    CssDeclaration* declaration = keyword != CSS_VALUE__UNDEF
+        ? style_tree_get_declaration_with_fallback(element->specified_style, property, &hint)
+        : style_tree_get_declaration(element->specified_style, property);
     if (!declaration || !declaration->value ||
         declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
         return fallback;
@@ -2441,12 +2450,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
 }
 
-float layout_apply_line_height_leading(float line_height,
-                                       float* ascender, float* descender) {
-    float leading = line_height - (*ascender + *descender);
+float layout_line_height_ascent_leading(float line_height, float content_height) {
     // Blink CalculateLeadingSpace floors the ascent half and assigns the
     // remainder below the baseline; preserve the full authored line-height.
-    float ascent_leading = floorf(leading / 2.0f);
+    return floorf((line_height - content_height) / 2.0f);
+}
+
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender) {
+    float content_height = *ascender + *descender;
+    float leading = line_height - content_height;
+    float ascent_leading = layout_line_height_ascent_leading(line_height, content_height);
     *ascender += ascent_leading;
     *descender += leading - ascent_leading;
     return ascent_leading;
@@ -2518,29 +2532,38 @@ CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction) {
     return align;
 }
 
+void layout_middle_inline_contribution(LayoutContext* lycon, CssEnum align,
+                                       float item_height, float* ascender, float* descender) {
+    if (!lycon || !ascender || !descender) return;
+    float x_height_half = 0.0f;
+    if (align == CSS_VALUE_MIDDLE) {
+        float parent_size = lycon->line.parent_font_size;
+        if (parent_size <= 0.0f && lycon->font.style) parent_size = lycon->font.style->font_size;
+        if (parent_size <= 0.0f) parent_size = lycon->block.init_ascender + lycon->block.init_descender;
+        FontHandle* parent_handle = lycon->line.parent_font_style
+            ? lycon->line.parent_font_style->font_handle : font_box_handle(&lycon->font);
+        x_height_half = parent_size * (parent_handle ? font_get_x_height_ratio(parent_handle) : 0.5f) / 2.0f;
+    }
+    // line extents and final placement must use the same parent-font reference point.
+    *ascender = item_height / 2.0f + x_height_half;
+    *descender = item_height / 2.0f - x_height_half;
+}
+
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
     float pa_asc = lycon->line.parent_font_ascender;
     float pa_desc = lycon->line.parent_font_descender;
-    float pa_fsize = lycon->line.parent_font_size;
     switch (align) {
     case CSS_VALUE_BASELINE:
         return baseline_pos - item_baseline -
             vertical_align_baseline_shift(lycon, align, valign_offset);
     case CSS_VALUE_TOP:
         return 0;
-    case CSS_VALUE_MIDDLE: {
-        // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with the baseline
-        float x_height_half;
-        FontHandle* parent_handle = lycon->line.parent_font_style
-            ? lycon->line.parent_font_style->font_handle : nullptr;
-        if (parent_handle) {
-            float x_ratio = font_get_x_height_ratio(parent_handle);
-            x_height_half = pa_fsize * x_ratio / 2.0f;
-        } else {
-            x_height_half = pa_fsize * 0.25f; // fallback: ~0.5em x-height
-        }
-        return baseline_pos - x_height_half - item_height / 2.0f;
+    case CSS_VALUE_MIDDLE:
+    case CSS_VALUE_BASELINE_MIDDLE: {
+        float ascender, descender;
+        layout_middle_inline_contribution(lycon, align, item_height, &ascender, &descender);
+        return baseline_pos - ascender;
     }
     case CSS_VALUE_BOTTOM:
             return line_height - item_height;
@@ -4846,7 +4869,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         CssEnum float_value = CSS_VALUE_NONE;
 
-        if (elem->position) {
+        // a dirty retained float may now be inline; dispatch must precede its style refresh.
+        if (elem->position && elem->styles_resolved() && !elem->needs_style_recompute()) {
             float_value = elem->positionp()->float_prop;
         } else {
             float_value = layout_specified_keyword(

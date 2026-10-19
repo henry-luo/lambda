@@ -657,13 +657,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
         document->url = lam::own(replacement);
         return true;
     }
-    // Input and the loader can retain document->url across navigation, so
-    // exchange owned fields instead of invalidating their carrier pointer.
-    Url previous = *document->url;
-    *document->url = *replacement;
-    *replacement = previous;
-    url_destroy(replacement);
-    return true;
+    return url_replace_contents(document->url, replacement);
 }
 
 extern "C" __attribute__((weak)) void dom_css_document_language_changed(void* document) {

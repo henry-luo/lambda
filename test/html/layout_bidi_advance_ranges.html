@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf") }
+body { margin: 0 }
+.case { margin-bottom: 10px }
+.box { display: inline-block; width: max-content; white-space: pre;
+    font: 13.6px/20px Menlo, "Courier New", monospace }
+</style>
+<body id="result">
+<div class="case"><span class="box" id="plain">arabic_text = &quot;مرحبا&quot;</span></div>
+<div class="case"><span class="box" id="trailing-lf">arabic_text = &quot;مرحبا&quot;
+</span></div>
+<div class="case"><span class="box" id="trailing-space-lf">arabic_text = &quot;مرحبا&quot; &#10;</span></div>
+<div class="case"><span class="box" id="trailing-crlf">arabic_text = &quot;مرحبا&quot;&#13;&#10;</span></div>
+<div class="case"><span class="box" id="line-before">abc
+arabic_text = &quot;مرحبا&quot;</span></div>
+<div class="case"><span class="box" id="line-after">arabic_text = &quot;مرحبا&quot;
+abc</span></div>
+<div class="case"><span class="box" id="rtl" style='direction:rtl;'>مرحبا
+</span></div>
+<div class="case"><span class="box" id="hebrew">abc &quot;שלום&quot;
+</span></div>
+<div class="case"><span class="box" id="hebrew-no-lf">abc &quot;שלום&quot;</span></div>
+<div class="case"><span class="box" id="latin">abc &quot;hello&quot;
+</span></div>
+<div class="case"><span class="box" id="document" style='font-family:Ahem,"Courier New",monospace;'>arabic_text = &quot;مرحبا&quot;
+</span></div>
+<div class="case"><span class="box" id="spaced">abc مرحبا def
+</span></div>
+<div class="case"><span class="box" id="styled">abc <b id="styled-word">مرحبا</b> def
+</span></div>
+<div class="case"><span class="box" id="tabbed">abc	مرحبا	def
+</span></div>
+<div class="case"><span class="box" id="repeat">abc &quot;مرحبا&quot;
+abc &quot;مرحبا&quot;
+</span></div>
+<div class="case"><span class="box" id="bold-control" style="font-weight:bold">مرحبا</span></div>
+<div class="case"><span class="box" id="ascii-control">abc</span></div>
+<div class="case"><span class="box" id="space-control"> </span></div>
+</body>

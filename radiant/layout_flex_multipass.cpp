@@ -294,7 +294,8 @@ static void layout_in_flow_content_bounds_impl(ViewElement* elem, LayoutAxis axi
     float min_edge = 0.0f;
     float max_edge = 0.0f;
     for (View* child = elem->first_child; child; child = child->next()) {
-        if (layout_view_is_block_flow_box(child)) {
+        // paint/scroll extents include structural table boxes; flow sizing keeps its narrower classification.
+        if (include_out_of_flow ? child->is_block() : layout_view_is_block_flow_box(child)) {
             ViewElement* child_elem = lam::view_require_element(child);
             if (layout_element_is_display_none(child_elem)) {
                 continue;

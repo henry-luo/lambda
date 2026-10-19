@@ -45,6 +45,7 @@ struct RxClass {
     CodePointInterval* ranges;
     int range_count;
     bool negated;
+    bool sorted_ranges;
 };
 
 struct RxSeq {
@@ -207,6 +208,9 @@ static inline bool bt_is_word(uint32_t cp, bool icase, bool unicode) {
 }
 
 static bool bt_class_contains_raw(const RxClass* cls, uint32_t cp) {
+    // generated property intervals are ordered; avoid rescanning hundreds per code point.
+    if (cls->sorted_ranges)
+        return js_regex_sorted_range_contains(cls->ranges, cls->range_count, (int)cp);
     for (int i = 0; i < cls->range_count; i++) {
         if (codepoint_interval_contains(&cls->ranges[i], cp)) return true;
     }
@@ -430,6 +434,7 @@ static RxNode* property_class(Parser* ps, const char* name, int name_len, bool n
     }
     cls->negated = negated;
     mem_free(pairs);
+    cls->sorted_ranges = true;
     n->cls = cls;
     return n;
 }

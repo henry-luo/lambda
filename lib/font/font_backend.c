@@ -105,8 +105,8 @@ void font_backend_destroy(FontHandle* handle) {
 void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
     if (!handle || !ct_font_ref) return;
     // callers may select the handle's existing auxiliary face; retain before releasing aliases.
-    void* measured = font_platform_retain_ct_font(ct_font_ref);
-    void* raster = font_platform_retain_ct_font(ct_font_ref);
+    void* measured = font_platform_copy_for_css(ct_font_ref);
+    void* raster = font_platform_retain_ct_font(measured);
     if (handle->ct_font_ref) font_platform_destroy_ct_font(handle->ct_font_ref);
     if (handle->ct_raster_ref) font_platform_destroy_ct_font(handle->ct_raster_ref);
     handle->ct_font_ref = measured;

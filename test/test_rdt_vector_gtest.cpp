@@ -617,12 +617,18 @@ TEST(TextOverflowPaint, ExportSlicesKeepTheirWhitespaceProcessingContext) {
         {"ab   cd", 3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
         {"ab   cd", 0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
         {"A\nB", 0, 2, CSS_VALUE_PRE, CSS_VALUE_NONE, "A"},
-        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A"},
+        // a DOM CR is a space before the preserved LF (CSS Text 3 §4).
+        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A \nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A\rB", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A B", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A\rB", 0, 3, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A B"},
         {"A\nB", 0, 2, CSS_VALUE_PRE_LINE, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_NORMAL, CSS_VALUE_NONE, "A "},
     };
     for (const Case& sample : cases) {
+        SCOPED_TRACE(sample.source);
         TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
         lam::Temp<char> visible(render_text_create_export_segment(
             (const unsigned char*)sample.source, &slice, sample.transform, false, sample.white_space));
@@ -677,6 +683,125 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
         font_handle_release(style.font_handle); font_context_destroy(fonts);
     }
 }
+
+TEST(TextOverflowPaint, ColorGlyphShadowUsesAlphaCoverage) {
+    uint8_t pixels[] = {0, 0, 255, 255, 0, 128, 0, 128};
+    GlyphBitmap bitmap = {}; bitmap.buffer = pixels; bitmap.width = 2; bitmap.height = 1;
+    bitmap.pitch = 8; bitmap.pixel_mode = GLYPH_PIXEL_BGRA; bitmap.bitmap_scale = 1.0f;
+    ImageSurface* surface = image_surface_create(2, 1); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, (size_t)surface->pitch);
+    DlDrawGlyph shadow = {}; shadow.bitmap = bitmap;
+    shadow.clip = {0, 0, 2, 1}; shadow.color = Color{.r=0,.g=0,.b=0,.a=255};
+    dl_replay_draw_glyph(surface, &shadow);
+    const uint8_t* result = (const uint8_t*)surface->pixels;
+    for (unsigned channel = 0; channel < 3; channel++) {
+        EXPECT_EQ(result[channel], 0);
+        EXPECT_EQ(result[4 + channel], 127);
+    }
+    image_surface_destroy(surface);
+}
+
+#ifdef __APPLE__
+TEST(TextOverflowPaint, SelectedFaceShapingRejectsForeignGlyphIdsAndKeepsCacheNamespaces) {
+    FontContextConfig config = {}; config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* font = font_resolve(fonts, &description); ASSERT_NE(font, nullptr);
+    const GlyphBitmap* scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(scalar, nullptr); GlyphBitmap expected = *scalar;
+    const GlyphBitmap* indexed = font_render_glyph_index(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(indexed, nullptr);
+    // the same integer names a different glyph in the Unicode and face-local namespaces.
+    EXPECT_TRUE(indexed->width != expected.width || indexed->height != expected.height ||
+        indexed->pitch != expected.pitch || memcmp(indexed->buffer, expected.buffer,
+            (size_t)expected.pitch * expected.height) != 0);
+    scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL); ASSERT_NE(scalar, nullptr);
+    EXPECT_EQ(scalar->width, expected.width); EXPECT_EQ(scalar->height, expected.height);
+    EXPECT_EQ(memcmp(scalar->buffer, expected.buffer, (size_t)expected.pitch * expected.height), 0);
+
+    struct Probe { int calls; uint32_t glyph; } probe = {};
+    auto visit = [](void* pointer, uint32_t glyph, float, float, float) {
+        Probe* value = (Probe*)pointer; value->calls++; value->glyph = glyph;
+    };
+    float advance = -1.0f;
+    const char source[] = "🐕‍🦺";
+    EXPECT_FALSE(font_visit_face_glyphs(font, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 0); EXPECT_FLOAT_EQ(advance, -1.0f);
+    FontHandle* emoji = font_resolve_for_emoji(fonts, &description, 0x1F415);
+    ASSERT_NE(emoji, nullptr);
+    ASSERT_TRUE(font_visit_face_glyphs(emoji, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 1); EXPECT_FLOAT_EQ(advance, 20.0f);
+    EXPECT_NE(probe.glyph, font_get_glyph_index(emoji, 0x1F415));
+    const GlyphBitmap* joined = font_render_glyph_index(emoji, probe.glyph, GLYPH_RENDER_NORMAL);
+    ASSERT_NE(joined, nullptr); EXPECT_EQ(joined->pixel_mode, GLYPH_PIXEL_BGRA);
+    EXPECT_GT(joined->width, 0); EXPECT_GT(joined->height, 0);
+    font_handle_release(emoji); font_handle_release(font); font_context_destroy(fonts);
+}
+
+TEST(TextOverflowPaint, GraphemeClustersPreserveShapedGlyphsAndFollowingTextAdvance) {
+    struct Sample { const char* text; int cluster_glyphs; float advance; };
+    const Sample samples[] = {
+        {"🐕‍🦺M", 1, 20.0f}, {"👨‍👩‍👧‍👦M", 1, 20.0f},
+        {"👩🏽‍💻M", 1, 20.0f}, {"🏳️‍🌈M", 1, 20.0f},
+        {"🇸🇬M", 1, 20.0f}, {"1️⃣M", 1, 20.0f},
+        {"❤️M", 1, 20.0f}, {"😀M", 1, 20.0f},
+        {"🐕‍😀M", 2, 40.0f},
+        {"e\u0301M", 1, 8.90625f}, {"A\u030AM", 1, 10.671875f},
+        {"n\u0303M", 1, 8.90625f}, {"u\u0308\u0301M", 1, 8.90625f},
+        {"ι\u0308\u0301M", 1, 3.5625f}, {"и\u0306M", 1, 8.9375f},
+        {"=\u0338M", 1, 8.78125f}, {"ハ\u309AM", 1, 16.0f},
+    };
+    for (float density : {1.0f, 2.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 16.0f; style.letter_spacing = 3.0f;
+        FontBox box = {lam::up(&style), 16.0f};
+        FontProp replacement = FONT_PROP_DEFAULT;
+        description.size_px = 32.0f;
+        replacement.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(replacement.font_handle, nullptr);
+        replacement.font_size = 32.0f;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            if (pass == 1) font_context_reset_glyph_caches(fonts);
+            for (const Sample& sample : samples) {
+                SCOPED_TRACE(sample.text);
+                SCOPED_TRACE(density);
+                SCOPED_TRACE(pass);
+                PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up(sample.text);
+                run.text_len = (int)strlen(sample.text); run.x = 5.0f; run.baseline_y = 40.0f;
+                DisplayList list = {}; dl_init(&list, arena);
+                PaintList recorded;
+                if (pass == 2) {
+                    paint_glyph_run(&recorded, &run);
+                    box = {lam::up(&replacement), 32.0f};
+                    render_glyph_run_raster_lower(&recorded.data()[0].glyph_run, &list);
+                    box = {lam::up(&style), 16.0f};
+                } else render_glyph_run_raster_lower(&run, &list);
+                // browser controls distinguish one ligature from an unsupported two-glyph composition.
+                EXPECT_EQ(list.item_count(), sample.cluster_glyphs + 1);
+                if (list.item_count() > 0) {
+                    const DlDrawGlyph& marker = list.data()[list.item_count() - 1].draw_glyph;
+                    EXPECT_EQ(marker.bitmap.pixel_mode, GLYPH_PIXEL_GRAY);
+                    float pixel_to_css = render_font_pixel_to_css(style.font_handle, &marker.bitmap);
+                    float actual_x = marker.has_transform ? marker.transform.e13 : (float)marker.x;
+                    float expected_x = roundf(run.x + sample.advance + 3.0f +
+                        (float)marker.bitmap.bearing_x * pixel_to_css);
+                    EXPECT_FLOAT_EQ(actual_x, expected_x);
+                }
+                dl_destroy(&list);
+            }
+        }
+        arena_destroy(arena);
+        font_handle_release(replacement.font_handle);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+#endif
 
 TEST(TextOverflowPaint, SynthesizedPunctuationSpaceKeepsLogicalWidthAcrossDensities) {
     for (float density : {1.0f, 2.0f}) {

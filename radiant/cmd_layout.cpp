@@ -111,7 +111,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
                                         uint64_t* script_prefetch_start_ns_out = nullptr);
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                      Element* html_root, HtmlVersion version,
-                                     Url* url, Runtime* runtime);
+                                     Url* url);
 static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
                                                   const char* css_filename,
                                                   const char* log_prefix,
@@ -2272,7 +2272,7 @@ static void complete_document_scripts(DomDocument* doc, Pool* pool) {
     run_html_document_scripts(doc, pool, nullptr, nullptr,
                               false, 0, 0, script_start_ns, nullptr);
     populate_layout_document(doc, doc->root, doc->html_root,
-                             (HtmlVersion)doc->html_version, doc->url, doc->lambda_runtime);
+                             (HtmlVersion)doc->html_version, doc->url);
     extract_body_transform_scale(doc->root, doc);
     dom_js_mutation_records_reset(doc);
 }
@@ -2298,9 +2298,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         log_error("load_lambda_html_doc: invalid parameters");
         return nullptr;
     }
-
-    Url* superseded_html_urls[4] = {nullptr};
-    int superseded_html_url_count = 0;
 
     char* html_filepath = url_to_local_path(html_url);
     bool xhtml = !html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars);
@@ -2331,12 +2328,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             Url* redirected_url = url_parse(eff_url);
             if (redirected_url && redirected_url->is_valid) {
                 log_info("[redirect] Updating document URL: %s → %s", url_str, eff_url);
-                // the returned document owns the final URL, so keep replaced
-                // URLs until success instead of leaving them unreachable.
-                if (html_url && html_url != redirected_url && superseded_html_url_count < 4) {
-                    superseded_html_urls[superseded_html_url_count++] = html_url;
-                }
-                html_url = redirected_url;
+                // the caller retains this carrier through its own teardown.
+                url_replace_contents(html_url, redirected_url);
+                url_str = url_get_href(html_url);
             } else if (redirected_url) {
                 url_destroy(redirected_url);
             }
@@ -2465,15 +2459,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         Url* base_url = url_parse(base_href);
         if (base_url && base_url->is_valid) {
             log_info("[base] Overriding document URL with base href: %s", base_href);
-            // Input and DomDocument must agree on the same owned Url; otherwise
-            // replacing html_url for <base> leaves the initial parse URL leaked.
-            if (input && input->url == html_url) {
-                input->url = base_url;
-            }
-            if (html_url && html_url != base_url && superseded_html_url_count < 4) {
-                superseded_html_urls[superseded_html_url_count++] = html_url;
-            }
-            html_url = base_url;
+            // Input and CLI cleanup share this carrier, including after a base override.
+            url_replace_contents(html_url, base_url);
         } else if (base_url) {
             url_destroy(base_url);
         }
@@ -2635,12 +2622,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Step 8: Publish the document roots after scripts and cascade are complete.
     populate_layout_document(dom_doc, dom_root, html_root,
-                             (HtmlVersion)detected_version, html_url, nullptr);
-    for (int i = 0; i < superseded_html_url_count; i++) {
-        if (superseded_html_urls[i] && superseded_html_urls[i] != html_url) {
-            url_destroy(superseded_html_urls[i]);
-        }
-    }
+                             (HtmlVersion)detected_version, html_url);
     // Parsing can execute scripts that synchronously create geometry and state;
     // preserve their shared owners through the document's committed layout.
 
@@ -3234,9 +3216,10 @@ static Input* read_layout_input_file(Url* url, const char* filepath,
     return input;
 }
 
+// load-time layout may already own an evaluator; geometry publication must preserve it (D5.4.1).
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                       Element* html_root, HtmlVersion version,
-                                      Url* url, Runtime* runtime) {
+                                      Url* url) {
     if (!doc) return;
     doc->root = lam::up(root);
     doc->html_root = lam::up(html_root);
@@ -3267,7 +3250,6 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
         doc->view_tree->init((MemContext*)doc->services.mem_ctx);
         doc->view_tree->content_visibility_state = visibility;
     }
-    doc->lambda_runtime = runtime;
 }
 
 static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
@@ -3621,7 +3603,7 @@ static DomDocument* load_home_styled_source_doc(
         css_engine, pool, stylesheet_path, log_prefix, stylesheet_label, true);
     CssStylesheet* stylesheets[1] = {stylesheet};
     layout_apply_css_stylesheets(document, dom_root, stylesheets, 1, pool, css_engine);
-    populate_layout_document(document, dom_root, source_root, HTML5, url, nullptr);
+    populate_layout_document(document, dom_root, source_root, HTML5, url);
     log_info("[%s] loaded source document", log_prefix);
     return document;
 }
@@ -3771,6 +3753,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
         if (shared_runtime) loader_runtime_finish_document(nullptr, shared_runtime);
         return nullptr;
     }
+    dom_doc->lambda_runtime = markdown_runtime;
     if (shared_runtime) layout_adopt_loader_runtime(dom_doc, shared_runtime);
 
     auto step2_end = time_now_ns();
@@ -3803,7 +3786,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
 
     // Step 6: Populate DomDocument structure
     populate_layout_document(dom_doc, dom_root, markdown_root, HTML5,
-                             markdown_url, markdown_runtime);
+                             markdown_url);
 
     // retain exactly the sheets applied above; removed math sheets no longer occupy this array.
     store_document_stylesheets(dom_doc, markdown_stylesheets, 1, nullptr, 0, pool);
@@ -3920,7 +3903,7 @@ static DomDocument* load_page_xml_doc(Url* url, int width, int height, Pool* poo
     configure_css_input_environment(engine, document);
     layout_apply_css_stylesheets(document, original, document->stylesheets,
         document->stylesheet_count, pool, engine);
-    populate_layout_document(document, original, root, HTML5, url, nullptr);
+    populate_layout_document(document, original, root, HTML5, url);
     return document;
 }
 
@@ -4428,7 +4411,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
         time_elapsed_ms_f(step7_start, step7_end));
 
-    populate_layout_document(dom_doc, dom_root, html_elem, HTML5, script_url, nullptr);
+    populate_layout_document(dom_doc, dom_root, html_elem, HTML5, script_url);
 
     store_document_stylesheets(dom_doc,
                                script_stylesheet ? script_stylesheets : nullptr,

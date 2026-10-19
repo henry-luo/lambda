@@ -44,25 +44,9 @@ static bool quirks_br_after_nested_inline_text(LayoutContext* lycon,
 InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
     InlineOutOfFlowKind kind = {};
     if (!elem) return kind;
-    kind.floated = layout_position_is_floated(elem->position);
-    kind.positioned = layout_position_is_abs_fixed(elem->position);
-    if (kind.floated || kind.positioned || !elem->specified_style ||
-        !elem->specified_style->tree) return kind;
-
-    AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-    if (float_node) {
-        StyleNode* style = (StyleNode*)float_node->declaration;
-        const CssValue* value = style && style->winning_decl ? style->winning_decl->value : nullptr;
-        kind.floated = value && value->type == CSS_VALUE_TYPE_KEYWORD &&
-            (value->data.keyword == CSS_VALUE_LEFT || value->data.keyword == CSS_VALUE_RIGHT);
-    }
-    AvlNode* position_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-    if (position_node) {
-        StyleNode* style = (StyleNode*)position_node->declaration;
-        const CssValue* value = style && style->winning_decl ? style->winning_decl->value : nullptr;
-        kind.positioned = value && value->type == CSS_VALUE_TYPE_KEYWORD &&
-            (value->data.keyword == CSS_VALUE_ABSOLUTE || value->data.keyword == CSS_VALUE_FIXED);
-    }
+    // pre-layout classification must see the same hint and rollback cascade as display blockification.
+    kind.floated = layout_element_is_floated(elem);
+    kind.positioned = layout_element_is_abs_or_fixed(elem);
     return kind;
 }
 
@@ -545,6 +529,13 @@ void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
 }
 
 static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
+    DomNode* source = nullptr;
+    uint32_t edge = layout_inline_text_edge_codepoint(inline_node, true,
+        LAYOUT_INLINE_TEXT_KEEP_ASCII_SPACE, &source);
+    if (source && is_space(edge)) {
+        // a disappearing space owns its wrap policy; its ancestor cannot enable a pre/nowrap break.
+        return get_text_wrap_mode_value(source, lycon) != CSS_VALUE_NOWRAP;
+    }
     return inline_node &&
         get_text_wrap_mode_value(inline_node->parent, lycon) != CSS_VALUE_NOWRAP;
 }
@@ -3107,16 +3098,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float asc_contribution = 0.0f;
         float desc_contribution = 0.0f;
         CssEnum valign = span->inl()->vertical_align;
-        if (valign == CSS_VALUE_MIDDLE) {
-            float x_height_half = lycon->font.current_font_size * 0.25f;
-            FontHandle* parent_handle = lycon->line.parent_font_style
-                ? lycon->line.parent_font_style->font_handle : nullptr;
-            if (parent_handle) {
-                float x_ratio = font_get_x_height_ratio(parent_handle);
-                x_height_half = lycon->line.parent_font_size * x_ratio / 2.0f;
-            }
-            asc_contribution = span->content_height / 2.0f + x_height_half;
-            desc_contribution = span->content_height / 2.0f - x_height_half;
+        if (layout_is_middle_vertical_align(valign)) {
+            layout_middle_inline_contribution(
+                lycon, valign, span->content_height, &asc_contribution, &desc_contribution);
         } else if (valign == CSS_VALUE_TOP) {
             lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, span->content_height);
             lycon->line.max_top_height = max(lycon->line.max_top_height, span->content_height);

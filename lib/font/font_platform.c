@@ -838,6 +838,36 @@ static CFMutableDictionaryRef font_platform_create_css_traits(int css_weight,
     return traits;
 }
 
+static CTFontRef font_platform_copy_with_attributes(CTFontRef base, float size_px,
+                                                    CFDictionaryRef attrs) {
+    if (!base || !attrs) return NULL;
+    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+    if (!desc) return NULL;
+    CTFontRef copied = CTFontCreateCopyWithAttributes(base, (CGFloat)size_px, NULL, desc);
+    CFRelease(desc);
+    return copied;
+}
+
+void* font_platform_copy_for_css(void* ct_font_ref) {
+    if (!ct_font_ref) return NULL;
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    if (!(CTFontGetSymbolicTraits(font) & kCTFontTraitColorGlyphs))
+        return (void*)CFRetain(font);
+
+    // color-face tracking is a platform default, separate from CSS letter-spacing.
+    int zero = 0;
+    CFNumberRef tracking = CFNumberCreate(NULL, kCFNumberIntType, &zero);
+    if (!tracking) return (void*)CFRetain(font);
+    CFStringRef key = CFSTR("NSCTFontUnscaledTrackingAttribute");
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+        (const void**)&key, (const void**)&tracking, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(tracking);
+    CTFontRef copied = font_platform_copy_with_attributes(font, 0.0f, attrs);
+    if (attrs) CFRelease(attrs);
+    return copied ? (void*)copied : (void*)CFRetain(font);
+}
+
 static CTFontRef font_platform_copy_with_css_traits(CTFontRef base,
                                                     float size_px,
                                                     int css_weight,
@@ -854,12 +884,8 @@ static CTFontRef font_platform_copy_with_css_traits(CTFontRef base,
     CFRelease(traits);
     if (!attrs) return NULL;
 
-    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+    CTFontRef copied = font_platform_copy_with_attributes(base, size_px, attrs);
     CFRelease(attrs);
-    if (!desc) return NULL;
-
-    CTFontRef copied = CTFontCreateCopyWithAttributes(base, (CGFloat)size_px, NULL, desc);
-    CFRelease(desc);
     return copied;
 }
 
@@ -891,12 +917,9 @@ void* font_platform_copy_with_weight_variation(const void* ct_font_ref,
     CFRelease(variation);
     if (!attrs) return NULL;
 
-    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+    CTFontRef varied = font_platform_copy_with_attributes(
+        (CTFontRef)ct_font_ref, size_px, attrs);
     CFRelease(attrs);
-    if (!desc) return NULL;
-    CTFontRef varied = CTFontCreateCopyWithAttributes(
-        (CTFontRef)ct_font_ref, (CGFloat)size_px, NULL, desc);
-    CFRelease(desc);
     return (void*)varied;
 }
 
@@ -1005,6 +1028,9 @@ void* font_platform_create_ct_font(const char* postscript_name,
     }
 
     if (ct_font) {
+        CTFontRef css_font = (CTFontRef)font_platform_copy_for_css(ct_font);
+        CFRelease(ct_font);
+        ct_font = css_font;
         log_debug("font_platform: created CTFont (ps=%s, size=%.2f, wgt=%d, slant=%d)",
                   postscript_name ? postscript_name : "?", size_px, css_weight,
                   (int)css_slant);
@@ -1129,7 +1155,7 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
     return kerning;
 }
 
-static CTLineRef font_platform_create_measure_line(void* ct_font_ref,
+void* font_platform_create_text_line(void* ct_font_ref,
                                                     const char* text, int byte_len) {
     CTFontRef font = (CTFontRef)ct_font_ref;
     CFStringRef str = CFStringCreateWithBytes(NULL, (const UInt8*)text, byte_len,
@@ -1155,6 +1181,45 @@ static CTLineRef font_platform_create_measure_line(void* ct_font_ref,
     CFRelease(astr);
     return line;
 
+}
+
+bool font_platform_visit_face_glyphs(void* ct_font_ref, const char* text,
+        int byte_len, FontGlyphVisitFn visitor, void* context, float* advance) {
+    if (!ct_font_ref || !text || byte_len <= 0 || !visitor || !advance) return false;
+    CTLineRef line = (CTLineRef)font_platform_create_text_line(ct_font_ref, text, byte_len);
+    if (!line) return false;
+    CFArrayRef runs = CTLineGetGlyphRuns(line);
+    CFIndex count = runs ? CFArrayGetCount(runs) : 0;
+    bool selected = count > 0;
+    for (CFIndex i = 0; selected && i < count; i++) {
+        CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, i);
+        CFTypeRef face = CFDictionaryGetValue(CTRunGetAttributes(run), kCTFontAttributeName);
+        // foreign-face glyph IDs cannot be rasterized through the selected handle.
+        selected = face && CFEqual(face, ct_font_ref);
+    }
+    float width = 0.0f;
+    for (CFIndex i = 0; selected && i < count; i++) {
+        CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, i);
+        CFIndex glyph_count = CTRunGetGlyphCount(run);
+        for (CFIndex first = 0; first < glyph_count;) {
+            CGGlyph glyphs[64]; CGPoint positions[64]; CGSize advances[64];
+            CFIndex chunk = glyph_count - first;
+            if (chunk > 64) chunk = 64;
+            CFRange range = CFRangeMake(first, chunk);
+            CTRunGetGlyphs(run, range, glyphs);
+            CTRunGetPositions(run, range, positions);
+            CTRunGetAdvances(run, range, advances);
+            for (CFIndex j = 0; j < chunk; j++) {
+                visitor(context, glyphs[j], (float)positions[j].x,
+                    -(float)positions[j].y, (float)advances[j].width);
+                width += (float)advances[j].width;
+            }
+            first += chunk;
+        }
+    }
+    CFRelease(line);
+    if (selected) *advance = width;
+    return selected;
 }
 
 static TextExtents font_platform_measure_line_range(CTLineRef line, CFRange range,
@@ -1193,7 +1258,7 @@ TextExtents font_platform_measure_text(void* ct_font_ref, const char* text,
                                        int byte_len, float fallback_height) {
     TextExtents ext = {0};
     if (!ct_font_ref || !text || byte_len <= 0) return ext;
-    CTLineRef line = font_platform_create_measure_line(ct_font_ref, text, byte_len);
+    CTLineRef line = (CTLineRef)font_platform_create_text_line(ct_font_ref, text, byte_len);
     if (!line) return ext;
 
     ext = font_platform_measure_line_range(line, CFRangeMake(kCFNotFound, 0), fallback_height);
@@ -1222,7 +1287,7 @@ bool font_platform_measure_text_range(void* ct_font_ref, const char* text,
     CFIndex last = first + CFStringGetLength(range);
     CFRelease(prefix);
     CFRelease(range);
-    CTLineRef line = font_platform_create_measure_line(ct_font_ref, text, byte_len);
+    CTLineRef line = (CTLineRef)font_platform_create_text_line(ct_font_ref, text, byte_len);
     if (!line) return false;
     *extents = font_platform_measure_line_range(line, CFRangeMake(first, last - first), fallback_height);
     CFRelease(line);

@@ -94,6 +94,17 @@ Url* url_clone(const Url* src) {
     return url;
 }
 
+bool url_replace_contents(Url* url, Url* replacement) {
+    if (!url || !replacement) return false;
+    if (url == replacement) return true;
+    // shared document/Input/loader aliases must outlive replacement of the owned fields.
+    Url previous = *url;
+    *url = *replacement;
+    *replacement = previous;
+    url_destroy(replacement);
+    return true;
+}
+
 // Destroy URL structure
 void url_destroy(Url* url) {
     if (!url) return;

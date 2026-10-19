@@ -235,9 +235,12 @@ static float compute_element_baseline(
     (void)lycon;
     (void)is_row_direction;
 
-    if (prefer_last && element->blk &&
-        element->block()->last_line_baseline > 0.0f) {
-        return element->block()->last_line_baseline;
+    GridItemProp* grid_item = grid_item_prop(element);
+    if (element->blk && (prefer_last || (grid_item && grid_item->anonymous_text_runs))) {
+        // anonymous grid boxes have line metrics but no DOM children to visit.
+        float baseline = prefer_last ? element->block()->last_line_baseline
+                                     : element->block()->first_line_baseline;
+        if (baseline > 0.0f) return baseline;
     }
 
     float last_child_baseline = -1.0f;

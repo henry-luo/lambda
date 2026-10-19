@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 10px/20px Ahem; }
+.case { width: 200px; margin-bottom: 10px; background: #eee; }
+.replaced { width: 40px; height: 40px; margin: 0; padding: 0; border: 0; background: lime; }
+.small { width: 12px; height: 12px; }
+.big-font { font-size: 20px; }
+.author { vertical-align: baseline; }
+.hint-parent { vertical-align: top; }
+.rollback { vertical-align: revert-layer; }
+@layer alignment {
+    .layered { vertical-align: baseline; }
+    .layer-rollback { vertical-align: revert-layer; }
+}
+</style></head><body id="result">
+<div id="none" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg"></div>
+<div id="center" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="middle" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="middle"></div>
+<div id="mixed-case" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="CeNtEr"></div>
+<div id="top" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="top"></div>
+<div id="texttop" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="texttop"></div>
+<div id="absmiddle" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="absmiddle"></div>
+<div id="abscenter" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="abscenter"></div>
+<div id="css-middle" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" style="vertical-align:middle"></div>
+<div id="css-legacy" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" style="vertical-align:-webkit-baseline-middle"></div>
+<div id="author-rule" class="case">xx<img class="replaced author" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="author-inline" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:baseline"></div>
+<div id="author-initial" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:initial"></div>
+<div id="author-unset" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:unset"></div>
+<div id="author-inherit" class="case hint-parent">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:inherit"></div>
+<div id="author-revert" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:revert"></div>
+<div id="author-revert-layer" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="center" style="vertical-align:revert-layer"></div>
+<div id="rule-revert-layer" class="case">xx<img class="replaced rollback" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="author-layer" class="case">xx<img class="replaced layered" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="layer-revert" class="case">xx<img class="replaced layer-rollback" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="unknown" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="bogus"></div>
+<div id="untrimmed" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align=" center "></div>
+<div id="small-center" class="case">xx<img class="replaced small" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="small-middle" class="case">xx<img class="replaced small" src="layout_intrinsic_image.svg" style="vertical-align:middle"></div>
+<div id="parent-font" class="case">xx<img class="replaced big-font" src="layout_intrinsic_image.svg" style="vertical-align:middle"></div>
+<div id="legacy-font" class="case">xx<img class="replaced big-font" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="input-image" class="case">xx<input class="replaced" type="image" src="layout_intrinsic_image.svg" align="center"></div>
+<div id="iframe" class="case">xx<iframe class="replaced" srcdoc="" align="center"></iframe></div>
+<div id="object" class="case">xx<object class="replaced" data="layout_intrinsic_image.svg" type="image/svg+xml" align="center"></object></div>
+<div id="embed" class="case">xx<embed class="replaced" src="layout_intrinsic_image.svg" type="image/svg+xml" align="center"></div>
+<div id="ordinary-span" class="case">xx<span class="replaced" style="display:inline-block" align="center"></span></div>
+<div id="text-input" class="case">xx<input class="replaced" type="text" align="center"></div>
+<div id="left" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="left"></div>
+<div style="clear:both"></div>
+<div id="right" class="case">xx<img class="replaced" src="layout_intrinsic_image.svg" align="right"></div>
+<div style="clear:both"></div>
+<div id="logo" class="case" style="font:16px/24px Arial"><img class="logo" src="../layout/data/support/images/gh_logo.svg" width="200" align="center"></div>
+<div id="wrapped-right" class="case"><a>
+<img class="replaced" src="layout_intrinsic_image.svg" align="right">
+</a></div><div style="clear:both"></div>
+<div id="wrapped-left" class="case"><a>
+<img class="replaced" src="layout_intrinsic_image.svg" align="left">
+</a></div><div style="clear:both"></div>
+</body></html>

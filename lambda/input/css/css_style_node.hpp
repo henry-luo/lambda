@@ -169,6 +169,10 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
  * @return Winning declaration or NULL if not set
  */
 CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code);
+
+// include a borrowed host-language declaration without changing the style tree.
+CssDeclaration* style_tree_get_declaration_with_fallback(StyleTree* tree,
+    CssPropertyCode property, CssDeclaration* fallback);
 CssDeclaration* style_tree_get_authored_declaration(StyleTree* style_tree, CssPropertyCode property_code);
 CssDeclaration* style_tree_get_inline_declaration(StyleTree* style_tree, CssPropertyCode property_code);
 CssDeclaration* style_tree_get_presentation_declaration(StyleTree* style_tree, CssPropertyCode property_code);

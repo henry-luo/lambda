@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Load-time layout runtime ownership</title></head>
+<body><div id="result">
+<form><input id="control" value="ready"></form>
+<math id="formula"><mfrac><mi>a</mi><mi>b</mi></mfrac></math>
+<iframe srcdoc="<p>embedded load blocker</p>"></iframe>
+<script>document.body.setAttribute('data-script', 'complete');</script>
+</div></body></html>

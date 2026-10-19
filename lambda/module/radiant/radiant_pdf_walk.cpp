@@ -276,7 +276,9 @@ void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     Rect rect = render_geometry_boundary_rect(view, {x, y, view->width, view->height});
     x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
+    // table layer backgrounds require shared paint emission, even with a simple local boundary.
     bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
+        !render_background_uses_table_layers(view) &&
         pdf_walk_simple_boundary(view->boundary(), rect.width, rect.height);
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
     PdfPaintBatch batch(ctx, rect);

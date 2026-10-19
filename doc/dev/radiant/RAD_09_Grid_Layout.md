@@ -2,6 +2,7 @@
 
 > **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
 > **Scoped source refresh:** 2026-10-11 — storage, placement references/extents and owner-font math, calculated repeat counts, repeat expansion, decoded area grammar and grid component cascade/CSSOM (§2.3–2.5, §4, §7–8). Older driver/measurement references retain their historical stamp.
+> **Anonymous-text refresh:** 2026-10-19 — flattened text collection, scratch items, inline measurement and final geometry publication (§3).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS Grid implementation: `grid-template-*` and `repeat()` expansion, definite and auto placement (dense/sparse) over an occupancy matrix, the CSS Grid §11.4–11.8 track-sizing algorithm (intrinsic sizing, `fr`, `minmax`, `fit-content`, auto-stretch), track offsetting and content/self alignment, baseline alignment, and per-item content layout. The defining structural fact is a **single canonical computed-track model**: `GridContainerLayout` stores `radiant::grid::TrackArray` objects, and parsed `GridTrackSize` syntax is converted into that model once when a sizing pass initializes.
 >
@@ -65,6 +66,22 @@ grid-definition shorthand and independent paged layout remain open.
 ---
 
 ## 3. The multipass driver
+
+[CSS Grid 1 §6](https://www.w3.org/TR/css-grid-1/#grid-items) text sequences
+participate through scratch-lived anonymous block items. Shared flex/grid
+helpers flatten `display:contents`, join consecutive text nodes and suppress
+whitespace-only sequences, including under `white-space:pre`. The wrappers
+and run records belong to the grid pass (**D4.5.1v4 / D4.1.4v5**) and never
+enter the retained DOM/view tree. The inline formatter supplies min/max-content
+widths and height at the resolved column width; trial formatting detaches and
+restores source rectangles so measurement preserves retained text geometry.
+Final content layout uses the grid area's width for inherited indentation,
+then publishes alignment movement back to the source text. Anonymous line
+baselines stay relative to the item border box; alignment and inline-grid
+baseline export consume those metrics without synthesizing a bottom edge.
+Ten horizontal controls cover placement order, explicit/auto tracks,
+alignment, indentation, contents flattening and whitespace suppression
+across retained reflow.
 
 `layout_grid_content` (`layout_grid_multipass.cpp:390`) orchestrates the whole thing, following the same multipass shape as flex (`layout_grid_multipass.cpp:23` notes it mirrors `layout_flex_multipass.cpp`; cross-reference [RAD_08 — Flexbox Layout](RAD_08_Flexbox_Layout.md)). It guards nested-grid recursion through the shared `LayoutContext.depth` / `MAX_LAYOUT_DEPTH` policy described in §1 (**D5.1.1v3**). It then consults the shared Taffy-style layout-pass cache via `layout_pass_cache_get(...,"GRID")` (`layout_grid_multipass.cpp:437`) and, in `RunMode::ComputeSize` with both dimensions already known, returns the cached size without laying out (`layout_grid_multipass.cpp:448`). Otherwise it runs the passes.
 

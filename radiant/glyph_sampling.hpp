@@ -26,6 +26,10 @@ static inline uint32_t glyph_sample_coverage_pixel(const GlyphBitmap* bitmap, in
     if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
         return bitmap->buffer[src_y * bitmap->pitch + src_x];
     }
+    // shadows and text masks use color glyph alpha, independent of their painted RGB.
+    if (bitmap->pixel_mode == GLYPH_PIXEL_BGRA) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x * 4 + 3];
+    }
     if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
         const uint8_t* subpixel = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
         return ((uint32_t)subpixel[0] + (uint32_t)subpixel[1] + (uint32_t)subpixel[2] + 1) / 3;

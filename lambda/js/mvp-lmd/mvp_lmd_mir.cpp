@@ -33,6 +33,7 @@
 #include "../../../lib/math_utils.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/atomic.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include <math.h>
 
 enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
@@ -139,6 +140,9 @@ struct LmdBinding {
     LmdBinding* fallback;
 };
 struct LmdWithLookup { LmdBinding* object; LmdWithLookup* outer; };
+struct LmdPrivateBindingKey { AstNode* owner; String* name; LmdBinding* binding; };
+using LmdPrivateBindings = TypedHashMap<LmdPrivateBindingKey,
+    HashMapIdentity2MemberKeyOps<LmdPrivateBindingKey, &LmdPrivateBindingKey::owner, &LmdPrivateBindingKey::name>>;
 struct LmdFunction {
     AstFuncNode* ast;
     MIR_item_t item;
@@ -239,6 +243,7 @@ struct MvpLmdProgram {
     MIR_module_t module;
     ArrayList* functions;
     ArrayList* bindings;
+    HashMap* private_bindings;
     Item* slots;
     uint32_t slot_count;
     char diagnostic[192];
@@ -727,12 +732,12 @@ static LmdBinding* private_binding(MvpLmdProgram* p, AstNode* site, String* name
     for (AstNode* node = site; node; child = node, node = ast_index_parent(&p->frontend->ast_index, node)) {
         if (node->node_type != AST_NODE_CLASS && node->node_type != AST_NODE_CLASS_EXPR) continue;
         if (child && child == ((AstClassNode*)node)->superclass) continue;
-        for (int i = 0; i < p->bindings->length; i++) {
-            LmdBinding* binding = (LmdBinding*)p->bindings->data[i];
-            if (binding->private_name && binding->entry->node == node &&
-                    named(binding->entry->name, name->chars)) return binding;
-        }
+        // one frontend name pool interns spellings; retain the declaring class in the identity.
+        LmdPrivateBindingKey key = {node, name, NULL};
+        if (const auto* found = LmdPrivateBindings::get(p->private_bindings, key)) return found->binding;
         if (!declaring_function) continue;
+        if (!p->private_bindings) p->private_bindings = LmdPrivateBindings::create(8);
+        if (!p->private_bindings) { diagnostic(p, site, "private binding index allocation"); return NULL; }
         NameEntry* entry = (NameEntry*)pool_calloc(p->frontend->pool, sizeof(NameEntry));
         LmdBinding* binding = (LmdBinding*)mem_calloc(1, sizeof(LmdBinding), MEM_CAT_TEMP);
         if (!entry || !binding) { mem_free(binding); diagnostic(p, site, "private binding allocation"); return NULL; }
@@ -740,7 +745,12 @@ static LmdBinding* private_binding(MvpLmdProgram* p, AstNode* site, String* name
         binding->entry = entry; binding->owner = declaring_function; binding->kinds = K_STRING;
         binding->private_name = binding->observed = true;
         if (!declaring_function->id) binding->slot = p->slot_count++;
-        arraylist_append(p->bindings, binding);
+        if (!arraylist_append(p->bindings, binding)) {
+            mem_free(binding); diagnostic(p, site, "private binding list allocation"); return NULL;
+        }
+        key.binding = binding;
+        LmdPrivateBindings::set(p->private_bindings, key);
+        if (hashmap_oom(p->private_bindings)) { diagnostic(p, site, "private binding index insertion"); return NULL; }
         return binding;
     }
     return NULL;
@@ -7784,7 +7794,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         if (u->op == OPERATOR_JS_TYPEOF && u->operand->node_type == AST_NODE_IDENT) {
             AstIdentNode* id = (AstIdentNode*)u->operand;
             // receiver/meta reads still evaluate their value and preserve initialization errors.
-            bool receiver_value = named(id->name, "this") || named(id->name, "new.target");
+            bool receiver_value = named(id->name, "this") || named(id->name, "new.target") ||
+                named(id->name, "import.meta");
             LmdBinding* binding = identifier_binding(c->program, id);
             if (eval_reference_site(c->program, u->operand))
                 v = eval_reference_operation(c, eval_reference(c, id).eval_reference, JS_INTERP_REFERENCE_TYPEOF);
@@ -8407,6 +8418,22 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t in
         check_error(c, em_call_3(&c->em, "mvp_lmd_private_names_initialize", MIR_T_I64,
             MIR_T_P, reg(c, c->unit), MIR_T_P, relocated(c, (uint64_t)names),
             MIR_T_I64, integer(c, passive_count), true));
+        if (!cls->eval_environment && cls->field_count) {
+            auto* slots = (uint32_t*)pool_calloc(c->program->frontend->pool, cls->field_count * sizeof(uint32_t));
+            if (!slots) { diagnostic(c->program, site, "private field key plan"); return expression(c, NULL); }
+            uint32_t fields = 0;
+            bool passive = true;
+            for (AstNode* member = ((AstBlockNode*)ast->body)->statements; member; member = member->next) {
+                auto* field = member->node_type == AST_NODE_FIELD ? (AstClassFieldNode*)member : NULL;
+                if (!field || !field->is_private || field->is_static || field->computed || field->value) { passive = false; break; }
+                auto* key = (AstIdentNode*)field->key;
+                LmdBinding* binding = private_binding(c->program, site, key->name);
+                if (!binding || !passive_private(binding)) { passive = false; break; }
+                slots[fields++] = binding->slot;
+            }
+            // no computed keys, methods or initializers can observe the intermediate metadata.
+            if (passive && fields == cls->field_count) cls->private_field_slots = slots;
+        }
     }
     if (cls->has_private_names) for (int i = 0; i < c->program->bindings->length; i++) {
         LmdBinding* binding = (LmdBinding*)c->program->bindings->data[i];
@@ -8452,7 +8479,7 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t in
             MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, name), MIR_T_I64, integer(c, 0), true));
     }
     uint32_t field_index = 0, initializer_index = 0;
-    if (cls->dynamic) for (AstNode* member = ((AstBlockNode*)ast->body)->statements; member; member = member->next) {
+    if (cls->dynamic && !cls->private_field_slots) for (AstNode* member = ((AstBlockNode*)ast->body)->statements; member; member = member->next) {
         if (member->node_type == JS_AST_NODE_STATIC_BLOCK) continue;
         bool field = member->node_type == AST_NODE_FIELD;
         AstMethodNode* method = field ? NULL : (AstMethodNode*)member;
@@ -10072,6 +10099,8 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
         cls->values = cls->indirect_values ? metadata.get().array->items : env + captures;
         if (retains_parent) cls->values[count - captures - 1] = parent_value.get();
         cls->initializers = cls->values + 3; cls->field_keys = cls->initializers + cls->initializer_count;
+        if (cls->private_field_slots) for (uint32_t i = 0; i < cls->field_count; i++)
+            cls->field_keys[i] = cls->program->slots[cls->private_field_slots[i]];
         cls->values[0] = constructor_root.get();
         if (cls->private_method_mask) {
             for (int i = 0; i < 2; i++) if (cls->private_method_mask & (1 << i)) {
@@ -10858,29 +10887,61 @@ Item mvp_lmd_dynamic_global(MvpLmdProgram* p, Item key, Item value, int64_t oper
     return mvp_lmd_property_with_receiver(global, name.get(), input.get(),
         mode | (strict ? LMD_PROP_STRICT : 0), global);
 }
+static Item mvp_lmd_prepare_global_vars(MvpLmdProgram* program, NameScope* scope) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> global(roots, program->slots[program->global_slot]);
+    if (get_type_id(global.get()) != LMD_TYPE_MAP || global.get().map->map_kind != MAP_KIND_PLAIN) return ItemNull;
+    // mixed function/Annex B declarations retain their ordered descriptor operations.
+    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next)
+        if (entry->is_annex_b_companion || (entry->node && entry->node->node_type == AST_NODE_FUNC)) return ItemNull;
+    int capacity = scope ? scope->entry_count : 0;
+    if (!capacity) return ItemNull;
+    auto** names = (String**)pool_alloc(program->frontend->pool, capacity * sizeof(String*));
+    if (!names) return ItemError;
+    int count = 0;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        LmdBinding* local = binding(program, entry);
+        if (!local || local->intrinsic || entry->is_lexical) continue;
+        if (!typemap_hash_lookup_key((TypeMap*)global.get().map->type, entry->name)) names[count++] = entry->name;
+    }
+    // the preceding declaration checks prove extensibility; scope entries are unique and own keys are absent.
+    if (!count) return ItemNull;
+    if (!map_put_undefined_unique_absent_bulk_heap(global.get().map, names, count, runtime_shape_tree(), 0)) return ItemError;
+    // MVP descriptors live in shape flags on the ordinary packed carrier, without a legacy DESC map kind.
+    for (int i = 0; i < count; i++)
+        typemap_hash_lookup_key((TypeMap*)global.get().map->type, names[i])->flags |= JSPD_NON_CONFIGURABLE;
+    return ItemNull;
+}
 static Item mvp_lmd_prepare_script_bindings(MvpLmdProgram* program) {
     NameScope* scope = ((AstScript*)program->frontend->ast_root)->global_vars;
     // check every declaration before publishing any cell or global property.
-    for (int pass = 0; pass < 2; pass++) for (NameEntry* entry = scope ? scope->first : NULL;
-            entry; entry = entry->next) {
-        LmdBinding* local = binding(program, entry);
-        // implicit writes are analysis facts; every source declaration still needs its binding.
-        if (!local || local->intrinsic) continue;
-        if (entry->is_annex_b_companion) {
-            if (!pass) continue;
-            Item available = mvp_lmd_dynamic_global(program, Item{.item = s2it(entry->name)},
-                Item{.item = ITEM_TRUE}, JS_INTERP_HOST_CHECK_DECLARE | JS_INTERP_HOST_SCRIPT, false);
-            if (item_is_error(available)) return available;
-            if (available.item != ITEM_TRUE) continue;
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass) {
+            Item status = mvp_lmd_prepare_global_vars(program, scope);
+            if (item_is_error(status)) return status;
         }
-        bool function = entry->node && entry->node->node_type == AST_NODE_FUNC && !entry->is_annex_b_companion;
-        if (pass && entry->is_lexical) continue;
-        int operation = entry->is_lexical ? JS_INTERP_HOST_CHECK_DECLARE_LEXICAL :
-            function ? (pass ? JS_INTERP_HOST_DECLARE_FUNCTION : JS_INTERP_HOST_CHECK_DECLARE_FUNCTION) :
-            pass ? JS_INTERP_HOST_DECLARE : JS_INTERP_HOST_CHECK_DECLARE;
-        Item result = mvp_lmd_dynamic_global(program, Item{.item = s2it(entry->name)},
-            Item{.item = ITEM_JS_UNDEFINED}, operation | JS_INTERP_HOST_SCRIPT, false);
-        if (item_is_error(result)) return result;
+        for (NameEntry* entry = scope ? scope->first : NULL;
+                entry; entry = entry->next) {
+            LmdBinding* local = binding(program, entry);
+            // implicit writes are analysis facts; every source declaration still needs its binding.
+            if (!local || local->intrinsic) continue;
+            if (entry->is_annex_b_companion) {
+                if (!pass) continue;
+                Item available = mvp_lmd_dynamic_global(program, Item{.item = s2it(entry->name)},
+                    Item{.item = ITEM_TRUE}, JS_INTERP_HOST_CHECK_DECLARE | JS_INTERP_HOST_SCRIPT, false);
+                if (item_is_error(available)) return available;
+                if (available.item != ITEM_TRUE) continue;
+            }
+            bool function = entry->node && entry->node->node_type == AST_NODE_FUNC && !entry->is_annex_b_companion;
+            if (pass && entry->is_lexical) continue;
+            int operation = entry->is_lexical ? JS_INTERP_HOST_CHECK_DECLARE_LEXICAL :
+                function ? (pass ? JS_INTERP_HOST_DECLARE_FUNCTION : JS_INTERP_HOST_CHECK_DECLARE_FUNCTION) :
+                pass ? JS_INTERP_HOST_DECLARE : JS_INTERP_HOST_CHECK_DECLARE;
+            Item result = mvp_lmd_dynamic_global(program, Item{.item = s2it(entry->name)},
+                Item{.item = ITEM_JS_UNDEFINED}, operation | JS_INTERP_HOST_SCRIPT, false);
+            if (item_is_error(result)) return result;
+        }
     }
     program->script_published = true;
     program->script_bindings_pending = false;
@@ -13688,8 +13749,9 @@ static MvpLmdExecution* mvp_lmd_execute_owned(const char* source, size_t length,
     if (native_harness) {
         // native batches omit sta/assert source; import the same real helpers used by AST realms.
         if (!mvp_lmd_prepare_module_realm(p)) return e;
-        initialized = js_test262_native_harness_install();
-        if (!item_is_error(initialized)) initialized = mvp_lmd_import_host_globals(p);
+        // native closures must capture the formal global, including async completion state.
+        initialized = mvp_lmd_import_host_globals(p);
+        if (!item_is_error(initialized)) initialized = js_test262_native_harness_install();
         if (item_is_error(initialized)) { e->result = runtime_publish_result(e->owner_context, initialized); return e; }
     }
     if (runtime || native_harness) {
@@ -14058,6 +14120,7 @@ static void mvp_lmd_release_unit(MvpLmdProgram* p) {
         arraylist_free(p->bindings);
     }
     if (p->import_cache) hashmap_free(p->import_cache);
+    if (p->private_bindings) hashmap_free(p->private_bindings);
     if (p->objects) arraylist_free(p->objects);
     if (p->classes) arraylist_free(p->classes);
     if (p->dynamic_scripts) {

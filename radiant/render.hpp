@@ -2032,6 +2032,33 @@ typedef struct PaintList PaintList;
 // SVG and PDF exporters derive from it; RenderBackend::ctx points at it.
 struct RenderTextPaintData;
 struct RenderTextPaintEntry;
+enum RadiantPaintPhase : uint8_t {
+    RADIANT_PAINT_ALL,
+    RADIANT_PAINT_BLOCK_BACKGROUNDS,
+    RADIANT_PAINT_FLOATS,
+    RADIANT_PAINT_FOREGROUND
+};
+
+struct RadiantPaintPhaseScope {
+    RadiantPaintPhase* slot;
+    RadiantPaintPhase saved;
+    RadiantPaintPhaseScope(RadiantPaintPhase* value, RadiantPaintPhase next)
+        : slot(value), saved(*value) { *slot = next; }
+    ~RadiantPaintPhaseScope() { *slot = saved; }
+    RadiantPaintPhaseScope(const RadiantPaintPhaseScope&) = delete;
+    RadiantPaintPhaseScope& operator=(const RadiantPaintPhaseScope&) = delete;
+};
+
+inline bool render_paint_phase_has_content(RadiantPaintPhase phase) {
+    return phase == RADIANT_PAINT_ALL || phase == RADIANT_PAINT_FOREGROUND;
+}
+
+inline bool render_paint_phase_has_boundary(RadiantPaintPhase phase, View* view) {
+    // inline decorations belong with their line content, rather than block backgrounds.
+    return view && view->view_type == RDT_VIEW_INLINE ? render_paint_phase_has_content(phase)
+        : phase == RADIANT_PAINT_ALL || phase == RADIANT_PAINT_BLOCK_BACKGROUNDS;
+}
+
 struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
@@ -2040,6 +2067,7 @@ struct RenderContext {
     lam::Up<RenderTextPaintData> text_paint; // borrowed from the current block paint scope
     RdtMatrix overflow_clip_transform;
     bool has_overflow_clip_transform;
+    RadiantPaintPhase paint_phase = RADIANT_PAINT_ALL;
 };
 
 struct Css3dPaintContext;
@@ -3049,6 +3077,11 @@ bool radiant_video_events_pending(DocState* state);
 bool radiant_stack_is_positive_z_positioned(View* view);
 bool radiant_stack_is_negative_z_block(View* view);
 bool radiant_stack_is_context(View* view);
+bool radiant_stack_is_float(View* view);
+bool radiant_stack_is_paint_atomic(View* view);
+unsigned radiant_stack_flow_phases(View* first_child);
+bool radiant_stack_in_paint_phase(View* view, RadiantPaintPhase phase);
+RadiantPaintPhase radiant_stack_paint_phase(unsigned index);
 View* radiant_stack_path_child(View* ancestor, View* descendant);
 void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
     bool (*visit)(void* context, View* owner, View* layer));
@@ -3084,6 +3117,44 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
                                               ViewBlock* block);
 
 // ===== render_paint_boundary.hpp =====
+inline bool render_paint_boundary_hidden(ViewBlock* block) {
+    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewTableCell* cell = static_cast<ViewTableCell*>(block);
+    return cell->td && cell->td->hide_empty;
+}
+
+inline bool render_background_is_table_track(ViewBlock* view) {
+    return view && (view->view_type == RDT_VIEW_TABLE_ROW ||
+        view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+        view->view_type == RDT_VIEW_TABLE_COLUMN ||
+        view->view_type == RDT_VIEW_TABLE_COLUMN_GROUP);
+}
+
+inline bool render_background_uses_table_layers(ViewBlock* view) {
+    if (render_background_is_table_track(view)) return true;
+    if (!view || view->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewTable* table = nullptr;
+    for (View* parent = view->parent; parent; parent = parent->parent) {
+        if (parent->view_type == RDT_VIEW_TABLE) { table = static_cast<ViewTable*>(parent); break; }
+        if (parent->view_type == RDT_VIEW_TABLE_ROW || parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewBlock* source = static_cast<ViewBlock*>(parent);
+            if (source->bound && source->boundary()->background) return true;
+        }
+    }
+    if (!table) return false;
+    // fast paths may conservatively decline; the producer selects the cell's actual originating column.
+    bool background = false;
+    auto has_background = [&](ViewElement* source) {
+        background |= source->bound && source->boundary()->background;
+    };
+    table->each_column_source([&](ViewElement* source) {
+        has_background(source);
+        if (source->view_type == RDT_VIEW_TABLE_COLUMN_GROUP)
+            radiant_each_table_colgroup_column(source, has_background);
+    });
+    return background;
+}
+
 // Emits a complete simple CSS boundary into PaintIR.
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
@@ -4763,6 +4834,11 @@ bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* 
 CssEnum render_text_inherited_transform(ViewText* text_view);
 struct RadiantWhitespaceSpec;
 bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint, float* advance);
+// callbacks borrow cached bitmaps; offsets/advance are CSS pixels from the cluster baseline.
+typedef void (*RenderClusterGlyphFn)(void* context, const GlyphBitmap* bitmap, float x, float y);
+bool render_text_visit_cluster(const FontBox* font, const unsigned char* start,
+    const unsigned char* end, RenderClusterGlyphFn visitor, void* context,
+    size_t* bytes, float* advance, bool include_scalar = false);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,

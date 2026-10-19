@@ -42,7 +42,7 @@ static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     // on Chinese text).
     while (p < end) {
         unsigned char c = (unsigned char)*p;
-        if (c == '<' || (stop_ampersand && c == '&') || c == '\0') {
+        if (c == '<' || (stop_ampersand && c == '&') || c == '\0' || c == '\r') {
             break;
         }
         p++;
@@ -346,7 +346,13 @@ char html5_consume_next_char(Html5Parser* parser) {
     if (parser->pos >= parser->length) {
         return '\0';  // EOF
     }
-    return parser->html[parser->pos++];
+    char c = parser->html[parser->pos++];
+    // source newlines normalize before character references are decoded (HTML §13.2.3.5).
+    if (c == '\r') {
+        if (parser->pos < parser->length && parser->html[parser->pos] == '\n') parser->pos++;
+        return '\n';
+    }
+    return c;
 }
 
 // helper: peek at character without consuming
@@ -355,7 +361,8 @@ char html5_peek_char(Html5Parser* parser, size_t offset) {
     if (peek_pos >= parser->length) {
         return '\0';
     }
-    return parser->html[peek_pos];
+    char c = parser->html[peek_pos];
+    return c == '\r' ? '\n' : c;
 }
 
 // helper: check if at EOF
@@ -1008,7 +1015,8 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             // SVG metadata can contain large CDATA blocks; emit each plain run together.
             size_t start = parser->pos;
             while (parser->pos < parser->length &&
-                   parser->html[parser->pos] != ']' && parser->html[parser->pos] != '\0') {
+                   parser->html[parser->pos] != ']' && parser->html[parser->pos] != '\0' &&
+                   parser->html[parser->pos] != '\r') {
                 parser->pos++;
             }
             if (parser->pos > start) {

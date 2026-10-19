@@ -1215,7 +1215,8 @@ typedef enum CssOrigin {
     CSS_ORIGIN_USER,          // User stylesheet
     CSS_ORIGIN_AUTHOR,        // Document stylesheet
     CSS_ORIGIN_ANIMATION,     // CSS animations
-    CSS_ORIGIN_TRANSITION     // CSS transitions
+    CSS_ORIGIN_TRANSITION,    // CSS transitions
+    CSS_ORIGIN_AUTHOR_HINT   // HTML presentation; part of author origin for revert
 } CssOrigin;
 
 typedef void (*CssDeclarationPayloadRetainFn)(void* owner);
