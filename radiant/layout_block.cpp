@@ -709,79 +709,184 @@ static float text_wrap_balance_line_height(LayoutContext* lycon) {
     return 16.0f;
 }
 
-static int text_wrap_balance_normal_line_count(LayoutContext* lycon, ViewBlock* block,
-                                               float content_width) {
-    if (!lycon || !block || content_width <= 0.0f) return 1;
-    float line_height = text_wrap_balance_line_height(lycon);
-    float normal_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), content_width);
-    if (normal_height <= line_height + 0.5f) return 1;
-    int line_count = (int)ceilf((normal_height - 0.01f) / line_height); // INT_CAST_OK: line-count estimate for balance wrapping
-    if (line_count < 1) line_count = 1;
-    return line_count;
-}
+struct TextWrapBalanceProbe {
+    LayoutContext* lycon;
+    ViewBlock* block;
+    StrBuf* content;
+    const char* paragraph;
+    size_t length;
+    bool has_boundaries;
+    float query_y;
+    float query_left;
+    float query_width;
+    float clearance;
 
-static int text_wrap_balance_intrinsic_line_count(float max_content,
-                                                  float content_width) {
-    if (max_content <= 0.0f || content_width <= 0.0f) return 1;
-    int line_count = (int)ceilf((max_content - 0.01f) / content_width); // INT_CAST_OK: line-count estimate from intrinsic width
-    return line_count > 0 ? line_count : 1;
-}
+    TextWrapBalanceProbe(LayoutContext* context, ViewBlock* owner, int index)
+        : lycon(context), block(owner),
+          content(layout_collect_inline_text(owner->as_element(), true)),
+          paragraph(nullptr), length(0), has_boundaries(false),
+          query_y(context->block.advance_y), query_left(context->line.align_left),
+          query_width(0.0f), clearance(0.0f) {
+        if (!content) return;
+        has_boundaries = memchr(content->str, '\v', content->length) != nullptr;
+        const char* begin = content->str;
+        const char* end = begin + content->length;
+        for (int current = 0; current < index; current++) {
+            const char* boundary = (const char*)memchr(begin, '\v', (size_t)(end - begin));
+            if (!boundary) return;
+            begin = boundary + 1;
+        }
+        paragraph = begin;
+        const char* boundary = (const char*)memchr(begin, '\v', (size_t)(end - begin));
+        length = (size_t)((boundary ? boundary : end) - begin);
+    }
+    // paragraph slices borrow this buffer only until the measurement returns.
+    ~TextWrapBalanceProbe() { if (content) strbuf_free(content); }
+    TextWrapBalanceProbe(const TextWrapBalanceProbe&) = delete;
+    TextWrapBalanceProbe& operator=(const TextWrapBalanceProbe&) = delete;
+
+    static float line_width(void* context, int index, float required_width) {
+        TextWrapBalanceProbe* probe = (TextWrapBalanceProbe*)context;
+        LayoutContext* lycon = probe->lycon;
+        LayoutContextScope scope(lycon);
+        float line_height = text_wrap_balance_line_height(lycon);
+        lycon->block.advance_y = probe->query_y + index * line_height + probe->clearance;
+        lycon->line.left = probe->query_left;
+        lycon->line.right = probe->query_left + probe->query_width;
+        lycon->line.is_line_start = true;
+        update_line_for_bfc_floats(lycon);
+        float available = lycon->line.effective_right - lycon->line.effective_left;
+        if (required_width > available && lycon->line.has_float_intrusion) {
+            BlockContext* bfc = block_context_find_bfc(&lycon->block);
+            float next_y = find_line_y_for_width_with_floats(bfc, &lycon->block,
+                &lycon->line, required_width, lycon->block.advance_y, line_height);
+            probe->clearance += next_y - lycon->block.advance_y;
+            lycon->block.advance_y = next_y;
+            update_line_for_bfc_floats(lycon);
+            available = lycon->line.effective_right - lycon->line.effective_left;
+        }
+        return max(0.0f, available);
+    }
+
+    IntrinsicSizes widths() {
+        if (has_boundaries) {
+            if (!paragraph) return {};
+            TextIntrinsicWidths sizes = layout_measure_text_intrinsic_widths(
+                lycon, paragraph, length, get_element_text_transform(block),
+                get_element_font_variant(block), block->block()->white_space,
+                block->block()->overflow_wrap, block->block()->word_break);
+            return {sizes.min_content, sizes.max_content};
+        }
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, block, true);
+        float decoration = layout_box_metrics(block).pad_border_h;
+        sizes.min_content = max(0.0f, sizes.min_content - decoration);
+        sizes.max_content = max(0.0f, sizes.max_content - decoration);
+        return sizes;
+    }
+
+    int lines(float width) {
+        float line_height = text_wrap_balance_line_height(lycon);
+        BlockContext* bfc = block_context_find_bfc(&lycon->block);
+        bool query_floats = content && bfc && (bfc->left_float_count || bfc->right_float_count);
+        query_width = width;
+        clearance = 0.0f;
+        // balance uses the same shortened intervals and float clearance as rendering.
+        float height = (has_boundaries || query_floats)
+            ? (paragraph ? compute_text_height_at_width(lycon, paragraph, length,
+                width, line_height, get_element_text_transform(block),
+                get_element_font_variant(block), false,
+                query_floats ? line_width : nullptr, this) : 0.0f)
+            : calculate_max_content_height(lycon, block, width);
+        return max(1, (int)ceilf((height - 0.01f) / line_height)); // INT_CAST_OK: measured line count
+    }
+};
 
 static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
-                                       float content_width) {
-    if (!lycon || !block || !block->blk || content_width <= 0.0f) return 0.0f;
-    if (lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
+                                       float content_width, int paragraph,
+                                       bool* has_paragraph_boundaries) {
+    *has_paragraph_boundaries = false;
+    if (!block || !block->blk || content_width <= 0.0f ||
+        lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
     if (block->block()->white_space == CSS_VALUE_NOWRAP || block->block()->white_space == CSS_VALUE_PRE) return 0.0f;
     if (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) return 0.0f;
+    LayoutFontScope font_scope(lycon);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    TextWrapBalanceProbe probe(lycon, block, paragraph);
+    *has_paragraph_boundaries = probe.has_boundaries;
+    IntrinsicSizes sizes = probe.widths();
+    if (sizes.max_content <= content_width + 0.5f ||
+        sizes.min_content >= content_width - 0.5f) return 0.0f;
+    int normal_lines = probe.lines(content_width);
+    float normal_clearance = probe.clearance;
     bool clamp_active = lycon->block.line_clamp > 0;
-    float max_content = 0.0f;
-    float min_content = 0.0f;
-    IntrinsicSizes balance_sizes = measure_element_intrinsic_widths(
-        lycon, static_cast<DomElement*>(static_cast<DomNode*>(block)), true);
-    BoxMetrics balance_box = layout_box_metrics(block);
-    max_content = max(balance_sizes.max_content - balance_box.pad_border_h, 0.0f);
-    min_content = max(balance_sizes.min_content - balance_box.pad_border_h, 0.0f);
-    if (max_content <= content_width + 0.5f) return 0.0f;
-    if (min_content >= content_width - 0.5f) return 0.0f;
-    int target_lines = clamp_active ? lycon->block.line_clamp :
-        text_wrap_balance_intrinsic_line_count(max_content, content_width);
-    if (target_lines <= 1) return 0.0f;
-    // CSS Text 4 permits UAs to skip balancing above a small line-count limit.
-    if (target_lines > 5) return 0.0f;
+    int remaining_lines = clamp_active
+        ? max(0, lycon->block.line_clamp - lycon->block.balance_wrap_start_line)
+        : normal_lines;
+    // complex block/float heights do not encode a count of inline line boxes.
+    // retain the intrinsic estimate until their DOM probe can report that count.
+    int target_lines = clamp_active ? remaining_lines :
+        (probe.content ? normal_lines :
+            (int)ceilf((sizes.max_content - 0.01f) / content_width)); // INT_CAST_OK: fallback line-count estimate
+    if (clamp_active && probe.has_boundaries) target_lines = min(target_lines, normal_lines);
+    // CSS Text 4 §5.4 permits the auto fallback only above ten lines.
+    if (target_lines <= 1 || target_lines > 10) return 0.0f;
     int balance_line_limit = target_lines;
-    float content_measure = max_content;
+    float content_measure = sizes.max_content;
     if (clamp_active) {
-        // css overflow 4 §5.3: clamp the stable layout first, then balance
-        // the remaining visible lines without letting a discarded unbreakable
-        // tail prevent the balance pass from starting.
-        balance_line_limit = max(target_lines,
-            text_wrap_balance_normal_line_count(lycon, block, content_width));
-        content_measure = max(max_content - min_content, 0.0f);
+        // retain the existing clamp probe until visible-prefix measurement owns
+        // the cutoff; discarded content must not enlarge the visible line budget.
+        balance_line_limit = max(target_lines, normal_lines);
+        content_measure = max(content_measure - sizes.min_content, 0.0f);
     }
     float lower_bound = content_measure / (float)target_lines;
-    if (!clamp_active && lower_bound < min_content) {
-        lower_bound = min_content;
-    }
+    if (!clamp_active) lower_bound = max(lower_bound, sizes.min_content);
     if (lower_bound >= content_width - 0.5f) return 0.0f;
     float low = lower_bound;
     float high = content_width;
     for (int step = 0; step < 12; step++) {
         float mid = (low + high) * 0.5f;
-        float measured_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), mid);
-        int line_count = (int)ceilf((measured_height - 0.01f) / text_wrap_balance_line_height(lycon)); // INT_CAST_OK: probe result as line count
-        if (line_count <= balance_line_limit) {
-            high = mid;
-        } else {
-            low = mid;
-        }
+        // balancing chooses soft breaks within the existing float geometry;
+        // a narrower probe cannot clear a float to invent a new paragraph origin.
+        if (probe.lines(mid) <= balance_line_limit &&
+            probe.clearance <= normal_clearance + kTextLayoutSubpixelEpsilon) high = mid;
+        else low = mid;
     }
-    float balanced = ceilf(high * 2.0f) * 0.5f;
-    if (balanced < lower_bound) balanced = lower_bound;
-    if (!clamp_active && balanced < min_content) {
-        balanced = min_content;
-    }
-    if (balanced >= content_width - 0.5f) return 0.0f;
-    return balanced;
+    float balanced = max(lower_bound, ceilf(high * 2.0f) * 0.5f);
+    return balanced < content_width - 0.5f ? balanced : 0.0f;
+}
+
+static float text_wrap_balance_update(LayoutContext* lycon, ViewBlock* block,
+                                      float available_width, int paragraph) {
+    bool has_paragraph_boundaries = false;
+    float width = text_wrap_balance_measure(lycon, block, available_width,
+        paragraph, &has_paragraph_boundaries);
+    lycon->block.balance_wrap_active = width > 0.0f;
+    lycon->block.balance_wrap_width = width;
+    lycon->block.balance_wrap_owner = has_paragraph_boundaries ? lam::up(block) : nullptr;
+    return width;
+}
+
+static float text_wrap_balance_start(LayoutContext* lycon, ViewBlock* block,
+                                     float available_width) {
+    lycon->block.balance_wrap_paragraph = 0;
+    lycon->block.balance_wrap_start_line = 0;
+    lycon->block.balance_wrap_available_width = available_width;
+    return text_wrap_balance_update(lycon, block, available_width, 0);
+}
+
+void layout_advance_text_balance_paragraph(LayoutContext* lycon) {
+    ViewBlock* owner = lycon->block.balance_wrap_owner;
+    if (!owner) return;
+    lycon->block.balance_wrap_paragraph++;
+    lycon->block.balance_wrap_start_line = lycon->block.line_number;
+    float width = text_wrap_balance_update(lycon, owner,
+        lycon->block.balance_wrap_available_width,
+        lycon->block.balance_wrap_paragraph);
+    // a real forced break starts an independent paragraph; a terminal line
+    // flush must not consume a paragraph or inherit its predecessor's width.
+    lycon->line.left = lycon->line.align_left;
+    lycon->line.right = width > 0.0f
+        ? lycon->line.left + width : lycon->line.align_right;
 }
 
 static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
@@ -2840,30 +2945,6 @@ static float layout_strut_below_baseline(LayoutContext* lycon) {
     return max(descender, 0.0f);
 }
 
-static void layout_middle_inline_contribution(LayoutContext* lycon,
-                                               float item_height,
-                                               float* ascender,
-                                               float* descender) {
-    if (!lycon || !ascender || !descender) return;
-    float parent_font_size = lycon->line.parent_font_size;
-    if (parent_font_size <= 0.0f && lycon->font.style) {
-        parent_font_size = lycon->font.style->font_size;
-    }
-    if (parent_font_size <= 0.0f) {
-        parent_font_size = lycon->block.init_ascender + lycon->block.init_descender;
-    }
-    float x_height_half;
-    if (font_box_handle(&lycon->font)) {
-        float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
-        float x_height_font_size = lycon->font.current_font_size > 0.0f
-            ? lycon->font.current_font_size : parent_font_size;
-        x_height_half = x_height_font_size * x_ratio / 2.0f;
-    } else {
-        x_height_half = parent_font_size * 0.25f;
-    }
-    *ascender = item_height / 2.0f + x_height_half;
-    *descender = item_height / 2.0f - x_height_half;
-}
 
 static float layout_select_listbox_baseline(LayoutContext* lycon,
                                             ViewBlock* block, float margin_top) {
@@ -6694,6 +6775,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         block->block()->text_wrap_style : inherited_text_wrap_style;
     lycon->block.balance_wrap_active = false;
     lycon->block.balance_wrap_width = 0.0f;
+    lycon->block.balance_wrap_owner = nullptr;
     layout_setup_text_indent(lycon, block, content_width);
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
@@ -6791,10 +6873,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.first_line_style_active =
             lycon->block.first_line_font != nullptr;
     }
-    float balance_width = text_wrap_balance_measure(lycon, block, line_content_width);
+    float balance_width = text_wrap_balance_start(lycon, block, line_content_width);
     if (balance_width > 0.0f) {
-        lycon->block.balance_wrap_active = true;
-        lycon->block.balance_wrap_width = balance_width;
         lycon->line.left = inner_left;
         lycon->line.right = inner_left + balance_width;
         lycon->line.align_left = inner_left;
@@ -9345,16 +9425,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float inner_left = layout_axis_decoration_start(
                 block->bound ? block->boundary() : nullptr, LAYOUT_AXIS_X);
             float inner_right = inner_left + line_content_width;
-            float balance_width = text_wrap_balance_measure(lycon, block, block->content_width);
+            float balance_width = text_wrap_balance_start(lycon, block, block->content_width);
             if (balance_width > 0.0f) {
-                lycon->block.balance_wrap_active = true;
-                lycon->block.balance_wrap_width = balance_width;
                 line_init(lycon, inner_left, inner_left + balance_width);
                 lycon->line.align_left = inner_left;
                 lycon->line.align_right = inner_right;
             } else {
-                lycon->block.balance_wrap_active = false;
-                lycon->block.balance_wrap_width = 0.0f;
                 line_init(lycon, inner_left, inner_right);
                 if (lycon->paged) paged_line_start(lycon, block);
             }
@@ -10211,10 +10287,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     baseline_ref, item_baseline, valign_offset);
                 if (!is_broken_alt_image && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     float asc_contribution, desc_contribution;
-                    if (valign == CSS_VALUE_MIDDLE) {
+                    if (layout_is_middle_vertical_align(valign)) {
                         // CSS 2.1 §10.8.1: align the box midpoint with the parent x-height.
                         layout_middle_inline_contribution(
-                            lycon, item_height, &asc_contribution, &desc_contribution);
+                            lycon, valign, item_height, &asc_contribution, &desc_contribution);
                     } else if (valign == CSS_VALUE_TEXT_TOP) {
                         asc_contribution = lycon->line.parent_font_ascender;
                         desc_contribution = item_height - asc_contribution;
@@ -10355,7 +10431,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // CSS 2.1 §10.8.1: middle-aligned fallback glyphs expand the line
             // through the replaced inline's extents, not the text threshold.
             bool broken_alt_expands_line = is_broken_alt_image && block->in_line &&
-                block->inl()->vertical_align == CSS_VALUE_MIDDLE;
+                layout_is_middle_vertical_align(block->inl()->vertical_align);
             if (!is_broken_alt_image || broken_alt_expands_line) {
                 lycon->line.has_replaced_content = true;
                 lycon->line.atomic_inline_count++;
@@ -10386,13 +10462,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, block_flow_height);
                 }
                 else if (is_broken_alt_image &&
-                         block->inl()->vertical_align == CSS_VALUE_MIDDLE) {
+                         layout_is_middle_vertical_align(block->inl()->vertical_align)) {
                     // broken-image fallback remains an inline visual and must
                     // contribute its middle-aligned extents to the line box.
                     float asc_contribution = 0.0f;
                     float desc_contribution = 0.0f;
                     layout_middle_inline_contribution(
-                        lycon, block_flow_height, &asc_contribution, &desc_contribution);
+                        lycon, block->inl()->vertical_align, block_flow_height, &asc_contribution, &desc_contribution);
                     lycon->line.max_ascender = max(
                         lycon->line.max_ascender, asc_contribution);
                     lycon->line.max_descender = max(

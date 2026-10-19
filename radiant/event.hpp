@@ -4476,8 +4476,10 @@ struct DocState;
 struct DomDocument;
 struct EditingTargetRange;
 
+enum RadiantPaintPhase : uint8_t;
 typedef struct EventContext {
     RdtEvent event;
+    RadiantPaintPhase paint_phase;
     View* target;
     lam::Up<View> negative_path; // borrowed target while replaying a lifted negative layer's ancestry
     TextRect* target_text_rect;

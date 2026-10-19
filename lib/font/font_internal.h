@@ -443,6 +443,7 @@ typedef struct CodepointFallbackEntry {
 
 typedef struct BitmapCacheEntry {
     uint32_t        codepoint;
+    bool            is_glyph_index;
     GlyphRenderMode mode;
     FontHandle*     handle;
     uint64_t        handle_identity;
@@ -519,6 +520,8 @@ void*               font_platform_create_ct_font(const char* postscript_name,
 void*               font_platform_copy_with_weight_variation(const void* ct_font_ref,
                                                               float size_px,
                                                               int css_weight);
+// returns an owned face with CSS spacing, retaining non-color font state unchanged.
+void*               font_platform_copy_for_css(void* ct_font_ref);
 void*               font_platform_retain_ct_font(void* ct_font_ref);
 void                font_platform_destroy_ct_font(void* ct_font_ref);
 void                font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref);
@@ -529,6 +532,11 @@ float               font_platform_get_pair_kerning(void* ct_font_ref,
 TextExtents         font_platform_measure_text(void* ct_font_ref,
                                                 const char* text, int byte_len,
                                                 float fallback_height);
+void*               font_platform_create_text_line(void* ct_font_ref,
+                        const char* text, int byte_len);
+bool                font_platform_visit_face_glyphs(void* ct_font_ref,
+                        const char* text, int byte_len, FontGlyphVisitFn visitor,
+                        void* context, float* advance);
 bool                font_platform_measure_text_range(void* ct_font_ref,
                         const char* text, int byte_len, int range_start,
                         int range_length, float fallback_height, TextExtents* extents);
@@ -546,6 +554,9 @@ bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepo
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
                                               GlyphRenderMode mode, float bitmap_scale,
                                               float pixel_ratio, Arena* arena);
+GlyphBitmap*        font_rasterize_ct_render_index(void* ct_font_ref, uint32_t glyph_index,
+                        GlyphRenderMode mode, float bitmap_scale,
+                        float pixel_ratio, Arena* arena);
 #else
 // font_rasterize_tvg.cpp — ThorVG glyph rasterization (Linux/WASM)
 void*               font_rasterize_tvg_create(void);

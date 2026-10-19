@@ -1,6 +1,8 @@
 # Radiant — Inline & Text Layout
 
 > **Last verified against tree:** 2026-10-11 *(§11 clamp/ellipsis, intrinsic wrapping and computed paint spacing; other sections retain their prior verification scope)*
+> **Scoped source refresh:** 2026-10-19 — paragraph balance constraints and float-aware line-count probes (§12); following-punctuation constraints across inline boundaries (§5); fitting hyphen lookahead, source styles and mixed-font leading (§4).
+> **Scoped bidi/whitespace refresh:** 2026-10-19 — advance-based text range publication after visual reordering (§2.3); source newline preprocessing, DOM CR spacing and source-owned separator wrapping (§2.3). Complex-script paint remains separate.
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
@@ -13,7 +15,7 @@
 
 Inline and text layout is the one place where CSS's inline formatting context (CSS 2.1 §9.4.2, CSS Text 3) is realized. Block layout ([RAD_03 — Layout Driver, Block Layout & BFC](RAD_03_Layout_Driver_Block_BFC.md)) walks a block's children and, for each in-flow inline-level node, calls either `layout_inline` (an element) or `layout_text` (a text leaf) after `setup_font` has populated `lycon->font` and `lycon->block`. Those two functions cooperatively fill one in-progress line box — `lycon->line`, a `Linebox` — placing `TextRect` fragments and inline `View`s, and flush it with `line_break` when the line fills or a forced break occurs.
 
-The design is deliberately a **streaming, single-pass, per-character line-breaker**: there is no separate itemize → shape → reflow pipeline. `layout_text` (`layout_text.cpp:2612`) is one ~1370-line function whose main body is a `do…while(*str)` loop over the node's UTF-8 bytes, with a `goto LAYOUT_TEXT` back-edge that restarts the loop after every internal wrap. Line state accumulates on the `Linebox`; on overflow the breaker rewinds to a single recorded break cursor (`last_space`) and flushes. This is cache-friendly and simple, but it forgoes any global optimal-break (no Knuth-Plass) and does real shaping only on the ASCII fast path ([§6](#6-measurement-the-latin-fast-path-vs-the-per-codepoint-loop)). The known limits of this approach (no bidi reorder, no complex-script shaping) are collected in [§10](#10-known-issues--future-improvements).
+The design is deliberately a **streaming, single-pass, per-character line-breaker**: there is no separate itemize → shape → reflow pipeline. `layout_text` (`layout_text.cpp:2612`) is one ~1370-line function whose main body is a `do…while(*str)` loop over the node's UTF-8 bytes, with a `goto LAYOUT_TEXT` back-edge that restarts the loop after every internal wrap. Line state accumulates on the `Linebox`; on overflow the breaker rewinds to a single recorded break cursor (`last_space`) and flushes. This is cache-friendly and simple, but it forgoes any global optimal-break (no Knuth-Plass) and does real shaping only on the ASCII fast path ([§6](#6-measurement-the-latin-fast-path-vs-the-per-codepoint-loop)). The known limits of this approach (no general complex-script shaping) are collected in [§10](#10-known-issues--future-improvements).
 
 The whole subsystem is unusually spec-annotated: nearly every branch cites a CSS 2.1, CSS Text 3, or UAX #14 clause. That annotation is load-bearing — the branch structure of `layout_text` *is* the spec's decision tree, so the citations are the map to the code.
 
@@ -47,6 +49,37 @@ At the wrap point the tag drives class-specific behavior: `BRK_SOFT_HYPHEN` rend
 ### 2.3 `TextRect` — the emitted fragment
 
 Each visual text fragment on one line is a `TextRect` (defined in `view.hpp`, owned by `ViewText`): `x, y, width, height`, the `start_index`/`length` **byte range** into the node's text, `line_number`, `hanging_trim`, `has_trailing_hyphen`/`has_trailing_ellipsis`, and a `next` pointer forming a linked list. Critically the rect stores only a byte range and a width — **not** a shaped glyph buffer. Layout and rendering both walk the raw bytes and re-measure independently ([§8](#8-the-render_text-re-measurement-seam)). `output_text` (`layout_text.cpp:2447`) commits a rect into the `ViewText.rect` list, advances `advance_x`, and records the last-text-rect/view plus trailing-space bookkeeping for later trimming.
+
+`layout_bidi.cpp` reorders the established line fragments and their inline edges.
+Its scratch character advances are normalized to each emitted `TextRect` width;
+`bidi_place_visual_line` uses those advances for placement and range unions,
+as [CSSOM View §9](https://www.w3.org/TR/cssom-view-1/#dom-range-getclientrects)
+requires. Fallback bitmap ink and side bearings belong to paint and cannot
+replace the range advance. Preserved segment breaks are excluded from character
+fragments without suppressing neighboring fallback advances. Seventeen controls
+cover Arabic/Hebrew, LF/CRLF, RTL, styled runs, tabs, document fonts and retained
+family changes at 1×/2×. This local geometry pass does not change style/snapshot
+ownership (**D4.5.1v4 / D4.1.4v5**) or implement complex-script shaping. Contextual arrow fallback remains open. The earlier explicit-CRLF intrinsic
+width diagnosis is superseded by the source/DOM distinction below.
+
+HTML input preprocessing normalizes literal CR/CRLF to LF in the tokenizer's
+actual byte-reading path; fast DATA/RCDATA/RAWTEXT and CDATA scans stop at CR.
+A numeric-reference CR remains present in DOM/source ranges. For CSS processing,
+`layout_text_resolve_css_whitespace` gives that CR U+0020 semantics and
+`layout_text_is_segment_break` recognizes LF. Actual layout, bidi,
+justification, intrinsic paragraph collection and export share this distinction,
+as [CSS Text §4](https://www.w3.org/TR/css-text-3/#white-space-processing) requires.
+Parser/Input ownership remains **D4.2.6**; selected styles remain
+**D4.5.1v4 / D4.1.4v5**. CSS processing does not rewrite DOM bytes.
+
+The edge-codepoint lookup can return its source text node. A space-created wrap
+uses that node's wrapping policy rather than inheriting permission from an
+inline ancestor ([CSS Text §5.5](https://www.w3.org/TR/css-text-3/#line-break-details));
+this covers pre/nowrap separators with nested normal overrides and keeps atomic
+edges distinct. Source/retained/paint controls cover all six white-space modes.
+The browser's preserved-CR omission is isolated with an explicit, source-checked
+standards reference; the original raw capture and strict comparisons remain.
+Remaining G/H wrapping in `control-chars-00D` is still reported as partial.
 
 `BlockContext` (`layout.hpp:81`) supplies the driving state text layout reads but does not own: `line_height`/`line_height_is_normal`, `init_ascender`/`init_descender`, `lead_y`, `advance_y`, `text_align`/`text_align_last`, `direction`, `block_container_font` (used for the tab-stop advance), `text_indent`, `is_first_line`, `line_number`, and the float lists.
 
@@ -87,6 +120,50 @@ A span that wraps across lines produces multiple line fragments, so its bounding
 
 The look-ahead helpers `text_has_line_filled` / `node_has_line_filled` / `view_has_line_filled` (`layout_text.cpp:2267`/`2383`/`2411`) return a `LineFillStatus` (`layout.hpp:294`: `RDT_NOT_SURE`/`RDT_LINE_NOT_FILLED`/`RDT_LINE_FILLED`) so the end-of-node decision can peek across sibling nodes without committing.
 
+`text_has_line_filled` records a literal hyphen opportunity only after its
+visible glyph fits the float-adjusted line edge. Conditional hyphens use the
+existing `measure_hyphenate_character` and require the prefix plus generated
+mark to fit; empty/custom marks and `hyphens:none` retain their source meaning
+([CSS Text 3 §5.3](https://www.w3.org/TR/css-text-3/#hyphens-property)).
+`span_has_line_filled` scopes the following inline's view/font and resolves
+stale styles under `ComputeSize`, restoring its caller's flow context. This
+keeps lookahead observational and preserves selected style owners
+(**D4.5.1v4 /D4.1.4v5**). Inline boundaries do not create extra word breaks.
+
+Plain-text lookahead also scopes the following text owner's computed font,
+including the active first-line font. Leaving a nested code/span must not
+measure its parent's punctuation with the preceding child's font or spacing.
+`layout_lookahead_text_owner_font.html` checks fitting and overflowing direct,
+nested, decorated, spaced and reverse-size cases; retained width/font changes
+and both device scales exercise restoration of the borrowed font context.
+
+Unbreakable inline probes carry the source-measured advance through sibling
+boxes instead of substituting isolated intrinsic widths, which trim edge
+spaces. `LineFillProbe` retains collapsing state across owners; nowrap/pre
+spaces stay with the adjoining word, while preserved LF and nested normal
+separators keep their own break policy (CSS Text 3 §4.1.1/§5.5). Preserved TAB
+measurement shares the actual layout helper. GL/WJ/ZWJ classification reuses
+the existing Unicode boundary data, including NBSP's atomic compatibility
+exception. `layout_nowrap_separator_lookahead.html` covers 30 grouped/direct,
+source-font, spacing, forced-break and collapsed-owner cases with retained
+width/white-space edits at 1×/2×.
+
+A retained font-group reset may leave the active font aliasing that cleared
+group. `ensure_font` then obtains the family from the DOM parent rather than
+mistaking the cleared source for a missing inheritance value. This preserves
+[CSS Fonts 3 §3.1](https://www.w3.org/TR/css-fonts-3/#font-family-prop) inheritance
+and the selected style owners (**D4.5.1v4 /D4.1.4v5**); the source/parent family
+assertion catches a formerly hidden fallback exposed by 2× line metrics.
+
+Actual size/face differences use subpixel tolerance when comparing the union
+of each inline's leading with the block strut (CSS 2.2 §10.8.1). A real 22px
+union cannot be discarded as 2px rounding around a 20px strut; the original
+uniform-font rounding path remains separate. The 26 controls in
+`layout_hyphen_lookahead_fit.html` verify these line origins/heights, including
+nested/smaller-font prefixes, source-owned marks, neighboring fitting breaks,
+nowrap/break-all and retained width/marker changes at both device densities.
+
+
 ---
 
 ## 5. The per-character loop: measure, overflow, record
@@ -99,13 +176,37 @@ Each loop iteration (`layout_text.cpp:2887`) does three things.
 
 **Overflow / wrap decision** (`:3292`): the test is `wrap_lines && rect->x + rect->width - trailing_letter_spacing > line_right + 0.001f` (`line_right` is `effective_right` under float intrusion). The cascade of cases: a U+3000 or pre-wrap trailing space *hangs* rather than breaks; break-spaces with break-all rewinds to the prior break; a space breaks at the current space (collapsible spaces are removed, break-spaces spaces are kept per CSS Text 3 §3); pre-wrap hanging content that fits without its trailing spaces does not wrap; otherwise break at `last_space` (with the soft-hyphen fallback); an emergency mid-word break handles `overflow-wrap`/`break-word` when no break opportunity exists. Each breaking case ends by calling `output_text` + `line_break` and jumping back to `LAYOUT_TEXT`.
 
-**Break-opportunity recording** (`:3644` onward): after a non-breaking character, the loop records the current position as `last_space` and tags `last_space_kind`. Spaces set `BRK_SPACE` (and, for collapsible whitespace, `has_space`, `trailing_space_width`, and hanging-space accumulation); U+3000 sets `BRK_IDEOGRAPHIC_SPACE`; the CJK/break-all path (`:3805` region) uses `has_id_line_break_class` / `is_typographic_letter_unit` and applies UAX #14 LB13–21 by peeking at the next codepoint (including a cross-node peek via `peek_next_inline_codepoint`, `layout_text.cpp:854`, for LB13 at a node boundary). The CSS Text 3 §4.1.2 segment-break transformation is applied here (`:3654`): a collapsed newline between two East Asian W/F characters (neither Hangul) or adjacent to a ZWSP is *removed* rather than turned into a space.
+**Break-opportunity recording** (`:3644` onward): after a non-breaking character, the loop records the current position as `last_space` and tags `last_space_kind`. Spaces set `BRK_SPACE` (and, for collapsible whitespace, `has_space`, `trailing_space_width`, and hanging-space accumulation); U+3000 sets `BRK_IDEOGRAPHIC_SPACE`; the CJK/break-all path uses `has_id_line_break_class` / `is_break_all_text_unit` and applies the shared following-character constraints. `peek_next_inline_codepoint` reads the remaining text first, then adjoining inline content without crossing an atomic box. Segment-break transformation shares that lookup: a collapsed newline beside ZWSP is removed; other separators are preserved conservatively.
+
+Closing-punctuation candidates share the same contextual check as letter
+boundaries. This prevents a candidate after `)` from replacing an earlier
+fitting space when the next character is `]`, `!`, `/` or an infix separator,
+including across nested or padded inline boxes (CSS Text 3 §5.5; UAX #14 LB13/
+LB15d). The check retains the explicit `line-break:anywhere` override. Twelve
+controls in `layout_closing_punctuation_context.html` cover ordinary and
+preserved spaces, same-node punctuation, nested/padded spans, atomic content,
+nowrap and anywhere; the native regression checks text rectangles and box
+geometry through retained reflow at both densities. Broader Unicode boundary
+and paint fidelity remain separate limits.
 
 ---
 
+Normal punctuation wrapping (verified 2026-10-19) uses
+`layout_text_allows_ascii_opening_break` in `text_metrics.cpp`, shared by
+actual layout, lookahead and intrinsic measurement. It implements a general
+printable-ASCII compatibility classification before opening punctuation;
+it is UA tailoring allowed by CSS Text 3 §5/§5.5, rather than a default UAX #14
+mandate or an operator-string exception. ASCII symbols of line-break class AL
+also participate in break-all's character-unit path. Fitting candidates reuse
+`record_fitting_text_break`: sliced end edges are charged when their box ends,
+and clone end edges at each fragment, including nested owners. A candidate
+past the available measure cannot replace an earlier fitting opportunity.
+`layout_ascii_opening_breaks.html` covers normal/property/inline seams and
+intrinsic consumers; raw raster residue is kept separately from geometry.
+
 ## 6. Measurement: the Latin fast path vs the per-codepoint loop
 
-Two measurement strategies coexist. The general path loads each glyph individually with `font_load_glyph` and sums advances — correct for any script but one engine call per codepoint. The fast path `measure_shaped_simple_latin_run` (`layout_text.cpp:976`) shapes a whole run of simple ASCII-Latin bytes with a single `font_measure_text` call, letting the engine apply its own internal kerning. It is gated by `can_shape_simple_latin_run` (`layout_text.cpp:963`), which requires: no text-transform, no small-caps, no letter-spacing, and not `break-all`/`break-word` — i.e. the conditions under which a run has no per-character break points or per-character adjustments. The run must be at least two bytes and every byte must resolve to a real glyph (`font_get_glyph` id non-zero), else it bails to the per-codepoint loop. This is the *only* real "shaping" in the engine; everything else is per-codepoint advance with no GSUB. The same helper is reused by `measure_first_word_width` (`layout_text.cpp:2173`) and by intrinsic sizing ([RAD_05 — Intrinsic Sizing](RAD_05_Intrinsic_Sizing.md)) so min/max-content widths agree with the wrapping measurement.
+Several measurement strategies coexist. The scalar path loads individual glyphs with `font_load_glyph` and sums advances; it does not provide contextual substitutions by itself. The fast path `measure_shaped_simple_latin_run` (`layout_text.cpp:976`) shapes a whole run of simple ASCII-Latin bytes with a single `font_measure_text` call, letting the engine apply its own internal kerning. It is gated by `can_shape_simple_latin_run` (`layout_text.cpp:963`), which requires: no text-transform, no small-caps, no letter-spacing, and not `break-all`/`break-word` — i.e. the conditions under which a run has no per-character break points or per-character adjustments. The run must be at least two bytes and every byte must resolve to a real glyph (`font_get_glyph` id non-zero), else it bails to the per-codepoint loop. The contextual-script and emoji-cluster helpers also measure shaped advances. Selected-face color-cluster paint is described in [RAD_07 §3.4](RAD_07_Fonts.md#34-selected-face-color-clusters), and ordinary combining-cluster/transformed paint in [RAD_07 §3.5](RAD_07_Fonts.md#35-combining-clusters-and-transformed-paint); general contextual-script paint remains separate.
 
 The distinction between "layout dimensions are float" and the occasional `(int)` cast (e.g. byte lengths) follows the repository rule; text widths and positions are all `float`.
 
@@ -129,6 +230,20 @@ Three of the subtlest behaviors live in the interaction between the main loop an
 
 The used-line-height computation (`:1941`–`2030`) is intricate: it takes `max(css_line_height, font_line_height)` for mixed-font / replaced-content / normal-line-height lines, honors an explicit `line-height: 0`, applies a ±2px tolerance to absorb font-metric rounding, and tracks per-inline `max_inline_line_height`/`max_normal_line_height`/`max_atomic_inline_height` so that a small replaced element does not inflate the block advance. Finally it increments `line_number`, applies `-webkit-line-clamp`, and calls `line_reset`/`line_init` to start the next line box (recomputing float bounds via `update_line_for_bfc_floats`, `layout_text.cpp:1246`).
 
+`layout_middle_inline_contribution` supplies the same ascent/descent for line
+extents and final positioning. CSS `middle` includes half the parent's x-height;
+the typed `-webkit-baseline-middle` value centers on the parent baseline alone
+([HTML Rendering §15.4.3](https://html.spec.whatwg.org/multipage/rendering.html#attributes-for-embedded-content-and-images)).
+The shared HTML adapter covers images, iframes, embeds, objects and image-button
+inputs. Its borrowed author-hint declaration participates in ordinary cascade
+ordering, layers and `revert` through `style_tree_get_declaration_with_fallback`.
+The lookup leaves shared style snapshots untouched (**D4.5.1v4 /D4.1.4v5**),
+and the keyword enum is appended to retain existing IDs (**D4.6.1v4**).
+`LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCascade` verifies text and
+replaced-box geometry, computed values and retained attribute/type/float changes
+at both device densities. The `bottom` legacy hint remains a recorded
+spec/browser disagreement; this milestone does not claim full alias conformance.
+
 ---
 
 ## 9. The `render_text` re-measurement seam
@@ -139,7 +254,7 @@ Rendering does **not** consume a shaped buffer from layout. `render_text.cpp` re
 
 ## 10. Known Issues & Future Improvements
 
-1. **No real bidi engine.** `direction` (LTR/RTL) is honored only for alignment, `text-indent`, hanging-space placement, and `<br>`/replaced-element positioning. There is **no UAX #9 (UBA) level resolution or visual reordering** of mixed-direction runs. Directional formatting codepoints (U+202A–U+202E, LRM/RLM U+200E/200F) are recognized only as zero-advance in `text_codepoint_has_zero_advance` (`layout_text.cpp:287`) — never applied. Mixed-direction text renders in logical order. *Improvement:* a UBA reorder pass over each line's runs before `line_align`.
+1. **Bidi and complex-script paint remain separate.** `layout_bidi.cpp` resolves visual order for established line fragments, using optional FriBidi or its local fallback, and publishes advance-based ranges (§2.3). That geometry does not provide Arabic joining, Indic shaping or full bidi glyph substitution; the existing paint and fallback limitations still apply. This scoped refresh does not qualify the complete UAX #9 surface.
 2. **No general complex-script shaping.** Only the ASCII-Latin fast path calls `font_measure_text` (`layout_text.cpp:976`); every other script is measured per-codepoint with no GSUB. Arabic joining, Indic reordering, and ligatures beyond the font's simple advance are not handled. The comment at `layout_text.cpp:884` notes the ZWJ-emoji handling is a heuristic "without HarfBuzz text shaping". *Improvement:* integrate a shaper (HarfBuzz) and persist a shaped buffer (see item 5).
 3. **Emoji ZWJ sequences are heuristic.** `is_emoji_for_zwj` (`layout_text.cpp:877`) and `is_zwj_composition_base` use hardcoded codepoint ranges to zero post-ZWJ advances, rather than proper UAX #29 grapheme clustering; non-standard emoji sequences will mis-measure.
 4. **`<br>` reported height is an approximation.** `layout_inline.cpp:1180` admits the rule "is not fully understood" and uses the font cell height, whereas Chrome's reported `<br>` height varies by context.
@@ -204,6 +319,42 @@ non-forcing DOM frame contract in [DOM API §3.4](../../../vibe/radiant/Radiant_
 Tabs, complete Unicode separators, cross-node/shaping/vertical spacing and
 decoration placement remain open; see [FT-16](../../../vibe/radiant/Radiant_Design_Font_Text.md#16-computed-spacing-in-paint-2026-10-11).
 
+
+## 12. Balancing paragraphs separated by forced breaks (2026-10-19)
+
+[CSS Text 4 §5.4](https://www.w3.org/TR/css-text-4/#text-wrap-style)
+balances each group separated by a forced break independently. Block setup
+uses `TextWrapBalanceProbe` to choose a constraint from the normal line count;
+the auto fallback starts above ten lines. The shared `layout_collect_inline_text`
+preserves `<br>` and preserved newline boundaries. `BlockContext` stores the
+owning DOM block, paragraph index, available width and consumed clamp lines.
+At a real forced break, `line_break` advances that owner's paragraph before
+resetting the line. Terminal flushes and nested formatting contexts do not
+consume the owner's next paragraph.
+
+Each probe owns its temporary text and releases it on return
+(**D4.5.1v4 / D4.1.4v5**); no string or scratch pointer enters retained state.
+Single-paragraph styled content reuses the richer DOM intrinsic provider.
+Complex block/float heights retain their intrinsic line-count estimate, since
+total height does not identify the number of inline line boxes. Float-aware
+text probes reuse `update_line_for_bfc_floats` and
+`find_line_y_for_width_with_floats` through the shared word-height counter.
+Trials preserve normal clearance so narrowing a virtual constraint cannot
+move the paragraph to a new origin below its floats.
+
+The shared inline-height probe honors resolved `text-wrap-mode`: overflowing
+`pre`/`nowrap` text adds lines only at forced boundaries. A terminal forced
+break does not create another empty line box. `layout_intrinsic_text_wrap.html`
+checks grid row contributions for inherited/default `pre`, explicit wrap mode,
+blank groups and terminal newline/`<br>` boundaries through retained reflow.
+
+`layout_balance_paragraphs.html` checks direct and nested breaks, reversed
+paragraph lengths, blank preserved lines, center alignment, six-line text,
+normal line counts, float exclusion and clearance over retained reflow.
+Chromium leaves some later forced-break groups unbalanced; independent block
+controls supply the specified paragraph contract in those comparisons.
+Mixed-font paragraph probes, full script shaping, paragraph-wide float
+optimization and exact clamped-prefix selection remain partial.
 
 ## Appendix A — Source map
 

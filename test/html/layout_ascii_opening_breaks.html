@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 10px/20px Ahem; }
+.case { width: 240px; margin-bottom: 10px; background: #eee; }
+code { font: inherit; padding: 0 4px; background: lime; }
+.spaces { white-space: break-spaces; }
+.bare { padding: 0; }
+.minimum { width: min-content; }
+table { width: 40px; border-spacing: 0; margin-bottom: 10px; }
+td { padding: 0; }
+</style></head><body id="result">
+<div class="case">aaaaaaaaaaaaaaaa <code id="less" class="spaces">bbbb=&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="round">bbbb+(cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="square">bbbb:[cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="brace">bbbb!{cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="nested">bbbb=<span>&lt;cccc</span></code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="split"><span>bbbb=</span><span>&lt;cccc</span></code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="bare" class="bare">bbbb=&lt;cccc</code>.</div>
+<div class="case" style="overflow-wrap:break-word">aaaaaaaaaaaaaaaa <code id="break-word" class="spaces">bbbb=&lt;cccc</code>.</div>
+<div class="case" style="overflow-wrap:anywhere">aaaaaaaaaaaaaaaa <code id="anywhere">bbbb=&lt;cccc</code>.</div>
+<div class="case" style="word-break:break-all">aaaaaaaaaaaaaaaa <code id="break-all">bbbb=&lt;cccc</code>.</div>
+<div class="case" style="word-break:keep-all">aaaaaaaaaaaaaaaa <code id="keep-all">bbbb=&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="nowrap" style="white-space:nowrap">bbbb=&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="letters">bbbbcccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="digit">bbbb1&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="opening">bbbb(&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="currency">bbbb$&lt;cccc</code>.</div>
+<div class="case">aaaaaaaaaaaaaaaa <code id="late">bbbbbbbb=&lt;cc</code>.</div>
+<div id="minimum-bare" class="case minimum"><code class="bare">bbbb=&lt;cccc</code></div>
+<div id="minimum-slice" class="case minimum"><code>bbbb=&lt;cccc</code></div>
+<div id="minimum-clone" class="case minimum"><code style="box-decoration-break:clone">bbbb=&lt;cccc</code></div>
+<div id="minimum-nested" class="case minimum">aa<code><span>bbbb=</span><span>&lt;cccc</span></code>zz</div>
+<table id="minimum-cell"><tr><td><code>bbbb=&lt;cccc</code></td></tr></table>
+<div id="minimum-clone-nested" class="case minimum">aa<code id="clone-box" style="box-decoration-break:clone"><span id="clone-first">bbbb=</span><span id="clone-last">&lt;cccc</span></code>zz</div>
+<div id="terminal-normal" class="case minimum"><code>aaaaa </code></div>
+<div id="terminal-preserved" class="case minimum"><code class="spaces">aaaaa </code></div>
+</body></html>

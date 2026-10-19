@@ -9,7 +9,10 @@
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 #include "../lib/tagged.hpp"
+#include "radiant_render_test_utils.hpp"
+#include "../lib/str.h"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
@@ -212,6 +215,397 @@ protected:
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
 };
+
+TEST_F(RadiantTextQuery, LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCascade) {
+    ASSERT_NE(load("test/html/layout_legacy_replaced_alignment.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample {
+        const char* id; float height, text_y, image_y; const char* value;
+        const char* floating = "none";
+    } samples[] = {
+        {"none", 47, 32, 0, "baseline"},
+        {"center", 40, 12, 0, "-webkit-baseline-middle"},
+        {"middle", 40, 12, 0, "-webkit-baseline-middle"},
+        {"mixed-case", 40, 12, 0, "-webkit-baseline-middle"},
+        {"top", 40, 5, 0, "top"}, {"texttop", 45, 5, 5, "text-top"},
+        {"absmiddle", 40, 16, 0, "middle"}, {"abscenter", 40, 16, 0, "middle"},
+        {"css-middle", 40, 16, 0, "middle"},
+        {"css-legacy", 40, 12, 0, "-webkit-baseline-middle"},
+        {"author-rule", 47, 32, 0, "baseline"}, {"author-inline", 47, 32, 0, "baseline"},
+        {"author-initial", 47, 32, 0, "baseline"}, {"author-unset", 47, 32, 0, "baseline"},
+        {"author-inherit", 40, 5, 0, "top"}, {"unknown", 47, 32, 0, "baseline"},
+        {"author-revert", 47, 32, 0, "baseline"},
+        {"author-revert-layer", 40, 12, 0, "-webkit-baseline-middle"},
+        {"rule-revert-layer", 40, 12, 0, "-webkit-baseline-middle"},
+        {"author-layer", 47, 32, 0, "baseline"},
+        {"layer-revert", 40, 12, 0, "-webkit-baseline-middle"},
+        {"untrimmed", 47, 32, 0, "baseline"},
+        {"small-center", 20, 5, 7, "-webkit-baseline-middle"},
+        {"small-middle", 20, 5, 3, "middle"}, {"parent-font", 40, 16, 0, "middle"},
+        {"legacy-font", 40, 12, 0, "-webkit-baseline-middle"},
+        {"input-image", 40, 12, 0, "-webkit-baseline-middle"},
+        {"iframe", 40, 12, 0, "-webkit-baseline-middle"},
+        {"object", 40, 12, 0, "-webkit-baseline-middle"},
+        {"embed", 40, 12, 0, "-webkit-baseline-middle"},
+        {"ordinary-span", 47, 32, 0, "baseline"},
+        {"left", 20, 5, 0, "top", "left"}, {"right", 20, 5, 0, "top", "right"},
+    };
+    auto expect_keyword = [&](DomElement* element, CssPropertyCode property, const char* value) {
+        String* computed = css_prop_serialize_computed_value(document->document_pool, element, property, 0);
+        ASSERT_NE(computed, nullptr);
+        EXPECT_STREQ(computed->chars, value);
+    };
+    auto expect_sample = [&](const Sample& sample) {
+        SCOPED_TRACE(sample.id);
+        DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+        ASSERT_NE(box, nullptr);
+        DomText* text = box->first_child ? box->first_child->as_text() : nullptr;
+        DomElement* image = box->last_child ? box->last_child->as_element() : nullptr;
+        ASSERT_NE(text, nullptr); ASSERT_NE(image, nullptr);
+        float parent_y = 0, text_y = 0, image_y = 0;
+        view_get_visual_bounds(box, nullptr, &parent_y, nullptr, nullptr);
+        view_get_visual_bounds(text, nullptr, &text_y, nullptr, nullptr);
+        view_get_visual_bounds(image, nullptr, &image_y, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(box->height, sample.height);
+        // text and image offsets distinguish legacy baseline-middle from CSS middle.
+        EXPECT_FLOAT_EQ(text_y - parent_y, sample.text_y);
+        EXPECT_FLOAT_EQ(image_y - parent_y, sample.image_y);
+        expect_keyword(image, CSS_PROPERTY_VERTICAL_ALIGN, sample.value);
+        expect_keyword(image, CSS_PROPERTY_FLOAT, sample.floating);
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 2000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) expect_sample(sample);
+            DomElement* ordinary = dom_find_element_by_id(document->root->as_element(), "text-input");
+            ASSERT_NE(ordinary, nullptr);
+            expect_keyword(ordinary->last_child->as_element(), CSS_PROPERTY_VERTICAL_ALIGN, "baseline");
+            DomElement* logo = dom_find_element_by_id(document->root->as_element(), "logo");
+            ASSERT_NE(logo, nullptr);
+            DomElement* image = logo->first_child ? logo->first_child->as_element() : nullptr;
+            ASSERT_NE(image, nullptr);
+            // the original large SVG must not add an unrelated text-strut descent to its line.
+            EXPECT_FLOAT_EQ(logo->height, image->height);
+            for (const char* id : {"wrapped-right", "wrapped-left"}) {
+                SCOPED_TRACE(id);
+                DomElement* wrapper = dom_find_element_by_id(document->root->as_element(), id);
+                ASSERT_NE(wrapper, nullptr);
+                DomElement* anchor = wrapper->first_child ? wrapper->first_child->as_element() : nullptr;
+                ASSERT_NE(anchor, nullptr);
+                // an out-of-flow image cannot create an anonymous block fragment in its inline anchor.
+                EXPECT_FLOAT_EQ(anchor->width, 0.0f);
+                EXPECT_FLOAT_EQ(anchor->height, 0.0f);
+            }
+            DomElement* center = dom_find_element_by_id(document->root->as_element(), "center");
+            ASSERT_NE(center, nullptr);
+            DomElement* aligned = center->last_child->as_element();
+            ASSERT_NE(aligned, nullptr);
+            ASSERT_TRUE(aligned->set_attribute("align", "absmiddle"));
+            layout_html_doc(&ui, document, true);
+            expect_sample({"center", 40, 16, 0, "middle"});
+            ASSERT_TRUE(aligned->remove_attribute("align"));
+            layout_html_doc(&ui, document, true);
+            expect_sample({"center", 47, 32, 0, "baseline"});
+            ASSERT_TRUE(aligned->set_attribute("align", "center"));
+            layout_html_doc(&ui, document, true);
+            expect_sample({"center", 40, 12, 0, "-webkit-baseline-middle"});
+            DomElement* image_input = dom_find_element_by_id(document->root->as_element(), "input-image");
+            ASSERT_NE(image_input, nullptr);
+            DomElement* input = image_input->last_child->as_element();
+            ASSERT_NE(input, nullptr);
+            ASSERT_TRUE(input->set_attribute("type", "text"));
+            layout_html_doc(&ui, document, true);
+            expect_keyword(input, CSS_PROPERTY_VERTICAL_ALIGN, "baseline");
+            ASSERT_TRUE(input->set_attribute("type", "image"));
+            layout_html_doc(&ui, document, true);
+            expect_sample({"input-image", 40, 12, 0, "-webkit-baseline-middle"});
+            DomElement* left = dom_find_element_by_id(document->root->as_element(), "left");
+            ASSERT_NE(left, nullptr);
+            DomElement* floating = left->last_child->as_element();
+            ASSERT_NE(floating, nullptr);
+            ASSERT_TRUE(floating->set_attribute("align", "center"));
+            layout_html_doc(&ui, document, true);
+            expect_keyword(floating, CSS_PROPERTY_FLOAT, "none");
+            expect_sample({"left", 40, 12, 0, "-webkit-baseline-middle"});
+            ASSERT_TRUE(floating->set_attribute("align", "left"));
+            layout_html_doc(&ui, document, true);
+            expect_sample({"left", 20, 5, 0, "top", "left"});
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, NormalPunctuationBreaksShareInlineAndIntrinsicPolicy) {
+    ASSERT_NE(load("test/html/layout_ascii_opening_breaks.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float y, width, height; } samples[] = {
+        {"less", 5, 224, 30}, {"round", 55, 224, 30}, {"square", 105, 224, 30},
+        {"brace", 155, 224, 30}, {"nested", 205, 224, 30}, {"split", 255, 224, 30},
+        {"bare", 305, 220, 30}, {"break-word", 355, 224, 30}, {"anywhere", 405, 224, 30},
+        {"break-all", 455, 234, 30}, {"keep-all", 505, 224, 30}, {"nowrap", 575, 108, 10},
+        {"letters", 625, 88, 10}, {"digit", 675, 108, 10}, {"opening", 725, 108, 10},
+        {"currency", 775, 108, 10}, {"late", 825, 128, 10},
+        {"minimum-bare", 850, 50, 40}, {"minimum-slice", 900, 54, 40},
+        {"minimum-clone", 950, 58, 40}, {"minimum-nested", 1000, 74, 40},
+        {"minimum-cell", 1050, 54, 40},
+        // cloned fragments fit at 78px; Chromium's nested min-content query overestimates this by 4px.
+        {"minimum-clone-nested", 1100, 78, 40},
+        {"terminal-normal", 1150, 58, 20}, {"terminal-preserved", 1180, 68, 20},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 1200;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                // inline unions distinguish a legal fitting prefix from moving the whole word.
+                expect_box(sample.id, 0, sample.y, sample.width, sample.height);
+            }
+            // the 78px intrinsic guard must also contain the actual cloned fragments.
+            expect_box("clone-box", 0, 1105, 78, 30);
+            expect_box("clone-first", 24, 1105, 50, 10);
+            expect_box("clone-last", 4, 1125, 50, 10);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicMinimaRetainInlineWordEdges) {
+    ASSERT_NE(load("test/html/layout_inline_minimum_context.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float width, height; } samples[] = {
+        {"plain", 80, 20}, {"mixed", 100, 23}, {"decorated", 108, 23},
+        {"nested", 108, 23}, {"split", 108, 23}, {"prefix", 70, 40},
+        {"suffix", 50, 40}, {"both", 50, 40}, {"spaces", 60, 60},
+        {"forced", 40, 40}, {"atomic", 70, 40}, {"nowrap", 80, 20},
+        {"anywhere", 40, 40}, {"break-all", 40, 40},
+        {"out-of-flow", 80, 20}, {"inline-minimum", 80, 20},
+        {"empty-hyphen", 40, 40}, {"optional-break", 40, 40},
+        {"margin-cell", 87, 20}, {"margin-minimum", 87, 20},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 1000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(box, nullptr);
+                // cell and min-content box geometry reveal word-edge losses through nested inlines.
+                EXPECT_FLOAT_EQ(box->width, sample.width) << sample.id << " scale " << scale;
+                EXPECT_FLOAT_EQ(box->height, sample.height) << sample.id;
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, ClosingPunctuationRetainsAdjacentInlineContext) {
+    ASSERT_NE(load("test/html/layout_closing_punctuation_context.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float x, y, width, height; size_t pieces; } samples[] = {
+        {"split-code", 0, 5, 30, 30, 2}, {"nested-span", 0, 65, 30, 30, 2},
+        {"decorated-code", 0, 125, 32, 30, 2}, {"same-code", 0, 185, 40, 30, 2},
+        {"atomic-code", 10, 245, 60, 10, 1}, {"ex-code", 0, 305, 30, 30, 2},
+        {"is-code", 0, 365, 30, 30, 2}, {"sy-code", 0, 425, 30, 30, 2},
+        {"same-ex-code", 0, 485, 40, 30, 2}, {"nowrap-code", 10, 545, 60, 10, 1},
+        {"preserved-code", 0, 585, 40, 30, 2}, {"anywhere-code", 0, 645, 70, 30, 2},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 800;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                expect_box(sample.id, sample.x, sample.y, sample.width, sample.height);
+                DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(box, nullptr);
+                DomNode* child = box->first_child;
+                while (child && child->is_element()) child = child->as_element()->first_child;
+                DomText* text = child ? child->as_text() : nullptr;
+                ASSERT_NE(text, nullptr);
+                // text rectangles expose a stranded suffix even when its parent keeps the same height.
+                size_t pieces = 0;
+                for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                    pieces++;
+                    if (rect->next) EXPECT_FLOAT_EQ(rect->next->y - rect->y, 20.0f);
+                }
+                EXPECT_EQ(pieces, sample.pieces) << sample.id;
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, BaseReplacementPreservesTheLoadersUrlCarrier) {
+    Url* base = get_current_dir();
+    ASSERT_NE(base, nullptr);
+    Url* source = url_parse_path_or_url("test/html/layout_base_url_lifetime.html", base);
+    url_destroy(base);
+    ASSERT_NE(source, nullptr);
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    DocumentJsHostConfig host = {}; host.ui_context = &ui;
+    host.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    document = load_lambda_html_doc(source, nullptr, 320, 200, pool,
+        nullptr, false, false, &host);
+    ASSERT_NE(document, nullptr);
+    ASSERT_TRUE(dom_document_finalize_loader_pool(document, pool));
+    Url* loaded_url = document->url;
+    // the CLI retains this carrier until its separate cleanup after DOM retirement.
+    ASSERT_EQ(loaded_url, source);
+    ASSERT_EQ(document->input->url, source);
+    EXPECT_STREQ(url_get_href(source), "file:///");
+    ui.document = lam::up(document);
+    layout_html_doc(&ui, document, false);
+    expect_box("result", 0, 0, 40, 20);
+}
+
+TEST_F(RadiantTextQuery, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
+    ASSERT_NE(load("test/html/layout_responsive_image_minimum.html"), nullptr);
+    struct Sample { const char* id; const char* image; float width, image_width, height; } samples[] = {
+        {"direct", "direct-image", 40, 40, 12.5f},
+        {"anchor", "anchor-image", 40, 40, 12.5f},
+        {"span", "span-image", 40, 40, 12.5f},
+        {"unconstrained", "unconstrained-image", 64, 64, 20},
+        {"half", "half-image", 40, 20, 6.25f},
+        {"math", "math-image", 40, 40, 12.5f},
+        {"minimum", "minimum-image", 64, 64, 20},
+        {"decorated", "decorated-image", 40, 52, 24.5f},
+        {"css-width", "css-width-image", 40, 40, 12.5f},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 800;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(box, nullptr);
+                EXPECT_FLOAT_EQ(box->width, sample.width) << sample.id << " scale " << scale;
+                EXPECT_FLOAT_EQ(box->height, sample.height) << sample.id;
+                DomElement* image = dom_find_element_by_id(document->root->as_element(), sample.image);
+                ASSERT_NE(image, nullptr);
+                EXPECT_FLOAT_EQ(image->width, sample.image_width) << sample.image;
+                EXPECT_FLOAT_EQ(image->height, sample.height) << sample.image;
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSides) {
+    ASSERT_NE(load("test/html/layout_intrinsic_box_variables.html"), nullptr);
+    struct Sample { const char* id; float width, left; } samples[] = {
+        {"row-zero", 80, 0}, {"row-length", 104, 12}, {"cell-override", 94, 7},
+        {"ancestor-length", 98, 9}, {"shorthand-pair", 102, 11}, {"two-variables", 96, 8},
+        {"fallback", 92, 6}, {"arithmetic", 108, 14}, {"invalid", 80, 0},
+        {"cyclic", 80, 8}, {"cyclic-math", 100, 20}, {"longhand-winner", 94, 2},
+        {"logical", 104, 12}, {"font-math", 100, 20}, {"block-guard", 104, 12},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 800;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(box, nullptr);
+                EXPECT_FLOAT_EQ(box->width, sample.width) << sample.id << " scale " << scale;
+                ASSERT_NE(box->bound, nullptr);
+                EXPECT_FLOAT_EQ(box->boundary()->padding.left, sample.left) << sample.id;
+                ASSERT_NE(box->first_child, nullptr);
+                EXPECT_FLOAT_EQ(box->first_child->x, sample.left) << sample.id;
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
+    ASSERT_NE(load("test/html/layout_table_background_layers.html"), nullptr);
+    ui.viewport_width = 1200; ui.viewport_height = 800;
+    layout_html_doc(&ui, document, false);
+    DomElement* source = dom_find_element_by_id(document->root->as_element(), "ignored-source");
+    ASSERT_NE(source, nullptr); ASSERT_NE(source->bound, nullptr);
+    float padding = source->boundary()->padding.top;
+    struct Sample {
+        const char* id;
+        float x, y;
+        unsigned r, g, b, tolerance = 0;
+    } samples[] = {
+        {"empty-later-row", 60, 30, 0, 255, 0},
+        {"occupied-later-row", 10, 50, 0, 255, 0},
+        {"occupied-later-row", 60, 60, 0, 0, 255},
+        {"originating-row", 10, 50, 255, 0, 0},
+        {"originating-row", 60, 20, 255, 0, 0},
+        {"cross-cell-ink", 10, 10, 0, 0, 0},
+        {"cross-cell-ink", 45, 10, 0, 0, 255},
+        {"row-gradient", 10, 10, 255, 0, 0},
+        {"row-gradient", 10, 30, 0, 255, 0},
+        {"row-gradient", 10, 50, 255, 0, 0},
+        {"row-gradient", 10, 70, 0, 255, 0},
+        {"column-span", 50, 10, 255, 0, 0},
+        {"column-span", 70, 30, 0, 255, 0},
+        {"column-span", 50, 50, 0, 0, 255},
+        {"separated-row", 55, 30, 255, 255, 255},
+        {"separated-row", 70, 30, 255, 0, 0},
+        {"empty-cell-layers", 30, 30, 255, 255, 0},
+        {"empty-cell-layers", 55, 30, 255, 255, 0},
+        {"empty-cell-layers", 90, 40, 255, 0, 0},
+        {"row-opacity", 10, 60, 128, 255, 128, 1},
+        {"row-opacity", 60, 20, 255, 128, 128, 1},
+        {"row-opacity", 60, 60, 0, 0, 255},
+        {"row-group", 10, 50, 255, 0, 0},
+        {"row-missing-cell", 60, 50, 255, 255, 255},
+        {"row-missing-cell", 10, 50, 255, 0, 0},
+        {"column-under-row", 10, 10, 0, 255, 0},
+        {"column-under-row", 60, 10, 0, 0, 255},
+        {"column-under-row", 50, 60, 255, 0, 0},
+        {"column-repeat", 30, 10, 255, 0, 0},
+        {"column-repeat", 50, 10, 0, 255, 0},
+        {"column-group-span", 30, 10, 255, 0, 0},
+        {"column-group-span", 50, 10, 0, 255, 0},
+        {"alpha-layers", 10, 10, 80, 215, 167, 2},
+        {"alpha-layers", 60, 10, 191, 159, 96, 2},
+        {"ignored-track-insets", 10, 30, 0, 255, 0},
+        {"ignored-track-insets", 10, 50, 255, 0, 0},
+        {"css-table-cell", 10, 10, 255, 0, 0},
+        {"css-table-cell", 60, 30, 255, 0, 0},
+        {"nested-alpha", 10, 10, 255, 128, 128, 1},
+        {"nested-alpha", 60, 30, 255, 128, 128, 1},
+        {"row-image", 10, 50, 255, 0, 0},
+        {"row-image", 30, 70, 0, 255, 0},
+        {"zero-row-image", 10, 10, 255, 0, 0},
+        {"zero-row-image", 30, 30, 0, 255, 0},
+        {"zero-row-gradient", 10, 10, 255, 0, 0},
+        {"zero-row-gradient", 10, 30, 0, 255, 0},
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 1200; ui.viewport_height = 800;
+        ui.window_width = 1200 * scale; ui.window_height = 800 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            render_html_doc(&ui, document->view_tree, nullptr);
+            ASSERT_FALSE(ui.render_failed);
+            for (const Sample& sample : samples) {
+                SCOPED_TRACE(sample.id);
+                DomElement* box = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(box, nullptr);
+                float x = 0.0f, y = 0.0f;
+                view_get_visual_bounds(box, &x, &y, nullptr, nullptr);
+                test_radiant_expect_surface_pixel(ui.surface,
+                    (unsigned)roundf((x + sample.x) * scale),
+                    (unsigned)roundf((y + sample.y) * scale),
+                    sample.r, sample.g, sample.b, sample.tolerance);
+            }
+            EXPECT_FLOAT_EQ(source->boundary()->padding.top, padding);
+            for (const char* id : {"zero-image-source", "zero-gradient-source"}) {
+                DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+                ASSERT_NE(row, nullptr);
+                EXPECT_FLOAT_EQ(row->height, 0.0f);
+            }
+        }
+    }
+}
 
 TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
     ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
@@ -1288,6 +1682,532 @@ TEST_F(RadiantTextQuery, IsolatesReorderSplitRunsAndTransparentEmptyBoundaries) 
     EXPECT_NEAR(nested->x, 8.671875f, 0.1f);
 }
 
+TEST_F(RadiantTextQuery, DomCarriageReturnsKeepSpaceGeometryAndPaint) {
+    ASSERT_NE(load("test/html/layout_carriage_return_spacing.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    auto compare = [&](auto&& self, DomNode* actual, DomNode* control) -> void {
+        ASSERT_NE(actual, nullptr); ASSERT_NE(control, nullptr);
+        if (actual->is_text()) {
+            ASSERT_TRUE(control->is_text());
+            DomText* text = actual->as_text();
+            DomText* expected = control->as_text();
+            TextRect* rect = text->rect;
+            TextRect* reference = expected->rect;
+            for (; rect && reference; rect = rect->next, reference = reference->next) {
+                EXPECT_NEAR(rect->x, reference->x, 0.05f);
+                EXPECT_NEAR(rect->y, reference->y, 0.05f);
+                EXPECT_NEAR(rect->width, reference->width, 0.05f);
+                EXPECT_NEAR(rect->height, reference->height, 0.05f);
+                CssEnum mode = get_white_space_value(actual);
+                lam::Temp<char> painted(render_text_create_export_segment(text->text_data(),
+                    rect, CSS_VALUE_NONE, false, mode));
+                lam::Temp<char> expected_paint(render_text_create_export_segment(expected->text_data(),
+                    reference, CSS_VALUE_NONE, false, mode));
+                EXPECT_STREQ(painted.get(), expected_paint.get());
+            }
+            EXPECT_EQ(rect, nullptr); EXPECT_EQ(reference, nullptr);
+            return;
+        }
+        ASSERT_TRUE(actual->is_element()); ASSERT_TRUE(control->is_element());
+        DomNode* child = actual->as_element()->first_child;
+        DomNode* expected_child = control->as_element()->first_child;
+        for (; child && expected_child;
+                child = child->next_sibling, expected_child = expected_child->next_sibling) {
+            self(self, child, expected_child);
+        }
+        EXPECT_EQ(child, nullptr); EXPECT_EQ(expected_child, nullptr);
+    };
+    auto expect_pair = [&](const char* prefix) {
+        char actual_id[96], control_id[96];
+        str_fmt(actual_id, sizeof(actual_id), "%s-cr", prefix);
+        str_fmt(control_id, sizeof(control_id), "%s-space", prefix);
+        DomElement* actual = find(actual_id);
+        DomElement* control = find(control_id);
+        ASSERT_NE(actual, nullptr); ASSERT_NE(control, nullptr);
+        SCOPED_TRACE(prefix);
+        // a DOM CR has space geometry and paint (CSS Text §4), while source bytes stay intact.
+        EXPECT_NEAR(actual->width, control->width, 0.05f);
+        EXPECT_NEAR(actual->height, control->height, 0.05f);
+        compare(compare, actual, control);
+    };
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 4000;
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const char* mode : {"normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces"}) {
+                for (const char* kind : {"word", "break", "only", "wrap", "zwsp"}) {
+                    char prefix[80]; str_fmt(prefix, sizeof(prefix), "%s-%s", mode, kind);
+                    expect_pair(prefix);
+                }
+            }
+            for (const char* prefix : {"styled", "bidi", "spacing", "balance"}) expect_pair(prefix);
+            for (const char* id : {"pre-line-break-cr", "pre-line-break-space"}) {
+                DomElement* owner = find(id);
+                ASSERT_NE(owner, nullptr);
+                DomText* text = owner->first_child->as_text();
+                ASSERT_NE(text, nullptr); ASSERT_NE(text->rect.get(), nullptr);
+                // max-content retains the widest forced line after collapsible edge spaces are removed.
+                EXPECT_NEAR(owner->width, text->rect->width, 0.05f) << id;
+                EXPECT_NEAR(owner->height, 48.0f, 0.05f) << id;
+            }
+            DomText* source = find("pre-word-cr")->first_child->as_text();
+            ASSERT_NE(source, nullptr);
+            EXPECT_EQ(source->text_data()[2], '\r');
+            DomElement* changed = find("pre-word-cr");
+            DomElement* control = find("pre-word-space");
+            for (const char* style : {"white-space:normal;width:60px", "white-space:pre;width:max-content",
+                    "white-space:pre-line;width:60px", "white-space:pre;width:max-content"}) {
+                ASSERT_TRUE(changed->set_attribute("style", style));
+                ASSERT_TRUE(control->set_attribute("style", style));
+                layout_html_doc(&ui, document, true);
+                expect_pair("pre-word");
+            }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, NoWrapSeparatorsKeepTheirAdjacentWordsTogether) {
+    ASSERT_NE(load("test/html/layout_nowrap_separator_lookahead.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    auto expect_group = [&](const char* id, float head_y, float tail_delta = 0.0f) {
+        char query[96]; str_fmt(query, sizeof(query), "%s-head", id);
+        DomElement* head = find(query);
+        str_fmt(query, sizeof(query), "%s-tail", id);
+        DomElement* tail = find(query);
+        ASSERT_NE(head, nullptr); ASSERT_NE(tail, nullptr);
+        DomText* head_text = head->first_child->as_text();
+        DomText* tail_text = tail->first_child->as_text();
+        ASSERT_NE(head_text, nullptr); ASSERT_NE(tail_text, nullptr);
+        ASSERT_NE(head_text->rect.get(), nullptr); ASSERT_NE(tail_text->rect.get(), nullptr);
+        DomElement* row = find(id);
+        ASSERT_NE(row, nullptr);
+        DomText* prefix = row->first_child->as_text();
+        ASSERT_NE(prefix, nullptr); ASSERT_NE(prefix->rect.get(), nullptr);
+        EXPECT_NEAR(head_text->rect->y - prefix->rect->y, head_y, 0.05f) << id;
+        EXPECT_NEAR(tail_text->rect->y - head_text->rect->y, tail_delta, 0.05f) << id;
+    };
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 2400;
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        for (int pass = 0; pass < 2; pass++) {
+            SCOPED_TRACE(pass);
+            layout_html_doc(&ui, document, pass != 0);
+            for (int width : {80, 100}) {
+                for (const char* kind : {"nbsp", "nowrap-one", "nowrap-five", "nowrap-tab",
+                        "nowrap-lf", "nowrap-cr", "wrap-mode", "pre-one", "prewrap-nowrap",
+                        "whole-nowrap", "nested-normal"}) {
+                    char id[96]; str_fmt(id, sizeof(id), "w%d-%s", width, kind);
+                    expect_group(id, width == 80 ? 48.0f : 24.0f);
+                }
+            }
+            expect_group("w80-direct-nowrap", 48.0f);
+            expect_group("w80-direct-nbsp", 48.0f);
+            expect_group("w80-direct-collapsed", 48.0f);
+            EXPECT_NEAR(find("w80-direct-collapsed-tail")->x,
+                find("w80-direct-nbsp-tail")->x, 0.05f);
+            expect_group("w80-normal", 24.0f, 24.0f);
+            expect_group("w100-normal", 24.0f);
+            expect_group("w90-small-separator", 24.0f);
+            expect_group("w90-spaced-separator", 24.0f);
+            DomElement* spaced = find("w90-spaced-separator-space");
+            ASSERT_NE(spaced, nullptr); ASSERT_NE(spaced->font.get(), nullptr);
+            EXPECT_STREQ(spaced->fontp()->family.get(), find("w90-spaced-separator")->fontp()->family.get());
+            expect_group("w80-forced-lf", 24.0f, 24.0f);
+            DomElement* changed = find("w80-nowrap-five");
+            DomElement* separator = find("w80-nowrap-five-separator");
+            ASSERT_NE(changed, nullptr); ASSERT_NE(separator, nullptr);
+            // retained width and source-policy edits must change the same legal opportunity.
+            ASSERT_TRUE(changed->set_attribute("style", "width:100px"));
+            layout_html_doc(&ui, document, true);
+            expect_group("w80-nowrap-five", 24.0f);
+            ASSERT_TRUE(changed->set_attribute("style", "width:80px"));
+            ASSERT_TRUE(separator->set_attribute("style", "white-space:normal"));
+            layout_html_doc(&ui, document, true);
+            expect_group("w80-nowrap-five", 24.0f, 24.0f);
+            ASSERT_TRUE(separator->set_attribute("style", "white-space:nowrap"));
+            layout_html_doc(&ui, document, true);
+            expect_group("w80-nowrap-five", 48.0f);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, LookaheadUsesTheFollowingTextOwnersFont) {
+    ASSERT_NE(load("test/html/layout_lookahead_text_owner_font.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    auto expect_head = [&](const char* id, bool fits, float expected_x) {
+        DomElement* row = find(id);
+        char query[96]; str_fmt(query, sizeof(query), "%s-head", id);
+        DomElement* head = find(query);
+        ASSERT_NE(row, nullptr); ASSERT_NE(head, nullptr);
+        DomText* prefix = row->first_child->as_text();
+        DomText* text = head->first_child->as_text();
+        ASSERT_NE(prefix, nullptr); ASSERT_NE(text, nullptr);
+        ASSERT_NE(prefix->rect.get(), nullptr); ASSERT_NE(text->rect.get(), nullptr);
+        // a fitting word and its following period stay after the earlier space.
+        EXPECT_NEAR(head->x, expected_x, 0.05f) << id;
+        EXPECT_EQ(text->rect->y < prefix->rect->y + 20.0f, fits) << id;
+    };
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 1400;
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        for (int pass = 0; pass < 2; pass++) {
+            SCOPED_TRACE(pass);
+            layout_html_doc(&ui, document, pass != 0);
+            for (const char* kind : {"direct", "nested", "decorated", "spaced", "reverse"}) {
+                char id[96]; str_fmt(id, sizeof(id), "%s-fit", kind);
+                float prefix_width = strcmp(kind, "reverse") == 0 ? 60.0f :
+                    strcmp(kind, "spaced") == 0 ? 35.0f : 30.0f;
+                expect_head(id, true, prefix_width);
+                str_fmt(id, sizeof(id), "%s-overflow", kind);
+                expect_head(id, false, 0.0f);
+            }
+            DomElement* changed = find("direct-fit");
+            ASSERT_NE(changed, nullptr);
+            // a width edit changes the legal break without retaining a speculative font.
+            ASSERT_TRUE(changed->set_attribute("style", "width:59px"));
+            layout_html_doc(&ui, document, true);
+            expect_head("direct-fit", false, 0.0f);
+            ASSERT_TRUE(changed->set_attribute("style", "width:60px"));
+            layout_html_doc(&ui, document, true);
+            expect_head("direct-fit", true, 30.0f);
+            ASSERT_TRUE(changed->set_attribute("style", "width:60px;font-size:11px"));
+            layout_html_doc(&ui, document, true);
+            expect_head("direct-fit", false, 0.0f);
+            ASSERT_TRUE(changed->set_attribute("style", "width:60px;font-size:10px"));
+            layout_html_doc(&ui, document, true);
+            expect_head("direct-fit", true, 30.0f);
+        }
+    }
+}
+
+#ifdef __APPLE__
+#ifdef __APPLE__
+TEST_F(RadiantTextQuery, CombiningClustersKeepInkAcrossTransformsAndRetainedPaint) {
+    DomElement* root = load("test/html/layout_combining_cluster_paint.html");
+    ASSERT_NE(root, nullptr);
+    DomElement* changed = dom_find_element_by_id(document->root->as_element(), "normal-acute");
+    ASSERT_NE(changed, nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 1200; ui.viewport_height = 2040;
+        ui.window_width = 1200 * scale; ui.window_height = 2040 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            SCOPED_TRACE(scale);
+            SCOPED_TRACE(pass);
+            if (pass == 2) ASSERT_TRUE(changed->set_attribute("style", "font-size:24px;font-family:Arial"));
+            layout_html_doc(&ui, document, pass != 0);
+            render_html_doc(&ui, document->view_tree, nullptr);
+            ASSERT_FALSE(ui.render_failed);
+            size_t pairs = 0;
+            for (DomNode* node = root->first_child; node; node = node->next_sibling) {
+                if (!node->is_element() || node->as_element()->tag() != MARKUP_NAME_DIV) continue;
+                DomElement* row = node->as_element();
+                const char* id = row->get_attribute("id"); ASSERT_NE(id, nullptr);
+                SCOPED_TRACE(id);
+                DomElement* first = row->first_child->as_element();
+                DomElement* second = first->next_sibling->as_element();
+                ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+                float ax, ay, bx, by;
+                view_get_visual_bounds(first, &ax, &ay, nullptr, nullptr);
+                view_get_visual_bounds(second, &bx, &by, nullptr, nullptr);
+                EXPECT_FLOAT_EQ(ay, by); EXPECT_FLOAT_EQ(first->width, second->width);
+                DomElement* left_ink = first->first_child->as_element();
+                DomElement* right_ink = second->first_child->as_element();
+                ASSERT_NE(left_ink, nullptr); ASSERT_NE(right_ink, nullptr);
+                float padding = row->fontp()->font_size * 0.25f;
+                // compare padded ink, excluding the neighboring column's negative glyph bearings.
+                unsigned x1 = (unsigned)lroundf((ax - padding) * scale);
+                unsigned x2 = (unsigned)lroundf((bx - padding) * scale);
+                unsigned top = (unsigned)lroundf(ay * scale);
+                unsigned width = (unsigned)ceilf((max(left_ink->width, right_ink->width) + 2 * padding) * scale);
+                ASSERT_LT(width, (unsigned)lroundf((bx - ax - padding) * scale));
+                unsigned height = (unsigned)lroundf(row->height * scale);
+                ASSERT_LE(x1 + width, (unsigned)ui.surface->width);
+                ASSERT_LE(x2 + width, (unsigned)ui.surface->width);
+                ASSERT_LE(top + height, (unsigned)ui.surface->height);
+                unsigned maximum_error = 0; size_t dark_pixels = 0;
+                unsigned first_error_x = 0, first_error_y = 0, first_left = 0, first_right = 0;
+                for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) {
+                    const uint8_t* left = (const uint8_t*)ui.surface->pixels +
+                        (top + y) * ui.surface->pitch + (x1 + x) * 4;
+                    const uint8_t* right = (const uint8_t*)ui.surface->pixels +
+                        (top + y) * ui.surface->pitch + (x2 + x) * 4;
+                    for (unsigned channel = 0; channel < 4; channel++) {
+                        unsigned error = left[channel] > right[channel]
+                            ? left[channel] - right[channel] : right[channel] - left[channel];
+                        if (error && !maximum_error) {
+                            first_error_x = x; first_error_y = y;
+                            memcpy(&first_left, left, 4); memcpy(&first_right, right, 4);
+                        }
+                        if (error > maximum_error) maximum_error = error;
+                    }
+                    if (left[0] < 192 && left[1] < 192 && left[2] < 192) dark_pixels++;
+                }
+                // equivalent source forms must retain ink, including marks that have no advance.
+                EXPECT_GT(dark_pixels, 0u); EXPECT_EQ(maximum_error, 0u)
+                    << "origins " << ax << ',' << ay << " / " << bx << ',' << by
+                    << " first difference " << first_error_x << ',' << first_error_y
+                    << " rgba " << first_left << " / " << first_right;
+                pairs++;
+            }
+            EXPECT_EQ(pairs, 42u);
+            if (pass == 2) EXPECT_FLOAT_EQ(changed->fontp()->font_size, 24.0f);
+            DomElement* source = dom_find_element_by_id(root, "normal-acute-nfd");
+            ASSERT_NE(source, nullptr); ASSERT_NE(source->first_child, nullptr);
+            EXPECT_STREQ((const char*)source->first_child->text_data(), "e\u0301M");
+        }
+        ASSERT_TRUE(changed->set_attribute("style", "font-size:16px;font-family:Arial"));
+    }
+}
+#endif
+
+TEST_F(RadiantTextQuery, FloatPaintPhasesPreserveBackgroundsInlineInkAndHitOrder) {
+    ASSERT_NE(load("test/html/layout_float_paint_order.html"), nullptr);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 1200; ui.viewport_height = 1200;
+        ui.window_width = 1200 * scale; ui.window_height = 1200 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            SCOPED_TRACE(scale);
+            SCOPED_TRACE(pass);
+            DomElement* alpha_flow = find("alpha-native")->last_child->as_element();
+            ASSERT_NE(alpha_flow, nullptr);
+            if (pass == 2) ASSERT_TRUE(alpha_flow->set_attribute("style", "background:lime"));
+            layout_html_doc(&ui, document, pass != 0);
+            render_html_doc(&ui, document->view_tree, nullptr);
+            ASSERT_FALSE(ui.render_failed);
+            auto pixel = [&](const char* id, float dx, float dy, unsigned r, unsigned g, unsigned b) {
+                DomElement* box = find(id); ASSERT_NE(box, nullptr);
+                float x = 0, y = 0; view_get_visual_bounds(box, &x, &y, nullptr, nullptr);
+                test_radiant_expect_surface_pixel(ui.surface,
+                    (unsigned)lroundf((x + dx) * scale), (unsigned)lroundf((y + dy) * scale), r, g, b);
+            };
+            struct VisitProbe : RenderContext { ViewElement* watched; unsigned visits; } probe = {};
+            probe.watched = lam::view_require_element(static_cast<View*>(alpha_flow)); probe.ui_context = lam::up(&ui);
+            RenderBackend backend = {}; backend.ctx = lam::up(&probe);
+            backend.visit_element = [](RenderContext* context, ViewElement* view, float, float) {
+                VisitProbe* probe = (VisitProbe*)context;
+                if (view == probe->watched) probe->visits++;
+            };
+            RenderWalkState walk = {}; walk.ui_context = lam::up(&ui);
+            setup_font(&ui, &walk.font, &ui.default_font);
+            render_walk_block(&backend, &walk, lam::view_require_block(document->view_tree->root));
+            // export metadata belongs to one logical element visit, regardless of paint passes.
+            EXPECT_EQ(probe.visits, 1u);
+            pixel("opaque-native", 15, 15, 153, 153, 153);
+            pixel("alpha-native", 15, 15, pass == 2 ? 0 : 127, pass == 2 ? 127 : 0, 128);
+            pixel("nested-native", 15, 15, 0, 128, 0);
+            pixel("nested-native", 60, 15, 153, 153, 153);
+            pixel("inline", 15, 15, 0, 128, 0);
+            pixel("inline", 60, 15, 153, 153, 153);
+            pixel("clipped", 15, 15, 0, 0, 255);
+            pixel("clipped", 15, 50, 255, 255, 255);
+            pixel("opacity", 15, 15, 127, 127, 255);
+            pixel("no-pointer", 15, 15, 153, 153, 153);
+            pixel("positioned", 15, 15, 255, 0, 0);
+            pixel("no-float", 15, 15, 0, 128, 0);
+            pixel("no-float", 100, 15, 0, 0, 255);
+            pixel("replaced-svg", 15, 15, 0, 0, 255);
+            pixel("replaced-frame", 15, 15, 0, 0, 255);
+            DomElement* frame = find("replaced-frame");
+            ASSERT_NE(frame->embed.get(), nullptr); ASSERT_NE(frame->embedp()->doc.get(), nullptr);
+            DomElement* frame_ink = dom_find_element_by_id(frame->embedp()->doc->root->as_element(), "frame-ink");
+            ASSERT_NE(frame_ink, nullptr);
+            float frame_x = 0, frame_y = 0;
+            view_get_visual_bounds(frame, &frame_x, &frame_y, nullptr, nullptr);
+            EXPECT_EQ(radiant_document_element_from_point(document, frame_x + 15, frame_y + 15), frame_ink);
+            struct Hit { const char* box; const char* target; } hits[] = {
+                {"inline", "inline-ink"}, {"clipped", "clipped-float"},
+                {"opacity", "opacity-float"}, {"no-pointer", "no-pointer-flow"},
+                {"positioned", "positioned-flow"}, {"no-float", "no-float-ink"},
+            };
+            for (const Hit& hit : hits) {
+                float x = 0, y = 0; view_get_visual_bounds(find(hit.box), &x, &y, nullptr, nullptr);
+                EXPECT_EQ(radiant_document_element_from_point(document, x + 15, y + 15), find(hit.target)) << hit.box;
+            }
+        }
+        ASSERT_TRUE(find("alpha-native")->last_child->as_element()->set_attribute("style", "background:red"));
+    }
+}
+
+TEST_F(RadiantTextQuery, SystemColorFontTrackingDoesNotChangeCssAdvances) {
+    ASSERT_NE(load("test/html/layout_system_color_font_tracking.html"), nullptr);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    auto expect_width = [&](const char* id, float width) {
+        DomElement* glyph = find(id);
+        ASSERT_NE(glyph, nullptr);
+        DomText* text = glyph->first_child->as_text();
+        ASSERT_NE(text, nullptr); ASSERT_NE(text->rect.get(), nullptr);
+        EXPECT_NEAR(text->rect->width, width, 0.05f) << id;
+    };
+    struct Case { int size; float advance; } cases[] = {
+        {12, 15.0f}, {13, 16.0f}, {15, 19.0f}, {16, 20.0f},
+        {17, 21.0f}, {20, 22.0f}, {32, 32.0f}, {64, 64.0f},
+    };
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 1400;
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        for (int pass = 0; pass < 2; pass++) {
+            SCOPED_TRACE(pass);
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Case& entry : cases) {
+                char id[64]; str_fmt(id, sizeof(id), "size-%d-glyph", entry.size);
+                expect_width(id, entry.advance);
+            }
+            for (const char* id : {"family-glyph", "fallback-glyph", "cluster-glyph"})
+                expect_width(id, 20.0f);
+            DomElement* legacy = find("size-16-legacy");
+            ASSERT_NE(legacy, nullptr); ASSERT_NE(legacy->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(legacy->fontp()->font_size, 18.0f);
+            DomElement* annotation = find("size-16-ruby");
+            ASSERT_NE(annotation, nullptr); ASSERT_NE(annotation->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(annotation->fontp()->font_size, 8.0f);
+            DomElement* first = find("spaced-first");
+            DomElement* second = find("spaced-second");
+            ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+            EXPECT_NEAR(second->x - first->x, 23.0f, 0.05f);
+            EXPECT_NEAR(find("wrapped")->height, 48.0f, 0.05f);
+            expect_width("ascii-glyph", 31.8125f);
+            // retained size edits must not reuse the preceding color-font metric.
+            DomElement* changed = find("size-16");
+            ASSERT_NE(changed, nullptr);
+            ASSERT_TRUE(changed->set_attribute("style", "font-size:20px"));
+            layout_html_doc(&ui, document, true);
+            ASSERT_NE(changed->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(changed->fontp()->font_size, 20.0f);
+            DomElement* inherited = find("size-16-glyph");
+            ASSERT_NE(inherited, nullptr); ASSERT_NE(inherited->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(inherited->fontp()->font_size, 20.0f);
+            expect_width("size-16-glyph", 22.0f);
+            DomElement* ascii = find("size-16-ascii");
+            DomElement* ascii_control = find("size-20-ascii");
+            DomElement* fixed = find("size-16-fixed");
+            ASSERT_NE(ascii, nullptr); ASSERT_NE(ascii_control, nullptr); ASSERT_NE(fixed, nullptr);
+            ASSERT_NE(ascii->font.get(), nullptr); ASSERT_NE(fixed->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(ascii->fontp()->font_size, 20.0f);
+            EXPECT_FLOAT_EQ(fixed->fontp()->font_size, 12.0f);
+            EXPECT_NEAR(ascii->width, ascii_control->width, 0.05f);
+            EXPECT_FLOAT_EQ(legacy->fontp()->font_size, 18.0f);
+            DomElement* invalid = find("size-16-invalid");
+            ASSERT_NE(invalid, nullptr); ASSERT_NE(invalid->font.get(), nullptr);
+            EXPECT_FLOAT_EQ(invalid->fontp()->font_size, 20.0f);
+            EXPECT_FLOAT_EQ(annotation->fontp()->font_size, 10.0f);
+            ASSERT_TRUE(changed->set_attribute("style", "font-size:16px"));
+            layout_html_doc(&ui, document, true);
+            expect_width("size-16-glyph", 20.0f);
+        }
+    }
+}
+#endif
+
+TEST_F(RadiantTextQuery, SpaceCreatedWrapsUseTheirSourceInlinePolicy) {
+    ASSERT_NE(load("test/html/layout_carriage_return_spacing.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto find = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    ui.viewport_width = ui.window_width = 1200;
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const char* kind : {"pre-edge", "nowrap-edge", "nested-edge"}) {
+                for (const char* variant : {"space", "cr"}) {
+                    char id[96]; str_fmt(id, sizeof(id), "%s-%s-tail", kind, variant);
+                    DomElement* tail = find(id);
+                    ASSERT_NE(tail, nullptr);
+                    SCOPED_TRACE(id);
+                    bool nested = strcmp(kind, "nested-edge") == 0;
+                    EXPECT_NEAR(tail->x, nested ? 0.0f : strcmp(kind, "pre-edge") == 0 ? 80.0f : 40.0f, 0.05f);
+                    DomText* head = tail->parent->as_element()->first_child->as_text();
+                    ASSERT_NE(head, nullptr); ASSERT_NE(head->rect.get(), nullptr);
+                    EXPECT_NEAR(tail->y - head->rect->y, nested ? 24.0f : 0.0f, 0.05f);
+                }
+            }
+            DomElement* atomic_tail = find("atomic-edge-tail");
+            ASSERT_NE(atomic_tail, nullptr);
+            EXPECT_NEAR(atomic_tail->x, 0.0f, 0.05f);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, BidiRangesRetainShapedAdvancesAcrossPreservedBreaks) {
+    ASSERT_NE(load("test/html/layout_bidi_advance_ranges.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    auto box = [&](const char* id) {
+        return dom_find_element_by_id(document->root->as_element(), id);
+    };
+    auto expect_ranges = [&](const char* id, const char* first, const char* second = nullptr) {
+        DomElement* owner = box(id);
+        ASSERT_NE(owner, nullptr) << id;
+        DomText* text = owner->first_child ? owner->first_child->as_text() : nullptr;
+        ASSERT_NE(text, nullptr) << id;
+        const char* controls[] = {first, second};
+        size_t index = 0;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->length == 0) continue;
+            ASSERT_LT(index, second ? 2u : 1u) << id;
+            DomElement* control = box(controls[index++]);
+            ASSERT_NE(control, nullptr);
+            // a range's advance is independent of fallback glyph ink and preserved source breaks.
+            EXPECT_NEAR(rect->width, control->width, 0.05f) << id;
+        }
+        EXPECT_EQ(index, second ? 2u : 1u) << id;
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = ui.window_width = 1200;
+        ui.viewport_height = ui.window_height = 2000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const char* id : {"plain", "rtl", "hebrew", "hebrew-no-lf", "latin",
+                    "document", "spaced", "tabbed", "bold-control", "ascii-control", "space-control", "trailing-space-lf"})
+                expect_ranges(id, id);
+            expect_ranges("trailing-lf", "plain");
+            expect_ranges("trailing-crlf", "trailing-space-lf");
+            expect_ranges("line-before", "ascii-control", "plain");
+            expect_ranges("line-after", "plain", "ascii-control");
+            expect_ranges("repeat", "repeat", "repeat");
+            DomElement* styled = box("styled-word");
+            DomElement* bold = box("bold-control");
+            ASSERT_NE(styled, nullptr); ASSERT_NE(bold, nullptr);
+            EXPECT_NEAR(styled->width, bold->width, 0.05f);
+            DomElement* changed = box("trailing-lf");
+            ASSERT_NE(changed, nullptr);
+            for (const char* family : {"font-family:'Courier New',monospace",
+                    "font-family:Menlo,'Courier New',monospace"}) {
+                ASSERT_TRUE(changed->set_attribute("style", family));
+                layout_html_doc(&ui, document, true);
+                expect_ranges("trailing-lf", "trailing-lf");
+            }
+        }
+    }
+}
+
 TEST_F(RadiantTextQuery, PreservedTabsKeepAdvanceBoundsWithFallbackBidiGlyphs) {
     ASSERT_NE(load("test/html/layout_bidi_preserved_tabs.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
@@ -1502,6 +2422,353 @@ TEST_F(RadiantTextQuery, AligningASplitInlinePreservesItsBlockSiblingAndFragment
         EXPECT_NEAR(element->x, entry.x, 0.1f) << entry.id;
         EXPECT_NEAR(element->width, entry.width, 0.1f) << entry.id;
         EXPECT_NEAR(element->height, entry.height, 0.1f) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicTablesShareCollapsedBorderGeometry) {
+    ASSERT_NE(load("test/html/layout_table_intrinsic_collapsed_borders.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float width; } samples[] = {
+        {"table-auto", 536}, {"table-max", 536}, {"block-five", 536},
+        {"atomic-five", 536}, {"block-one", 108}, {"block-two", 215},
+        {"thick", 542}, {"mixed", 152}, {"mixed-table", 152}, {"hidden", 141},
+        {"spanning", 195}, {"rowspan", 162}, {"row-border", 150}, {"columns", 150},
+        {"separate", 558}, {"separate-table", 558}, {"minimum", 436},
+        {"table-border", 150}, {"table-border-parent", 150}, {"block-border", 152},
+        {"row-group", 150}, {"column-group", 150}, {"shifted-span", 155}, {"fractional", 538.5f},
+    };
+    auto expect_width = [&](const char* id, float width) {
+        DomElement* table = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(table, nullptr);
+        EXPECT_FLOAT_EQ(table->width, width) << id;
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = ui.window_width = 1200;
+        ui.viewport_height = ui.window_height = 2000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) expect_width(sample.id, sample.width);
+            DomElement* table = dom_find_element_by_id(document->root->as_element(), "block-five");
+            ASSERT_NE(table, nullptr);
+            // changing collapse changes grid geometry; retained measurement must discard old edges.
+            ASSERT_TRUE(table->set_attribute("style", "border-collapse:separate"));
+            layout_html_doc(&ui, document, true);
+            expect_width("block-five", 540);
+            ASSERT_TRUE(table->set_attribute("style", "border-collapse:collapse"));
+            layout_html_doc(&ui, document, true);
+            expect_width("block-five", 536);
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), "row-border-row");
+            ASSERT_NE(row, nullptr);
+            ASSERT_TRUE(row->set_attribute("style", "border-left:8px solid black;border-right:10px solid black"));
+            layout_html_doc(&ui, document, true);
+            expect_width("row-border", 158);
+            ASSERT_TRUE(row->set_attribute("style", "border-left:4px solid black;border-right:6px solid black"));
+            layout_html_doc(&ui, document, true);
+            expect_width("row-border", 150);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, TableRowsConsumeCollapsedBlockMarginsOnce) {
+    ASSERT_NE(load("test/html/layout_table_collapsed_margin_extents.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float height; } samples[] = {
+        {"ordinary", 82}, {"flex", 82}, {"leading", 66}, {"trailing", 66},
+        {"no-empty", 66}, {"tail-larger", 74}, {"tail-smaller", 66},
+        {"negative", 58}, {"mixed-chain", 54}, {"leading-negative", 58},
+        {"all-empty", 26}, {"all-empty-mixed", 14}, {"nested", 66},
+        {"barrier", 75}, {"min-height", 75}, {"relative", 66},
+        {"separate", 66}, {"zero", 50},
+        {"mixed-float", 90}, {"aligned-float", 130},
+    };
+    auto expect_height = [&](const char* id, float height) {
+        SCOPED_TRACE(id);
+        DomElement* table = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(table, nullptr);
+        char cell_id[48]; str_fmt(cell_id, sizeof(cell_id), "%s-cell", id);
+        DomElement* cell = dom_find_element_by_id(document->root->as_element(), cell_id);
+        ASSERT_NE(cell, nullptr);
+        EXPECT_FLOAT_EQ(table->height, height) << "cell flow height: " << cell->content_height;
+        EXPECT_FLOAT_EQ(cell->height, height);
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 600; ui.viewport_height = 2000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) expect_height(sample.id, sample.height);
+            for (const char* id : {"mixed-float-cell", "aligned-float-cell"}) {
+                DomElement* cell = dom_find_element_by_id(document->root->as_element(), id);
+                ASSERT_NE(cell, nullptr);
+                DomElement* floating = cell->first_child ? cell->first_child->as_element() : nullptr;
+                ASSERT_NE(floating, nullptr);
+                float cell_y = 0, float_y = 0;
+                view_get_visual_bounds(cell, nullptr, &cell_y, nullptr, nullptr);
+                view_get_visual_bounds(floating, nullptr, &float_y, nullptr, nullptr);
+                // centering a taller row must not feed the visual float shift back into its natural height.
+                EXPECT_FLOAT_EQ(float_y - cell_y, strcmp(id, "mixed-float-cell") == 0 ? 5.0f : 25.0f);
+                EXPECT_FLOAT_EQ(cell->content_height, 80.0f);
+            }
+            DomElement* tail = dom_find_element_by_id(document->root->as_element(), "ordinary-tail");
+            ASSERT_NE(tail, nullptr); ASSERT_NE(tail->bound, nullptr);
+            const Margin* resolved = view_boundary_flow_margin(tail->boundary());
+            ASSERT_NE(resolved, nullptr);
+            // the zero authored margin stays zero even when flow promotes the preceding chain.
+            EXPECT_FLOAT_EQ(resolved->top, 0.0f);
+            EXPECT_FLOAT_EQ(resolved->bottom, 0.0f);
+            ASSERT_TRUE(tail->set_attribute("style", "margin-bottom:24px"));
+            layout_html_doc(&ui, document, true);
+            expect_height("ordinary", 90);
+            ASSERT_TRUE(tail->set_attribute("style", "margin:0"));
+            layout_html_doc(&ui, document, true);
+            expect_height("ordinary", 82);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, TableCellsMeasurePositionedInlineBoxesAndTheirRootStruts) {
+    ASSERT_NE(load("test/html/layout_table_inline_extents.html"), nullptr);
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
+    process_document_font_faces(&ui, document);
+    struct Case {
+        const char* table;
+        const char* cell;
+        const char* atom;
+        float height, atom_top;
+    } cases[] = {
+        {"bare", "bare-cell", "bare-atom", 42, 0},
+        {"wrapped", "wrapped-cell", "wrapped-atom", 42, 0},
+        {"nested", "nested-cell", "nested-atom", 42, 0},
+        {"rowspan", "rowspan-cell", "rowspan-atom", 42, 0},
+        {"break", "break-cell", "break-atom", 52, 10},
+        {"aligned", "aligned-cell", "aligned-atom", 80, 19},
+        {"font-strut", "font-strut-cell", nullptr, 40, 0},
+        {"glyph-overflow", "glyph-overflow-cell", nullptr, 23, 0},
+        {"relative", "relative-cell", "relative-atom", 52, 30},
+        {"image", "image-cell", "image-atom", 52, 10},
+        {"margins", "margins-cell", nullptr, 50, 0},
+    };
+    for (int pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, pass > 0);
+        float top = 0;
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.table);
+            expect_box(entry.table, 0, top, 200, entry.height);
+            DomElement* cell = dom_find_element_by_id(document->root->as_element(), entry.cell);
+            ASSERT_NE(cell, nullptr);
+            EXPECT_FLOAT_EQ(cell->height, entry.height);
+            if (entry.atom) {
+                // visual offsets move the atom, while the table keeps its normal-flow line height.
+                expect_box(entry.atom, 0, top + entry.atom_top, 30, 40);
+            }
+            top += entry.height + 10;
+        }
+        DomElement* margins = dom_find_element_by_id(document->root->as_element(), "margins-cell");
+        ASSERT_NE(margins, nullptr);
+        float margin_x = 0, margin_y = 0;
+        view_get_visual_bounds(margins, &margin_x, &margin_y, nullptr, nullptr);
+        expect_box("margins-first", margin_x, margin_y + 10, 200, 10);
+        expect_box("margins-last", margin_x, margin_y + 30, 200, 10);
+    }
+}
+
+TEST_F(RadiantTextQuery, IntrinsicGridRowsRespectForcedBreaksWithoutSoftWrapping) {
+    ASSERT_NE(load("test/html/layout_intrinsic_text_wrap.html"), nullptr);
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
+    process_document_font_faces(&ui, document);
+    struct Case { const char* grid; const char* content; float y, height; } cases[] = {
+        {"grid-pre", "pre", 0, 20}, {"grid-nowrap", "nowrap", 30, 20},
+        {"grid-pre-line", "pre-line", 60, 30}, {"grid-pre-wrap", "pre-wrap", 100, 30},
+        {"grid-mode", "mode", 140, 20}, {"grid-inherited", "inherited", 170, 20},
+        {"grid-code", "code", 200, 20}, {"grid-blank", "blank", 230, 30},
+        {"grid-terminal-pre", "terminal-pre", 270, 20},
+        {"grid-terminal-wrap", "terminal-wrap", 300, 30},
+        {"grid-terminal-br", "terminal-br", 340, 20},
+    };
+    // estimated grid contributions must agree with the rendered forced-line groups after reflow.
+    for (int pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, pass > 0);
+        for (const Case& entry : cases) {
+            expect_box(entry.grid, 0, entry.y, 120, entry.height);
+            expect_box(entry.content, 0, entry.y, 120, entry.height);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, BalancedForcedBreakGroupsMatchIndependentParagraphs) {
+    ASSERT_NE(load("test/html/layout_balance_paragraphs.html"), nullptr);
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
+    process_document_font_faces(&ui, document);
+    struct Line { float y, left, right; };
+    struct Lines { Line values[16]; size_t count; };
+    auto block_for_id = [&](const char* id) {
+        return lam::view_as_block(dom_find_element_by_id(document->root->as_element(), id));
+    };
+    auto collect_lines = [&](auto&& self, DomNode* node, ViewBlock* root, Lines* lines) -> void {
+        if (node->is_text() && node->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(node);
+            ViewBlock* owner = layout_nearest_block_ancestor(text->parent_view());
+            float owner_x = 0, owner_y = 0, root_x = 0, root_y = 0;
+            view_get_visual_bounds(owner, &owner_x, &owner_y, nullptr, nullptr);
+            view_get_visual_bounds(root, &root_x, &root_y, nullptr, nullptr);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (rect->width <= 0.0f) continue;
+                float x = owner_x - root_x + rect->x;
+                float y = owner_y - root_y + rect->y;
+                size_t index = 0;
+                while (index < lines->count && fabsf(lines->values[index].y - y) > 0.1f) index++;
+                if (index == lines->count) {
+                    ASSERT_LT(index, sizeof(lines->values) / sizeof(lines->values[0]));
+                    lines->values[lines->count++] = {y, x, x + rect->width};
+                } else {
+                    lines->values[index].left = min(lines->values[index].left, x);
+                    lines->values[index].right = max(lines->values[index].right, x + rect->width);
+                }
+            }
+        } else if (node->is_element()) {
+            for (DomNode* child = node->as_element()->first_child; child; child = child->next_sibling)
+                self(self, child, root, lines);
+        }
+    };
+    struct Case { const char* id; const char* reference; float height; size_t count; float widths[6]; } cases[] = {
+        {"groups", "groups-ref", 50, 5, {80, 80, 90, 40, 60}},
+        {"reverse", "reverse-ref", 30, 3, {60, 80, 80}},
+        {"nested", "nested-ref", 40, 4, {80, 80, 80, 110}},
+        {"newlines", "newlines-ref", 50, 4, {80, 80, 80, 80}},
+        {"six-lines", "six-lines-ref", 60, 6, {100, 100, 100, 90, 110, 110}},
+        {"line-count", "line-count-ref", 30, 3, {70, 70, 30}},
+    };
+    // the source and independent blocks must keep the same breaks after retained reflow.
+    for (int pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, pass > 0);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.id);
+            ViewBlock* source = block_for_id(entry.id);
+            ViewBlock* reference = block_for_id(entry.reference);
+            ASSERT_NE(source, nullptr);
+            ASSERT_NE(reference, nullptr);
+            EXPECT_FLOAT_EQ(source->height, entry.height);
+            EXPECT_FLOAT_EQ(reference->height, entry.height);
+            Lines actual = {}, expected = {};
+            collect_lines(collect_lines, source, source, &actual);
+            collect_lines(collect_lines, reference, reference, &expected);
+            ASSERT_EQ(actual.count, entry.count);
+            ASSERT_EQ(expected.count, entry.count);
+            for (size_t index = 0; index < entry.count; index++) {
+                EXPECT_NEAR(actual.values[index].y, expected.values[index].y, 0.1f);
+                EXPECT_NEAR(actual.values[index].left, expected.values[index].left, 0.1f);
+                EXPECT_NEAR(actual.values[index].right, expected.values[index].right, 0.1f);
+                EXPECT_NEAR(actual.values[index].right - actual.values[index].left, entry.widths[index], 0.1f);
+            }
+        }
+        Lines balanced = {}, automatic = {}, cleared = {};
+        ViewBlock* source = block_for_id("external-float");
+        ViewBlock* reference = block_for_id("external-float-auto");
+        ViewBlock* clearance = block_for_id("float-clearance");
+        ASSERT_NE(source, nullptr);
+        ASSERT_NE(reference, nullptr);
+        ASSERT_NE(clearance, nullptr);
+        collect_lines(collect_lines, source, source, &balanced);
+        collect_lines(collect_lines, reference, reference, &automatic);
+        collect_lines(collect_lines, clearance, clearance, &cleared);
+        ASSERT_EQ(balanced.count, 5u);
+        ASSERT_EQ(automatic.count, balanced.count);
+        EXPECT_FLOAT_EQ(source->height, 50);
+        EXPECT_FLOAT_EQ(reference->height, source->height);
+        EXPECT_FLOAT_EQ(balanced.values[0].y, 0);
+        auto remaining_space_variance = [](const Lines& lines) {
+            float total = 0, squares = 0;
+            for (size_t index = 0; index < lines.count; index++) {
+                const Line& line = lines.values[index];
+                float available = line.y < 30 ? 130 : 280;
+                float remaining = available - (line.right - line.left);
+                total += remaining;
+                squares += remaining * remaining;
+            }
+            float mean = total / (float)lines.count;
+            return squares / (float)lines.count - mean * mean;
+        };
+        // CSS Text balances remaining space after float exclusion, preserving auto line count.
+        EXPECT_LT(remaining_space_variance(balanced), remaining_space_variance(automatic));
+        ASSERT_EQ(cleared.count, 1u);
+        EXPECT_FLOAT_EQ(cleared.values[0].y, 30);
+        EXPECT_FLOAT_EQ(cleared.values[0].right - cleared.values[0].left, 260);
+        EXPECT_FLOAT_EQ(clearance->height, 40);
+    }
+}
+
+TEST_F(RadiantTextQuery, AnonymousGridTextParticipatesInTracksAndRetainedLayout) {
+    ASSERT_NE(load("test/html/layout_grid_anonymous_text.html"), nullptr);
+    ui.viewport_width = ui.window_width = 1200;
+    ui.viewport_height = ui.window_height = 800;
+    process_document_font_faces(&ui, document);
+    struct Case {
+        const char* id;
+        float y, width, height, text_x, text_y, text_width, next_x;
+        bool wraps;
+    } cases[] = {
+        {"indent", 8, 106, 26, 53, 3, 50, 3, true},
+        {"fixed", 46, 166, 26, 63, 3, 50, 63, true},
+        {"before", 84, 166, 26, 3, 3, 50, 3, true},
+        {"only", 122, 186, 26, 3, 3, 50, 3, true},
+        {"aligned", 160, 166, 56, 113, 23, 50, 0, false},
+        {"percent", 228, 206, 26, 83, 3, 50, 43, true},
+        {"contents", 266, 166, 26, 63, 3, 50, 0, false},
+        {"fits", 332, 166, 16, 63, 3, 50, 0, false},
+        {"baseline", 360, 166, 26, 3, 11, 10, 0, false},
+    };
+    // repeated retained passes also exercise trial formatting over existing rectangles.
+    for (int pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, pass > 0);
+        for (const Case& entry : cases) {
+            expect_box(entry.id, 8, entry.y, entry.width, entry.height);
+            DomElement* grid = dom_find_element_by_id(document->root->as_element(), entry.id);
+            ASSERT_NE(grid, nullptr);
+            DomNode* child = grid->first_child;
+            while (child && !child->is_text()) {
+                if (child->is_element() && child->as_element()->display.outer == CSS_VALUE_CONTENTS) {
+                    child = child->as_element()->first_child;
+                    break;
+                }
+                child = child->next_sibling;
+            }
+            ASSERT_NE(child, nullptr) << entry.id;
+            ASSERT_TRUE(child->is_text()) << entry.id;
+            TextRect* rect = child->as_text()->rect;
+            ASSERT_NE(rect, nullptr) << entry.id;
+            EXPECT_FLOAT_EQ(rect->x, entry.text_x) << entry.id;
+            EXPECT_FLOAT_EQ(rect->y, entry.text_y) << entry.id;
+            EXPECT_FLOAT_EQ(rect->width, entry.text_width) << entry.id;
+            EXPECT_FLOAT_EQ(rect->height, 10) << entry.id;
+            if (entry.wraps) {
+                ASSERT_NE(rect->next, nullptr) << entry.id;
+                EXPECT_FLOAT_EQ(rect->next->x, entry.next_x) << entry.id;
+                EXPECT_FLOAT_EQ(rect->next->y, 13) << entry.id;
+                EXPECT_FLOAT_EQ(rect->next->width, 100) << entry.id;
+                EXPECT_EQ(rect->next->next, nullptr) << entry.id;
+            } else {
+                EXPECT_EQ(rect->next, nullptr) << entry.id;
+            }
+        }
+        expect_box("whitespace", 8, 304, 166, 16);
+        DomElement* whitespace = dom_find_element_by_id(document->root->as_element(), "whitespace");
+        for (DomNode* child = whitespace->first_child; child; child = child->next_sibling) {
+            if (child->is_text()) EXPECT_EQ(child->as_text()->rect, nullptr);
+        }
+        DomElement* contents = dom_find_element_by_id(document->root->as_element(), "contents");
+        ASSERT_TRUE(contents->last_child->is_text());
+        TextRect* tail = contents->last_child->as_text()->rect;
+        ASSERT_NE(tail, nullptr);
+        EXPECT_FLOAT_EQ(tail->x, 63);
+        EXPECT_FLOAT_EQ(tail->y, 13);
+        EXPECT_FLOAT_EQ(tail->width, 100);
+        // equal 20px font/line boxes expose the inline-grid's exported baseline.
+        expect_box("baseline-large", 71, 363, 100, 20);
+        expect_box("baseline-reference", 174, 363, 20, 20);
     }
 }
 
@@ -1952,6 +3219,70 @@ TEST_F(RadiantTextQuery, CjkHyphensKeepTheirPrecedingUnitExceptInLooseMode) {
     ASSERT_NE(loose, nullptr);
     EXPECT_NEAR(normal->width, 21.328125f, 0.05f);
     EXPECT_FLOAT_EQ(loose->width, 16.0f);
+}
+
+TEST_F(RadiantTextQuery, HyphenLookaheadUsesOnlyFittingBreakOpportunities) {
+    ASSERT_NE(load("test/html/layout_hyphen_lookahead_fit.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    struct Sample { const char* id; float height, head_top, tail_top; } samples[] = {
+        {"split-110", 40, 25, 25}, {"split-119", 40, 25, 25},
+        {"split-120", 40, 25, 25}, {"split-129", 40, 25, 25},
+        {"split-130", 40, 5, 5}, {"split-131", 40, 5, 5}, {"split-140", 40, 5, 5},
+        {"bare", 40, -1, -1}, {"opening", 40, 25, 25}, {"nested", 40, 25, 25},
+        {"space", 40, 5, 25}, {"break-all", 40, 5, 5}, {"nowrap", 20, 5, 5},
+        {"small-prefix", 42, 29, 25}, {"first-hyphen-fits", 40, 5, 5},
+        {"second-hyphen", 40, 5, 5}, {"shy-overflow", 40, 25, 25},
+        {"shy-fit", 40, 5, 5}, {"shy-empty", 40, 5, 5},
+        {"shy-double", 40, 25, 25}, {"shy-double-fit", 40, 5, 5},
+        {"shy-none", 40, 25, 25}, {"literal-none", 40, 25, 25},
+        {"shy-inline-double", 40, 25, 25}, {"shy-inline-empty", 40, 5, 5},
+        {"shy-inline-none", 40, 25, 25},
+    };
+    auto expect_top = [&](DomElement* owner, const char* id, const char* suffix, float expected) {
+        char span_id[64]; str_fmt(span_id, sizeof(span_id), "%s-%s", id, suffix);
+        DomElement* span = dom_find_element_by_id(document->root->as_element(), span_id);
+        ASSERT_NE(span, nullptr);
+        float owner_y = 0, span_y = 0;
+        view_get_visual_bounds(owner, nullptr, &owner_y, nullptr, nullptr);
+        view_get_visual_bounds(span, nullptr, &span_y, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(span_y - owner_y, expected) << span_id;
+    };
+    for (float scale : {1.0f, 2.0f}) {
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = ui.window_width = 1200;
+        ui.viewport_height = ui.window_height = 2000;
+        for (int pass = 0; pass < 2; pass++) {
+            layout_html_doc(&ui, document, pass != 0);
+            for (const Sample& sample : samples) {
+                DomElement* owner = dom_find_element_by_id(document->root->as_element(), sample.id);
+                ASSERT_NE(owner, nullptr);
+                EXPECT_FLOAT_EQ(owner->height, sample.height) << sample.id;
+                if (sample.head_top >= 0) {
+                    expect_top(owner, sample.id, "head", sample.head_top);
+                    expect_top(owner, sample.id, "tail", sample.tail_top);
+                }
+            }
+            DomElement* width = dom_find_element_by_id(document->root->as_element(), "split-120");
+            ASSERT_NE(width, nullptr);
+            // crossing the first fitting hyphen changes the whole joined prefix's line.
+            for (float available : {130.0f, 129.0f, 120.0f}) {
+                char style[40]; str_fmt(style, sizeof(style), "width:%.0fpx", available);
+                ASSERT_TRUE(width->set_attribute("style", style));
+                layout_html_doc(&ui, document, true);
+                expect_top(width, "split-120", "head", available >= 130.0f ? 5.0f : 25.0f);
+            }
+            DomElement* marked = dom_find_element_by_id(document->root->as_element(), "shy-inline-double");
+            DomElement* marker = dom_find_element_by_id(document->root->as_element(), "shy-inline-double-tail");
+            ASSERT_NE(marked, nullptr); ASSERT_NE(marker, nullptr);
+            // retained lookahead must see the following owner's replacement marker.
+            ASSERT_TRUE(marker->set_attribute("style", "hyphenate-character:\"\""));
+            layout_html_doc(&ui, document, true);
+            expect_top(marked, "shy-inline-double", "head", 5);
+            ASSERT_TRUE(marker->set_attribute("style", "hyphenate-character:\"xx\""));
+            layout_html_doc(&ui, document, true);
+            expect_top(marked, "shy-inline-double", "head", 25);
+        }
+    }
 }
 
 TEST_F(RadiantTextQuery, HyphenationLookaheadRetainsOutOfFlowAndEmptyInlineAnchors) {
@@ -3129,6 +4460,71 @@ TEST_F(RadiantPackageLayout, VelmtAttributesRemainAvailableToGeneratedPaint) {
         EXPECT_STREQ(tag->chars, "div");
         EXPECT_STREQ(role->chars, "node");
         EXPECT_STREQ(id->chars, "n0");
+    }
+}
+
+TEST_F(RadiantTextLayout, PendingResourceLoadsReleasePinsWithEitherOwner) {
+    ASSERT_NE(load("test/html/layout_load_runtime.html", true), nullptr);
+    EvalContext* owner = runtime_get_eval_context(dom_document_script_runtime(document));
+    ASSERT_TRUE(radiant_eval_context_switch(owner));
+    struct PendingDocuments {
+        DomDocument* documents[2] = {};
+        ~PendingDocuments() {
+            dom_dispatch_pending_resource_loads();
+            for (DomDocument* doc : documents) if (doc) dom_document_destroy(doc);
+        }
+    } held;
+    DomElement* frames[2] = {};
+    DomElement* images[2] = {};
+    for (size_t i = 0; i < 2; i++) {
+        held.documents[i] = dom_document_create(document->input);
+        ASSERT_NE(held.documents[i], nullptr);
+        dom_document_borrow_input_resources(held.documents[i]);
+        frames[i] = dom_element_create(held.documents[i], "iframe", nullptr);
+        images[i] = dom_element_create(held.documents[i], "img", nullptr);
+        ASSERT_NE(frames[i], nullptr); ASSERT_NE(images[i], nullptr);
+        dom_iframe_navigation_complete(frames[i]);
+        dom_queue_image_completion(images[i], true);
+    }
+    auto expect_pins = [&](size_t index, uint32_t count) {
+        for (DomElement* node : {frames[index], images[index]})
+            EXPECT_EQ(dom_node_pin_count(held.documents[index], dom_node_ref(node),
+                DOM_NODE_PIN_EVENT_QUEUE), count);
+    };
+    expect_pins(0, 1); expect_pins(1, 1);
+    dom_document_release_runtime_resources(held.documents[0], owner);
+    expect_pins(0, 0); expect_pins(1, 1);
+    if (HasFailure()) return;
+    dom_iframe_navigation_complete(frames[0]);
+    dom_queue_image_completion(images[0], false);
+    expect_pins(0, 1);
+    // document-first retirement must also detach the capsule's queued borrows.
+    dom_document_destroy(held.documents[0]);
+    held.documents[0] = nullptr;
+    dom_document_release_runtime_resources(held.documents[1], owner);
+    expect_pins(1, 0);
+}
+
+TEST_F(RadiantTextLayout, LoadTimeMathLayoutRetainsItsRuntimeUntilDocumentTeardown) {
+    struct TransientScripts {
+        TransientScripts() { script_runner_set_retain_js_state(false); }
+        ~TransientScripts() { script_runner_set_retain_js_state(true); }
+    } transient;
+    ASSERT_NE(load("test/html/layout_load_runtime.html", true), nullptr);
+    // embedded load blockers measure MathML before the transient JS realm is released.
+    ASSERT_EQ(document->js.runtime, nullptr);
+    Runtime* runtime = document->lambda_runtime;
+    ASSERT_NE(runtime, nullptr);
+    ASSERT_TRUE(document->owns_script_runtime);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        radiant_run_behavior_init(document);
+        EXPECT_EQ(dom_document_script_runtime(document), runtime);
+        DomElement* math = dom_find_element_by_id(document->root->as_element(), "formula");
+        ASSERT_NE(math, nullptr);
+        EXPECT_GT(math->width, 0.0f);
+        ASSERT_NE(math->custom_layout_paint_prop(), nullptr);
+        EXPECT_GT(math->custom_layout_paint_prop()->layer_count, 0);
     }
 }
 

@@ -92,6 +92,8 @@ bool url_equals(const Url* a, const Url* b);
 bool url_equals_without_fragment(const Url* a, const Url* b);
 Url* url_clone(const Url* url);
 bool url_has_authority(const Url* url);
+// preserve url's carrier, consume replacement on success, and release the old components.
+bool url_replace_contents(Url* url, Url* replacement);
 
 // Component setters (return URL_OK on success)
 UrlError url_set_href(Url* url, const char* href);

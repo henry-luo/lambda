@@ -838,6 +838,10 @@ static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, b
 
 static void target_stacking_view(EventContext* evcon, View* view) {
     if (!evcon || !view || evcon->target) return;
+    RadiantPaintPhaseScope phase(&evcon->paint_phase,
+        radiant_stack_is_paint_atomic(view) || radiant_stack_is_float(view) ||
+        radiant_stack_is_out_of_flow_positioned(view) || radiant_stack_is_in_flow_positioned_step8(view)
+            ? RADIANT_PAINT_ALL : evcon->paint_phase);
 
     if (view->is_block()) {
         target_block_view(evcon, lam::view_require_block(view));
@@ -906,56 +910,33 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 
 void target_children(EventContext* evcon, View* view) {
     if (!evcon || !view) return;
-
-    bool has_step8 = false;
-    View* last = view;
-    for (View* child = view; child; child = child->next()) {
-        if (!radiant_stack_is_deferred_from_normal_flow(child) &&
-            radiant_stack_is_in_flow_positioned_step8(child)) {
-            has_step8 = true;
+    unsigned phases = evcon->paint_phase == RADIANT_PAINT_ALL ? radiant_stack_flow_phases(view) : 0;
+    if (phases) {
+        // hit testing consumes the same CSS paint phases in reverse order.
+        for (unsigned index = 0; index < 3; index++) {
+            RadiantPaintPhase next = radiant_stack_paint_phase(2 - index);
+            if (!(phases & (1u << next))) continue;
+            RadiantPaintPhaseScope phase(&evcon->paint_phase, next);
+            target_children(evcon, view);
+            if (evcon->target) return;
         }
-        last = child;
+        return;
     }
-
-    // CSS 2.1 Appendix E step 8: in-flow positioned siblings (relative, sticky)
-    // paint after the others (render_walk_children), so they take the hit
-    // first — the later one first, as it paints on top.
-    if (has_step8) {
+    View* last = view;
+    for (View* child = view; child; child = child->next()) last = child;
+    if (render_paint_phase_has_content(evcon->paint_phase)) {
         for (View* child = last; child && !evcon->target;
              child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
             if (!radiant_stack_is_deferred_from_normal_flow(child) &&
-                radiant_stack_is_in_flow_positioned_step8(child)) {
-                target_stacking_view(evcon, child);
-            }
+                radiant_stack_is_in_flow_positioned_step8(child)) target_stacking_view(evcon, child);
         }
-        if (evcon->target) return;
     }
-
-    // overlapping normal-flow boxes also take hits in reverse paint order.
-    for (View* child = last;
-         child && !evcon->target;
+    for (View* child = last; child && !evcon->target;
          child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
-        // step-8 boxes were tried above
-        if (has_step8 && radiant_stack_is_in_flow_positioned_step8(child)) continue;
-        if (child->is_block()) {
-            ViewBlock* block = lam::view_require_block(child);
-            if (radiant_stack_is_deferred_from_normal_flow(child)) {
-                // skip deferred stacking entries; target_block_view walks them in reverse paint order.
-            } else {
-                target_block_view(evcon, block);
-            }
-        }
-        else if (child->view_type == RDT_VIEW_INLINE) {
-            if (radiant_stack_is_deferred_from_normal_flow(child)) {
-                continue;
-            }
-            ViewSpan* span = lam::view_require_element(child);
-            target_inline_view(evcon, span);
-        }
-        else if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(child);
-            target_text_view(evcon, text);
-        }
+        if (radiant_stack_is_deferred_from_normal_flow(child) ||
+            radiant_stack_is_in_flow_positioned_step8(child) ||
+            !radiant_stack_in_paint_phase(child, evcon->paint_phase)) continue;
+        target_stacking_view(evcon, child);
     }
 }
 
@@ -1237,6 +1218,11 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // an invisible box cannot claim the hit; traversal still reaches visible descendants.
     bool self_unhittable = view_visibility_is_hidden(block) || event_view_pointer_events_none(
         static_cast<View*>(block));
+    bool content_phase = render_paint_phase_has_content(evcon->paint_phase);
+    // ordinary block self hits belong below floats; replaced content remains foreground.
+    bool phase_self_allowed = evcon->paint_phase == RADIANT_PAINT_ALL ||
+        evcon->paint_phase == RADIANT_PAINT_BLOCK_BACKGROUNDS ||
+        (content_phase && layout_tag_is_replaced_content((NameId)block->tag()));
     // Content outside the overflow clip is not painted (setup_scroller), so it
     // must not take the hit either: an overflowing child would claim clicks on
     // a later sibling painted over it, e.g. a tab bar under a long <pre>. The
@@ -1258,7 +1244,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     View* view = NULL;
     bool hover = false;
     if (block->scroller && block->scroll_mut()->pane) {
-        hover = !path_only && !self_unhittable && scrollpane_target(evcon, block);
+        hover = content_phase && !path_only && !self_unhittable && scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
@@ -1315,12 +1301,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
-    if (block->custom_layout_paint_prop()) {
+    if (content_phase && block->custom_layout_paint_prop()) {
         target_positioned_children(evcon, block);
         if (evcon->target) goto RETURN;
         target_custom_layout_children(evcon, block);
         if (evcon->target) goto RETURN;
-    } else {
+    } else if (content_phase) {
         // Positioned content paints above the block's embedded self-content; walking
         // it first prevents iframe/webview hit targets from stealing covered clicks.
         target_positive_z_descendants(evcon, block->first_child);
@@ -1416,7 +1402,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 }
             }
         }
-        if (!self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
+        if (phase_self_allowed && !self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
             bool include_vertical_gap = rich_host;
@@ -1440,7 +1426,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
-    target_negative_z_descendants(evcon, block);
+    if (content_phase) target_negative_z_descendants(evcon, block);
 
     RETURN:
     // Only restore block position if no target was found
@@ -1458,7 +1444,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
-    if (!path_only && !self_unhittable && !evcon->target &&
+    if (phase_self_allowed && !path_only && !self_unhittable && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
@@ -1494,6 +1480,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     if (!evcon || !view_tree) return;
+    // embedded documents own their complete stack, even inside an outer foreground visit.
+    RadiantPaintPhaseScope document_phase(&evcon->paint_phase, RADIANT_PAINT_ALL);
     float saved_x = evcon->viewport_pointer_x, saved_y = evcon->viewport_pointer_y;
     evcon->viewport_pointer_x = evcon->event.mouse_position.x;
     evcon->viewport_pointer_y = evcon->event.mouse_position.y;

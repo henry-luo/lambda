@@ -32,6 +32,56 @@ bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoi
     return true;
 }
 
+struct RenderClusterVisit {
+    FontHandle* face;
+    RenderClusterGlyphFn visitor;
+    void* context;
+};
+
+static void render_cluster_glyph(void* pointer, uint32_t glyph_index,
+        float x, float y, float advance) {
+    (void)advance;
+    RenderClusterVisit* visit = (RenderClusterVisit*)pointer;
+    if (!visit->visitor) return;
+    const GlyphBitmap* bitmap = font_render_glyph_index(visit->face, glyph_index, GLYPH_RENDER_NORMAL);
+    visit->visitor(visit->context, bitmap, x, y);
+}
+
+bool render_text_visit_cluster(const FontBox* font, const unsigned char* start,
+        const unsigned char* end, RenderClusterGlyphFn visitor, void* context,
+        size_t* bytes, float* advance, bool include_scalar) {
+    if (!font || !font->style || !start || !end || start >= end || !bytes || !advance) return false;
+    TextGraphemeCluster cluster = {};
+    if (!text_get_grapheme_cluster(start, end, &cluster)) {
+        const unsigned char* cursor = start;
+        if (!include_scalar || !layout_utf8_next_codepoint(&cursor, end, &cluster.first)) return false;
+        cluster.bytes = (size_t)(cursor - start);
+        cluster.emoji = cluster.color_presentation = utf_is_emoji_presentation_default(cluster.first);
+    }
+    // contextual scripts need their full shaping run rather than a detached grapheme.
+    if (!cluster.emoji && utf_requires_contextual_shaping(cluster.first)) return false;
+    FontHandle* primary = font_box_handle(font);
+    if (!primary) return false;
+    FontStyleDesc style = font_style_desc_from_prop(font->style);
+    FontContext* fonts = font_handle_get_context(primary);
+    FontHandle* face = cluster.emoji && cluster.color_presentation
+        ? font_resolve_for_emoji(fonts, &style, cluster.first)
+        : font_has_codepoint(primary, cluster.first) ? font_handle_retain(primary)
+        : font_resolve_fallback_for_codepoint(primary, &style, cluster.first);
+    if (!face) return false;
+    RenderClusterVisit visit = {face, visitor, context};
+    float width = 0.0f;
+    // zero advance does not mean no ink; retain selected-face substitutions/mark positions (D4.5.1v4).
+    bool shaped = font_visit_face_glyphs(face, (const char*)start,
+        (int)cluster.bytes, render_cluster_glyph, &visit, &width); // INT_CAST_OK: bounded UTF-8 source length.
+    font_handle_release(face);
+    if (shaped) {
+        *bytes = cluster.bytes;
+        *advance = width + text_character_spacing(font->style, cluster.first);
+    }
+    return shaped;
+}
+
 static bool render_font_path_command(void* context, FontPathCommand command,
     const float* values, int count) {
     RenderGlyphPathWriter* writer = (RenderGlyphPathWriter*)context;
@@ -128,7 +178,7 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
             (cursor < end && str_utf8_decode(cursor, (size_t)(end - cursor), &next) > 0 && next == 0xFE0F);
         FontHandle* fallback = emoji ? font_resolve_for_emoji(font_context, &descriptor, codepoint)
             : !font_has_codepoint(primary, codepoint)
-                ? font_resolve_for_codepoint(font_context, &descriptor, codepoint) : nullptr;
+                ? font_resolve_fallback_for_codepoint(primary, &descriptor, codepoint) : nullptr;
         FontHandle* face = fallback ? fallback : primary;
         // exported text uses the selected Unicode face instead of a viewer's replacement font.
         float advance = font_get_glyph(face, codepoint).advance_x;

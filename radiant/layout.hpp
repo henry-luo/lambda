@@ -21,6 +21,8 @@
 #include <math.h>
 
 typedef struct LayoutContext LayoutContext;
+// formatting and measurement share the 1/64px layout-unit quantization tolerance.
+static constexpr float kTextLayoutSubpixelEpsilon = 1.0f / 64.0f;
 // paged flow state owned by the page composition (layout_paged.cpp); null in browsing layout
 struct PagedFlowState;
 
@@ -265,7 +267,24 @@ struct TextIntrinsicWidths {
     float max_content;
     float first_segment_min = -1.0f;
     float remaining_min_content = 0.0f;
+    float last_segment_min = -1.0f;
+    float interior_min_content = 0.0f;
+    bool has_min_content_break = false;
 };
+
+struct LayoutIntrinsicMinRun {
+    float minimum = 0.0f;
+    float first = -1.0f;
+    float tail = 0.0f;
+    float interior = 0.0f;
+    bool has_break = false;
+    DomNode* previous = nullptr;
+};
+void layout_intrinsic_break_min_run(LayoutIntrinsicMinRun* run);
+void layout_intrinsic_add_min_segment_edges(IntrinsicSizes* widths, float start, float end,
+    DomElement* element);
+void layout_intrinsic_append_min_run(LayoutContext* lycon, LayoutIntrinsicMinRun* run,
+    DomNode* child, const IntrinsicSizes& widths, bool separator = false);
 
 // The fast text paths share the same glyph-run probe; only their CSS
 // eligibility rules differ. Keeping the byte scan and font measurement here
@@ -389,6 +408,12 @@ inline bool is_typographic_letter_unit(uint32_t cp) {
     return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||
            (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);
 }
+inline bool is_break_all_text_unit(uint32_t cp) {
+    // CSS Text 3 §5.1 also treats ASCII symbols of Unicode line-break class AL as ID.
+    return is_typographic_letter_unit(cp) || cp == 0x23 || cp == 0x26 || cp == 0x2A ||
+        (cp >= 0x3C && cp <= 0x3E) || cp == 0x40 ||
+        (cp >= 0x5E && cp <= 0x60) || cp == 0x7E;
+}
 inline bool is_typographic_character_unit(uint32_t cp) {
     utf8proc_category_t cat = utf8proc_category(cp);
     return cp != 0 && cat != UTF8PROC_CATEGORY_CC && cat != UTF8PROC_CATEGORY_CF &&
@@ -397,11 +422,13 @@ inline bool is_typographic_character_unit(uint32_t cp) {
 bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
                                       CssEnum line_break, bool zwj_preceded,
                                       bool cj_non_starter);
+bool layout_text_allows_ascii_opening_break(uint32_t current, uint32_t next);
 bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
     uint32_t current, const unsigned char* next, const unsigned char* end,
     bool keep_all);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
+bool is_line_break_ba(uint32_t codepoint);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
                                        const unsigned char* text_end,
                                        size_t* cluster_bytes);
@@ -421,6 +448,7 @@ float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
 CssEnum get_element_text_transform(DomElement* element);
 CssEnum get_element_font_variant(DomElement* element);
 
+typedef float (*LayoutTextLineWidthQuery)(void* context, int line_index, float required_width);
 float compute_text_height_at_width(LayoutContext* lycon,
                                     const char* text,
                                     size_t length,
@@ -428,7 +456,12 @@ float compute_text_height_at_width(LayoutContext* lycon,
                                     float line_height,
                                     CssEnum text_transform = CSS_VALUE_NONE,
                                     CssEnum font_variant = CSS_VALUE_NONE,
-                                    bool preserve_forced_line_breaks = false);
+                                    bool preserve_forced_line_breaks = false,
+                                    LayoutTextLineWidthQuery line_width_query = nullptr,
+                                    void* line_width_context = nullptr,
+                                    bool allow_soft_wrap = true);
+StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descendants);
+void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
@@ -1766,7 +1799,8 @@ enum LayoutInlineTextEdgeMode {
 };
 bool layout_ruby_annotation_node(DomNode* node);
 uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
-    LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE);
+    LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
+    DomNode** source = nullptr);
 uint32_t layout_adjacent_inline_codepoint(DomNode* node, bool backwards,
     LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
     DomNode** common_ancestor = nullptr);
@@ -1775,8 +1809,24 @@ bool layout_atomic_inline_boundary_allows_soft_wrap(LayoutContext* lycon,
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
+inline uint32_t layout_text_resolve_css_whitespace(uint32_t codepoint) {
+    // source newlines are parsed already; a DOM CR has U+0020 semantics (CSS Text §4).
+    return codepoint == '\r' ? ' ' : codepoint;
+}
+inline bool layout_text_is_segment_break(uint32_t codepoint) {
+    return codepoint == '\n';
+}
 bool text_emphasis_marks_codepoint(uint32_t codepoint);
 bool text_codepoint_is_extended_pictographic(uint32_t codepoint);
+struct TextGraphemeCluster {
+    size_t bytes;
+    uint32_t first;
+    bool emoji, color_presentation;
+};
+bool text_get_grapheme_cluster(const unsigned char* start, const unsigned char* end,
+    TextGraphemeCluster* cluster);
+bool text_get_emoji_cluster(const unsigned char* start, const unsigned char* end,
+    TextGraphemeCluster* cluster);
 float text_unicode_space_width_em(uint32_t codepoint);
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
 bool text_unicode_space_has_explicit_advance(uint32_t codepoint);
@@ -1825,9 +1875,10 @@ struct LayoutTableAxis {
     int edge_count;
     int slot_count;
     LayoutTableAxis(const TableMetadata* meta, bool horizontal_axis)
-        : horizontal(horizontal_axis),
-          edge_count(meta ? (horizontal ? meta->row_count : meta->column_count) : 0),
-          slot_count(meta ? (horizontal ? meta->column_count : meta->row_count) : 0) {}
+        : LayoutTableAxis(meta ? meta->row_count : 0, meta ? meta->column_count : 0, horizontal_axis) {}
+    LayoutTableAxis(int rows, int columns, bool horizontal_axis)
+        : horizontal(horizontal_axis), edge_count(horizontal ? rows : columns),
+          slot_count(horizontal ? columns : rows) {}
     int row(int edge, int slot) const { return horizontal ? edge : slot; }
     int col(int edge, int slot) const { return horizontal ? slot : edge; }
     int fixed_index(bool start) const {
@@ -2306,6 +2357,10 @@ typedef struct BlockContext {
     CssEnum text_wrap_style;    // CSS Text 4 text-wrap-style
     bool balance_wrap_active;   // true when wrapping against balance_wrap_width
     float balance_wrap_width;   // inline measure used for text-wrap-style: balance
+    lam::Up<ViewBlock> balance_wrap_owner;
+    int balance_wrap_paragraph;
+    float balance_wrap_available_width;
+    int balance_wrap_start_line;
 
     lam::Up<struct BlockContext> parent;
     lam::Up<ViewBlock> establishing_element;
@@ -2575,6 +2630,7 @@ LayoutFlexStyleInfo layout_flex_declared_style_info(LayoutContext* lycon,
                                                     DomElement* element);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
+CssEnum layout_html_replaced_alignment_hint(DomElement* element, CssPropertyCode property);
 CssEnum logical_inline_direction(DomElement* element);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
@@ -2803,6 +2859,7 @@ struct StrBuf;
 const char* layout_html_ua_focus_css();
 CssStylesheet* radiant_ua_focus_stylesheet(DomDocument* doc, CssEngine* engine);
 bool layout_html_ua_stylesheet(StrBuf* css);
+bool layout_parse_legacy_font_size_level(const char* input, int* out_level);
 // Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
 void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
 
@@ -4605,6 +4662,22 @@ typedef struct LayoutFlattenedItemPolicy {
     bool reset_styles_resolved;
 } LayoutFlattenedItemPolicy;
 
+bool layout_text_has_collapsible_edge(DomText* text, bool trailing);
+DomNode* layout_adjacent_flattened_text(DomNode* node, ViewBlock* container, bool following);
+bool layout_contents_whitespace_is_text_separator(DomNode* text, ViewBlock* container);
+bool layout_collect_flattened_text_item(DomNode* text, ViewBlock* container);
+ViewElement* layout_create_anonymous_text_item(LayoutContext* lycon,
+    ScratchMark* scope, ViewBlock* container, DomText* text);
+LayoutAnonymousTextRun* layout_append_anonymous_text_run(LayoutContext* lycon,
+    ScratchMark* scope, LayoutAnonymousTextRun* head, DomText* text,
+    bool leading, bool trailing, bool whitespace);
+void layout_anonymous_text_runs(ViewElement* item, LayoutAnonymousTextRun* runs,
+    LayoutContext* lycon, ViewBlock* prelaid_container, bool finalize,
+    bool intrinsic = false);
+void layout_shift_anonymous_text_runs(LayoutAnonymousTextRun* runs, float dx, float dy);
+radiant::SizeF layout_measure_anonymous_text(LayoutContext* lycon,
+    ViewElement* item, LayoutAnonymousTextRun* runs, float width, bool intrinsic = false);
+
 int layout_collect_flattened_item_nodes(LayoutContext* lycon,
                                         ViewBlock* container,
                                         DomNode* first_child,
@@ -4682,6 +4755,11 @@ struct LayoutLogicalSides {
 
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
     const LayoutLogicalSides& sides);
+const CssValue* layout_box_component_value(const CssValue* value, CssPropertyCode source,
+    CssBoxSide side, const LayoutLogicalSides& sides);
+// borrowed from the caller's computed-value scratch or selected style owner (D4.5.1v4).
+const CssValue* layout_resolve_box_component_value(LayoutContext* context, DomElement* element,
+    const CssDeclaration* declaration, CssBoxSide side);
 bool layout_compute_scroll_keyword_axes(LayoutContext* context, StyleTree* style,
     bool vertical, bool overscroll, CssEnum inherited_x, CssEnum inherited_y,
     CssEnum* x, CssEnum* y);
@@ -4795,6 +4873,14 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
     sides.block_pair_end = inline_vertical ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
     return sides;
 }
+
+inline LayoutLogicalSides layout_element_logical_sides(DomElement* element) {
+    CssEnum direction = layout_specified_keyword(element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+    bool rtl = direction == CSS_VALUE_RTL ||
+        (direction != CSS_VALUE_LTR && logical_inline_direction(element) == CSS_VALUE_RTL);
+    return layout_logical_sides(layout_element_inline_axis_is_vertical(element),
+        layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
+}
 // Logical box properties all resolve to the same physical side pair. Keeping
 // the pair selection here prevents margin, padding, and inset from drifting
 // when writing-mode handling changes.
@@ -4871,43 +4957,20 @@ static inline bool layout_font_size_value_is_relative(const CssValue* value) {
 
 static inline bool layout_element_is_floated(const DomElement* element) {
     if (!element) return false;
-    if (element->specified_style) {
-        CssEnum specified_position = layout_specified_keyword(
-            const_cast<DomElement*>(element), CSS_PROPERTY_POSITION,
-            CSS_VALUE__UNDEF);
-        if (specified_position == CSS_VALUE_ABSOLUTE ||
-            specified_position == CSS_VALUE_FIXED) {
-            return false;
-        }
-        CssEnum specified_float = layout_specified_keyword(
-            const_cast<DomElement*>(element), CSS_PROPERTY_FLOAT,
-            CSS_VALUE__UNDEF);
-        if (specified_float != CSS_VALUE__UNDEF) {
-            return specified_float == CSS_VALUE_LEFT ||
-                specified_float == CSS_VALUE_RIGHT;
-        }
-    }
     // Intrinsic passes may run before PositionProp exists, so consult cascaded
-    // position/float values instead of treating an unresolved element as static.
-    if (element->position) {
-        return !layout_position_is_abs_fixed(element->position) &&
-            layout_position_is_floated(element->position);
-    }
-    if (!element->specified_style) return false;
-    CssDeclaration* position_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_POSITION);
-    if (position_decl && position_decl->value &&
-        position_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-        (position_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
-         position_decl->value->data.keyword == CSS_VALUE_FIXED)) {
+    // hints even when the element has no authored style tree.
+    CssEnum specified_position = layout_specified_keyword(
+        const_cast<DomElement*>(element), CSS_PROPERTY_POSITION, CSS_VALUE__UNDEF);
+    if (specified_position == CSS_VALUE_ABSOLUTE || specified_position == CSS_VALUE_FIXED) {
         return false;
     }
-    CssDeclaration* float_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_FLOAT);
-    return float_decl && float_decl->value &&
-        float_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-        (float_decl->value->data.keyword == CSS_VALUE_LEFT ||
-         float_decl->value->data.keyword == CSS_VALUE_RIGHT);
+    CssEnum specified_float = layout_specified_keyword(
+        const_cast<DomElement*>(element), CSS_PROPERTY_FLOAT, CSS_VALUE__UNDEF);
+    if (specified_float != CSS_VALUE__UNDEF) {
+        return specified_float == CSS_VALUE_LEFT || specified_float == CSS_VALUE_RIGHT;
+    }
+    return !layout_position_is_abs_fixed(element->position) &&
+        layout_position_is_floated(element->position);
 }
 
 static inline bool layout_view_is_out_of_flow_positioned(const View* view) {
@@ -5047,6 +5110,7 @@ static inline bool layout_block_is_skipped_container_item(const ViewBlock* block
 
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
+float layout_line_height_ascent_leading(float line_height, float content_height);
 float layout_apply_line_height_leading(float line_height,
                                        float* ascender, float* descender);
 float layout_inline_font_metrics(FontHandle* font, float line_height,
@@ -5056,6 +5120,11 @@ float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
 float layout_apply_baseline_shift(LayoutContext* lycon,
                                   float* ascender, float* descender);
 CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction);
+inline bool layout_is_middle_vertical_align(CssEnum align) {
+    return align == CSS_VALUE_MIDDLE || align == CSS_VALUE_BASELINE_MIDDLE;
+}
+void layout_middle_inline_contribution(LayoutContext* lycon, CssEnum align, float item_height,
+    float* ascender, float* descender);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset = 0);
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
@@ -5374,6 +5443,8 @@ struct TextJustifyContext {
     uint32_t unit_base;
     utf8proc_int32_t grapheme_state;
 };
+bool text_justify_cluster_gap(TextJustifyContext* context, const unsigned char* start,
+    const unsigned char* end, CssEnum mode);
 
 static inline bool text_justify_character_gap(TextJustifyContext* context,
                                                uint32_t current,

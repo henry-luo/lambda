@@ -61,6 +61,64 @@ bool radiant_stack_is_context(View* view) {
     return block && ((block->blk && block->block()->contain_positioning) || block->custom_layout_paint_prop());
 }
 
+static bool radiant_stack_is_flex_grid_item(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    if (!element) return false;
+    // committed item membership already accounts for display:contents ancestry.
+    DomElement::ParentItemKind kind = element->parent_item_kind();
+    return kind == DomElement::PARENT_ITEM_FLEX || kind == DomElement::PARENT_ITEM_GRID;
+}
+
+bool radiant_stack_is_float(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    return element && !radiant_stack_is_flex_grid_item(view) &&
+        !layout_position_is_abs_fixed(element->position) && layout_position_is_floated(element->position);
+}
+
+bool radiant_stack_is_paint_atomic(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    // inline tables and flex/grid items paint atomically like inline blocks (CSS 2.2 E.2).
+    return view && (radiant_stack_is_context(view) || view->view_type == RDT_VIEW_INLINE_BLOCK ||
+        (element && element->display.outer == CSS_VALUE_INLINE && element->display.inner == CSS_VALUE_TABLE) ||
+        radiant_stack_is_flex_grid_item(view));
+}
+
+unsigned radiant_stack_flow_phases(View* first_child) {
+    unsigned phases = 0;
+    const unsigned flow = (1u << RADIANT_PAINT_BLOCK_BACKGROUNDS) | (1u << RADIANT_PAINT_FOREGROUND);
+    for (View* child = first_child; child; child = child->next()) {
+        if (radiant_stack_is_deferred_from_normal_flow(child) ||
+            radiant_stack_is_in_flow_positioned_step8(child)) continue;
+        if (radiant_stack_is_float(child)) {
+            phases |= flow | (1u << RADIANT_PAINT_FLOATS);
+            continue;
+        }
+        if (radiant_stack_is_paint_atomic(child)) continue;
+        // ordinary block boxes own a background/hit layer even when their fill is transparent.
+        if (child->is_block()) phases |= flow;
+        if (view_contents_are_skipped(child)) continue;
+        ViewElement* element = lam::view_as_element(child);
+        if (element) phases |= radiant_stack_flow_phases(element->first_child);
+    }
+    return phases;
+}
+
+bool radiant_stack_in_paint_phase(View* view, RadiantPaintPhase phase) {
+    if (phase == RADIANT_PAINT_ALL) return true;
+    if (radiant_stack_is_in_flow_positioned_step8(view)) return false;
+    if (radiant_stack_is_float(view)) return phase == RADIANT_PAINT_FLOATS;
+    if (radiant_stack_is_paint_atomic(view) || view->view_type == RDT_VIEW_TEXT ||
+        view->view_type == RDT_VIEW_MARKER) return phase == RADIANT_PAINT_FOREGROUND;
+    // ordinary ancestors remain traversable to preserve each descendant's font/clip frame.
+    return true;
+}
+
+RadiantPaintPhase radiant_stack_paint_phase(unsigned index) {
+    static const RadiantPaintPhase phases[] = {RADIANT_PAINT_BLOCK_BACKGROUNDS,
+        RADIANT_PAINT_FLOATS, RADIANT_PAINT_FOREGROUND};
+    return index < 3 ? phases[index] : RADIANT_PAINT_ALL;
+}
+
 View* radiant_stack_path_child(View* ancestor, View* descendant) {
     for (View* child = descendant; child; child = child->parent) {
         if (child->parent == ancestor) return child;

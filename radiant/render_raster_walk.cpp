@@ -51,6 +51,12 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
     rdcon->block.y += fixed.y * rdcon->raster_scale;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
+    if (!render_paint_phase_has_content(rdcon->paint_phase)) {
+        // partial visits still enter the ordinary box scopes, without dispatching replaced pixels.
+        render_block_view(rdcon, block);
+        return;
+    }
+
     if (block->tag_id == MARKUP_NAME_SVG) {
         // MathLive positions a percentage-sized SVG inside a zero-height VList
         // row. Its marker can miss the viewport even though the clipped SVG
@@ -116,7 +122,7 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
     }
     else {
         // Skip only absolute/fixed positioned elements - they are rendered separately.
-        // Floats also have a position struct and remain in normal flow.
+        // float roots are selected by the shared paint-phase walk.
         if (skip_positioned_in_normal_flow && block->position &&
             (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
              block->positionp()->position == CSS_VALUE_FIXED)) {

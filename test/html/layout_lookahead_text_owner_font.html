@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Line-fill probes use each text owner's font</title>
+<style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+body { margin:0; }
+.row { font:10px/40px Ahem; margin-bottom:10px; }
+.large { font-size:20px; }
+.outer { font-size:30px; }
+</style>
+<body id="result">
+<div class="row" id="direct-fit" style="width:60px;">AA <span id="direct-fit-head" class="large">G</span>. next</div>
+<div class="row" id="direct-overflow" style="width:59px;">AA <span id="direct-overflow-head" class="large">G</span>. next</div>
+<div class="row" id="nested-fit" style="width:60px;">AA <span class="outer"><span id="nested-fit-head" class="large">G</span></span>. next</div>
+<div class="row" id="nested-overflow" style="width:59px;">AA <span class="outer"><span id="nested-overflow-head" class="large">G</span></span>. next</div>
+<div class="row" id="decorated-fit" style="width:70px;">AA <span id="decorated-fit-head" class="large" style="padding:0 5px">G</span>. next</div>
+<div class="row" id="decorated-overflow" style="width:69px;">AA <span id="decorated-overflow-head" class="large" style="padding:0 5px">G</span>. next</div>
+<div class="row" id="spaced-fit" style="width:65px;word-spacing:5px">AA <span id="spaced-fit-head" class="large">G</span>. next</div>
+<div class="row" id="spaced-overflow" style="width:64px;word-spacing:5px">AA <span id="spaced-overflow-head" class="large">G</span>. next</div>
+<div class="row" id="reverse-fit" style="width:90px;font-size:20px">AA <span id="reverse-fit-head" style="font-size:10px">G</span>. next</div>
+<div class="row" id="reverse-overflow" style="width:89px;font-size:20px">AA <span id="reverse-overflow-head" style="font-size:10px">G</span>. next</div>
+</body>

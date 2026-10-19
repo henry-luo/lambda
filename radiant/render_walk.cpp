@@ -141,7 +141,8 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
     state->x = p->pa_x + block->x + fixed.x;
     state->y = p->pa_y + block->y + fixed.y;
-    if (backend->visit_element) {
+    // semantic export visits occur once, even when box paint scopes have several phases.
+    if (render_paint_phase_has_content(backend->ctx->paint_phase) && backend->visit_element) {
         backend->visit_element(backend->ctx, block, state->x, state->y);
     }
 
@@ -185,7 +186,9 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
 
     bool backface_hidden = view_backface_is_hidden(block);
     bool hidden = backface_hidden || view_visibility_is_hidden(block);
-    if (!hidden && block->bound && backend->render_bound) {
+    if (!hidden && !render_paint_boundary_hidden(block) &&
+        render_paint_phase_has_boundary(backend->ctx->paint_phase, block) &&
+        (block->bound || render_background_uses_table_layers(block)) && backend->render_bound) {
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
 
@@ -197,6 +200,7 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         p->stop_after_self = true;
         return false;
     }
+    if (!render_paint_phase_has_content(backend->ctx->paint_phase)) return true;
 
     if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
@@ -250,7 +254,8 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
             backend->begin_block_children(backend->ctx, block);
         }
 
-        render_walk_negative_z_descendants(backend, state, block);
+        bool content_phase = render_paint_phase_has_content(backend->ctx->paint_phase);
+        if (content_phase) render_walk_negative_z_descendants(backend, state, block);
 
         if (block->custom_layout_paint_prop()) {
             RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
@@ -281,10 +286,10 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
             render_walk_children(backend, state, block->first_child);
         }
 
-        if (block->position) {
+        if (content_phase && block->position) {
             render_walk_positioned_children(backend, state, block);
         }
-        if (!block->custom_layout_paint_prop()) {
+        if (content_phase && !block->custom_layout_paint_prop()) {
             render_walk_positive_z_descendants(backend, state, block->first_child);
         }
 
@@ -304,14 +309,16 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (!p->stop_after_self && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block) &&
+    if (render_paint_phase_has_content(backend->ctx->paint_phase) &&
+        !p->stop_after_self && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block) &&
         block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
         }
     }
 
-    if (!render_walk_aborted(backend) && backend->render_outline && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block))
+    if (render_paint_phase_has_content(backend->ctx->paint_phase) &&
+        !render_walk_aborted(backend) && backend->render_outline && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block))
         backend->render_outline(backend->ctx, block, state->x, state->y);
 
     if (p->opened_effect_group) {
@@ -370,7 +377,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         state->color = span->inl()->color;
     }
 
-    if (backend->visit_element) {
+    if (render_paint_phase_has_content(backend->ctx->paint_phase) && backend->visit_element) {
         backend->visit_element(backend->ctx, span,
             state->x + span->x, state->y + span->y);
     }
@@ -416,6 +423,10 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
     if (render_text_paint_atomic_hidden(backend->ctx, view)) return;
     if (render_walk_aborted(backend)) return;
     if (view_backface_is_hidden(view, view->is_block() ? BACKFACE_SUBTREE : BACKFACE_SELF)) return;
+    RadiantPaintPhaseScope phase(&backend->ctx->paint_phase,
+        radiant_stack_is_paint_atomic(view) || radiant_stack_is_float(view) ||
+        radiant_stack_is_out_of_flow_positioned(view) || radiant_stack_is_in_flow_positioned_step8(view)
+            ? RADIANT_PAINT_ALL : backend->ctx->paint_phase);
 
     switch (view->view_type) {
         case RDT_VIEW_BLOCK:
@@ -521,14 +532,26 @@ void render_walk_negative_z_descendants(RenderBackend* backend, RenderWalkState*
 }
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
+    unsigned phases = backend->ctx->paint_phase == RADIANT_PAINT_ALL ? radiant_stack_flow_phases(view) : 0;
+    if (phases) {
+        // CSS 2.2 E.2: float subtrees sit between block backgrounds and inline foreground.
+        for (unsigned index = 0; index < 3; index++) {
+            RadiantPaintPhase next = radiant_stack_paint_phase(index);
+            if (!(phases & (1u << next))) continue;
+            RadiantPaintPhaseScope phase(&backend->ctx->paint_phase, next);
+            render_walk_children(backend, state, view);
+        }
+        return;
+    }
     bool has_step8 = false;
     for (View* child = view; child; child = child->next()) {
         if (render_walk_aborted(backend)) break;
         if (radiant_stack_is_deferred_from_normal_flow(child)) continue;
         if (radiant_stack_is_in_flow_positioned_step8(child)) {
-            has_step8 = true;
+            has_step8 = render_paint_phase_has_content(backend->ctx->paint_phase);
             continue;
         }
+        if (!radiant_stack_in_paint_phase(child, backend->ctx->paint_phase)) continue;
         render_walk_view(backend, state, child);
     }
     // CSS 2.1 Appendix E step 8: in-flow positioned siblings paint above the
@@ -560,6 +583,7 @@ void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState*
 
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block || !block->position) return;
+    RadiantPaintPhaseScope phase(&backend->ctx->paint_phase, RADIANT_PAINT_ALL);
 
     ArrayList* abs_children = radiant_stack_collect_positioned_children(
         block, "[RAD_CAP_RENDER_ABS]");

@@ -308,6 +308,42 @@ TEST_F(HtmlParserTest, BasicParsingSimpleDiv) {
     EXPECT_TRUE(strview_equal(&type->name, "div"));
 }
 
+TEST_F(HtmlParserTest, SourceNewlinesNormalizeBeforeCharacterReferences) {
+    struct Case { const char* source; const char* tag; const char* expected; } cases[] = {
+        {"<p>A\rB\r\nC\nD</p>", "p", "A\nB\nC\nD"},
+        {"<textarea>A\rB\r\nC\nD</textarea>", "textarea", "A\nB\nC\nD"},
+        {"<title>A\rB\r\nC\nD</title>", "title", "A\nB\nC\nD"},
+        {"<style>A\rB\r\nC\nD</style>", "style", "A\nB\nC\nD"},
+        {"<script>A\rB\r\nC\nD</script>", "script", "A\nB\nC\nD"},
+        {"<xmp>A\rB\r\nC\nD</xmp>", "xmp", "A\nB\nC\nD"},
+        {"<plaintext>A\rB\r\nC\nD", "plaintext", "A\nB\nC\nD"},
+        {"<svg><![CDATA[A\rB\r\nC\nD]]></svg>", "svg", "A\nB\nC\nD"},
+        {"<p>中文\r左右\r\n↔</p>", "p", "中文\n左右\n↔"},
+        {"<p>A&#13;B&#13;&#10;C</p>", "p", "A\rB\r\nC"},
+        {"<textarea>A&#13;B&#13;&#10;C</textarea>", "textarea", "A\rB\r\nC"},
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.tag);
+        Input* input = input_from_source(entry.source, nullptr, html_type, nullptr);
+        ASSERT_NE(input, nullptr);
+        Element* element = findElementByTagAllSlots(input->root, entry.tag);
+        ASSERT_NE(element, nullptr);
+        StringBuf* text = stringbuf_new(pool);
+        ElementReader(element).textContent(text);
+        EXPECT_STREQ(text->str->chars, entry.expected);
+    }
+    Item parsed = parseHtml("<div title=\"A\rB\r\nC\" data-cr=\"A&#13;B\"></div>");
+    Element* element = findElementByTagAllSlots(parsed, "div");
+    ASSERT_NE(element, nullptr);
+    // input preprocessing normalizes literal bytes, while a decoded reference stays in the DOM.
+    EXPECT_STREQ(ElementReader(element).get_attr_string("title"), "A\nB\nC");
+    EXPECT_STREQ(ElementReader(element).get_attr_string("data-cr"), "A\rB");
+    parsed = parseHtml("<div><!--A\rB\r\nC--></div>");
+    Element* comment = findElementByTagAllSlots(parsed, "#comment");
+    ASSERT_NE(comment, nullptr);
+    EXPECT_STREQ(ElementReader(comment).get_attr_string("data"), "A\nB\nC");
+}
+
 TEST_F(HtmlParserTest, ExplicitLengthPreservesScriptsAndMarkupAfterNullBytes) {
     const char source[] = "<!doctype html><script>const route='a\0b';</script>"
         "<p>tail</p><script>console.log('after')</script>";

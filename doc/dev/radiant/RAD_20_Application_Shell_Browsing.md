@@ -37,6 +37,16 @@ The CLI entry points live in `lambda/main.cpp`: `strcmp(argv[1], "layout")` rout
 
 `free_document` (`ui_context.cpp:248`) is the per-document teardown: it cancels or abandons the document's JS timers (choosing `js_event_loop_abandon_document_timers` when the JS batch-cleanup guard tripped, [RAD_21](RAD_21_JS_Scripting_Integration.md)), cleans up retained JS state, destroys the `DocState`, frees DOM-owned embed image surfaces, destroys the view tree/pool ([RAD_01](RAD_01_View_and_DOM_Model.md)), and destroys the `Url` and the `DomDocument` arena.
 
+The HTML loader, its `Input` and the CLI can retain the same URL carrier.
+Redirects and `<base>` overrides use `url_replace_contents` to move the new
+components into that carrier and release the previous components. DOM URL
+replacement shares this helper. Preserving the carrier lets the chosen owner
+detach and destroy it once at teardown (**D4.1.4v5 / D4.2.6**); a list of retired
+carrier pointers cannot do that. HTTP error-page construction refreshes its
+borrowed href after replacement. `BaseReplacementPreservesTheLoadersUrlCarrier`
+checks the shared carrier and final geometry; the URL library test also checks
+relative resolution and self-replacement.
+
 Document resources that retain script values bind their `EvalContext` owner
 (**D5.3.3 / D5.4.1**). `script_runner_cleanup_js_state` retires standalone-JS
 resources before destroying that evaluator: animation hosts disappear, while
@@ -136,6 +146,22 @@ The load path is intentionally **DOM-backed and format-normalizing**. Every inpu
 Dispatch is by scheme first, then file extension, in `load_html_doc_no_redirect` (`cmd_layout.cpp:3522`). `load_html_doc` (`cmd_layout.cpp:3597`) wraps it in a redirect loop (up to 8 hops) that follows a document-level `pending_navigation_url` (meta-refresh style) — the old design note attributed dispatch to `load_html_doc()` directly, but the extension switch actually lives in the `_no_redirect` inner function. Each branch ultimately produces a Lambda element tree, then two shared calls do the normalization: `dom_document_create(input)` (`lambda/input/css/dom_element.cpp:125`) allocates the `DomDocument`, and `build_dom_tree_from_element(root, dom_doc, parent)` (same file) builds the retained `DomElement` tree in place.
 
 The per-format flows (all in `cmd_layout.cpp` unless noted):
+
+Publishing post-script roots and replacing load-time view geometry preserves
+the document's evaluator. Embedded load blockers can trigger MathML/package
+layout during script execution and retain that runtime beyond transient JS
+realm cleanup. `populate_layout_document` therefore owns only geometry/root
+publication; each loader attaches its runtime explicitly. Existing document
+teardown releases package paint roots and drains that runtime's compiler jobs
+before input/cache destruction (**D5.3.3 / D5.4.1 / D8.5.1v7**).
+
+Pending iframe/image load events register a document resource in their owning
+DOM runtime capsule. Document destruction cancels only its queued events and
+unpins their nodes while the registry is live; evaluator shutdown releases
+the same resources when it retires first. The callback uses its stored capsule
+without changing TLS, so a second document's queue remains intact (**D5.3.3 /
+D5.4.1**). This also covers one-shot rendering after a transient JS realm drops
+its document alias but package paint roots keep the evaluator alive.
 
 - **HTML / HTTP / default** — `load_lambda_html_doc`. The richest path. It loads source (memory/file/HTTP), converts non-UTF-8 charset, parses with the HTML5 parser, creates the `DomDocument`, builds the DOM tree, extracts viewport and `<base href>`, collects external/inline/`@import` stylesheets in document order, applies inline `style=""`, then applies the initial CSS cascade **before** load-time scripts so CSSOM reads see cascaded values. After `execute_document_scripts`, any JS DOM/class/style or `<style>` mutation triggers stylesheet re-collection and a post-script recascade that preserves JS inline style writes; inline event handlers are compiled after script execution. The legacy scripts-before-cascade order is still available with `RADIANT_SCRIPT_BEFORE_CASCADE=1`. JS scripting is detailed in [RAD_21](RAD_21_JS_Scripting_Integration.md).
 - **SVG (top-level) and raster images** (`.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`) — `load_svg_doc`/`load_image_doc` both delegate to `load_dom_backed_image_document` (`cmd_layout.cpp:3679`), which escapes the image URL/filename, generates a tiny `html > head(style) > body[data-rdt-document=image] > img.rdt-image-document` document, and feeds that in-memory HTML string to `load_lambda_html_doc`. Making an image a normal DOM page is the right shape for future zoom/copy/context-menu affordances. Inline SVG inside HTML stays on the inline-SVG render path ([RAD_14](RAD_14_SVG_Vector_Graph.md)), not this wrapper.

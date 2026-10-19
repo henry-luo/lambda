@@ -4564,7 +4564,7 @@ struct PagedPaintResources {
 
 static TypesetStatus paged_publish_box_paint(PagedFlowState* state, LayoutViewNode* node,
         ViewBlock* source, BoundaryProp* boundary, Rect rect, const Rect* background_area = nullptr) {
-    ViewBlock box = *source; box.bound = lam::view_prop(boundary);
+    ViewBlock box = view_with_boundary(source, boundary);
     PagedPaintResources resources(state);
     auto capture = [&](RenderExportTargetKind target, lam::Up<const PaintList>* destination) -> TypesetStatus {
         PaintList* paint = paged_publish_paint(state);

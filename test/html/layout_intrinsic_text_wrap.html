@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Intrinsic grid row height honors text wrap mode</title>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 10px/10px Ahem; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); width: 120px; margin-bottom: 10px; background: silver; }
+.pre { white-space: pre; }
+.nowrap { white-space: nowrap; }
+.pre-line { white-space: pre-line; }
+.pre-wrap { white-space: pre-wrap; }
+.no-wrap { text-wrap-mode: nowrap; }
+pre, code { font: inherit; margin: 0; }
+pre { overflow-x: auto; }
+</style>
+<body id="result">
+<div id="grid-pre" class="grid"><div id="pre" class="pre">aaaaaa aaaaaa
+bb bb</div></div>
+<div id="grid-nowrap" class="grid"><div id="nowrap" class="nowrap">aaaaaa aaaaaa<br>bb bb</div></div>
+<div id="grid-pre-line" class="grid"><div id="pre-line" class="pre-line">aaaaaa aaaaaa
+bb bb</div></div>
+<div id="grid-pre-wrap" class="grid"><div id="pre-wrap" class="pre-wrap">aaaaaa aaaaaa
+bb bb</div></div>
+<div id="grid-mode" class="grid"><div id="mode" class="pre-wrap no-wrap">aaaaaa aaaaaa
+bb bb</div></div>
+<div id="grid-inherited" class="grid"><div id="inherited" class="pre"><span>aaaaaa aaaaaa
+bb bb</span></div></div>
+<div id="grid-code" class="grid"><pre id="code"><code>aaaaaa aaaaaa
+bb bb</code></pre></div>
+<div id="grid-blank" class="grid"><div id="blank" class="nowrap">aaaaaa aaaaaa<br><br>bb bb</div></div>
+<div id="grid-terminal-pre" class="grid"><div id="terminal-pre" class="pre">aaaaaa aaaaaa
+bb bb
+</div></div>
+<div id="grid-terminal-wrap" class="grid"><div id="terminal-wrap" class="pre-wrap">aaaaaa aaaaaa
+bb bb
+</div></div>
+<div id="grid-terminal-br" class="grid"><div id="terminal-br" class="nowrap">aaaaaa aaaaaa<br>bb bb<br></div></div>
+</body>

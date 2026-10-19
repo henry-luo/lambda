@@ -1,7 +1,9 @@
 # Radiant layout partial passes — October 2026
 
-Status: round 8 spacing fix passes the layout and Radiant baselines,
-2026-10-19. The full input audit is recorded in round 8 below.
+Status: round 11 table-cell inline measurement passes native and paged-media
+checks; the corrected leading calculation is undergoing aggregate qualification,
+2026-10-19. Round 10 remains fully qualified below.
+The input audit remains in round 8 below.
 
 ## Scope and initial gate
 
@@ -2727,3 +2729,2567 @@ The follow-up inspection also confirms the grid style pass counts only
 element items and its scratch capacity excludes text. A future implementation
 should promote the existing scratch-lived anonymous-item factory from flex
 instead of copying it, preserving the pass-owned lifetime in D4.5.1v4.
+
+## Round 9: anonymous grid text items
+
+Starting checkpoint (2026-10-19): **3,139 full /155 partial /0 failed**
+from a fresh `make test-layout-baseline`. Selected milestone: make anonymous
+text participate in grid placement and track sizing. CSS Grid 1 §6 and §8.5
+require an anonymous block container for each child text sequence, with
+whitespace-only sequences suppressed. CSS Text 3 §8.1 makes inherited
+indentation apply to the anonymous block's first line, using its own width.
+No Lambda semantics ruling changes. Scratch wrappers and run records remain
+owned by the enclosing layout pass, following D4.5.1v4 and D4.1.4v5.
+
+Diagnosis: flattened grid collection excludes text; the no-element fallback
+formats direct text against the entire container instead of a grid area.
+The existing flex implementation already provides scratch anonymous boxes,
+flattened text adjacency, and original-node text layout. Extract shared
+primitives rather than copying these. Grid will collect contiguous flattened
+text sequences into scratch items, measure them through the inline formatter,
+and retain ordinary grid placement/alignment. Measurements must preserve
+retained source rectangles; scratch wrappers never enter the DOM/view tree.
+
+Acceptance: `layout_grid_anonymous_text.html` covers text after/before an
+element, auto and fixed columns, text-only explicit tracks, inherited fixed
+and percentage indentation, block and inline alignment, display:contents text,
+and whitespace-only suppression under white-space:pre. Capture browser and
+Radiant geometry/PNGs in `temp/layout-analysis/round9/`. Focused WPT checks
+include `text-indent/anonymous-grid-item-001.html` and the existing flex peer.
+Verification budget: focused native/CLI checks while implementing; once
+stable, full native text suite, integer-cast lint, complete layout baseline,
+and required Radiant baseline. Keep corpus references and scoring unchanged.
+
+Implementation: anonymous items now share the existing flex scratch factory,
+run representation, flattened adjacency and text projection helpers. Grid
+collects these items before auto-placement and measures their inline content
+instead of using the former container-wide text fallback. Row contributions
+reuse the resolved track-span size. Trial layout detaches existing text
+rectangles, recycles only its own new rectangles, then restores source state;
+no scratch item or run pointer is retained on DOM nodes. Collection storage
+shares the grid pass lifetime so ending a nested node-buffer scope cannot
+unwind live anonymous items.
+
+Focused result: `anonymous-grid-item-001` and its flex peer both match all
+compared geometry. The nine independent controls match all **18 element
+rectangles** from fresh Chromium and pass three retained layouts. Their
+1200×800 PNGs differ in **2,012/2,880,000 RGB channels**; the complete original
+WPT PNGs differ in **30,980 channels**, including paragraph/font painting.
+These are geometry results, not pixel-equality claims. Native text/layout
+passes **139/139**; integer-cast lint and diff checks pass. The exact layout
+gate improves to **3,140 full /154 partial /0 failed /0 skipped**, preserving
+all 3,294 recorded cases and their scoring/reference data.
+
+Read-only follow-up: fresh captures again confirm the previously recorded
+atomic-inline GL/WJ/ZWJ browser/spec disagreement. The native no-wrap behavior
+follows [CSS Text 3 §5.5](https://www.w3.org/TR/css-text-3/#line-break-details);
+those browser-wrapping partials remain unchanged.
+The evidence is saved as `atomic-diagnosis*` under the round 9 temp directory.
+
+Review found a required alignment follow-up before completion: scratch items
+have no DOM children, so the shared baseline finder synthesizes their bottom
+edge. In the Ahem control with a 20px element beside 10px anonymous text,
+fresh Chromium places the text at local y=11px; native places it at y=9px.
+The formatter also exports a container-relative baseline because its text
+origin is the grid item's position. Preserve measured anonymous baseline
+metrics, normalize them to the item border-box origin, and teach the existing
+baseline finder to consume those metrics. The inline-grid exporter must add
+the item origin exactly once. Add this control to the finite acceptance set;
+this is part of ordinary grid alignment, not an independent feature tail.
+The in-progress first aggregate gate is retained as pre-follow-up evidence;
+qualify the corrected implementation again after it finishes.
+
+Baseline follow-up: measured metrics now remain on the scratch item and use
+its own border-box origin. The shared baseline finder uses those metrics for
+anonymous items; inline-grid export adds the item origin once (CSS Grid 1
+§10.6). The tenth control checks both a shared baseline with a larger-font
+item and inline-grid alignment beside an independent same-font reference.
+All **20 element rectangles** match Chromium and **139/139 native tests**
+pass, including three retained reflows. The final control PNG comparison is
+**2,342/2,880,000 differing RGB channels**. A test initially used the generic
+text-origin helper on an inline parent whose text remains in block coordinates;
+that helper double-counted its parent offset although the layout dump and PNG
+were correct. The contract now checks the independently captured element
+boxes. This separate text-origin helper issue is outside the grid change.
+
+The first full Radiant gate passed **5,887 full /158 expected partial /1
+existing skip /0 failed**, across 6,046 tests. It predates the baseline
+follow-up; the final implementation is undergoing fresh exact-layout and
+Radiant qualification. The generated CSS inventory was refreshed only for
+source/test line references; qualification states and layout score floors
+are unchanged.
+
+Next bounded investigation: `text-wrap-balance-004`. Fresh browser and native
+PNGs are under round 9 (`text-wrap-balance-004-browser.png`,
+`balance-radiant.png`). Native's blue forced-break block is unbalanced while
+its orange independent blocks balance; Chromium balances both groups. The
+current `text_wrap_balance_measure` in `layout_block.cpp` uses one width and
+one target-line count for the whole block, while height probes include every
+forced-break group. [CSS Text 4 text-wrap-style](https://www.w3.org/TR/css-text-4/#text-wrap-style)
+requires groups separated by forced breaks to balance independently and
+permits disabling balance only above ten lines; the current five-line cap
+also needs examination. No balancing production change is included in round 9.
+
+Design starting points for that next milestone: reuse/promote
+`intrinsic_append_inline_text` / `intrinsic_text_br_content_height` in
+`intrinsic_sizing.cpp`, which already preserve `<br>` as a forced marker;
+keep per-group constraints in the owning inline formatting context and
+advance at real forced breaks, without retaining temporary strings or scratch
+pointers across their owner. `line_break` / `line_reset` and
+`update_line_for_bfc_floats` already preserve active balance constraints.
+Acceptance should compare forced-break groups with independent block controls,
+including nested inline breaks, distinct paragraph lengths and retained reflow.
+Existing float and clamp contracts must retain their floors. Complete this
+finite paragraph-group behavior before expanding balance/clamp interactions.
+
+An independent Ahem diagnostic (`balance-groups-diagnosis.html` under round 9)
+confirms the paragraph-group cause without external font uncertainty: at
+240px, six two-letter words break as **160px +160px** in Chromium and in
+native independent block controls, but as **220px +100px** in native's
+forced-break group. All three groups retain the same 100px total height;
+the defect is the chosen soft breaks, not container height. The following
+long-word group and single-line group already agree. Keep these controls as
+the starting evidence for the next milestone.
+This priority targets balanced headings with authored line breaks and gives
+later clamp work correct paragraph boundaries; it is not selected solely to
+increase the synthetic full-pass count.
+
+Final round 9 qualification (2026-10-19): exact `make test-layout-baseline`
+passes **3,140 full /154 partial /0 failed /0 skipped** across 3,294 cases.
+The corrected implementation's full `make test-radiant-baseline` passes
+**5,887 full /158 expected partial /1 existing skip /0 failed** across
+6,046 cases, including **139/139 native text/layout tests**. Integer-cast
+lint, CSS inventory freshness and diff checks pass. The executable is newer
+than every changed engine source. Logs, browser/native PNGs and the independent
+20-element geometry comparison are retained under `temp/layout-analysis/round9/`.
+The anonymous-grid milestone is complete by behavior: text participates in
+tracks and auto-placement, inherits its own line formatting, exports real
+baselines, and survives retained reflow without retained scratch items.
+The long-running goal stays active for the bounded forced-break balancing
+investigation recorded above.
+
+## Round 10: balance forced-break paragraphs independently
+
+Starting evidence: round 9 verifies **3,140 full /154 partial /0 failed**
+and the required Radiant gate. The worktree retains that implementation.
+Priority: ordinary balanced headings with authored breaks. The owning stage
+is the balance probe and its formatting-context state, not CSS parsing or
+painting. CSS Text 4 `text-wrap-style:balance` requires separate forced-break
+groups and unchanged auto line counts for groups of five or fewer lines;
+its allowed disable threshold is above ten lines. No Lambda semantics or
+formal design ruling changes. D4.5.1v4 / D4.1.4v5 govern temporary measurement
+storage and prohibit retaining a string or scratch pointer beyond its owner.
+
+Design: expose the existing inline-text collector for both intrinsic height
+and paragraph probes. Preserve actual forced boundaries in that representation.
+Store only the owning DOM block, paragraph index and available inline size in
+BlockContext; compute each paragraph's constraint from temporary collected
+text, releasing it before returning. Advance via the existing real-forced-break
+flag, which distinguishes `<br>`/preserved newlines from terminal line flushes.
+Use normal wrapping line counts rather than dividing an unwrapped width.
+Keep the existing complex-content intrinsic fallback and apply remaining clamp
+budget to each group. Share width activation between setup and continuation.
+
+Acceptance: `layout_balance_paragraphs.html` pairs independent block controls
+with direct/nested `<br>`, reversed group lengths, center alignment, preserved
+newlines/blank groups, a six-line paragraph and an underestimated normal line
+count. Include the original `text-wrap-balance-004` WPT. Mixed-font shaping,
+paragraph-wide float optimization and precise clamp cutoff selection remain
+separate limitations; preserve their existing cases while fixing the common
+paragraph boundary model. Verification budget: focused native/CLI comparisons
+and neighboring balance/clamp/float WPTs during implementation; then full native
+text, layout baseline, required Radiant baseline, cast lint, inventory and diff
+checks once stable. Keep browser reference files and score floors unchanged.
+
+Implementation diagnosis: the first text inventory found four regressions.
+Single-paragraph mixed-font/clamp runs need the existing DOM intrinsic provider;
+the flattened string only supplies a different provider where a forced boundary
+must split it. Complex block/float heights also do not directly encode an inline
+line count. Reusing their existing intrinsic estimate resolves three regressions.
+The remaining external-float case exposes a missing measurement dependency:
+normal line counts must query the same shortened intervals and clearance as
+rendering. The shared word-height probe now accepts line-width queries and
+reuses the renderer's float-space/clearance helpers. A trial must preserve the
+normal float clearance; narrowing a virtual measure must not clear the float
+and manufacture a new paragraph origin. Two independent Ahem float/clearance
+controls extend acceptance for this shared prerequisite.
+
+Focused verification: **887 full /93 partial /0 failed** across all 980 CSS
+text baseline cases. `text-wrap-balance-004` becomes full; the original float
+and clamp regression floors are preserved. All **140 native text/layout tests**
+pass. The eight behavior controls include six paragraph pairs, an external
+float and a clearing word; the independent auto float supplies the comparison
+for reduced variance in remaining space while retaining normal line count.
+All **38 captured element rectangles** match fresh Chromium. The 1200×800
+control images differ in **21,912/2,880,000 RGB channels**, including valid
+UA differences in soft-break choice and the browser's later-group imbalance.
+Do not interpret this as pixel equality. The first clearance-check build failed
+because the existing subpixel tolerance was text-file-local; that diagnostic
+ran the older executable and is labeled `before-clearance-build`. The constant
+is now shared, and the successful rebuilt executable produced the focused
+zero-failure result. Cast lint, inventory freshness and diff checks pass.
+
+Qualification found a shared prerequisite: page snapshots regress because the
+inline height probe preserves `pre` newlines but still permits soft wrapping.
+Three isolated runs of the saved pre-round-10 executable pass the snapshot
+average check; three runs of the changed executable fail it. The demo's code
+cards acquire one extra estimated line per grid row, although their final text
+layout is unchanged. Expectations and tolerances are unchanged.
+
+A minimal Ahem grid distinguishes this cause: `pre`, `nowrap`, inherited `pre`
+and `pre-wrap` with `text-wrap-mode:nowrap` require 20px for two forced lines;
+the probe supplies 30px. Wrapping `pre-line`/`pre-wrap` controls correctly need
+30px. [CSS Text 4 §5.1](https://www.w3.org/TR/css-text-4/#text-wrap-mode)
+allows only forced breaks under `nowrap`. Repair the intrinsic inline height
+query using the existing wrap-mode resolver and forced-boundary representation;
+verify the grid contribution and retained reflow against these controls before
+requalifying the snapshot and full gates. This is part of round 10's shared
+measurement repair, not a new layout-score exception.
+
+The repair keeps one word-height counter with an explicit soft-wrap switch;
+the inline-height caller supplies the existing resolved wrap mode. Forced
+boundaries still advance lines, and a terminal boundary no longer invents an
+empty trailing line box. `layout_intrinsic_text_wrap.html` checks eleven grid
+rows, including inherited/default `pre`, explicit nowrap mode, real blank lines,
+and terminal newline/`<br>` boundaries over three retained passes. All **141
+native tests** pass. The 980-case CSS text gate remains **887 full /93 partial
+/0 failed**. All **21 browser-captured control rectangles** agree; the PNGs
+still differ in **4,752/2,880,000 RGB channels**. The corrected page snapshot
+check passes three isolated runs, with **90.9% average elements /91.4% text**;
+demo recovers its **98.8% element /83.6% text** score. The full layout and
+Radiant gates are undergoing fresh qualification on this implementation.
+
+The corrected implementation's exact `make test-layout-baseline` passes
+**3,141 full /153 partial /0 failed /0 skipped** across 3,294 cases. The first
+qualification attempt could not bind WPT's local HTTP server inside the sandbox
+and ran no layout cases; its log is labeled `baseline-sandbox-denied`. The
+insufficient-permission Radiant attempt was terminated and labeled
+`radiant-sandbox-stopped`. Qualification uses local-server access, without
+changing the harness, reference captures, tolerance or baseline floors.
+
+Read-only follow-up triage during qualification: fresh
+`word-break-normal-zh-000` at 1200×800 gives both Radiant and Chromium 77px
+span unions, versus 86px in the stored reference. Both engines give the two
+bordered blocks 94px heights; current browser/native inline widths differ by
+about 2.3px. Captures and native layout are under
+`temp/layout-analysis/round11/`. Establish equal font inputs before attributing
+the stored font-box discrepancy to layout. No font metric or reference change
+is justified by this comparison. The reversed-counter capture also reconfirms
+the Chromium syntax limitation already deferred in round 3; it is not a new
+engine repair candidate.
+
+Final round 10 qualification: exact `make test-layout-baseline` passes
+**3,141 full /153 partial /0 failed /0 skipped** across 3,294 cases. The full
+`make test-radiant-baseline` passes **5,890 full /157 expected partial /1
+existing skip /0 failed**, across 6,048 cases, including all **141 native
+text/layout tests**. The final logs are `baseline-corrected-final.log` and
+`radiant-qualified-final.log` under `temp/layout-analysis/round10/`.
+Integer-cast lint, CSS inventory freshness and diff checks pass.
+
+This bounded milestone is complete by behavior: forced-break groups choose
+independent balance constraints, normal line counts and float intervals feed
+the probe, and shared intrinsic heights honor nowrap and terminal forced breaks.
+The authored controls survive retained reflow. Mixed-font paragraph shaping,
+full float optimization and exact clamped-prefix selection retain their partial
+scope. The long-running goal remains active for the remaining recorded partials;
+the read-only font/reference triage above does not justify a production change.
+
+## Round 11: positioned inline extents in table-cell height
+
+Starting evidence: round 10's exact layout and Radiant gates pass. A fresh
+form/Markdown inventory retains **365 full /13 partial** and **48 full /10
+partial** respectively, with no regression-floor failures. Several form
+references describe a different DOM (the multiline textarea references contain
+inputs), so they do not justify CSS changes. Markdown's sponsor table in
+`md_remark-readme` reproduces with the same local image resources: native
+599px versus fresh Chromium 436px. The actual images have the expected sizes.
+
+Priority: ordinary Markdown tables containing linked images and authored line
+breaks. The root is `measure_cell_content_height`: it adds an inline subtree's
+height to its wrapper's font-box y, although the subtree's atomic descendants
+have their own positioned top. A 40px atomic box after one 10px text line needs
+52px including the root strut, but native measures 82px. This oversized minimum
+then feeds the existing rowspan distributor; distribution itself is not the
+cause. A second control exposes missing root-strut descent beside an unwrapped
+atomic box (40px versus 42px). Explicit inline line-height controls expose the
+same font-box/line-box origin distinction (45px versus 40px, 25px versus 23px).
+
+Authority: [CSS 2.2 §17.5.3](https://www.w3.org/TR/CSS22/tables.html#height-layout)
+and [§10.8](https://www.w3.org/TR/CSS22/visudet.html#line-height) size rows from
+the cell's line boxes. Inline font boxes, glyph ink, atomic margin boxes and
+line-height have distinct roles. Relative visual offsets do not enlarge normal
+flow (§9.4.3). No Lambda formal ruling changes; existing temporary measurement
+ownership remains under D4.5.1v4 / D4.1.4v5.
+
+Design: retain the existing inline extent collector, use its positioned origin
+when consuming its line-stack height, and center explicit line-height around
+the measured font box for either sign of leading. Include in-flow atomic inline
+cells in the existing cached flow-height/root-strut floor. Reuse the existing
+hypothetical-position helper for relative atomic descendants. Do not alter the
+rowspan algorithm or introduce image/tag-specific dimensions.
+
+Acceptance: direct/nested atomic wrappers, an atomic run after a forced break,
+a rowspan ending in an empty row, middle alignment against a taller cell,
+explicit line-height and glyph overflow, and a relative atomic descendant.
+Compare the isolated sponsor table and fresh native/browser controls under
+`temp/layout-analysis/round11/`. Scope is horizontal cell content measurement;
+column-width differences and unrelated image/resource/reference state remain
+separate evidence. Verification budget: focused native geometry first, then
+table/Markdown neighbors; once stable, exact layout, required Radiant baseline,
+cast lint, CSS inventory and diff checks. Preserve every reference and floor.
+
+Implementation: the positioned inline extent supplies both origin and height;
+the wrapper's font-box y no longer shifts an atomic subtree's contribution.
+Positive and negative leading use the same explicit line-height centering rule.
+Atomic-only content retains the already-formatted root-strut minimum. The first
+native pass exposed a one-pixel rowspan image shift: post-growth alignment used
+only descendant ink/atomic bounds, so it now reuses the natural content-height
+measurement. The neighboring table gate then caught
+`visibility-collapse-rowspan-005`: that same alignment must include block-child
+margins in its origin, matching initial alignment. Reusing its margin-aware
+bounds fixes the regression and adds a permanent block-margin control.
+
+All 57 table baseline cases pass. Markdown retains 48 full /10 partial with no
+regression-floor failures; `md_remark-readme` improves from 94.7% to 99.7% of
+elements and retains 100% text. The isolated sponsor table now has Chromium's
+436px height, with exact row heights and image y positions; its one recorded
+element mismatch is a separate 8.75px column-width difference. Eleven Ahem
+controls cover the accepted height/alignment contracts through retained reflow.
+
+The before/after/browser PNGs also expose an older table paint-order defect:
+the empty second row's background paints over the first row's spanning-cell
+content, and later row backgrounds cover other spanning content. Corrected
+geometry does not repair that raster ordering. Treat CSS 2.2 §17.5.1 table
+layers as the next table milestone; do not claim sponsor images are visually
+matched. Keep this evidence under `temp/layout-analysis/round11/`.
+
+Focused qualification passes all **142 native text/layout tests**; the final
+eleven-control fixture also verifies block paragraph positions inside the
+rowspan. All **56 captured element rectangles** match Chromium within 0.1px.
+The control PNGs differ in **1,272/2,880,000 RGB channels**; the sponsor-table
+PNGs retain the documented paint-order/column-width differences and are not a
+pixel match. Page snapshots pass their unchanged average check. Integer-cast
+lint, inventory freshness and diff checks pass.
+
+Exact `make test-layout-baseline` passes **3,141 full /153 partial /0 failed
+/0 skipped** across 3,294 cases. Markdown element fidelity improves while its
+ten partial statuses remain: the original sponsor table now has one separate
+column-width mismatch. Full Radiant qualification is running on the same
+implementation; no baseline/reference/tolerance change is included.
+
+The first required Radiant run found five paged-media alignment regressions.
+Their exact assertions expose a shared precision dependency: text formatting
+floors ascent half-leading, while the new inverse font-box conversion used an
+unsnapped half. The 0.5px discrepancy moves middle/bottom-aligned glyphs and
+repeated/split table content. Stop that failed aggregate before rebuilding;
+retain `radiant-leading-failed.log`. Extract the existing leading calculation
+for both font formatting and inverse table measurement, leaving the formatter's
+behavior intact. The unmodified paged tests supply the neighboring precision
+contract; no expected coordinate or tolerance changes are appropriate.
+
+The rebuilt shared-leading implementation passes all **491 paged-media tests**
+and all **142 native text/layout tests**. Existing formatter behavior is
+unchanged; table origin recovery calls the extracted ascent-leading helper.
+Integer-cast lint and diff checks pass. Fresh exact-layout and full Radiant
+qualification run sequentially; the earlier exact pass predates this precision
+correction and is not the final gate evidence.
+
+Read-only paint triage: `table-layers-diagnosis.html` under round 11 isolates
+three cases with no font/image dependencies. An empty later row paints blue
+over an earlier green spanning cell and its black content. A nonempty later
+row similarly covers the lower part of that cell. With a transparent spanning
+cell, the originating red row's background must extend into the span; a later
+row's blue rectangle must not replace that coverage. Fresh Chromium confirms
+all three under [CSS 2.2 §17.5.1](https://www.w3.org/TR/CSS22/tables.html#table-layers).
+
+The existing raster/export walks paint each row background together with its
+children in DOM order. A next table-paint milestone must share table-layer
+ordering and originating-cell coverage across backends, using existing
+background emission/geometry helpers. Prepainting full row rectangles alone
+would leave the transparent-cell case wrong. Do not add a rowspan-specific
+culling exception or duplicate a raster-only traversal. This triage changes no
+production paint code while the current qualification owns the executable.
+
+Blocking prerequisite: the final exact layout gate retains **3,141 full /153
+partial /0 failed /0 skipped**, but the full Radiant gate finishes with one
+actual failure: `PageLoad/html5_kitchen_sink` intermittently crashes during
+shutdown. All 491 paged-media tests and the other components pass. A worker
+backtrace reads an AST function name while the main thread destroys the module
+cache. LLDB ownership tracing proves the missing owner: `populate_layout_document`
+receives a document-owned runtime created during embedded-load MathML layout,
+then replaces it with its null runtime argument. Its registered compiler jobs
+survive document cleanup and race input-cache destruction. Two other runtimes
+are correctly drained. This is an ownership defect, not a compiler timeout.
+
+Design: geometry publication must preserve evaluator identity. Remove runtime
+assignment from that helper and initialize Markdown's optional runtime explicitly
+at its loader boundary. Reuse existing document teardown and compiler draining;
+do not add global shutdown ordering, delays, or disable compilation. Existing
+D5.3.3 / D5.4.1 and D8.5.1v7 govern the continuous ownership and compiler-cache
+lifetime; no formal ruling changes. Acceptance: transient JS plus an embedded
+load blocker forces MathML layout during load, retains the same document-owned
+runtime across geometry publication, behavior initialization and retained reflow,
+then closes through existing teardown. The new deterministic regression must
+fail before the fix. Verify that every runtime queuing jobs is cleaned before
+input-cache teardown, repeat the originally crashing page, then rerun exact
+layout and the required full Radiant gate sequentially. Keep failed logs and
+diagnostic captures in round 11; unchanged memory limits and test floors apply.
+
+The regression fails deterministically before the fix at the missing runtime
+assertion, then passes after geometry publication stops mutating ownership.
+All **143 native text/layout tests** pass. The fixed LLDB trace records cleanup
+for every runtime that queues compiler jobs before both input-cache teardown
+sites (`unclosed_compiler_runtimes=[]`); the earlier trace records the orphan.
+Only Radiant loader ownership changes; no Lambda runtime/compiler or vendor
+source is changed. Fifteen actual original-page process lifecycles exit cleanly.
+The PageLoad runner pre-runs its pages once before GTest, so repeated assertions
+over its cached results are not counted as repeated process coverage.
+
+Final regular qualification on CLI SHA256
+`8055731b234463dcf8dfac97ee74b7ba2bd146aedf579f8f635b6f218f590720`:
+exact `make test-layout-baseline` passes **3,141 full /153 partial /0 failed
+/0 skipped** across 3,294 cases. Full `make test-radiant-baseline` passes
+**5,892 full /157 expected partial /1 existing skip /0 failed** across 6,050
+cases, including all **143 native text/layout**, **491 paged-media**, **111
+page-load**, **644 UI** and **208 viewer** checks. The gates ran sequentially;
+the CLI remained unchanged throughout. Logs are `baseline-owner-final.log` and
+`radiant-owner-final.log`. Integer-cast lint, inventory freshness and diff checks
+pass. A separate supported ASan host is building for focused lifetime coverage;
+that result is still pending and does not replace regular gate evidence.
+
+The table-height/ownership milestone is complete by regular behavior checks:
+inline descendant positions and snapped leading determine natural cell height,
+root struts and block margins survive rowspan alignment, and post-load geometry
+publication preserves the runtime whose packages and compiler jobs remain live.
+The long-running goal remains active. For the next table paint milestone, reuse
+`layout_table_each_column` / `layout_table_column_range` and retained column,
+row-group, row and cell geometry instead of rebuilding layout during paint or
+copying the table traversals. A shared background-layer/coverage design must
+preserve image positioning, missing-cell coverage, separated-border gaps,
+`empty-cells`, and effect/transform scopes. Normal DOM-order row rectangles
+cannot provide that contract; the three saved raster/browser controls demonstrate
+why both background order and originating-cell coverage matter.
+
+ASan prerequisite follow-up: the original page passes three instrumented view
+lifecycles and the minimal interactive view passes, but one-shot PNG rendering
+of the same fixture exposes a second real lifetime gap. `dom_shutdown` calls
+`reset_pending_iframe_loads` after `free_document` destroyed the document's
+registry; a queued iframe event still owns a native node pin there. Preserve
+`runtime-asan-results-before.json` and `load-runtime-asan-render.log`. The fix
+belongs to the pending resource-load queue, not sanitizer settings or a global
+pre-destroy reset: a document and its evaluator can retire in either order,
+and one evaluator may queue events for multiple documents.
+
+Design/acceptance: register one existing document resource per queue/document
+pair, backed by the actual runtime capsule. Either owner cancels that document's
+pending iframe/image entries and releases their pins while the registry is live;
+document callbacks use the stored capsule without rebinding TLS (D5.3.3 / D5.4.1).
+Reuse resource registration/release and the current queue shapes. Verify pin
+release on runtime-resource retirement without touching a second document's
+queue, then document-first retirement, normal draining and runtime shutdown.
+Add a deterministic pin-count regression before editing production code.
+Rerun focused ASan view/render lifecycles. This extends into `lambda/dom/`, so
+fresh Lambda and Radiant baseline gates are required after the queue fix,
+followed by the exact layout gate. Earlier regular passes remain evidence for
+the preceding implementation, not the final queue repair.
+
+Queue implementation: iframe and image enqueue paths share a document-resource
+registration helper. Its stored capsule/document pair removes that document's
+queued entries and releases their pins; runtime reset releases those same
+resources instead of keeping a second unpin path. No public API or module
+export changes. The new pin-count regression fails before the fix and passes
+afterward, covering two documents in one capsule and both retirement orders.
+All **144 native text/layout tests** pass. The separate supported ASan host
+passes three original-page view lifecycles, the minimal interactive view and
+the previously failing PNG render, with no ASan diagnostics. Coverage is the
+instrumented CLI host; vendor libraries and the native GTest parent remain
+uninstrumented, and leak detection is disabled. Preserve failed sanitizer logs;
+the clean result is `runtime-asan-results-queue.json`. Fresh Lambda, exact layout
+and Radiant gates now qualify this final queue implementation sequentially.
+
+The first post-queue Lambda aggregate reports **7,891/7,892 passed**: the sole
+failure is `BinarySchemaTest.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`.
+Both engine producers succeed; the Python validator exits at `from PIL import
+Image` because the default Python 3.14 lacks Pillow. All 315 precise-GC stress
+cases and the 1,620-case main Lambda corpus pass. Preserve `lambda-queue-final.log`.
+Supply Pillow 13.0.0 in `temp/layout-analysis/round11/python-env` with system
+site packages inherited; do not modify validators or global Python. The exact
+failing case then passes in both tiers (`pdf-validator-local-python.log`).
+Fresh gates run with that local environment's `bin` prepended to `PATH`, in
+the order exact layout, Lambda, then Radiant. Their logs are
+`baseline-queue-final.log`, `lambda-queue-python-final.log`, and
+`radiant-queue-final.log`. Source, floors and expectations stay unchanged.
+
+Round 11 final qualification is complete on CLI SHA256
+`b03a592bce5720ff4712a3b7d45b85e623e83664cd3ad0919131312c28f7af5c`.
+Exact layout passes **3,141 full /153 partial /0 failed /0 skipped** across
+3,294 cases. Lambda passes **7,892/7,892**, with the local Pillow environment
+above. Full Radiant passes **5,893 full /157 expected partial /1 existing skip
+/0 failed** across 6,051 cases, including all **144 native text/layout**, **491
+paged-media**, **111 page-load**, **644 UI** and **208 viewer** checks. The
+normal CLI stayed unchanged across the serial gates. All five focused ASan
+lifecycle controls pass with the documented coverage; integer-cast lint,
+inventory freshness and diff checks pass. The consolidated evidence is
+`temp/layout-analysis/round11/qualification-queue-final.json`. No required
+qualification remains for this table-height/lifetime milestone. The overall
+goal remains active for remaining partials and the table paint repair below.
+
+## Round 12 read-only triage: table background propagation
+
+Round 11 qualification remains active; its sources and executable stay frozen.
+Twelve font-free native/browser controls under `temp/layout-analysis/round12/`
+separate source coverage from paint order. Eleven differ in pixels. The
+cross-cell overflowing block-background control already matches exactly:
+globally prepainting every cell background would change that correct overlap.
+The earlier label "table paint-order defect" was therefore too broad. The first
+wrong stage is painting a row rectangle where the cell should paint propagated
+background layers. No production paint code has changed yet.
+
+[CSS Tables 3 draft §5.1 and §5.3.2](https://www.w3.org/TR/css-tables-3/#drawing-cell-backgrounds)
+preserves DOM-order cell painting and assigns each cell the backgrounds of its
+originating column group, column, row group and row, below its own background.
+Positioning and image sizing use the source box, while coverage belongs to the
+cell. Missing anonymous slots have no such backgrounds. This makes the
+[CSS 2.2 §17.5.1](https://www.w3.org/TR/CSS22/tables.html#table-layers)
+layer model concrete without replacing the tree walk with a global prepass.
+The Tables 3 text is a working draft; keep that status explicit.
+
+The controls expose rowspan content covered by later rows, missing extension
+of the originating row's solid/gradient background, absent column/column-group
+backgrounds, painted separated-border gaps, and paint in missing-cell slots.
+An opacity control challenges effect ownership. The empty-cells control needs
+separate treatment: Chromium computes `hide` but still shows the row background
+behind a truly empty cell; both CSS 2.2 and the Tables 3 draft say the table
+background should show through all internal layers. Preserve that browser
+discrepancy instead of inventing a matching exception.
+
+Design direction after round 11 closes: reuse the existing background producer
+with distinct positioning and painting rectangles, selected from retained view
+geometry. Reuse `view_geometry_ancestor_offset` and the existing column-source
+lookup, promoting its static helper through `layout_table.hpp` if needed.
+Source tracks/groups stop painting independent background rectangles. Cells
+record their propagated layers in the existing raster/export background path,
+preserving their DOM order, current transform/effect scope and canonical style
+owners (D4.5.1v4 / D4.1.4v5). Fast boundary paths must use the same model; cells
+without their own background or boundary still need propagated layers. Do not
+copy traversal helpers, rebuild table layout during paint, or special-case
+spanning-cell visibility. Include solid and gradient sources, both border
+models, retained reflow, source-free cells, nested tables, opacity and exports
+in the finite acceptance plan before coding.
+
+Expanded triage now covers nineteen controls. Three are unchanged passing
+guards: cross-cell overlap, CSS table cells without an authored background,
+and nested alpha tables. Repeated `<col span>` and childless column-group spans
+both use their published bounding box for gradient positioning in Chromium.
+Additional controls cover five alpha layers, ignored track padding/borders,
+and an SVG image source. The core source/painting rectangle split must handle
+all of these through one producer, without mutating source styles. PDF's
+`radiant_pdf_walk.cpp` uses the shared full boundary producer for its graphic
+path but also has a direct simple-boundary dispatch; that optimization must
+observe the same table-background policy. Preserve functional snapshot/export
+ownership under S2.6.6v3 and the existing module boundary under D7.3.3–D7.3.4.
+
+Active round 12 plan: restore usable striped/spanning Markdown tables by fixing
+the background producer, after round 11's complete qualification. Acceptance
+uses the nineteen controls in `layout_table_background_layers.html`: originating
+solid, gradient and SVG-image sources; repeated columns and groups; separated
+gaps and missing slots; source-free CSS cells; alpha/effect scopes; existing
+cross-cell overlap and nested-table guards. `empty-cells:hide` follows the
+explicit standards rule despite the saved Chromium discrepancy. Verify both
+device densities and retained reflow, and preserve canonical source insets.
+
+The shared producer will enumerate the originating sources and keep their
+positioning rectangles separate from cell coverage. Raster, SVG and PDF's
+graphic path must consume that same plan; primitive/direct fast paths may run
+only where the plan has no extra table layers. Reuse the existing column lookup
+and ancestor-offset helpers. Painting gets a temporary effective source box
+with inapplicable track padding/borders removed, without altering its computed
+style (D4.5.1v4 / D4.1.4v5). Keep source selection independent of backend and do
+not introduce another renderer traversal or table-layout cache. The native
+pixel test must fail first. Verification budget: focused pixel checks and
+browser/native captures, targeted SVG/PDF exports, neighboring table/Markdown
+checks, then exact layout and required Radiant qualification. Validate module
+boundaries for the shared export policy; additional Lambda qualification applies
+if the module-side implementation changes its affected path. Preserve all
+references, floors and existing tolerances.
+
+The first producer implementation fixes all pixel samples except the first
+zero-height-row control. That row's spanning cell was never painted: shared
+paint/scroll extent scanning uses the block-flow classification, which excludes
+structural table rows/groups/cells. Correct the existing extent scan to traverse
+all block boxes in its paint/scroll mode, preserving flow-sizing classification.
+Do not add a special rowspan culling bypass. The same original control supplies
+the regression, at both densities and through retained reflow. All background
+source selection stays in the shared producer; the source image box and cell
+coverage remain separate.
+
+Round 12 focused implementation is complete. The shared source/coverage plan
+now drives raster, SVG and PDF, including PDF's former direct simple-boundary
+dispatch. The column lookup is promoted rather than copied; the third borrowed
+boundary projection shape is extracted as `view_with_boundary`. Its synchronous
+use preserves canonical source ownership under D4.5.1v4 / D4.1.4v5 and functional
+PDF resources under S2.6.6v3. Existing source padding remains unchanged after
+painting and retained reflow. The pixel assertion helper is shared with the map
+tests rather than duplicated.
+
+Two added zero-height source controls fail first in `native-zero-before.log`:
+the tile planner rejects the source positioning box despite positive cell
+coverage and explicitly sized tiles. Allow zero positioning dimensions while
+retaining positive coverage and resolved-tile checks. Recheck size after `round`
+resizing: CSS Backgrounds 3 §2.9 suppresses a resolved zero-sized image. No
+rowspan-specific bypass or synthetic source dimensions are introduced.
+
+The resulting 21 controls pass all 46 literal native samples at both densities
+through two layout/paint passes. Full focused runners pass **145 native text/
+layout**, **491 paged-media**, and **20 map** checks (`native-final.log`,
+`paged-final.log`, `map-final.log`). Browser/native captures match exactly for
+18 controls. Two standards discrepancies are preserved: Chromium retains row
+paint behind a hidden empty cell and uses ignored separate-model row border
+insets to shrink its gradient basis. The native producer follows CSS 2.2
+§17.5.1/§17.6.1. A third control differs only by one 8-bit color level under
+opacity; source opacity stays exactly 0.5.
+
+Focused native PNG and PDF exports pass all 46 literal samples. The SVG export
+passes 44/46 literal samples: its two opacity samples are 126 rather than
+128±1, matching Chromium's HTML reference exactly. The exported `<g>` carries
+`opacity="0.5000"`; preserve this rasterizer quantization difference without
+changing the correct producer or the permanent native tolerance. All other SVG
+samples, including both zero-height image sources, pass. The existing continuous
+PDF session produces a 1250×800 page for a 1200×800 requested viewport; every
+control is inside the checked region, and unrelated page sizing remains outside
+this milestone. `export-pixel-results-final.log` preserves the raw differences.
+The original sponsor-table PNG now shows all linked images instead of covering
+them with later row backgrounds; remaining automatic column-width differences
+are a separate geometry investigation.
+
+Round 12 aggregate qualification is complete on CLI SHA256
+`563d1bb9d745cbecfff93d14bb626ea9700b84a3effd8cbe76a86aaba44d5157`:
+exact layout **3,141 full /153 partial /0 failed /0 skipped**, Lambda
+**7,892/7,892**, and full Radiant **5,894 full /157 expected partial /1 existing
+skip /0 failed** across 6,052 cases. The CLI hash is identical before and after
+the serial gates. Native text/layout **145**, paged-media **491**, page-load
+**111**, viewer **208**, UI automation **644**, and page-snapshot **51** checks
+pass in the aggregate. The local round 11 Python/Pillow environment supplies the
+PDF validator dependency without changing global Python or test expectations.
+
+Module-boundary validation passes (134 deferred Class-F imports against the
+unchanged 165 baseline). Current ASan CLI exports pass PNG, SVG and PDF with
+`detect_leaks=0:halt_on_error=1`; prebuilt vendor libraries and native GTest
+parents are uninstrumented. Cast lint, CSS inventory freshness and diff checks
+pass. `temp/layout-analysis/round12/qualification-final.json` consolidates the
+evidence, including the raw browser/export discrepancies above. This table
+background milestone has no required qualification left; the overall goal
+remains active for remaining partials and the intrinsic substitution repair.
+
+## Round 13 read-only triage: intrinsic table widths
+
+Round 12 sources remain frozen during aggregate qualification. Seven local
+font-free table controls under `temp/layout-analysis/round13/` separate an
+explicit width, `width:max-content` with a maximum, spans, rowspans, padding,
+and custom-property substitution. Do not treat their initial large differences
+as one percentage-distribution defect. Replacing the row variable with the
+same literal padding removes most differences without any engine edit.
+
+The variable controls produce `NaN` cell intrinsic minimums: debugger evidence
+in `column-widths.log` shows that the nested 128px block is measured correctly,
+but the cell's final box contribution is invalid. The cyclic-padding path
+re-reads raw shorthand components in `get_intrinsic_box_side_widths_from_css`;
+`resolve_length_value` substitutes through the active view. Verify the measured
+element's owner context and substitute the entire shorthand before side
+selection. The corrected debugger inspection (`variable-owner-valid.log`)
+confirms `RDT_VIEW_TABLE` during the cell padding queries: the resolver looks
+up a row's variable from the table instead of the measured cell. The earlier
+`variable-owner.log` stops at an unreadable tagged pointer expression and is
+not evidence for the owner. Whole-shorthand substitution and computed-invalid
+handling follow [CSS Variables 1 §3.1–§3.2](https://www.w3.org/TR/css-variables-1/#shorthand-variables).
+Do not replace invalid arithmetic with a clamp or treat valid variables as zero.
+
+Literal-padding controls at 898px match explicit-width cell boxes within 0.33px,
+but `width:max-content` controls underfill by up to 54.2px. The separate table
+intrinsic routine in `intrinsic_sizing.cpp` sums cell widths without the used
+table solver's intrinsic percentage plan; its independent per-row counters also
+do not model occupied rowspan slots. These observations identify investigation
+boundaries, not a verified repair for the original 8.75px sponsor-cell mismatch.
+Reuse table metadata/column helpers when addressing that model; do not grow a
+third table sizing algorithm or fit its distribution to the sponsor page.
+
+The next finite milestone is owner-correct intrinsic box substitution: valid
+inherited/overridden variables, multi-token padding, math/fallbacks, invalid
+computed declarations, cyclic percentage padding and retained reflow. Reuse
+the existing substitution, cascade, box-side and scratch-owner helpers under
+D4.5.1v4 / D4.1.4v5. Establish native failures and browser controls before
+editing. Focused intrinsic/table checks and cast lint precede exact layout and
+required Radiant qualification; extend module/export checks only for changes
+to those consumers or ownership boundaries. Percentage/rowspan intrinsic model
+work remains separate until the substitution milestone has usable core coverage.
+
+Fourteen bounded variable controls are now captured in
+`intrinsic-box-variables.html` and `compare-variables-before.json` under the
+round 13 temporary directory. Row-defined lengths, cell overrides, whole/pair
+shorthands, arithmetic and cyclic percentages all expose zero-width cells;
+ancestor-variable and fallback controls already pass. A logical-padding guard
+is 80px instead of 104px: the intrinsic physical reparse misses the winning
+logical declaration. The ordinary inline-block guard remains 104px in both
+native geometry and the browser PNG. Reuse `layout_cascaded_style_declaration`
+and `layout_logical_sides` for physical/logical competition, together with the
+existing substitution/projected-shorthand helpers; do not copy the box-family
+tables or bypass selected paged bindings. These are read-only diagnostics;
+no round 13 production or permanent test edit has started.
+
+Round 13 implementation starts with the failing permanent
+`IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSides` regression and
+`layout_intrinsic_box_variables.html` (raw red: `native-before.log`). Intrinsic
+padding probes now use the measured element, the existing component cascade,
+whole-declaration substitution/validation and shared physical/logical side
+projection. Cyclic percentage terms resolve against zero while preserving
+length terms. Invalid computed padding keeps its cascade win and initial zero;
+canonical style ownership remains unchanged (D4.5.1v4 / D4.1.4v5).
+
+The side projector is extracted from the existing scroll-spacing consumer,
+and the repeated element-direction/writing-mode mapping is shared rather than
+copied. The first implementation passes all fourteen width controls at both
+densities and through retained layout. Neighboring native text/layout **146**,
+paged-media **491**, and CSS **147** tests pass on that intermediate source.
+
+The required PNG comparison finds a second instance of the same owner defect:
+all cell rectangles match exactly, but two cyclic-percentage cells retain
+padding from the outer 1200px constraint. Their children paint at x=120/130
+instead of x=8/20. The final percentage-spacing updater substitutes through the
+table's active view and skips its unresolved result. Extend the permanent test
+with used padding and child-position assertions (`native-used-before.log` is
+red), then share the owner-aware resolved-side helper between intrinsic and
+final percentage stages. Keep the finalized table basis and width-distribution
+algorithm unchanged. No broad qualification is claimed for the intermediate
+width-only result; fresh pixel, neighboring, boundary and required aggregate
+checks follow the complete value path.
+
+The complete fourteen-control regression now passes widths, used padding and
+child positions at both densities through retained reflow (`native-used.log`).
+The 1200×800 native PNG matches Chromium exactly: **0 different pixels** in
+`variable-pixels-used.json`, compared with 6,400 differing pixels in the
+intermediate width-only implementation. Preserve that intermediate capture and
+report under the `width-only` names. The new shared resolved-component helper
+keeps whole-declaration validation/projection and selected paged substitutions
+in the CSS owner; the raw variable resolver remains file-private. Final native,
+paged, CSS, module-boundary, cast-lint and scoped ASan checks are running before
+fresh aggregate qualification. The table width distribution is unchanged.
+
+An adjacent font-owner control finds a remaining instance before qualification:
+a 10px cell's `calc(1em + 10%)` uses the table's 16px font in the final update,
+giving 26px instead of 20px padding. Stop the pending validation chain (task
+group 60427, terminal 143) before its boundary/ASan stage, add the fifteenth
+control, and preserve `native-font-before.log` as red. `LayoutFontScope` and
+the existing `setup_font` bind math evaluation to the receiving cell and restore
+the surrounding context afterward. The complete regression then passes
+(`native-font.log`), and the fifteen-control 1200×800 PNG again matches Chromium
+exactly (`variable-pixels-final.json`). Final checks restart against this source;
+the interrupted and pre-font results do not qualify the font-owner repair.
+
+Final round 13 preflight passes **146 native text/layout**, **491 paged-media**,
+**147 CSS**, all **57 table** baseline cases and Markdown **48 full /10 partial**
+with unchanged floors. Strict module boundaries, integer-cast lint and inventory
+freshness pass. The current ASan CLI PNG is pixel-identical to Chromium across
+all fifteen controls, with leak detection disabled and the previously documented
+host/vendor instrumentation scope. The additional PDF validator passes in both
+tiers in its actual `test_lambda_errors_gtest` runner. Preserve the initial
+wrong-runner attempt separately; it never executed a test.
+
+Final round 13 qualification completes on CLI SHA256
+`b705ae06ba52fb71abc49bab123780ae3a490ec00ea834ed5100156168929dea`.
+Exact layout passes **3,141 full /153 partial /0 failed /0 skipped** across
+3,294 cases. Full Radiant passes **5,895 full /157 expected partial /1 existing
+skip /0 failed** across 6,053 cases, including all 146 native text/layout,
+491 paged-media, 644 UI automation, 208 viewer and 111 page-load checks. The
+serial aggregate chain (session 74445) exits 0, and the executable hash remains
+identical before and after both gates. `temp/layout-analysis/round13/qualification-final.json`
+consolidates the current fifteen-control pixel, preflight and aggregate evidence.
+This owner/substitution milestone has no required qualification left; the
+overall partial-repair goal remains active for the responsive-image defect below.
+No runtime or module-side source changed in this round, so its affected PDF
+boundary receives fresh focused validation without repeating the unchanged
+complete Lambda runtime baseline from round 12.
+
+## Round 14 read-only triage: responsive image intrinsic minimums
+
+The sponsor-table partial remains 8.75px in one cell. Cell measurements retain
+the authored 128/64px image width in their intrinsic minimum, and the definite
+width shortcut is reached during both whole-table and per-cell queries
+(`sponsor-minima.log`, `sponsor-image-state.log`). Optimized debugger variables
+are unavailable at that shortcut; do not infer their values from missing data.
+
+Seven new font-free controls under `temp/layout-analysis/round14/` isolate the
+behavior without the sponsor page or percentage-column distribution. A 40px
+table with a 64px image and percentage `max-width` stays 40px in Chromium, but
+Radiant forces it to 64px. Direct, anchor-wrapped, span-wrapped, 50% maximum and
+`calc(100%)` maximum cases all differ. Unconstrained and explicit 64px minimum
+guards agree. This is a common responsive-image sizing defect, not an offset
+to fit the sponsor table.
+
+The existing replaced-size path computes a zero min-content contribution for
+cyclic percentage maxima, then applies the remaining constraints. The earlier
+definite-width shortcut instead assigns its one clamped width to both minimum
+and maximum. Investigate that first lost distinction before changing percentage
+distribution or replacing the whole table intrinsic model. Reuse
+`intrinsic_apply_definite_width_constraints` so an authored minimum still floors
+the suppressed contribution (CSS Sizing 3 §5.2.1); keep the natural/explicit
+max-content contribution. This is a hypothesis until a failing native test and
+the measured shortcut state confirm the repair.
+
+After round 13 qualification closes, the finite acceptance covers those seven
+controls, inline wrappers, retained layout and both densities, plus the original
+Markdown/table comparison. Focused intrinsic/replaced-size neighbors precede
+exact layout and required Radiant gates. Keep all references and floors; use
+additional boundary/ASan checks only if the implementation changes APIs or
+ownership rather than arithmetic. The larger table percentage/rowspan intrinsic
+model remains separate. No round 14 production edit has started.
+
+Round 14 implementation adds `layout_responsive_image_minimum.html` with nine
+controls and one shared SVG asset. The original seven receive two guards for
+decoration and an authored CSS width, which already follows the general path.
+The native regression fails first (`native-before.log`): hinted percentage-max
+images force 40px tables to 64px, and a decorated image forces 76px. The definite
+shortcut now honors the existing zero-content-minimum decision, starting from
+its calculated padding/border floor and applying the same minimum constraints.
+It preserves the maximum contribution. This reuses the existing helper and
+does not change table percentage distribution or special-case image tags.
+
+The added height assertions expose unrelated shorthand parsing: `font:0/0
+sans-serif` is rejected because `css_parse_font_shorthand` does not accept a
+zero NUMBER as its size token. Equivalent `0px` and explicit longhands yield
+the expected zero strut (`font-length.json`, `font-longhands.json`). The new
+image fixture uses the explicit zero length; original controls and the failed
+unitless-shorthand reproduction remain saved. That parser gap is separate
+backlog, not a responsive-image repair.
+
+All nine table widths, used image widths/heights and table heights now pass
+at both densities through retained reflow (`native-isolated.log`). The PNG
+comparison retains a 40-pixel difference at y=12: native exposes the green cell
+background where Chromium retains the first image's fractional red edge.
+Other pixels match; no tolerance or reference is changed. Keep
+`image-pixels-first.json` as raw evidence rather than claiming exact raster
+parity. Remaining fractional paint coverage is outside the intrinsic-size fix.
+
+The original `md_remark-readme` partial is now fully matched: **376/376 elements,
+408/408 text nodes, 2/2 spans** with no differences. Markdown improves from
+**48 full /10 partial** to **49 full /9 partial**, and all **57 table** baseline
+cases pass (`inventory-first.log`, unchanged references/floors). Native text/
+layout **147/147** passes; neighboring paged-media and final lint/inventory
+checks precede fresh exact layout and required Radiant qualification. APIs and
+ownership are unchanged by this arithmetic repair, so the prior boundary/ASan
+coverage is not rerun or claimed as new source instrumentation.
+
+Round 14 qualification completes on CLI SHA256
+`26314f9400e3db1bc15e8afd7f4d040b042d8bc359f771a08560fcb779c848e8`.
+Exact layout passes **3,142 full /152 partial /0 failed /0 skipped** across
+3,294 cases. Full Radiant passes **5,897 full /156 expected partial /1 existing
+skip /0 failed** across 6,054 cases, including 147 native text/layout, 491
+paged-media, 644 UI automation, 208 viewer and 111 page-load checks. The serial
+qualification chain exits 0, its process exits, and the CLI hash remains
+unchanged. `temp/layout-analysis/round14/qualification-final.json` records the
+focused checks, original Markdown improvement, raw 40-pixel paint residue and
+aggregate results. This intrinsic-minimum milestone has no qualification left;
+the overall partial-repair goal remains active.
+
+## Round 15 read-only diagnosis: URL carrier retirement blocks table reduction
+
+Reduced inline controls distinguish ordinary space wrapping from Chromium's
+additional before-`<` punctuation opportunity. The platform line-break resource
+does not supply that ASCII opportunity either. Do not infer a shared repair
+for punctuation tailoring and table code fragments from those two observations.
+The isolated original UUID table still reproduces its missing code fragment
+with the baseline fixture-font stylesheet applied.
+
+That reduction also exposes a deterministic teardown fault with `<base href>`.
+The resource-free `temp/layout-analysis/round15/base-only.html` reproduces it:
+normal layout exits 1 after writing its view tree; the existing round 13 ASan
+CLI exits 134 with a heap-use-after-free. The loader frees the caller's original
+URL from `superseded_html_urls` at `cmd_layout.cpp:2641`; CLI teardown later
+destroys the same carrier. Redirect handling uses the same replacement shape.
+The ASan executable predates round 14 arithmetic; this evidence qualifies the
+unchanged URL path only. `diagnosis-pending.json` retains both executable hashes
+and the raw crash logs. No round 15 engine edit has started.
+
+Treat the owner defect as the next finite prerequisite. **D4.1.4v5 / D4.2.6**
+require preserving the chosen lifetime owner through Input/pool teardown.
+`dom_document_replace_url` already preserves URL carrier identity by exchanging
+owned fields. Assess extracting/reusing that operation for redirects and base
+processing, replacing the superseded-pointer list. Check borrowed href views
+and early-load failures before editing. Acceptance covers carrier identity and
+final contents, base-only CLI layout/PNG cleanup, redirected/base resource
+resolution and failed loads. Focused URL/native loader checks and targeted ASan
+precede the affected library, exact layout and required Radiant gates. Keep
+punctuation tailoring and the broader document-URL/base-URI model separate from
+this ownership repair.
+
+Round 15 implementation first adds `layout_base_url_lifetime.html` and
+`BaseReplacementPreservesTheLoadersUrlCarrier`. The native test fails before
+the repair: the returned document uses a different carrier (`native-before.log`).
+The existing DOM field-exchange operation is extracted to
+`lib/url.c:url_replace_contents`, with its ownership contract in `url.h`.
+HTML redirect/base handling and DOM replacement all use it. The bounded
+superseded-pointer list disappears. HTTP error construction refreshes its
+borrowed href after an exchange; self-replacement is an explicit no-op.
+
+The native regression, all 36 URL-extra checks and the formerly crashing
+base-only CLI layout now pass. A library regression checks that an existing
+alias resolves relatives against all the replacement components and survives
+self-replacement. Fresh ASan and strict module-boundary builds precede HTTP
+redirect/base/error controls and required aggregate qualification. These first
+passes do not qualify the still-pending sanitizer and aggregate checks.
+
+Fresh preflight now passes **148 native text/layout** checks and the PDF offset/
+image-stream validator in both tiers. The base-only 1200×800 PNG matches Chromium
+exactly. Twelve CLI controls cover local base handling, the isolated UUID table,
+HTTP success, redirect plus base-relative CSS, redirected HTTP failure and an
+expected missing-file error, each with native and fresh ASan binaries. All have
+the expected exits and no sanitizer fault; leak detection is disabled, and
+prebuilt vendor libraries/native GTest parents are not instrumented. Preserve
+the first cache-observation attempt: its request-count assertion detected reuse
+of the native CSS response by the ASan process. Distinct resource URLs then
+verify a separate CSS request for each binary (`url-lifetime-final.json`).
+
+Strict module boundaries pass with 134 deferred Class-F imports against the
+unchanged 165-entry baseline. Integer-cast lint and the regenerated 421-name
+inventory pass. The first inventory check correctly reports stale source
+locations before regeneration. Library/input neighbors are rebuilt; serial
+library, input, exact layout and required full Radiant gates remain pending.
+
+The library gate passes **1,659/1,659**. The broad input gate completes with
+**4,340 passed /46 failed**: ten Wiki writer cases report an unknown
+`input_type` option, 24 PDF/export cases fail, and twelve prose round-trip
+cases fail. `input-summary-final.json` preserves every failing name. These
+failures are not relabeled expected or covered by the passing layout result;
+their before/after regression status has not been established for every path.
+The original serial chain exits 2 at this gate. Exact layout and full Radiant
+then run serially on unchanged source in session 43544; exact layout passes
+**3,142 full /152 partial /0 failed /0 skipped**. Full Radiant remains pending.
+
+Gate preparation changes the CLI fingerprint from
+`4dd5fbfa7085a50f94dff2a554262b1ff06a7fe4502727404e49f70e05afa76d`
+to `a73b5bdc8aa9bceacf603b7fb7788c05278ce4aabc4cabbf7b1752cc3f2156d8`.
+Both build targets select `debug_native`; the Radiant target also forces a
+relink. The post-input and post-Radiant-build fingerprints agree. Preserve the
+failed whole-preparation hash assertion rather than claiming an unchanged
+executable across those builds. All twelve CLI controls repeat successfully
+against the current aggregate executable, and its base-only PNG again matches
+Chromium exactly. Earlier controls remain in `pre-aggregate-controls/`.
+
+## Round 16 read-only candidate: closing punctuation across inline boundaries
+
+The isolated UUID table records `BRK_CL` after the final `)` in
+`options.random = (random)`. That candidate replaces the earlier fitting space
+because the closing-punctuation path checks only the remainder of its current
+text node. It misses the following `]` outside the `code` element. The debugger
+confirms the candidate kind and width; its attempted parent-sibling dump fails
+on the tagged wrapper, so that failed dump is not evidence that a sibling is
+absent (`round15/table-wrap-kind-debugger.log`).
+
+Five Ahem controls under `temp/layout-analysis/round16/` isolate this loss:
+plain, nested and padded split-node spans remain one fragment in Radiant while
+Chromium splits them at the earlier space. Same-node and atomic-inline guards
+already match. **CSS Text 3 §1.4 /§5.5** ignores inline box boundaries for text
+adjacency, and **UAX #14 LB13** suppresses a break before the following closing
+punctuation. Reuse the existing inline-adjacency lookup; the two existing
+current-text/following-inline lookup pairs and this third consumer should share
+their shape. Acceptance adds retained reflow and both densities, then the
+original Markdown/table comparison, focused neighbors, lint and the required
+layout/Radiant gates. `round16/diagnosis-pending.json` records measured geometry.
+No round 16 engine edit has started while round 15 qualification is live.
+
+Round 15's actual make gates finish with **3,142 full /152 partial /0 failed**
+for exact layout and **5,898 full /156 expected partial /1 existing skip /0
+failed** for full Radiant (6,055 cases). Session 43544 then exits 1 at its
+historical pre-build hash assertion. The preserved post-input, pre-layout/
+Radiant, final and repeated-control fingerprints all agree on
+`a73b5bdc8aa9bceacf603b7fb7788c05278ce4aabc4cabbf7b1752cc3f2156d8`.
+`round15/qualification-final.json` records both the failed original hash check
+and the successful post-build comparison. The 46 broad-input failures remain a
+qualification limit; this gate is not claimed green. The requested layout/
+Radiant checks and URL/library/ASan controls are complete, and the process is
+terminal before any text-layout edit begins.
+
+Additional round 16 controls disprove a bracket-only repair. EX/IS/SY suffixes
+and same-node `)!` still admit an illegal candidate, while nowrap and an atomic
+inline already behave correctly. The closing-candidate guard duplicates only
+part of the restrictions in `layout_text_allows_letter_break`; reuse that
+existing contextual check and its `line-break:anywhere` override. Twelve finite
+controls now include preserved spaces from the original Markdown style and an
+anywhere override. The latter must retain a later explicitly allowed boundary,
+not stop at the preceding letter. CSS Text 3 §5.5 and UAX #14 LB13/LB15d govern
+these adjacency restrictions. The source change stays in the candidate path
+and the shared current-text/following-inline lookup.
+
+Round 16 adds `layout_closing_punctuation_context.html` and the native
+`ClosingPunctuationRetainsAdjacentInlineContext` regression. Preserve two
+incorrect test setups separately: the first reads the column/page-fragment
+counter instead of text rectangles, and the second omits native `@font-face`
+setup. With the canonical font-processing step and actual `TextRect` chain,
+the unmodified engine fails nine controls and passes three guards at both
+densities through retained reflow (`native-before.log`). Those are the red
+results for the identified candidate defect.
+
+The private `peek_next_inline_codepoint` now owns the current-text/following-
+inline lookup for segment-break, letter-break and closing-candidate consumers.
+Closing candidates reuse `layout_text_allows_letter_break` instead of their
+incomplete duplicated CL/NS guard. All twelve native controls pass. The PNG
+comparison records **1,182 differing pixels /960,000**, dominated by Ahem edge
+coverage, with a separate padded-fragment paint difference. Do not claim exact
+raster parity or change the reference/tolerance (`closing-pixels-first.json`).
+
+Focused text, inline, table and Markdown baseline categories retain zero
+failures. The first UUID code-fragment difference disappears: text improves
+from 719/723 to **722/723**, and elements from 647/653 to **648/653**. Its second
+table still has a stranded bracket and an undersized first column; the whole
+page remains partial. Markdown therefore stays **49 full /9 partial**. This
+remaining unbreakable-run intrinsic-width case is a separate next diagnosis,
+not evidence that the repaired closing candidate still admits `)]`. Full native/
+paged neighbors, lint/inventory and exact layout/Radiant qualification follow.
+
+Round 16 preflight passes **149 native text/layout**, **491 paged-media**,
+integer-cast lint, inventory freshness and diff checks after the complete native
+build preparation. Focused categories pass **887 full /93 partial** text,
+**169 full** inline, **57 full** tables and **49 full /9 partial** Markdown,
+all with zero failures and unchanged floors. The change is private layout
+computation with no API/ownership alteration; round 15's unchanged URL-owner
+boundary/ASan evidence is retained without claiming new sanitizer coverage of
+this text path. Exact layout and full Radiant qualification now run serially.
+
+The remaining UUID table mismatch has five reduced controls under
+`temp/layout-analysis/round17/`: plain, mixed-font, padded, nested and split-word
+cases require widths **80/100/108/108/108px** in Chromium but receive
+**60/60/68/68/40px** in Radiant. This is a substantial intrinsic-run loss, not a
+fractional paint offset. `calculate_min_content_width` already delegates to the
+central intrinsic-measurement path; trace its child sizes and run state before
+claiming a duplicate walker or editing. `round17/diagnosis-pending.json` records
+the measured widths/heights and next finite investigation. No round 17 source
+change starts during round 16 qualification.
+
+Read-only source tracing locates the table-specific loss in
+`measure_cell_widths` (`layout_table.cpp:6463`): its `append_inline_widths`
+accumulates max-content widths but reduces child minima independently with
+`max`. The plain Ahem control's 10/60/10px pieces consequently permit a 60px
+cell minimum instead of an 80px unbroken run. Inspect the runtime child sizes
+and share the existing intrinsic run computation before editing; do not copy
+the other walk or add a width floor tied to a tag or fixture. CSS Tables 3
+§3.8.2 and CSS Sizing 3 §2.1 provide the min-content basis. CSS 2.2 §17.5.2.2's
+particular automatic-layout algorithm is non-normative guidance, not a mandated
+algorithm. This next repair remains read-only during round 16's live gates.
+
+Round 16 qualification is complete: exact layout passes **3,142 full /152
+partial /0 failed /0 skipped**, and full Radiant passes **5,899 full /156
+partial /0 failed /1 existing skip** (6,056 cases). The complete serial chain
+exits zero and the CLI SHA-256 remains `17bb5d7f…8386780c` through both gates.
+`round16/qualification-final.json` retains the focused checks and raw pixel
+residue. Round 15's broader input failures remain a separate qualification
+limit; no claim of a green input aggregate follows from these layout gates.
+
+Round 17 now targets min-content continuity through ordinary inline elements
+in automatic table cells. Runtime tracing confirms the plain cell receives
+10/60/10px child minima and selects 60px, losing the unbreakable 80px run.
+The split-word inline itself reports 38px min-content versus 68px max-content,
+so both the shared inline reducer and table consumer need a common run model.
+The finite acceptance set is the original UUID options table, the five reduced
+Ahem controls, and adjacent space, forced-break, atomic, nowrap, anywhere and
+break-all controls at both densities through retained reflow. Preserve mixed
+fonts, inline decoration and nesting. First run the native regression red,
+then focused neighbors and affected baseline categories; qualify with lint,
+inventory, exact layout and full Radiant after the implementation is stable.
+
+The round 17 regression `IntrinsicMinimaRetainInlineWordEdges` first fails on
+the old engine for whole and partial words through nested inlines. The shared
+`LayoutIntrinsicMinRun` replaces the generic whole-child punctuation heuristic
+and the table's independent-child minimum reduction. Text and element results
+carry first/last unbreakable segment widths plus internal-break state, retaining
+their font advances and inline box edges. Node ends do not introduce wrapping;
+the seam reuses the intrinsic text boundary classifier. Real spaces, forced
+lines, optional breaks, atomics and out-of-flow descendants remain distinct.
+An existing `pre` neighbor caught a first/last-line normalization error in the
+initial edit; preserving distinct forced-line segments fixes it rather than
+changing the test's expectation. Empty-inline and optional-break controls then
+challenge the new shared state directly.
+
+All **18 browser-derived controls**, at 1×/2× through retained layout, now pass,
+along with **150 native text/layout** and **491 paged-media** cases. Affected
+baseline categories retain **887 full /93 partial** text, **169 full** inline,
+**57 full** tables and improve Markdown to **50 full /8 partial**, all with zero
+failures. The original UUID page is now fully matched: **653/653 elements,
+723/723 text entries and 2/2 spans**, with no differences. The initial 16-control
+raw PNG comparison retains 1,976 differing pixels; geometry parity does not
+establish exact raster parity. Final rendering and exact layout/full Radiant
+qualification follow after complete native build preparation. The complete
+result is copied by the existing constraint-keyed cache, preserving selected
+view/snapshot ownership (**D4.5.1v4 /D4.1.4v5**); the old width-pair-only cache
+description in RAD_05 §2.2 was corrected against the current implementation.
+
+The first exact round 17 gate stops with **two sizing regressions**
+(`slice-intrinsic-size` and `clone-intrinsic-size`), so full Radiant does not
+start. Preserve `baseline-first-failed.log` and
+`qualification-first-failed.json`. Both lose 4px per adjacent unbroken span:
+the first-segment summary had received only the start margin, although the
+same unbroken segment owns both margins. The shared
+`layout_intrinsic_add_min_segment_edges` now handles this distinction for
+margins, padding and borders; real internal breaks still assign the edges to
+separate segments. Two additional browser-derived controls reproduce the loss
+in a cell and a direct min-content query before the correction
+(`native-margin-before.log`). The finite set is now twenty controls. Recheck
+the sizing category along with the earlier neighbors before repeating the
+required gates; no floor, reference or tolerance change addresses this defect.
+
+The margin correction clears both decoration cases and all **776 sizing**
+cases. The widened inline check then exposes
+`dominant-baseline-mixed-writing-modes-002`: the summary retained vertical
+inline advances after the query had converted its numeric result to physical
+block-axis width. That summary cannot participate as a horizontal word edge.
+The existing vertical-axis conversion now maps the edge summary to the physical
+width as well. Preserve the failed `wpt-css-inline-final.json` observation and
+verify this case with the sizing/text/inline/table/Markdown neighbors before
+the aggregate retry. No aggregate was started on the margin-only version.
+
+After the axis correction, all affected neighbors pass: **776 sizing**, **169
+inline**, **57 table**, **887 full /93 partial text**, **50 full /8 partial
+Markdown**, **150 native text/layout** and **491 paged-media** cases. The twenty
+controls retain 1×/2× and retained-reflow coverage. The final 1200×1000 browser/
+Radiant pair has **2,440 differing raw pixels /1,200,000**, retained as raster
+residue. Exact layout qualification passes **3,143 full /151 partial /0 failed
+/0 skipped**; full Radiant qualification is live under the frozen implementation.
+
+The next read-only candidate is `md_ts-node-readme`'s inline environment-variable
+example (`round18/diagnosis-pending.json`). Fresh Chromium geometry agrees with
+its reference: the code text has two fragments, while Radiant keeps it whole on
+the next line. Seven Ahem whitespace controls match in both engines, disproving
+preserved whitespace alone as the cause. Eight punctuation controls isolate a
+normal wrapping difference before an opening symbol after another symbol;
+individual symbols remain whole, while the hyphen guard wraps in both engines.
+Chromium documents printable-ASCII compatibility tailoring before opening
+punctuation ([primary implementation](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/platform/text/text_break_iterator.cc)).
+Unicode 17 assigns U+003C–U+003E to AL
+([LineBreak.txt](https://www.unicode.org/Public/17.0.0/ucd/LineBreak.txt)), so this
+extra opportunity is not a default UAX #14 mandate. Design a general shared
+boundary policy within CSS Text 3 §5/§5.5's UA tailoring before implementing;
+do not add a fixture/operator-pair exception or copy vendor code. No round 18
+engine edit begins during round 17 qualification.
+
+Round 17 qualification is complete. Exact layout passes **3,143 full /151
+partial /0 failed /0 skipped** (3,294 cases). Full Radiant passes **5,901 full
+/155 partial /0 failed /1 existing skip** (6,057 cases). The complete retry
+chain exits zero and its CLI hash remains unchanged through both gates;
+`round17/qualification-final.json` records the actual fingerprint, native
+neighbors, twenty controls, boundary/lint/inventory checks and pixel residue.
+The failed first layout attempt and the subsequent mixed-axis observation stay
+preserved as evidence of the corrections. The UUID README is fully matched,
+and the shared horizontal word-edge milestone is closed. Round 15's broader
+input failures remain a separate qualification limit; this gate does not
+relabel them expected or establish a green input aggregate. The long-running
+partial-pass goal remains active for the next normal punctuation boundary
+milestone, whose reduced evidence and design guards are under `round18/`.
+
+## Round 18: normal punctuation boundaries in inline code
+
+**Priority/outcome:** common README examples with operator/opening punctuation
+should use a fitting normal wrap opportunity instead of moving the entire
+inline to the next line. The ts-node environment-variable example is the
+original failing case. Round 17's previous turn made verified progress and
+closed its shared intrinsic-word milestone; no aggregate remains live.
+
+**Policy and owner:** use one character-class predicate for normal breaks
+before ASCII opening punctuation, shared by text layout, lookahead and
+intrinsic measurement (including the inline seam reducer). The 376-control
+browser matrix establishes a consistent compatibility policy for all four
+openers and preceding printable characters. This is UA punctuation tailoring
+under CSS Text 3 §5/§5.5, not a claim that default UAX #14 requires it. Keep
+letters, digits, word prefixes, openers and protected character units intact;
+retain existing hyphen/question-mark behavior. Do not copy third-party source
+or use a fixture string/operator-pair exception. Reuse the fitting-candidate
+path and shared adjacency lookup rather than duplicating their arithmetic.
+
+**Finite acceptance:** `layout_ascii_opening_breaks.html` has 22 browser-derived
+cases: four openers; nested/split seams; padding; normal, break-word, anywhere,
+break-all, keep-all and nowrap; letter/digit/opener/currency guards; a candidate
+past the available line edge; and bare/slice/clone/nested/cell min-content
+queries. Test both densities through retained reflow. The unmodified engine
+fails sixteen controls and passes six guards (`round18/native-before.log`).
+The break-all guard exposes the existing distinction between Unicode letter
+categories and ASCII symbols of line-break class AL. The padded min-content
+controls also require real slice/clone edge ownership when the new normal
+opportunity splits a word; numeric minima must agree with their propagated
+edge summaries. These are shared consumers of this boundary, not fixture
+width adjustments.
+
+**Verification budget:** run the native regression red, focused edit-loop
+checks, then native text/paged neighbors and affected text/inline/sizing/table/
+Markdown categories. Compare fresh native PNG with the saved Chromium image
+without changing tolerances. Run integer-cast lint, inventory/diff checks and
+module-boundary validation for the public helper, then complete build
+preparation and serial exact layout/full Radiant gates. Keep unrelated broad
+input failures and independent Unicode/paint residue recorded separately.
+
+The shared normal predicate, break-all ASCII AL units, fitting-candidate
+helper and lookahead/intrinsic consumers first pass **20/22** controls. The
+remaining two expose the shared numeric slice minimum: 58px instead of 54px.
+The result now preserves first/interior/last segments, composes forced lines
+through the same reducer, and applies slice/clone edges to that summary.
+Terminal spaces no longer invent an empty final fragment. Numeric minima and
+propagated edge widths therefore agree. A second focused check exposes the
+corresponding used-layout error: reserving a sliced end edge at an internal
+candidate rejects the valid 54px prefix. The fitting helper now walks inline
+owners and reserves only edges belonging to that fragment; clone owners
+reserve their repeated end edge. Existing break kinds remain intact.
+
+The acceptance set grows to **25** controls with terminal-space and nested
+clone checks. The latter records a browser intrinsic overestimate rather than
+copying it: flat clone min-content is 78px; a nested query returns 82px, while
+literal-width 78px and 82px controls render identical, non-overflowing fragments.
+The native guard uses 78px, consistent with CSS Sizing 3 §2.1 and CSS Break 3
+§5.4; the raw browser comparison retains the 4px discrepancy. All 25 native
+controls pass at 1×/2× through retained reflow, along with **151 native** and
+**491 paged-media** neighbors. The raw 1200×1400 pair differs at **7,497 pixels
+/1,680,000**, dominated by edge coverage with additional decoration residue;
+do not claim exact PNG parity (`round18/pixels-first.json`). Affected baseline
+categories and required aggregate qualification are still pending. The existing
+cache copies the complete result, including the new interior width, under
+**D4.5.1v4 /D4.1.4v5**; no ownership ruling changes.
+
+Affected categories first retain zero failures: **887 full /93 partial text**,
+**169 inline**, **776 sizing**, **57 table**, and Markdown improves to **52
+full /6 partial**. Both original common-page examples now fully match:
+ts-node **1,062/1,062 elements and 1,490/1,490 text**, conventional-changelog
+**295/295 elements and 296/296 text**, with no differences. UUID remains full.
+
+Direct clone-fragment assertions then disprove an incomplete parent-only
+qualification: the parent minimum is 78px, but the code union starts at -4px
+and spans 82px because its second child starts at 0 instead of 4px. Preserve
+`native-final.log` (150 pass /1 fail). `output_text` had retained clone start
+padding only when the text's direct parent was cloned, clearing an outer
+clone's pending edge through an ordinary nested span. The new shared
+`inline_fragment_edge_width` ancestor traversal computes both continuation
+starts and fitting-candidate ends. Consumed slice starts disappear; all active
+clone owners retain their own edge. The native guard checks the code union
+and both actual child fragments at both densities through retained reflow.
+Repeat affected neighbors after this shared layout change before qualification.
+
+The final fragment assertions and affected neighbors pass after the continuation
+repair: **151 native**, **491 paged**, and unchanged green affected categories,
+including **52 full /6 partial Markdown**. The supplemental ASCII sweep matches
+wrapping positions/heights in **376/376** cases; exact boxes match **372/376**.
+The four width-only apostrophe differences remain in the failed comparison
+artifact. Reading Ahem's Unicode cmap confirms U+0027 is absent; the residual
+comes from a fallback advance difference, whose actual fallback faces are not
+yet traced. Do not relabel this sweep exact or change its geometry tolerance.
+Final PNG comparison retains **7,412 differing pixels /1,680,000** and the
+documented nested-clone intrinsic discrepancy. Boundary validation passes
+(strict lib/core/io/radiant DSOs; Class-F deferment 134 against ratchet 165),
+integer-cast lint and 421-name inventory freshness pass, and complete build
+preparation succeeds. Exact layout and full Radiant qualification now run
+serially under a frozen implementation (`round18/qualification-pending.json`).
+
+The exact round 18 layout gate passes **3,145 full /149 partial /0 failed
+/0 skipped**; full Radiant remains live. The next read-only candidate is the
+Zod logo's legacy `align="center"` hint (`round19/diagnosis-pending.json`).
+Fresh Chromium uses `-webkit-baseline-middle`, with a 164.234375px logo and
+paragraph. Native layout adds a baseline descent, producing 170.2px. Nine
+Ahem controls isolate the missing presentational hints: center/middle/top and
+absolute-middle aliases leave native 47px line boxes where the browser uses
+40px; ordinary CSS `vertical-align:middle` and an author baseline override
+already behave as controls. The image branch of `resolve_htm_style.cpp`
+handles only left/right floats.
+
+This is not a page-height correction. HTML Rendering §15.4.3 specifies legacy
+center/middle alignment on the parent's baseline
+([primary spec](https://html.spec.whatwg.org/multipage/rendering.html#attributes-for-embedded-content-and-images)).
+It differs from CSS middle: the browser's Ahem text offsets are 12px versus
+16px, so future regression checks must observe the text as well as box height.
+The browser's bottom hint currently computes baseline while the cited spec
+maps bottom to bottom; retain that disagreement explicitly. Design shared hint
+resolution and cascade/used-value handling before editing, covering applicable
+replaced elements rather than an image/file exception. No round 19 engine
+change starts during round 18 qualification.
+
+Round 18 qualification is complete: exact layout passes **3,145 full /149
+partial /0 failed /0 skipped** (3,294 cases), and full Radiant passes **5,904
+full /153 partial /0 failed /1 existing skip** (6,058 cases). The full serial
+chain exits zero; CLI SHA-256 stays `2ee00891…64e05c7d` through both gates.
+`round18/qualification-final.json` records the native/paged/category checks,
+25 controls with direct cloned-fragment bounds, 376-case wrapping sweep,
+strict module-boundary/lint/inventory checks and raw image limits. Both ts-node
+and conventional-changelog README pages now fully match. The shared normal
+ASCII-opening boundary and associated first/interior/last fragment milestone
+is closed; the failed intermediate checks stay preserved. Broader round 15
+input failures remain a separate qualification limit. The long-running goal
+remains active for the legacy replaced-alignment milestone in `round19/`.
+
+## Round 19: legacy alignment hints for replaced elements
+
+**Priority/outcome:** the Zod logo's `align="center"` must align its midpoint
+with the parent's baseline and stop adding an unrelated text-strut descent.
+This common documentation/image behavior precedes its independent remaining
+table-width discrepancy. The preceding goal turn made verified progress and
+closed round 18; both required aggregates completed with zero failures.
+
+**Design/owner:** add a distinct typed baseline-middle value, appending its enum
+and keyword entry so existing value IDs remain stable (**D4.6.1v4**). A shared
+HTML presentational-hint adapter applies to `img`, `iframe`, `embed`, `object`
+and image-button inputs before author CSS. Case-insensitive center/middle use
+the legacy value; absolute-middle aliases use ordinary CSS middle; top/texttop
+use their CSS values. Existing left/right float handling moves into that
+adapter; floated legacy elements retain the observed top computed alignment.
+Unknown/non-applicable hints remain inert. Preserve the separately recorded
+bottom-hint spec/browser disagreement rather than claiming complete alias
+conformance. Promote/generalize `layout_middle_inline_contribution` and share
+midpoint math with inline line contributions and final placement. Parent-font
+x-height affects CSS middle; it must not affect legacy baseline-middle. Keep
+selected style groups and snapshots owned under **D4.5.1v4 /D4.1.4v5**.
+
+**Finite acceptance:** `layout_legacy_replaced_alignment.html` has 37 controls:
+ordinary baseline; center/middle and case folding; top/texttop; absolute-middle
+and authored CSS legacy/ordinary values; stylesheet/inline/initial/unset/inherit
+precedence; unknown/untrimmed values; small images; differing element/parent
+font sizes; all applicable replaced tags; ordinary span/text-input exclusions;
+existing floats; and the original SVG. Test geometry, relative text/image
+offsets and computed values at 1×/2× through retained reflow. The unmodified
+engine fails sixteen named controls plus the SVG line-height invariant
+(`round19/native-before.log`). Container height alone cannot prove legacy
+alignment: the Ahem text offsets distinguish its 12px from CSS middle's 16px.
+
+**Verification budget:** native regression red, focused edit loop, native text
+and paged neighbors, affected form/text/inline/sizing/table/Markdown categories,
+browser/native image comparison without floor or tolerance changes. The CSS
+enum/keyword addition requires CSS input checks as well as full Radiant;
+retain the known broad input qualification limit honestly if it recurs. Run
+integer-cast lint, inventory and module-boundary checks; complete builds before
+fingerprinting and serial exact layout/full Radiant qualification. Original Zod
+logo behavior must improve; unrelated table and resource fidelity remain
+separate work rather than page offsets or asset-specific exceptions.
+
+**Round 19 edit-loop findings:** extending the controls to origin/layer rollback
+and causal mutations exposed two shared prerequisites. Treating the hint as a
+UA default made author `revert` retain it; float dispatch read the old retained
+`PositionProp` before the pending style refresh and asserted when the image
+became inline. A borrowed declaration now enters the existing cascade lookup
+with a distinct author-hint origin: CSS Cascade 5 §6.5 makes it independent for
+normal ordering/layers and part of author for `revert`. The lookup applies the
+existing rollback filters across the property, shorthand and `all`; it neither
+writes to canonical style trees nor allocates retained payloads (**D4.5.1v4 /
+D4.1.4v5**). Float dispatch reads the current cascade when used properties are
+dirty. Keep the initial failed regression and assertion trace in `round19/`.
+The test observer also now carries an explicit expected float value, so a
+mutation of the row named `left` does not accidentally assert its old state.
+Native/static and causal browser checks distinguish the alignment values;
+full milestone qualification remains pending.
+
+The first neighboring category sweep found a real Marked README regression
+(one inline link widened from 0px to 898px). Its float became visible to display
+blockification before a separate raw-declaration classifier could see the HTML
+hint. Two minimal float-only wrappers reproduce the same 200px error
+(`native-wrapped-red.log`). `inline_out_of_flow_kind` now delegates to existing
+shared flow helpers, and `layout_element_is_floated` also queries hints when no
+authored tree exists. This removes duplicated lookup logic rather than adding a
+wrapper/page exception. Browser anchors remain 0×0 for both float directions.
+
+**Round 19 completion:** the typed legacy alignment and borrowed hint-origin
+cascade now reach all five applicable replaced-element kinds. Shared midpoint
+math distinguishes the parent baseline from CSS middle's parent x-height;
+unknown/non-applicable hints stay inert. Author stylesheet/inline/layer/defaulting
+controls, hint removal, input-type changes, float-to-inline transitions and
+float-only inline wrappers pass retained native checks at 1×/2×. Zod's logo
+paragraph now equals its image height (164.2px serialized), without adding the
+old text-strut descent. The intermediate stale-state, rollback, assertion and
+Marked README failures remain preserved; Marked is restored to full matching.
+
+The frozen CLI `a0a5a93a…d038a863` passes exact layout **3,145 full /149 partial
+/0 failed /0 skipped** (3,294), and full Radiant **5,905 full /153 partial /0
+failed /1 existing skip** (6,059). Both actual Make targets exit zero, and the
+binary/source fingerprints remain unchanged. Native text **152**, paged **491**,
+and cascade **42** pass, as do all six affected category inventories. Strict
+module boundaries (Class-F 134 vs 165 ratchet), integer-cast lint and the 421-name
+inventory pass. The required input gate remains **4,341 passed /46 failed**
+(4,387): its failed test-name set exactly matches round 15; this is an honest
+qualification limit, not an expected-failure relabel or a proof of every causal
+before/after path. No new ASan/full Lambda qualification is claimed.
+
+The 37 Chromium/native controls have **35 exact relative-geometry matches**.
+The excluded ordinary text-input metrics and 0.034375px serialized SVG size
+difference remain visible. Raw full-viewport screenshots differ at **19,162
+/2,400,000 RGB pixels**; preserve form/SVG raster limits rather than changing
+comparison tolerances. `round19/qualification-final.json` links the actual gate
+summaries and failed intermediate evidence. The layout-only Make target leaves
+shared `test_summary.json` stale: its final saved JSON is parsed from the actual
+terminal breakdown, and the mistaken input-summary copy is retained separately.
+
+The long-running goal remains active. Read-only round 20 diagnosis separates a
+stale Zod table-width reference (saved 543px, fresh Chromium 527.390625px using
+the current 206×33 SVG; native 528px) from its real height error (180px browser,
+196px native). The final paragraph's DOM and CSSOM correctly resolve a zero
+bottom margin; used block-flow margins differ after sibling collapse.
+`measure_cell_content_height` then rescans these margins and appears to add a
+promoted self-collapsing margin twice. Six minimal controls and a DOM/CSSOM
+probe are saved under `round20/`; compare `view_boundary_flow_margin` with used
+margin-chain placement before fixing the shared table extent owner. Do not
+patch selectors, force an end-of-layout margin, distort image ratios or change
+references to hide the discrepancy. No round 20 engine edit occurred during
+round 19 qualification.
+
+## Round 20: table row height after adjoining empty blocks
+
+**Priority/outcome:** remove the real extra 16px in Zod's sponsor table while
+preserving intrinsic image ratios. Round 19 completed exact layout/full Radiant
+with zero failures. Its required input gate retains 46 failures with the same
+recorded names; this table-only milestone does not silently reclassify them.
+Fresh Chromium gives the sponsor table 180px height and 527.390625px width;
+native gives 196px and 528px. The saved 543px width reference disagrees with
+current local image dimensions and remains an independent evidence limit.
+
+**Owner/design:** CSS 2.2 §8.3.1 collapses an adjoining margin set once;
+§17.5.3 derives cell/row minimum height from its laid-out content. The shared
+`layout_table_cell_content` already records the normal-flow advance in
+`content_height`. `measure_cell_content_height` instead reconstructs block
+height from consumed/promoted boundary margins, potentially counting the same
+chain twice or treating negative overflow as extra height. Confirm the cursor
+and preserved `view_boundary_flow_margin` before changing this owner; reuse
+existing flow classification/metrics rather than adding a paragraph/tag rule.
+Keep selected style/snapshot ownership unchanged (**D4.5.1v4 /D4.1.4v5**).
+
+**Finite acceptance:** eighteen permanent controls cover ordinary/flex tables,
+leading/trailing/no empty blocks, positive/negative/mixed margin chains,
+all-empty/nested blocks, border/min-height separators, relative positioning,
+separate borders and zero margins. Native geometry must match Chromium at both
+densities through retained reflow and causal tail-margin changes. Verify the
+original Zod table against fresh browser geometry; leave stale width/reference
+and other page residues explicit.
+
+**Verification budget:** native regression red, focused edit loop, native text
+and paged neighbors, affected form/box/sizing/table/Markdown inventories, PNG
+comparison and original-page measurement. Then lint/inventory/diff and build
+preparation before frozen serial exact layout/full Radiant gates. No new
+allocation/lifetime change or runtime semantics ruling is planned; do not
+repeat unrelated input/ASan/Lambda gates absent a relevant new cause.
+
+**Round 20 edit-loop result:** twelve initial controls fail while their cell
+normal-flow `content_height` already equals the correct browser content height.
+The table rescan, not CSS selector/author margin resolution, owns the mismatch.
+Cells with normal-flow block content now use that recorded cursor extent; the
+existing flow classifier distinguishes block from atomic inline content.
+Float extent is retained at the cell-flow owner before row alignment shifts
+children. Two added mixed/middle-aligned float guards bring acceptance to 20
+row-height controls. Native **153**, paged **491** and all five affected
+category inventories pass. The original sponsor table is now 180px high;
+Zod improves from 1,935 to 1,946 matched elements out of 1,974 against the saved
+reference, while its independent stale-width and other differences remain.
+
+The geometry observer also preserves three pre-existing zero-area negative
+empty-box position differences (unchanged relative coordinates before/after),
+and raw PNGs differ at 2,400 of 2,400,000 pixels within two float/background
+paint overlaps. These independent block-position/painter residues are not
+claimed fixed or hidden by tolerance changes. The original analysis wrapper
+could not handle the box category's missing saved baseline; its failed output
+is preserved. A corrected temporary observer retains the ordinary category
+verdict, and all 17 box cases pass. Aggregate qualification remains pending.
+
+**Round 20 completion:** table cells with normal-flow block content now derive
+natural row height from the formatter's completed flow cursor. Consumed margin
+chains are not reconstructed as fresh space, and negative overflow does not
+inflate the row. Floats are included before alignment shifts their visual
+positions. All 20 row-height controls and causal margin transitions pass at
+1×/2×, including positive/negative/nested chains, separators and middle-aligned
+mixed floats. Native text/layout **153**, paged **491**, and all five affected
+category checks pass. Zod's real sponsor-table error is fixed (196px →180px,
+matching fresh Chromium), improving saved-reference element matches by eleven;
+the page remains partial for independent differences.
+
+Exact layout passes **3,145 full /149 partial /0 failed /0 skipped** (3,294).
+Full Radiant passes **5,906 full /153 partial /0 failed /1 existing skip**
+(6,060). Both actual Make targets exit zero. CLI SHA-256
+`6b7c70bf…d925b703`, qualifying production/test diff and permanent fixture stay
+unchanged throughout the gates. Integer-cast lint, the 421-name inventory and
+diff checks pass. No API/import/ownership placement changed, so module-boundary
+validation is not repeated. The last input run is still round 19's 46-failure
+qualification limit; this table-only change does not rerun that gate or transfer
+its totals to the new binary. No new ASan/full Lambda qualification is claimed.
+`round20/qualification-final.json` records these scopes and the preserved failed
+regression/observer output. Three unchanged zero-area empty-box positions and
+the 2,400-pixel float/background overlap residue remain unclaimed, with no
+baseline/tolerance edits.
+
+The long-running goal remains active. Read-only round 21 captures confirm a real
+Axios table-width discrepancy and a resource/reference-state discrepancy for
+Commander's unavailable remote badge. An Ahem probe removes glyph uncertainty:
+five 1px-bordered columns measure 536px in Chromium and ordinary native tables,
+but native block/inline-block max-content table wrappers measure 540px. Generic
+intrinsic sizing appears to count full cell borders while the used collapsed
+grid shares resolved edges; verify and reuse the existing conflict geometry
+before editing. Axios also has smaller glyph-metric differences, so do not
+promise exact page raster equality from a baseline pass. Jest's adjacent-link
+wrapping mismatch is saved as another candidate; simple opening/link controls
+already pass, so reduce its mixed-font context before choosing a root. No
+round 21 engine change occurred during round 20 qualification.
+
+## Round 21: collapsed borders in intrinsic table wrappers
+
+**Priority/outcome:** fix Axios's real excess intrinsic table width. Ahem removes
+font uncertainty: five cells with 80px text, 26px padding and 1px borders occupy
+536px in Chromium and native table layout, but native block/inline-block table
+wrappers request 540px. Wider row/column borders are also absent from intrinsic
+measurement. The first disagreement is generic intrinsic track contributions.
+
+**Owner/design:** CSS 2.2 §17.6.2 places winning borders on shared gridlines;
+§17.6.2.1 supplies conflict precedence. Extract the existing used-layout edge
+winner into a shared borrowed source adapter. Intrinsic measurement supplies its
+source rows, span occupancy and resolved style boundaries, replaces full cell
+borders with winning half edges, and includes the table's outer half edges.
+Keep the official style resolver and scoped scratch storage; do not create a
+parallel border parser or mutate retained used cell metadata. Selected style
+ownership remains governed by **D4.5.1v4 /D4.1.4v5**.
+
+**Finite acceptance:** seventeen Ahem controls cover ordinary/block/atomic,
+min/max-content, one/two/five columns, wider/mixed/hidden borders, col/row spans,
+row/column borders and separate-border controls. Browser widths must match at
+1×/2× through retained reflow and collapse→separate→collapse mutation. Recheck
+Axios against fresh Chromium; its independent glyph residue remains explicit.
+
+**Verification budget:** regression red, focused edit loop, native text/paged
+neighbors and affected form/box/sizing/table/Markdown categories, original page
+and PNG comparison. Shared API extraction requires strict module-boundary
+checks. Complete builds, lint/inventory/diff before frozen serial exact layout
+and full Radiant gates. No unrelated input/ASan/Lambda gate absent a new cause.
+
+
+**Round 21 edit-loop evidence:** the original seventeen width controls pass after
+sharing conflict geometry and selecting table behavior by CSS display. The
+separate-border guard exposed a pre-existing retained error: the HTML tag path
+wrapped an already repaired anonymous grid in another measured grid, adding
+6px spacing. CSS display now leaves the outer block to normal measurement.
+Five border-owner/span guards and fractional padding extend acceptance to 23
+tables plus the shrink-to-fit parent (24 width assertions). They expose two
+additional shared causes: integer rounding of each cell contribution, and
+adding the table's own border after it already won a collapsed outer edge.
+These are removed; the paged min-content assertion now expects exact measured
+fractional words plus padding instead of documenting old per-cell rounding.
+The failed intermediate paged check is preserved, not masked by tolerance.
+Final native/category and aggregate qualification remains pending.
+
+
+**Round 21 completion:** generic intrinsic table sizing and used collapsed-border
+layout now share the borrowed grid edge resolver. Span occupancy uses the shared
+bounded HTML span helpers, and current row/group styles are resolved before
+measurement. Fractional contributions and outer half edges remain fractional;
+the table border is included once. CSS display selects table versus ordinary
+block measurement, so retained anonymous grids do not acquire extra spacing.
+All 24 width assertions match Chromium at 1×/2×, including the causal width
+sequence 540→536→158→150. Native text/layout **154**, paged **491**, strict
+module boundaries, integer-cast lint, 421-name inventory and diff checks pass.
+All five affected category checks pass; Axios becomes a full baseline pass,
+with width 495px→486.9px (fresh Chromium 481.859375px). Its independent checkmark
+metric difference remains explicit.
+
+Exact layout: **3,146 full /148 partial /0 failed /0 skipped** (3,294).
+Full Radiant: **5,908 full /152 partial /0 failed /1 existing skip** (6,061).
+Both actual Make targets exit zero; session 94913 is terminal. CLI SHA-256
+`fee080c8…4a8f9a6b`, qualifying source/test diff and all permanent fixture hashes
+stay unchanged throughout both gates. The initial red regression, missing-header
+build error, retained separate-border failure and old paged rounding expectation
+are preserved under `round21/`. No tolerances or baseline verdicts changed.
+Seven non-asserted cell geometry differences (span/internal-track allocation)
+and **8,471 /2,400,000 RGB pixels** remain recorded; matching table widths does
+not claim full cell/raster conformance. The last input qualification remains
+round 19's 46 failures; no new input/ASan/full Lambda result is claimed.
+`round21/qualification-final.json` records the verification scopes and limits.
+
+The long-running goal remains active. Read-only round 22 reduction brackets a
+hyphen lookahead error: at Ahem widths 120/129, the prefix fills the line but
+the first legal hyphen break is at 130. Chromium moves the joined inline word;
+native leaves the first span on line one. Widths 110/119 and 130/131/140 already
+match. `text_has_line_filled` marks the hyphen opportunity before checking its
+advance, a candidate shared root that still needs a red regression and finite
+acceptance before editing. Nested/small-font controls reproduce it, while
+space/break-all/nowrap controls match. A reduced copy of the original Jest
+paragraph retains the browser's exact 866px width and mixed-font/link positions.
+No round 22 production edit occurred during round 21 qualification.
+
+## Round 22: lookahead admits only fitting hyphen breaks
+
+**Priority/outcome:** fix Jest's adjacent-link wrapping and the same common
+word split across styled inlines. Round 21 qualified 3,146 full /148 partial
+layout cases with zero failures. Its CLI/source and all aggregate handles are
+revalidated as terminal before this milestone.
+
+**Owner/hypothesis:** `text_has_line_filled` sets `has_break_opportunity` before
+measuring a literal hyphen, and accepts a soft hyphen without measuring its
+generated mark. At Ahem width 120/129, letters fill 120px but the first hyphen
+ends at 130px. The false fitting break keeps the preceding inline on line one.
+Widths 110/119 and 130/131/140 already match Chromium. CSS Text 3 §5 and §5.3
+ignore inline boundaries within words; visible hyphens consume width, and a
+conditional hyphen's generated mark participates in fitting. Reuse
+`measure_hyphenate_character` and the existing float-aware line edge/spacing
+policy. Keep lookahead observational and style ownership unchanged
+(**D4.5.1v4 /D4.1.4v5**); no selector offsets, extra breaks or tolerance changes.
+
+**Finite acceptance:** 23 permanent controls cover widths bracketing the first
+hyphen, nested/smaller-font inlines, actual earlier fitting breaks, separating
+spaces, break-all/nowrap, literal `hyphens:none`, soft/empty/double generated
+marks and disabled conditional hyphenation. Match browser line origins and
+heights at 1×/2× through retained reflow and causal 120→130→129→120 width changes.
+Recheck the reduced and original Jest paragraph, including the exact 866px
+mixed-font context. Keep unrelated Unicode/bidi/shaping residue explicit.
+
+**Verification budget:** red regression, focused text/paged neighbors, browser
+and native PNGs plus original Markdown, then text/inline/box/sizing/table/
+Markdown category gates. No API or allocation/ownership changes are planned;
+repeat strict module boundaries only if that scope changes. Complete build,
+lint/inventory/diff before frozen serial exact layout/full Radiant gates.
+Prior input qualification remains round 19's 46 failures; no new input/ASan/
+full Lambda gate is claimed for a text-layout-only correction.
+
+**Round 22 adjacent causes:** after the fitting-only change, all original line
+origins pass. The smaller-font guard still ends at 40px instead of browser 42px.
+A temporary trace records a real 22px leading union (13px above/9px below the
+baseline) against a 20px strut, with both font-difference flags set. The existing
+2px rounding cutoff suppresses that union. Genuine size/face changes now use
+the existing subpixel epsilon, as normal leading already does. Uniform-font
+rounding policy stays in its existing path; this is a shared CSS 2.2 §10.8.1
+metric decision, not a fixture adjustment.
+
+Three added following-inline guards bring acceptance to 26 cases. They show
+lookahead borrowing the preceding text's `hyphenate-character`/`hyphens` state.
+The following inline now enters the existing view/font scopes and resolves
+stale styles under `ComputeSize` with its flow context restored afterward.
+This uses the official resolver and existing ownership scopes
+(**D4.5.1v4 /D4.1.4v5**), not another CSS parser or temporary property pointers.
+The first failed probe command expected a nonempty establishing-element id;
+the saved raw metric trace still isolates the 22px union. No diagnostic logging
+remains in production. Recheck native/paged and neighboring categories before
+qualifying this broader shared-style/line-union correction.
+
+
+**Round 22 edit-loop result:** all 26 controls pass at both densities through
+retained layout and the causal top sequence 5→25→25→5→25. Browser/native
+measurement agrees across all 77 selected boxes within the JSON serialization
+bound. The original Jest paragraph and its 866px reduced copy now keep both
+links on line two at browser positions (native 188.8px and 243.9px). Jest becomes
+a full saved-baseline pass: Markdown improves from 53 full /5 partial to
+54 full /4 partial. Native text/layout **155**, paged **491** and all seven
+form/text/inline/box/sizing/table/Markdown category checks pass with zero
+failures. Raw control PNGs still differ at 4,710 /2,400,000 RGB pixels; the
+reduced Jest page has 16,686 differing pixels including header/footer/font
+raster details. These raw artifacts are preserved without tolerance/baseline
+changes. Aggregate qualification remains pending.
+
+
+**Round 22 completion:** lookahead admits literal hyphen breaks after their
+visible glyph fits and conditional breaks after the generated marker fits.
+Following inlines use their current source styles under existing scoped
+measurement; genuine mixed-font leading unions are not suppressed by uniform
+rounding tolerance. All 26 controls/77 selected boxes match Chromium geometry
+within serialization precision, at 1×/2× through retained width/marker changes.
+Native text/layout **155**, paged **491**, strict module boundaries, integer-cast
+lint, the 421-name inventory and all seven affected category checks pass. Jest
+becomes a full baseline pass (Markdown 54 full /4 partial). Raw control/reduced
+Jest raster residue stays explicit (4,710 and 16,686 /2,400,000 RGB pixels).
+
+Exact layout: **3,147 full /147 partial /0 failed /0 skipped** (3,294).
+Full Radiant: **5,910 full /151 partial /0 failed /1 existing skip** (6,062).
+Both actual Make targets exit zero; session 95930 is terminal. CLI SHA-256
+`5a456f50…dd9879e`, source/test diff and permanent fixture hashes remain unchanged
+through both gates and the final audit. Expected-red and intermediate mixed-font/
+marker-owner evidence remain under `round22/`; no baselines or tolerances changed.
+The last input qualification is still round 19's 46 failures; no new input/ASan/
+full Lambda result is claimed. `round22/qualification-final.json` records scopes.
+
+The long-running goal remains active. Read-only round 23 probes find that the
+current Chromium rejects `counter-reset:reversed(...)` in two remaining list
+fixtures (`CSS.supports` false, computed reset `none`). Do not force valid
+counter behavior to match that browser; native correctness still needs its own
+spec/reference evidence. An initial cached native file was stale (2026-10-13),
+and a fresh native file is now saved separately. Common Unicode Markdown is
+more actionable: initial canonical fixture-font captures retain arrow/Arabic
+width discrepancies, but the capture policy must match the saved reference.
+Arrow widths are 866.8px native, 815.47px fixture-font Chromium, 809.05px saved;
+the matched document-font Chromium width is 809.09375px (round 23 correction),
+so this does not establish arrow reference drift. The Arabic code line is
+213.8px native, 156.69px current Chromium and 171.84px saved. Both engines already
+use system UI/Menlo for the arrow context, so do not assume a missing system-font
+alias. Arabic fallback differs (native Courier New, browser Times New Roman).
+Trace actual family/handle/advance and shaping paths before selecting a fix.
+No round 23 production change occurred during round 22 qualification.
+
+## Round 23: bidi text ranges retain shaped advances
+
+**Priority/outcome:** remove a real width-publication error in mixed-script
+code and inline text. The prior round qualified both aggregate gates with zero
+failures. Current source/CLI fingerprints and terminal handles are revalidated.
+The saved Unicode Markdown Arabic line is measured at 171.812881px, then a
+hardware watchpoint catches `bidi_place_visual_line` publishing 213.780457px.
+The first named-helper debugger breakpoint was stale; current source breakpoints
+and the width watchpoint provide the actual write and stack. No font guess or
+fixture-specific offset is needed.
+
+**Owner/design:** CSSOM View §9 defines horizontal text range bounds by text
+advance width (https://www.w3.org/TR/cssom-view-1/#dom-range-getclientrects).
+Bidi finalization instead advances a second cursor by fallback bitmap ink
+widths/bearings. A preserved newline disables fallback advances while keeping
+those ink metrics, magnifying the error. Use the existing normalized shaped
+advances for visual placement/range union; remove the competing ink cursor.
+Visible glyphs beside segment breaks still need their fallback advances; the
+existing line-break filter already excludes the breaks themselves. This is
+local scratch/geometry work, with style/snapshot owners unchanged
+(**D4.5.1v4 /D4.1.4v5**). No library/vendor, font-name substitution or baseline/
+tolerance change is planned.
+
+**Finite acceptance:** seventeen advance-range controls cover plain/trailing
+LF/CRLF, preceding/following/repeated lines, Arabic/Hebrew, RTL, document fonts,
+styled subruns and tab stops, plus primary Latin/space/bold controls. Complete
+unwrapped ranges must equal the corresponding max-content advance, independently
+of bitmap ink. Verify retained layout at 1×/2× and causal primary/fallback family
+changes, original Markdown and browser/native PNGs. CRLF's pre-existing intrinsic
+box overcount is separate from its text-range width and remains recorded. The
+arrow paragraph's contextual fallback/shaping mismatch is independent backlog.
+
+**Verification budget:** red regression; native text/paged neighbors; affected
+text/inline/box/sizing/Markdown categories and document captures. Then build,
+lint/inventory/diff before frozen serial exact layout/full Radiant gates.
+No API/import/ownership placement changes are planned; strict module validation
+is repeated only if that scope changes. No new input/ASan/full Lambda gate for
+this geometry-only correction; prior input remains round 19's 46-failure limit.
+
+**Capture-policy correction:** round 22's read-only arrow 'reference drift'
+compared a fixture-font capture (815.47px) with a legacy document-font reference.
+The matched document-font capture is 809.09375px, agreeing with the saved
+809.05px within serialization precision. The canonical extractor now injects
+fixture fonts unconditionally, so its output alone cannot establish drift in
+legacy document-font references. Both policies and actual glyph/font reports
+are saved under `round23/`. Arabic's current fallback face differs from the
+saved reference; explicit-family controls isolate the advance-bound defect
+without claiming that independent font matching is solved. No round 23 font
+engine change has been made.
+
+**Implementation/focused evidence:** removed the parallel fallback-ink cursor,
+its side-bearing/bitmap fields and the newline-dependent fallback exception.
+The existing fragment advance normalization and hidden trailing-space handling
+remain the shared placement model. CSSOM View §9 range bounds now use that
+advance union; bitmap glyph bounds stay in paint. The new regression fails
+56 assertions before the fix, then passes fresh/retained 1×/2× layout and causal
+Courier/Menlo family changes. All 156 native text/geometry tests and 491 paged
+tests pass. Affected form/text/inline/box/sizing/table/Markdown categories have
+zero failures. `boundary-shaping-009` becomes a full pass (all 18 elements,
+16 text ranges and eight spans); several Arabic breaking/spacing cases improve.
+Unicode Markdown retains all 129 element matches and improves from 143/145 to
+144/145 text matches: its Arabic code range is 171.8px, previously 213.8px,
+against the saved 171.84px. The arrow range remains independently partial.
+
+Document-font browser/native captures under `temp/layout-analysis/round23/`
+cover all seventeen controls plus the styled subrun and the full original page.
+The reduced direct text ranges differ by at most 0.022px in x and 0.069px in
+width after one-decimal native serialization. The control PNGs differ at
+8,737/2,400,000 pixels; the original page at 384,525/6,526,800 pixels. These are
+measured comparisons, not raster-equivalence claims: Arabic joining/paint and
+contextual arrow font fallback remain open. CRLF range width is repaired, while
+its intrinsic max-content box still overcounts one space. No fonts, references,
+baselines, tolerances or vendor sources were changed.
+
+**Evidence limits:** `native-red.log` was captured before replacing the fixture's
+literal CRLF (normalized while copying) with explicit `&#13;&#10;`; its named
+CRLF row therefore contained LF in that red run. Final native/browser captures
+confirm actual CRLF DOM text, and the final regression checks its range width.
+No claim is made that its separate intrinsic box width passed before or after.
+
+**Aggregate qualification/completion:** terminal session 14651 exits 0 after the
+serial exact `make test-layout-baseline` and `make test-radiant-baseline` gates.
+Layout: **3,148 full /146 partial /0 failed /0 skipped** (3,294 total). Full
+Radiant: **5,912 full /150 partial /0 failed /one existing skip** (6,063 total).
+The new native test accounts for the extra total; `boundary-shaping-009` moves
+one partial to full. CLI SHA-256 is
+`8cda17c9c830d088ca1610743808cdca8e9baa14a894e19edcf9230469f7ccf7`.
+Production/test diff and all untracked fixture fingerprints stay identical
+through both gates. Build-test, the Radiant integer-cast lint, 421-name inventory
+validation and diff checks pass. No API/import/ownership change required a new
+module-boundary run; round 22's result is historical, not transferred. Input's
+round 19 46-failure limit likewise remains historical; no input/ASan/full Lambda
+rerun or qualification is claimed for this local geometry repair.
+
+The bounded advance-range milestone is complete; the long-running goal remains
+active. Next diagnosis is saved in `round23/diagnosis-pending.json`. Installed
+font fallback may vary across user agents under
+[CSS Fonts 4 §5.2](https://www.w3.org/TR/css-fonts-4/#font-style-matching), so the
+remaining arrow discrepancy needs a proved engine defect before a font change.
+[Blink's fallback iterator](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/platform/fonts/font_fallback_iterator.cc)
+and its shaping overview describe run-level fallback iteration; that is
+consistent with the joined/isolated glyph observations, not a qualified native
+fix. A separate intrinsic-line helper splits preserved text only at LF and
+leaves preceding CR in the measured slice; confirm normalization ownership
+before repairing the CRLF box overcount. Commander’s remaining two elements
+are a remote badge, so resource availability must be separated from layout.
+No production edit followed the frozen qualification build.
+
+## Round 24: HTML newline preprocessing and DOM carriage-return spacing
+
+**Priority/outcome:** repair the shared source/DOM whitespace boundary exposed
+by partial `control-chars-00D`, which grows a normal document by 450px, and by
+Windows line endings in max-content code. Round 23's source/CLI/fixture hashes
+still match, and process inspection confirms no aggregate is live. This clear
+spec defect takes priority over the arrow's permitted installed-font variation.
+
+**Owner/evidence:** HTML §13.2.3.5 normalizes literal source CR and CRLF to LF
+before tokenization; character-reference CR remains CR in the DOM. The HTML5
+UTF-8 iterator has normalization, but the actual byte-consumption/scanning path
+bypasses it. CSS Text 3 §4 treats surviving CR identically to U+0020, rather than
+as a segment break. Actual layout, bidi, paragraph collection and paint still
+classify it as LF; intrinsic measurement mostly already counts it as a space.
+A six-mode Ahem matrix under `round24/` separates literal HTML, escaped CR,
+space, LF, CRLF and whitespace-only controls. Parser/source storage ownership
+stays under **D4.2.6**; style/snapshot ownership stays under
+**D4.5.1v4 / D4.1.4v5**. No DOM payload rewrite is allowed for CSS processing.
+
+**Finite acceptance:** normalize literal newlines in DATA/RCDATA/RAWTEXT/script,
+CDATA/plaintext, attributes and comments while preserving numeric-reference CR
+and ordinary LF. Keep original DOM byte ranges after CSS processing. Across six
+white-space modes, CR must match an equal U+0020 control in layout/intrinsic
+sizes, wrapping, mixed bidi/styled spans and paint. Verify source-vs-reference
+parser results, fresh/retained 1×/2× geometry and causal white-space/width edits.
+Correct the older round 23 explicit-CRLF expectation if required by those
+semantics, using a real space+LF control rather than removing coverage.
+
+**Browser/spec limit:** current Chromium ignores DOM CR under pre/pre-wrap/
+break-spaces rather than treating it as a space; `control-chars-00D` therefore
+fails its own space reference in Chromium. Do not implement that discrepancy.
+Round 23's 'intrinsic CRLF overcount' hypothesis was premature: its explicit
+reference CR must first be evaluated as a CSS space. Keep the matched space
+control and parsed DOM content as the acceptance authority. Sources:
+https://www.w3.org/TR/css-text-3/#white-space-processing and
+https://html.spec.whatwg.org/multipage/parsing.html#preprocessing-the-input-stream.
+
+**Verification budget:** red parser/native controls, focused HTML/text/paged and
+paint checks, affected layout categories, then frozen serial input/layout/full
+Radiant gates. The input gate has a recorded round 19 46-failure limit; compare
+actual failure identities rather than transferring that result. Changes to a
+shared header require module-boundary validation; no new allocation or rooting
+boundary is planned, so ASan is added only if that changes. No baseline,
+tolerance, font-name or vendor edits.
+
+**Qualification finding/scope update:** the focused category classification has
+one failure, `control-chars-00D` text 38.1% →33.3%; earlier commentary reported
+zero failures from an incomplete log tail. Both native sections now agree with
+each other, but current/saved Chromium drops preserved CR. The space reference
+also exposes a genuine shared wrap error: `layout_inline` grants a break after
+an unbreakable inline solely from its parent's wrap mode. CSS Text §5.5 assigns
+a disappearing space's opportunity to that space's own box. A pre/nowrap
+separator must not acquire a break from its normal ancestor; a nested normal
+separator may. Add these six bounded controls and repair this owning decision
+before aggregate qualification. This is not permission to imitate Chromium's
+CR omission or to change a baseline threshold.
+
+**Reference-oracle correction:** the corpus already has explicit `.standards`
+references with a specification, reason, fixture SHA-256, browser identity and
+strict comparison; raw browser captures remain separate. Extend that existing
+control format with validated scalar `text_codepoints` substitutions, shared
+between capture and loading, instead of changing any engine result, tolerance or
+baseline floor. The CR→SPACE control follows CSS Text §4 and the pinned WPT match
+`css/css-text/white-space/reference/control-chars-00D-ref.html`. It retains the
+element/style tree and records the original fixture hash. Invalid scalars,
+duplicates, empty mappings, stale source and missing provenance are rejected.
+
+The temporary candidate is generated from the actual original fixture by
+Chromium, with fixture fonts matched in native capture. Ordinary comparison
+scores are 13/15 elements, 18/25 text (72%) and 8/10 spans; remaining G/H wrapping
+is separately visible. The original raw Chromium capture remains unchanged.
+Installing this independently derived standards reference restores a meaningful
+oracle without changing baseline acceptance thresholds or hiding the remaining
+layout differences. This updates the initial no-reference-change plan because
+the observed failure belongs to the browser oracle, not the CSS-correct engine.
+The sibling `lambda-test/layout` harness/control changes are part of this
+qualification and must be fingerprinted alongside the main engine worktree.
+
+**Final consumer finding:** the 75-control browser space-reference comparison
+isolates two 20px max-content errors: pre-line space/CR immediately before LF.
+Actual layout already trims these separators, but intrinsic line slices retain
+them. Add a cross-owner range/max-content assertion and trim the collapsible
+line suffix in the shared forced-line measurement wrapper (CSS Text §4.1.1).
+PNG/native-2×/SVG/PDF CR-versus-space controls were pixel-identical before this
+additional correction; repeat affected captures on the final binary. Initial
+edge regression y assertions used line origins instead of text-cell origins;
+corrected to the measured first text cell. The atomic control expectation is
+confirmed from Chromium (x=0), not inferred from its width.
+
+**Stable implementation/qualification entry:** parser (69), native text/geometry
+(158) and paged (491) suites pass after the wrap-owner repair. The source-owner
+lookup handles actual DOM edges, avoiding a stale last-rendered text node across
+atomic or collapsed descendants. Source CR bytes survive CSS layout. The final
+pre-line regression is red at exactly 20px (60px intrinsic versus 40px laid-out
+line), then green after shared suffix trimming. The affected text category is
+888 full /92 partial /0 failures with the standards reference installed; other
+affected categories retain their prior zero-failure results.
+
+The frozen qualification now includes the sibling harness, new shared control
+validator, raw and standards reference files, fixture source and unchanged
+`wpt-css-text/baseline.txt` in addition to main production/tests and fixture
+hashes. Run the source/control contracts, strict module boundary, build,
+integer-cast lint and inventory before serial input, exact layout and full
+Radiant checks. Input remains an independent required result; compare it with
+round 19 by actual failure identities and counts, and do not abort layout
+qualification merely for that recorded unrelated debt.
+
+**Qualification restart for a consumer defect:** the first qualification was
+stopped during input, before either layout aggregate, after final pixels exposed
+an extra pre-line blank line at the corrected intrinsic width. Its confirmed
+process group 68257 was terminated; session 51606 returned 143, and process
+inspection found no survivors. `qualification-attempt1/` retains the interrupted
+state/log and explicit abort reason; no input/aggregate result is claimed from it.
+
+A new height regression fails at 72px versus the browser's 48px. The existing
+whitespace-before-forced-break probe is generalized to the remaining source
+slice and shared inline-edge lookup. Collapsible separators before preserved LF
+now defer fitting until that forced break trims them, preventing a soft break
+followed by an extra forced break. No source bytes or preserved spaces are
+removed. All 158 native and 491 paged tests pass after this fix. The final 75
+control boxes match the browser's space-equivalent reference in x/y/height,
+with maximum width delta 0.041px from serialization. Native CR/SPACE PNG 1×,
+PNG 2×, SVG raster and direct Poppler PDF pairs each differ at zero pixels;
+raw browser-space comparison still differs at 12,270/4,800,000 padded pixels,
+so no full browser raster-equivalence claim is made. Restart the frozen gates
+only after this final consumer repair.
+
+
+**Vector qualification finding:** the first complete Radiant aggregate reports
+one failing export-slice assertion: direct DOM `A\r\nB` under `pre-wrap`
+expected `A` instead of `A `. HTML source preprocessing does not apply to this
+unit's direct DOM input; CSS Text 3 §4 requires CR to have SPACE semantics.
+Correct this expectation, add matched SPACE/LF and direct preserved-CR controls,
+and retain slice byte-offset assertions. All 169 vector cases pass afterward.
+The unchanged CLI passes the exact layout gate again (3148 full /146 partial,
+zero failures); the full Radiant recheck also passes (5914 full /150 partial,
+zero failures /one existing skip; 6065 total). Session 19148 is terminal exit 0.
+The separate input run is 4388 total /4342 passed /46 failed, with exactly the
+same failing identities as round 19 (no added/removed failures). Both aggregates
+and all final CR/SPACE renders used CLI SHA-256 `2a10fa081ea5dbbae4f59174557c21592226f4ec71512bafd2546d6dc33a04c8`.
+`temp/layout-analysis/round24/qualification-final.json` preserves the initial
+failed aggregate, corrected recheck and independent input result. No ASan or
+full Lambda qualification is claimed; the long-running partial-pass goal remains active.
+
+## Round 25 — nowrap separators join the surrounding inline word
+
+**Scope/evidence:** round 24's read-only 16-case browser/native reduction shows
+`G<span style="white-space:nowrap">     </span>H` split across lines at 80px,
+where NBSP and whole-nowrap controls stay together. At 100px all controls fit;
+normal-space controls remain breakable. `pre` SPACE exhibits the same error.
+The original `control-chars-00D` WPT retains this G/H difference against its
+normative SPACE reference. Work begins after round 24's aggregate handle ends.
+
+**Authority/design:** CSS Text 3 §4.1.1 collapses the source separator before
+fitting; §5.5 assigns its break permission to its own box and forbids breaks
+created solely by inline boundaries. The lookahead's ASCII-run predicate rejects
+all whitespace before consulting that permission, and its text probe separately
+returns NOT_FILLED at every ASCII space. Repair those shared decisions, retaining
+preserved LF as a forced boundary. A measured continuation must count one
+collapsed separator with the source font/spacing rather than all raw bytes or
+the ancestor font. Reuse existing whitespace/advance helpers; do not replace
+lookahead with min/max equality or introduce a fixture-specific boundary.
+Style/view probes remain observational (**D4.5.1v4 /D4.1.4v5**).
+
+**Acceptance/verification budget:** a permanent Ahem fixture and native geometry
+regression compare nowrap SPACE (one/five), collapsed TAB/LF, `pre` SPACE,
+whole-nowrap and NBSP controls at a fitting and constrained width. Add a nested
+normal override and a styled separator that disprove treating the whole inline
+as atomic. Check fresh/retained 1×/2× layout plus causal width/white-space edits.
+Capture browser geometry/PNG and Radiant PNG under `temp/layout-analysis/round25`;
+run the original WPT comparison and affected text/inline categories. After a
+stable implementation run native text/paged coverage, required integer-cast
+lint, exact layout and full Radiant gates on one frozen binary. No source parser,
+reference, threshold, baseline-floor or ownership change is planned. Preserved
+TAB stops and arbitrary Unicode lookahead are not the selected milestone.
+
+
+**Red evidence and scope refinement:** the permanent fixture contains 27 cases.
+Its native regression reaches 88 failing geometry assertions before the fix;
+the first fixture-load failure was a missing harness `result` ID and is not
+behavioral evidence. Chromium confirms the expected head/tail positions. Explicit
+head/tail spans expose the same boundary error with NBSP; extend the existing
+conservative run classifier to shared GL/WJ/ZWJ information (plus the atomic
+NBSP exception), preserving break-all/anywhere and forced-LF limits. No new
+Unicode range table is introduced. The classifier and text probe honor source
+wrap permission; the latter carries its measured, collapsed advance across
+siblings. Preserved TAB measurement is moved from actual layout into one shared
+helper, rather than approximated in lookahead. Arbitrary Unicode/preserved-TAB
+cross-node shortcut expansion remains outside this milestone.
+
+The source-font challenge identifies a separate shared aggregation defect:
+`intrinsic_collapsed_space_width` uses the parent font when replacing an inline
+space-only contribution. Resolve the actual leading text owner through the
+existing inline-edge query and measure with that already resolved owner's font
+under `LayoutFontScope`. Use it both when adding a surviving separator and when
+subtracting a duplicate leading separator. A smaller-font and negative
+word-spacing control each fit exactly at 90px. At 1×, all 108 row/following/head/
+tail boxes across 27 cases match Chromium in x/y/width/height without tolerance
+changes.
+
+**Density consumer finding:** two remaining 2× assertions show a 49px instead of
+48px block. LLDB finds a 19px second-line ascent while the block strut stays
+24px: the negative-word-spacing source selects Times New Roman instead of its
+inherited Ahem. Switching the intrinsic active element/view together does not
+fix it; that candidate is removed. A hardware watchpoint finds the assignment
+in `DomElement::ensure_font`: after a retained reset, `lycon->font.style` and the
+source's font group are the same cleared object. Testing that object for an
+inherited family falls through to the initial Times font even though its DOM
+parent still owns Ahem. Exclude this self-alias and obtain the parent's family
+before falling back to the initial font. Add a source/parent family assertion
+alongside unchanged two-density geometry tolerances. This retains style owners
+under **D4.5.1v4 /D4.1.4v5** without changing either ruling or the intrinsic scope
+header. Temporary logger/debugger probes are removed from source before the
+final build. The focused two-density regression remains a qualification gate.
+
+
+**Direct-sibling acceptance:** the original WPT remains at 72% after the first
+27 grouped controls pass because `span_has_line_filled` replaces a standalone
+nowrap space span with its zero trimmed intrinsic width. Two direct-sibling
+controls expose eight red assertions. Propagate the recursive source probe's
+measured advance through inline boxes, retaining existing source font/style
+scopes and shared decoration-edge resolution. `LineFillProbe` carries collapsing
+state across owners so adjacent nowrap space spans contribute one separator.
+The final fixture has 30 cases; a NBSP control checks the two-owner tail x as
+well as line membership. Preserve forced LF, nested normal overrides and
+source-owned spacing. The original WPT then reaches 100% elements/spans/text
+with its existing standards reference and unchanged strict comparison. Broad
+qualification follows final native/paged coverage; no new reference/control,
+threshold or baseline-floor changes are made in round 25.
+
+
+**Round 25 qualification:** all 159 native text and 491 paged cases pass. The
+exact layout gate is 3149 full /145 partial /zero failures; full Radiant is
+5916 full /149 partial /zero failures /one existing skip (6066 total). Session
+41189 is terminal exit 0. Strict original `control-chars-00D` also passes 100%
+elements/spans/text after both aggregates on the same frozen CLI. Thirty
+controls compare 117 boxes against Chromium with zero x/y/width/height deltas;
+fresh/retained 1×/2× source-font and causal-edit assertions pass. All captures
+and gates use CLI SHA-256 `cc24b90961e3bf9163d989220bc5d52a6b27e65f5b39eeb5066b73702ed63a38`.
+
+The module boundary, reference contracts, build, integer-cast lint, inventory
+(421) and both repository diff checks pass. There are no round 25 reference,
+threshold or baseline changes. Raster comparisons retain 5896/3120000 changed
+pixels at 1× and 11536/12480000 at 2×; the inspected glyph ink bounds agree but
+edge antialias shades differ (e.g. 196 versus 202), so pixel equivalence is not
+claimed. `temp/layout-analysis/round25/qualification-final.json` and the
+before/fixed/Chromium image comparison preserve the evidence. No input, ASan
+or full Lambda result is claimed for this Radiant-only milestone; round 24's
+input limit remains separate. The long-running goal remains active.
+
+## Round 26 — textarea placeholder reference collisions
+
+**Read-only diagnosis while round 25 is frozen:** all three
+`form/the-textarea-element/multiline-placeholder{,-cr,-crlf}.html` fixtures
+contain three `textarea rows=5` controls. Their legacy basename browser
+references instead contain three `input` controls and a 37px html box. The
+same basenames under `data/baseline/` are the actual input fixtures. This is a
+confirmed source/reference collision, not evidence that textarea layout must
+imitate input geometry. `reference_paths.js` and both capture/loading paths
+already support nested category-relative keys; the textarea-qualified files
+are missing. Keep the valid input references and all acceptance thresholds.
+`round25/next-form-reference-diagnosis.json` records source/reference hashes and
+control trees; `next-form-collision-audit.json` bounds the three affected form
+cases. Other form partials have no matching baseline-source basename.
+
+**Finite acceptance/design:** after round 25's aggregate handle is terminal,
+capture the actual three textarea documents through the existing extractor,
+with matched fixture fonts, into project temp first. Assert the resulting
+reference control tags, preserve input-reference hashes, and compare Radiant
+geometry plus browser/native images. Install only independently captured
+qualified references through the existing resolver. The missing local
+`support/placeholder.css` contains only the pinned WPT's placeholder color and
+opacity reset; resolve/import the unchanged support asset if needed for faithful
+paint capture. Do not alter source markup, reference geometry, comparison rules,
+skip lists or baseline floors.
+
+The textarea paint loop currently splits logical lines only at LF. Fresh
+LF/CR/CRLF images must establish whether referenced/dynamic CR needs the HTML
+placeholder display normalization independently of CSS Text's ordinary DOM-CR
+SPACE rule. Source attributes must remain unchanged. If a real paint defect is
+confirmed, find/reuse the shared text-control normalization/line iterator before
+adding code, and define a small causal native raster regression. Use HTML's
+`attr-textarea-placeholder` and input-placeholder rules as the authority; do not
+apply a textarea rule to ordinary DOM text.
+
+**Verification budget:** capture/reference contracts and focused form
+comparisons first; any production repair gets native control/vector coverage,
+1×/2× retained checks, required lint, exact layout and full Radiant gates on a
+frozen binary. A reference-only correction needs its source/reference checks,
+affected category and exact layout gate; earlier full-Radiant evidence remains
+explicitly tied to its original configuration. No approval checkpoint is
+inferred for this already-authorized layout task.
+
+
+**Reference correction scope:** fresh independently captured qualified references
+contain exactly three textarea controls and compare at 100% elements/spans/text
+for all three fixtures on the unchanged round 25 CLI. The original pinned WPT
+placeholder color/opacity stylesheet is restored without modification. Install
+six full/compact Darwin references through the existing directory-qualified
+resolver; source markup, the input references and all baseline floors remain
+unchanged. Binding checks canonicalize the corpus symlink and prove the input
+bindings retain their prior paths/hashes. The form category is 368 full /10
+partial /zero failures (378 total). The exact layout gate passes at 3152 full
+/142 partial /zero failures /zero skips (3294 total); session 63428 is terminal
+exit 0. Engine SHA-256 remains `cc24b90961e3bf9163d989220bc5d52a6b27e65f5b39eeb5066b73702ed63a38`.
+`temp/layout-analysis/round26/qualification-final.json` records the source/reference
+fingerprints, source-unchanged engine/test diff, bindings and gate scope.
+
+The font-matched image comparison also exposes existing textarea paint issues:
+CR-only placeholders join logical lines, and LF/CRLF placeholder line spacing
+differs from Chromium. These are visible in `round26/placeholder-comparison.png`;
+geometry-only full matches do not establish paint equivalence. No engine change
+is made in this reference-identity milestone. Keep those consumer defects as a
+separate bounded paint investigation rather than modifying reference geometry
+or stretching this source/reference correction into all text-control editing.
+The round 25 full Radiant result remains tied to its pre-correction reference
+configuration; this reference-only milestone requires fresh form/exact-layout
+checks and does not claim a repeated full Radiant/input/ASan gate.
+
+
+## Round 27 — source-owned fonts in inline lookahead
+
+**Priority/design:** fix the common README case where an inline code word and
+its attached period fit the current line but move together to the next line.
+`markdown/md_zod-readme.html` exposes this in its nullish-schema paragraph.
+The line-fill probe exits the code span while retaining its 13.6px monospace
+font, then measures the parent's period (16px proportional) in that stale font.
+A reduced Ahem control confirms the causal direction: the 20px child probes a
+10px parent period as 20px and rejects an exactly fitting line. The selected
+repair scopes each text probe to its actual owner's computed font, preserving
+the active first-line font and restoring the caller through `LayoutFontScope`.
+No boundary, width, offset or fixture-specific exception is added; selected
+style ownership remains **D4.5.1v4 /D4.1.4v5**. CSS Text 3 §5.5 and §7 govern
+cross-inline opportunities and source spacing.
+
+**Finite acceptance/verification:** ten fitting/overflowing controls cover
+direct/nested exits, inline padding, word spacing and the reverse size relation.
+The original native regression has red assertions before the production edit;
+then fresh/retained 1×/2× cases and causal width/font changes pass. All 160 native
+text and 491 paged tests pass. Twenty row/head boxes match Chromium with zero
+x/y/width/height deltas. Zod's original text score increases from 99.758% to
+100%; its remaining sponsor-image sizing difference is independent. Required
+lint, exact layout and full Radiant gates follow on the frozen configuration.
+A new letter-spacing boundary control exposed the existing terminal-spacing
+fit policy versus Chromium; its source and diagnosis remain in round27 temp.
+CSS Text 3 §7.2 removes line-edge spacing, so that policy is not changed to
+imitate this browser difference. The permanent spacing controls use word
+spacing to isolate the selected source-font defect.
+
+**Independent capture correction:** the Commander broken remote badge is
+93.078px under the checked-in remote-blocking policy, rather than the legacy
+116.5px loaded badge. The Zod CodeRabbit local SVG is intrinsically 206×33 and
+uses 499.391×80, rather than the legacy 218.3×80. Current Chromium and native
+captures agree on both facts. Two independent full captures have identical
+compact comparison trees for each source. Install the normal full/compact
+Darwin references for both pages, including Zod's still-partial table; retain
+all default/Linux reference hashes, fixture sources and baseline floors.
+No comparator, capture policy or threshold changes are made in this round.
+`round27/reference-repeatability.json` and `reference-install-plan.json` record
+provenance; the original full captures remain in temp.
+
+**Separate remaining work:** the Numeric sponsor PNG is 22620×6640 and exceeds
+the configured image limits. Do not raise limits or substitute a fixture size;
+first determine whether bounded metadata/decode ownership can preserve
+intrinsic dimensions without admitting the oversized allocation. Markdown emoji
+and arrow-symbol partials also remain independent font-fallback measurements.
+The long-running goal remains active after this finite repair's qualification.
+
+
+**Round 27 qualification/completion:** session 20046 is terminal exit 0. The
+exact layout gate is 3153 full /141 partial /zero failures /zero skips (3294
+total). Full Radiant is 5921 full /145 partial /zero failures /one existing
+skip (6067 total), including 160 native text and 491 paged cases. Module
+boundary, reference contracts, build, integer-cast lint, inventory and both
+repository diff checks pass. CLI SHA-256 is
+`d7ec01fe58aed99da215cd3d6d4a1c6d73a88db5bbf40ac4df70d52a365408b4`.
+`temp/layout-analysis/round27/qualification-final.json` binds the engine,
+fixture and reference hashes to these results. The new regression has 40
+failing assertions before the repair. Ten final controls compare 20 boxes
+with zero geometry deltas; raster comparisons retain 1670/2400000 differing
+pixels at 1× and 3284/9600000 at 2×, so raster equality is not claimed.
+The markdown category is 55 full /3 partial /zero failures. No input, ASan or
+full Lambda result is transferred to this binary. The long-running goal stays
+active; fresh emoji/arrow font captures start only after both aggregate handles
+are terminal.
+
+
+## Round 28 — system color-font tracking
+
+**Priority/root evidence:** fresh Chromium repeats the legacy emoji line
+memberships both with and without fixture fonts. Radiant measures the same
+16px system color glyph as 21px, while Chromium uses 20px. A standalone
+CoreText probe proves automatic unscaled tracking contributes that extra pixel;
+a zero-tracking font copy matches browser captures at 12/13/15/16/17/20px,
+with unchanged 32/64px metrics. Raw hmtx would give 16px at 16px, so replacing
+platform optical metrics with table-only advances would be incorrect.
+`temp/layout-analysis/round28/` retains browser glyph ranges/platform fonts,
+the platform probe, reduced native geometry and images. Skia's primary
+`SkCTFontCreateExactCopy.cpp` similarly disables unscaled tracking during font
+construction. No fixture width/advance compensation is proposed.
+
+**Finite design/acceptance:** normalize automatic tracking when installing a
+system color-font face into the platform backend, retaining the same face for
+measurement/rendering. Share the descriptor-copy shape before adding its third
+variant. Preserve non-color system UI optical/weight state and exact document
+font data. Returned CoreText references remain explicitly owned; retain the
+selected face before releasing old aliases (**D4.5.1v4 /D4.1.4v5** ownership).
+Fourteen native controls cover eight sizes, concrete/fallback families, an
+extended emoji cluster, CSS letter spacing, a width that fits two emoji, and an
+ASCII control, with fresh/retained 1×/2× and causal size edits. The original
+`md_test-emoji` paragraph must match browser line memberships. The independent
+arrow-family discrepancy stays separate unless the evidence connects it.
+
+**Verification budget:** confirm new font/context and native text regressions
+red before production edits; focused green, font/text/paged neighbors and
+browser/native comparisons first. Then build all required runners and run
+`make test-library`, integer-cast lint, exact layout and full Radiant on a
+frozen source/binary/reference configuration. No reference, threshold or
+baseline-floor changes are planned for this repair.
+
+
+**Retained-font prerequisite:** the color-metric repair makes the unchanged
+original emoji fixture pass 100% elements/spans/text and the platform regression
+passes. Four retained mutation checks still fail. Additional computed-value
+assertions prove the parent becomes 20px while the unstyled child stays 16px.
+The implicit font-size inheritance path treats any positive retained computed
+size as if it were an own declaration. Own cascade/shorthand and HTML UA size
+rules were already checked above that guard. Remove only that stale-cache guard
+so the current parent computed size is inherited on each resolution (CSS
+Cascade 5 §7.2); preserve existing own-size and UA-default handling. Add ASCII
+inherited-size and fixed author-size controls to the same causal mutation.
+This shared CSS consumer repair expands qualification to the full input suite,
+with its previously recorded failures compared by identity; no failure masking
+or baseline/reference edits are allowed. The font-context runner's initial
+link failure and stale zero-selected invocation are diagnostic setup errors,
+not red behavioral evidence. Valid red logs have 12 platform and 52 native
+assertions before the tracking fix; the retained prerequisite has independent
+computed-size red assertions after it.
+
+
+**UA-default neighboring coverage:** inherited-size refresh correctly preserves
+own CSS sizes, but the existing terminal-decoration test exposes an `rt`
+annotation growing from its UA half-size to its parent's size. Replace the
+resolver's duplicated heading/small-text preservation list with the existing
+`HtmlUaElementDefault` scale/medium-lineage metadata, which also covers ruby.
+A valid legacy HTML font-size hint remains local through the existing parser,
+now promoted to the module header; missing/invalid hints inherit normally.
+Keep native red evidence for this prerequisite and add retained ruby/fixed-size
+controls. This shares the UA rules instead of adding font-size exceptions for
+individual failing fixtures.
+
+
+**Final focused evidence and limits:** all 161 native text and 492 paged tests
+pass after the UA preservation repair. The markdown category is 57 full /one
+partial /zero failures; the original emoji page is strict 100% elements/spans/
+text with unchanged references. The Unicode page also scores 100% under its
+unchanged comparator, but the arrow string remains 864.8px versus Chromium's
+809.05px. Two repaired color-arrow advances reduced the prior 866.8px width by
+2px, crossing the existing comparison tolerance; do not claim resolved Unicode
+fallback fidelity. Preserve this remaining 55.75px discrepancy for diagnosis.
+All 35 compared control boxes agree horizontally within 0.038px and have equal
+widths within 0.035px. The ruby-containing row retains a 12px block-axis
+geometry difference; downstream y positions inherit that offset. Correct ruby
+font-size preservation does not establish complete ruby line-box layout. Keep
+these raw images/deltas and do not shift output or change tolerances to hide it.
+
+**Qualification completed:** round28 session 36880 terminated successfully on
+CLI `f29d51c0a5c72d6d9836f9d39d7e2e11db7344f90c15c23066dc6d26d1b88b12`.
+Exact `make test-layout-baseline`: 3155 full /139 partial /zero failures /zero
+skips. Full Radiant: 5925 full /143 partial /zero failures /one existing skip.
+All 1659 library checks pass. Full input reports the same 46 failures as round19,
+with no added or removed failure identities; it is not a passing gate. The
+driver verifies unchanged source/reference fingerprints and CLI across all
+aggregates. `temp/layout-analysis/round28/qualification-final.json` retains
+the terminal stage results and visual limits. No references, floors, comparator
+tolerances or capture policies changed in this round. The long-running partial
+repair goal remains active.
+
+## Round 29 — preserve joined color clusters through paint
+
+**Priority/evidence:** the original emoji comparison exposes a shared paint
+defect: layout measures the service-dog cluster as 20px, but ordinary/effect
+painting walks its Unicode scalars and paints separate dog and vest glyphs.
+The same defect appears before round28. A direct CoreText probe confirms that
+service-dog, family, skin-tone profession, flag, keycap and VS16 sequences shape
+to one glyph in the exact selected face; an unsupported composition shapes to
+two glyphs and 40px. Preserve both outcomes, rather than forcing a cluster to
+one em. Browser controls at 1×/2× agree in CSS geometry. Raw probes, captures and
+the finite milestone plan are in `temp/layout-analysis/round29/`.
+
+**Design/acceptance:** expose selected-face glyph IDs and positions from the
+existing CoreText shaping-line factory, preflighting every run before visiting
+glyphs. Reuse the raster kernel with font-local glyph IDs, with an explicit
+cache-key namespace separate from Unicode scalars. Keep bitmap buffers in the
+existing font-cache lifetime, since display lists borrow them
+(**D4.5.1v4 /D4.1.4v5**). Share cluster/face selection across layout and paint.
+Cover ordinary/shadow/effect ink, following ASCII with CSS letter spacing,
+supported and unsupported compositions, two densities and retained repaint/cache
+reset. CSS Fonts 4 §5.3 governs cluster matching; CSS Text 3 §7.2 applies spacing
+to typographic units. SVG source export is a neighbor; general contextual-script
+painting is a separate milestone.
+
+**Verification budget:** require a red existing-API paint regression before
+production edits, then focused font/cache/paint checks, native text/paged/vector
+neighbors and raw browser/native images. Qualify stable changes with library,
+module boundary, lint/inventory, exact layout and full Radiant. Repeat full
+input only for relevant parser/cascade/input changes or new failure evidence.
+No reference, tolerance, capture-policy or baseline-floor changes are planned.
+
+**Root repair/focused evidence:** the selected-face shaping visitor preflights
+CoreText runs, and indexed glyph rasterization shares the existing kernel/cache
+with an explicit namespace. A shared color-cluster classifier and paint visitor
+now feed ordinary text, native shadow collection, overflow fitting and effect
+raster lowering. The initial existing-API regression reports 52 assertions;
+its repaired glyph-count/advance checks pass at both densities and after cache
+reset. A six-assertion independent pixel regression exposes a prerequisite:
+the coverage sampler omitted BGRA alpha, and sharp shadow replay inferred color
+mode instead of retaining mask mode. Both are repaired in their shared owners.
+All 172 vector, 161 native text and 492 paged neighbors pass on the first
+integrated build. Subsequent retained-selection controls and aggregate gates
+are still pending; these counts are not final qualification.
+
+**Visual scope/limits:** all 72 compared row/inline boxes in the 36-row control
+have equal x/y/height and widths within 0.029px of Chromium. Raw 1×/2× pixels
+remain different; no raster-equality claim is made. The before/browser/after
+panel preserves raw coordinates. Ordinary supported clusters now show the
+joined glyph, while the unsupported composition keeps both glyphs. General
+contextual-script paint and complete SVG color/shadow export remain separate.
+
+**Build-boundary prerequisite:** the first aggregate preparation stops at two
+lightweight runner links: shared `text_metrics.cpp` reaches grapheme segmentation
+in streaming `layout_text.cpp`, and the standalone display-list runner omits the
+new classifier's owner. Move the existing grapheme helper and its BA classifier
+into `text_metrics.cpp`, promoting the latter through `layout.hpp`, and declare
+that shared source in the display-list runner's JSON build configuration.
+Regenerate through `make`; no duplicate helper or test stub is introduced.
+The preparation failure is not an aggregate test result. Rebuild the affected
+consumers and requalify the resulting binary before recording completion.
+
+**Qualification completed:** session 17791 terminates successfully on CLI
+`9b904d5ebcc4eb3b8118429821aa64b85285d4ac49ed02a244d593264a65dc2e`.
+Exact layout: 3155 full /139 partial /zero failures /zero skips. Full Radiant:
+5928 full /143 partial /zero failures /one existing skip. All 1659 library
+checks pass. The final native neighbors are 172 vector, 161 text-query,
+492 paged, 86 display-list and 25 state-store checks. The retained paint matrix
+also preserves its recorded 16px selection after the active font changes to
+32px. Fresh final captures are byte-identical at both densities after the
+shared-module move; all 72 control boxes retain the geometry agreement above.
+Unshadowed SVG export retains complete source clusters. The original Markdown
+emoji comparison remains strict 100% elements/spans/text. Source, build-config,
+fixture/reference fingerprints and CLI remain unchanged throughout the gates.
+`temp/layout-analysis/round29/qualification-final.json` records the terminal
+results and limits. Input is not repeated in this font/layout/paint round;
+round28's 46 unchanged failures remain prior evidence, not a result on this CLI.
+No reference, tolerance, floor or capture-policy changes occur. The long-running
+goal remains active.
+
+**Next read-only evidence:** `round30/next-canonical-shaping-diagnosis.json`
+narrows the remaining arrow width difference. Chromium renders precomposed
+U+219A and its decomposed arrow/overlay using two primary SFNS glyphs at
+14.1875px. Whole-run CoreText uses Menlo at 9.6328125px for U+219A, while its
+decomposed form uses SFNS at 14.1796875px. This establishes a normalization/
+fallback difference, not a per-symbol width adjustment. CSS Fonts 4 §5.3–§5.4
+must guide any selected-font canonical fallback; preserve DOM bytes, explicit
+fonts' supported composite glyphs and source-owned range indices. Do not
+normalize the shared CTLine factory without an index map. Known atomic-inline
+and reversed-counter browser/spec disagreements stay separate; no engine change
+is justified by their scores alone.
+
+Fresh native source-pair captures after qualification also expose an independent
+paint cause: decomposed arrow/overlay and not-equal controls keep their shaped
+widths but lose the visible combining overlay. Ordinary paint skips
+`text_codepoint_has_zero_advance`, which includes visible combining marks.
+Prioritize a finite base/mark paint milestone using the selected-face glyph API
+before the separate canonical fallback/index-map problem. The round30 plan and
+raw images record this distinction; no round30 engine changes are made here.
+
+
+## Round 30 — preserve ordinary combining-cluster ink
+
+**Priority and red evidence:** native paint drops visible combining marks even
+when layout measures the full cluster. The ordinary loop equates zero advance
+with no ink, while the effect scalar loop loses shaping substitutions. This
+breaks decomposed names, stacked accents, Kana and symbol overlays. The existing
+paint API produces 96 failing assertions before the repair. Browser platform
+font/glyph probes, native captures and the finite plan are retained under
+`temp/layout-analysis/round30/`. Precomposed arrow fallback is independently
+narrowed by the previous round's diagnosis; it is not a width-table repair.
+
+**Design and acceptance:** generalize the shared emoji visitor to ordinary
+extended graphemes, retaining selected-face glyph IDs, positions and actual
+advance. Reuse the existing indexed raster/cache and native/shadow/effect emitters.
+A typographic unit receives one letter-spacing increment (CSS Fonts 4 §5.3;
+CSS Text 3 §7.2). Reuse the existing transform segment builder with original word
+context; case expansion is preflighted unit by unit before ink emission. Keep
+DOM bytes and source-owned ranges unchanged (CSS Text 3 §2.1;
+**D4.5.1v4 /D4.1.4v5**). Contextual scripts need their full run and remain on the
+existing path. Canonical scalar fallback and SVG outline cluster placement stay
+separate, with no claim of complete multilingual shaping.
+
+**Fallback prerequisite:** the first generalized visitor leaves 12 Kana checks
+red. A captured Arial handle with a missing style family is re-resolved as the
+UA Times face before fallback selection. Its base and full cluster choose
+different fallback faces, so exact-face preflight correctly rejects the result.
+Promote a source-aware wrapper over the existing font fallback resolver and use
+the captured handle as its origin. Do not alter the control's style to hide the
+ownership defect. General grapheme segmentation checks its ordinary boundary
+before the BA exception, avoiding the BA scan for a normal ASCII boundary while
+retaining the same break decision; no debug performance claim is made.
+
+**Focused verification:** all 10 paint tests pass, including the previous color
+controls, cache reset, 1×/2× density and captured-font replacement. All 172 vector,
+162 native text-query and 492 paged neighbors pass. The new native ink test
+covers 42 composed/decomposed pairs, shadows, spacing, uppercase/lowercase,
+capitalize and case expansion through fresh/retained repaint and a causal font
+size edit. Its first whole-column crop included the next column's negative
+bearing; first-difference coordinates and identical CLI/unit images establish
+that test-region contamination. Comparing padded bounds of each sample's own
+ink retains exact RGBA equality and passes. This crop correction is not a
+rendering tolerance change.
+
+**Verification budget/status:** qualify the stable source and binary with module
+boundaries, build-test, lint/inventory, library, exact layout and full Radiant.
+Input is not repeated for this font/layout/paint change; round28's 46 unchanged
+input failures remain prior evidence, not a result on this binary. No reference,
+threshold, floor or capture-policy changes are planned. Fresh browser/native
+images at both densities and final aggregate results are pending below.
+
+
+**Fresh visual evidence:** all 126 row/ink boxes match Chromium in x, y and
+height; widths differ by at most 0.046875px. All 42 source pairs have identical
+native RGBA ink at each density. The browser/native full images still differ
+at 36,951 of 2,448,000 pixels (1×) and 79,448 of 9,792,000 pixels (2×); preserve
+those raw raster differences rather than claim browser pixel equality.
+`comparison-final.png` shows the missing-mark repair without moving coordinates.
+Source, fixture, references and binary are now frozen for aggregate qualification.
+
+
+**Qualification completed:** session 36373 terminates successfully on CLI
+`4e87a357b5f31c9f25fc09676d051ca6855e7487f0f0f97ec106d6cb7fbdfd66`.
+Exact `make test-layout-baseline`: 3155 full /139 partial /zero failures /zero
+skips. Full Radiant: 5929 full /143 partial /zero failures /one existing skip,
+across 6073 tests. All 1659 library checks pass. Module boundaries, reference
+contracts, all runner builds, integer-cast lint, CSS inventory freshness and diff
+checks pass. The driver verifies unchanged source/build/fixture/reference
+fingerprints and CLI throughout the gates. Final evidence is retained in
+`temp/layout-analysis/round30/qualification-final.json`. No references,
+thresholds, floors or capture policies changed. Clusters needing multiple font
+faces keep the existing fallback path; complete cluster font matching is not
+claimed. The documented contextual-script, canonical scalar fallback and SVG
+outline limits remain separate. The long-running goal stays active.
+
+**Next finite diagnosis:** fresh browser/native images for
+`text-wrap-balance-float-006` show a paint defect independent of its legal
+soft-break differences. The later paragraph's red background covers a preceding
+silver float, despite correct text exclusion geometry. CSS 2.2 Appendix E.2
+steps 4/5 require ordinary block backgrounds/borders below non-positioned float
+subtrees. Three independent opaque, translucent and nested controls are
+pixel-identical to their expected positioned-layer controls in Chromium; native
+differs over all 4800 pixels of each 80×60 float. The translucent control requires
+blue-over-red composition, so clipping a background around float geometry would
+be wrong. The same defect survives SVG export and Chromium replay, identifying
+the shared paint walk rather than the raster backend. The existing child walk
+mixes ordinary blocks and floats in source order, and hit testing reverses that
+same sequence. Reuse stacking classifiers, scoped ancestry replay and the block
+phase drivers; preserve view/style ownership (**D4.5.1v4 /D4.1.4v5**) and module
+boundaries (**D7.3.3–D7.3.4**). The finite acceptance/verification plan and raw
+captures are under `round31/next-float-paint-diagnosis.json`; no round31 engine or
+test changes have been made. Valid combined text transforms need a separate
+spec milestone: Chromium rejects them, so its rejection cannot justify dropping
+valid native support to improve a stored score. Fresh clamp-control line breaks
+already agree; its span union discrepancy remains distinct.
+
+
+## Round 31 — float paint phases
+
+**Priority and acceptance:** the qualified round30 binary paints a later normal
+block's background above an earlier float. Independent opaque, translucent and
+nested controls fail over each entire 80×60 float in PNG and SVG, while Chromium
+matches independent positioned-layer references. The new native regression is
+red before engine edits and includes inline overlap, clipping, an opacity owner,
+pointer-events:none, 1×/2×, retained repaint and a causal background edit. CSS
+2.2 Appendix E.2 steps 4/5/7/8 require block backgrounds, floats, inline content
+and positioned layers in that order; hit testing must traverse the painted
+layers in reverse. The float's translucent background must compose over the
+ordinary block background, so clipping or overwriting geometry is not a repair.
+
+**Structured design:** retain the shared child walk and introduce background,
+float and foreground phases with an all-paint state for atomic subtrees. Shared
+stacking classifiers decide which visit owns a float, ordinary scaffold or atomic
+paint root. Activate extra passes when floating descendants require them, while
+ordinary wrappers inherit the current phase. Enter the existing font, ancestry,
+clip and effect scopes in each visit. Boundary paint belongs to the background
+pass; replaced pixels, inline content and positioned work retain foreground
+ownership. Keep real stacking contexts and inline/flex/grid atomic roots intact.
+Reuse these classifications for reverse hit testing, including normal block
+self-hit deferral. Do not copy the negative-layer ancestry walker.
+
+Partial visits no longer own a complete contiguous subtree fragment. Guard
+whole-fragment reuse and element markers by that ownership property instead of
+replaying a whole cached subtree in one phase. Whole atomic/root visits retain
+the existing cache contract (**D4.5.1v4 /D4.1.4v5**); a future cache for individual
+phases would need explicit identity and is not implied by a view ID. Preserve
+module boundaries (**D7.3.3–D7.3.4**) and retain float exclusion geometry and
+source bytes. Independent soft-break optimization and no-float stacking debt
+remain separate; no fixture-specific order or background clipping is allowed.
+
+**Verification budget:** focused red/green native paint/hit tests, neighboring
+text/vector/paged and retained checks, fresh browser/native 1×/2× controls and
+shared SVG/PDF consumers. Then build all required runners and qualify the frozen
+source with relevant boundary/lint/inventory checks, exact layout and full
+Radiant. No reference, tolerance, floor or capture-policy changes are planned.
+
+
+**Shared-cause refinement:** an ordinary later block with a negative top margin
+also covers earlier inline ink and takes its hit when no float is present. The
+new independent control fails before activation changes, and Chromium confirms
+the earlier ink belongs above that background. This is the same CSS phase owner,
+so retaining float-only activation would leave the root shape incomplete.
+`radiant_stack_flow_phases` now computes a shared phase bitset for ordinary block
+sequences as well as floats. Inline-only sequences keep the single-pass path;
+contexts without floats omit that pass. The earlier plan's no-float deferral is
+superseded by this evidence, not adopted as a compatibility path.
+
+**Direct consumer prerequisites:** the native red control has 132 assertions.
+A block SVG/HTML neighbor already owns its internal phase correctly. The direct
+iframe path exposes 12 paint and six hit assertions: an embedded document must
+restart its complete stack inside its frame's foreground content. Add scoped
+resets at the existing render/document-hit entries. Generic export callbacks
+also report three semantic visits for one ordinary block (six red assertions).
+Restrict `visit_element` to foreground, preserving one destination/link/callback
+per logical element. The fixture and tests include these ownership controls.
+
+**Export limit:** the opaque/translucent/nested float, inline overlap, clipping,
+positioned overlay and SVG/HTML samples agree in PNG/SVG/PDF (opacity rounding
+can differ by one channel). SVG/PDF omit embedded iframe contents on both the
+archived round30 and repaired binaries. This pre-existing export limitation is
+recorded separately; native iframe paint/hit ownership is repaired. Do not
+claim complete iframe export from the float phase checks.
+
+
+**Stable focused/visual acceptance:** all 163 native text-query, 172 vector,
+492 paged, 86 display-list, 30 retained-list and 25 state-store checks pass after
+the complete flow activation. The final 14 compared case boxes have identical
+x/y/width/height to Chromium, and both browser densities retain identical CSS
+geometry. All 15 sampled native colors match within one channel value. All
+SVG/PDF samples except the independently unchanged iframe-content limitation
+also match within one channel value. Raw full-image native/browser differences
+remain 14,340/2,400,000 pixels at1× and26,760/9,600,000 at2×; no full raster equality
+claim is made. In the original balance/float page, the formerly red point(30,100)
+now matches Chromium's silver(192,192,192). Legal soft-break differences remain
+separate. Native retained/causal paint and hit checks cover the repaired layers.
+The initial range-for build needed a C-style shared phase-order helper; the
+semantic probe also needed explicit project borrowed/view casts. Those build
+errors are setup results, not red behavioral evidence. Source/binary/fixture/
+references are now frozen for required aggregate qualification.
+
+**Terminal qualification and wrap-up:** the exact `make test-layout-baseline`
+exits zero with **3,155 full /139 partial /0 failed /0 skipped**. Library passes
+all 1,659 checks. Module boundaries, reference contracts, runner build, integer
+cast lint, inventory and diff checks pass. The full `make test-radiant-baseline`
+exits 2 with **5,926 full /143 partial /4 failed /1 skipped** out of 6,074.
+The four failures are `svg_foreign_object`, `svg_foreign_object_css`,
+`svg_foreign_object_interaction` and `svg_foreign_object_namespaces` in the UI
+automation runner (11, four, seven and three failed script assertions). They
+passed in round30; their cause has not yet been established. Focused native and
+export controls do not qualify those broader integration cases.
+
+The qualification driver is terminal (session53995 exit1); source and CLI
+fingerprints remain unchanged after the failed aggregate. Evidence and the UI
+log are archived under `temp/layout-analysis/round31/qualification-final.json`
+and `ui-automation-final.log`. **Round31 remains unqualified.** At the user's
+wrap-up request, work is paused with the current changes preserved. Investigate
+these four failures before resuming partial-pass repairs. The read-only round32
+form-owner diagnosis is deferred; no form-owner engine edits were started.

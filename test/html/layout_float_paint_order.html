@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>Float paint order controls</title>
+<style>
+body{margin:16px;background:white;font:14px Arial}
+.row{height:100px;display:flex;gap:20px}
+.case{position:relative;width:240px;height:80px}
+.floated .swatch{float:left;width:80px;height:60px;background:#999}
+.reference .swatch{position:absolute;left:0;top:0;width:80px;height:60px;background:#999}
+.flow{height:60px;background:red}
+.alpha .swatch{background:rgba(0,0,255,.5)}
+.nested .flow>div{height:30px;background:yellow}
+.nested .swatch>div{width:40px;height:30px;background:green}
+</style>
+<main id="result"><div class="row"><div class="case floated" id="opaque-native"><div class="swatch"></div><div class="flow"></div></div><div class="case reference" id="opaque-reference"><div class="swatch"></div><div class="flow"></div></div></div>
+<div class="row"><div class="case floated alpha" id="alpha-native"><div class="swatch"></div><div class="flow"></div></div><div class="case reference alpha" id="alpha-reference"><div class="swatch"></div><div class="flow"></div></div></div>
+<div class="row"><div class="case floated nested" id="nested-native"><div class="swatch"><div></div></div><div class="flow"><div></div></div></div><div class="case reference nested" id="nested-reference"><div class="swatch"><div></div></div><div class="flow"><div></div></div></div></div>
+
+<div class="row"><div class="case floated" id="inline"><div class="swatch" id="inline-float"></div><div class="flow"><span id="inline-ink" style="display:inline-block;margin-left:-80px;width:40px;height:30px;background:green;vertical-align:top"></span></div></div></div>
+<div class="row"><div class="case" id="clipped"><div style="width:240px;height:40px;overflow:hidden"><div class="swatch" id="clipped-float" style="float:left;width:80px;height:60px;background:blue"></div><div class="flow"></div></div></div></div>
+<div class="row"><div class="case" id="opacity"><div style="opacity:.5"><div class="swatch" id="opacity-float" style="float:left;width:80px;height:60px;background:blue"></div><div class="flow"></div></div></div></div>
+<div class="row"><div class="case floated" id="no-pointer"><div class="swatch" style="pointer-events:none"></div><div class="flow" id="no-pointer-flow"></div></div></div>
+<div class="row"><div class="case floated" id="positioned"><div class="swatch"></div><div class="flow" id="positioned-flow" style="position:relative"></div></div></div>
+<div class="row"><div class="case floated" id="replaced"><div class="swatch"></div><div class="flow"><svg id="replaced-svg" xmlns="http://www.w3.org/2000/svg" width="80" height="30" style="display:block"><foreignObject width="80" height="30"><div xmlns="http://www.w3.org/1999/xhtml" id="replaced-ink" style="width:80px;height:30px;background:blue"></div></foreignObject></svg></div></div></div>
+<div class="row"><div class="case floated" id="embedded"><div class="swatch"></div><div class="flow"><iframe id="replaced-frame" width="80" height="30" style="display:block;border:0" srcdoc="<body style='margin:0'><div id='frame-ink' style='width:80px;height:30px;background:blue'></div>"></iframe></div></div></div>
+<div class="row"><div class="case" id="no-float"><div class="flow" style="height:30px"><span id="no-float-ink" style="display:inline-block;width:80px;height:30px;background:green;vertical-align:top"></span></div><div style="height:30px;background:blue;margin-top:-30px"></div></div></div>
+</main>

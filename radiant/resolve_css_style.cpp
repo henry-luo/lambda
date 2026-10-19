@@ -4752,18 +4752,22 @@ static bool preserve_html_ua_font_size(LayoutContext* lycon, DomElement* element
         span->font->font_size_from_medium = true;
         return true;
     }
+    if (tag == MARKUP_NAME_FONT) {
+        // a valid HTML size hint is local; missing or invalid hints still inherit.
+        int level = 0;
+        return layout_parse_legacy_font_size_level(element->get_attribute("size"), &level);
+    }
     if (layout_tag_has_monospace_family_default(tag)) {
         return span->font && span->fontp()->family &&
             str_ieq_cstr(span->fontp()->family, "monospace") &&
             span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium;
     }
-    if (tag >= MARKUP_NAME_H1 && tag <= MARKUP_NAME_H6) {
-        return span->font && span->fontp()->font_size > 0;
-    }
-    if (tag == MARKUP_NAME_SMALL || tag == MARKUP_NAME_BIG ||
-        tag == MARKUP_NAME_SUB || tag == MARKUP_NAME_SUP) {
+    HtmlUaElementDefault ua;
+    if (layout_html_ua_element_default(tag, &ua) &&
+        (ua.keeps_medium || ua.font_scale != 1.0f)) {
+        // shared UA size rules include ruby annotations, not only headings and small text.
         return span->font && span->fontp()->font_size > 0 &&
-            !span->fontp()->font_size_from_medium;
+            (ua.keeps_medium || !span->fontp()->font_size_from_medium);
     }
     if (tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_BUTTON ||
         tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA) {
@@ -5213,21 +5217,37 @@ static const CssPropertyCode* box_component_family(CssPropertyCode property) {
     return nullptr;
 }
 
+const CssValue* layout_box_component_value(const CssValue* value, CssPropertyCode source,
+        CssBoxSide side, const LayoutLogicalSides& sides) {
+    const CssPropertyCode* family = box_component_family(source);
+    if (!value || !family || css_value_is_global_keyword(value) || family[0] == CSS_PROPERTY_BORDER)
+        return value;
+    // project only after substitution: a variable can supply the entire quad or logical pair.
+    if (source == family[0]) return css_box_shorthand_side_value(value, side);
+    LayoutLogicalProperty logical = layout_logical_property(source);
+    if (!logical.valid || !logical.pair) return value;
+    bool pair_follows_start = family[0] != CSS_PROPERTY_MARGIN && family[0] != CSS_PROPERTY_PADDING;
+    LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides, pair_follows_start);
+    return css_pair_side_value(value, side == physical.second);
+}
+
+const CssValue* layout_resolve_box_component_value(LayoutContext* context, DomElement* element,
+        const CssDeclaration* declaration, CssBoxSide side) {
+    if (!context || !element || !declaration || !declaration->value) return nullptr;
+    CssPropertyCode source = declaration->pending_shorthand_code > 0
+        ? declaration->pending_shorthand_code : declaration->property_code;
+    const CssValue* value = resolve_layout_var_value(context, element, declaration->value, source);
+    if (!value || !css_property_validate_value(source, value)) return nullptr;
+    return layout_box_component_value(value, source, side, layout_element_logical_sides(element));
+}
+
 static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
                                    bool padding) {
     if (!element || !element->specified_style) return;
     const CssPropertyCode* family = box_component_family(
         padding ? CSS_PROPERTY_SCROLL_PADDING : CSS_PROPERTY_SCROLL_MARGIN);
     const CssDeclaration* winners[4] = {};
-    int parts[4] = {};
-    CssEnum specified_direction = layout_specified_keyword(
-        element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-    bool rtl = specified_direction == CSS_VALUE_RTL ||
-        (specified_direction != CSS_VALUE_LTR &&
-         logical_inline_direction(element) == CSS_VALUE_RTL);
-    LayoutLogicalSides logical_sides = layout_logical_sides(
-        layout_element_inline_axis_is_vertical(element),
-        layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
+    LayoutLogicalSides logical_sides = layout_element_logical_sides(element);
     for (int index = 0; index < 11; index++) {
         CssDeclaration* declaration = style_tree_get_declaration(
             element->specified_style, family[index]);
@@ -5247,7 +5267,6 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
             if (!winners[side] ||
                 css_declaration_cascade_compare(declaration, winners[side]) > 0) {
                 winners[side] = declaration;
-                parts[side] = index == 0 ? side : side == second && second != first ? 1 : 0;
             }
         }
     }
@@ -5281,13 +5300,7 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
                 continue;
             }
         }
-        if (winner->property_code == family[0]) {
-            CssQuadValues quad = {};
-            if (!quad.expand(value)) { target[side] = {}; continue; }
-            value = quad.side[side];
-        } else if (value->type == CSS_VALUE_TYPE_LIST) {
-            value = css_pair_side_value(value, parts[side] == 1);
-        }
+        value = layout_box_component_value(value, winner->property_code, (CssBoxSide)side, logical_sides);
         if (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
             value->data.keyword == CSS_VALUE_AUTO)) {
             target[side] = {};
@@ -5683,10 +5696,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // parent's computed value, not the parent's winning declaration.
             if (prop_id == CSS_PROPERTY_FONT_SIZE && ancestor &&
                 ancestor->font && ancestor->fontp()->font_size > 0) {
-                if (inheritance_span->font && inheritance_span->fontp()->font_size > 0.0f &&
-                    !inheritance_span->fontp()->font_size_from_medium) {
-                    continue;
-                }
+                // a retained computed size is not a local declaration; refresh it from the parent.
                 inheritance_span->ensure_font(lycon);
                 inheritance_span->font->font_size = ancestor->font->font_size;
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
@@ -8441,15 +8451,7 @@ CssEnum logical_inline_direction(DomElement* element) {
 
 int css_logical_corner_index(CssPropertyCode property, DomElement* element) {
     if (!element) return -1;
-    CssEnum specified = layout_specified_keyword(
-        element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-    bool rtl = specified == CSS_VALUE_RTL ||
-        (specified != CSS_VALUE_LTR &&
-         logical_inline_direction(element) == CSS_VALUE_RTL);
-    WritingMode mode = layout_element_writing_mode(element);
-    LayoutLogicalSides sides = layout_logical_sides(
-        layout_element_inline_axis_is_vertical(element),
-        mode == WM_VERTICAL_RL, rtl);
+    LayoutLogicalSides sides = layout_element_logical_sides(element);
     bool block_start = property == CSS_PROPERTY_BORDER_START_START_RADIUS ||
         property == CSS_PROPERTY_BORDER_START_END_RADIUS;
     bool inline_start = property == CSS_PROPERTY_BORDER_START_START_RADIUS ||
@@ -8552,12 +8554,8 @@ CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
                                                      CssPropertyCode property) {
     if (!element || !element->specified_style || property <= CSS_PROPERTY_UNKNOWN ||
         property >= CSS_PROPERTY_COUNT) return nullptr;
-    CssEnum direction = layout_specified_keyword(element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-    bool rtl = direction == CSS_VALUE_RTL ||
-        (direction != CSS_VALUE_LTR && logical_inline_direction(element) == CSS_VALUE_RTL);
-    bool vertical = layout_element_inline_axis_is_vertical(element);
     return layout_cascaded_style_declaration(element->specified_style, property,
-        layout_logical_sides(vertical, layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl));
+        layout_element_logical_sides(element));
 }
 
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,

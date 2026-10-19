@@ -876,12 +876,14 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
 
 static float table_line_box_top(float top, float height, float line_height,
                                 bool line_height_is_normal) {
-    if (!line_height_is_normal && line_height > 0.0f && height > line_height) {
-        // CSS Inline centers explicit line-height within the measured glyph box.
-        top += (height - line_height) / 2.0f;
+    if (!line_height_is_normal && line_height > 0.0f) {
+        // invert the formatter's snapped leading when recovering a line-box origin.
+        top -= layout_line_height_ascent_leading(line_height, height);
     }
     return top;
 }
+
+static float table_cell_hypothetical_child_y(View* child);
 
 static void table_collect_inline_line_box_extent(View* view, float cell_line_height,
                                                  bool line_height_is_normal,
@@ -935,7 +937,7 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         view->view_type == RDT_VIEW_BLOCK ||
         view->view_type == RDT_VIEW_LIST_ITEM ||
         view->view_type == RDT_VIEW_TABLE) {
-        float child_top = view->y;
+        float child_top = table_cell_hypothetical_child_y(view);
         table_note_cell_content_extent(extent, child_top, child_top + view->height);
         if (view->view_type != RDT_VIEW_INLINE_BLOCK && cell_line_height > 0.0f) {
             table_note_cell_line_position(extent, child_top, cell_line_height);
@@ -990,8 +992,6 @@ static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     return max(generic_extent - layout_box_metrics(tcell).pad_border_h, 0.0f);
 }
 
-static float table_cell_hypothetical_child_y(View* child);
-
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     // Table rows use the table block axis; in vertical writing that is physical x.
     if (table_grid_uses_vertical_inline_axis(get_parent_table(tcell))) {
@@ -1008,14 +1008,28 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float self_margin_chain = 0.0f;
     bool has_self_margin_chain = false;
     View* last_sizing_child = nullptr;
+    bool has_block_flow_content = false;
     for_each_table_cell_vertical_align_child(
-        lam::view_require_element(tcell), [&](View* child) { last_sizing_child = child; });
+        lam::view_require_element(tcell), [&](View* child) {
+            last_sizing_child = child;
+            LayoutVerticalFlowChild info = {};
+            if (layout_classify_vertical_flow_child(tcell, child, &info) &&
+                info.normal_block && !info.atomic_inline &&
+                !layout_block_is_out_of_flow(info.block)) {
+                has_block_flow_content = true;
+            }
+        });
     float ignored_quirky_margin_bottom = 0.0f;
     ViewBlock* last_sizing_block = lam::view_as_block(last_sizing_child);
     if (last_sizing_block && last_sizing_block->bound &&
         layout_quirky_container_ignores_child_margin_bottom(
             lycon, tcell, last_sizing_block)) {
         ignored_quirky_margin_bottom = last_sizing_block->boundary()->margin.bottom;
+    }
+    if (has_block_flow_content) {
+        // block flow already consumed adjoining margins; rescanning promoted chains
+        // counts empty blocks twice and turns negative overflow into extra row height.
+        return max(0.0f, tcell->content_height - ignored_quirky_margin_bottom);
     }
     LayoutContextScope context_scope(lycon);
     if (tcell->font) {
@@ -1090,7 +1104,8 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                     lam::view_require<RDT_VIEW_INLINE>(child))) {
                 return;
             }
-            if (child->view_type == RDT_VIEW_INLINE) {
+            if (child->view_type == RDT_VIEW_INLINE ||
+                child->view_type == RDT_VIEW_INLINE_BLOCK) {
                 has_inline_formatting_content = true;
             }
             ViewElement* block = lam::view_require_element(child);
@@ -1110,18 +1125,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                                                      cell_line_height_is_normal,
                                                      cell_font_size, tcell->font,
                                                      &inline_extent);
-                if (block->content_height > 0) {
-                    child_height = max(child_height, block->content_height);
-                } else if (cell_line_height > child_height) {
-                    child_height = cell_line_height;
-                }
                 if (inline_extent.has_content) {
-                    float inline_line_box_height = table_inline_line_stack_height(&inline_extent);
-                    if (inline_line_box_height > child_height) {
-                        child_height = inline_line_box_height;
-                    }
+                    // descendant boxes share the cell's coordinates, not the wrapper's font-box origin.
+                    child_top = inline_extent.min_y;
+                    child_height = table_inline_line_stack_height(&inline_extent);
                 }
-                child_bottom = child->y + child_height;
+                child_bottom = child_top + child_height;
             }
             if (block->bound) {
                 bool is_self_collapsing = (child_height == 0);
@@ -3029,157 +3038,70 @@ static void apply_collapsed_border_to_cell(LayoutContext* lycon, ViewTableCell* 
     (*target)->priority = border.priority;
 }
 
-static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
-                                        int* out_first_row_in_group, int* out_last_row_in_group) {
-    int row_idx = 0;
-    for (View* child = static_cast<View*>(table->first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            int first_in_group = row_idx;
-            ViewTableRowGroup* rg = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
-            for (ViewTableRow* row = rg->first_row(); row; row = rg->next_row(row)) {
-                row_idx++;
-            }
-            int last_in_group = row_idx - 1;
-            if (target_row >= first_in_group && target_row <= last_in_group) {
-                if (out_first_row_in_group) *out_first_row_in_group = first_in_group;
-                if (out_last_row_in_group) *out_last_row_in_group = last_in_group;
-                return lam::view_require_block(child);
-            }
-        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            if (row_idx == target_row) {
-                if (out_first_row_in_group) *out_first_row_in_group = -1;
-                if (out_last_row_in_group) *out_last_row_in_group = -1;
-                return nullptr;
-            }
-            row_idx++;
-        }
-    }
-    return nullptr;
+DomElement* LayoutTableBorderGrid::cell(int row, int column) const {
+    if (!cells || row < 0 || row >= row_count || column < 0 || column >= column_count) return nullptr;
+    return cells[(size_t)row * (size_t)column_count + (size_t)column];
 }
 
-typedef lam::ArrayOwnedList<CollapsedBorder, lam::LayoutSessionDomain> CollapsedBorderList;
-
-static ViewTableRow* table_row_at_index(ViewTable* table, int target_row);
-static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col);
-
-// Collapsed-border resolution touches every edge in the table grid.  Keep its
-// structural lookups local to this pass so large row groups do not rescan the
-// full flattened table for each edge.
-struct TableCollapsedBorderLookup {
-    ViewTableRow** rows;
-    ViewBlock** row_groups;
-    ViewTableCell** cells;
-    int row_count;
-    int column_count;
-    bool ready;
-};
-
-// The lookup arrays live in the caller's scope.
-static TableCollapsedBorderLookup table_collapsed_border_lookup_create(
-    ScratchScope* scope, ViewTable* table, const TableMetadata* meta) {
-    TableCollapsedBorderLookup lookup = {nullptr, nullptr, nullptr, 0, 0, false};
-    if (!scope || !table || !meta || meta->row_count <= 0 || meta->column_count <= 0) {
-        return lookup;
+LayoutTableBorderGrid layout_table_border_grid_create(ScratchScope* scope,
+        DomElement* table, int rows, int columns) {
+    LayoutTableBorderGrid grid;
+    if (!scope || !table || rows <= 0 || columns <= 0) return grid;
+    grid.table = table;
+    grid.row_count = rows;
+    grid.column_count = columns;
+    grid.rows = scope->array_zero<DomElement*>(rows);
+    grid.row_groups = scope->array_zero<DomElement*>(rows);
+    grid.cells = scope->array_zero<DomElement*>((size_t)rows * (size_t)columns);
+    grid.columns = scope->array_zero<DomElement*>(columns);
+    grid.column_groups = scope->array_zero<DomElement*>(columns);
+    if (!grid.rows || !grid.row_groups || !grid.cells || !grid.columns || !grid.column_groups) {
+        log_error("table_border_grid_alloc_failed: rows=%d columns=%d", rows, columns);
+        return {};
     }
+    layout_table_visit_source_columns(table, &grid,
+        [](void* context, DomElement* source, size_t first, size_t span, bool) {
+            auto* grid = static_cast<LayoutTableBorderGrid*>(context);
+            bool group = resolve_display_value(source).inner == CSS_VALUE_TABLE_COLUMN_GROUP;
+            DomElement** targets = group ? grid->column_groups : grid->columns;
+            for (size_t column = first; column < (size_t)grid->column_count && column - first < span; column++)
+                if (!targets[column]) targets[column] = source;
+        });
+    return grid;
+}
 
-    lookup.row_count = meta->row_count;
-    lookup.column_count = meta->column_count;
-    size_t cell_count = (size_t)lookup.row_count * (size_t)lookup.column_count;
-    lookup.rows = scope->array_zero<ViewTableRow*>((size_t)lookup.row_count);
-    lookup.row_groups = scope->array_zero<ViewBlock*>((size_t)lookup.row_count);
-    lookup.cells = scope->array_zero<ViewTableCell*>(cell_count);
-    if (!lookup.rows || !lookup.row_groups || !lookup.cells) {
-        log_error("table_collapsed_border_lookup_alloc_failed: rows=%d columns=%d",
-                  lookup.row_count, lookup.column_count);
-        lookup.rows = nullptr;
-        lookup.row_groups = nullptr;
-        lookup.cells = nullptr;
-        return lookup;
-    }
-
+static LayoutTableBorderGrid table_used_border_grid_create(
+        ScratchScope* scope, ViewTable* table, const TableMetadata* meta) {
+    LayoutTableBorderGrid grid = layout_table_border_grid_create(
+        scope, table, meta->row_count, meta->column_count);
+    if (!grid.cells) return grid;
     int row_index = 0;
-    for (ViewTableRow* row = table->first_row(); row && row_index < lookup.row_count;
+    for (ViewTableRow* row = table->first_row(); row && row_index < grid.row_count;
          row = table->next_row(row), row_index++) {
-        lookup.rows[row_index] = row;
+        grid.rows[row_index] = row;
         ViewBlock* group = row->parent_row_group();
-        if (group && group->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            lookup.row_groups[row_index] = group;
-        }
-        row->each_cell( [&](ViewTableCell* cell) {
+        if (group && group->view_type == RDT_VIEW_TABLE_ROW_GROUP) grid.row_groups[row_index] = group;
+        row->each_cell([&](ViewTableCell* cell) {
             if (!cell || !cell->td) return;
-            int row_start = cell->td->row_index;
-            int row_end = row_start + cell->td->row_span;
-            int col_start = cell->td->col_index;
-            int col_end = col_start + cell->td->col_span;
-            if (row_start < 0) row_start = 0;
-            if (col_start < 0) col_start = 0;
-            if (row_end > lookup.row_count) row_end = lookup.row_count;
-            if (col_end > lookup.column_count) col_end = lookup.column_count;
-            for (int cell_row = row_start; cell_row < row_end; cell_row++) {
-                for (int cell_col = col_start; cell_col < col_end; cell_col++) {
-                    size_t index = (size_t)cell_row * (size_t)lookup.column_count +
-                        (size_t)cell_col;
-                    if (!lookup.cells[index]) lookup.cells[index] = cell;
+            int first_row = max(0, cell->td->row_index);
+            int first_column = max(0, cell->td->col_index);
+            int last_row = min(grid.row_count, cell->td->row_index + cell->td->row_span);
+            int last_column = min(grid.column_count, cell->td->col_index + cell->td->col_span);
+            for (int r = first_row; r < last_row; r++) {
+                for (int c = first_column; c < last_column; c++) {
+                    DomElement*& slot = grid.cells[(size_t)r * (size_t)grid.column_count + (size_t)c];
+                    if (!slot) slot = cell;
                 }
             }
         });
     }
-    lookup.ready = true;
-    return lookup;
+    return grid;
 }
 
-static ViewTableRow* table_collapsed_border_row(const TableCollapsedBorderLookup* lookup,
-                                                ViewTable* table, int row) {
-    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count) {
-        return lookup->rows[row];
-    }
-    return table_row_at_index(table, row);
-}
-
-static ViewTableCell* table_collapsed_border_cell(const TableCollapsedBorderLookup* lookup,
-                                                  ViewTable* table, int row, int col) {
-    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count &&
-        col >= 0 && col < lookup->column_count) {
-        size_t index = (size_t)row * (size_t)lookup->column_count + (size_t)col;
-        return lookup->cells[index];
-    }
-    return find_cell_at(table, row, col);
-}
-
-static ViewBlock* table_collapsed_border_row_group(const TableCollapsedBorderLookup* lookup,
-                                                   ViewTable* table, int row) {
-    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count) {
-        return lookup->row_groups[row];
-    }
-    return find_rowgroup_for_row(table, row, nullptr, nullptr);
-}
-
-static void append_collapsed_border_candidate(CollapsedBorderList& candidates,
-                                              const CollapsedBorder& value) {
-    lam::SessionPtr<CollapsedBorder> border = lam::session_make<CollapsedBorder>(MEM_CAT_LAYOUT);
-    if (!border) {
-        log_error("append_collapsed_border_candidate_alloc_failed");
-        return;
-    }
-    *border = value;
-    if (!candidates.append(static_cast<lam::SessionPtr<CollapsedBorder>&&>(border))) {
-        log_error("append_collapsed_border_candidate_append_failed: count=%zu", candidates.size());
-    }
-}
-
-template <typename ViewType>
-static void table_append_border(CollapsedBorderList& candidates, ViewType* view,
-                                int side, bool visible_only = false) {
-    if (!view) return;
-    CollapsedBorder border = table_view_border(view, side);
-    if (!visible_only || border.style != CSS_VALUE_NONE) {
-        append_collapsed_border_candidate(candidates, border);
-    }
-}
-
-void layout_table_visit_columns(ViewTable* table, void* context, LayoutTableColumnFn visitor, bool properties) {
+void layout_table_visit_source_columns(DomElement* table, void* context,
+        LayoutTableSourceColumnFn visitor, bool properties) {
     size_t next = 0;
-    auto leaf = [&](ViewElement* column) {
+    auto leaf = [&](DomElement* column) {
         RadiantTableColumnRange range = {};
         if (!radiant_table_column_range(column, next, SIZE_MAX, &range)) return SIZE_MAX;
         next = range.next;
@@ -3187,22 +3109,38 @@ void layout_table_visit_columns(ViewTable* table, void* context, LayoutTableColu
         if (geometric || properties) visitor(context, column, range.column, range.repeat, false);
         return geometric ? range.column : SIZE_MAX;
     };
-    table->each_column_source([&](ViewElement* source) {
-        if (source->view_type == RDT_VIEW_TABLE_COLUMN) { leaf(source); return; }
+    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* source = child->as_element();
+        CssEnum display = resolve_display_value(source).inner;
+        if (display == CSS_VALUE_TABLE_COLUMN) { leaf(source); continue; }
+        if (display != CSS_VALUE_TABLE_COLUMN_GROUP) continue;
         size_t first = SIZE_MAX, last = 0; bool has_children = false;
-        radiant_each_table_colgroup_column(source, [&](ViewElement* column) {
+        for (DomNode* node = source->first_child; node; node = node->next_sibling) {
+            if (!node->is_element()) continue;
+            DomElement* column = node->as_element();
+            if (resolve_display_value(column).inner != CSS_VALUE_TABLE_COLUMN) continue;
             has_children = true;
             size_t start = leaf(column);
-            if (start == SIZE_MAX) return;
+            if (start == SIZE_MAX) continue;
             first = start < first ? start : first;
             last = next > last ? next : last;
-        });
+        }
         if (!has_children) {
             // a childless group contributes its own span; its native number is not a leaf position.
             first = next; next += layout_table_column_span(source);
             visitor(context, source, first, next - first, false);
         } else if (first != SIZE_MAX) visitor(context, source, first, last - first, true);
-    });
+    }
+}
+
+void layout_table_visit_columns(ViewTable* table, void* context, LayoutTableColumnFn visitor, bool properties) {
+    struct Adapter { void* context; LayoutTableColumnFn visitor; } adapter = {context, visitor};
+    layout_table_visit_source_columns(table, &adapter,
+        [](void* data, DomElement* column, size_t first, size_t span, bool container) {
+            auto* adapter = static_cast<Adapter*>(data);
+            adapter->visitor(adapter->context, static_cast<ViewElement*>(column), first, span, container);
+        }, properties);
 }
 
 bool layout_table_column_range(ViewElement* source, size_t* first, size_t* span) {
@@ -3217,7 +3155,7 @@ bool layout_table_column_range(ViewElement* source, size_t* first, size_t* span)
     return found;
 }
 
-static ViewBlock* find_table_column_source(ViewTable* table, int target_col, bool want_group) {
+ViewBlock* layout_table_find_column_source(ViewTable* table, int target_col, bool want_group) {
     ViewBlock* found = nullptr;
     layout_table_each_column(table, [&](ViewElement* source, size_t first, size_t span, bool) {
         bool group = source->view_type == RDT_VIEW_TABLE_COLUMN_GROUP;
@@ -3228,7 +3166,7 @@ static ViewBlock* find_table_column_source(ViewTable* table, int target_col, boo
 }
 
 static ViewBlock* find_column_element(ViewTable* table, int target_col) {
-    return find_table_column_source(table, target_col, false);
+    return layout_table_find_column_source(table, target_col, false);
 }
 
 static int table_effective_column_count(ViewTable* table, TableMetadata* meta,
@@ -3257,52 +3195,20 @@ static int table_effective_column_count(ViewTable* table, TableMetadata* meta,
 }
 
 static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
-    return find_table_column_source(table, target_col, true);
+    return layout_table_find_column_source(table, target_col, true);
 }
 
-static ViewTableRow* table_row_at_index(ViewTable* table, int target_row) {
-    if (!table || target_row < 0) return nullptr;
-    int row_index = 0;
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        if (row_index == target_row) return row;
-        row_index++;
-    }
-    return nullptr;
-}
-
-static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col) {
-    return table->find_cell( [&](ViewTableRow* row, ViewTableCell* cell) {
-        (void)row;
-        int row_start = cell->td->row_index;
-        int row_end = row_start + cell->td->row_span;
-        int col_start = cell->td->col_index;
-        int col_end = col_start + cell->td->col_span;
-        return target_row >= row_start && target_row < row_end &&
-            target_col >= col_start && target_col < col_end;
-    });
-}
-
-static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
-                                        const TableCollapsedBorderLookup* lookup,
-                                        CollapsedBorderList& candidates,
+static void apply_collapsed_border_pair(LayoutContext* lycon, const LayoutTableBorderGrid& grid,
+                                        const CollapsedBorder& winner,
                                         const LayoutTableAxis& axis, int row, int col) {
-    if (candidates.size() == 0) return;
-    CollapsedBorder winner = *candidates[0];
-    for (size_t i = 1; i < candidates.size(); i++) {
-        winner = layout_table_collapsed_winner(winner, *candidates[i]);
-    }
     if (axis.has_previous(row, col)) {
-        ViewTableCell* previous = table_collapsed_border_cell(
-            lookup, table, axis.previous_row(row, col), axis.previous_col(row, col));
-        if (previous) {
-            apply_collapsed_border_to_cell(lycon, previous, winner, axis.previous_side());
-        }
+        auto* previous = static_cast<ViewTableCell*>(grid.cell(
+            axis.previous_row(row, col), axis.previous_col(row, col)));
+        apply_collapsed_border_to_cell(lycon, previous, winner, axis.previous_side());
     }
     if (axis.has_next(row, col)) {
-        ViewTableCell* next = table_collapsed_border_cell(lookup, table, row, col);
-        if (next) {
-            apply_collapsed_border_to_cell(lycon, next, winner, axis.next_side());
-        }
+        auto* next = static_cast<ViewTableCell*>(grid.cell(row, col));
+        apply_collapsed_border_to_cell(lycon, next, winner, axis.next_side());
     }
 }
 
@@ -3318,7 +3224,7 @@ static CollapsedBorder* table_cell_resolved_border(ViewTableCell* cell, int side
 }
 
 static void table_update_collapsed_edge(ViewTable* table, TableMetadata* meta,
-                                        const TableCollapsedBorderLookup* lookup,
+                                        const LayoutTableBorderGrid& grid,
                                         bool horizontal, bool start) {
     LayoutTableAxis axis(meta, horizontal);
     int fixed = axis.fixed_index(start);
@@ -3328,7 +3234,7 @@ static void table_update_collapsed_edge(ViewTable* table, TableMetadata* meta,
         int row = axis.row(fixed, index);
         int col = axis.col(fixed, index);
         CollapsedBorder* border = table_cell_resolved_border(
-            table_collapsed_border_cell(lookup, table, row, col), side);
+            static_cast<ViewTableCell*>(grid.cell(row, col)), side);
         if (border && border->width > *max_width) *max_width = border->width;
     }
 }
@@ -3361,93 +3267,68 @@ static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
     for_each_table_row_cell_slot_in_tree(static_cast<View*>(row->first_child), fn);
 }
 
-static void collect_collapsed_border_candidates(ViewTable* table,
-                                                const TableCollapsedBorderLookup* lookup,
-                                                const LayoutTableAxis& axis, int row, int col,
-                                                CollapsedBorderList& candidates) {
+CollapsedBorder layout_table_collapsed_edge(const LayoutTableBorderGrid& grid,
+        const LayoutTableAxis& axis, int row, int col) {
+    CollapsedBorder winner;
+    auto append = [&](DomElement* element, int side) {
+        if (element) winner = layout_table_collapsed_winner(winner, table_view_border(element, side));
+    };
     int edge = axis.edge(row, col);
     bool at_start = edge == 0;
     bool at_end = edge == axis.edge_count;
-    // the winner fold keeps the earlier of equal borders, so candidates enter in CSS 2.2 §17.6.2.1
-    // precedence: cell, row, row group, column, column group, then table (CSS Tables 3 §3.7.1 keeps
-    // the cell over an equal table border); within a type the upper or left element comes first.
-    if (!at_start) {
-        table_append_border(candidates, table_collapsed_border_cell(
-            lookup, table, axis.previous_row(row, col), axis.previous_col(row, col)),
-            axis.previous_side());
-    }
-    if (!at_end) {
-        table_append_border(candidates, table_collapsed_border_cell(lookup, table, row, col),
-                            axis.next_side());
-    }
+    // equal borders keep CSS 2.2 §17.6.2.1 precedence: cell, row, group, column, group, table.
+    if (!at_start) append(grid.cell(axis.previous_row(row, col), axis.previous_col(row, col)), axis.previous_side());
+    if (!at_end) append(grid.cell(row, col), axis.next_side());
     if (axis.horizontal) {
-        if (!at_start) {
-            table_append_border(candidates, table_collapsed_border_row(lookup, table, row - 1),
-                                2, true);
-        }
-        if (!at_end) {
-            table_append_border(candidates, table_collapsed_border_row(lookup, table, row),
-                                0, true);
-        }
-        ViewBlock* upper_group = !at_start ? table_collapsed_border_row_group(lookup, table, row - 1) : nullptr;
-        ViewBlock* lower_group = !at_end ? table_collapsed_border_row_group(lookup, table, row) : nullptr;
-        if (upper_group && upper_group != lower_group) table_append_border(candidates, upper_group, 2, true);
-        if (lower_group && lower_group != upper_group) table_append_border(candidates, lower_group, 0, true);
+        if (!at_start) append(grid.rows[row - 1], 2);
+        if (!at_end) append(grid.rows[row], 0);
+        DomElement* upper = !at_start ? grid.row_groups[row - 1] : nullptr;
+        DomElement* lower = !at_end ? grid.row_groups[row] : nullptr;
+        if (upper != lower) { append(upper, 2); append(lower, 0); }
         if (at_start || at_end) {
             int side = at_start ? 0 : 2;
-            table_append_border(candidates, find_column_element(table, col), side, true);
-            table_append_border(candidates, find_colgroup_element(table, col), side, true);
+            append(grid.columns[col], side);
+            append(grid.column_groups[col], side);
         }
     } else {
         if (at_start || at_end) {
             int side = at_start ? 3 : 1;
-            table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
-            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
-            table_append_border(candidates, group, side, true);
+            append(grid.rows[row], side);
+            append(grid.row_groups[row], side);
         }
-        if (!at_start) {
-            table_append_border(candidates, find_column_element(table, col - 1), 1, true);
-        }
-        if (!at_end) {
-            table_append_border(candidates, find_column_element(table, col), 3, true);
-        }
-        ViewBlock* left_group = !at_start ? find_colgroup_element(table, col - 1) : nullptr;
-        ViewBlock* right_group = !at_end ? find_colgroup_element(table, col) : nullptr;
-        if (left_group && left_group != right_group) {
-            table_append_border(candidates, left_group, 1, true);
-        }
-        if (right_group && right_group != left_group) {
-            table_append_border(candidates, right_group, 3, true);
-        }
+        if (!at_start) append(grid.columns[col - 1], 1);
+        if (!at_end) append(grid.columns[col], 3);
+        DomElement* left = !at_start ? grid.column_groups[col - 1] : nullptr;
+        DomElement* right = !at_end ? grid.column_groups[col] : nullptr;
+        if (left != right) { append(left, 1); append(right, 3); }
     }
-    if (at_start) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(true)));
-    if (at_end) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(false)));
+    if (at_start) append(grid.table, axis.table_side(true));
+    if (at_end) append(grid.table, axis.table_side(false));
+    return winner;
 }
 
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
     ScratchScope scope(&lycon->scratch);
-    TableCollapsedBorderLookup lookup = table_collapsed_border_lookup_create(&scope, table, meta);
+    LayoutTableBorderGrid grid = table_used_border_grid_create(&scope, table, meta);
+    if (!grid.cells) return;
     auto resolve_axis = [&](bool horizontal) {
         LayoutTableAxis axis(meta, horizontal);
         for (int edge = 0; edge <= axis.edge_count; edge++) {
             for (int slot = 0; slot < axis.slot_count; slot++) {
                 int row = axis.row(edge, slot);
                 int col = axis.col(edge, slot);
-                CollapsedBorderList candidates(MEM_CAT_LAYOUT, 4);
-                collect_collapsed_border_candidates(
-                    table, &lookup, axis, row, col, candidates);
-                apply_collapsed_border_pair(
-                    lycon, table, &lookup, candidates, axis, row, col);
+                CollapsedBorder winner = layout_table_collapsed_edge(grid, axis, row, col);
+                apply_collapsed_border_pair(lycon, grid, winner, axis, row, col);
             }
         }
     };
     resolve_axis(true);
     resolve_axis(false);
-    table_update_collapsed_edge(table, meta, &lookup, true, true);
-    table_update_collapsed_edge(table, meta, &lookup, true, false);
-    table_update_collapsed_edge(table, meta, &lookup, false, true);
-    table_update_collapsed_edge(table, meta, &lookup, false, false);
+    table_update_collapsed_edge(table, meta, grid, true, true);
+    table_update_collapsed_edge(table, meta, grid, true, false);
+    table_update_collapsed_edge(table, meta, grid, false, true);
+    table_update_collapsed_edge(table, meta, grid, false, false);
 
 }
 
@@ -4867,9 +4748,10 @@ static void reapply_rowspan_vertical_alignment(LayoutContext* lycon,
     float padding_bottom = insets.padding.bottom;
     float content_area_height = tcell->height - border_top - border_bottom - padding_top - padding_bottom;
     float content_start_y = border_top + padding_top;
-    TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell);
+    TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell, true);
     if (!bounds.has_content) return;
-    float content_actual_height = bounds.max_y - bounds.min_y;
+    // row growth must retain the same line-box and root-strut minimum as initial alignment.
+    float content_actual_height = measure_cell_content_height(lycon, tcell);
     float new_offset = layout_table_cell_vertical_align_target(
         valign, content_area_height, content_actual_height, content_start_y);
     float adjustment = new_offset - bounds.min_y;
@@ -6300,7 +6182,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         tcell->block_mut()->last_line_max_descender =
             lycon->block.last_line_max_descender;
     }
-    cell->content_height = lycon->block.advance_y - content_start_y;
+    // retain float extent before row alignment moves children away from their flow origin.
+    float content_bottom = max(lycon->block.advance_y,
+        find_descendant_float_max_y(lam::view_require_element(cell), 0.0f));
+    cell->content_height = content_bottom - content_start_y;
     if (cell->content_height < 0.0f) cell->content_height = 0.0f;
     if (temporarily_definite_cell_height) {
         tcell->block_mut()->given_height = saved_cell_given_height;
@@ -6464,8 +6349,12 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
         cell_text_indent = cell->block()->text_indent;
     }
     bool first_line = true;
-    auto append_inline_widths = [&](const IntrinsicSizes& widths) {
-        if (widths.min_content > min_width) min_width = widths.min_content;
+    LayoutIntrinsicMinRun inline_min_run;
+    auto append_inline_widths = [&](DomNode* child, const IntrinsicSizes& widths,
+                                    bool separator) {
+        // cell minima retain the same unbreakable inline edges as other intrinsic consumers.
+        layout_intrinsic_append_min_run(lycon, &inline_min_run, child, widths, separator);
+        min_width = max(min_width, inline_min_run.minimum);
         if (widths.has_forced_break) {
             // forced lines remain separate at max-content, including across inline siblings.
             inline_run_max += widths.first_line_max;
@@ -6537,7 +6426,8 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                      original_has_leading_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
-                append_inline_widths(widths);
+                append_inline_widths(child, widths, collapse_ws &&
+                    (pending_whitespace_only || prev_ended_with_space || original_has_leading_ws));
                 prev_ended_with_space = original_has_trailing_ws;
                 prev_end_space_measured = false;
                 pending_whitespace_only = false;
@@ -6594,6 +6484,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
             NameId child_tag = child->tag();
             bool is_line_break = (child_tag == MARKUP_NAME_BR);
             if (is_line_break) {
+                layout_intrinsic_break_min_run(&inline_min_run);
                 table_intrinsic_flush_inline_run(
                     &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
                     &has_inline_content, &prev_ended_with_space);
@@ -6627,6 +6518,13 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 IntrinsicSizes inline_widths = child_sizes;
                 inline_widths.min_content = child_min;
                 inline_widths.max_content = child_max + inline_margin_h;
+                if (!layout_intrinsic_element_is_atomic_inline(child_elem) &&
+                    inline_widths.first_segment_min >= 0.0f) {
+                    LayoutIntrinsicMarginPair margins =
+                        layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
+                    layout_intrinsic_add_min_segment_edges(
+                        &inline_widths, margins.left, margins.right, child_elem);
+                }
                 // atomic inline boxes retain their own formatting context's forced breaks.
                 if (layout_intrinsic_element_is_atomic_inline(child_elem)) {
                     inline_widths.has_forced_break = false;
@@ -6636,12 +6534,15 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                     inline_widths.first_line_max += margins.left;
                     inline_widths.last_line_max += margins.right;
                 }
-                append_inline_widths(inline_widths);
+                child_min = inline_widths.min_content;
+                append_inline_widths(child, inline_widths, collapse_ws &&
+                    (pending_whitespace_only || prev_ended_with_space || starts_with_ws));
                 prev_ended_with_space = layout_element_edge_has_whitespace(child, true);
                 prev_end_space_measured = prev_ended_with_space;
                 pending_whitespace_only = false;
             } else {
                 if (!child_is_float) {
+                    layout_intrinsic_break_min_run(&inline_min_run);
                     table_intrinsic_flush_inline_run(
                         &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
                         &has_inline_content, &prev_ended_with_space);

@@ -196,6 +196,13 @@ bool font_visit_glyph_path(FontHandle* handle, uint32_t codepoint,
 bool font_visit_glyph_index_path(FontHandle* handle, uint32_t glyph_index,
     FontPathVisitFn visitor, void* context, struct Arena* arena);
 
+// glyph IDs belong to this exact face; positions/advances are CSS pixels, Y-down.
+// unsupported shaping or a foreign fallback face returns false before any visit.
+typedef void (*FontGlyphVisitFn)(void* context, uint32_t glyph_index,
+    float x, float y, float advance);
+bool font_visit_face_glyphs(FontHandle* handle, const char* text, int byte_len,
+    FontGlyphVisitFn visitor, void* context, float* advance);
+
 // get the font's .notdef advance when no face covers a codepoint
 float font_get_missing_glyph_advance(FontHandle* handle);
 
@@ -262,6 +269,9 @@ typedef struct LoadedGlyph {
 // render a glyph to bitmap (result is cached; pointer valid until cache eviction)
 const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                                       GlyphRenderMode mode);
+// font-local indices use a separate cache namespace from Unicode characters.
+const GlyphBitmap* font_render_glyph_index(FontHandle* handle, uint32_t glyph_index,
+    GlyphRenderMode mode);
 
 // load a glyph with automatic codepoint fallback. tries the primary handle
 // first; if the glyph is missing, resolves a fallback font via FontContext's
@@ -318,6 +328,9 @@ char* font_platform_find_fallback(const char* font_name, int* out_face_index);
 // returns NULL if no font covers this codepoint.
 FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* style,
                                         uint32_t codepoint);
+// resolve a retained fallback relative to the already selected face, without re-resolving its style.
+FontHandle* font_resolve_fallback_for_codepoint(FontHandle* source,
+    const FontStyleDesc* style, uint32_t codepoint);
 
 // resolve the shared emoji-presentation face; the caller releases the retained handle.
 FontHandle* font_resolve_for_emoji(FontContext* ctx, const FontStyleDesc* style, uint32_t codepoint);
@@ -331,6 +344,8 @@ bool font_has_codepoint(FontHandle* handle, uint32_t codepoint);
 
 // get the font family name (e.g., "Arial", "Times New Roman")
 const char* font_handle_get_family_name(FontHandle* handle);
+// borrowed owning context; its lifetime must encompass the selected handle.
+FontContext* font_handle_get_context(FontHandle* handle);
 
 // get the requested CSS pixel size
 float font_handle_get_size_px(FontHandle* handle);

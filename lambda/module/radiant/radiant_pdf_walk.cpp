@@ -268,7 +268,7 @@ void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
     bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
-        pdf_walk_simple_boundary(view->boundary());
+        !render_background_uses_table_layers(view) && pdf_walk_simple_boundary(view->boundary());
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
     PdfPaintBatch batch(ctx, rect);
     if (!render_paint_boundary_emit_full(batch.paint, ctx->ui_context, view, rect))

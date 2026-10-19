@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf') }
+body { margin: 0 }
+.case { margin-bottom: 6px }
+.box { display: inline-block; width: max-content; font: 20px/24px Ahem }
+.wrap { width: 60px }
+</style>
+<body id="result">
+<div class="case"><span class="box" id="normal-word-cr" style="white-space:normal">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="normal-word-space" style="white-space:normal">AA BB</span></div>
+<div class="case"><span class="box" id="normal-break-cr" style="white-space:normal">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="normal-break-space" style="white-space:normal">AA &#10;B</span></div>
+<div class="case"><span class="box" id="normal-only-cr" style="white-space:normal">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="normal-only-space" style="white-space:normal">  </span></div>
+<div class="case"><span class="box wrap" id="normal-wrap-cr" style="white-space:normal">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="normal-wrap-space" style="white-space:normal">AA BB</span></div>
+<div class="case"><span class="box" id="nowrap-word-cr" style="white-space:nowrap">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="nowrap-word-space" style="white-space:nowrap">AA BB</span></div>
+<div class="case"><span class="box" id="nowrap-break-cr" style="white-space:nowrap">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="nowrap-break-space" style="white-space:nowrap">AA &#10;B</span></div>
+<div class="case"><span class="box" id="nowrap-only-cr" style="white-space:nowrap">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="nowrap-only-space" style="white-space:nowrap">  </span></div>
+<div class="case"><span class="box wrap" id="nowrap-wrap-cr" style="white-space:nowrap">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="nowrap-wrap-space" style="white-space:nowrap">AA BB</span></div>
+<div class="case"><span class="box" id="pre-word-cr" style="white-space:pre">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="pre-word-space" style="white-space:pre">AA BB</span></div>
+<div class="case"><span class="box" id="pre-break-cr" style="white-space:pre">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="pre-break-space" style="white-space:pre">AA &#10;B</span></div>
+<div class="case"><span class="box" id="pre-only-cr" style="white-space:pre">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="pre-only-space" style="white-space:pre">  </span></div>
+<div class="case"><span class="box wrap" id="pre-wrap-cr" style="white-space:pre">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="pre-wrap-space" style="white-space:pre">AA BB</span></div>
+<div class="case"><span class="box" id="pre-wrap-word-cr" style="white-space:pre-wrap">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="pre-wrap-word-space" style="white-space:pre-wrap">AA BB</span></div>
+<div class="case"><span class="box" id="pre-wrap-break-cr" style="white-space:pre-wrap">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="pre-wrap-break-space" style="white-space:pre-wrap">AA &#10;B</span></div>
+<div class="case"><span class="box" id="pre-wrap-only-cr" style="white-space:pre-wrap">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="pre-wrap-only-space" style="white-space:pre-wrap">  </span></div>
+<div class="case"><span class="box wrap" id="pre-wrap-wrap-cr" style="white-space:pre-wrap">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="pre-wrap-wrap-space" style="white-space:pre-wrap">AA BB</span></div>
+<div class="case"><span class="box" id="pre-line-word-cr" style="white-space:pre-line">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="pre-line-word-space" style="white-space:pre-line">AA BB</span></div>
+<div class="case"><span class="box" id="pre-line-break-cr" style="white-space:pre-line">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="pre-line-break-space" style="white-space:pre-line">AA &#10;B</span></div>
+<div class="case"><span class="box" id="pre-line-only-cr" style="white-space:pre-line">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="pre-line-only-space" style="white-space:pre-line">  </span></div>
+<div class="case"><span class="box wrap" id="pre-line-wrap-cr" style="white-space:pre-line">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="pre-line-wrap-space" style="white-space:pre-line">AA BB</span></div>
+<div class="case"><span class="box" id="break-spaces-word-cr" style="white-space:break-spaces">AA&#13;BB</span></div>
+<div class="case"><span class="box" id="break-spaces-word-space" style="white-space:break-spaces">AA BB</span></div>
+<div class="case"><span class="box" id="break-spaces-break-cr" style="white-space:break-spaces">AA&#13;&#10;B</span></div>
+<div class="case"><span class="box" id="break-spaces-break-space" style="white-space:break-spaces">AA &#10;B</span></div>
+<div class="case"><span class="box" id="break-spaces-only-cr" style="white-space:break-spaces">&#13;&#13;</span></div>
+<div class="case"><span class="box" id="break-spaces-only-space" style="white-space:break-spaces">  </span></div>
+<div class="case"><span class="box wrap" id="break-spaces-wrap-cr" style="white-space:break-spaces">AA&#13;BB</span></div>
+<div class="case"><span class="box wrap" id="break-spaces-wrap-space" style="white-space:break-spaces">AA BB</span></div>
+<div class="case"><span class="box" id="styled-cr" style='white-space:pre'>A<b>&#13;B</b> C</span></div>
+<div class="case"><span class="box" id="styled-space" style='white-space:pre'>A<b> B</b> C</span></div>
+<div class="case"><span class="box" id="bidi-cr" style='white-space:pre;direction:rtl;font-family:Menlo,"Courier New",monospace'>אב&#13;cd</span></div>
+<div class="case"><span class="box" id="bidi-space" style='white-space:pre;direction:rtl;font-family:Menlo,"Courier New",monospace'>אב cd</span></div>
+<div class="case"><span class="box" id="spacing-cr" style='white-space:pre;word-spacing:3px;letter-spacing:2px'>A&#13;B</span></div>
+<div class="case"><span class="box" id="spacing-space" style='white-space:pre;word-spacing:3px;letter-spacing:2px'>A B</span></div>
+<div class="case"><span class="box" id="balance-cr" style='white-space:pre-wrap;text-wrap:balance;width:120px'>AA&#13;BB&#13;CC DD EE</span></div>
+<div class="case"><span class="box" id="balance-space" style='white-space:pre-wrap;text-wrap:balance;width:120px'>AA BB CC DD EE</span></div>
+<div class="case"><span class="box" id="normal-zwsp-cr" style="white-space:normal">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="normal-zwsp-space" style="white-space:normal">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="nowrap-zwsp-cr" style="white-space:nowrap">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="nowrap-zwsp-space" style="white-space:nowrap">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="pre-zwsp-cr" style="white-space:pre">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="pre-zwsp-space" style="white-space:pre">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="pre-wrap-zwsp-cr" style="white-space:pre-wrap">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="pre-wrap-zwsp-space" style="white-space:pre-wrap">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="pre-line-zwsp-cr" style="white-space:pre-line">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="pre-line-zwsp-space" style="white-space:pre-line">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="break-spaces-zwsp-cr" style="white-space:break-spaces">AA&#x200B;&#13;B</span></div>
+<div class="case"><span class="box" id="break-spaces-zwsp-space" style="white-space:break-spaces">AA&#x200B; B</span></div>
+<div class="case"><span class="box" id="pre-edge-space" style="display:block;width:80px;white-space:normal">C<span id="pre-edge-space-source" style="white-space:pre">   </span><span id="pre-edge-space-tail">D</span></span></div>
+<div class="case"><span class="box" id="pre-edge-cr" style="display:block;width:80px;white-space:normal">C<span id="pre-edge-cr-source" style="white-space:pre">&#13;&#13;&#13;</span><span id="pre-edge-cr-tail">D</span></span></div>
+<div class="case"><span class="box" id="nowrap-edge-space" style="display:block;width:40px;white-space:normal">C<span id="nowrap-edge-space-source" style="white-space:nowrap"> </span><span id="nowrap-edge-space-tail">D</span></span></div>
+<div class="case"><span class="box" id="nowrap-edge-cr" style="display:block;width:40px;white-space:normal">C<span id="nowrap-edge-cr-source" style="white-space:nowrap">&#13;</span><span id="nowrap-edge-cr-tail">D</span></span></div>
+<div class="case"><span class="box" id="nested-edge-space" style="display:block;width:40px;white-space:normal">C<span id="nested-edge-space-source" style="white-space:pre"><span style="white-space:normal"> </span></span><span id="nested-edge-space-tail">D</span></span></div>
+<div class="case"><span class="box" id="nested-edge-cr" style="display:block;width:40px;white-space:normal">C<span id="nested-edge-cr-source" style="white-space:pre"><span style="white-space:normal">&#13;</span></span><span id="nested-edge-cr-tail">D</span></span></div>
+<div class="case"><span class="box" id="atomic-edge" style="display:block;width:40px;white-space:normal">C<span style="white-space:nowrap"> <i style="display:inline-block;width:20px;height:20px"></i></span><span id="atomic-edge-tail">D</span></span></div>
+</body>

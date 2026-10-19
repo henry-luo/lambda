@@ -2046,6 +2046,7 @@ static const CssEnumInfo css_value_definitions[] = {
     {"linearrgb", 9, CSS_VALUE_LINEARRGB, CSS_VALUE_GROUP_SVG_PAINT},
     {"horizontal", 10, CSS_VALUE_HORIZONTAL, CSS_VALUE_GROUP_DIRECTION},
     {"vertical", 8, CSS_VALUE_VERTICAL, CSS_VALUE_GROUP_DIRECTION},
+    {"-webkit-baseline-middle", 23, CSS_VALUE_BASELINE_MIDDLE, CSS_VALUE_GROUP_VERTICAL_ALIGN},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
