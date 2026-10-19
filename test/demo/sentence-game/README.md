@@ -184,6 +184,28 @@ second or third card of the corresponding pile:
 | How | F / G / H |
 | Why | V / B / N |
 
+### Read aloud
+
+**Read aloud**, beside *Your sentence*, reads the finished sentence in a
+girl’s voice: the best installed US English female voice (Samantha on a stock
+Mac), pitched up a little and at a slightly unhurried pace. A better female
+voice installed under System Settings → Accessibility → Spoken Content →
+Manage Voices is picked automatically. While it reads, the button becomes
+**Stop**. In Levels 1 and 3 it waits
+for a complete sentence; in Level 2 it reads the words placed so far, so you
+can hear an attempt before checking it.
+
+Double-click any card to hear its words: a picture card reads its phrase, a
+word card its word, and the full-stop card says “full stop”. A new reading
+replaces the one in progress. A double-click begins with an ordinary click, so
+it still selects a picture card, or places (or returns) a Level 2 word. Its
+second click is ignored, so only that word moves and it is the word you hear.
+
+Speech runs locally through the Radiant speech service
+(`vibe/radiant/Radiant_Design_Speech.md`). The demo is a local document, so it
+may start audio from any handler (**D7.5.4**). Where no speech engine is
+available, reading stays silent and the button returns to **Read aloud**.
+
 ### Further advanced pattern ideas
 
 | Pattern | Example |
@@ -207,7 +229,7 @@ the current session. The direct entry point is still available:
 
 | File | Purpose |
 | --- | --- |
-| `sentence-game.ls` | Reactive view instance and event handlers |
+| `sentence-game.ls` | Reactive view instance, event handlers and read-aloud speech |
 | `mod_game.ls` | Level selection, session routing and separate progress |
 | `mod_game_scene.ls` | Level picker, word puzzles and picture workspace |
 | `mod_model.ls` | Patterns, card catalogs, seeded deals, clause chains and game transitions |
@@ -265,4 +287,16 @@ Captures and results go under `temp/sentence-game/`:
 ./lambda.exe demo sentence-game --headless \
   --event-file test/demo/sentence-game/tests/compact.json \
   --event-result temp/sentence-game/compact-result.json
+```
+
+The read-aloud replay covers the sentence reading and its **Stop** toggle,
+card double-clicks in Levels 1 and 2, and keyboard selection alongside them.
+It uses the deterministic fake speech engine on offline audio output.
+`lambda.exe demo` does not apply the fixture's `env` block, so set both
+variables yourself; otherwise the real system voice speaks on wall time:
+
+```sh
+LAMBDA_SPEECH_ENGINE=fake LAMBDA_AUDIO_OUTPUT=offline ./lambda.exe demo sentence-game --headless \
+  --event-file test/demo/sentence-game/tests/read_aloud.json \
+  --event-result temp/sentence-game/read-aloud-result.json
 ```

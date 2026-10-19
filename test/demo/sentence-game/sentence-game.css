@@ -299,6 +299,13 @@
     .sentence-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .sentence-topline h2 { margin: 0; color: #8d6a00; font-size: .72rem; font-weight: 950; letter-spacing: .13em; text-transform: uppercase; }
     .sentence-instruction { color: #8d6a00; font-size: .73rem; font-weight: 800; }
+    .sentence-tools { display: flex; align-items: center; gap: 12px; }
+    .read-aloud { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; min-height: 34px; padding: 6px 13px 6px 10px; border: 1px solid #e7c444; border-radius: 999px; background: white; color: #8d6a00; font: inherit; font-size: .76rem; font-weight: 900; cursor: pointer; }
+    .read-aloud[aria-pressed="false"]:hover:not(:disabled) { background: #fff0b8; }
+    .read-aloud[aria-pressed="true"] { border-color: var(--blue); background: var(--blue); color: white; }
+    .read-aloud:disabled { opacity: .45; cursor: default; }
+    .read-aloud:focus-visible { outline: 3px solid #4e8cff; outline-offset: 3px; }
+    .read-icon { flex-shrink: 0; }
 
     .sentence-preview {
       min-height: 45px;
@@ -524,6 +531,8 @@
       .card-hint { font-size: .64rem; }
       .sentence-zone { margin: 16px 12px; padding: 15px 13px 14px; }
       .sentence-instruction { max-width: 130px; font-size: .65rem; text-align: right; }
+      .sentence-tools { gap: 8px; }
+      .read-aloud { min-height: 32px; padding-inline: 8px 10px; font-size: .7rem; }
       .sentence-actions { align-items: stretch; flex-direction: column; gap: 8px; }
       .builder-actions { padding: 0 14px 18px; }
       .feedback { min-height: 18px; font-size: .77rem; }

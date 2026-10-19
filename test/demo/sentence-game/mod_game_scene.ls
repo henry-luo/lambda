@@ -18,14 +18,17 @@ fn levels_screen(app) => base.frame({phase:"levels",book:[],clauses:[]},0,"Three
         >]>
     <p class:"footer-note","Play at your own pace. All three levels use the same sentence-building colors.">
 >)
+// a word card reads its word on double-click; the full stop is named, not voiced as a pause.
+fn spoken(card) => if (card.text == ".") "full stop" else card.text
 fn word_button(card,index,locked) => <button id:"word-" ++ card.id,type:"button",class:"word-card",'data-action':"word",'data-card':card.id,
+    'data-say':spoken(card),
     *:(if (locked) {disabled:""} else {}),
     <span card.text><span class:"word-key",model.bank_keys[index] or "">
 >
 fn placed_word(card,index,word_count,locked) => <span class:"placed-word",
     <button type:"button",class:"move-word",'data-action':"word-left",'data-card':card.id,'aria-label':"Move " ++ card.text ++ " left",
         *:(if (locked or index == 0) {disabled:""} else {}),"←">
-    <button id:"placed-" ++ card.id,type:"button",class:"placed-label",'data-action':"remove-word",'data-card':card.id,
+    <button id:"placed-" ++ card.id,type:"button",class:"placed-label",'data-action':"remove-word",'data-card':card.id,'data-say':spoken(card),
         'aria-label':"Return " ++ card.text ++ " to the word bank",*:(if (locked) {disabled:""} else {}),card.text>
     <button type:"button",class:"move-word",'data-action':"word-right",'data-card':card.id,'aria-label':"Move " ++ card.text ++ " right",
         *:(if (locked or index == word_count-1) {disabled:""} else {}),"→">
@@ -36,8 +39,9 @@ fn puzzle_play(st) => <section id:"puzzle-screen",class:"game-board",'aria-label
             <p class:"puzzle-progress",string(len(st.order)) ++ " / " ++ string(len(st.cards)) ++ " cards placed">>>
     <section class:"puzzle-answer",'aria-labelledby':"arrange-heading",
         <div class:"sentence-topline",<h2 id:"arrange-heading","Arrange your sentence">
-            <button id:"hint",type:"button",class:"text-button",'data-action':"hint",'aria-pressed':string(st.hint),
-                *:(if (st.phase != "build") {disabled:""} else {}),if (st.hint) "Hide hint" else "Need a hint?">>
+            <div class:"sentence-tools",<button id:"hint",type:"button",class:"text-button",'data-action':"hint",'aria-pressed':string(st.hint),
+                *:(if (st.phase != "build") {disabled:""} else {}),if (st.hint) "Hide hint" else "Need a hint?">
+                ; (base.read_button(st,puzzle.assembled(st)))>>
         if (st.hint) <p class:"puzzle-hint","Start with “" ++ join([for (i,word in split(puzzle.lesson(st).answers[0]," ") where i < 2) word]," ") ++ "”. The full stop goes last.">;
         <div id:"ordered-words",class:"ordered-words",role:"group",'aria-label':"Words in your sentence",
             if (len(st.order) == 0) <p class:"empty-order","Click the cards below in sentence order.">
@@ -121,5 +125,9 @@ fn picture_page(st) => base.frame(st,3,<span "★ " ++ string(len(st.book)) ++ (
     if (st.phase == "picture") picture_picker(st) else picture_play(st);
     <p class:"footer-note","Choose cards that describe what you see. Every card is reusable, including in sentences joined with and, but, or because.">
 >)
-pub fn page(app) => if (app.level == 0) levels_screen(app) else if (app.level == 1) base.page(app.play)
-    else if (app.level == 2) puzzle_page(app.play) else picture_page(app.play)
+// whether the sentence is being read aloud is view state, so it joins the level state for rendering only.
+pub fn page(app,reading=false) {
+    let st = if (app.level == 0) app.play else {*:app.play,reading:reading}
+    if (app.level == 0) levels_screen(app) else if (app.level == 1) base.page(st)
+    else if (app.level == 2) puzzle_page(st) else picture_page(st)
+}
