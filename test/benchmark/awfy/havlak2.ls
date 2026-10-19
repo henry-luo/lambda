@@ -545,7 +545,8 @@ pn verify_result(result: int, innerIterations: int) int {
 
 pn main() int {
     var __t0 = clock()
-    var result = lta_main(1, 1, 10, 10, 5)
+    // match the other AWFY ports' 50 extra full-graph recognitions
+    var result = lta_main(1, 50, 10, 10, 5)
     var __t1 = clock()
     var ok = verify_result(result, 1)
     if (ok == 1) {

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D5.3.4: guard the captured synchronous consumer before a callback body; materialize a fresh closure only on the miss arm. Captures use shared precise cells.",
+  "args": ["--runtime=mvp-lmd"],
+  "checks": [{
+    "in_func": "mvp_lmd_f6",
+    "expect_seq": [", mvp_lmd_f2", "dadd\t", "call\tmvp_lmd_function_new", "call\theap_calloc_closure_env"],
+    "count": {"call\tmvp_lmd_function_new": 1, "call\theap_calloc_closure_env": 1}
+  }, {
+    "in_func": "mvp_lmd_f8",
+    "expect_seq": [", mvp_lmd_f3", "call\tmvp_lmd_function_new"]
+  }]
+}

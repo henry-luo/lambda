@@ -22,7 +22,7 @@ from lambda_process import run_lambda_process
 from run_benchmarks import build_benchmark_list, check_release_build, mir_script_variants
 from run_paired_benchmarks import (compare_row, finalize_provenance, lambda_build_manifest,
     normalized_stdout, run_once, source_provenance)
-from benchmark_provenance import command_output, sha256_file
+from benchmark_provenance import command_output, sha256_file, mask_lambda_source
 
 
 ANNOTATION_CASES = {
@@ -39,8 +39,7 @@ ANNOTATION_CASES = {
 
 def erase_annotations(source):
     """Erase the selected corpus's annotations, preserving strings and type definitions."""
-    masked = re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
-        lambda match: re.sub(r'[^\n]', ' ', match.group()), source)
+    masked = mask_lambda_source(source)
     names = ["int", "float", "bool", "string", "any", "array", "list", "map"]
     names += re.findall(r'^\s*type\s+(\w+)\s*=', masked, re.M)
     contract = r'(?:' + '|'.join(names) + r')\b(?:\[\]|\?)*'
