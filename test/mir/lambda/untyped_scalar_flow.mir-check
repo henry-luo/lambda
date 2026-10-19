@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Homogeneous inferred conditional arms retain native integer carriers; dynamic, mixed, borrowed and error cases keep their original behavior (D2.4.1-D2.4.3, S7.8.1).",
+  "checks": [
+    {
+      "in_func": "_flow_magnitude_#",
+      "expect": ["div\t{{r}}"],
+      "forbid": ["call\tfn_idiv_p, fn_idiv", "call\tfn_ge_p, fn_ge"]
+    }
+  ]
+}
