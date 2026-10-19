@@ -103,7 +103,7 @@ share the headless command registry. The histogram reuses the presented raster.
 Save defaults to `.photos`, preserving original samples and editable settings.
 A `.psd` destination remains supported for the qualified PSD subset; Export PSD
 is explicit. PSD refuses retained transforms/blends/clipping/pass-through and
-enabled effects rather than discarding them. Project data is parsed without
+editable effects, including disabled ones, rather than discarding them. Project data is parsed without
 execution, capped at 128 MiB and currently uncompressed. Pixel tools require
 rasterization of a transformed source. Full PhotoCraft parity and high-depth/ICC
 editing are still pending.

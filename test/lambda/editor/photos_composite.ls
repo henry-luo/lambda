@@ -113,3 +113,7 @@ check("translated-mask-region",img.render_region(translated_doc,[1,1,4,3])^.pixe
 let half_blue = img.with_region(strip,[1,0,2,1],img.blank({width:1,height:1,color:[0.0,0.0,1.0,128/255]})^.pixels)^
 let fraction_doc = img.document(img.stack([img.layer(half_blue,{position:[0,1],transform:[1,0,0,1,0.5,0]})]),{width:4,height:3})
 check("fractional-translation",img.sample(img.render_frame(fraction_doc)^,1,1)^ == [170,0,85,192])
+check("disabled-effect-psd-refusal",(img.encode(disabled.doc,{format:'psd'}) ^ { true }) is bool)
+let disabled_project = editor.open_session(project.decode(project.encode(disabled.doc)^)^ )^
+check("disabled-effect-project",effects.items(model.active(disabled_project)^.node)[0].enabled == false and
+    img.render_frame(disabled_project.doc)^ == img.render_frame(disabled.doc)^)

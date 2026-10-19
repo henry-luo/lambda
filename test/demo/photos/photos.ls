@@ -32,7 +32,7 @@ pn show_file(owner,st,kind) {
     dom.set_text_content(present.node(owner,"file-help"),if (kind in ["action-save","action-open"]) "Actions replay recorded edits on the currently selected layer."
         else if (kind == "save") "Use .photos to preserve all editable settings, or .psd for the supported PSD profile."
         else if (kind == "export") "Exports the current composition with transparency."
-        else if (kind == "psd") "Retained transforms, blend modes and enabled effects require a project, or explicit rasterization before PSD export."
+        else if (kind == "psd") "Use .photos to keep transforms, blend modes and editable effects. Flatten the image for the supported PSD raster profile."
         else "Enter a local image, PSD or .photos project path.")
     dom.set_state(present.node(owner,"file-path"),"value",if (kind == "action-save") "temp/photos/action.laction" else if (kind == "save")
         (if (ends_with(lower(st.path),".photos")) st.path else "temp/photos/composition.photos")

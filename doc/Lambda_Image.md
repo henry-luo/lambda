@@ -178,8 +178,8 @@ never executes code. Encoded text and decoded raster payloads are capped at
 128 MiB with a conservative preflight before packing; nesting is limited to 64.
 The initial format uses hexadecimal Mark binary data and has no compression or
 content deduplication. PSD export explicitly refuses retained transforms,
-non-normal blends and pass-through/clipping metadata it cannot retain. Enabled
-effects require explicit rasterization or a rich project.
+non-normal blends and pass-through/clipping metadata it cannot retain. Retained
+effects, including disabled ones, require explicit rasterization or a rich project.
 
 ## Bounded retouch kernels
 

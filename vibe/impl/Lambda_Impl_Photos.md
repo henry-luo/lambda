@@ -258,7 +258,7 @@ The PSD writer now explicitly rejects retained attributes it cannot serialize.
 
 Photos provides project saving/opening, explicit PSD export, transform/blend and
 effect controls, and a histogram derived from its presented raster. Quick
-adjustments add editable effects. Focused package tests include 49 composition
+adjustments add editable effects. Focused package tests include 51 composition
 checks and project file persistence, plus existing photo/image tests; 11 cases
 pass under forced GC and poisoned frees. All 34 native ImageIO checks pass.
 The composite UI replay covers gray/red pixels, transform undo/redo, effect
@@ -325,7 +325,7 @@ adding a Photos-only input workaround (**S12.1.3**).
 
 - The 16 selected package/runtime cases pass with forced GC and poisoned frees;
   the eager-JIT pass of the 10 Photos/new dynamic-index cases also passes.
-  Photos fixtures contain 41 core, 13 interaction, 26 paint, 49 composite,
+  Photos fixtures contain 41 core, 13 interaction, 26 paint, 51 composite,
   21 retouch and 16 action semantic checks, with procedural PSD/project/action
   round trips. The final composite review includes mask/effect, transform
   gestures, identity reset and metadata-preserving flattening.
@@ -388,3 +388,7 @@ ImageIO cases pass in the optimized native executable. The broader aggregate
 results above precede this exact-sampling optimization; final focused UI and
 measurement results follow. No interactive-latency claim is inferred from the
 headless benchmark.
+
+PSD profile checks also cover disabled editable effects: they are refused instead
+of being silently discarded, while project reopen retains their disabled state
+and original appearance. The composite fixture now contains 51 semantic checks.
