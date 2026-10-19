@@ -21,8 +21,10 @@ pub pn publish(owner,st) any^ {
         top:(viewport_box.height-size.height*scale)/2+st.pan.y})
         dom.style_set_property(surface,string(property),string(requested) ++ "px")
     dom.set_attribute(stage,"data-scale",string(scale))
+    var rendered = st.painted_raster
     if (st.painted_doc == null or st.painted_doc != st.doc) {
         let pixels = img.render_frame(st.doc)^
+        rendered = pixels
         dom.set_canvas_pixels(node(owner,".raster-canvas"),pixels.pixels)^
     }
     let selection = node(owner,".raster-selection")
@@ -37,5 +39,5 @@ pub pn publish(owner,st) any^ {
         for (key,requested in {left:box.x,top:box.y,width:box.width,height:box.height})
             dom.style_set_property(overlay,string(key),string(requested*scale) ++ "px")
     }
-    return {*:st,painted_doc:st.doc,painted_selection:st.selection,scale:scale}
+    return {*:st,painted_doc:st.doc,painted_raster:rendered,painted_selection:st.selection,scale:scale}
 }

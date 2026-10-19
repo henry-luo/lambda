@@ -93,3 +93,17 @@ The report identifies the binary, source package, scenario, phase timings and
 maximum child-process RSS. It measures construction, repeated moves (including
 current eager validation/composition), and PSD encoding; it does not establish
 interactive display latency. Do not run `make release` in a worktree.
+
+Transforms and editable effects are available in the lower property dock. Drag
+with Transform (T) to scale radially; hold Shift at pointer-down to rotate. Numeric
+controls apply relative angle/X/Y scale; reset/flip and explicit rasterization
+are available. Blend modes, clipping, group isolation and ordered effect controls
+share the headless command registry. The histogram reuses the presented raster.
+
+Save defaults to `.photos`, preserving original samples and editable settings.
+A `.psd` destination remains supported for the qualified PSD subset; Export PSD
+is explicit. PSD refuses retained transforms/blends/clipping/pass-through and
+enabled effects rather than discarding them. Project data is parsed without
+execution, capped at 128 MiB and currently uncompressed. Pixel tools require
+rasterization of a transformed source. Full PhotoCraft parity and high-depth/ICC
+editing are still pending.

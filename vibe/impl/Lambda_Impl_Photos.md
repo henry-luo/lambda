@@ -28,7 +28,7 @@ Build a worktree-local host; shared dependency links follow Developer Guide §7.
 | M0 reuse and measurement | Complete for the bounded initial profile; optimized timings below |
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
 | M2 tiles, selections and painting | Core implemented; focused native/package checks and 63 UI assertions pass; aggregate qualification follows the next native batch |
-| M3 transforms, reversible effects and rich persistence | Pending |
+| M3 transforms, reversible effects and rich persistence | Implemented core: affine, eight blends, clipping/pass-through, effects, histogram and versioned project data; focused checks below |
 | M4 retouch, type/shapes, channels and actions | Pending |
 | M5 high depth/color and scale qualification | Pending |
 
@@ -229,3 +229,41 @@ poisoned frees. Evidence: `temp/photos-m2-native.log`, `temp/photos-m2-targeted.
 M3–M5 remain pending: retained transforms/effects, rich-project persistence, retouch/type/shapes,
 actions/multiple documents, and high-depth/color/scale qualification. This
 checkpoint does not claim complete PhotoCraft feature parity.
+
+## M3 retained composition and editable persistence
+
+The shared compositor now evaluates eight linear-light blend modes, source-local
+six-value affine matrices with premultiplied interpolation, ordered retained
+color/filter effects, base-alpha-preserving clipping chains and pass-through
+stacks. Layer masks follow affine geometry. Group opacity/masks interpolate the
+backdrop for pass-through evaluation. Group effects and pass-through clipping
+bases require explicit isolation; specialized content remains unsupported.
+Composition scratch admission includes filter/group/clipping buffers.
+
+The raster package adds relative/matrix transforms, Transform gestures with one
+history transaction, flips, rasterization, blend/clipping/isolation commands and
+ordered effect editing. Applying a mask excludes retained effects from its alpha
+bake, preventing double processing. Image resize conjugates retained affine
+matrices, and merge/ungroup refuse combinations that would change backdrop blend
+behavior silently (**S9.1.3 / S9.2.2**).
+
+`lambda.image.project` packs raw binary raster samples into versioned Mark data,
+retaining hidden RGB, gray channels, IDs, masks, locks, transforms/effects and
+source assets. It checks a conservative payload estimate before packing, caps
+encoded/decoded payloads at 128 MiB and rejects malformed/unknown versions.
+Read/write are procedural and publication is atomic (**S12.1.1v3**); decode parses
+data without evaluation. This first format has no compression/deduplication.
+The PSD writer now explicitly rejects retained attributes it cannot serialize.
+
+Photos provides project saving/opening, explicit PSD export, transform/blend and
+effect controls, and a histogram derived from its presented raster. Quick
+adjustments add editable effects. Focused package tests include 37 composition
+checks and project file persistence, plus existing photo/image tests; 11 cases
+pass under forced GC and poisoned frees. All 34 native ImageIO checks pass.
+The new composite UI replay passes 13 assertions, including actual gray/red
+pixels, transform undo/redo, effect toggle and editable project reopening. Full
+Photos replay and aggregate qualification are running at the next boundary.
+
+A native effect probe caught an iterator borrowing a temporary `MapReader`; the
+adapter now keeps that reader alive for the option scan (**D5.3.3**). The existing
+multiply-rejection fixture now asserts the newly supported rendered pixel.

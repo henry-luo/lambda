@@ -254,3 +254,12 @@ pub fn reframe(raster,rect,options={}) element^ =>
 pub fn mix_samples(raster,other,options={}) element^ =>
     edit_samples(raster,"mix",{*:checked_options(options,["selection","origin"])^,other:other})^
 pub fn extract_samples(raster,options={}) element^ => edit_samples(raster,"extract",options)^
+
+// raw bytes preserve channel shape and hidden RGB across data-only project serialization.
+pub fn to_bytes(raster) binary^ => edit_samples(raster,"pack")^
+pub fn from_bytes(bytes,options) element^ {
+    if (not (bytes is binary)) raise error("image.from_bytes: expected binary samples")
+    else lambda.sys.image_raster(bytes,options)^
+}
+
+pub fn histogram(raster) array^ => edit_samples(raster,"histogram")^

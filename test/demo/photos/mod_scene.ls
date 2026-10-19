@@ -1,6 +1,7 @@
 import model: lambda.editor.raster.model
 import editor: lambda.editor.raster
 import tools: lambda.editor.raster.tools
+import effects: lambda.editor.raster.effects
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -13,10 +14,23 @@ pub fn layer_rows(st) => [for (row in editor.layers(st.doc))
             'data-mask':row.id,title:"Edit layer mask","M">
         if (row.node.locked == true) <span title:"Locked","L">
     >]
+pub fn effect_rows(st) {
+    let row = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null;
+    [for (i,effect in effects.items(row.node)) <div class:if (i == st.effect_index) "effect-row selected" else "effect-row",
+        <button 'data-select-effect':string(i),if (effect.enabled == false) "○ " ++ effect.name else "● " ++ effect.name>>]
+}
+fn histogram_channel(counts,c) {
+    let bins = [for (bin in 0 to 63) sum(slice(counts[c],bin*4,bin*4+4))]
+    let maximum = max(1,max(bins));
+    <g fill:["#ef7777","#6acb8b","#72a7ed"][c],opacity:0.55, *[
+        for (bin in 0 to 63) <rect x:bin*4,y:72-72*bins[bin]/maximum,width:3,height:72*bins[bin]/maximum>]>
+}
+pub fn histogram_chart(counts) => <svg viewBox:"0 0 256 72",width:256,height:72,'aria-label':"RGB histogram",
+    *[for (c in [0,1,2]) histogram_channel(counts,c)]>
 pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
     <header class:"menubar",<strong "λ Photos"> <nav 'aria-label':"Document commands", *[
         button("new","new","New"),button("open","open","Open…"),button("place","place","Place image…"),
-        button("save","save","Save PSD…"),button("export","export","Export PNG…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,
+        button("save","save","Save project…"),button("save-psd","psd","Export PSD…"),button("export","export","Export PNG…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,
     <section class:"options", *[button("undo","history.undo","Undo"),button("redo","history.redo","Redo"),
         <span class:"separator">,button("add-layer","layer.new","New layer"),button("duplicate","layer.duplicate","Duplicate"),
         button("group","layer.group","Group"),button("ungroup","layer.ungroup","Ungroup"),
@@ -65,7 +79,19 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <div class:"fields", *[field("image-width","Width",1024,"number"),field("image-height","Height",768,"number")]>,
                 <div class:"button-grid", *[button("resize-image","resize-image","Resize image"),button("resize-canvas","resize-canvas","Resize canvas"),
                     button("flatten","document.flatten","Flatten")]>]>,
-            <section class:"history-panel",<h2 "History"> <div id:"history"> >]>]>,
+            <section class:"history-panel",<h2 "History"> <div id:"history"> >,
+            <section class:"transform-panel", *[<h2 "Transform & blend">,
+                <div class:"button-grid", *[button("clipping","layer.clipping","Toggle clipping"),button("isolation","layer.isolation","Toggle isolation")]>,
+                <label "Blend mode" <select id:"blend", *[for (mode in ["normal","multiply","screen","overlay","darken","lighten","difference","exclusion"]) <option value:mode,mode>]>>,
+                <p "Transform tool: drag to scale; Shift-drag to rotate.">,
+                <div class:"fields", *[field("transform-angle","Rotate degrees",0,"number"),field("transform-x","Scale X",1,"number"),field("transform-y","Scale Y",1,"number")]>,
+                <div class:"button-grid", *[button("transform-apply","transform-apply","Apply transform"),button("transform-reset","transform-reset","Reset transform"),
+                    button("flip-x","flip-x","Flip horizontal"),button("flip-y","flip-y","Flip vertical"),button("rasterize","layer.rasterize","Rasterize layer")]>]>,
+            <section class:"histogram-panel",<h2 "Histogram"> <div id:"histogram">>,
+            <section class:"effects-panel", *[<h2 "Editable effects">,<div id:"effects">,
+                <div class:"fields", *[for (control in effects.controls) field("effect-" ++ control.key,control.label,control.value,"number")]>,
+                <div class:"button-grid", *[button("effect-add","effect-add","Add effect"),button("effect-toggle","effect.toggle","Toggle effect"),
+                    button("effect-remove","effect.remove","Remove effect"),button("effect-up","effect-up","Move effect up"),button("effect-down","effect-down","Move effect down")]>]>]>]>,
     <footer class:"statusbar",<output id:"status",role:"status",'aria-live':"polite","Opening sample…"> <span id:"dimensions","">>,
     <section id:"file-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"File operation", *[
         <h2 id:"file-title","Open image">,field("file-path","Path"),
@@ -73,5 +99,5 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
         <div class:"button-grid", *[button("file-cancel","file-cancel","Cancel"),button("file-confirm","file-confirm","Continue")]>]>,
     <section id:"discard-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"Unsaved changes", *[
         <h2 "Save changes first?">,<p "This document has unsaved edits.">,
-        button("discard-cancel","discard-cancel","Cancel"),button("discard-save","discard-save","Save PSD…"),
+        button("discard-cancel","discard-cancel","Cancel"),button("discard-save","discard-save","Save project…"),
         button("discard-confirm","discard-confirm","Discard changes")]>]>

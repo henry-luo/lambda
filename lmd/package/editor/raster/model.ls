@@ -4,6 +4,7 @@ import sequence: lambda.editor.mod_doc
 import paths: lambda.editor.mod_source_pos
 import geometry: lambda.editor.draw.geometry
 import common: lambda.slide.common
+import affine: lambda.chart.svg_transform
 
 pub fn value(v,fallback) => common.value(v,fallback)
 pub fn finite(v) => geometry.finite_number(v)
@@ -72,6 +73,8 @@ pub fn pixel_target(st,writing=true) any^ {
     let mask_node = if (st.target == "mask") mask(row.node) else null
     let raster = if (st.target == "mask") mask_node[0] else img.raster_of(row.node)
     if (name(row.node) != 'layer' or raster == null) raise error("Raster: select an editable pixel layer or mask")
+    else if (row.node.transform != null and row.node.transform != affine.identity)
+        raise error("Raster: rasterize the transformed layer before editing source pixels in canvas coordinates")
     else if (writing and locked(st.doc,[row.path])) raise error("Raster: target layer is locked")
     else {row:row,raster:raster,position:[position(row.node)[0]+value(mask_node.position,[0,0])[0],
         position(row.node)[1]+value(mask_node.position,[0,0])[1]]}
@@ -123,7 +126,12 @@ pub fn bounds(node) {
         }
     } else {
         let raster = img.raster_of(node)
-        {x:position(node)[0],y:position(node)[1],width:value(raster.width,0),height:value(raster.height,0)}
+        let m = value(node.transform,affine.identity)
+        let corners = [for (x in [0,value(raster.width,0)]) for (y in [0,value(raster.height,0)]) affine.project(m,[x,y])]
+        let left = min([for (p in corners) p[0]])
+        let top = min([for (p in corners) p[1]]);
+        {x:position(node)[0]+left,y:position(node)[1]+top,
+            width:max([for (p in corners) p[0]])-left,height:max([for (p in corners) p[1]])-top}
     }
 }
 pub fn hit(image,point) => [for (row in layers(image) where name(row.node) == 'layer' and

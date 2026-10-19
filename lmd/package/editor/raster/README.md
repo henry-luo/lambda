@@ -51,7 +51,15 @@ from saved/exported pixels. The facade and command tests need no native DOM.
 
 Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
 are retained as shared backing until a touched tile detaches (**S9.2.2 /
-D4.1.4v5**). Reversible effects, native rich projects, high depth and
-color conversion remain subsequent proposal milestones. The shared image
+D4.1.4v5**). Layer affine transforms, eight blend modes, clipping chains and
+pass-through groups use the shared renderer. `layer.transform` accepts a matrix
+or a relative angle/scale around the current bounds; the Transform tool scales
+radially and Shift-drag rotates, with cancel/commit history. Pixel editing on a
+transformed source requires explicit `layer.rasterize`.
+
+`effect.add/update/toggle/remove/reorder` retain ordered adjustments/filters.
+The demo provides controls and a histogram. `lambda.image.project` preserves
+these parameters, original pixel bytes, masks, locks and tree identities in a
+versioned `.photos` data file. High depth and color conversion remain later work. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor
 locks, which its writer cannot preserve; flat export intentionally renders pixels.

@@ -7,6 +7,7 @@ pub let catalog = [
     {id:"lasso",label:"Lasso",key:"l",icon:"⌁"},{id:"wand",label:"Wand",key:"w",icon:"✧"},
     {id:"brush",label:"Brush",key:"b",icon:"✎"},{id:"erase",label:"Erase",key:"e",icon:"▱"},
     {id:"bucket",label:"Fill",key:"f",icon:"▣"},{id:"gradient",label:"Gradient",key:"g",icon:"▥"},
+    {id:"transform",label:"Transform",key:"t",icon:"⤢"},
     {id:"eyedropper",label:"Sample",key:"i",icon:"⌖"}
 ]
 pub fn configure(st,command) any^ {

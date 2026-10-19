@@ -79,7 +79,7 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `fill(raster,color)`, `clear(raster)`, `stamp(raster,brush,position,options={})` | Return filled, cleared or source-over stamped storage. Stamp accepts normalized `opacity`. |
 | `crop(raster,rect)`, `resize(raster,width,height)`, `adjust(raster,options)` | Return transformed samples using the shared numeric/image kernels. |
 | `transform(raster,options)`, `rotate(raster,quarter_turns)`, `flip(raster,horizontal=true,vertical=false)` | Explicitly bake geometry; image-process adjustments/transforms require RGBA8. |
-| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render normal source-over composition or read a sample. Region rendering allocates/evaluates only the requested canvas rectangle, including isolated-group scratch and mask placement. |
+| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render linear-light source-over composition with the supported blends, or read a sample. Region rendering allocates/evaluates only the requested canvas rectangle, including isolated-group scratch and mask placement. |
 | `selection(width,height,options)`, `wand(raster,point,options={})` | Gray coverage from rectangle, ellipse, even-odd polygon or all; color selection with normalized tolerance and contiguous/global matching. Shape options use `start`/`end` or polygon `points`. |
 | `combine_coverage(a,b,mode)`, `invert_coverage(a)`, `feather_coverage(a,radius)`, `coverage_bounds(a)` | Replace/add/subtract/intersect, finite inversion, bounded box-filter feather and nonzero half-open bounds (`null` for empty). |
 | `paint_stroke(raster,options)`, `paint_fill(raster,options)`, `gradient(raster,options)` | Gray/RGBA painting with color, opacity and optional document-space selection/origin. Strokes accept points, size/hardness/spacing/flow and paint/erase mode; gradients accept linear/radial endpoints and endpoint colors. |
@@ -111,10 +111,14 @@ retaining its source asset alone does not authorize byte passthrough.
 ## Qualified profiles and limits
 
 - Composition supports straight-alpha sRGB, integral placement, visibility,
-  normalized opacity, isolated groups and one gray alpha mask per node,
+  normalized opacity, isolated/pass-through groups and one gray alpha mask per node,
   including independent mask bounds/default coverage and inversion. It
-  composites in linear light. Other blend modes, pass-through groups,
-  clipping, retained transforms and enabled effects require another profile
+  composites in linear light with the eight blend modes listed below.
+  Clipping chains preserve their base alpha; retained layer affine transforms move samples and masks together.
+  Ordered enabled `effect` children apply extent-preserving image-process adjustments and filters.
+  Unsupported blend names, singular transforms and geometry options in effects fail explicitly.
+  Pass-through group effects require explicit isolation, as do pass-through clipping bases.
+  Specialized content requires another profile
   or explicit baking.
 - Shared codecs import their supported still representations as RGBA8;
   PNG/JPEG and GIF are covered by package fixtures. GIF preserves rational
@@ -143,3 +147,36 @@ Individual Rasters/render outputs are bounded to 16 million pixels and
 256 MiB, layer count to 4096, and composition depth to 64. GIF import/export
 also uses the shared codec budgets. These are correctness limits, not
 photo-scale performance claims.
+
+## Retained composition and projects
+
+Layers accept `transform:[a,b,c,d,tx,ty]` in source-local coordinates, followed by
+integral `position`. Sampling interpolates premultiplied encoded sRGB; composition
+uses linear-light RGB. Blend names are `normal`, `multiply`, `screen`, `overlay`,
+`darken`, `lighten`, `difference`, `exclusion`. This is an explicit working-space
+choice, not a claim of Photoshop appearance compatibility. `clipping:true` joins
+an immediately lower base sibling's clipping chain. The chain retains base alpha,
+including partial coverage. Stacks accept `isolation:'isolated'` or `'pass_through'`;
+pass-through group opacity/masks interpolate the before/after backdrop.
+
+An `<effect kind:'adjust',enabled:true,options:{...}>` retains shared image-process
+color/filter parameters. Effects apply in child order before the layer mask and
+affine transform. Geometry options are rejected. Gray/tiled inputs materialize
+only for a filter evaluation. Group/filter/clipping buffers share a bounded
+256-MiB composition scratch admission limit.
+
+`histogram(raster)` returns one 256-bin count array per native channel. Transparent
+samples contribute to alpha bins and are excluded from color bins. `to_bytes` and
+`from_bytes(bytes,{width,height,channels:4,color_space:'srgb'})` copy raw interleaved
+samples and preserve hidden RGB and gray coverage (**S9.1.2**).
+
+`lambda.image.project.encode/decode` serializes a version-1 `.photos` Mark data
+container. `read/write` acquire and atomically publish it (**S12.1.1v3**). Raw binary
+samples preserve shape/channel/working-space identity; tree attributes preserve
+IDs, locks, masks, effects, transforms and source assets. Loading parses data,
+never executes code. Encoded text and decoded raster payloads are capped at
+128 MiB with a conservative preflight before packing; nesting is limited to 64.
+The initial format uses hexadecimal Mark binary data and has no compression or
+content deduplication. PSD export explicitly refuses retained transforms,
+non-normal blends and pass-through/clipping metadata it cannot retain. Enabled
+effects require explicit rasterization or a rich project.

@@ -135,6 +135,12 @@ struct PsdCompile {
         RootFrame roots(2);
         Rooted<Item> owner(roots, value), child(roots, ItemNull);
         if (depth > 64) return fail("PSD group nesting limit exceeded");
+        // this writer stores raw layer samples; reject metadata it cannot persist.
+        if (!lambda_image_setting(owner.get(),"blend","normal") ||
+                get_type_id(item_attr(owner.get(),"transform"))!=LMD_TYPE_NULL ||
+                !lambda_image_setting(owner.get(),"isolation","isolated") ||
+                (get_type_id(item_attr(owner.get(),"clipping"))==LMD_TYPE_BOOL && it2b(item_attr(owner.get(),"clipping"))))
+            return fail("PSD profile cannot preserve retained transforms/blends; save a Photos project or flatten explicitly");
         bool group = lambda_image_tag(owner.get(), "stack");
         if (group) {
             if (!root && !record(owner.get(), 3)) return false;

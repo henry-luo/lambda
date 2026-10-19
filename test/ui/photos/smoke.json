@@ -31,7 +31,7 @@
     {"type":"click","target":{"selector":"#new"}},
     {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-layers","equals":"0"},
     {"type":"click","target":{"selector":"#open"}},
-    {"type":"type","target":{"selector":"#file-path"},"text":"temp/photos/composition.psd","clear":true},
+    {"type":"type","target":{"selector":"#file-path"},"text":"temp/photos/composition.photos","clear":true},
     {"type":"click","target":{"selector":"#file-confirm"}},
     {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-layers","equals":"3"},
     {"type":"click","target":{"selector":"#export"}},

@@ -229,13 +229,15 @@ extern "C" Item fn_image_raster(Item samples, Item options) {
             return lambda_image_error("unknown raster option");
     int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM] = {}, strides[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
     bool blank = get_type_id(source.get()) == LMD_TYPE_NULL;
-    if (blank) {
+    bool bytes = get_type_id(source.get()) == LMD_TYPE_BINARY;
+    if (blank || bytes) {
         if (!opts.get("width").isInt() || !opts.get("height").isInt())
             return lambda_image_error("blank raster requires integer width and height");
         shape[0] = opts.get("height").asInt(); shape[1] = opts.get("width").asInt();
         auto count = opts.get("channels");
         if (!count.isNull() && !count.isInt()) return lambda_image_error("channel count must be an integer");
         shape[2] = count.isNull() ? 4 : count.asInt();
+        if (bytes && !opts.get("color").isNull()) return lambda_image_error("binary raster cannot have a fill color");
     } else {
         if (!opts.get("width").isNull() || !opts.get("height").isNull() ||
                 !opts.get("channels").isNull() || !opts.get("color").isNull())
@@ -249,6 +251,8 @@ extern "C" Item fn_image_raster(Item samples, Item options) {
     if (shape[0] < 1 || shape[1] < 1 || shape[2] < 1 || shape[2] > 4 ||
             shape[0] > 16000000 || shape[1] > 16000000 || shape[0] * shape[1] > 16000000)
         return lambda_image_error("invalid raster dimensions or channel count");
+    if (bytes && binary_length(source.get().get_binary())!=(uint64_t)(shape[0]*shape[1]*shape[2]))
+        return lambda_image_error("binary raster byte length disagrees with its extent/channels");
     color.set(opts.get("color_space").item());
     if (get_type_id(color.get()) != LMD_TYPE_NULL && !is_text_type_id(get_type_id(color.get())))
         return lambda_image_error("color_space must be a color identity name");
@@ -256,7 +260,8 @@ extern "C" Item fn_image_raster(Item samples, Item options) {
         ? raster_buffer_sparse((uint32_t)shape[1], (uint32_t)shape[0], (uint8_t)shape[2], 64 * 1024 * 1024)
         : raster_buffer_create((uint32_t)shape[1], (uint32_t)shape[0], (uint8_t)shape[2], 64 * 1024 * 1024);
     if (!buffer) return lambda_image_error("raster allocation failed");
-    if (!blank) {
+    if (bytes) memcpy(buffer->pixels,binary_data(source.get().get_binary()),buffer->size);
+    else if (!blank) {
         const uint8_t* data = (const uint8_t*)source.get().array_num->data;
         for (int64_t y = 0; y < shape[0]; y++) for (int64_t x = 0; x < shape[1]; x++)
             for (int64_t c = 0; c < shape[2]; c++)

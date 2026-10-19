@@ -3,6 +3,16 @@ import model: .model
 import history: lambda.editor.mod_history
 
 pub let catalog = [
+    {id:"layer.clipping",label:"Toggle layer clipping",fields:["clipping"],target:true},
+    {id:"layer.isolation",label:"Change group isolation",fields:["isolation"],target:true},
+    {id:"layer.blend",label:"Change blend mode",fields:["blend"],target:true},
+    {id:"layer.transform",label:"Transform layer",fields:["matrix","angle","scale_x","scale_y"],target:true},
+    {id:"layer.rasterize",label:"Rasterize layer",fields:[],target:true},
+    {id:"effect.add",label:"Add editable effect",fields:["options","name"],target:true},
+    {id:"effect.update",label:"Update effect",fields:["index","options","name"],target:true},
+    {id:"effect.toggle",label:"Toggle effect",fields:["index"],target:true},
+    {id:"effect.remove",label:"Remove effect",fields:["index"],target:true},
+    {id:"effect.reorder",label:"Reorder effect",fields:["index","to"],target:true},
     {id:"tool.configure",label:"Tool settings",fields:["tool","brush","foreground","background","selection_mode","tolerance","gradient_kind"],target:false},
     {id:"layer.select",label:"Select layer",fields:["ids","target"],target:false},
     {id:"layer.insert",label:"Place image",fields:["raster","name","position","parent"],target:false},

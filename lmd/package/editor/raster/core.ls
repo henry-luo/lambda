@@ -7,6 +7,8 @@ import registry: .commands
 import selection: .selection
 import paint: .paint
 import tools: .tools
+import transforms: .transform
+import effects: .effects
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -79,7 +81,10 @@ fn replace_selected(st,siblings,replacement) any^ {
 fn scaled(node,sx,sy) any^ {
     let changed = if (name(node) in ['layer','mask']) img.with_properties(node,
         {position:[int(round(model.position(node)[0]*sx)),int(round(model.position(node)[1]*sy))]})^ else node;
-    img.with_children(changed,[for (child in content(node))
+    let geometry = if (name(node) == 'layer' and node.transform != null) (
+        let m = node.transform,
+        img.with_properties(changed,{transform:[m[0],m[1]*sy/sx,m[2]*sx/sy,m[3],m[4]*sx,m[5]*sy]})^) else changed;
+    img.with_children(geometry,[for (child in content(node))
         if (name(child) == 'raster') img.resize(child,max(1,int(round(child.width*sx))),max(1,int(round(child.height*sy))))^
         else if (name(child) in ['stack','layer','mask']) scaled(child,sx,sy)^ else child])^
 }
@@ -100,6 +105,22 @@ fn edit_node(st,command) any^ {
         if (not model.finite(command.opacity) or command.opacity<0 or command.opacity>1)
             raise error("Raster: opacity must be between zero and one")
         else img.with_properties(node,{opacity:command.opacity})^)
+    else if (command.id == "layer.clipping") (
+        if (name(node) != 'layer') raise error("Raster: clip one layer to its lower sibling")
+        else img.with_properties(node,{clipping:model.value(command.clipping,node.clipping != true)})^)
+    else if (command.id == "layer.isolation") (
+        if (name(node) != 'stack') raise error("Raster: select a group")
+        else img.with_properties(node,{isolation:model.value(command.isolation,
+            if (model.value(node.isolation,'isolated') in ['isolated',"isolated"]) 'pass_through' else 'isolated')})^)
+    else if (command.id == "layer.blend") (
+        if (not (command.blend in ['normal','multiply','screen','overlay','darken','lighten','difference','exclusion',
+            "normal","multiply","screen","overlay","darken","lighten","difference","exclusion"])) raise error("Raster: unsupported blend mode")
+        else img.with_properties(node,{blend:command.blend})^)
+    else if (command.id == "layer.transform") (
+        if (name(node) != 'layer') raise error("Raster: transform one layer")
+        else img.with_properties(node,{transform:transforms.command_matrix(node,command)^})^)
+    else if (command.id == "layer.rasterize") (
+        if (name(node) != 'layer') raise error("Raster: rasterize one layer") else transforms.rasterize(st,node)^)
     else if (command.id == "mask.add") (
         if (name(node) != 'layer' or model.mask(node) != null or img.raster_of(node) == null)
             raise error("Raster: add a mask to an unmasked raster layer")
@@ -117,6 +138,7 @@ fn edit_node(st,command) any^ {
 pub fn apply_command(st,command) any^ {
     let id = command.id;
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
+    else if (starts_with(id,"effect.")) effects.run_command(st,command)^
     else if (id == "tool.configure") tools.configure(st,command)^
     else if (starts_with(id,"selection.") or id in ["mask.from_selection","mask.invert","mask.apply"]) selection.run_command(st,command)^
     else if (starts_with(id,"paint.") or id in ["pixels.fill","pixels.clear","pixels.adjust"]) paint.run_command(st,command)^
@@ -188,6 +210,8 @@ pub fn apply_command(st,command) any^ {
         let last_index = siblings.rows[last].index
         let adjacent = all([for (i,child in content(siblings.node) where model.composition(child) and i>=first and i<=last_index) child.id in chosen])
         if (not adjacent) raise error("Raster: select adjacent sibling layers to merge")
+        else if (any([for (row in siblings.rows) not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true]))
+            raise error("Raster: merge requires normal, unclipped selected layers")
         else {
             let raster = img.render_frame(img.document(img.stack([for (row in siblings.rows) row.node]),
                 {width:st.doc.width,height:st.doc.height}))^;
@@ -198,6 +222,9 @@ pub fn apply_command(st,command) any^ {
         let row = model.active(st)^
         let checked = unlocked(st)^
         if (name(row.node) != 'stack' or model.value(row.node.opacity,1)!=1 or row.node.visible == false or
+            not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or
+            (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in model.rows(row.node))
+                not (model.value(descendant.node.blend,'normal') in ['normal',"normal"]) or descendant.node.clipping == true])) or
             model.mask(row.node) != null or any([for (c in content(row.node)) name(c) == 'effect']))
             raise error("Raster: ungroup requires a visible, unmasked, full-opacity group")
         else {

@@ -10,6 +10,7 @@ import files: .mod_files
 import scene: .mod_scene
 import present: .mod_present
 import tools: lambda.editor.raster.tools
+import effects: lambda.editor.raster.effects
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
@@ -17,22 +18,24 @@ let INITIAL = editor.open_session(editor.new_document()^ )^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photos")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
-    painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
+    effect_index:0,effect_draft:{},painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st) {
     var next = st
     present.publish(owner,st) ^ { dom.set_attribute(owner,"data-error",^.message) } ~ { next = ~ }
     return next
 }
 pn show_file(owner,st,kind) {
-    let title = if (kind == "open") "Open image or PSD" else if (kind == "place") "Place image as layer"
-        else if (kind == "save") "Save layered PSD" else "Export PNG"
+    let title = if (kind == "open") "Open image or Photos project" else if (kind == "place") "Place image as layer"
+        else if (kind == "save") "Save Photos project" else if (kind == "psd") "Export layered PSD" else "Export PNG"
     dom.set_text_content(present.node(owner,"file-title"),title)
     dom.set_text_content(present.node(owner,"file-help"),if (kind == "save")
-        "Saves the supported raster layer profile with a regenerated composite."
+        "Use .photos to preserve all editable settings, or .psd for the supported PSD profile."
         else if (kind == "export") "Exports the current composition with transparency."
-        else "Enter a local PNG, JPEG or supported PSD path.")
+        else if (kind == "psd") "Retained transforms, blend modes and enabled effects require a project, or explicit rasterization before PSD export."
+        else "Enter a local image, PSD or .photos project path.")
     dom.set_state(present.node(owner,"file-path"),"value",if (kind == "save")
-        (if (st.path != "") st.path else "temp/photos/composition.psd")
+        (if (ends_with(lower(st.path),".photos")) st.path else "temp/photos/composition.photos")
+        else if (kind == "psd") "temp/photos/composition.psd"
         else if (kind == "export") "temp/photos/composition.png" else "")
     let next = publish(owner,{*:st,dialog:kind,error:""})
     dom.focus_set(present.node(owner,"file-path"),false)
@@ -41,9 +44,26 @@ pn show_file(owner,st,kind) {
 pn replace_document(st,action,path="") any^ {
     let next = if (action == "new") editor.open_session(editor.new_document()^)^ else files.open_document(path)^
     return {*:base_session(next,if (action == "new") "Untitled" else split(path,"/")[last]),
-        path:if (ends_with(lower(path),".psd")) path else ""}
+        path:if (ends_with(lower(path),".psd") or ends_with(lower(path),".photos")) path else ""}
 }
 pn command(owner,st,action) any^ {
+    if (action == "transform-apply") { return editor.exec(st,{id:"layer.transform",angle:float(field(owner,"transform-angle")),
+        scale_x:float(field(owner,"transform-x")),scale_y:float(field(owner,"transform-y"))})^ }
+    if (action == "transform-reset") { return editor.exec(st,{id:"layer.transform",matrix:[1,0,0,1,0,0]})^ }
+    if (action in ["flip-x","flip-y"]) { return editor.exec(st,{id:"layer.transform",scale_x:if (action == "flip-x") -1 else 1,
+        scale_y:if (action == "flip-y") -1 else 1})^ }
+    if (action == "effect-add") {
+        var options = {}
+        for (control in effects.controls) { options = {*:options,[control.key]:float(field(owner,"effect-" ++ control.key))} }
+        let changed = editor.exec(st,{id:"effect.add",options:options,name:"Adjustment"})^;
+        return {*:changed,effect_index:len(effects.items(model.active(changed)^.node))-1}
+    }
+    if (action in ["effect.toggle","effect.remove"]) { return editor.exec(st,{id:action,index:st.effect_index})^ }
+    if (action in ["effect-up","effect-down"]) {
+        let target = st.effect_index+(if (action == "effect-up") -1 else 1)
+        let changed = editor.exec(st,{id:"effect.reorder",index:st.effect_index,to:target})^;
+        return {*:changed,effect_index:target}
+    }
     if (action == "selection-feather") { return editor.exec(st,{id:"selection.feather",radius:float(field(owner,"feather-radius"))})^ }
     if (action == "swap-colors") { return editor.exec(st,{id:"tool.configure",foreground:st.background,background:st.foreground})^ }
     if (action == "file-cancel" or action == "discard-cancel") {
@@ -61,12 +81,14 @@ pn command(owner,st,action) any^ {
         if (action == "new") { return replace_document(st,"new")^ }
         return show_file(owner,st,"open")
     }
-    if (action in ["place","save","export"]) { return show_file(owner,st,action) }
+    if (action in ["place","save","export","psd"]) { return show_file(owner,st,action) }
     if (action == "file-confirm") {
         let path = field(owner,"file-path")
         if (st.dialog == "open") { return replace_document(st,"open",path)^ }
         if (st.dialog == "place") { return {*:files.place(st,path)^,dialog:"",error:"",status:"Image placed"} }
-        let saved = files.write_document(st,path,if (st.dialog == "save") "psd" else "png")^
+        let format = if (st.dialog == "psd") "psd" else if (st.dialog == "export") "png"
+            else if (ends_with(lower(path),".psd")) "psd" else "photos"
+        let saved = files.write_document(st,path,format)^
         let next = if (st.dialog == "save") editor.mark_saved(st,saved.snapshot) else st
         let result = {*:next,dialog:"",path:if (st.dialog == "save") path else st.path,error:"",status:"Saved · " ++ path,pending:""}
         if (st.pending == "close") { dom.set_close_guard(owner,false); dom.request_window_close(owner); return result }
@@ -89,7 +111,7 @@ pn command(owner,st,action) any^ {
     if (action in ["exposure-up","exposure-down","mono","sharpen"]) {
         let options = if (action == "mono") {saturation:0.0} else if (action == "sharpen") {sharpen:0.5}
             else {exposure:if (action == "exposure-up") 0.25 else -0.25};
-        return editor.exec(st,{id:"pixels.adjust",options:options})^
+        return editor.exec(st,{id:"effect.add",options:options,name:if (action == "mono") "Monochrome" else if (action == "sharpen") "Sharpen" else "Exposure"})^
     }
     if (action == "fill-white") {
         return editor.exec(st,{id:"pixels.fill",color:if (st.target == "mask") [1.0] else [1.0,1.0,1.0,1.0]})^
@@ -138,6 +160,9 @@ on click(evt) {
     if (tool != null and tool != owner) {
         editor.exec(next,{id:"tool.configure",tool:dom.get_attribute(tool,"data-tool")}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
     }
+    else if (dom.closest(evt.target,"[data-select-effect]") != null) {
+        next = {*:next,effect_index:int(dom.get_attribute(dom.closest(evt.target,"[data-select-effect]"),"data-select-effect"))}
+    }
     else if (layer != null) {
         let mask = dom.get_attribute(layer,"data-mask")
         let visible = dom.get_attribute(layer,"data-visibility")
@@ -166,11 +191,20 @@ on change(evt) {
         return 'handled'
     }
     var next = {*:session,error:""}
+    if (starts_with(id,"effect-")) {
+        let key = slice(id,7,len(id))
+        let current = effects.items(model.active(session)^.node)[session.effect_index]
+        if (current == null) { session = {*:session,effect_draft:{*:session.effect_draft,[key]:float(field(owner,id))}}; return 'handled' }
+        editor.exec(next,{id:"effect.update",index:session.effect_index,options:{*:current.options,[key]:float(field(owner,id))}}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        session = publish(owner,next)
+        return 'handled'
+    }
     let action = if (starts_with(id,"brush-")) {id:"tool.configure",brush:{[slice(id,6,len(id))]:float(field(owner,id))}}
         else if (id in ["foreground","background","tolerance","selection-mode","gradient-kind"])
             {id:"tool.configure",[if (id == "selection-mode") "selection_mode" else if (id == "gradient-kind") "gradient_kind" else id]:
                 if (id == "tolerance") float(field(owner,id)) else field(owner,id)}
         else if (id == "layer-name") {id:"layer.rename",name:field(owner,id)}
+        else if (id == "blend") {id:"layer.blend",blend:field(owner,id)}
         else if (id == "opacity") {id:"layer.opacity",opacity:float(field(owner,id))}
         else if (id in ["position-x","position-y"]) (
             let active = model.active(session)^,

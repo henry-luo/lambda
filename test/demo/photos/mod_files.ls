@@ -1,8 +1,9 @@
 // S12.1.1v3: file acquisition/publication is explicit; decode/edit stays in lambda.image.
 import img: lambda.image
 import editor: lambda.editor.raster
+import project: lambda.image.project
 
-pub pn open_document(path) any^ { return editor.open_session(img.read(path)^)^ }
+pub pn open_document(path) any^ { return editor.open_session(if (ends_with(lower(path),".photos")) project.read(path)^ else img.read(path)^)^ }
 pub pn place(st,path) any^ {
     let image = img.read(path)^
     if (len(img.frames(image)) != 0) raise error("Photos: choose a still image to place")
@@ -12,6 +13,10 @@ pub pn place(st,path) any^ {
 pub pn write_document(st,path,format) any^ {
     if (not (path is string) or path == "" or
         not ends_with(lower(path),"." ++ format)) raise error("Photos: choose a ." ++ format ++ " destination")
+    if (format == "photos") {
+        project.write(st.doc,path)^
+        return {snapshot:st.doc,report:{preserved:["pixels","layers","masks","effects","transforms","locks"],omitted:[]}}
+    }
     if (format == "psd" and any([for (row in editor.layers(st.doc)) row.node.locked == true]))
         raise error("Photos: unlock layers before saving this PSD profile; lock persistence is not supported yet")
     let snapshot = st.doc

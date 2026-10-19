@@ -1,4 +1,5 @@
 #include "image_raster.hpp"
+#include "heap_api.h"
 #include "lambda-error.h"
 #include "lambda-number-runtime.hpp"
 #include "../core/mark_reader.hpp"
@@ -7,11 +8,9 @@
 #include <math.h>
 
 // native kernels operate on owned tiles; the adapter roots only the input values (D5.3.3).
-struct RasterEdit {
-    RasterBuffer* result = nullptr;
+struct RasterEdit : RasterOwner {
     const char* error = nullptr;
     uint32_t left = UINT32_MAX, top = UINT32_MAX, right = 0, bottom = 0;
-    ~RasterEdit() { raster_buffer_destroy(result); }
     bool fail(const char* message) { error = message; return false; }
     bool number(Item options, const char* key, double fallback, double low, double high, double* out) {
         return (lambda_image_number(options, key, fallback, out) && *out >= low && *out <= high) || fail("image edit option is outside its finite range");
@@ -380,7 +379,7 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
         !strcmp(operation, "reframe") ? " op rect fill " :
         !strcmp(operation, "mix") ? " op other selection origin " :
         !strcmp(operation, "extract") ? " op selection origin " :
-        (!strcmp(operation, "invert") || !strcmp(operation, "bounds") || !strcmp(operation, "overlay")) ? " op " : nullptr;
+        (!strcmp(operation, "invert") || !strcmp(operation, "bounds") || !strcmp(operation, "overlay") || !strcmp(operation,"pack") || !strcmp(operation,"histogram")) ? " op " : nullptr;
     if (!allowed) return lambda_image_error("unknown image edit operation");
     MapReader opts = MapReader::fromItem(config.get());
     auto entries = opts.entries(); const char* key; ItemReader field;
@@ -401,6 +400,29 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
     else if (!strcmp(operation,"reframe") || !strcmp(operation,"mix") || !strcmp(operation,"extract"))
         edit_map(edit,source,config.get(),operation);
     else if (!source) return lambda_image_error("image edit requires a Raster");
+    else if (!strcmp(operation,"histogram")) {
+        int64_t counts[4][256]={};
+        for (uint32_t y=0;y<source->height;y++) for (uint32_t x=0;x<source->width;x++) {
+            const uint8_t* pixel=raster_buffer_pixel(source,x,y);
+            bool alpha=source->channels==2 || source->channels==4;
+            for (uint8_t c=0;c<source->channels;c++)
+                if (!alpha || pixel[source->channels-1] || c==source->channels-1) counts[c][pixel[c]]++;
+        }
+        RootedValueBuilder result(true), row(true);
+        for (uint8_t c=0;c<source->channels;c++) {
+            row.value.set({.array=array_plain()});
+            for (int i=0;i<256;i++) row.append({.item=i2it(counts[c][i])});
+            result.append(row.value.get());
+        }
+        return result.value.get();
+    }
+    else if (!strcmp(operation,"pack")) {
+        RasterOwner dense; dense.result=raster_buffer_create(source->width,source->height,source->channels,source->size);
+        if (!dense.result || !raster_buffer_copy_region(source,0,0,source->width,source->height,-1,dense.result->pixels,source->size))
+            return lambda_image_error("cannot pack raster bytes");
+        Binary* bytes=heap_binary_from_bytes((const char*)dense.result->pixels,(int64_t)source->size);
+        return bytes ? Item{.item=x2it(bytes)} : ItemError;
+    }
     else if (!strcmp(operation, "bounds")) {
         if (source->channels != 1) return lambda_image_error("selection bounds require coverage");
         int64_t left = source->width, top = source->height, right = 0, bottom = 0;

@@ -35,7 +35,7 @@ pub fn run_command(st,command) any^ {
         }
     }
     else if (id == "selection.from_mask" or id == "mask.invert" or id == "mask.apply") {
-        let target = model.pixel_target({*:st,target:"pixels"})^
+        let target = model.pixel_target({*:st,target:"pixels"},id != "selection.from_mask")^
         let mask = model.mask(target.row.node)
         if (mask == null) raise error("Raster: layer has no mask")
         else if (id == "selection.from_mask") {
@@ -52,7 +52,9 @@ pub fn run_command(st,command) any^ {
                 [for (child in content(target.row.node)) if (name(child) == 'mask') inverted else child])^)^}
         }
         else {
-            let source = img.with_properties(target.row.node,{position:[0,0],opacity:1.0,visible:true,blend:'normal'})^
+            // apply only alpha; retained effects must not be evaluated a second time afterward.
+            let unfiltered = img.with_children(target.row.node,[for (child in content(target.row.node) where name(child) != 'effect') child])^
+            let source = img.with_properties(unfiltered,{position:[0,0],opacity:1.0,visible:true,blend:'normal',clipping:false})^
             let pixels = img.render_frame(img.document(img.stack([source]),{width:target.raster.width,height:target.raster.height}))^
             let node = img.with_children(target.row.node,[for (child in content(target.row.node) where name(child) != 'mask')
                 if (name(child) == 'raster') pixels else child])^;

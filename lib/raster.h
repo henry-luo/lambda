@@ -41,3 +41,27 @@ bool raster_buffer_copy_region(const RasterBuffer* buffer, uint32_t left, uint32
 void raster_buffer_over(RasterBuffer* destination, const RasterBuffer* source,
     int64_t left, int64_t top, double opacity, const RasterBuffer* mask,
     int64_t mask_left, int64_t mask_top, double outside_coverage, bool invert_mask);
+
+// blend functions use linear-light RGB; samples remain straight encoded sRGB.
+typedef enum RasterBlend { RASTER_NORMAL, RASTER_MULTIPLY, RASTER_SCREEN, RASTER_OVERLAY,
+    RASTER_DARKEN, RASTER_LIGHTEN, RASTER_DIFFERENCE, RASTER_EXCLUSION } RasterBlend;
+void raster_mix_blend(uint8_t* destination, const uint8_t* source, double coverage, RasterBlend mode);
+void raster_rgba_pixel(const RasterBuffer* source, uint32_t x, uint32_t y, uint8_t* rgba);
+bool raster_buffer_blend(RasterBuffer* destination, const RasterBuffer* source,
+    double left, double top, const double* transform, RasterBlend mode, double opacity,
+    const RasterBuffer* mask, double mask_left, double mask_top, double outside, bool inverse, bool atop);
+
+void raster_buffer_crossfade(RasterBuffer* destination, const RasterBuffer* source, double opacity,
+    const RasterBuffer* mask, int64_t left, int64_t top, double outside, bool inverse, bool atop);
+
+#ifdef __cplusplus
+struct RasterOwner {
+    RasterBuffer* result = nullptr;
+    RasterOwner() = default;
+    RasterOwner(const RasterOwner&) = delete;
+    RasterOwner& operator=(const RasterOwner&) = delete;
+    ~RasterOwner() { raster_buffer_destroy(result); }
+    void reset(RasterBuffer* replacement) { raster_buffer_destroy(result); result = replacement; }
+};
+
+#endif
