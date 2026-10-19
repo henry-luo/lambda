@@ -18,7 +18,7 @@ fn girl_voice() {
 pn read_aloud(owner,voice,words,part) {
     if (voice != null) { dom.speech_command(owner,voice.token,"cancel") }
     // a slightly unhurried pace suits early readers; a raised pitch makes the adult voice sound young.
-    let token = dom.speak(owner,words,{voice:girl_voice(),lang:"en-US",rate:0.9,pitch:1.3})
+    let token = dom.speak(owner,words,{voice:girl_voice(),lang:"en-US",rate:0.9,pitch:1.5})
     if (token == null) { return null }
     return {token:token,part:part}
 }

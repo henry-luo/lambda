@@ -188,7 +188,7 @@ second or third card of the corresponding pile:
 
 **Read aloud**, beside *Your sentence*, reads the finished sentence in a
 girl’s voice: the best installed US English female voice (Samantha on a stock
-Mac), pitched up a little and at a slightly unhurried pace. A better female
+Mac), pitched up to sound young and at a slightly unhurried pace. A better female
 voice installed under System Settings → Accessibility → Spoken Content →
 Manage Voices is picked automatically. While it reads, the button becomes
 **Stop**. In Levels 1 and 3 it waits
