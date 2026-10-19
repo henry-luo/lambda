@@ -4,7 +4,7 @@
  *
  * This file holds two independent groups of tests:
  *
- * 1. RenderOutputParity.* — export-backend correctness on small, hand-written
+ * 1. RenderOutputParity.* and CanvasWebGlExportTest — export-backend correctness on small, hand-written
  *    HTML snippets rendered through `./lambda.exe render`. Two sub-themes:
  *      - Pixel parity across render paths: render the same HTML two ways
  *        (tiled vs. untiled, 1 vs. 2 render threads, embedded-SVG replay) and
@@ -32,14 +32,16 @@
  *    temp/pdf_visual/diff for inspection. New/missing baselines auto-initialize,
  *    and `--update-baseline` rewrites the baseline when there are no regressions.
  *
- * All tests skip gracefully when lambda.exe is unbuilt, Poppler is missing, or
- * no PDF fixtures are present.
+ * Export comparisons require pdftocairo/rsvg-convert. The import corpus uses
+ * pdfinfo/pdftoppm and skips when its tools or fixtures are absent; dedicated
+ * intrinsic-geometry controls require their fixtures. See test/README.md.
  */
 
 #include <gtest/gtest.h>
 #include "../lib/file.h"
 #include "../lib/mem.h"
 #include "../lib/ownership.hpp"
+#include "../lib/arraylist.hpp"
 #include "../lib/windows_compat.h"
 
 #include <ctype.h>
@@ -168,9 +170,20 @@ static bool ensure_dir(const char* path) {
 }
 
 static bool command_exists(const char* tool) {
+    struct Probe { char* name; bool available; };
+    static struct Cache {
+        lam::ArrayList<Probe> probes;
+        ~Cache() { for (size_t i = 0; i < probes.size(); i++) free(probes[i].name); }
+    } cache;
+    // availability is fixed for a test process; matrix cases need no repeated shells.
+    for (size_t i = 0; i < cache.probes.size(); i++)
+        if (!strcmp(cache.probes[i].name, tool)) return cache.probes[i].available;
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "command -v '%s' >/dev/null 2>&1", tool);
-    return system(cmd) == 0;
+    bool available = system(cmd) == 0;
+    char* name = strdup(tool);
+    if (name && !cache.probes.push_back({name, available})) free(name);
+    return available;
 }
 
 static void shell_quote(const char* src, char* dst, size_t dst_size) {
@@ -290,26 +303,18 @@ static CommandResult run_html_fixture_script(const char* html_path, const char* 
 }
 
 static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path, float pixel_ratio = 1.0f) {
-    char qpdf[PATH_MAX + 8], qpng[PATH_MAX + 8], command[PATH_MAX * 3 + 128];
+    if (!command_exists("pdftocairo")) return false;
+    char qpdf[PATH_MAX + 8], command[PATH_MAX * 3 + 128];
     shell_quote(pdf_path, qpdf, sizeof(qpdf));
-    shell_quote(png_path, qpng, sizeof(qpng));
-    if (pixel_ratio == 1.0f && command_exists("sips")) {
-        const char* srgb_profile = "/System/Library/ColorSync/Profiles/sRGB Profile.icc";
-        if (!file_exists(srgb_profile)) return false;
-        char qprofile[PATH_MAX + 8]; shell_quote(srgb_profile, qprofile, sizeof(qprofile));
-        // convert Quartz's profiled samples to the sRGB byte coordinates used by comparisons.
-        snprintf(command, sizeof(command), "sips --matchTo %s -s format png %s --out %s >/dev/null 2>&1",
-            qprofile, qpdf, qpng);
-    } else if (command_exists("pdftoppm")) {
-        char prefix[PATH_MAX], qprefix[PATH_MAX + 8];
-        str_copy(prefix, sizeof(prefix), png_path, strlen(png_path));
-        size_t length = strlen(prefix);
-        if (length < 4 || strcmp(prefix + length - 4, ".png") != 0) return false;
-        prefix[length - 4] = '\0';
-        shell_quote(prefix, qprefix, sizeof(qprefix));
-        snprintf(command, sizeof(command), "pdftoppm -png -f 1 -l 1 -singlefile -r %g %s %s >/dev/null 2>&1",
-                 72.0f * pixel_ratio, qpdf, qprefix);
-    } else return false;
+    char prefix[PATH_MAX], qprefix[PATH_MAX + 8];
+    str_copy(prefix, sizeof(prefix), png_path, strlen(png_path));
+    size_t length = strlen(prefix);
+    if (length < 4 || strcmp(prefix + length - 4, ".png") != 0) return false;
+    prefix[length - 4] = '\0';
+    shell_quote(prefix, qprefix, sizeof(qprefix));
+    // one reader aligns text/vector edge coverage at both densities; comparisons stay byte-exact.
+    snprintf(command, sizeof(command), "pdftocairo -png -antialias gray -f 1 -l 1 -singlefile -r %g %s %s >/dev/null 2>&1",
+             72.0f * pixel_ratio, qpdf, qprefix);
     int status = system(command);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
@@ -554,7 +559,7 @@ static int pdf_page_count(const char* pdf_path) {
 }
 
 static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size,
-        bool crop_box = false, bool natural_96dpi = false) {
+        bool crop_box = false, bool natural_96dpi = false, const char* reader = "pdftoppm") {
     char prefix[PATH_MAX];
     char qpdf[PATH_MAX + 8];
     char qprefix[PATH_MAX + 8];
@@ -569,7 +574,8 @@ static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_pn
     char resolution[64];
     if (natural_96dpi) snprintf(resolution, sizeof(resolution), "-r 96");
     else snprintf(resolution, sizeof(resolution), "-scale-to-x %d -scale-to-y -1", RENDER_WIDTH);
-    snprintf(cmd, sizeof(cmd), "pdftoppm -png -f %d -l %d -singlefile %s %s %s %s 2>&1",
+    snprintf(cmd, sizeof(cmd), "%s -png %s -f %d -l %d -singlefile %s %s %s %s 2>&1",
+        reader, !strcmp(reader, "pdftocairo") ? "-antialias gray" : "",
         page, page, crop_box ? "-cropbox" : "", resolution, qpdf, qprefix);
     CommandResult result = run_command_capture(cmd);
     if (result.exit_code != 0 || !file_exists(out_png)) {
@@ -837,7 +843,7 @@ static void expect_html_pair_output_parity(const char* name, const char* actual,
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* sources[] = {actual, reference};
     char png_paths[2][PATH_MAX], pdf_png_paths[2][PATH_MAX], svg_paths[2][PATH_MAX];
-    bool pdf_available = command_exists("sips") || command_exists("pdftoppm");
+    bool pdf_available = command_exists("pdftocairo");
     char options[64];
     snprintf(options, sizeof(options), "--pixel-ratio %d", pixel_ratio);
     for (size_t i = 0; i < 2; i++) {
@@ -884,10 +890,17 @@ static void expect_colored_html_pair_output_parity(const char* name, const char*
     expect_html_pair_output_parity(name, actual, reference, true, density);
     const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
     for (const char* suffix : suffixes) {
-        if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+        if (!strcmp(suffix, "_pdf.png") && !command_exists("pdftocairo")) continue;
         char path[PATH_MAX]; str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
         expect_png_channel_coverage(path, channel, 7u & ~(1u << channel), 1);
     }
+}
+
+static void reference_glyph_css(char* output, size_t capacity, const char* color, bool outline) {
+    // sharp effect references need native outlines; ordinary PDF text is independently font-hinted.
+    str_fmt(output, capacity, outline
+        ? "color:transparent;text-decoration-color:transparent;text-shadow:0 0 %s;"
+        : "color:%s;text-decoration-color:currentColor;", color);
 }
 
 static void expect_html_css_override_output_parity(const char* name, const char* actual,
@@ -1534,6 +1547,21 @@ TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
         EXPECT_EQ(file_contains_text(svg, "fill=\"rgb(0,255,0)\""), page < 2);
     }
     image_free(preview.pixels);
+}
+
+TEST(RenderOutputParity, PdfTextKeepsUnicodeDecorationsSvgAndSharedPageFontsSearchable) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftotext"));
+    const char* source = "test/html/pdf_text_export.html";
+    for (bool paged : {false, true}) {
+        SCOPED_TRACE(paged);
+        const char* pdf = paged ? "temp/render_output_parity/text_paged.pdf" : "temp/render_output_parity/text_continuous.pdf";
+        ASSERT_TRUE(render_document_fixture(source, pdf, paged ? "--paged" : ""));
+        char command[512];
+        snprintf(command, sizeof(command), "python3 test/pdf_output_check.py %s text %d", pdf, paged ? 2 : 1);
+        CommandResult checked = run_command_capture(command);
+        EXPECT_EQ(checked.exit_code, 0) << checked.output;
+    }
 }
 
 TEST(RenderOutputParity, PdfExportMonospaceUnicodeTextUsesFontFallback) {
@@ -2429,7 +2457,8 @@ TEST(RenderOutputParity, ResponsivePicturePrintSelectionRetainsDensityAndPhysica
     strbuf_append_str(html, "<!doctype html><style>@page{size:100px 60px;margin:10px}"
         "html,body{margin:0} picture{display:block} picture+picture{break-before:page} img{display:block}</style>");
     for (const char* url : {red, blue}) {
-        strbuf_append_str(html, "<picture><source type='image/avif' srcset='missing.avif'>"
+        // a registered codec such as AVIF must be selected even if its URL is missing.
+        strbuf_append_str(html, "<picture><source type='image/x-unsupported' srcset='missing.unsupported'>"
             "<source media='print' type='image/svg+xml' srcset=\"");
         strbuf_append_str(html, url); strbuf_append_str(html, " 2x\"><img src='missing-fallback.png'></picture>");
     }
@@ -3130,13 +3159,13 @@ TEST(RenderOutputParity, SvgExportTextShadowWithoutAuthoredFont) {
     char actual[2048], reference[2048];
     snprintf(actual, sizeof(actual), "%s<div class=box style='text-shadow:2px 3px red'>Shadow</div>", prefix);
     snprintf(reference, sizeof(reference), "%s<div style='position:relative;width:200px;height:40px'>"
-        "<div class=box style='position:absolute;left:2px;top:3px;color:red'>Shadow</div>"
+        "<div class=box style='position:absolute;left:2px;top:3px;color:transparent;text-shadow:0 0 red'>Shadow</div>"
         "<div class=box style='position:absolute'>Shadow</div></div>", prefix);
     // default-font shadows must reach pixels independently of the SVG representation.
     for (int density = 1; density <= 2; density++) {
         char name[128]; snprintf(name, sizeof(name), "text_shadow_default_font_%dx", density);
         SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference, 0, density);
     }
 }
 
@@ -3385,11 +3414,12 @@ TEST(RenderOutputParity, EmphasisTransformsAndShadowOffsetsMatchPlacedText) {
         expect_html_pair_output_parity(name, actual, reference, true, density);
     }
     snprintf(actual, sizeof(actual), "%s.box{text-emphasis-color:transparent;text-shadow:0 40px 0 red}</style><div class=box>ABC DEF</div>", prefix);
-    snprintf(reference, sizeof(reference), "%s.box{top:60px}</style><div class=box style='color:red'>ABC DEF</div>", prefix);
+    snprintf(reference, sizeof(reference), "%s.box{top:60px;text-emphasis-color:transparent;"
+        "text-shadow:0 0 red}</style><div class=box>ABC DEF</div>", prefix);
     for (int density : {1, 2}) {
         char name[80]; snprintf(name, sizeof(name), "emphasis_shadow_offset_%dx", density);
-        // one foreground run preserves the glyph/mark order of the shadow silhouette.
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        // a separately positioned outline avoids PDF font hinting changing the reference geometry.
+        expect_colored_html_pair_output_parity(name, actual, reference, 0, density);
     }
 }
 
@@ -4755,7 +4785,7 @@ TEST(RenderOutputParity, BackfacesRespectThreeDimensionalContextsInRasterAndSvg)
     ASSERT_TRUE(render_document_fixture(html, svg));
     EXPECT_FALSE(file_contains_text(svg, "rgb(255,0,255)"));
     EXPECT_TRUE(file_contains_text(svg, "rgb(255,128,0)"));
-    if (command_exists("sips") || command_exists("pdftoppm")) {
+    if (command_exists("pdftocairo")) {
         const char* pdf = "temp/render_output_parity/backface_visibility.pdf";
         const char* pdf_png = "temp/render_output_parity/backface_visibility_pdf.png";
         ASSERT_TRUE(render_document_fixture(html, pdf));
@@ -5302,7 +5332,7 @@ TEST(RenderOutputParity, InsideImageMarkersShareInlineBaselineAndStrutAcrossOutp
                 expect_html_pair_output_parity(name, actual, reference, true, density);
                 for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
                     if (strcmp(suffix, "_pdf.png") == 0 &&
-                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                        !command_exists("pdftocairo")) continue;
                     char path[PATH_MAX];
                     str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
                     // a positive source-color sample rejects two omitted images.
@@ -5334,7 +5364,7 @@ TEST(RenderOutputParity, NestedInlineFontStrutsKeepLeadingAcrossOutputs) {
                 expect_html_pair_output_parity(name, actual, reference, true, density);
                 if (image) for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
                     if (strcmp(suffix, "_pdf.png") == 0 &&
-                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                        !command_exists("pdftocairo")) continue;
                     char path[PATH_MAX];
                     str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
                     expect_png_channel_coverage(path, 0, 6, 1);
@@ -5382,7 +5412,7 @@ TEST(RenderOutputParity, AdjoiningEmptyMarginChainsAgreeAcrossOutputs) {
         expect_html_pair_output_parity(name, actual, reference, true, density);
         for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
             if (strcmp(suffix, "_pdf.png") == 0 &&
-                !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                !command_exists("pdftocairo")) continue;
             char path[PATH_MAX];
             str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             ImageData image = {};
@@ -6468,7 +6498,7 @@ TEST(RenderOutputParity, CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutp
             const char* formats[] = {".png", "_0_svg.png", "_pdf.png"};
             for (const char* format : formats) {
                 if (strcmp(format, "_pdf.png") == 0 &&
-                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                        !command_exists("pdftocairo")) continue;
                 char path[PATH_MAX];
                 snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, format);
                 // PDF profiles preserve the selected primary channel's order.
@@ -6590,12 +6620,11 @@ static void expect_canvas_pixels_and_effects(const char* family, const char* dra
                 snprintf(script, sizeof(script), draw_script, alpha == 255 ? "1" : ".5");
                 snprintf(actual, sizeof(actual), "%s<canvas id=c width=48 height=32 style='%s'></canvas>"
                     "<script>%s</script>", prefix, effects[effect].actual, script);
-                // Opaque sources use baked alpha; Poppler rounds a translucent soft mask
-                // plus constant alpha differently from their pre-multiplied mask byte.
-                unsigned reference_alpha = effects[effect].half_opacity && alpha == 255 ? 128 : alpha;
+                // keep source alpha and CSS group opacity independent in both controls.
+                unsigned reference_alpha = alpha;
                 snprintf(reference, sizeof(reference), "%s<img src='canvas_reference_%u.png' width=48 height=32 style='%s;%s'>",
                     prefix, reference_alpha, effects[effect].reference,
-                    effects[effect].half_opacity && alpha == 128 ? "opacity:.5" : "");
+                    effects[effect].half_opacity ? "opacity:.5" : "");
                 expect_html_pair_output_parity(name, actual, reference, true, density);
                 for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
                     char path[PATH_MAX];
@@ -6615,7 +6644,7 @@ TEST(RenderOutputParity, Canvas2DPixelsStateAndTransformsAcrossOutputs) {
         "if(ctx.fillStyle!=='#ff0000')throw new Error('Canvas restore failed');");
 }
 
-class CanvasWebGlExportTest : public ::testing::Test {
+class CanvasWebGlExportTest : public ::testing::TestWithParam<unsigned> {
     char* previous_host = nullptr;
     void SetUp() override {
         const char* previous = getenv("LAMBDA_HEADLESS_GLFW_WINDOW");
@@ -6634,23 +6663,26 @@ class CanvasWebGlExportTest : public ::testing::Test {
     }
 };
 
-TEST_F(CanvasWebGlExportTest, PixelsAlphaAndEffectsReachEveryOutput) {
-    for (bool premultiplied : {false, true}) for (bool preserved : {false, true}) {
-        char name[64], draw[1024];
-        snprintf(name, sizeof(name), "webgl_pixels_%u_%u", premultiplied, preserved);
-        snprintf(draw, sizeof(draw),
-            "const alpha=%%s;const channel=%s;"
-            "const gl=document.getElementById('c').getContext('webgl2',"
-            "{antialias:false,premultipliedAlpha:%s,preserveDrawingBuffer:%s});"
-            "if(!gl)throw new Error('WebGL context unavailable');"
-            "gl.clearColor(channel,0,0,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
-            "gl.enable(gl.SCISSOR_TEST);gl.scissor(24,0,24,32);"
-            "gl.clearColor(0,0,channel,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
-            "if(gl.getError()!==gl.NO_ERROR)throw new Error('WebGL drawing failed');",
-            premultiplied ? "alpha" : "1", premultiplied ? "true" : "false", preserved ? "true" : "false");
-        expect_canvas_pixels_and_effects(name, draw);
-    }
+TEST_P(CanvasWebGlExportTest, PixelsAlphaAndEffectsReachEveryOutput) {
+    // independent context modes can share the bounded process-worker queue.
+    bool premultiplied = (GetParam() & 2u) != 0;
+    bool preserved = (GetParam() & 1u) != 0;
+    char name[64], draw[1024];
+    snprintf(name, sizeof(name), "webgl_pixels_%u_%u", premultiplied, preserved);
+    snprintf(draw, sizeof(draw),
+        "const alpha=%%s;const channel=%s;"
+        "const gl=document.getElementById('c').getContext('webgl2',"
+        "{antialias:false,premultipliedAlpha:%s,preserveDrawingBuffer:%s});"
+        "if(!gl)throw new Error('WebGL context unavailable');"
+        "gl.clearColor(channel,0,0,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
+        "gl.enable(gl.SCISSOR_TEST);gl.scissor(24,0,24,32);"
+        "gl.clearColor(0,0,channel,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
+        "if(gl.getError()!==gl.NO_ERROR)throw new Error('WebGL drawing failed');",
+        premultiplied ? "alpha" : "1", premultiplied ? "true" : "false", preserved ? "true" : "false");
+    expect_canvas_pixels_and_effects(name, draw);
 }
+
+INSTANTIATE_TEST_SUITE_P(ContextModes, CanvasWebGlExportTest, ::testing::Values(0u, 1u, 2u, 3u));
 
 TEST(RenderOutputParity, TextSpacingSurvivesCollapseOverflowAndEffectsAcrossOutputs) {
     // keep visible glyph groups identical so independent rasterizers compare spacing, not path grouping.
@@ -7196,7 +7228,7 @@ TEST(RenderOutputParity, PdfPrintMediaSelectsRulesAndLinkedStylesheet) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
     }
-    if (!command_exists("sips") && !command_exists("pdftoppm")) {
+    if (!command_exists("pdftocairo")) {
         GTEST_SKIP() << "a PDF rasterizer is unavailable";
     }
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
@@ -7311,7 +7343,7 @@ TEST(RenderOutputParity, ScopeRootsLimitsAndProximityReachRasterSvgAndPdf) {
         "temp/render_output_parity/scopes_reference.pdf"};
     const char* pdf_png_paths[] = {"temp/render_output_parity/scopes_pdf.png",
         "temp/render_output_parity/scopes_reference_pdf.png"};
-    bool pdf_available = command_exists("sips") || command_exists("pdftoppm");
+    bool pdf_available = command_exists("pdftocairo");
     StrBuf* source = strbuf_new();
     ASSERT_NE(source, nullptr);
     for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); i++) {
@@ -9137,7 +9169,7 @@ TEST(RenderOutputParity, AnimationGeneral3dRotationPerspectiveAndMatrixValuesRea
 TEST(RenderOutputParity, AnimationPerspectiveDepthExportsTheAffineScaleAcrossBackends) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
         GTEST_SKIP() << "lambda.exe is unavailable";
-    if (!command_exists("sips") && !command_exists("pdftoppm"))
+    if (!command_exists("pdftocairo"))
         GTEST_SKIP() << "a PDF rasterizer is unavailable";
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/animation_perspective_depth.html";
@@ -10588,7 +10620,7 @@ TEST(RenderOutputParity, SvgExportCssFilterUsesRasterFallbackImage) {
         << "SVG raster fallback should embed the captured filtered paint";
 }
 
-TEST(RenderOutputParity, PdfUnicodeTextUsesFontOutlines) {
+TEST(RenderOutputParity, PdfUnicodeTextKeepsEmbeddedFontsAndSearchableCharacters) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
         GTEST_SKIP() << "lambda.exe is unavailable";
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
@@ -10605,10 +10637,15 @@ TEST(RenderOutputParity, PdfUnicodeTextUsesFontOutlines) {
     int status = system(cmd);
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
-    EXPECT_TRUE(pdf_contains_content(pdf_path, " c\n"));
-    EXPECT_TRUE(pdf_contains_content(pdf_path, "f\n"));
-    EXPECT_FALSE(pdf_contains_content(pdf_path, " Tj\n"));
-    EXPECT_FALSE(file_contains_text(pdf_path, "Café"));
+    // searchable text uses embedded faces and Unicode maps (PDF output design §4.4).
+    EXPECT_TRUE(pdf_contains_content(pdf_path, " Tj\n"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/ToUnicode "));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/FontFile") || file_contains_text(pdf_path, "/CharProcs "));
+    ASSERT_TRUE(command_exists("pdftotext"));
+    snprintf(cmd, sizeof(cmd), "pdftotext -enc UTF-8 %s -", qpdf);
+    CommandResult text = run_command_capture(cmd);
+    ASSERT_EQ(text.exit_code, 0) << text.output;
+    EXPECT_NE(strstr(text.output, "Café αβγ Привет"), nullptr) << text.output;
 }
 
 TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {
@@ -10921,8 +10958,10 @@ TEST(RenderOutputParity, PdfOpacityGroupPreservesIsolatedAlpha) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image"));
-    EXPECT_TRUE(file_contains_text(pdf_path, "/SMask"));
+    // isolated opacity remains vector paint; pixel-only effects retain soft-mask tests below.
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Form"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/S /Transparency"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/ca 0.5"));
     const char* raster_path = "temp/render_output_parity/pdf_opacity_check.png";
     ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, raster_path, 2.0f));
     ImageData image = {}; ASSERT_TRUE(load_png_rgba(raster_path, &image));
@@ -10985,6 +11024,22 @@ static void parse_pdf_render_args(int* argc, char** argv) {
     *argc = out;
 }
 
+static void expect_intrinsic_pdf_page(const PdfFileInfo* pdf, int page, const char* reader, int sample_radius) {
+    char reference[PATH_MAX], actual[PATH_MAX], diff[PATH_MAX];
+    ASSERT_TRUE(render_reference_page(pdf, page, reference, sizeof(reference), false, false, reader));
+    ImageData ref = {};
+    ASSERT_TRUE(load_png_rgba(reference, &ref));
+    int height = ref.height;
+    image_free(ref.pixels);
+    ASSERT_TRUE(render_lambda_png_page(pdf, page - 1, height, actual, sizeof(actual), true));
+    snprintf(diff, sizeof(diff), "%s/%s_page_%d.png", PDF_DIFF_DIR, pdf->base, page);
+    double mismatch = 100.0, delta = 255.0;
+    compare_pngs(reference, actual, diff, &mismatch, &delta, sample_radius);
+    char property[64]; snprintf(property, sizeof(property), "page_%d_mismatch_percent", page);
+    ::testing::Test::RecordProperty(property, mismatch);
+    EXPECT_LT(mismatch, 0.75) << "page " << page << "; inspect " << diff;
+}
+
 TEST(PdfRenderVisual, EmbeddedType1MathMatchesPoppler) {
     if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is required for the PDF reference";
     ASSERT_TRUE(ensure_dir("temp"));
@@ -10998,22 +11053,19 @@ TEST(PdfRenderVisual, EmbeddedType1MathMatchesPoppler) {
     ASSERT_GT(pages, 1);
     // page 2 exercises display sums/integrals, size-specific delimiters, accents and braces.
     for (int page = 1; page <= pages; page++) {
-        char reference[PATH_MAX], actual[PATH_MAX], diff[PATH_MAX];
-        ASSERT_TRUE(render_reference_page(&pdf, page, reference, sizeof(reference)));
-        ImageData ref = {};
-        ASSERT_TRUE(load_png_rgba(reference, &ref));
-        int height = ref.height;
-        image_free(ref.pixels);
-        // Poppler rounds up the bitmap height; keep the SVG's intrinsic ratio to avoid a subpixel y inset.
-        ASSERT_TRUE(render_lambda_png_page(&pdf, page - 1, height, actual, sizeof(actual), true));
-        snprintf(diff, sizeof(diff), "%s/type1_math_page_%d.png", PDF_DIFF_DIR, page);
-        double mismatch = 100.0, delta = 255.0;
         // compare ink geometry with one-pixel antialias smoothing: Poppler hints text, SVG paints outlines.
-        compare_pngs(reference, actual, diff, &mismatch, &delta, 1);
-        char property[64]; snprintf(property, sizeof(property), "page_%d_mismatch_percent", page);
-        RecordProperty(property, mismatch);
-        EXPECT_LT(mismatch, 0.75) << "page " << page << "; inspect " << diff;
+        expect_intrinsic_pdf_page(&pdf, page, "pdftoppm", 1);
     }
+}
+
+TEST(PdfRenderVisual, EmbeddedJpegKeepsIntrinsicPageGeometryAgainstCairo) {
+    ASSERT_TRUE(command_exists("pdftocairo"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(ensure_dir(PDF_DIFF_DIR));
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "%s", "test/pdf/PrinceCatalogue.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "%s", "jpeg_intrinsic");
+    // Cairo and the native image sampler use pixel centers; Splash's legacy image phase differs.
+    expect_intrinsic_pdf_page(&pdf, 1, "pdftocairo", 0);
 }
 
 TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
@@ -11091,7 +11143,7 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
                 continue;
             }
 
-            // Poppler rounds the raster height up; retain the PDF aspect ratio instead of centering in that rounded height.
+            // Poppler rounds the bitmap height up; preserve the source page's intrinsic geometry.
             if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png), true)) {
                 add_pdf_page_result(results, &result_count, test_id, &files[i], page, diff_png,
                                     100.0, 255.0, "Lambda render failed");
@@ -11248,7 +11300,7 @@ TEST(RenderOutputParity, GradientStopMathAndUsedFixupReachEveryImageOutput) {
         expect_png_channel_coverage(path, 0, 2, 1);
         snprintf(path, sizeof(path), "temp/render_output_parity/%s_0_svg.png", name);
         expect_png_channel_coverage(path, 0, 2, 1);
-        if (command_exists("sips") || command_exists("pdftoppm")) {
+        if (command_exists("pdftocairo")) {
             snprintf(path, sizeof(path), "temp/render_output_parity/%s_pdf.png", name);
             expect_png_channel_coverage(path, 0, 2, 1);
         }
@@ -11297,7 +11349,7 @@ TEST(RenderOutputParity, RadialMaskGroupsReachEveryImageOutput) {
         expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
         const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
         for (const char* suffix : suffixes) {
-            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("pdftocairo")) continue;
             char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             ImageData image; ASSERT_TRUE(load_png_rgba(path, &image));
             // test the translated content corner as well; a white page margin would miss an omitted mask.
@@ -11333,7 +11385,7 @@ TEST(RenderOutputParity, HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcross
         expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
         const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
         for (const char* suffix : suffixes) {
-            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("pdftocairo")) continue;
             char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             ImageData image; ASSERT_TRUE(load_png_rgba(path, &image));
             // own invisible paint must clear the content corner, including outlines and markers.
@@ -11373,7 +11425,7 @@ TEST(RenderOutputParity, OutsideGradientStopsPreserveColorsAcrossOutputs) {
         char path[PATH_MAX];
         const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
         for (const char* suffix : suffixes) {
-            if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            if (!strcmp(suffix, "_pdf.png") && !command_exists("pdftocairo")) continue;
             snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             expect_png_channel_coverage(path, item.channel, 2, 1);
         }
@@ -11392,7 +11444,7 @@ TEST(RenderOutputParity, TransformedOverflowClipsFollowOwningBoxesAcrossOutputs)
         expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
         const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
         for (const char* suffix : suffixes) {
-            if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            if (!strcmp(suffix, "_pdf.png") && !command_exists("pdftocairo")) continue;
             char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             expect_png_channel_coverage(path, 2, 2, 1);
         }
@@ -11431,11 +11483,11 @@ TEST(RenderOutputParity, LinearBackgroundClipTextUsesGlyphCoverageAndOwnerBox) {
         "background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}</style>";
     const struct { const char* name; const char* style; const char* reference; } cases[] = {
         {"single", "", "<div style='position:relative;width:80px;height:100px'>"
-            "<div class=frame style='left:0;width:40px'><div class=glyph style='color:red'>M</div></div>"
-            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;color:blue'>M</div></div></div>"},
+            "<div class=frame style='left:0;width:40px'><div class=glyph style='color:transparent;text-shadow:0 0 red'>M</div></div>"
+            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;color:transparent;text-shadow:0 0 blue'>M</div></div></div>"},
         {"indent", "text-indent:16px", "<div style='position:relative;width:80px;height:100px'>"
-            "<div class=frame style='left:0;width:40px'><div class=glyph style='text-indent:16px;color:red'>M</div></div>"
-            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;text-indent:16px;color:blue'>M</div></div></div>"},
+            "<div class=frame style='left:0;width:40px'><div class=glyph style='text-indent:16px;color:transparent;text-shadow:0 0 red'>M</div></div>"
+            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;text-indent:16px;color:transparent;text-shadow:0 0 blue'>M</div></div></div>"},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128], actual[2048], reference[3072];
@@ -11443,7 +11495,8 @@ TEST(RenderOutputParity, LinearBackgroundClipTextUsesGlyphCoverageAndOwnerBox) {
         SCOPED_TRACE(name);
         snprintf(actual, sizeof(actual), "%s<div class=box style='%s'>M</div>", prefix, item.style);
         snprintf(reference, sizeof(reference), "%s%s", prefix, item.reference);
-        expect_html_pair_output_parity(name, actual, reference, true, scale);
+        // masks use outlines; positioned sharp copies compare the same geometry without viewer font hinting.
+        expect_colored_html_pair_output_parity(name, actual, reference, 0, scale);
     }
 }
 
@@ -11470,12 +11523,12 @@ TEST(RenderOutputParity, HardGradientTextDirectionsRepeatsAndRunsUseOwnerGeometr
             float x = item.vertical ? 0.0f : start, y = item.vertical ? start : 0.0f;
             float width = item.vertical ? item.width : item.band, height = item.vertical ? item.band : 100.0f;
             strbuf_append_format(reference, "<div class=frame style='left:%gpx;top:%gpx;width:%gpx;height:%gpx'>"
-                "<div class=glyph style='position:relative;left:%gpx;top:%gpx;color:%s'>%s</div></div>",
+                "<div class=glyph style='position:relative;left:%gpx;top:%gpx;color:transparent;text-shadow:0 0 %s'>%s</div></div>",
                 x, y, width, height, -x, -y, item.colors[band], item.text);
         }
         strbuf_append_str(reference, "</div>");
         snprintf(name, sizeof(name), "text_clip_hard_%s_%dx", item.name, density); SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference->str, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference->str, 0, density);
         strbuf_free(reference);
     }
 }
@@ -11501,7 +11554,7 @@ TEST(RenderOutputParity, TextBackgroundTilesUseSizePositionRepeatAndColorLayers)
         strbuf_append_str(reference, "<div style='position:relative;width:80px;height:100px'>");
         if (strcmp(item.name, "base_color") == 0 || strcmp(item.name, "layers") == 0) {
             const char* color = strcmp(item.name, "base_color") == 0 ? "lime" : "blue";
-            strbuf_append_format(reference, "<div class=frame style='left:0;width:80px'><div class=glyph style='color:%s'>M</div></div>", color);
+            strbuf_append_format(reference, "<div class=frame style='left:0;width:80px'><div class=glyph style='color:transparent;text-shadow:0 0 %s'>M</div></div>", color);
         }
         for (int band = 0; band < item.bands; band++) {
             // image gaps add no paint; the optional base glyph already supplies the clipped lower layer.
@@ -11510,12 +11563,13 @@ TEST(RenderOutputParity, TextBackgroundTilesUseSizePositionRepeatAndColorLayers)
                 (strcmp(item.name, "layers") == 0 && band > 0)) continue;
             float x = (float)band * item.band;
             strbuf_append_format(reference, "<div class=frame style='left:%gpx;width:%gpx'>"
-                "<div class=glyph style='position:relative;left:%gpx;color:%s'>M</div></div>",
+                "<div class=glyph style='position:relative;left:%gpx;color:transparent;text-shadow:0 0 %s'>M</div></div>",
                 x, item.band, -x, item.colors[band]);
         }
         strbuf_append_str(reference, "</div>");
         snprintf(name, sizeof(name), "text_clip_tile_%s_%dx", item.name, density); SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference->str, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference->str,
+            !strcmp(item.colors[0], "lime") ? 1 : 0, density);
         strbuf_free(reference);
     }
 }
@@ -11545,18 +11599,22 @@ TEST(RenderOutputParity, VisibleTextShadowsUseAuthoredOrderBetweenBackgroundAndT
         {"clipped", "0 0 lime", "background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text;", "lime"},
     };
     for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
-        char actual[2048], reference[2048], name[128];
+        char actual[2048], reference[3072], name[128], ink[256], blue[256];
+        reference_glyph_css(ink, sizeof(ink), item.color, true);
+        reference_glyph_css(blue, sizeof(blue), "blue", true);
         snprintf(actual, sizeof(actual), "%s<div class=box style='%scolor:transparent;text-shadow:%s'>M</div>", prefix, item.background, item.shadow);
-        // independent foreground glyphs paint the same authored layers behind transparent text.
+        // separate positioned layers verify ordering independently of a combined shadow list.
         if (strcmp(item.name, "clipped") == 0)
-            snprintf(reference, sizeof(reference), "%s<div class=box style='%scolor:%s'>M</div>", prefix, item.background, item.color);
+            snprintf(reference, sizeof(reference), "%s<div class=box style='position:relative'>"
+                "<div class=box style='position:absolute;%scolor:transparent'>M</div>"
+                "<div class=box style='position:absolute;%s'>M</div></div>", prefix, item.background, ink);
         else if (strcmp(item.name, "list") == 0)
             snprintf(reference, sizeof(reference), "%s<div style='position:relative;width:80px;height:100px'>"
-                "<div class=box style='position:absolute;color:blue'>M</div>"
-                "<div class=box style='position:absolute;color:red'>M</div></div>", prefix);
-        else snprintf(reference, sizeof(reference), "%s<div class=box style='color:%s'>M</div>", prefix, item.color);
+                "<div class=box style='position:absolute;%s'>M</div>"
+                "<div class=box style='position:absolute;%s'>M</div></div>", prefix, blue, ink);
+        else snprintf(reference, sizeof(reference), "%s<div class=box style='%s'>M</div>", prefix, ink);
         snprintf(name, sizeof(name), "text_shadow_visible_%s_%dx", item.name, density); SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference, !strcmp(item.color, "lime") ? 1 : 0, density);
     }
 }
 
@@ -11913,7 +11971,8 @@ TEST(RenderOutputParity, OpacityGroupsCompositeOverlappingInteriorsOnce) {
 TEST(RenderOutputParity, DecorationShadowsMatchTranslatedDecoratedText) {
     for (const char* pattern : {"solid", "dashed", "dotted", "double", "wavy"})
         for (int blur : {0, 4}) for (int density : {1, 2}) {
-        char actual[3072], reference[3072], name[128], filter[64];
+        char actual[3072], reference[3072], name[128], filter[64], ink[256];
+        reference_glyph_css(ink, sizeof(ink), "rgb(0,128,0)", blur == 0);
         const char* base = "<!doctype html><style>html,body{margin:0;width:300px;height:180px;background:white}.txt{"
             "position:absolute;top:10px;left:10px;font:70px Arial;white-space:pre;"
             "color:transparent;text-decoration:underline red 5px;text-underline-offset:-10px;"
@@ -11922,13 +11981,12 @@ TEST(RenderOutputParity, DecorationShadowsMatchTranslatedDecoratedText) {
         snprintf(actual, sizeof(actual), "%s.original{text-shadow:0 40px %dpx rgb(0,128,0)}"
             "</style><div class='txt original'>g      g</div>", prefix, blur);
         snprintf(filter, sizeof(filter), "filter:blur(%gpx);", blur * .5);
-        snprintf(reference, sizeof(reference), "%s.copy{top:50px;color:rgb(0,128,0);"
-            "text-decoration-color:rgb(0,128,0);%s}</style>"
+        snprintf(reference, sizeof(reference), "%s.copy{top:50px;%s%s}</style>"
             "<div class='txt copy'>g      g</div><div class='txt original'>g      g</div>",
-            prefix, blur ? filter : "");
+            prefix, ink, blur ? filter : "");
         snprintf(name, sizeof(name), "deco_shadow_%s_%d_%dx", pattern, blur, density);
         SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference, 1, density);
     }
 }
 
@@ -11976,16 +12034,16 @@ TEST(RenderOutputParity, TranslucentDecorationShadowsApplyLayerAlphaOnce) {
         "color:transparent;text-decoration:underline transparent 5px;"
         "text-underline-offset:-10px;text-decoration-skip-ink:none}";
     for (int blur : {0, 4}) for (int density : {1, 2}) {
-        char actual[3072], reference[3072], filter[64], name[128];
+        char actual[3072], reference[3072], filter[64], name[128], ink[256];
+        reference_glyph_css(ink, sizeof(ink), "rgb(0,128,0)", blur == 0);
         snprintf(actual, sizeof(actual), "%s.original{text-shadow:0 40px %dpx rgba(0,128,0,.5)}"
             "</style><div class='txt original'>g      g</div>", base, blur);
         snprintf(filter, sizeof(filter), "filter:blur(%gpx);", blur * .5);
-        snprintf(reference, sizeof(reference), "%s.copy{top:50px;color:rgb(0,128,0);"
-            "text-decoration-color:rgb(0,128,0);opacity:0.501960784314;%s}"
-            "</style><div class='txt copy'>g      g</div>", base, blur ? filter : "");
+        snprintf(reference, sizeof(reference), "%s.copy{top:50px;%sopacity:0.501960784314;%s}"
+            "</style><div class='txt copy'>g      g</div>", base, ink, blur ? filter : "");
         snprintf(name, sizeof(name), "deco_shadow_alpha_%d_%dx", blur, density);
         SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference, 1, density);
     }
 }
 
@@ -12034,34 +12092,36 @@ TEST(RenderOutputParity, EffectsRetainOverflowingGlyphAndDecorationInk) {
 TEST(RenderOutputParity, DecorationShadowLayersPreserveBackdropOffsetsAndTransforms) {
     const struct { const char* name; const char* outer; const char* shadows; const char* copies; } cases[] = {
         {"offset", "", "14px 40px 0 rgb(0,128,0)",
-            "<div class='txt copy' style='left:30px;top:56px;color:rgb(0,128,0);text-decoration-color:rgb(0,128,0)'>g      g</div>"},
+            "<div class='txt copy sharp' style='left:30px;top:56px;'>g      g</div>"},
         {"layers", "", "14px 40px 0 red,-6px 32px 4px blue",
             "<div class='txt copy' style='left:10px;top:48px;color:blue;text-decoration-color:blue;filter:blur(2px)'>g      g</div>"
-            "<div class='txt copy' style='left:30px;top:56px;color:red;text-decoration-color:red'>g      g</div>"},
+            "<div class='txt copy sharp' style='left:30px;top:56px;'>g      g</div>"},
         {"alpha", "opacity:.5", "14px 40px 0 rgba(0,128,0,.5)",
-            "<div class='txt copy' style='left:30px;top:56px;color:rgb(0,128,0);text-decoration-color:rgb(0,128,0);opacity:.501960784314'>g      g</div>"},
+            "<div class='txt copy sharp' style='left:30px;top:56px;opacity:.501960784314'>g      g</div>"},
         {"transform", "transform:translate(12px,6px)", "14px 40px 0 rgb(0,128,0)",
-            "<div class='txt copy' style='left:30px;top:56px;color:rgb(0,128,0);text-decoration-color:rgb(0,128,0)'>g      g</div>"},
+            "<div class='txt copy sharp' style='left:30px;top:56px;'>g      g</div>"},
         {"transform_blur", "transform:translate(12px,6px)", "14px 40px 4px rgb(0,128,0)",
             "<div class='txt copy' style='left:30px;top:56px;color:rgb(0,128,0);text-decoration-color:rgb(0,128,0);filter:blur(2px)'>g      g</div>"},
         {"transform_alpha", "transform:translate(12px,6px)", "14px 40px 0 rgba(0,128,0,.5)",
-            "<div class='txt copy' style='left:30px;top:56px;color:rgb(0,128,0);text-decoration-color:rgb(0,128,0);opacity:.501960784314'>g      g</div>"}
+            "<div class='txt copy sharp' style='left:30px;top:56px;opacity:.501960784314'>g      g</div>"}
     };
     for (const auto& item : cases) for (int density : {1, 2}) {
-        char actual[4096], reference[4096], name[128];
+        char actual[4096], reference[4096], name[128], ink[256];
+        bool layers = !strcmp(item.name, "layers");
+        reference_glyph_css(ink, sizeof(ink), layers ? "red" : "rgb(0,128,0)", true);
         const char* prefix = "<!doctype html><style>html,body{margin:0;width:340px;height:200px;background:white}"
             ".backdrop{position:absolute;left:0;top:0;width:340px;height:200px;"
             "background:linear-gradient(to right,orange 50%%,cyan 50%%)}"
             ".outer{position:absolute;left:0;top:0;width:300px;height:150px;%s}"
             ".txt{position:absolute;left:16px;top:16px;font:70px Arial;white-space:pre;color:transparent;"
             "text-decoration:underline transparent 5px;text-underline-offset:-10px;text-decoration-skip-ink:none}"
-            "</style><div class=backdrop></div><div class=outer>";
-        char base[2048]; snprintf(base, sizeof(base), prefix, item.outer);
+            ".sharp{%s}</style><div class=backdrop></div><div class=outer>";
+        char base[2048]; snprintf(base, sizeof(base), prefix, item.outer, ink);
         snprintf(actual, sizeof(actual), "%s<div class=txt style='text-shadow:%s'>g      g</div></div>", base, item.shadows);
         snprintf(reference, sizeof(reference), "%s%s</div>", base, item.copies);
         snprintf(name, sizeof(name), "deco_shadow_context_%s_%dx", item.name, density);
         SCOPED_TRACE(name);
-        expect_html_pair_output_parity(name, actual, reference, true, density);
+        expect_colored_html_pair_output_parity(name, actual, reference, layers ? 0 : 1, density);
     }
 }
 

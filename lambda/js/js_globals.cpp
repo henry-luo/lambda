@@ -9880,6 +9880,18 @@ static Item js_test262_verify_property_call(Item* args, int argc) {
         argc > 3 ? args[3] : make_js_undefined());
 }
 
+static Item js_test262_complete(Item error) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> reason(roots, error), global(roots, js_get_global_this());
+    JS_ASSIGN_OR_RETURN(done, js_get_key_cstr(global.get(), "__lambda_test262_async_done"));
+    if (js_is_truthy(done))
+        return js_throw_value(js_test262_error_with_message("$DONE called multiple times", ItemNull));
+    JS_ASSIGN_OR_RETURN(stored, js_set_key_cstr(global.get(), "__lambda_test262_async_done",
+        Item{.item = ITEM_TRUE}));
+    return js_is_truthy(reason.get()) ? js_throw_value(reason.get()) : make_js_undefined();
+}
+
 extern "C" Item js_test262_native_harness_install(void) {
     // Native-harness jobs run in a fresh realm. Publishing real callable
     // helpers preserves ordinary lookup, aliasing, and method dispatch while
@@ -9910,6 +9922,8 @@ extern "C" Item js_test262_native_harness_install(void) {
     JS_ASSIGN_OR_RETURN(verify_stored,
         js_set_key_cstr(global_root.get(), "verifyProperty", verify_root.get()));
     js_set_native_method(global_root.get(), "$DONOTEVALUATE", js_donotevaluate);
+    // dependencies may register the completion callback before the root module body runs.
+    js_set_native_method(global_root.get(), "$DONE", js_test262_complete);
     js_set_native_method(global_root.get(), "isConstructor", js_is_constructor);
     js_set_native_method(global_root.get(), "isPrimitive", js_test262_is_primitive);
     js_set_native_method(global_root.get(), "buildString", js_test262_build_string);

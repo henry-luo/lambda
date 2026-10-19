@@ -178,10 +178,11 @@ int paint_list_count(const PaintList* pl) {
     return pl ? pl->item_count() : 0;
 }
 
-bool paint_list_borrow_commands(PaintList* destination, const PaintList* source) {
-    if (!destination || !source || destination == source) return false;
+bool paint_list_borrow_range(PaintList* destination, const PaintList* source, int begin, int end) {
+    if (!destination || !source || destination == source || begin < 0 || end < begin || end > source->item_count()) return false;
     size_t start = destination->size();
-    for (const PaintCmd& original : *source) {
+    for (int index = begin; index < end; index++) {
+        const PaintCmd& original = source->data()[index];
         PaintCmd copy = original;
         copy.borrowed_payload = true;
         // a deferred image remains owned by the edition across repeated lowerings.
@@ -189,6 +190,10 @@ bool paint_list_borrow_commands(PaintList* destination, const PaintList* source)
         if (!destination->append(copy)) { destination->rewind(start); return false; }
     }
     return true;
+}
+
+bool paint_list_borrow_commands(PaintList* destination, const PaintList* source) {
+    return source && paint_list_borrow_range(destination, source, 0, source->item_count());
 }
 
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,

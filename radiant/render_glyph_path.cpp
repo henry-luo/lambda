@@ -23,6 +23,8 @@ Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, flo
     return {x + pixel, top, fmaxf(0.0f, space_width - 2.0f * pixel), height};
 }
 
+Color render_text_missing_glyph_color() { return Color{0xFF0000FF}; }
+
 bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint,
     float* advance) {
     if (!font || !font->style || !advance ||
@@ -140,7 +142,7 @@ RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
 }
 
 bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_context,
-    RenderTextRunGlyphFn visitor, void* context) {
+    RenderTextRunGlyphFn visitor, void* context, bool include_spaces) {
     const FontBox* box = paint_glyph_run_font(run);
     FontHandle* primary = font_box_handle(box);
     if (!run || !run->text || !box || !box->style || !visitor) return false;
@@ -165,11 +167,15 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
             category == UTF8PROC_CATEGORY_CF || category == UTF8PROC_CATEGORY_CC) continue;
         if (character_gap) pen += run->cjk_spacing;
         if (codepoint == ' ') {
+            if (include_spaces && !visitor(context, codepoint, primary, pen, run->baseline_y,
+                    text_space_advance(box->style, run->word_spacing))) return false;
             pen += text_space_advance(box->style, run->word_spacing);
             continue;
         }
         float synthetic_advance = 0.0f;
         if (render_text_synthesized_space_advance(box, codepoint, &synthetic_advance)) {
+            if (include_spaces && font_has_codepoint(primary, codepoint) &&
+                    !visitor(context, codepoint, primary, pen, run->baseline_y, synthetic_advance)) return false;
             pen += synthetic_advance;
             continue;
         }
@@ -181,12 +187,14 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
                 ? font_resolve_fallback_for_codepoint(primary, &descriptor, codepoint) : nullptr;
         FontHandle* face = fallback ? fallback : primary;
         // exported text uses the selected Unicode face instead of a viewer's replacement font.
-        float advance = font_get_glyph(face, codepoint).advance_x;
-        ok = font_has_codepoint(face, codepoint) &&
+        bool missing = !font_has_codepoint(face, codepoint);
+        float advance = include_spaces && missing ? box->style->space_width : font_get_glyph(face, codepoint).advance_x;
+        // PDF text can retain an unmapped character with the face's .notdef glyph.
+        ok = (include_spaces || font_has_codepoint(face, codepoint)) &&
             visitor(context, codepoint, face, pen, run->baseline_y, advance);
         if (!ok) log_debug("TEXT_OUTLINE: cannot extract U+%04X from %s (coverage=%u)",
             codepoint, font_handle_get_family_name(face), font_has_codepoint(face, codepoint));
-        pen += advance + text_character_spacing(box->style, codepoint);
+        pen += advance + (include_spaces && missing ? 0.0f : text_character_spacing(box->style, codepoint));
         if (fallback) font_handle_release(fallback);
     }
     return ok;

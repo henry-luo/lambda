@@ -2,6 +2,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "radiant_image_job.hpp"
 #include "radiant_pdf_graphic.hpp"
+#include "radiant_pdf_text.hpp"
 #include "radiant_pdf_source.hpp"
 #include "radiant_pdf_semantics.hpp"
 #include "../../../lib/tagged.hpp"
@@ -73,6 +74,7 @@ struct PdfWalkFrame {
     Bound graphic_bounds;
     RdtMatrix graphic_transform;
     DisplayList* backdrop;
+    PdfTextResources* text_resources;
 };
 #include "pdf_view_schema.inc"
 
@@ -81,6 +83,7 @@ const PdfWalkFrame* pdf_walk_frame(Item context) {
 }
 
 struct PdfWalkContext : RenderContext {
+    PdfTextResources text_resources;
     BinarySchemaOwner* owner;
     const BinarySchema* element;
     const BinarySchema* text_rect;
@@ -251,10 +254,13 @@ struct PdfPaintBatch {
     ~PdfPaintBatch() { paint_list_destroy(&local); }
 };
 
-bool pdf_walk_simple_boundary(const BoundaryProp* bound) {
+bool pdf_walk_simple_boundary(const BoundaryProp* bound, float width, float height) {
     if (!bound) return true;
+    // calculated radii remain expressions until paint resolves the final border box.
+    Corner radius = bound->border ? bound->border->radius : Corner{};
+    resolve_border_radius_percentages(&radius, width, height);
     if (!render_paint_background_is_simple(bound->background) ||
-        (bound->border && (radiant_corner_has_radius(&bound->border->radius) || bound->border->border_image_type != GRADIENT_NONE || bound->border->border_image_url)) ||
+        (bound->border && (radiant_corner_has_radius(&radius) || bound->border->border_image_type != GRADIENT_NONE || bound->border->border_image_url)) ||
         bound->outline || bound->box_shadow) return false;
     if (bound->border) for (size_t edge = 0; edge < 4; edge++)
         if (bound->border->width.values[edge] > 0 && bound->border->styles[edge] != CSS_VALUE_SOLID) return false;
@@ -267,8 +273,10 @@ void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     Rect rect = render_geometry_boundary_rect(view, {x, y, view->width, view->height});
     x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
+    // table layer backgrounds require shared paint emission, even with a simple local boundary.
     bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
-        !render_background_uses_table_layers(view) && pdf_walk_simple_boundary(view->boundary());
+        !render_background_uses_table_layers(view) &&
+        pdf_walk_simple_boundary(view->boundary(), rect.width, rect.height);
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
     PdfPaintBatch batch(ctx, rect);
     if (!render_paint_boundary_emit_full(batch.paint, ctx->ui_context, view, rect))
@@ -290,13 +298,15 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     ctx->font = *font; ctx->color = color;
     DomElement* parent = view->parent ? view->parent->as_element() : nullptr;
-    const FontProp* style = font->style;
-    bool decorated = style && (style->text_shadow || style->text_emphasis_enabled || style->text_deco_extra ||
-        (style->text_deco && style->text_deco != CSS_VALUE_NONE));
     RenderTextPaintIterator fragments(ctx, view);
     while (!pdf_walk_aborted(ctx)) {
         TextRect* rect = fragments.next(true);
         if (!rect) break;
+        // the iterator selects the ellipsis/inline fragment's font and color.
+        font = &ctx->font; color = ctx->color;
+        const FontProp* style = font->style;
+        bool decorated = style && (style->text_shadow || style->text_emphasis_enabled || style->text_deco_extra ||
+            (style->text_deco && style->text_deco != CSS_VALUE_NONE));
         PaintGlyphRun run = {};
         lam::Temp<char> segment(render_text_rect_glyph_run(view, rect, font, color, x, y, &run,
             fragments.reverses_clusters()));
@@ -597,7 +607,7 @@ bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool enterin
 }
 bool pdf_secondary_boundary(void* data, const BoundaryProp* bound, RdtLogicalRect rect) {
     PdfWalkContext* ctx = (PdfWalkContext*)data;
-    if (!pdf_walk_simple_boundary(bound)) {
+    if (!pdf_walk_simple_boundary(bound, rect.width, rect.height)) {
         // A page fragment borrows committed styles; copy mutable border geometry locally.
         BoundaryProp local = bound ? *bound : BoundaryProp{};
         BorderProp border = bound && bound->border ? *bound->border : BorderProp{};
@@ -761,7 +771,14 @@ RADIANT_C_API Item fn_radiant_pdf_graphic(Item context_item) {
     const PdfWalkFrame* frame = pdf_walk_frame(context.get());
     if (!frame || !frame->graphic || !frame->ui) return radiant_pdf_error("graphic helper requires the active callback context");
     return radiant_pdf_graphic(frame->graphic, frame->ui, frame->graphic_bounds,
-        frame->page_width, frame->page_height, frame->backdrop, &frame->graphic_transform);
+        frame->page_width, frame->page_height, frame->backdrop, &frame->graphic_transform, frame->text_resources);
+}
+
+RADIANT_C_API Item fn_radiant_pdf_text_run(Item context_item) {
+    RootFrame roots(1); Rooted<Item> context(roots, context_item);
+    const PdfWalkFrame* frame = pdf_walk_frame(context.get());
+    if (!frame || !frame->glyph_run) return radiant_pdf_error("text helper requires an active text callback");
+    return radiant_pdf_text(frame->glyph_run, frame->ui, frame->text_resources);
 }
 
 RADIANT_C_API Item fn_radiant_pdf_glyph_path(Item context_item) {
@@ -829,13 +846,15 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
         // unavailable lazy images keep the native painter's absent-image behavior.
         if (!image->pixels) return ItemNull;
     }
-    return radiant_pdf_surface(image, placement, content);
+    ScaleMode sampling = view ? render_image_scale_mode(view, false) : SCALE_MODE_LINEAR;
+    return radiant_pdf_surface(image, placement, content, sampling, ui_context_raster_scale(frame->ui));
 }
 
 static Item pdf_walk(Item path_item, Item options_item,
         Item callback_item, Item schemas_item, bool source_html,
         RenderExportSession* existing = nullptr, const ViewPageSelection* page_selection = nullptr) {
-    RootFrame roots(11);
+    RootFrame roots(12);
+    Rooted<Item> fonts(roots, {.array = array_plain()});
     Rooted<Item> links(roots, {.array = array_plain()}), destinations(roots, {.array = array_plain()}), metadata(roots, ItemNull);
     Rooted<Item> path(roots, path_item), options(roots, options_item), callback(roots, callback_item),
         schemas(roots, schemas_item), error(roots, ItemNull), result(roots, ItemNull),
@@ -902,12 +921,15 @@ static Item pdf_walk(Item path_item, Item options_item,
             context->backdrop_arenas.destroy();
             if (context->output) context->output->ops->destroy(context->output);
             if (selection_pool) pool_destroy(selection_pool);
+            // selected handles must retire before their owning UI font context.
+            context->text_resources.clear();
             render_export_session_end(session);
             binary_schema_owner_release(owner);
         }
     } cleanup = {owner, &owned_session, &ctx, selection_pool};
     if (!output || !selection_pool) return radiant_pdf_error("cannot allocate PDF callback byte destination");
     ctx.owner = owner; ctx.output = output; ctx.callback = &callback; ctx.error = &error;
+    ctx.text_resources.fonts = &fonts; ctx.frame.text_resources = &ctx.text_resources;
     ctx.resources = &resources; ctx.pages = &pages; ctx.links = &links; ctx.destinations = &destinations;
     if (!resources.get().array || !pages.get().array) return radiant_pdf_error("cannot allocate PDF resource plan");
     ctx.element = pdf_walk_bind(owner, schemas.get(), "element", &element_schema, error);

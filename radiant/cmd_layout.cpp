@@ -3789,7 +3789,8 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     populate_layout_document(dom_doc, dom_root, markdown_root, HTML5,
                              markdown_url);
 
-    store_document_stylesheets(dom_doc, markdown_stylesheets, 3, nullptr, 0, pool);
+    // retain exactly the sheets applied above; removed math sheets no longer occupy this array.
+    store_document_stylesheets(dom_doc, markdown_stylesheets, 1, nullptr, 0, pool);
 
     auto total_end = time_now_ns();
     log_info("[TIMING] load_markdown_doc total: %.1fms",

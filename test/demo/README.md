@@ -8,6 +8,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | Name | Entry point | Guide |
 | --- | --- | --- |
 | `tetris` | `tetris/tetris.ls` | [Tetris](tetris/TETRIS.md) |
+| `sentence-game` | `sentence-game/sentence-game.ls` | [Sentence Match](sentence-game/README.md) |
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |

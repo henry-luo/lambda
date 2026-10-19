@@ -6094,6 +6094,10 @@ static void layout_shift_clean_block(LayoutContext* lycon, DomNode* child) {
 }
 
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
+    if (lycon->paged && paged_native_layout(lycon, block)) {
+        finalize_block_flow(lycon, block, block->display.outer);
+        return;
+    }
     if (block->position) {
         ViewBlock* abs_walker = block->positionp()->first_abs_child;
         while (abs_walker) {
@@ -7770,6 +7774,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                           Linebox *pa_line, float* out_original_margin_top,
                           bool* out_sibling_margin_collapsed_before_layout,
                           float* out_sibling_consumed_margin_top) {
+    lycon->block.flow_box = lam::up(block);
     layout_block_content_count++;
     if (layout_block_content_count % 5000 == 0) {
         log_notice("layout_block_content: count=%d", layout_block_content_count);

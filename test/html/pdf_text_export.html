@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PDF text export</title>
+<style>
+@font-face { font-family: PdfText; src: url('../lambda/math/fonts/NotoSansMath-Regular.ttf'); }
+@page { size: 400px 380px; margin: 16px; }
+html, body { margin: 0; padding: 0; font: 18px PdfText, Arial, sans-serif; }
+section { height: 348px; }
+section + section { break-before: page; }
+p { margin: 0 0 12px; }
+.decorated { text-decoration: underline; background: #eef; }
+.affine { transform: translate(10px, 0) rotate(5deg) skewX(8deg); transform-origin: left top; }
+.group { opacity: .5; }
+.group span { display: inline-block; margin-right: -12px; background: #ff8080; }
+</style>
+<section>
+<p>Hello café Ω ∑ 𝔸</p>
+<p class="decorated">Decorated text</p>
+<p class="affine">Affine text</p>
+<p style="font-style:italic">Synthetic italic</p>
+<p>Fallback 中文 😀</p>
+<div class="group"><span>Group text</span><span>Overlap</span></div>
+<svg width="280" height="32"><text x="2" y="24" font-family="PdfText" font-size="18">SVG text Ω</text></svg>
+</section>
+<section><p>Second page text</p><p>Shared font resource</p><p>Shared fallback 中文 😀</p></section>

@@ -112,6 +112,7 @@ struct PagedComposition {
     bool reference_used;
     Pool* reference_pool;
     TypesetTargetStore targets;
+    TypesetTargetStore native_targets;
     PagedPaintRecord* paint_records;
 };
 
@@ -161,6 +162,19 @@ static TypesetStatus paged_column_select(PagedPageCursor* composer, uint32_t ind
 
 
 
+static TypesetStatus paged_native_sources(Pool* pool, const PagedLayoutOptions* options, TypesetSourceScope* scope) {
+    if (!options->native_flow_count) return TYPESET_OK;
+    TypesetSourceNamespace* sources = (TypesetSourceNamespace*)pool_alloc(pool,
+        options->native_flow_count * sizeof(TypesetSourceNamespace));
+    if (!sources) return TYPESET_OUT_OF_MEMORY;
+    for (size_t i = 0; i < options->native_flow_count; i++) {
+        const TypesetFlowProvider* provider = options->native_flows[i].provider;
+        sources[i] = {provider->identity, provider->generation};
+    }
+    *scope = {sources, options->native_flow_count};
+    return TYPESET_OK;
+}
+
 PagedLayoutOptions paged_layout_options_default() {
     PagedLayoutOptions options = {};
     options.max_pages = 10000;
@@ -181,6 +195,7 @@ void paged_composition_destroy(ViewTree* tree) {
     for (size_t i = 1; i < composition->flow_font_count; i += 2) font_cache_unpin_handle(composition->flow_fonts[i]->font_handle);
     if (composition->mark_sources) hashmap_free(composition->mark_sources);
     typeset_targets_dispose(&composition->targets);
+    typeset_targets_dispose(&composition->native_targets);
     if (composition->reference_pool) mem_pool_destroy(composition->reference_pool);
     counter_context_destroy(composition->counters);
     mem_pool_destroy(composition->pool);
@@ -861,11 +876,19 @@ struct PagedFragmentainer {
     bool occupied;
     float alignment;           // publication-only body translation; auxiliary areas retain their slots
 };
+struct PagedNativeLine {
+    const PagedNativeFlowBinding* binding;
+    TypesetContribution contribution;
+    TypesetLineCandidate selected;
+    TypesetResume resume;
+    TypesetBreak before;
+};
 struct PagedFlowLine {
     float top, height;         // in the paragraph's inline frame (BlockContext::advance_y)
     size_t fragmentainer;
     int number;                // the block-local line number its text rects carry
     uint32_t anchor_first, anchor_count; // the footnotes and page floats anchored on the line
+    PagedNativeLine* native;
 };
 enum PagedAnchorKind : uint8_t { PAGED_ANCHOR_NOTE, PAGED_ANCHOR_TOP, PAGED_ANCHOR_BOTTOM };
 enum PagedNotePolicy : uint8_t { PAGED_NOTE_AUTO, PAGED_NOTE_LINE, PAGED_NOTE_BLOCK };
@@ -895,6 +918,12 @@ struct PagedFlowAnchor {
     View* box;                 // or the box it precedes
 };
 struct PagedFlowTable;
+struct PagedNativeEvent {
+    const PagedNativeFlowBinding* binding;
+    TypesetContribution contribution;
+    size_t line;
+    PagedNativeEvent* next;
+};
 struct PagedFixedBox {
     ViewBlock* block;
     float origin_x, origin_y;
@@ -906,6 +935,8 @@ struct PagedFlowParagraph {    // one block container's uninterrupted inline run
     size_t count, capacity;
     PagedFlowParagraph* next;
     PagedFlowTable* table;     // set when the unit is a table broken by the row pass instead of a run
+    PagedNativeEvent* events;
+    PagedNativeEvent* last_event;
 };
 struct PagedStrut {
     View* view;                // the box, or the paragraph block of a line strut
@@ -979,6 +1010,8 @@ struct PagedFlowState {
         RadiantSpaceSpec range;
         float used;
         bool after;
+        bool native;
+        TypesetGlue glue;
     }* space_gaps;
     size_t space_gap_count, space_gap_capacity;
     ViewModelCheckpoint* pass; // the pages of the running layout pass
@@ -1016,6 +1049,7 @@ struct PagedFlowState {
     size_t indent_count, indent_capacity;
     TypesetStatus status;
     uint32_t relaxed_minima, relaxed_avoidance;
+    size_t native_steps;
 };
 
 static TypesetStatus paged_flow_fail(PagedFlowState* state, TypesetStatus status, DomNode* source, const char* reason) {
@@ -1835,32 +1869,70 @@ static TypesetStatus paged_space_after(PagedFlowState* state, ViewBlock* block, 
     return paged_space_append(state, block, true);
 }
 
-// shrink earlier native flexible space before adding an avoidable page break (XSL 1.1 §4.3.1).
+static void paged_space_reduce(PagedFlowState* state, BlockContext* owner, ViewBlock* block,
+        PagedFlowState::SpaceGap& gap, ViewBlock* root, float amount) {
+    ViewBlock* branch = gap.box ? gap.box : gap.paragraph->block;
+    ViewBlock* enclosing = gap.box ? paged_flow_parent_block(branch) : branch;
+    ViewBlock* closed = gap.box ? branch : nullptr;
+    BlockContext* cursor = nullptr;
+    for (; enclosing; enclosing = paged_flow_parent_block(enclosing)) {
+        if (paged_view_inside(block, enclosing))
+            for (BlockContext* active = owner; active; active = active->parent)
+                // ordinary ancestors own cursors even when they share an outer BFC.
+                if (active->flow_box == enclosing) { cursor = active; break; }
+        if (cursor) break;
+        if (enclosing == root) { closed = root; break; }
+        closed = enclosing;
+    }
+    paged_space_shift(state, cursor, gap, closed, -amount);
+    gap.used -= amount;
+}
+
+static bool paged_space_precedes(PagedFlowState* state, const PagedFlowState::SpaceGap& gap,
+        size_t index, float before) {
+    if (!gap.box && gap.line >= gap.paragraph->count) return false;
+    float end = gap.box ? paged_flow_top(gap.box) : paged_flow_top(gap.paragraph->block) + gap.paragraph->lines[gap.line].top;
+    if (gap.after) end += gap.box->height - layout_axis_decoration_end(gap.box->bound, LAYOUT_AXIS_Y);
+    return end <= before + kPagedFlowEpsilon && paged_fragmentainer_index(state, end) == index;
+}
+
+// native vertical glue uses the same ordered packing contract as paragraph glue.
+static float paged_native_shrink_spaces(PagedFlowState* state, BlockContext* owner,
+        ViewBlock* block, size_t index, float before, float needed, ViewBlock* root) {
+    if (!state->composition->options.native_flow_count || !state->space_gap_count) return 0.0f;
+    TypesetItem* items = (TypesetItem*)pool_calloc(state->composition->pool, state->space_gap_count * sizeof(TypesetItem));
+    if (!items) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return 0.0f; }
+    float natural = 0.0f;
+    for (size_t i = 0; i < state->space_gap_count; i++) {
+        const PagedFlowState::SpaceGap& gap = state->space_gaps[i];
+        if (!gap.native || !paged_space_precedes(state, gap, index, before)) continue;
+        items[i].kind = TYPESET_GLUE; items[i].glue = gap.glue; items[i].glue.natural = gap.used;
+        if (!gap.glue.shrink_order) items[i].glue.shrink = fmaxf(0.0f, gap.glue.shrink - gap.glue.natural + gap.used);
+        natural += gap.used;
+    }
+    TypesetPacking packing = typeset_pack_glue(items, 0, state->space_gap_count, natural, natural - needed);
+    float reduced = 0.0f;
+    for (size_t i = 0; i < state->space_gap_count; i++) {
+        if (items[i].kind != TYPESET_GLUE) continue;
+        float amount = state->space_gaps[i].used - typeset_glue_advance(&items[i].glue, &packing);
+        if (amount > 0.0f) { paged_space_reduce(state, owner, block, state->space_gaps[i], root, amount); reduced += amount; }
+    }
+    pool_free(state->composition->pool, items);
+    return reduced;
+}
+
+// shrink earlier flexible space before adding an avoidable page break (XSL 1.1 §4.3.1).
 static float paged_shrink_preceding_spaces(PagedFlowState* state, BlockContext* owner,
         ViewBlock* block, size_t index, float before, float needed, ViewBlock* root) {
-    float reduced = 0.0f;
+    float reduced = paged_native_shrink_spaces(state, owner, block, index, before, needed, root);
+    needed -= reduced;
     for (size_t i = state->space_gap_count; i > 0 && needed > kPagedFlowEpsilon; i--) {
         PagedFlowState::SpaceGap& gap = state->space_gaps[i - 1];
-        float end = gap.box ? paged_flow_top(gap.box) : paged_flow_top(gap.paragraph->block) + gap.paragraph->lines[gap.line].top;
-        if (gap.after) end += gap.box->height - layout_axis_decoration_end(gap.box->bound, LAYOUT_AXIS_Y);
         // keeps and refits can move a gap after it was recorded; only the current line's earlier spaces can help.
-        if (end > before + kPagedFlowEpsilon || paged_fragmentainer_index(state, end) != index) continue;
+        if (gap.native || !paged_space_precedes(state, gap, index, before)) continue;
         float amount = fminf(needed, fmaxf(0.0f, gap.used - gap.range.minimum));
         if (amount <= 0.0f) continue;
-        ViewBlock* branch = gap.box ? gap.box : gap.paragraph->block;
-        ViewBlock* enclosing = gap.box ? paged_flow_parent_block(branch) : branch;
-        ViewBlock* closed = gap.box ? branch : nullptr;
-        BlockContext* cursor = nullptr;
-        for (; enclosing; enclosing = paged_flow_parent_block(enclosing)) {
-            if (paged_view_inside(block, enclosing))
-                for (BlockContext* active = owner; active; active = active->parent)
-                    if (active->establishing_element == enclosing) { cursor = active; break; }
-            if (cursor) break;
-            if (enclosing == root) { closed = root; break; }
-            closed = enclosing;
-        }
-        paged_space_shift(state, cursor, gap, closed, -amount);
-        gap.used -= amount;
+        paged_space_reduce(state, owner, block, gap, root, amount);
         needed -= amount; reduced += amount;
     }
     return reduced;
@@ -2100,6 +2172,49 @@ static TypesetStatus paged_lines_move(PagedFlowState* state, BlockContext* owner
     return TYPESET_OK;
 }
 
+static TypesetStatus paged_native_boundary(PagedFlowState* state, PagedFlowParagraph* paragraph,
+        size_t line, size_t frame, TypesetBreak* boundary) {
+    const PagedFlowLine& placed = paragraph->lines[line];
+    const PagedNativeLine* native = placed.native;
+    *boundary = native ? native->before : TypesetBreak{};
+    if (boundary->scope == TYPESET_BREAK_LINE) *boundary = {};
+    if (!native || !native->binding->break_candidate) return TYPESET_OK;
+    const PagedFragmentainer& area = state->fragmentainers[frame];
+    PagedNativeBreakCandidate candidate = {native->contribution.source, native->resume,
+        native->selected.first, native->selected.next, area.page ? area.page->page_number : 0, area.column,
+        paged_flow_top(paragraph->block) + placed.top - area.top, area.bottom - area.top,
+        placed.height, *boundary};
+    TypesetStatus status = native->binding->break_candidate(native->binding->context, &candidate, boundary);
+    if (status == TYPESET_OK && (boundary->legality > TYPESET_BREAK_FORCED || boundary->scope > TYPESET_BREAK_PAGE))
+        status = TYPESET_INVALID;
+    return status;
+}
+
+// producer preferences rank legal boundaries; the shared fit still supplies the strut and page.
+static TypesetStatus paged_native_break_first(PagedFlowState* state, PagedFlowParagraph* paragraph,
+        size_t line, size_t previous, size_t* first) {
+    if (!paragraph->lines[line].native) return TYPESET_OK;
+    size_t chosen = SIZE_MAX;
+    int32_t cost = INT32_MAX;
+    size_t start = *first;
+    while (start > 0 && paragraph->lines[start - 1].fragmentainer == previous) start--;
+    for (size_t at = *first + 1; at > start; ) {
+        at--;
+        if (at > start && at - start < (size_t)paged_flow_line_limit(state, paragraph->block, false)) continue;
+        TypesetBreak boundary;
+        TypesetStatus status = paged_native_boundary(state, paragraph, at, previous, &boundary);
+        if (status != TYPESET_OK) return status;
+        if (boundary.legality == TYPESET_BREAK_FORBIDDEN) continue;
+        float top = paged_flow_top(paragraph->block) + paragraph->lines[at].top;
+        if (at < line && top <= state->fragmentainers[previous].top + kPagedFlowEpsilon) continue;
+        if (chosen == SIZE_MAX || boundary.penalty < cost) { chosen = at; cost = boundary.penalty; }
+        if (boundary.legality == TYPESET_BREAK_FORCED) { chosen = at; break; }
+    }
+    if (chosen == SIZE_MAX) return TYPESET_UNPLACEABLE;
+    *first = chosen;
+    return TYPESET_OK;
+}
+
 // fit `line` of `paragraph`: a line that would cross its fragmentainer end moves
 // to the next one (with the orphans before it), and a line that already starts a
 // later fragmentainer by position is a break as well, so orphans, keeps and
@@ -2153,9 +2268,11 @@ static TypesetStatus paged_fit_line(PagedFlowState* state, LayoutContext* lycon,
         if (status != TYPESET_OK) return status;
     }
     size_t first = line;
+    bool forced = lines[line].native && lines[line].native->before.legality == TYPESET_BREAK_FORCED &&
+        lines[line].native->before.scope >= TYPESET_BREAK_COLUMN;
     size_t on_previous = 0;
     while (first > 0 && lines[first - 1].fragmentainer == previous) { first--; on_previous++; }
-    if (on_previous && (block_policy || (int)on_previous < paged_flow_line_limit(state, paragraph->block, false))) {
+    if (!forced && on_previous && (block_policy || (int)on_previous < paged_flow_line_limit(state, paragraph->block, false))) {
         // orphans: the lines before the break move with it unless they start the fragmentainer
         float previous_top, previous_bottom;
         paged_reserve(state, paragraph->block, previous, &previous_top, &previous_bottom);
@@ -2163,9 +2280,12 @@ static TypesetStatus paged_fit_line(PagedFlowState* state, LayoutContext* lycon,
             first = line; state->relaxed_minima++;
         }
     } else first = line;
+    status = forced ? TYPESET_OK : paged_native_break_first(state, paragraph, line, previous, &first);
+    if (status != TYPESET_OK) return status;
     float target_top, target_bottom;
     paged_reserve(state, paragraph->block, target, &target_top, &target_bottom);
-    status = paged_lines_move(state, owner, paragraph, first, line, target, target_top, root, false);
+    // an explicit producer break stays forced even when it lands exactly on the natural page edge.
+    status = paged_lines_move(state, owner, paragraph, first, line, target, target_top, root, forced);
     if (status != TYPESET_OK) return status;
     size_t recorded = state->strut_count - 1;
     // the moved lines take their anchors along: the lines before the line start the
@@ -2208,6 +2328,10 @@ static TypesetStatus paged_paragraph_widows(PagedFlowState* state, LayoutContext
     while (broke > 1 && lines[broke - 1].fragmentainer == lines[broke - 2].fragmentainer) broke--;
     if (broke <= 1) return TYPESET_OK;
     broke--; // the first line after the last break
+    for (size_t i = state->strut_count; i > 0; i--) {
+        const PagedStrut& strut = state->struts[i - 1];
+        if (strut.paragraph == paragraph && strut.line == (int)broke && strut.forced) return TYPESET_OK; // INT_CAST_OK: paragraph line index
+    }
     size_t after = paragraph->count - broke;
     int widows = paged_flow_line_limit(state, paragraph->block, true);
     if ((int)after >= widows) return TYPESET_OK;
@@ -2217,6 +2341,15 @@ static TypesetStatus paged_paragraph_widows(PagedFlowState* state, LayoutContext
     if (moved && (int)moved < paged_flow_line_limit(state, paragraph->block, false)) moved = 0;
     float block_top = paged_flow_top(paragraph->block);
     size_t previous = lines[broke - 1].fragmentainer, target = lines[broke].fragmentainer;
+    while (lines[moved].native) {
+        TypesetBreak boundary;
+        TypesetStatus status = paged_native_boundary(state, paragraph, moved, previous, &boundary);
+        if (status != TYPESET_OK) return status;
+        if (boundary.legality != TYPESET_BREAK_FORBIDDEN) break;
+        if (!moved) return TYPESET_UNPLACEABLE;
+        moved--;
+        if (moved && (int)moved < paged_flow_line_limit(state, paragraph->block, false)) moved = 0; // INT_CAST_OK: paragraph line count
+    }
     float previous_top, previous_bottom, target_top, target_bottom;
     paged_reserve(state, paragraph->block, previous, &previous_top, &previous_bottom);
     paged_reserve(state, paragraph->block, target, &target_top, &target_bottom);
@@ -4314,27 +4447,203 @@ static TypesetStatus paged_line_break_before(PagedFlowState* state, BlockContext
     return paged_lines_move(state, owner, paragraph, line, line, target, reserve_top, nullptr, true);
 }
 
-void paged_line_commit(LayoutContext* lycon, float used_line_height) {
+static void paged_commit_line(LayoutContext* lycon, ViewBlock* block, float used_line_height,
+        PagedNativeLine* native = nullptr) {
     PagedFlowState* state = lycon->paged;
-    if (state->outside || state->status != TYPESET_OK || !lycon->line.start_view) return;
-    ViewBlock* block = paged_flow_parent_block(lycon->line.start_view);
-    if (!block || !paged_flow_block(block) || paged_flow_closed(block) || !paged_flow_fragmentable(lycon, block)) return;
     PagedFlowParagraph* paragraph = paged_paragraph_open(state, block);
     if (!paragraph || !lam::pool_grow_array(state->composition->pool, &paragraph->lines, &paragraph->capacity,
         paragraph->count + 1, 16)) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
+    if (native && state->outside) {
+        if (native->before.legality == TYPESET_BREAK_FORCED && native->before.scope >= TYPESET_BREAK_COLUMN) {
+            paged_flow_fail(state, TYPESET_INVALID, block, "native static content cannot force an internal page break"); return;
+        }
+        paragraph->lines[paragraph->count++] = {lycon->block.advance_y, used_line_height, 0, lycon->block.line_number, 0, 0, native};
+        return;
+    }
     // the footnote calls and page floats met since the last line are anchored on this one
     uint32_t first = (uint32_t)state->anchors_bound, count = (uint32_t)(state->anchor_count - state->anchors_bound); // INT_CAST_OK: anchor counts are bounded by the element budget
     for (size_t i = state->anchors_bound; i < state->anchor_count; i++) {
         state->anchors[i].paragraph = paragraph; state->anchors[i].line = paragraph->count; state->anchors[i].box = nullptr;
     }
     state->anchors_bound = state->anchor_count;
-    paragraph->lines[paragraph->count++] = {lycon->block.advance_y, used_line_height, 0, lycon->block.line_number, first, count};
+    paragraph->lines[paragraph->count++] = {lycon->block.advance_y, used_line_height, 0, lycon->block.line_number, first, count, native};
+    if (native) {
+        size_t frame;
+        TypesetStatus status = paged_fragmentainer_at(state, paged_flow_top(block) + lycon->block.advance_y, &frame);
+        TypesetBreak boundary = {};
+        if (status == TYPESET_OK) status = paged_native_boundary(state, paragraph, paragraph->count - 1, frame, &boundary);
+        if (status != TYPESET_OK) { paged_flow_fail(state, status, block, "native break candidate failed"); return; }
+        native->before = boundary;
+        if (boundary.legality == TYPESET_BREAK_FORCED && boundary.scope >= TYPESET_BREAK_COLUMN)
+            state->pending_break = boundary.scope == TYPESET_BREAK_PAGE ? VIEW_BREAK_PAGE : VIEW_BREAK_COLUMN;
+    }
     TypesetStatus status = paged_line_break_before(state, &lycon->block, paragraph, paragraph->count - 1);
     if (status != TYPESET_OK) { paged_flow_fail(state, status, block, nullptr); return; }
     if (paged_space_commit(state, &lycon->block, paragraph, paragraph->count - 1) != TYPESET_OK) return;
-    paged_fit_line(state, lycon, &lycon->block, paragraph, paragraph->count - 1, nullptr, true);
+    status = paged_fit_line(state, lycon, &lycon->block, paragraph, paragraph->count - 1, nullptr, true);
+    if (status != TYPESET_OK) { paged_flow_fail(state, status, block, "page flow line could not be fitted"); return; }
     const PagedFlowLine& fitted = paragraph->lines[paragraph->count - 1];
     state->flow_end = fmaxf(state->flow_end, paged_flow_top(block) + fitted.top + fitted.height);
+}
+
+void paged_line_commit(LayoutContext* lycon, float used_line_height) {
+    PagedFlowState* state = lycon->paged;
+    if (state->outside || state->status != TYPESET_OK || !lycon->line.start_view) return;
+    ViewBlock* block = paged_flow_parent_block(lycon->line.start_view);
+    if (!block || !paged_flow_block(block) || paged_flow_closed(block) || !paged_flow_fragmentable(lycon, block)) return;
+    paged_commit_line(lycon, block, used_line_height);
+}
+
+static const PagedNativeFlowBinding* paged_native_binding(const PagedLayoutOptions& options,
+        const TypesetFlowProvider* provider, DomElement* source = nullptr) {
+    for (size_t i = 0; i < options.native_flow_count; i++) {
+        const PagedNativeFlowBinding* binding = &options.native_flows[i];
+        if (source ? binding->source == source : binding->provider == provider) return binding;
+    }
+    return nullptr;
+}
+
+struct PagedNativePath { const PagedNativeFlowBinding* binding; const PagedNativePath* parent; };
+
+static TypesetStatus paged_native_stream(LayoutContext* lycon, ViewBlock* block,
+        const PagedNativeFlowBinding* binding, const PagedNativePath* parent, TypesetBreak* before) {
+    PagedFlowState* state = lycon->paged;
+    const PagedLayoutOptions& options = state->composition->options;
+    size_t depth = 0;
+    for (const PagedNativePath* at = parent; at; at = at->parent) {
+        if (at->binding == binding) return TYPESET_INVALID;
+        if (++depth >= options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
+    }
+    PagedNativePath path = {binding, parent};
+    TypesetResume saved = {}, cursor = binding->start;
+    TypesetStatus status = typeset_flow_checkpoint(binding->provider, &cursor, &saved);
+    if (status != TYPESET_OK) return status;
+    status = typeset_flow_restore(binding->provider, &saved, &cursor);
+    while (status == TYPESET_OK) {
+        if (++state->native_steps > options.max_nodes) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+        TypesetContribution contribution = {}; TypesetResume next = {};
+        status = typeset_flow_next(binding->provider, &cursor, &contribution, &next);
+        if (status == TYPESET_DONE) { status = TYPESET_OK; break; }
+        if (status != TYPESET_OK) break;
+        if (contribution.source.provider != binding->provider->identity ||
+            contribution.source.generation != binding->provider->generation ||
+            contribution.source.offset_unit > TYPESET_PROVIDER_OFFSETS) { status = TYPESET_STALE; break; }
+        state->composition->diagnostic.native_source = contribution.source;
+        if (contribution.kind == TYPESET_CONTRIBUTION_NESTED) {
+            const PagedNativeFlowBinding* child = paged_native_binding(options, contribution.nested);
+            status = child && !child->source ? paged_native_stream(lycon, block, child, &path, before) : TYPESET_INVALID;
+        } else if (contribution.kind == TYPESET_CONTRIBUTION_BOUNDARY) {
+            *before = contribution.boundary;
+        } else if (contribution.kind == TYPESET_CONTRIBUTION_MARK || contribution.kind == TYPESET_CONTRIBUTION_TARGET) {
+            if (state->outside) { status = TYPESET_INVALID; break; }
+            const TypesetSource* source = contribution.kind == TYPESET_CONTRIBUTION_MARK
+                ? (contribution.mark ? &contribution.mark->source : nullptr)
+                : (contribution.target ? &contribution.target->source : nullptr);
+            if (!source || !typeset_source_same_identity(*source, contribution.source)) { status = TYPESET_INVALID; break; }
+            PagedFlowParagraph* paragraph = paged_paragraph_open(state, block);
+            PagedNativeEvent* event = (PagedNativeEvent*)pool_calloc(state->composition->pool, sizeof(PagedNativeEvent));
+            if (!paragraph || !event) { status = TYPESET_OUT_OF_MEMORY; break; }
+            *event = {binding, contribution, paragraph->count, nullptr};
+            if (paragraph->last_event) paragraph->last_event->next = event; else paragraph->events = event;
+            paragraph->last_event = event;
+        } else if (contribution.kind == TYPESET_CONTRIBUTION_GLUE) {
+            const TypesetGlue& glue = contribution.glue;
+            if (!isfinite(glue.natural) || glue.natural < 0.0f || !isfinite(glue.shrink) || glue.shrink < 0.0f ||
+                !isfinite(glue.stretch) || glue.stretch < 0.0f || glue.shrink_order > 3 || glue.stretch_order > 3) { status = TYPESET_INVALID; break; }
+            float top = paged_flow_top(block) + lycon->block.advance_y;
+            size_t frame = paged_fragmentainer_index(state, top);
+            bool starting = !state->outside && (top <= state->fragmentainers[frame].top + kPagedFlowEpsilon ||
+                state->pending_break >= VIEW_BREAK_COLUMN ||
+                (before->legality == TYPESET_BREAK_FORCED && before->scope >= TYPESET_BREAK_COLUMN));
+            PagedFlowParagraph* paragraph = paged_paragraph_open(state, block);
+            if (!paragraph || !lam::pool_grow_array(state->composition->pool, &state->space_gaps, &state->space_gap_capacity,
+                    state->space_gap_count + 1, 16)) { status = TYPESET_OUT_OF_MEMORY; break; }
+            float used = starting && glue.discard_start ? 0.0f : glue.natural;
+            TypesetGlue active = glue;
+            // discarded leading glue contributes neither size nor ordered shrink capacity.
+            if (starting && glue.discard_start) active.natural = active.stretch = active.shrink = 0.0f;
+            state->space_gaps[state->space_gap_count++] = {nullptr, paragraph, paragraph->count, {}, used, false, true, active};
+            lycon->block.advance_y += used;
+        } else if (contribution.kind == TYPESET_CONTRIBUTION_BOX || contribution.kind == TYPESET_CONTRIBUTION_PARAGRAPH) {
+            const TypesetParagraph* paragraph = contribution.kind == TYPESET_CONTRIBUTION_PARAGRAPH ? contribution.paragraph : nullptr;
+            if (contribution.kind == TYPESET_CONTRIBUTION_PARAGRAPH && !paragraph) { status = TYPESET_INVALID; break; }
+            size_t capacity = paragraph ? (paragraph->max_alternatives ? paragraph->max_alternatives : paragraph->count) : 1;
+            if (!binding->material || !capacity || capacity > options.max_nodes ||
+                capacity > SIZE_MAX / sizeof(TypesetLineCandidate)) { status = TYPESET_INVALID; break; }
+            TypesetLineCandidate* scratch = (TypesetLineCandidate*)pool_calloc(state->composition->pool,
+                capacity * sizeof(TypesetLineCandidate));
+            if (!scratch) { status = TYPESET_OUT_OF_MEMORY; break; }
+            size_t first = 0;
+            do {
+                if (++state->native_steps > options.max_nodes || lycon->block.line_number == INT_MAX) {
+                    status = TYPESET_BUDGET_EXHAUSTED; break;
+                }
+                PagedNativeLine* native = (PagedNativeLine*)pool_calloc(state->composition->pool, sizeof(PagedNativeLine));
+                if (!native) { status = TYPESET_OUT_OF_MEMORY; break; }
+                native->binding = binding; native->contribution = contribution; native->resume = cursor; native->before = *before;
+                if (paragraph) {
+                    status = typeset_next_line(paragraph, first, lycon->block.content_width, scratch, capacity, &native->selected);
+                    if (status != TYPESET_OK) break;
+                    if (first && paragraph->items) native->before = paragraph->items[first].has_before
+                        ? paragraph->items[first].before : paragraph->items[first - 1].boundary;
+                } else {
+                    const TypesetMetrics& metrics = contribution.metrics;
+                    native->selected = {0, 1, 0, 1, metrics.advance, metrics.height + metrics.depth, metrics.depth, metrics.baseline};
+                }
+                if (!isfinite(native->selected.height) || native->selected.height <= 0.0f ||
+                    !isfinite(native->selected.width) || native->selected.width < 0.0f) { status = TYPESET_INVALID; break; }
+                // native lines enter the same paragraph/strut journal as ordinary inline layout.
+                paged_commit_line(lycon, block, native->selected.height, native);
+                status = state->status;
+                if (status != TYPESET_OK) break;
+                lycon->block.advance_y += native->selected.height;
+                lycon->block.max_width = fmaxf(lycon->block.max_width, native->selected.width);
+                lycon->block.line_number++;
+                first = native->selected.next;
+                *before = {};
+            } while (paragraph && first < paragraph->count);
+            pool_free(state->composition->pool, scratch);
+        } else status = paged_flow_fail(state, TYPESET_INVALID, block,
+            "native auxiliary contributions require an insertion/float adapter");
+        if (status == TYPESET_OK && contribution.kind != TYPESET_CONTRIBUTION_BOUNDARY &&
+            contribution.boundary.scope >= TYPESET_BREAK_COLUMN) *before = contribution.boundary;
+        cursor = next;
+    }
+    // every exit rewinds the producer, including nested and rejected layout passes.
+    TypesetResume restored = {};
+    TypesetStatus rewind = typeset_flow_restore(binding->provider, &saved, &restored);
+    return status == TYPESET_OK ? rewind : status;
+}
+
+bool paged_native_layout(LayoutContext* lycon, ViewBlock* block) {
+    PagedFlowState* state = lycon->paged;
+    const PagedNativeFlowBinding* binding = paged_native_binding(state->composition->options, nullptr, block);
+    if (!binding) return false;
+    if (state->status != TYPESET_OK) return true;
+    if (!state->outside && !paged_flow_fragmentable(lycon, block)) {
+        paged_flow_fail(state, TYPESET_INVALID, block, "native provider needs a fragmentable body flow");
+        return true;
+    }
+    PagedFlowParagraph* saved = state->paragraph;
+    if (state->outside) {
+        // each static measurement replaces its workspace records; already published editions own their material.
+        for (PagedFlowParagraph* paragraph = state->paragraphs; paragraph; paragraph = paragraph->next)
+            if (paragraph->block == block) paragraph->block = nullptr;
+        state->paragraph = nullptr;
+    }
+    TypesetBreak before = {};
+    TypesetStatus status = paged_native_stream(lycon, block, binding, nullptr, &before);
+    if (status == TYPESET_OK) for (size_t i = 0; i < state->space_gap_count; i++) {
+        PagedFlowState::SpaceGap& gap = state->space_gaps[i];
+        if (gap.native && gap.paragraph->block == block && gap.line == gap.paragraph->count && gap.glue.discard_end) {
+            lycon->block.advance_y -= gap.used; gap.used = 0.0f;
+        }
+    }
+    if (status == TYPESET_OK && !state->outside && before.legality == TYPESET_BREAK_FORCED && before.scope >= TYPESET_BREAK_COLUMN)
+        state->pending_break = before.scope == TYPESET_BREAK_PAGE ? VIEW_BREAK_PAGE : VIEW_BREAK_COLUMN;
+    if (status != TYPESET_OK) paged_flow_fail(state, status, block, "native provider could not be laid out");
+    if (state->outside) state->paragraph = saved;
+    return true;
 }
 
 // tables and ordinary boxes both contribute their completed extent before pending anchors drain.
@@ -4511,6 +4820,7 @@ bool paged_flow_pass_begin(LayoutContext* lycon) {
     // condition passes must bind against their newly selected areas, not a speculative predecessor.
     state->indent_count = 0;
     state->draining = false; state->flow_end = 0.0f;
+    state->native_steps = 0;
     // fixed sheets are composed at their own viewports; the document shell owns no flow page.
     state->outside = state->tree->model->css->page_document->fixed_count ? 1 : 0;
     // the hooks record the pass's mark sources again
@@ -5307,6 +5617,85 @@ static bool paged_publish_leaf(const ViewBlock* block) {
 static TypesetStatus paged_publish_block(PagedFlowState* state, ViewBlock* block, float origin_x, float origin_y,
         const PagedParentMap* parents, bool root);
 
+static TypesetStatus paged_native_event_publish(PagedFlowState* state, const PagedNativeEvent* event,
+        size_t index, LayoutViewNode* parent) {
+    const TypesetContribution& contribution = event->contribution;
+    const PagedFragmentainer& area = state->fragmentainers[index];
+    uint32_t page = area.page ? area.page->page_number : 0;
+    ViewNativeMaterial lease = {}; lease.source = contribution.source; lease.owner = event->binding->owner;
+    if (!paged_publish_admit(state, nullptr) || !view_tree_native_fragment_append(state->tree, parent, &lease,
+            {area.rect.x, area.rect.y, 0, 0})) return TYPESET_INVALID;
+    if (contribution.kind == TYPESET_CONTRIBUTION_MARK) {
+        TypesetMark mark = *contribution.mark;
+        if (mark.kind == TYPESET_MARK_RUNNING) return TYPESET_INVALID;
+        mark.page_number = page; mark.at_page_start = state->content_page != page;
+        return typeset_mark_append(&state->composition->marks, &mark);
+    }
+    TypesetTarget target = *contribution.target;
+    const TypesetTarget* declared = typeset_target_find(&state->composition->references->targets, target.name);
+    if (!declared || !typeset_source_same_identity(declared->source, target.source)) return TYPESET_INVALID;
+    target.page_number = target.last_page_number = page;
+    return typeset_target_append(&state->composition->native_targets, &target);
+}
+
+static TypesetStatus paged_native_publish(PagedFlowState* state, ViewBlock* block,
+        float left, float top, const PagedParentMap* parents) {
+    if (!state->composition->options.native_flow_count) return TYPESET_OK;
+    for (PagedFlowParagraph* paragraph = state->paragraphs; paragraph; paragraph = paragraph->next) {
+        if (paragraph->block != block) continue;
+        PagedNativeEvent* event = paragraph->events;
+        for (size_t line = 0; line < paragraph->count; line++) {
+            const PagedFlowLine& placed = paragraph->lines[line];
+            const PagedNativeLine* native = placed.native;
+            if (!native) continue;
+            size_t first = paged_fragmentainer_index(state, top + placed.top);
+            size_t last = paged_fragmentainer_index(state, top + placed.top + placed.height - kPagedFlowEpsilon);
+            for (; event && event->line == line; event = event->next) {
+                TypesetStatus status = paged_native_event_publish(state, event, first, paged_publish_parent(state, parents, first));
+                if (status != TYPESET_OK) return status;
+            }
+            for (size_t part = 0; part < state->composition->options.max_nodes; part++) {
+                ViewNativeMaterial material = {}; RdtLogicalRect relative = {};
+                TypesetStatus status = native->binding->material(native->binding->context, &native->contribution,
+                    &native->selected, part, &material, &relative);
+                if (status == TYPESET_DONE) break;
+                if (status != TYPESET_OK) return status;
+                if (material.source.provider != native->binding->provider->identity ||
+                    material.source.generation != native->binding->provider->generation) return TYPESET_STALE;
+                material.owner = native->binding->owner;
+                if (!material.solution) material.solution = native->selected.solution;
+                for (size_t index = first; index <= last; index++) {
+                    const PagedFragmentainer& area = state->fragmentainers[index];
+                    float x = area.rect.x + left + layout_axis_decoration_start(block->bound, LAYOUT_AXIS_X);
+                    float y = area.rect.y + top + placed.top - area.top;
+                    if (!paged_publish_admit(state, block)) return state->status;
+                    ViewModelStatus model_status;
+                    LayoutViewNode* node = view_tree_native_fragment_append(state->tree,
+                        paged_publish_parent(state, parents, index), &material,
+                        {x + relative.x, y + relative.y, relative.width, relative.height}, &model_status);
+                    if (!node) return model_status == VIEW_MODEL_OUT_OF_MEMORY ? TYPESET_OUT_OF_MEMORY : TYPESET_INVALID;
+                    if (node->glyph_run) { node->glyph_run->x += x; node->glyph_run->baseline_y += y; }
+                    if (node->image_box) {
+                        node->image_box->content_rect.x += x; node->image_box->content_rect.y += y;
+                        node->image_box->image_rect.x += x; node->image_box->image_rect.y += y;
+                    }
+                    node->role = state->publish_role; node->first_fragment = index == first; node->last_fragment = index == last;
+                    status = paged_publish_content(state, index);
+                    if (status != TYPESET_OK) return status;
+                }
+                if (part + 1 == state->composition->options.max_nodes) return TYPESET_BUDGET_EXHAUSTED;
+            }
+        }
+        size_t tail = paged_fragmentainer_index(state, top + (paragraph->count
+            ? paragraph->lines[paragraph->count - 1].top : 0.0f));
+        for (; event; event = event->next) {
+            TypesetStatus status = paged_native_event_publish(state, event, tail, paged_publish_parent(state, parents, tail));
+            if (status != TYPESET_OK) return status;
+        }
+    }
+    return TYPESET_OK;
+}
+
 static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, float origin_x, float origin_y,
         const PagedParentMap* parents, bool root);
 
@@ -5402,7 +5791,8 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
             status = paged_publish_column_range(state, node, block);
         if (status == TYPESET_OK && block->display.inner == RDT_DISPLAY_REPLACED)
             status = paged_publish_image(state, node, block, origin_x, origin_y, fragmentainer);
-        if (status == TYPESET_OK && index == first && !root && paged_publish_leaf(block)) status = paged_publish_content(state, index);
+        if (status == TYPESET_OK && index == first && !root && paged_publish_leaf(block) &&
+            !paged_native_binding(state->composition->options, nullptr, block)) status = paged_publish_content(state, index);
     }
     if (table) {
         // captions are wrapper children in visual order; rows and columns belong to the decorated grid.
@@ -5459,6 +5849,7 @@ static TypesetStatus paged_publish_box(PagedFlowState* state, ViewBlock* block, 
         state->publish_role = saved_role;
         if (status == TYPESET_OK && record->footer) status = paged_publish_block(state, record->footer, left, top, content_parents, false);
     } else if (status == TYPESET_OK) status = paged_publish_children(state, block, left, top, content_parents, content_selection);
+    if (status == TYPESET_OK) status = paged_native_publish(state, block, left, top, &mine);
     if (status == TYPESET_OK && block->view_type == RDT_VIEW_TABLE_ROW)
         status = paged_publish_missing_cells(state, block, mine);
     if (table && status == TYPESET_OK) status = paged_publish_children(state, block, left, top, &mine, PAGED_CHILD_AFTER);
@@ -6228,6 +6619,9 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
     composition->mark_sources = lam::own(paged_mark_sources_new(16));
     if (!composition->mark_sources) return TYPESET_OUT_OF_MEMORY;
     composition->marks = {tree->model->tree_id, tree->layout_generation, composition->pool, nullptr, 0, 0};
+    if (paged_native_sources(composition->pool, options, &composition->marks.sources) != TYPESET_OK) return TYPESET_OUT_OF_MEMORY;
+    composition->native_targets = {tree->model->tree_id, tree->layout_generation, composition->pool,
+        nullptr, 0, 0, options->max_nodes, nullptr, composition->marks.sources};
     DomElement* root = tree->model->document->root;
     ViewCssStyle* style = view_css_resolve(tree, root);
     if (!style) return TYPESET_OUT_OF_MEMORY;
@@ -6345,10 +6739,11 @@ static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession
     for (size_t i = 0; status == TYPESET_OK && i < session->targets.count; i++) {
         const TypesetTarget& previous = session->targets.entries[i];
         const PagedTargetValue* old = (const PagedTargetValue*)previous.binding.get();
-        // every target is a DOM element the page flow met
+        const TypesetTarget* native = !old->source.address
+            ? typeset_target_find(&tree->model->composition->native_targets, previous.name) : nullptr;
         DomNode* node = old->source.address ? dom_node_ref_validate(tree->model->document, old->source) : nullptr;
-        if (!node || !node->is_element()) { status = TYPESET_STALE; break; }
-        DomElement* source = node->as_element();
+        if ((!native && !node) || (node && !node->is_element())) { status = TYPESET_STALE; break; }
+        DomElement* source = node ? node->as_element() : nullptr;
         // the page flow recorded a target's counters where its layout met the target
         PagedMarkSource key = {}; key.source = source;
         const PagedMarkSource* mark = (const PagedMarkSource*)hashmap_get(tree->model->composition->mark_sources, &key);
@@ -6359,17 +6754,19 @@ static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession
         if (!value->counters) { status = TYPESET_OUT_OF_MEMORY; break; }
         const char** parts[] = {&value->before, &value->after};
         for (size_t j = 0; j < 2 && status == TYPESET_OK; j++) {
-            *parts[j] = paged_flow_pseudo_text(session->pool, source, j == 0);
+            *parts[j] = source ? paged_flow_pseudo_text(session->pool, source, j == 0) : "";
             if (!*parts[j]) status = TYPESET_OUT_OF_MEMORY;
         }
         if (status != TYPESET_OK) break;
         TypesetTarget target = previous;
-        target.page_number = paged_target_page(tree, source);
-        target.last_page_number = paged_target_page(tree, source, true);
+        target.page_number = native ? native->page_number : paged_target_page(tree, source);
+        target.last_page_number = native ? native->last_page_number : paged_target_page(tree, source, true);
         target.binding = lam::up((const TypesetRecord*)value);
-        target.source.generation = tree->layout_generation; target.value = target.binding;
+        if (source) { target.source.generation = tree->layout_generation; target.value = target.binding; }
+        else target.value = native->value;
         for (size_t area = 0; area < 3; area++) for (size_t edge = 0; edge < 2; edge++) {
-            uint32_t number = mark ? mark->generated_pages[area][edge] : 0;
+            uint32_t number = native ? (edge ? native->last_page_number : native->page_number)
+                : mark ? mark->generated_pages[area][edge] : 0;
             value->pages[area][edge] = number;
             if (number) {
                 value->labels[area][edge] = pool_strdup(session->pool, tree->model->pages.get()[number - 1]->label);
@@ -6504,15 +6901,75 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
     }
     if (!view_tree_model_source_valid(tree)) return TYPESET_STALE;
     if (tree->model->composition || tree->model->node_count != 1) return TYPESET_INVALID;
+    struct NativeOwners {
+        const PagedLayoutOptions* options;
+        size_t count;
+        ~NativeOwners() {
+            while (count) {
+                const ViewNativeOwner& owner = options->native_flows[--count].owner;
+                owner.release(owner.context);
+            }
+        }
+    } owners = {options, 0};
+    if ((options->native_flow_count && !options->native_flows) || options->native_flow_count > options->max_nodes ||
+        options->native_flow_count > SIZE_MAX / sizeof(TypesetSourceNamespace))
+        return TYPESET_INVALID;
+    for (size_t i = 0; i < options->native_flow_count; i++) {
+        const PagedNativeFlowBinding& binding = options->native_flows[i];
+        const TypesetFlowProvider* provider = binding.provider;
+        TypesetStatus invalid = binding.target_count > options->max_nodes ? TYPESET_BUDGET_EXHAUSTED : TYPESET_OK;
+        if (!provider || !provider->identity || !provider->generation || !provider->next || !provider->checkpoint ||
+            !provider->restore || !binding.owner.context || !binding.owner.retain || !binding.owner.release) invalid = TYPESET_INVALID;
+        else if (binding.start.provider != provider->identity || binding.start.generation != provider->generation) invalid = TYPESET_STALE;
+        if (binding.source) {
+            DomElement* root = binding.source;
+            size_t depth = 0;
+            while (root && root != tree->model->document->root && depth++ <= options->max_depth) root = root->parent_element();
+            if (root != tree->model->document->root ||
+                (!radiant_page_element(binding.source, "flow") && !radiant_page_element(binding.source, "static-content"))) invalid = TYPESET_INVALID;
+            for (DomNode* child = binding.source->first_child; child; child = child->next_sibling)
+                if (!child->is_text() || !radiant_page_whitespace(child->as_text())) invalid = TYPESET_INVALID;
+        }
+        for (size_t earlier = 0; earlier < i; earlier++) {
+            const PagedNativeFlowBinding& other = options->native_flows[earlier];
+            if ((provider && other.provider->identity == provider->identity && other.provider->generation == provider->generation) ||
+                (binding.source && binding.source == other.source)) invalid = TYPESET_INVALID;
+        }
+        if (invalid == TYPESET_OK && !binding.owner.retain(binding.owner.context)) invalid = TYPESET_STALE;
+        if (invalid != TYPESET_OK) {
+            if (diagnostic) { diagnostic->status = invalid; diagnostic->source = dom_node_ref(binding.source); diagnostic->reason = "invalid native flow binding"; }
+            return invalid;
+        }
+        owners.count++;
+    }
     PagedReferenceSession session = {};
     session.pool = mem_pool_create((MemContext*)tree->model->document->services.mem_ctx,
         MEM_ROLE_LAYOUT, "view_tree.secondary.references");
     if (!session.pool) return TYPESET_OUT_OF_MEMORY;
     session.targets = {tree->model->tree_id, tree->layout_generation, session.pool,
         nullptr, 0, 0, options->max_nodes, nullptr};
+    if (paged_native_sources(session.pool, options, &session.targets.sources) != TYPESET_OK) return TYPESET_OUT_OF_MEMORY;
     session.convergence.pool = session.pool; session.convergence.limit = options->max_reference_passes;
     size_t visited = 0;
     TypesetStatus status = paged_targets_seed(tree, &session, tree->model->document->root, 0, &visited, options);
+    for (size_t i = 0; status == TYPESET_OK && i < options->native_flow_count; i++) {
+        const PagedNativeFlowBinding& binding = options->native_flows[i];
+        if (binding.target_count && !binding.targets) { status = TYPESET_INVALID; break; }
+        for (size_t j = 0; status == TYPESET_OK && j < binding.target_count; j++) {
+            TypesetTarget target = binding.targets[j];
+            if (target.source.provider != binding.provider->identity || target.source.generation != binding.provider->generation) {
+                status = TYPESET_STALE; break;
+            }
+            PagedTargetValue* value = (PagedTargetValue*)pool_calloc(session.pool, sizeof(PagedTargetValue));
+            if (!value) { status = TYPESET_OUT_OF_MEMORY; break; }
+            // reference metadata belongs to the compositor; the opaque value keeps its producer namespace.
+            value->provider = tree->model->tree_id; value->text = value->before = value->after = "";
+            value->counters = counter_snapshot_copy(nullptr, session.pool);
+            if (!value->counters) { status = TYPESET_OUT_OF_MEMORY; break; }
+            target.page_number = target.last_page_number = 0; target.binding = lam::up((const TypesetRecord*)value);
+            status = typeset_target_append(&session.targets, &target);
+        }
+    }
     bool settled = false;
     LayoutContentVisibilityTransaction history = {};
     while (status == TYPESET_OK && !settled) {

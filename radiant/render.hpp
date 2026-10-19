@@ -353,6 +353,7 @@ RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wav
 float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap = nullptr);
 // logical coordinates retain the raster painter's one-device-pixel inset.
 Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, float space_width);
+Color render_text_missing_glyph_color();
 bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
@@ -1657,6 +1658,7 @@ typedef struct PaintGlyphRun {
     Color color;
     lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
+    int logical_text_offset; // logical UTF-8 follows visual bytes when bidi reverses clusters
     lam::Own<const char> owned_text;  // set when the paint list keeps the text
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
@@ -1688,7 +1690,7 @@ RdtPath* render_path_create_paint_glyph_run(const PaintGlyphRun* run, FontContex
 typedef bool (*RenderTextRunGlyphFn)(void* context, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance);
 bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* fonts,
-    RenderTextRunGlyphFn visitor, void* context);
+    RenderTextRunGlyphFn visitor, void* context, bool include_spaces = false);
 float render_text_baseline_y(const FontBox* font, float text_top);
 
 struct RenderTextEmphasis {
@@ -1791,6 +1793,7 @@ void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
 // source and its resource owner must outlive lowering and destruction of destination.
 bool paint_list_borrow_commands(PaintList* destination, const PaintList* source);
+bool paint_list_borrow_range(PaintList* destination, const PaintList* source, int begin, int end);
 // transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
                                   RdtGradientStop* stops = nullptr);
@@ -4089,6 +4092,7 @@ bool render_paint_inset_shadows(PaintList*, UiContext*, ViewBlock*, Rect);
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
     float viewport_height, float density, ImageSurface** surface, Rect* placement,
     DisplayList* backdrop = nullptr, const RdtMatrix* transform = nullptr);
+bool render_paint_ink_bounds(const PaintList* paint, const RdtMatrix* transform, Bound* bounds);
 
 // ===== render_background.hpp =====
 // Background rendering functions
@@ -4755,7 +4759,8 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
 
 typedef bool (*SvgExportPaintConsumer)(PaintList* paint, void* context);
 bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
-    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback = false);
+    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback = false,
+    bool preserve_text = false, lam::ArrayList<FontContext*>* retained_fonts = nullptr);
 ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bound* logical_bounds);
 
 void render_svg_inline_register_paint_ir_lowerers(void);

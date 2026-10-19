@@ -1,0 +1,19 @@
+{
+  "name": "Sentence game narrow three-part layout and object selection",
+  "html": "test/demo/sentence-game/sentence-game.ls",
+  "viewport": {"width": 390, "height": 1000},
+  "events": [
+    {"type":"click","target":{"selector":"#mode-3"}},
+    {"type":"assert_count","target":{"selector":".card"},"count":9},
+    {"type":"assert_position","element_a":{"selector":"#predicate-heading"},"element_b":{"selector":"#object-heading"},"relation":"above"},
+    {"type":"click","target":{"selector":"#subject-cards .card"}},
+    {"type":"click","target":{"selector":"#predicate-cards .card"}},
+    {"type":"assert_attribute","target":{"selector":"#primary"},"attribute":"disabled","equals":"disabled"},
+    {"type":"click","target":{"selector":"#object-cards .card"}},
+    {"type":"assert_text","target":{"selector":"#sentence-preview"},"contains":"."},
+    {"type":"assert_visible","target":{"selector":"#primary"},"visible":true},
+    {"type":"click","target":{"selector":"#primary"}},
+    {"type":"assert_attribute","target":{"selector":"#sentence-game"},"attribute":"data-count","equals":"1"},
+    {"type":"capture_surface","source":"page","file":"temp/sentence-game/compact.png"}
+  ]
+}

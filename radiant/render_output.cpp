@@ -64,13 +64,30 @@ bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const R
     return ok;
 }
 
+static void render_output_prepare_paint_lowerers() {
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+}
+
+bool render_paint_ink_bounds(const PaintList* paint, const RdtMatrix* transform, Bound* bounds) {
+    if (!paint || !bounds) return false;
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.paint.ink", "render.paint.ink.list", "render.paint.ink.scratch")) return false;
+    DisplayList display = {}; dl_init(&display, arenas.list_arena);
+    render_output_prepare_paint_lowerers();
+    paint_ir_lower_raster_transformed(paint, &display, transform);
+    bool valid = dl_validate_or_log(&display, "render.paint.ink");
+    if (valid) *bounds = dl_content_bounds(&display);
+    dl_destroy(&display); arenas.destroy();
+    return valid;
+}
+
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
         float viewport_height, float density, ImageSurface** surface, Rect* placement,
         DisplayList* backdrop, const RdtMatrix* transform) {
     if (!surface || !placement) return false;
     *surface = nullptr;
-    render_svg_inline_register_paint_ir_lowerers();
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    render_output_prepare_paint_lowerers();
     RenderEffectRasterImage image = {};
     Bound page_clip = {0.0f, 0.0f, viewport_width * density, viewport_height * density};
     if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
@@ -910,8 +927,7 @@ static bool render_secondary_raster_record(ViewTree* tree, const ViewPageBox* pa
     bool ok = render_secondary_snapshot_paint(tree, page, paint, bounds, clip);
     paint_pop_transform(paint);
     if (!ok || !paint_ir_validate_or_log(paint, "secondary raster")) return false;
-    render_svg_inline_register_paint_ir_lowerers();
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    render_output_prepare_paint_lowerers();
     paint_ir_lower_raster(paint, list);
     return true;
 }

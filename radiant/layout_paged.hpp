@@ -12,6 +12,30 @@ float paged_label_body_columns(LayoutContext* lycon, ViewTable* table, TableMeta
 size_t paged_flow_node_limit(LayoutContext* lycon);
 bool paged_table_source_admit(LayoutContext* lycon, ViewElement* source);
 void paged_flow_layout_error(LayoutContext* lycon, DomElement* source, TypesetStatus status, const char* reason);
+struct PagedNativeBreakCandidate {
+    TypesetSource source;
+    TypesetResume resume;
+    size_t first, next;
+    uint32_t page_number, column;
+    float used, available, height;
+    TypesetBreak boundary;
+};
+// callbacks are replayable: material returns OK per part, then DONE; rectangles and paint use the selected line's origin.
+typedef TypesetStatus (*PagedNativeMaterialFn)(void* context, const TypesetContribution* contribution,
+    const TypesetLineCandidate* line, size_t index, ViewNativeMaterial* material, RdtLogicalRect* rect);
+typedef TypesetStatus (*PagedNativeBreakFn)(void* context, const PagedNativeBreakCandidate* candidate,
+    TypesetBreak* boundary);
+struct PagedNativeFlowBinding {
+    DomElement* source; // an empty r:flow/static-content; null registers a nested-only provider
+    const TypesetFlowProvider* provider;
+    TypesetResume start;
+    ViewNativeOwner owner; // retains immutable glyph/image/exact/solution payloads with published editions (D4.5.1v4)
+    void* context;
+    PagedNativeMaterialFn material;
+    PagedNativeBreakFn break_candidate; // pure preference/legality; shared flow still owns page commitment
+    const TypesetTarget* targets; // declare names before enumeration so body references can resolve forward
+    size_t target_count;
+};
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
     size_t max_nodes;
@@ -19,6 +43,8 @@ struct PagedLayoutOptions {
     uint32_t max_container_passes;
     bool right_binding;
     ViewPageSide first_side;
+    const PagedNativeFlowBinding* native_flows;
+    size_t native_flow_count;
 };
 struct PagedLayoutDiagnostic {
     TypesetStatus status;
@@ -29,6 +55,7 @@ struct PagedLayoutDiagnostic {
     uint32_t reference_passes;
     uint32_t container_passes;
     const RadiantSourceOrigin* origin;
+    TypesetSource native_source;
 };
 PagedLayoutOptions paged_layout_options_default();
 TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* options,

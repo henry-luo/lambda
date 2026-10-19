@@ -5169,7 +5169,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (html->display.outer == CSS_VALUE_CONTENTS) {
         html->display.outer = CSS_VALUE_BLOCK;
         html->display.inner = CSS_VALUE_FLOW;
-    }
+    } else html->display = blockify_display(html->display);
 
     bool root_is_form_control = html->form_control() != nullptr;
     if (root_is_form_control) {
