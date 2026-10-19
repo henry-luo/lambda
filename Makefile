@@ -68,6 +68,7 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline --list-build-targets)
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
+PDF_TEST_CONFIG ?= debug_native
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
 # clean baseline run reports a missing executable. The concurrency and Node
@@ -2269,14 +2270,18 @@ build-pdf-render-test: build-lambda-data
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" \
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=$(PDF_TEST_CONFIG) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" \
 		test_pdf_render_visual_gtest
 
 test-pdf-render: build-pdf-render-test
 	@echo "Running PDF render visual gtest suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_pdf_render_visual_gtest.exe" ]; then \
-		./test/test_pdf_render_visual_gtest.exe $(ARGS); \
+		if [ -n "$(strip $(ARGS))" ]; then \
+			./test/test_pdf_render_visual_gtest.exe $(ARGS); \
+		else \
+			node test/test_run.js --include-test=test_pdf_render_visual_gtest; \
+		fi; \
 	else \
 		echo "Error: test/test_pdf_render_visual_gtest.exe not found - run 'make build-pdf-render-test' first"; \
 		exit 1; \

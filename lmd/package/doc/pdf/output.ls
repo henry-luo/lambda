@@ -69,21 +69,74 @@ fn image_data_fragment(image, sequence) map^ {
     }
 }
 
-fn graphic_fragment(ctx) map^ {
-    let graphic = radiant.pdf_graphic(ctx)^;
-    if (graphic.image != null) {
-        let image = image_data_fragment(graphic.image, ctx.sequence)^;
-        if (graphic.matrix == null) image
-        else {*: image, content: <file format:'pdf', "q\n" numbers(graphic.matrix)^ " cm\n" image.content "Q\n">}
-    }
-    else combine([for (index, path_shape in graphic.paths) {
+fn hex_word(value) => [for (factor in [4096, 256, 16, 1])
+    "0123456789ABCDEF"[int(floor(float(value) / factor)) % 16]] |> join("")
+
+fn unicode_hex(codepoint) => if (codepoint < 65536) hex_word(codepoint)
+    else hex_word(55296 + int(floor(float(codepoint - 65536) / 1024))) ++ hex_word(56320 + (codepoint - 65536) % 1024)
+
+fn font_key(glyph) => "F" ++ string(glyph.font.id) ++
+    if (glyph.font.glyph_program) "S" ++ string(int(floor(float(glyph.glyph) / 256))) else ""
+
+fn character_code(character) => if (character.font.glyph_program) slice(hex_word(character.glyph), 2, 4) else hex_word(character.glyph)
+
+fn text_fragment(text, color, sequence, invisible = false) map^ {
+    let hidden = invisible or color.a == 0;
+    let keys = unique([for (glyph in text.glyphs) font_key(glyph)]);
+    let resources = [for (key in keys) {
+        let glyphs = [for (glyph in text.glyphs where font_key(glyph) == key) glyph];
+        {name: key, category: "Font", face: glyphs[0].font, characters: glyphs}
+    }];
+    let commands = <file format:'pdf',
+        if (text.text != null) { "/Span << /ActualText "; radiant.pdf_value(text.text)^; " >> BDC\n" }
+        "BT\n" if (hidden) "3 Tr\n"
+        for (glyph in text.glyphs) {
+            if (glyph.missing != null and not hidden) "3 Tr\n"
+            "/" font_key(glyph) " " util.pdf_num(text.size)^ " Tf\n"
+            // the page uses CSS y-down coordinates; font glyph space is y-up.
+            "1 0 " util.pdf_num(glyph.shear)^ " -1 " numbers([glyph.x, glyph.y])^ " Tm\n<" character_code(glyph) "> Tj\n"
+            if (glyph.missing != null and not hidden) "0 Tr\n"
+        }
+        "ET\n" if (text.text != null) "EMC\n">;
+    // text rendering mode is graphics state and survives ET; an invisible run must not hide later siblings.
+    let painted = combine([if (hidden) fragment(<file format:'pdf', "q\n" commands "Q\n">)
+        else colored(color, "R" ++ string(sequence) ++ "Text", commands)^,
+        for (index, glyph in text.glyphs where glyph.missing != null and not invisible)
+            fill_rect(glyph.missing_color, glyph.missing[0], glyph.missing[1], glyph.missing[2], glyph.missing[3],
+                "R" ++ string(sequence) ++ "Missing" ++ string(index))^]);
+    {*: painted, resources: resources ++ painted.resources}
+}
+
+fn graphic_shapes(shapes, sequence, invisible = false) map^ => combine([for (index, path_shape in shapes) {
+    let resource_key = "R" ++ string(sequence) ++ "P" ++ string(index);
+    if (path_shape.group != null) {
+        let inside = graphic_shapes(path_shape.group, resource_key, invisible)^;
+        {content: "q\n/" ++ resource_key ++ "Alpha gs\n/" ++ resource_key ++ "Form Do\nQ\n",
+            resources: inside.resources ++ [
+                {name: resource_key ++ "Alpha", category: "ExtGState", alpha: path_shape.opacity},
+                {name: resource_key ++ "Form", category: "XObject", form: true, bounds: path_shape.bounds,
+                    content: inside.content, members: inside.resources}]}
+    } else {
         let color = path_shape.color;
-        let commands = <file format:'pdf',
+        let scope = <file format:'pdf',
             for (clip_shape in path_shape.clips) {
                 for (command in clip_shape.commands) path_command(command)^;
                 if (clip_shape.evenodd) "W* n\n" else "W n\n"
             }
-            numbers(path_shape.matrix)^ " cm\n"
+            numbers(path_shape.matrix)^ " cm\n">;
+        if (path_shape.image != null) {
+            let image = image_data_fragment(path_shape.image, resource_key)^;
+            let translucent = path_shape.opacity != 1.0;
+            {content: <file format:'pdf', "q\n" scope
+                if (translucent) "/" ++ resource_key ++ "Alpha gs\n"
+                image.content "Q\n">,
+                resources: image.resources ++ if (translucent)
+                    [{name: resource_key ++ "Alpha", category: "ExtGState", alpha: path_shape.opacity}] else []}
+        } else if (path_shape.text != null) {
+            let text = text_fragment(path_shape.text, color, resource_key, invisible)^;
+            {*: text, content: <file format:'pdf', "q\n" scope text.content "Q\n">}
+        } else {
+        let commands = <file format:'pdf', scope
             if (path_shape.stroke) {
                 numbers([float(color.r) / 255.0, float(color.g) / 255.0, float(color.b) / 255.0])^ " RG\n"
                 util.pdf_num(path_shape.width)^ " w\n" string(path_shape.cap) " J\n" string(path_shape.join) " j\n"
@@ -91,8 +144,19 @@ fn graphic_fragment(ctx) map^ {
             }
             for (command in path_shape.commands) path_command(command)^
             if (path_shape.stroke) "S\n" else if (path_shape.evenodd) "f*\n" else "f\n">;
-        colored(color, "R" ++ string(ctx.sequence) ++ "P" ++ string(index), commands)^
-    }])
+        colored(color, resource_key, commands)^
+        }
+    }
+}])
+
+fn graphic_fragment(ctx) map^ {
+    let graphic = radiant.pdf_graphic(ctx)^;
+    if (graphic.image != null) {
+        let image = image_data_fragment(graphic.image, ctx.sequence)^;
+        let placed = if (graphic.matrix == null) image
+            else {*: image, content: <file format:'pdf', "q\n" numbers(graphic.matrix)^ " cm\n" image.content "Q\n">};
+        combine([placed, graphic_shapes(graphic.texts or [], string(ctx.sequence) ++ "Hidden", true)^])
+    } else graphic_shapes(graphic.paths, ctx.sequence)^
 }
 
 fn draw(event, node, ctx) any^ {
@@ -107,10 +171,7 @@ fn draw(event, node, ctx) any^ {
     else if (event == "fill") fill_rect(ctx.color, ctx.x, ctx.y, ctx.width, ctx.height, "R" ++ string(ctx.sequence))^
     else if (event == "boundary") boundary(node, ctx)^
     else if (event == "text") {
-        let outline = radiant.pdf_glyph_path(ctx)^;
-        if (outline == null) graphic_fragment(ctx)^
-        else colored(ctx.color, "R" ++ string(ctx.sequence),
-            <file format:'pdf', for (command in outline) path_command(command)^ "f\n">)^
+        text_fragment(radiant.pdf_text_run(ctx)^, ctx.color, ctx.sequence)^
     }
     else if (event == "image") image_data_fragment(radiant.pdf_image(ctx)^, ctx.sequence)^
     else if (event == "graphic") graphic_fragment(ctx)^
@@ -143,6 +204,54 @@ fn resource_object(resource, resources, object_number, first_resource) any^ {
     let begin = string(object_number) ++ " 0 obj\n";
     if (resource.category == "ExtGState") (begin, "<< /Type /ExtGState /ca " ++ util.pdf_num(resource.alpha)^ ++
         " /CA " ++ util.pdf_num(resource.alpha)^ ++ " >>\nendobj\n")
+    else if (resource.category == "Font") {
+        if (resource.face.glyph_program) {
+            let characters = resource.characters;
+            (begin, "<< /Type /Font /Subtype /Type3 /FontBBox [" ++ numbers(resource.bbox)^ ++
+                "] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 0 /LastChar 255 /Widths [" ++
+                ([for (code in range(0, 256, 1)) {
+                    let matches = [for (character in characters where character.glyph % 256 == code) character.width];
+                    if (len(matches) > 0) util.pdf_num(matches[0])^ else "0"
+                }] |> join(" ")) ++ "] /Encoding << /Type /Encoding /Differences [" ++
+                ([for (character in characters) string(character.glyph % 256) ++ " /G" ++ string(character.glyph)] |> join(" ")) ++
+                "] >> /CharProcs << " ++ ([for (character in characters) "/G" ++ string(character.glyph) ++ " " ++
+                    reference(resources, resource.name ++ "G" ++ string(character.glyph), first_resource)^] |> join(" ")) ++
+                " >> /Resources << " ++ resource_entries(resource.members, resources, first_resource)^ ++
+                " >> /ToUnicode " ++ reference(resources, resource.name ++ "Unicode", first_resource)^ ++ " >>\nendobj\n")
+        } else {
+        (begin, "<< /Type /Font /Subtype /Type0 /BaseFont /" ++ resource.base_name ++
+            " /Encoding /Identity-H /DescendantFonts [" ++ reference(resources, resource.name ++ "CID", first_resource)^ ++
+            "] /ToUnicode " ++ reference(resources, resource.name ++ "Unicode", first_resource)^ ++ " >>\nendobj\n")
+        }
+    }
+    else if (resource.category == "CIDFont") {
+        let face = resource.face;
+        (begin, "<< /Type /Font /Subtype /" ++ (if (face.cff) "CIDFontType0" else "CIDFontType2") ++
+            " /BaseFont /" ++ resource.base_name ++ " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>" ++
+            " /FontDescriptor " ++ reference(resources, resource.parent ++ "Descriptor", first_resource)^ ++
+            (if (face.cff) "" else " /CIDToGIDMap /Identity") ++ " /DW 1000 /W [" ++
+            ([for (character in resource.characters) string(character.glyph) ++ " [" ++ util.pdf_num(character.width)^ ++ "]"] |> join(" ")) ++
+            "] >>\nendobj\n")
+    }
+    else if (resource.category == "FontDescriptor") {
+        let face = resource.face;
+        (begin, "<< /Type /FontDescriptor /FontName /" ++ resource.base_name ++ " /Flags " ++ string(face.flags) ++
+            " /FontBBox [" ++ numbers(face.bbox)^ ++ "] /Ascent " ++ util.pdf_num(face.ascent)^ ++
+            " /Descent " ++ util.pdf_num(face.descent)^ ++ " /CapHeight " ++ util.pdf_num(face.cap_height)^ ++
+            " /ItalicAngle " ++ util.pdf_num(face.italic_angle)^ ++ " /StemV 80 /" ++ (if (face.cff) "FontFile3" else "FontFile2") ++
+            " " ++ reference(resources, resource.parent ++ "Program", first_resource)^ ++ " >>\nendobj\n")
+    }
+    else if (resource.category == "FontProgram" or resource.category == "ToUnicode" or resource.category == "GlyphProgram" or
+            (resource.category == "XObject" and resource.form)) {
+        let details = if (resource.category == "FontProgram")
+            (if (resource.cff) " /Subtype /OpenType" else " /Length1 " ++ string(resource.original_length))
+            else if (resource.form) " /Type /XObject /Subtype /Form /FormType 1 /BBox [" ++ numbers(resource.bounds)^ ++
+                "] /Group << /S /Transparency /I true /K false /CS /DeviceRGB >> /Resources << " ++
+                resource_entries(resource.members, resources, first_resource)^ ++ " >>"
+            else "";
+        (begin, "<<" ++ details ++ " /Filter /FlateDecode /Length " ++ string(len(resource.bytes)) ++
+            " >>\nstream\n", resource.bytes, "\nendstream\nendobj\n")
+    }
     else if (resource.category == "XObject") {
         let mask = if (resource.mask == null) "" else " /SMask " ++ reference(resources, resource.mask, first_resource)^;
         let dictionary = "<< /Type /XObject /Subtype /Image /Width " ++ string(resource.width) ++
@@ -153,18 +262,20 @@ fn resource_object(resource, resources, object_number, first_resource) any^ {
     else raise error("PDF output: unknown resource category")
 }
 
+fn resource_entries(members, resources, first_resource) string^ => [for (category in ["ExtGState", "XObject", "Font"]) "/" ++ category ++ " << " ++
+    ([for (key in unique([for (resource in members where resource.category == category) resource.name]))
+        "/" ++ key ++ " " ++ reference(resources, key, first_resource)^] |> join(" ")) ++ " >>"] |> join(" ")
+
 fn page_object(page, index, resources, first_resource, annotations, stream_object) any^ {
     let sheet_number = 3 + index * 2;
-    let resource_entries = [for (category in ["ExtGState", "XObject"]) "/" ++ category ++ " << " ++
-        ([for (resource in page.resources where resource.category == category)
-            "/" ++ resource.name ++ " " ++ reference(resources, resource.name, first_resource)^] |> join(" ")) ++ " >>"] |> join(" ");
+    let entries = resource_entries(page.resources, resources, first_resource)^;
     let boxes = if (len(page.boxes) > 0)
         ([for (box in page.boxes) "/" ++ box.name ++ " [" ++ numbers(box.values)^ ++ "]"] |> join(" "))
         else "/MediaBox [0 0 " ++ util.pdf_num(page.width * page.scale)^ ++ " " ++ util.pdf_num(page.height * page.scale)^ ++ "]";
     let annots = [for (annotation in annotations where annotation.page == index) string(annotation.number) ++ " 0 R"] |> join(" ");
     let sheet = string(sheet_number) ++ " 0 obj\n<< /Type /Page /Parent 2 0 R " ++ boxes ++
         (if (page.rotation == null) "" else " /Rotate " ++ string(page.rotation)) ++
-        " /Annots [" ++ annots ++ "] /Resources << " ++ resource_entries ++ " >> /Contents " ++ string(sheet_number + 1) ++ " 0 R >>\nendobj\n";
+        " /Annots [" ++ annots ++ "] /Resources << " ++ entries ++ " >> /Contents " ++ string(sheet_number + 1) ++ " 0 R >>\nendobj\n";
     let stream = string(sheet_number + 1) ++ " 0 obj\n<< /Filter /FlateDecode /Length " ++ string(len(page.content)) ++ " >>\nstream\n";
     if (stream_object) (stream, page.content, "\nendstream\nendobj\n") else sheet
 }
@@ -183,8 +294,57 @@ fn object_parts(index, pages, resources, first_resource, catalog, page_tree, ann
 
 // Resource preparation happens once; measuring and final emission use these exact bytes.
 fn prepared_resource(resource) map^ {
-    if (resource.category == "XObject") {*: resource, bytes: radiant.pdf_deflate(resource.bytes)^}
+    if (resource.form) {*: resource, bytes: radiant.pdf_deflate(binary(resource.content))^}
+    else if (resource.category == "XObject" or resource.category == "FontProgram" or resource.category == "ToUnicode" or resource.category == "GlyphProgram")
+        {*: resource, bytes: radiant.pdf_deflate(resource.bytes)^}
     else resource
+}
+
+fn font_resources(resource) array^ {
+    let face = resource.face;
+    let base_name = [for (character in face.name) {
+        let code = ord(character);
+        if ((code >= 65 and code <= 90) or (code >= 97 and code <= 122) or (code >= 48 and code <= 57) or character == "-") character
+        else "#" ++ slice(hex_word(code), 2, 4)
+    }] |> join("");
+    let characters = [for (glyph in unique([for (character in resource.characters) character.glyph]))
+        [for (character in resource.characters where character.glyph == glyph) character][0]];
+    let mapped = [for (character in characters where character.unicode != null) character];
+    let cmap = <file format:'pdf', "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+        "/CMapName /LambdaUnicode def\n/CMapType 2 def\n1 begincodespacerange\n"
+        if (face.glyph_program) "<00> <FF>\n" else "<0000> <FFFF>\n"
+        "endcodespacerange\n"
+        for (offset in range(0, len(mapped), 100)) {
+            let group = slice(mapped, offset, min(offset + 100, len(mapped)));
+            string(len(group)); " beginbfchar\n";
+            for (character in group) { "<"; character_code(character); "> <"; unicode_hex(character.unicode); ">\n" };
+            "endbfchar\n"
+        }
+        "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n">;
+    let unicode_resource = {name: resource.name ++ "Unicode", category: "ToUnicode", bytes: binary(cmap)};
+    if (face.glyph_program) {
+        let boxes = [for (character in characters) character.program.bbox];
+        let bbox = [min([for (box in boxes) box[0]]), min([for (box in boxes) box[1]]),
+            max([for (box in boxes) box[2]]), max([for (box in boxes) box[3]])];
+        let programs = [for (character in characters) {
+            let key = resource.name ++ "G" ++ string(character.glyph);
+            let image = if (character.program.image != null) image_data_fragment(character.program.image, key)^ else fragment("");
+            let commands = <file format:'pdf', util.pdf_num(character.width)^ " 0 "
+                if (character.program.image != null) "d0\nq\n1 0 0 -1 0 0 cm\n"
+                else { numbers(character.program.bbox)^; " d1\n" }
+                if (character.program.image != null) { image.content; "Q\n" }
+                else { for (command in character.program.commands) path_command(command)^; "f\n" }>;
+            image.resources ++ [{name: key, category: "GlyphProgram", bytes: binary(commands)}]
+        }];
+        let members = [for (program in programs) for (entry in program where entry.category == "XObject") entry];
+        [{*: resource, base_name: base_name, characters: characters, members: members, bbox: bbox}, unicode_resource,
+            for (program in programs) for (entry in program) entry]
+    } else [{*: resource, base_name: base_name, characters: characters},
+        {name: resource.name ++ "CID", parent: resource.name, category: "CIDFont", face: face, base_name: base_name, characters: characters},
+        {name: resource.name ++ "Descriptor", parent: resource.name, category: "FontDescriptor", face: face, base_name: base_name},
+        {name: resource.name ++ "Program", category: "FontProgram", cff: face.cff, original_length: len(face.bytes), bytes: face.bytes},
+        unicode_resource]
 }
 
 // Name-tree keys sort by their decoded PDF string bytes, including UTF-16 surrogate pairs.
@@ -238,9 +398,17 @@ fn document(plan) element^ {
     let source_pages = if (plan.pages == null) [plan] else plan.pages;
     let pages = [for (page in source_pages) {*: page, content: radiant.pdf_deflate(page.content)^,
         resources: [for (resource in page.resources) prepared_resource(resource)^]}];
-    let resources = [for (page in pages) for (resource in page.resources) resource];
+    let contributions = [for (page in pages) for (resource in page.resources) resource];
+    let fonts = [for (key in unique([for (resource in contributions where resource.category == "Font") resource.name])) {
+        let uses = [for (resource in contributions where resource.name == key) resource];
+        {*: uses[0], characters: [for (use in uses) for (character in use.characters) character]}
+    }];
+    let resources = [for (resource in contributions where resource.category != "Font") resource,
+        for (font in fonts) for (resource in font_resources(font)^) prepared_resource(resource)^];
     let first_resource = 3 + 2 * len(pages);
-    let header = "%PDF-1.4\n";
+    // marked-content ActualText requires PDF 1.5; embedded OpenType/CFF requires 1.6.
+    let header = if (any([for (font in fonts) font.face.cff and not font.face.glyph_program])) "%PDF-1.6\n"
+        else "%PDF-1.5\n";
     let first_extra = first_resource + len(resources);
     let links = [for (page_index, page in pages) for (link in page.links) {page: page_index, link: link}];
     let outlines = if (plan.outlines == null) [] else plan.outlines;

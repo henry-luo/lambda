@@ -97,9 +97,20 @@ if (workerCase) {
     data.testsuites[0].testsuite[0] = { name: scenario === 'wrong-case' ? 'Other' : workerCase,
         status: 'RUN', result: scenario === 'skip' ? 'SKIPPED' : 'COMPLETED', time: '0.001s' };
     if (process.env.FAKE_CASE_TRACE_DIR) {
-        const trace = { start: Date.now(), cap: process.env.LAMBDA_TEST_MAX_CONCURRENT, args: process.argv.slice(2) };
+        const trace = { start: Date.now(), cap: process.env.LAMBDA_TEST_MAX_CONCURRENT,
+            cwd: process.cwd(), args: process.argv.slice(2) };
         process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_CASE_TRACE_DIR, workerCase + '.json'),
             JSON.stringify({ ...trace, end: Date.now() })));
+    }
+    if (process.env.FAKE_VERIFY_WORKSPACE) {
+        const scratch = path.join('temp', 'shared-name.txt');
+        fs.writeFileSync(scratch, workerCase);
+        process.on('exit', () => {
+            if (process.cwd() === process.env.FAKE_VERIFY_WORKSPACE ||
+                !fs.existsSync('lambda.exe') || !fs.existsSync('test') ||
+                !fs.readFileSync('lambda.exe').equals(fs.readFileSync(process.env.RADIANT_TEST_EXECUTABLE)) ||
+                fs.readFileSync(scratch, 'utf8') !== workerCase) process.exitCode = 9;
+        });
     }
 }
 if (scenario === 'launches') {
@@ -172,6 +183,34 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
 }
 
 try {
+    check('Selected PDF workers preserve every case and isolate fixed scratch paths', () => {
+        const name = 'test_pdf_render_visual_gtest';
+        fs.writeFileSync(path.join(fixture, name + '.exe'), fake, { mode: 0o755 });
+        const output = path.join(fixture, 'pdf-results');
+        const traces = path.join(fixture, 'pdf-traces');
+        const host = path.join(fixture, 'pdf-host.exe');
+        fs.writeFileSync(host, 'workspace host fixture');
+        fs.mkdirSync(output); fs.mkdirSync(traces);
+        const selected = JSON.parse(invoke(['--include-test=' + name, '--list']).stdout);
+        assert.equal(selected.length, 1);
+        assert.equal(selected[0].baseName, name);
+        assert.equal(selected[0].isolatedCwd, true);
+        const child = invoke(['--include-test=' + name], {
+            LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: output,
+            LAMBDA_PDF_TEST_JOBS: '2', FAKE_TEST: name, FAKE_SCENARIO: 'parallel',
+            FAKE_CASE_TRACE_DIR: traces, FAKE_VERIFY_WORKSPACE: ROOT,
+            RADIANT_TEST_EXECUTABLE: host,
+        });
+        assert.equal(child.status, 0, child.stdout + child.stderr);
+        const data = JSON.parse(fs.readFileSync(path.join(output, name + '_results.json')));
+        assert.equal(data.tests, 4); assert.equal(data.failures, 0);
+        const cases = fs.readdirSync(traces).map(file => JSON.parse(fs.readFileSync(path.join(traces, file))));
+        assert.equal(cases.length, 4);
+        const directories = new Set(cases.map(item => item.cwd));
+        assert.equal(directories.size, 2);
+        assert.ok([...directories].every(directory => directory.startsWith(path.join(ROOT, 'temp') + path.sep)));
+        for (const directory of directories) fs.rmSync(directory, { recursive: true, force: true });
+    });
     check('Radiant inventory includes every baseline phase', () => {
         const selected = new Set(inventory.map(t => t.baseName));
         for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
@@ -455,9 +494,11 @@ try {
         assert.equal(peak, ceiling, `peak reserved workers: ${peak}`);
         assert.ok(parallelPeak <= ceiling);
         if (ceiling >= 5) {
-            const light = rows.find(row => row.name === 'test_rdt_vector_gtest');
-            assert.ok(rows.some(row => ['test_ui_automation_gtest', 'test_radiant_view_gtest'].includes(row.name) &&
-                row.start < light.end && light.start < row.end));
+            // slots are reserved during discovery too; short jobs may finish before the first case starts.
+            const pools = summary.level2_c_tests;
+            const light = pools.find(row => row.test === 'test_rdt_vector_gtest');
+            assert.ok(pools.some(row => ['test_ui_automation_gtest', 'test_radiant_view_gtest'].includes(row.test) &&
+                row.start_ms < light.end_ms && light.start_ms < row.end_ms));
         }
         const graphics = rows.find(row => row.name === 'test_map_gtest');
         assert.ok(rows.filter(row => row !== graphics).every(row => row.end <= graphics.start));

@@ -6,6 +6,7 @@
 #include "../../lib/font/font_glyf.h"
 #include "../../lib/font/font_tables.h"
 #include "../../lib/font/font_math.h"
+#include "../../lib/font/font_export.h"
 #include "../../lib/endian.h"
 #include "../../lib/arena.h"
 #include "../../lib/hashmap_helpers.h"
@@ -59,6 +60,70 @@ TEST_F(FontMathTest, MissingMathIsAnOrdinaryFontCapability) {
     ASSERT_NE(tables, nullptr);
     EXPECT_EQ(math.data, nullptr);
     EXPECT_NE(font_tables_get_hmtx(tables), nullptr);
+}
+
+TEST_F(FontMathTest, ExportsOwnedStandaloneFontWithValidChecksumAndGlyphMetrics) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    FontHandle handle = {}; handle.tables = tables;
+    FontExport exported = {}; const char* error = nullptr;
+    ASSERT_TRUE(font_export_face(&handle, &exported, &error)) << (error ? error : "");
+    EXPECT_NE(exported.bytes, bytes);
+    uint32_t checksum = 0;
+    for (size_t offset = 0; offset < exported.length; offset += 4) checksum += read_be32(exported.bytes + offset);
+    EXPECT_EQ(checksum, 0xB1B0AFBAu);
+    FontTables* reopened = font_tables_open(exported.bytes, exported.length, pool);
+    ASSERT_NE(reopened, nullptr);
+    uint16_t glyph = cmap_lookup(font_tables_get_cmap(tables), 'W');
+    EXPECT_EQ(cmap_lookup(font_tables_get_cmap(reopened), 'W'), glyph);
+    EXPECT_FLOAT_EQ(font_export_glyph_width(&handle, glyph),
+        1000.0f * hmtx_get_advance(font_tables_get_hmtx(tables), glyph) / font_tables_get_head(tables)->units_per_em);
+    EXPECT_EQ(font_export_italic_shear(&handle), 0);
+    handle.slant = FONT_SLANT_ITALIC;
+    EXPECT_FLOAT_EQ(font_export_italic_shear(&handle), FONT_SYNTHETIC_ITALIC_SHEAR);
+    font_tables_close(reopened, pool);
+    font_export_free(&exported);
+}
+
+TEST_F(FontMathTest, CompleteEmbeddingHonorsPermissionsAndTableExtents) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    FontHandle handle = {}; handle.tables = tables;
+    Os2Table* os2 = font_tables_get_os2(tables); ASSERT_NE(os2, nullptr);
+    FontExport exported = {}; const char* error = nullptr;
+    os2->fs_type = 2;
+    EXPECT_FALSE(font_export_face(&handle, &exported, &error));
+    EXPECT_EQ(exported.bytes, nullptr);
+    os2->fs_type = 0x100; // complete embedding remains valid when subsetting is forbidden.
+    ASSERT_TRUE(font_export_face(&handle, &exported, &error));
+    font_export_free(&exported);
+    // native-instance conversion emits selected glyph programs, so it cannot ignore no-subsetting.
+    uint32_t tag = tables->dirs[0].tag;
+    tables->dirs[0].tag = FONT_TAG('f','v','a','r');
+    EXPECT_FALSE(font_export_face(&handle, &exported, &error));
+    tables->dirs[0].tag = tag;
+    tables->dirs[0].offset = UINT32_MAX;
+    EXPECT_FALSE(font_export_face(&handle, &exported, &error));
+    EXPECT_EQ(exported.bytes, nullptr);
+}
+
+TEST_F(FontMathTest, ExtractsCollectionFaceWithStandaloneOffsets) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    size_t length = tables->data_len;
+    uint8_t* collection = (uint8_t*)calloc(1, length + 32); ASSERT_NE(collection, nullptr);
+    memcpy(collection, "ttcf", 4); write_be32(collection + 4, 0x00010000);
+    write_be32(collection + 8, 1); write_be32(collection + 12, 32);
+    memcpy(collection + 32, bytes, length);
+    for (uint16_t i = 0; i < tables->num_tables; i++) {
+        uint8_t* offset = collection + 32 + 12 + (size_t)i * 16 + 8;
+        write_be32(offset, read_be32(offset) + 32);
+    }
+    FontTables* face = font_tables_open_face(collection, length + 32, 0, pool); ASSERT_NE(face, nullptr);
+    FontHandle handle = {}; handle.tables = face;
+    FontExport exported = {}; const char* error = nullptr;
+    ASSERT_TRUE(font_export_face(&handle, &exported, &error)) << (error ? error : "");
+    FontTables* reopened = font_tables_open(exported.bytes, exported.length, pool); ASSERT_NE(reopened, nullptr);
+    EXPECT_EQ(cmap_lookup(font_tables_get_cmap(reopened), 'W'), cmap_lookup(font_tables_get_cmap(tables), 'W'));
+    font_tables_close(reopened, pool); font_tables_close(face, pool);
+    font_export_free(&exported); free(collection);
 }
 
 TEST_F(FontMathTest, ReadsGlyphVariantsAndConnectors) {

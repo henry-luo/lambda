@@ -141,8 +141,8 @@ not a Lambda document ABI (D7.4.4, D7.4.5v2).
 `render_pdf.cpp` now contains no PDF operator/object writer. The retired
 `lib/pdf_writer.c` and its HPDF-compatible API/header have been removed after
 caller migration. Streams use real Flate compression; Lambda writes metadata,
-links, destinations, outlines and page labels. Glyph outlines preserve selected
-font appearance; searchable font embedding/ToUnicode is separate scope.
+links, destinations, outlines and page labels. Text uses selected embedded
+fonts, positioned glyph codes and ToUnicode; see §4.4 for the text policy.
 
 | Responsibility | Proposed owner |
 |---|---|
@@ -254,6 +254,36 @@ Use precise `RootFrame`/`Rooted` ownership for retained Lambda values and
 trace callbacks for retained Item edges, following **D5.3.3–D5.3.4**. A GC
 root for a wrapper alone does not keep a separate native arena alive: the
 session must own or pin that lifetime explicitly.
+
+### 4.4 Searchable PDF text (USER, 2026-10-18)
+
+Ordinary text uses PDF text-show operators. Affine translation, rotation,
+skew, scale and per-glyph placement remain text; deformation that PDF matrices
+cannot represent may use outlines. Logical Unicode is retained independently
+of painted glyph order. ToUnicode maps character codes and ActualText preserves
+logical sequences where glyph identity alone is ambiguous.
+
+Radiant supplies selected faces and final placement through its shared glyph
+visitor. Lambda writes font dictionaries, widths, Unicode maps, text operators
+and streams under **S2.6.6v3 / D2.6.12v3**. Complete static TrueType faces are
+embedded, with collection faces rebuilt as standalone SFNT programs.
+CFF/OpenType uses the matching font type and PDF 1.6. Native, variable and
+color/bitmap formats use generated Type 3 font programs: glyph descriptions
+belong to the font, while page content continues to use text-show operators.
+Type 3 resources use 256-code banks and are shared across pages.
+
+Font snapshots own their bytes. Isolated SVG font contexts remain owned until
+export retirement; retained handles release before their contexts
+(**D4.5.1v4 / D5.3.3**). Embedding permissions are checked before preparing
+font programs. Subsetting is a later size optimization.
+
+Simple opacity groups are PDF transparency forms containing text. Raster-only
+effects retain invisible text alongside their visual image. Direct text and
+glyphs inside decorated graphic resources share the serializer. Continuous
+solid-fill SVG text is retained before display-list lowering erases its identity.
+
+Remaining coverage: complex SVG paint/filter combinations, warped-outline
+replacement text, and paged flow's independent omission of inline SVG boxes.
 
 ## 5. The file content MarkBuilder
 

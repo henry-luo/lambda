@@ -2448,6 +2448,7 @@ struct LambdaDemo {
 // one catalog drives both command lookup and the list of launchable demos.
 static const LambdaDemo LAMBDA_DEMOS[] = {
     {"tetris", "test/demo/tetris/tetris.ls"},
+    {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
     {"photo", "test/demo/photo/photo.ls"},

@@ -664,6 +664,14 @@ protected:
         if (body) *body = region;
         return region ? page_sequence("native") : nullptr;
     }
+    DomElement* provider_flow(const char* css = "size:200px 100px;margin:10px", DomElement** master = nullptr) {
+        DomElement* body = nullptr;
+        DomElement* sequence = body_column_sequence(css, nullptr, &body);
+        if (master) *master = body ? body->parent_element() : nullptr;
+        DomElement* flow = sequence ? page_control("r:flow", sequence) : nullptr;
+        return flow && flow->set_attribute("region-name", "body") &&
+            flow->set_attribute("style", "orphans:1;widows:1") ? flow : nullptr;
+    }
     DomElement* page_column(DomElement* body, const char* width, const char* height = "100%",
             const char* x = "0", const char* y = "0") {
         DomElement* column = page_control("r:column", body);
@@ -12473,6 +12481,33 @@ TEST_F(SecondaryViewTest, NativeSpaceRangesPackToFitAndRestoreAcrossPageTrials) 
     }
 }
 
+TEST_F(SecondaryViewTest, PagedFlowShrinksSpacesAcrossClosedSiblingsWithoutGrowingAnEmptyPage) {
+    stylesheet("@page{size:200px 100px;margin:10px}p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* wrapper = block(nullptr); ASSERT_NE(wrapper, nullptr);
+    DomElement* first = block("First", nullptr, "div", wrapper); ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(first->set_attribute("r:space-after.minimum", "10px"));
+    ASSERT_TRUE(first->set_attribute("r:space-after.optimum", "30px"));
+    ASSERT_TRUE(first->set_attribute("r:space-after.maximum", "40px"));
+    DomElement* second = block("Second", nullptr, "div", wrapper); ASSERT_NE(second, nullptr);
+    DomElement* last = block("Last", nullptr, "div", wrapper); ASSERT_NE(last, nullptr);
+    for (const char* display : {"block", "flow-root"}) {
+        SCOPED_TRACE(display);
+        ASSERT_TRUE(wrapper->set_attribute("style", display[0] == 'b' ? "display:block" : "display:flow-root"));
+        ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+        PagedLayoutOptions options = paged_layout_options_default(); options.max_pages = 1;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        LayoutViewNode* outer = source_fragment(tree, wrapper, VIEW_FRAGMENT_BODY, true);
+        LayoutViewNode* middle = source_fragment(tree, second, VIEW_FRAGMENT_BODY, true);
+        LayoutViewNode* tail = source_fragment(tree, last, VIEW_FRAGMENT_BODY, true);
+        ASSERT_NE(outer, nullptr); ASSERT_NE(middle, nullptr); ASSERT_NE(tail, nullptr);
+        EXPECT_FLOAT_EQ(outer->rect.height, 80.0f);
+        EXPECT_FLOAT_EQ(middle->rect.y, 50.0f); EXPECT_FLOAT_EQ(tail->rect.y, 70.0f);
+        for (DomElement* box : {first, second, last}) expect_source_range_coverage(tree, box->first_child);
+    }
+}
+
 TEST_F(SecondaryViewTest, NativeSpaceStacksPreserveEmptyAncestorsAndNamespaceAliases) {
     stylesheet("@page { size: 200px 160px; margin: 10px } p, div { margin: 0; font: 10px/20px Arial; orphans: 1; widows: 1 }");
     ASSERT_TRUE(source->set_attribute("xmlns:pub", RADIANT_PAGE_NAMESPACE));
@@ -13786,6 +13821,314 @@ TEST_F(SecondaryViewTest, ColumnAndPageAvoidanceAndKeepsUseTheirOwnBoundaryDomai
         expect_source_range_coverage(tree, a->first_child); expect_source_range_coverage(tree, b->first_child);
         EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
     }
+}
+
+struct PagedProviderFixture {
+    NativeFragmentFixture* owner;
+    TypesetFlowProvider provider;
+    TypesetContribution contributions[16];
+    size_t count, position, checkpoints, restores, reads, break_calls;
+    bool stuck, fail_restore;
+    size_t force_before;
+    size_t prefer_before;
+};
+static TypesetStatus paged_provider_next(void* context, const TypesetResume* cursor,
+        TypesetContribution* contribution, TypesetResume* next) {
+    PagedProviderFixture* fixture = (PagedProviderFixture*)context;
+    if (cursor->serial >= fixture->count) return TYPESET_DONE;
+    fixture->reads++; *contribution = fixture->contributions[cursor->serial];
+    *next = *cursor; if (!fixture->stuck) next->serial++;
+    fixture->position = next->serial;
+    return TYPESET_OK;
+}
+static TypesetStatus paged_provider_checkpoint(void* context, const TypesetResume* cursor, TypesetResume* saved) {
+    ((PagedProviderFixture*)context)->checkpoints++; *saved = *cursor; return TYPESET_OK;
+}
+static TypesetStatus paged_provider_restore(void* context, const TypesetResume* saved, TypesetResume* restored) {
+    PagedProviderFixture* fixture = (PagedProviderFixture*)context;
+    fixture->restores++; fixture->position = saved->serial; *restored = *saved;
+    return fixture->fail_restore ? TYPESET_STALE : TYPESET_OK;
+}
+static TypesetStatus paged_provider_material(void* context, const TypesetContribution* contribution,
+        const TypesetLineCandidate* line, size_t index, ViewNativeMaterial* material, RdtLogicalRect* rect) {
+    if (index) return TYPESET_DONE;
+    PagedProviderFixture* fixture = (PagedProviderFixture*)context;
+    *material = native_fragment_material(fixture->owner);
+    material->source = contribution->source; material->start = line->first; material->length = line->next - line->first;
+    material->glyph_run = lam::up((const PaintGlyphRun*)&fixture->owner->run);
+    *rect = {0, 0, line->width, line->height};
+    return TYPESET_OK;
+}
+static TypesetStatus paged_provider_break(void* context, const PagedNativeBreakCandidate* candidate, TypesetBreak* boundary) {
+    PagedProviderFixture* fixture = (PagedProviderFixture*)context; fixture->break_calls++;
+    if (candidate->source.node == fixture->force_before) {
+        boundary->legality = TYPESET_BREAK_FORCED; boundary->scope = TYPESET_BREAK_PAGE;
+    }
+    if (candidate->source.node == fixture->prefer_before) boundary->penalty = -25;
+    return TYPESET_OK;
+}
+static PagedNativeFlowBinding paged_provider_binding(PagedProviderFixture* fixture,
+        NativeFragmentFixture* owner, DomElement* flow, size_t count) {
+    fixture->owner = owner; fixture->count = count;
+    fixture->provider = {owner->exact.provider, 5, fixture, paged_provider_next, paged_provider_checkpoint, paged_provider_restore};
+    for (size_t i = 0; i < count; i++) {
+        TypesetContribution& contribution = fixture->contributions[i]; contribution.kind = TYPESET_CONTRIBUTION_BOX;
+        contribution.source = native_fragment_material(owner).source; contribution.source.node = i + 1;
+        contribution.metrics = {40, 20, 0, 15, {0, 0, 40, 20}, lam::up((const TypesetRecord*)&owner->exact)};
+    }
+    return {flow, &fixture->provider, {owner->exact.provider, 5, 0, {}},
+        {owner, native_fragment_retain, native_fragment_release}, fixture, paged_provider_material, paged_provider_break};
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterSharesPageFlowAndRetainsPaintAfterProviderAndSourceReset) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}r\\:flow{orphans:1;widows:1}");
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    NativeFragmentFixture* owner = native_fragment_fixture(); ASSERT_NE(owner, nullptr);
+    native_fragment_paint_fixture(owner); owner->run.x = 0; owner->run.baseline_y = 15; owner->run.count = owner->run.text_len = 1;
+    PagedProviderFixture fixture = {}; PagedNativeFlowBinding binding = paged_provider_binding(&fixture, owner, flow, 8);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    PagedLayoutDiagnostic diagnostic = {}; ViewTree* tree = secondary();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(fixture.position, 0u); EXPECT_GT(fixture.restores, 0u);
+    for (size_t i = 0; i < 8; i++) {
+        TypesetSource id = fixture.contributions[i].source;
+        const ViewNodeState* native = view_tree_native_state(tree, &id); ASSERT_NE(native, nullptr);
+        ASSERT_EQ(native->occurrence_count, 1u); LayoutViewNode* node = native->first_occurrence;
+        EXPECT_EQ(node->source.address, nullptr); EXPECT_EQ(occurrence_page(node), i / 4 + 1);
+        EXPECT_FLOAT_EQ(node->rect.x, 10); EXPECT_FLOAT_EQ(node->rect.y, 10.0f + 20.0f * static_cast<float>(i % 4));
+        EXPECT_EQ(node->native_material->metrics.exact.get(), &owner->exact);
+    }
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 2); ASSERT_NE(expected, nullptr);
+    size_t ink = 0;
+    for (size_t y = 0; y < static_cast<size_t>(expected->height); y++) for (size_t x = 0; x < static_cast<size_t>(expected->width); x++) {
+        Color color = {snapshot_pixel(expected, x, y)};
+        if (color.b > color.r && color.b > color.g) ink++;
+    }
+    EXPECT_GT(ink, 20u);
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture.position, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(owner);
+    ImageSurface* actual = render_secondary_page_snapshot(retained, 2); ASSERT_NE(actual, nullptr);
+    expect_same_surface_pixels(expected, actual); image_surface_destroy(expected); image_surface_destroy(actual);
+    ASSERT_TRUE(create_dir("temp/paged-media-impl"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(retained, "temp/paged-media-impl/native-adapter-retained.pdf"));
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterRewindsForcedBreaksStaleStreamsAndNestedProviders) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    NativeFragmentFixture* owners[] = {native_fragment_fixture(), native_fragment_fixture()};
+    ASSERT_NE(owners[0], nullptr); ASSERT_NE(owners[1], nullptr); owners[1]->exact.provider++;
+    PagedProviderFixture parent = {}, child = {};
+    PagedNativeFlowBinding bindings[] = {paged_provider_binding(&parent, owners[0], flow, 2),
+        paged_provider_binding(&child, owners[1], nullptr, 3)};
+    parent.contributions[0].kind = TYPESET_CONTRIBUTION_NESTED; parent.contributions[0].nested = &child.provider;
+    parent.force_before = 2;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = bindings; options.native_flow_count = 2;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_GT(parent.break_calls, 0u);
+    const ViewNodeState* tail = view_tree_native_state(tree, &parent.contributions[1].source); ASSERT_NE(tail, nullptr);
+    EXPECT_EQ(occurrence_page(tail->first_occurrence), 2u); EXPECT_EQ(parent.position, 0u); EXPECT_EQ(child.position, 0u);
+    const TypesetStatus expected[] = {TYPESET_NO_PROGRESS, TYPESET_STALE, TYPESET_INVALID};
+    for (size_t mode = 0; mode < 3; mode++) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree));
+        child.stuck = mode == 0; child.fail_restore = mode == 1;
+        if (mode == 2) { child.contributions[0].kind = TYPESET_CONTRIBUTION_NESTED; child.contributions[0].nested = &child.provider; }
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), expected[mode]);
+        EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u);
+        EXPECT_EQ(parent.position, 0u); EXPECT_EQ(child.position, 0u);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    for (NativeFragmentFixture* owner : owners) { EXPECT_EQ(ref_count_get(&owner->references), 1); native_fragment_release(owner); }
+}
+
+static size_t paged_provider_alternatives(const TypesetParagraph* paragraph, size_t first,
+        float width, TypesetLineCandidate* lines, size_t capacity, void*) {
+    size_t count = paragraph->count - first > 1 ? 2 : 1;
+    if (capacity < count) return count;
+    for (size_t i = 0; i < count; i++) {
+        lines[i] = {}; lines[i].first = lines[i].paint_first = first;
+        lines[i].next = lines[i].paint_end = first + i + 1;
+        lines[i].width = width; lines[i].height = 20; lines[i].baseline = 15; lines[i].cost = static_cast<double>(i);
+        lines[i].solution = lam::up((const TypesetRecord*)&((NativeFragmentFixture*)paragraph->context)->exact);
+    }
+    return count;
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterPreservesProducerLineChoiceAndCanonicalSourceIntervals) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    NativeFragmentFixture* owner = native_fragment_fixture(); ASSERT_NE(owner, nullptr);
+    PagedProviderFixture fixture = {}; PagedNativeFlowBinding binding = paged_provider_binding(&fixture, owner, flow, 1);
+    TypesetItem items[6] = {};
+    TypesetParagraph paragraph = {items, 6, 20, paged_provider_alternatives, typeset_choose_lowest_cost, owner};
+    paragraph.max_alternatives = 2;
+    fixture.contributions[0].kind = TYPESET_CONTRIBUTION_PARAGRAPH; fixture.contributions[0].paragraph = &paragraph;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool furthest : {false, true}) {
+        SCOPED_TRACE(furthest); ASSERT_TRUE(view_tree_model_reset(tree));
+        paragraph.choose = furthest ? typeset_choose_furthest_line : typeset_choose_lowest_cost;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, furthest ? 1u : 2u); EXPECT_EQ(fixture.position, 0u);
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture.contributions[0].source); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, furthest ? 3u : 6u);
+        size_t next = 0;
+        for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+            EXPECT_EQ(node->text_start, next); next += node->text_length;
+            EXPECT_EQ(node->native_material->solution.get(), &owner->exact);
+            EXPECT_FLOAT_EQ(node->rect.width, 180);
+        }
+        EXPECT_EQ(next, 6u);
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); paragraph.max_alternatives = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(fixture.position, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(ref_count_get(&owner->references), 1);
+    native_fragment_release(owner);
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterUsesOrderedVerticalGlueAndHonorsForbiddenPageBoundaries) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    NativeFragmentFixture* owner = native_fragment_fixture(); ASSERT_NE(owner, nullptr);
+    PagedProviderFixture fixture = {}; PagedNativeFlowBinding binding = paged_provider_binding(&fixture, owner, flow, 5);
+    for (size_t i : {1u, 2u}) {
+        fixture.contributions[i].kind = TYPESET_CONTRIBUTION_GLUE;
+        fixture.contributions[i].glue = {15, 10, 10, 0, static_cast<uint8_t>(i == 2 ? 2 : 0), true, true};
+    }
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.max_pages = 1; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    const ViewNodeState* middle = view_tree_native_state(tree, &fixture.contributions[3].source);
+    const ViewNodeState* last = view_tree_native_state(tree, &fixture.contributions[4].source);
+    ASSERT_NE(middle, nullptr); ASSERT_NE(last, nullptr);
+    EXPECT_FLOAT_EQ(middle->first_occurrence->rect.y, 50); EXPECT_FLOAT_EQ(last->first_occurrence->rect.y, 70);
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    fixture.contributions[0].kind = TYPESET_CONTRIBUTION_GLUE;
+    fixture.contributions[0].glue = {200, 10, 10, 2, 2, true, true};
+    fixture.contributions[5] = fixture.contributions[0]; fixture.contributions[5].source.node = 6; fixture.count = 6;
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 1u);
+    middle = view_tree_native_state(tree, &fixture.contributions[3].source); ASSERT_NE(middle, nullptr);
+    // the entire leading conditional run vanishes, including the two smaller glue contributions.
+    EXPECT_FLOAT_EQ(middle->first_occurrence->rect.y, 10);
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    binding = paged_provider_binding(&fixture, owner, flow, 5); fixture.prefer_before = 3; options.max_pages = 10;
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    const ViewNodeState* preferred = view_tree_native_state(tree, &fixture.contributions[2].source); ASSERT_NE(preferred, nullptr);
+    EXPECT_EQ(occurrence_page(preferred->first_occurrence), 2u); EXPECT_FLOAT_EQ(preferred->first_occurrence->rect.y, 10);
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture.count = 3;
+    fixture.prefer_before = 0;
+    for (size_t i = 0; i < 3; i++) {
+        fixture.contributions[i].kind = TYPESET_CONTRIBUTION_BOX; fixture.contributions[i].metrics.height = 30;
+        fixture.contributions[i].boundary = {TYPESET_BREAK_FORBIDDEN, TYPESET_BREAK_PAGE, 0, 0};
+    }
+    options.max_pages = 10;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_FALSE(tree->model->committed); EXPECT_EQ(fixture.position, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(owner);
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterBindsNativeMarksAndForwardTargetsThroughReferenceReplay) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}"
+        ".reference::before{content:target-counter(url(#native-target),page)}");
+    DomElement* reference = block(nullptr); ASSERT_NE(reference, nullptr);
+    ASSERT_TRUE(reference->set_attribute("class", "reference"));
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    ASSERT_TRUE(source->DomNode::remove_child(reference));
+    ASSERT_TRUE(flow->parent->insert_before(reference, flow));
+    NativeFragmentFixture* owner = native_fragment_fixture(); ASSERT_NE(owner, nullptr);
+    PagedProviderFixture fixture = {}; PagedNativeFlowBinding binding = paged_provider_binding(&fixture, owner, flow, 7);
+    TypesetMark mark = {TYPESET_MARK_NATIVE, "chapter", fixture.contributions[4].source, "Native chapter",
+        lam::up((const TypesetRecord*)&owner->exact), 0, false};
+    TypesetTarget target = {"native-target", fixture.contributions[5].source, 0, lam::up((const TypesetRecord*)&owner->exact)};
+    fixture.contributions[4].kind = TYPESET_CONTRIBUTION_MARK; fixture.contributions[4].mark = &mark;
+    fixture.contributions[5].kind = TYPESET_CONTRIBUTION_TARGET; fixture.contributions[5].target = &target;
+    binding.targets = &target; binding.target_count = 1;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_GE(diagnostic.reference_passes, 2u); EXPECT_EQ(fixture.position, 0u);
+    const TypesetTarget* found = layout_secondary_target(tree, "native-target"); ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->page_number, 2u); EXPECT_EQ(found->source.provider, target.source.provider);
+    EXPECT_EQ(found->source.generation, 5u); EXPECT_EQ(found->value.get(), &owner->exact);
+    const TypesetMark* chapter = layout_secondary_mark(tree, TYPESET_MARK_NATIVE, "chapter", 2, TYPESET_MARK_FIRST);
+    ASSERT_NE(chapter, nullptr); EXPECT_STREQ(chapter->text, "Native chapter"); EXPECT_EQ(chapter->value.get(), &owner->exact);
+    ASSERT_NE(source_glyph_text(tree, reference, "2"), nullptr);
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(owner);
+    found = layout_secondary_target(retained, "native-target"); ASSERT_NE(found, nullptr); EXPECT_EQ(found->page_number, 2u);
+    chapter = layout_secondary_mark(retained, TYPESET_MARK_NATIVE, "chapter", 2, TYPESET_MARK_FIRST);
+    ASSERT_NE(chapter, nullptr); EXPECT_STREQ(chapter->text, "Native chapter");
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterRepeatsStaticProvidersWithoutChangingBodyOrBorrowingTheirWorkspace) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* master = nullptr;
+    DomElement* flow = provider_flow("size:200px 100px;margin:20px", &master); ASSERT_NE(flow, nullptr); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "before", "head", "20px"), nullptr);
+    DomElement* header = static_content(flow->parent_element(), "head"); ASSERT_NE(header, nullptr);
+    NativeFragmentFixture* owners[] = {native_fragment_fixture(), native_fragment_fixture()};
+    for (NativeFragmentFixture* owner : owners) { ASSERT_NE(owner, nullptr); native_fragment_paint_fixture(owner); owner->run.x = 0; owner->run.baseline_y = 15; owner->run.count = owner->run.text_len = 1; }
+    owners[1]->exact.provider++;
+    PagedProviderFixture body = {}, head = {};
+    PagedNativeFlowBinding bindings[] = {paged_provider_binding(&body, owners[0], flow, 5),
+        paged_provider_binding(&head, owners[1], header, 1)};
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = bindings; options.native_flow_count = 2;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(head.position, 0u); EXPECT_EQ(body.position, 0u); EXPECT_GE(head.reads, 2u);
+    const ViewNodeState* repeated = view_tree_native_state(tree, &head.contributions[0].source); ASSERT_NE(repeated, nullptr);
+    ASSERT_EQ(repeated->occurrence_count, 2u);
+    uint32_t page = 1;
+    for (LayoutViewNode* node = repeated->first_occurrence; node; node = node->next_occurrence) {
+        EXPECT_EQ(node->role, VIEW_FRAGMENT_STATIC); EXPECT_EQ(occurrence_page(node), page++);
+        EXPECT_FLOAT_EQ(node->rect.height, 20); EXPECT_EQ(node->glyph_run->font.get(), &owners[1]->box);
+    }
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(retained, 1); ASSERT_NE(expected, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); head.count = 2; head.contributions[1] = head.contributions[0];
+    head.contributions[0].boundary = {TYPESET_BREAK_FORCED, TYPESET_BREAK_PAGE, 0, 0};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_FALSE(tree->model->committed); EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(head.position, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); for (NativeFragmentFixture* owner : owners) native_fragment_release(owner);
+    ImageSurface* actual = render_secondary_page_snapshot(retained, 1); ASSERT_NE(actual, nullptr);
+    expect_same_surface_pixels(expected, actual); image_surface_destroy(expected); image_surface_destroy(actual);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, NativeAdapterWidowsRespectProducerForbiddenAndForcedBoundaries) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial}");
+    DomElement* flow = provider_flow(); ASSERT_NE(flow, nullptr);
+    ASSERT_TRUE(flow->set_attribute("style", "orphans:2;widows:2"));
+    NativeFragmentFixture* owner = native_fragment_fixture(); ASSERT_NE(owner, nullptr);
+    PagedProviderFixture fixture = {}; PagedNativeFlowBinding binding = paged_provider_binding(&fixture, owner, flow, 5);
+    fixture.contributions[2].boundary = {TYPESET_BREAK_FORBIDDEN, TYPESET_BREAK_PAGE, 0, 0};
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool forced : {false, true}) {
+        SCOPED_TRACE(forced); ASSERT_TRUE(view_tree_model_reset(tree)); fixture.force_before = forced ? 5 : 0;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u);
+        for (size_t i = 0; i < 5; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture.contributions[i].source); ASSERT_NE(state, nullptr);
+            EXPECT_EQ(occurrence_page(state->first_occurrence), i < (forced ? 4u : 2u) ? 1u : 2u);
+        }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(owner);
 }
 
 TEST_F(SecondaryViewTest, NativeFragmentsRetainExactSourcesThroughNestedRollbackAndGenerationLeases) {
@@ -16616,6 +16959,20 @@ static const char* paged_flow_table_css =
 // P3 gate: a table breaks between rows; its header group repeats at the top of
 // each continuation and its footer group closes each fragment right below the
 // last body row, the footer's own occurrence ending the table; body rows occur once
+TEST_F(SecondaryViewTest, PagedFlowBlockifiesInlineRootsBeforeFragmentingTheirChildren) {
+    stylesheet("@page{size:200px 100px;margin:10px}p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    ASSERT_TRUE(source->set_attribute("style", "display:inline"));
+    DomElement* first = block("A\nB\nC\nD"); ASSERT_NE(first, nullptr);
+    DomElement* last = block("E\nF\nG\nH"); ASSERT_NE(last, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    LayoutViewNode* tail = source_glyph_text(tree, last->first_child, "H"); ASSERT_NE(tail, nullptr);
+    EXPECT_EQ(occurrence_page(tail), 2u);
+    expect_source_range_coverage(tree, first->first_child); expect_source_range_coverage(tree, last->first_child);
+}
+
 TEST_F(SecondaryViewTest, PagedFlowBreaksTablesBetweenRowsAndRepeatsTheirGroups) {
     StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
     strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s", paged_flow_table_css);

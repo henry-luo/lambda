@@ -10,6 +10,7 @@ const { finished: streamFinished } = require('stream');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { createWorkspace } = require('./test_workspace.js');
 
 // ─── CLI argument parsing ──────────────────────────────────────────────────────
 
@@ -18,18 +19,19 @@ let targetSuite = '';
 let excludeSuite = '';
 let targetCategory = '';
 let excludeTests = new Set();
+let includeTests = new Set();
 let rawOutput = false;
 let parallelExecution = true;
 let inputResultsFile = '';
 let listTests = false;
 let listBuildTargets = false;
 
-function addExcludedTests(value) {
+function addSelectedTests(target, value) {
     if (!value) return;
     for (const name of value.split(',')) {
         const trimmed = name.trim();
         if (trimmed) {
-            excludeTests.add(trimmed.replace(/\.exe$/, ''));
+            target.add(trimmed.replace(/\.exe$/, ''));
         }
     }
 }
@@ -40,8 +42,10 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--target')            targetSuite = args[++i];
     else if (arg.startsWith('--exclude-target=')) excludeSuite = arg.split('=')[1];
     else if (arg === '--exclude-target')    excludeSuite = args[++i];
-    else if (arg.startsWith('--exclude-test=')) addExcludedTests(arg.substring('--exclude-test='.length));
-    else if (arg === '--exclude-test')       addExcludedTests(args[++i]);
+    else if (arg.startsWith('--exclude-test=')) addSelectedTests(excludeTests, arg.substring('--exclude-test='.length));
+    else if (arg === '--exclude-test')       addSelectedTests(excludeTests, args[++i]);
+    else if (arg.startsWith('--include-test=')) addSelectedTests(includeTests, arg.substring('--include-test='.length));
+    else if (arg === '--include-test')       addSelectedTests(includeTests, args[++i]);
     else if (arg.startsWith('--category=')) targetCategory = arg.split('=')[1];
     else if (arg === '--category')          targetCategory = args[++i];
     else if (arg.startsWith('--input-results=')) inputResultsFile = arg.split('=').slice(1).join('=');
@@ -56,6 +60,7 @@ for (let i = 0; i < args.length; i++) {
   --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
   --exclude-target=S   Exclude tests from specified suite (e.g. jube)
   --exclude-test=NAME  Exclude test executable base name (repeatable or comma-separated)
+  --include-test=NAME  Select test executable base name (repeatable or comma-separated)
   --category=CAT       Run only tests from specified category (baseline, extended)
   --raw                Show raw test output without formatting
   --sequential         Run tests sequentially (default: parallel)
@@ -373,6 +378,7 @@ function discoverTests(config) {
                     caseWorkers: t.case_workers || 1,
                     caseWorkersEnv: t.case_workers_env,
                     caseWorkerArgs: t.case_worker_args || [],
+                    isolatedCwd: t.isolated_cwd === true,
                     artifactDirs: t.artifact_dirs || [],
                     workerSlots: t.worker_slots || t.case_workers || 1,
                     workerSlotsEnv: t.worker_slots_env || t.case_workers_env,
@@ -424,6 +430,7 @@ function filterTests(tests) {
     if (targetSuite)    result = result.filter(t => t.suite === targetSuite);
     if (excludeSuite)   result = result.filter(t => t.suite !== excludeSuite);
     if (excludeTests.size) result = result.filter(t => !excludeTests.has(t.baseName));
+    if (includeTests.size) result = result.filter(t => includeTests.has(t.baseName));
     if (targetCategory) result = result.filter(t => t.category === targetCategory);
     return result;
 }
@@ -571,7 +578,7 @@ function runTest(testInfo) {
     const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT,
         testInfo.allocatedSlots || MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
     if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
-        !process.env.GTEST_TOTAL_SHARDS && caseWorkers > 1) {
+        !process.env.GTEST_TOTAL_SHARDS && (caseWorkers > 1 || testInfo.isolatedCwd)) {
         return runGtestCases(testInfo, caseWorkers);
     }
     return new Promise((resolve) => {
@@ -595,6 +602,8 @@ function runTest(testInfo) {
             return;
         }
 
+        const cwd = testInfo.cwd || (testInfo.isolatedCwd && !testInfo.listCases
+            ? createWorkspace(ROOT_DIR, `${path.basename(exePath, '.exe')}-`) : undefined);
         const log = fs.createWriteStream(logFile);
         let logError = null;
         const finish = result => {
@@ -620,7 +629,7 @@ function runTest(testInfo) {
         const existingAsan = env.ASAN_OPTIONS || '';
         env.ASAN_OPTIONS = existingAsan ? `${existingAsan}:detect_container_overflow=0` : 'detect_container_overflow=0';
 
-        let command = `./${path.relative(ROOT_DIR, exePath)}`;
+        let command = cwd ? exePath : `./${path.relative(ROOT_DIR, exePath)}`;
         let spawnArgs = testArgs;
 
         if (testInfo.runner === 'node') {
@@ -674,7 +683,7 @@ function runTest(testInfo) {
         }
 
         const child = spawn(command, spawnArgs, {
-            cwd: ROOT_DIR,
+            cwd: cwd || ROOT_DIR,
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: !IS_WINDOWS,
@@ -867,10 +876,11 @@ async function runGtestCases(testInfo, workers) {
         (previousTimes.get(b.name) || 0) - (previousTimes.get(a.name) || 0));
     let next = 0;
     async function worker() {
+        const cwd = testInfo.isolatedCwd ? createWorkspace(ROOT_DIR, `${baseName}-`) : undefined;
         while (next < names.length) {
             const { name, index } = queue[next++];
             const workerName = `${baseName}_cases/${index}`;
-            const result = await runTest({ ...testInfo, baseName: workerName, caseWorker: true,
+            const result = await runTest({ ...testInfo, cwd, baseName: workerName, caseWorker: true,
                 minimumPassed: 0, allocatedSlots: 1,
                 env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
                 runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${name}`] });
@@ -884,6 +894,7 @@ async function runGtestCases(testInfo, workers) {
                 `${rows[0].suite}.${rows[0].tc.name}` === name;
             const tc = valid ? rows[0].tc : { name: caseName, classname: suiteName, time: '0s',
                 status: 'RUN', result: 'COMPLETED' };
+            if (cwd) tc.workspace = cwd;
             // a missing, mismatched or crashing child fails its discovered case, even with passing JSON.
             if (!valid || result.failed) {
                 if (!Array.isArray(tc.failures) || !tc.failures.length) {
@@ -1304,6 +1315,8 @@ function displayResults(config, results, durationMs) {
             details: e.details || '', suites: e.subResults || [],
             log_file: e.logFile || '',
             duration_ms: e.durationMs || 0,
+            start_ms: e.startMs,
+            end_ms: e.endMs,
             worker_slots: e.testInfo.allocatedSlots || 1,
             captured_case_duration_ms: e.capturedCaseDurationMs || 0,
             launch_timings: e.launchTimings || [],

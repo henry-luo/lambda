@@ -804,7 +804,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         // share the missing-glyph geometry with offscreen text captures.
                         Rect rect = render_text_missing_glyph_rect(&rdcon->font, x / s, y / s, scaled_space_width / s);
                         rect.x *= s; rect.y *= s; rect.width *= s; rect.height *= s;
-                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, render_text_missing_glyph_color().c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         x += scaled_space_width;
                     }
                     else {
@@ -1011,11 +1011,16 @@ static void decoration_fill_rect(TextDecorationPaintContext* context, Rect* rect
 }
 
 static bool decoration_record_path(TextDecorationPaintContext* context, RdtPath* path,
-        Color color, float stroke_width, bool clip) {
+        Color color, float stroke_width, bool clip, const RdtMatrix* placement = nullptr) {
     if (context->failed) return false;
     if (context->raster) {
         int count = context->raster->dl ? context->raster->dl->item_count() : 0;
         const RdtMatrix* transform = render_state_current_transform(context->raster);
+        RdtMatrix combined;
+        if (placement) {
+            combined = transform ? rdt_matrix_multiply(transform, placement) : *placement;
+            transform = &combined;
+        }
         if (clip) rc_push_clip(context->raster, path, transform);
         else if (stroke_width > 0) rc_stroke_path(context->raster, path, color, stroke_width,
             RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, transform);
@@ -1025,19 +1030,19 @@ static bool decoration_record_path(TextDecorationPaintContext* context, RdtPath*
     }
     if (context->display) {
         int count = context->display->item_count();
-        if (clip) dl_push_clip(context->display, path, nullptr);
+        if (clip) dl_push_clip(context->display, path, placement);
         else if (stroke_width > 0) dl_stroke_path(context->display, path, color, stroke_width,
-            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
-        else dl_fill_path(context->display, path, color, RDT_FILL_WINDING, nullptr);
+            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, placement);
+        else dl_fill_path(context->display, path, color, RDT_FILL_WINDING, placement);
         if (context->display->item_count() != count + 1) context->failed = true;
         return false;
     }
     int index = paint_list_count(context->paint);
     PaintOp operation = clip ? PAINT_PUSH_CLIP : stroke_width > 0 ? PAINT_STROKE_PATH : PAINT_FILL_PATH;
-    if (clip) paint_push_clip(context->paint, path, nullptr);
+    if (clip) paint_push_clip(context->paint, path, placement);
     else if (stroke_width > 0) paint_stroke_path(context->paint, path, color, stroke_width,
-        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
-    else paint_fill_path(context->paint, path, color, RDT_FILL_WINDING, nullptr);
+        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, placement);
+    else paint_fill_path(context->paint, path, color, RDT_FILL_WINDING, placement);
     // vector commands outlive the recorder; transfer each shape before its caller releases scratch.
     // paint_push_clip already owns its clone; fill/stroke commands require transfer.
     bool recorded = paint_list_count(context->paint) == index + 1;
@@ -1405,7 +1410,7 @@ static int collect_skip_ink_gaps(TextDecorationPaintContext* context, unsigned c
 
 static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, uint32_t color,
         SkipInkGap* gaps, int gap_count, RdtPath* decoration = nullptr,
-        float stroke_width = 0.0f) {
+        float stroke_width = 0.0f, const RdtMatrix* placement = nullptr) {
     RdtPath* clip = decoration ? rdt_path_new() : nullptr;
     if (decoration && !clip) {
         context->failed = true;
@@ -1441,7 +1446,7 @@ static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, 
         // clip the complete pattern so skipping ink never restarts its dash or wave phase.
         bool owns_clip = clip && decoration_record_path(context, clip, Color{}, 0, true);
         if (!context->failed)
-            owns_decoration = decoration_record_path(context, decoration, Color{color}, stroke_width, false);
+            owns_decoration = decoration_record_path(context, decoration, Color{color}, stroke_width, false, placement);
         if (clip && !context->failed) {
             if (context->raster) {
                 int count = context->raster->dl ? context->raster->dl->item_count() : 0;
@@ -1544,7 +1549,10 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
 
     bool styled = deco_style == CSS_VALUE_DASHED || deco_style == CSS_VALUE_DOTTED ||
         deco_style == CSS_VALUE_DOUBLE || deco_style == CSS_VALUE_WAVY;
-    RdtPath* path = styled ? render_path_create_decoration(&rect, deco_style) : nullptr;
+    // flatten patterns in local coordinates so placement cannot change subdivision rounding.
+    Rect local = {0, 0, rect.width, rect.height};
+    RdtMatrix placement = rdt_matrix_translate(rect.x, rect.y);
+    RdtPath* path = styled ? render_path_create_decoration(&local, deco_style) : nullptr;
     if (styled && !path) {
         context->failed = true;
         log_error("[TEXT_DECO_GAPS] cannot allocate decoration pattern");
@@ -1556,8 +1564,8 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
         float left, top, right, bottom;
         if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
             // gap masks select horizontal intervals; integer vertical edges retain the stroke antialias coverage.
-            ink_band.y = top - stroke_width * .5f;
-            float bottom_edge = bottom + stroke_width * .5f;
+            ink_band.y = rect.y + top - stroke_width * .5f;
+            float bottom_edge = rect.y + bottom + stroke_width * .5f;
             if (context->raster || context->display) {
                 ink_band.y = floorf(ink_band.y);
                 bottom_edge = ceilf(bottom_edge);
@@ -1579,9 +1587,9 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
         } else {
             int count = collect_skip_ink_gaps(context, str, text_rect,
                 ink_band.y, ink_band.y + ink_band.height, thickness, gaps);
-            owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, gaps, count, path, stroke_width);
+            owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, gaps, count, path, stroke_width, &placement);
         }
-    } else owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, nullptr, 0, path, stroke_width);
+    } else owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, nullptr, 0, path, stroke_width, &placement);
     if (!owns_path) rdt_path_free(path);
 
 }
@@ -1894,6 +1902,7 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     run->color = color;
     run->text = lam::up((const char*)content);
     run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    run->logical_text_offset = reverse_clusters ? run->text_len + 1 : 0;
     // vector targets name the selected face; a missing handle keeps the authored family.
     run->font_family = lam::up(font_box_handle(font)
         ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());

@@ -1,6 +1,6 @@
 # Paged layout integration: one layout engine, breaks as the only paged step
 
-**Status:** implementation in progress, started 2026-10-14. P1–P5 have focused flow gates; native/FO integration (P6) and removal (P7) have also started. The current tree has removed the item engine and its `RADIANT_PAGED_ENGINE=legacy` selector, the region trial engine and the external page policy. Earlier §9 entries describe their historical state. The obsolete secondary selector/container replay, item budgets and frame/table paint fallbacks are now removed too. P2 retains shared boundary/inline paint and per-sheet fixed geometry; P3 separates caption wrappers from painted grids. Remaining paint combinations, the native-provider adapter, test migration and aggregate/release gates stay open; the latest §9 entry records current evidence. This plan supersedes the engine-level direction of the P4 "resumable main flow" milestone recorded in [Radiant_Impl_Paged_Media](Radiant_Impl_Paged_Media.md); the page-box level, the page model and the output contracts recorded there stay.
+**Status (2026-10-18):** the two remaining paged export failures are closed and the P6 core native-provider adapter is implemented. All 500 paged cases and 124 reuse cases pass. P7 qualification has run against completed PDF commit `9cce7697b` plus these paged changes: full PDF, baseline raster equivalence, performance and size gates remain open. The current receipts and measured limits are at the start of §9. The item engine and its `RADIANT_PAGED_ENGINE=legacy` selector, region trial engine, external page policy, secondary selector/container replay, item budgets and frame/table paint fallbacks remain removed. Earlier dated §9 entries are historical evidence, not the current backlog. This plan supersedes the engine-level direction of the P4 "resumable main flow" milestone recorded in [Radiant_Impl_Paged_Media](Radiant_Impl_Paged_Media.md); the page-box level, page model and output contracts recorded there stay.
 **Design authority:** [Radiant_Layout_Paged_Media §1.3](../radiant/Radiant_Layout_Paged_Media.md#13-design-principle-2026-10-14-paged-layout-is-normal-layout-with-breaks) (the principle this plan implements), §3.2, §5 and §11 for the page model.
 **Formal linkage:** D4.5.1v4 and D4.1.4v5 (ownership of published editions and retained pages), D7.1.4v2 (headless profile). No formal ruling defines Radiant page layout; the vibe design doc is the authority for this plan.
 
@@ -243,6 +243,184 @@ The user ruled on the three open questions the same day; §4 records each ruling
 4. (2026-10-15) A split table cell keeps its `vertical-align` and applies it to each of its slices on its own, as the item engine did and the [design doc](../radiant/Radiant_Layout_Paged_Media.md) describes ("split cells align each consumed slice with its visible decoration edges"). CSS Fragmentation 3 and CSS Tables 3 leave the placement of a fragmented cell's content undefined. §9 (P3) records the implementation.
 
 ## 9. Progress record
+
+### Active completion plan (2026-10-18)
+
+1. **Paged exports:** diagnose and close
+   `PagedMarkdownPaginatesCollapsedTablesAndUnbreakableCodeThroughItsLoader`
+   and `FoAndNativePageControlsSharePreviewAndPhysicalPdfPages`. Preserve
+   source coverage, physical page geometry and exact FO/native output parity;
+   change an obsolete expectation only with independent evidence. Use the two
+   export cases and focused shared-layout controls during implementation.
+2. **P6 native adapter:** consume replayable `TypesetFlowProvider` material
+   through ordinary page-flow hooks, retain producer line alternatives and
+   implement the replacement break-candidate contract. Acceptance covers
+   boxes/paragraphs, replay and failure, nested/source identities, retained
+   paint and producer break decisions. Published resources remain edition-owned
+   under **D4.5.1v4 / D4.1.4v5**; the retired page-policy engine stays removed.
+3. **P7 qualification:** run the complete paged/reuse, Radiant and PDF gates
+   after implementation stabilizes, then measure optimized paged-corpus timing
+   against an available provenance-matched frozen release baseline and report
+   actual source sizes. Preserve independent failures and unavailable platform
+   or baseline evidence as explicit qualification limits. Update current
+   support documentation from delivered behavior.
+
+Continuation relayout, float deferral, column balancing and flex/grid row breaks
+remain the separate §7 backlog. Keep one milestone active; broaden verification
+at its boundary instead of rerunning aggregate gates in the edit loop.
+
+**Export milestone complete:** both original process export cases pass, including
+the full FO/native preview and physical-PDF pair inventory. Generated document
+roots now use the shared display blockification rule before fragmentation.
+Markdown retains its one actual stylesheet rather than reading three entries
+from a one-entry array. Flexible-space shrinking updates the cursor of the
+ordinary flow box, independently of BFC ownership, eliminating phantom trailing
+sheets in the flow-trait/property-binding fixtures. The native sheet-keep oracle
+now omits inter-element formatting whitespace: its inherited preserved linefeeds
+had made that input different from the FO translator's element-only flow. Its
+authored block linefeeds and exact image comparisons remain. New inline-root
+and closed-sibling shrinking regressions pass; the complete paged runner passes
+493/493. Receipts: `temp/paged_completion_exports_before.xml`,
+`paged_completion_exports_final.xml`, `paged_completion_native_exports.xml` and
+`paged_completion_stage1.xml`. Ownership still follows **D4.5.1v4 / D4.1.4v5**.
+
+**P6 core adapter complete:** `PagedNativeFlowBinding` binds replayable native
+providers to empty body or static flow controls, with nested-only registrations.
+Boxes and producer-selected paragraph alternatives enter the shared line/strut
+journal; a pure `break_candidate` callback ranks legal boundaries with signed
+costs and forced/forbidden tags. Widow repair respects forbidden boundaries and
+preserves forced breaks even at an exact natural page edge. Ordered native glue
+uses the common glue packer; conditional discarded glue has no residual shrink
+capacity. Native marks and declared forward targets participate in reference
+replay. Every enumeration exit restores the canonical provider cursor. Static
+providers use independent measurement records and repeat without growing body
+extent. Published glyph/image/exact/solution records retain the producer owner
+through the existing edition material API (**D4.5.1v4 / D4.1.4v5**).
+
+Seven adapter acceptance cases cover these behaviors, stale streams, nested
+providers, rollback and paint after provider/source teardown. The complete
+paged gate passes **500/500**; reuse passes **124/124**. Receipts:
+`temp/paged_completion_adapter_gate_final.xml`, the paged component of
+`temp/paged_completion_radiant_native.log`, and
+`temp/paged_debug_run/temp/qualify_view_reuse_retry.xml`. Native insertion/float
+contributions and static mark/target events receive explicit diagnostics; a
+complete TeX frontend/output routine remains future work. Existing DOM notes and
+page floats continue through their shared reservation paths.
+
+**P7 functional receipts (2026-10-18):** the native-access Radiant aggregate
+completed with 6,051 cases: 5,657 pass, 235 fail, 158 accepted partial and one
+skip. Another task replaced `lambda.exe` during the run; failed launches include
+`No such file or directory`. The affected components were replayed with frozen
+executables, and all **235 failing case identities** pass. The CSS syntax gate's
+minimum of 25 passes is also satisfied by 38 passes. The raw aggregate and the
+identity reconciliation remain separate receipts in
+`temp/paged_completion_radiant_native_summary.json` and
+`temp/paged_completion_qualification.json`.
+
+| Follow-up gate | Result |
+|---|---|
+| Paged media, aggregate component | 500 pass |
+| Retained view reuse | 124 pass |
+| Viewer, including gameplay/GC and native scenes | 210 pass |
+| Page loading | 111 pass |
+| WPT input events | 20 pass, 12 skip |
+| WPT CSS syntax | 38 pass, 6 skip |
+| CSS cascade memory, original fixture location | 1 pass |
+
+The frozen-tree CSS memory failure was path-dependent accounting, rather than a
+paged allocation regression: 21 extra source-URI bytes across 412 declaration
+payloads add exactly 8,652 bytes. The frozen executable uses 381,630 bytes in
+that directory and 372,978 at the original fixture path, within the unchanged
+373,940-byte limit. Reverting just this task's paged sources in a second frozen
+debug build reproduces the overrun at its longer path too. The unchanged native
+gate passes from the original location with executable replacement monitoring
+(`temp/paged_completion_css_memory_root.json`). Integer-cast lint and strict
+module-boundary validation pass. These receipts cover macOS; ASan and other
+platforms are not claimed by this run.
+
+The completed PDF-text commit `9cce7697b` also has a final native-access Radiant
+aggregate receipt: **5,891 pass / 158 accepted partial / one skip / one
+page-load timeout** of 6,051, including **500/500 paged cases**. Bootstrap's
+15-second timeout passes three independent reruns (8.1, 7.6 and 7.4 seconds),
+following Developer Guide §7.4; the separate 111-case page-load replay above also
+passes. Its preserved summary is
+`temp/paged_completion_radiant_final_summary.json`; the independent timeout
+controls are recorded in `Radiant_Impl_PDF_Text.md`. The final PDF and optimized
+candidate were refreshed to that completed commit before their qualification.
+Integer-cast lint and module-boundary validation were repeated successfully for
+the completed tree (`temp/paged_completion_lint_committed.log` and
+`temp/paged_debug_run/temp/qualify_module_boundary_final.log`).
+
+**PDF gate at P7 (2026-10-18):** **280 pass / 30 fail** of 310. Both original paged export
+failures pass, including all 53 FO/native preview and physical-PDF pairs. Of the
+remaining failures, 21 identities were already present in the earlier full PDF
+baseline; nine additional identities also fail in a control build with only
+this task's paged changes removed. The intermediate PDF snapshot had one more
+failure (`EffectsRetainOverflowingGlyphAndDecorationInk`), repaired by the
+completed PDF commit. The obsolete outline-only Unicode assertion is among the
+remaining failures after searchable PDF text was introduced. This is a red full
+output gate, not a release approval. Final receipt:
+`temp/paged_debug_run/temp/qualify_pdf_render_visual.xml`; controls:
+`temp/paged_debug_control/temp/qualify_pdf_control.xml`. The identity inventory
+and control comparison are in `temp/paged_completion_qualification.json`.
+
+**PDF follow-up (2026-10-19):** the complete output gate now passes **314/314**,
+with no skips. Shared export fixes and corrected independent controls close all
+30 failures above; the four existing WebGL modes are separately scheduled and
+one intrinsic-image geometry control was added. Frozen optimized host/harness
+runs measure **633.38 → 184.24 seconds** with four isolated case workers.
+The fixes, companion-corpus reference correction and qualification receipts are
+recorded in [the PDF text implementation follow-up](Radiant_Impl_PDF_Text.md#export-correctness-and-runtime-follow-up-2026-10-19).
+This closes the PDF gate; the separate paged raster-equivalence, composition
+performance and source-size qualifications below remain open.
+
+**Optimized release measurement:** both hosts built with
+`make build-release-compile` (`NDEBUG`, `-O3`, thin LTO); candidate source and
+executable hashes are recorded. The comparison release was reconstructed from
+`git archive 1a9921fe9` with the same installed dependencies: the original
+captured release artifact was unavailable. The actual inventory is **113
+inputs**, including the old paged fixtures, old cheatsheet and a generated
+300-page HTML document. Three alternating samples use the existing
+`RADIANT_VIEW_TIMING_PATH` composition metric; end-to-end CLI times are also
+retained. These are macOS measurements under the recorded host load.
+
+| Release control | Baseline → candidate | Assessment |
+|---|---|---|
+| Exact native preview pixels | 7/113 equal | baseline raster equivalence remains open |
+| Physical sheet geometry | 110/113 equal | two page-count changes and one rejected old SVG resource |
+| Composition, 110 geometry-matched cases / 637 pages | 2.677 → 3.380 ms/page | 0.792× speedup; about 26% slower; descriptive because pixels differ |
+| Composition, seven pixel-equal cases / 21 pages | 3.042 → 4.833 ms/page | 0.629× speedup; the ≥2× target is missed |
+| 300-page document | 0.614 → 0.323 s | 1.90×; pixel differences prevent an equivalence claim |
+| Cheatsheet | 1.222 → 0.174 s, 21 → 22 pages | excluded from geometry/equivalence aggregates |
+
+The old SVG outlines glyphs while the candidate emits text elements, so SVG
+text-node hashes are not a cross-version content oracle. Native PNG controls
+therefore compare decoded pixels for every full preview. The 300-page whole
+preview uses 1/8 scale, with additional full-density page 1/150/300 controls;
+all three samples differ. The other geometry changes are
+`paged_media_column_rules.rpd` (3 → 4 sheets) and rejection of the archived
+prefixed external SVG used by `paged_media_graphics_namespaces.fo`. That old
+resource differs from the unprefixed resource in the current fixture; it was
+kept unchanged for this comparison. The detailed differences need independent
+reference classification; they are not all asserted to be regressions.
+Receipts and scripts: `temp/paged_release/qualification.json`, `qualify.py`,
+`raster_controls.py` and `raster/`. Intermediate measurements remain explicitly
+separate as `intermediate_qualification.json`.
+
+**Actual source size:** the four audited files shrink **10,528 → 8,766 lines**
+(−1,762), excluding additional shared-layout changes. `layout_paged.cpp` is
+**7,181**, rather than the estimated ≈3,400. `view_tree_css.cpp` is 1,332,
+`typeset.cpp` 253 and `typeset_regions.cpp` is removed (baseline 179).
+The ≈−5,500 net estimate is not achieved. These are raw source counts; no
+blank/comment-line deletion or formatting reduction was used. Full inventory:
+`temp/paged_release/source_sizes.json`.
+
+**P7 remains open:** resolve the full PDF gate, classify/correct independent
+raster differences, meet or explicitly revise the release performance/size
+targets, and qualify remaining platform/reference scope. Inline SVG replaced
+publication is also incomplete in the PDF-text fixture. The core P6 adapter is
+delivered; its documented native auxiliary limits and the separate §7 feature
+extensions remain outside that profile.
 
 ### 2026-10-14: P1 hooks, P2 publication for the CSS flow, P0 gates
 

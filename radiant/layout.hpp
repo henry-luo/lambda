@@ -2308,6 +2308,7 @@ typedef struct BlockContext {
     float balance_wrap_width;   // inline measure used for text-wrap-style: balance
 
     lam::Up<struct BlockContext> parent;
+    lam::Up<ViewBlock> flow_box; // cursor owner, including blocks that do not establish a BFC
     lam::Up<ViewBlock> establishing_element;
     bool is_bfc_root;
 
@@ -4541,6 +4542,7 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // a line that crosses the fragmentainer end moves to the next one (with its
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
+bool paged_native_layout(LayoutContext* lycon, ViewBlock* block);
 void paged_line_start(LayoutContext* lycon, ViewBlock* block);
 void paged_line_metrics(LayoutContext* lycon);
 bool paged_line_keep(LayoutContext* lycon, DomNode* node);

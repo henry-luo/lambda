@@ -24,7 +24,8 @@ pub fn pdf_num(n) string^ {
     let value = float(n);
     if (value != value or value == inf or value == -inf) raise error("PDF output requires finite numbers")
     else {
-        let text = string(value);
+        // string() uses six significant digits; PDF geometry requires round-trip numbers (S2.6.6v3).
+        let text = format(value, 'json')^;
         let parts = split(replace(text, "E", "e"), "e");
         if (len(parts) == 1) text
         else {

@@ -52,6 +52,18 @@ static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
 static thread_local int g_svg_resource_stack_depth = 0;
 static thread_local RasterRenderContext* g_svg_active_rdcon = nullptr;
 
+struct SvgExportText {
+    int begin, end;
+    PaintGlyphRun run;
+};
+struct SvgExportTextCapture {
+    Arena* arena;
+    DisplayList* target;
+    lam::ArrayList<SvgExportText> runs{MEM_CAT_RENDER};
+    lam::ArrayList<FontContext*>* contexts;
+};
+static thread_local SvgExportTextCapture* g_svg_export_text = nullptr;
+
 struct SvgImageResolverEntry {
     Element* svg_root;
     Item pdf_root;
@@ -5684,6 +5696,47 @@ static void svg_text_draw_style(SvgTextLayout* layout, int style_index, bool fit
         svg_text_draw_style_content(layout, style_index, fitted, scale_glyphs);
 }
 
+// replace only the recorded ink span; clips, groups and paint order stay native.
+struct SvgExportTextScope {
+    SvgExportTextCapture* capture = nullptr;
+    size_t index = 0;
+    SvgExportTextScope(SvgTextLayout* layout, SvgTextRun* source, const RdtMatrix* matrix) {
+        SvgInlineRenderContext* ctx = layout->ctx;
+        SvgExportTextCapture* owner = g_svg_export_text;
+        if (!owner || owner->target != ctx->dl.get() || source->paint_warped || source->color_bitmap ||
+                ctx->fill_none || !ctx->stroke_none ||
+                (ctx->fill_paint.kind != SVG_PAINT_COLOR && ctx->fill_paint.kind != SVG_PAINT_CURRENT_COLOR)) return;
+        const SvgTextStyle* style = &layout->styles[source->style];
+        FontStyleDesc descriptor = svg_text_font_descriptor(style, source->font->family);
+        FontHandle* face = font_resolve(ctx->font_ctx, &descriptor);
+        if (!face) return;
+        FontProp* prop = (FontProp*)arena_calloc(owner->arena, sizeof(FontProp));
+        char* text = (char*)arena_alloc(owner->arena, source->len + 1);
+        if (!prop || !text || source->len > INT_MAX) { font_handle_release(face); return; }
+        memcpy(text, layout->chars->str + source->start, source->len); text[source->len] = 0;
+        prop->font_handle = lam::counted(face); prop->font_size = style->font_size;
+        prop->family = lam::up(arena_strdup(owner->arena, source->font->family));
+        prop->font_weight_numeric = style->font_weight;
+        prop->font_style = style->font_slant == FONT_SLANT_ITALIC ? CSS_VALUE_ITALIC : CSS_VALUE_NORMAL;
+        SvgExportText record = {}; record.begin = ctx->dl->item_count();
+        record.run.captured_font = {lam::up(prop), style->font_size}; record.run.has_captured_font = true;
+        record.run.text = lam::up((const char*)text);
+        record.run.text_len = (int)source->len; // INT_CAST_OK: validated SVG UTF-8 run byte length.
+        record.run.font_size = style->font_size; record.run.x = source->x; record.run.baseline_y = source->y;
+        record.run.color = ctx->fill_color;
+        record.run.color.a = clamp_byte_round((float)record.run.color.a * ctx->fill_opacity * ctx->opacity);
+        RdtMatrix stretch = rdt_matrix_scale(source->glyph_scale_x, 1.0f);
+        stretch.e13 = source->x * (1.0f - source->glyph_scale_x);
+        record.run.transform = rdt_matrix_multiply(matrix, &stretch); record.run.has_transform = true;
+        index = owner->runs.size();
+        if (!owner->runs.push_back(record)) { font_handle_release(face); return; }
+        capture = owner;
+    }
+    ~SvgExportTextScope() {
+        if (capture) capture->runs[index].end = capture->target->item_count();
+    }
+};
+
 static void svg_text_draw_style_content(SvgTextLayout* layout, int style_index,
     bool fitted, bool scale_glyphs) {
     SvgInlineRenderContext* ctx = layout->ctx;
@@ -5704,6 +5757,7 @@ static void svg_text_draw_style_content(SvgTextLayout* layout, int style_index,
         const char* text = layout->chars->str + run->start;
         if (style->hidden || run->path_hidden || !run->font || run->glyph_scale_x <= 0.0f || str_all(text, run->len, str_is_space)) continue;
         RdtMatrix matrix = run->paint_warped ? ctx->transform : svg_text_run_transform(run, &ctx->transform);
+        SvgExportTextScope text_scope(layout, run, &matrix);
         RdtPath* path = run->paint_path;
         if (svg_text_can_paint_native(layout, run, &matrix) &&
             svg_text_draw_bitmap_glyph(layout, run, &matrix, true)) {
@@ -7639,7 +7693,11 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     }
 
     if (!shared_style) svg_style_destroy(&local_style);
-    if (isolated_fonts) font_context_destroy(isolated_fonts);
+    if (isolated_fonts) {
+        if (g_svg_export_text && g_svg_export_text->target == dl && g_svg_export_text->contexts)
+            g_svg_export_text->contexts->push_back(isolated_fonts);
+        else font_context_destroy(isolated_fonts);
+    }
     scratch_restore(resource_scratch, resource_mark);
     if (pushed_source) svg_resource_stack_pop(source_path);
 }
@@ -7799,19 +7857,37 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
 }
 
 bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
-    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback) {
+    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback, bool preserve_text,
+    lam::ArrayList<FontContext*>* retained_fonts) {
     if (!subscene || !subscene->svg_root || !consumer) return false;
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.export.vector");
     if (!arena) return false;
     DisplayList dl = {}; dl_init(&dl, arena);
+    Arena* text_arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.export.text");
+    if (!text_arena) { dl_destroy(&dl); mem_arena_destroy(arena); return false; }
+    SvgExportTextCapture captured; captured.arena = text_arena; captured.target = &dl;
+    lam::ArrayList<FontContext*> local_fonts{MEM_CAT_RENDER};
+    captured.contexts = retained_fonts ? retained_fonts : &local_fonts;
+    struct CaptureScope {
+        SvgExportTextCapture* previous;
+        ~CaptureScope() { g_svg_export_text = previous; }
+    } capture_scope = {g_svg_export_text};
+    if (preserve_text) g_svg_export_text = &captured;
     PaintSvgSubscene logical = *subscene; logical.raster_scale = 1;
     render_svg_record_subscene(&logical, &dl, true);
+    g_svg_export_text = capture_scope.previous;
     PaintList paint = {};
     bool valid = dl_validate_or_log(&dl, "svg_export_vector");
     // resolved image pixels feed the paint list until the consumer has run
     ImageSurfaceReadScope read_scope;
     // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
+    size_t text_index = 0;
     for (int i = 0; valid && i < dl.item_count(); i++) {
+        while (text_index < captured.runs.size() && captured.runs[text_index].end <= i) text_index++;
+        if (text_index < captured.runs.size() && captured.runs[text_index].begin == i) {
+            const SvgExportText& text = captured.runs[text_index++];
+            paint_glyph_run(&paint, &text.run); i = text.end - 1; continue;
+        }
         const DisplayItem& item = dl.data()[i];
         switch (item.op) {
         case DL_FILL_RECT: {
@@ -7897,7 +7973,13 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
             image_surface_destroy(surface);
         }
     }
-    paint_list_destroy(&paint); dl_destroy(&dl); mem_arena_destroy(arena);
+    paint_list_destroy(&paint); dl_destroy(&dl);
+    // selected faces retire before their arena-backed font props.
+    for (size_t i = 0; i < captured.runs.size(); i++)
+        font_handle_release(font_box_handle(paint_glyph_run_font(&captured.runs[i].run)));
+    for (size_t i = 0; i < local_fonts.size(); i++) font_context_destroy(local_fonts[i]);
+    mem_arena_destroy(text_arena);
+    mem_arena_destroy(arena);
     return ok;
 }
 
