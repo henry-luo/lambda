@@ -221,10 +221,36 @@ pub fn encode_report(image, options = {}) map^ {
         notes: if (format in ['psd', "psd"]) ["opacity and mask default round to 8 bits",
             "source blocks are rewritten; opaque source metadata is not copied"] else []}}
 }
-pub fn render_region(image, rect, options = {}) element^ => crop(render_frame(image, options)^, rect)^
+pub fn render_region(image, rect, options = {}) element^ =>
+    render_frame(image,{*:checked_options(options,["frame"])^,rect:rect})^
 pub fn sample(raster, x, y) array^ => read_region(raster, [x, y, x + 1, y + 1])^[0, 0]
 
 pub fn transform(raster, options) element^ => adjust(raster, options)^
 pub fn rotate(raster, quarter_turns) element^ => transform(raster, {turns: quarter_turns})^
 pub fn flip(raster, horizontal = true, vertical = false) element^ =>
     transform(raster, {flip_x: horizontal, flip_y: vertical})^
+
+// S9.2.2: coverage and paint return immutable rasters with shared untouched tiles.
+fn edit_samples(raster,operation,options={}) any^ {
+    if (not (options is map) or any([for (key,value in options) string(key) == "op"]))
+        raise error("image: edit options must be a map without an op override")
+    else lambda.sys.image_edit(raster,{op:operation,*:options})^
+}
+pub fn selection(width,height,options) element^ =>
+    edit_samples(null,"shape",{*:checked_options(options,["shape","start","end","points"])^,width:width,height:height})^
+pub fn combine_coverage(coverage,other,mode="replace") element^ => edit_samples(coverage,"combine",{other:other,mode:mode})^
+pub fn invert_coverage(coverage) element^ => edit_samples(coverage,"invert")^
+pub fn feather_coverage(coverage,radius) element^ => edit_samples(coverage,"feather",{radius:radius})^
+pub fn coverage_bounds(coverage) any^ => edit_samples(coverage,"bounds")^
+pub fn coverage_overlay(coverage) element^ => edit_samples(coverage,"overlay")^
+pub fn paint_stroke(raster,options) element^ => edit_samples(raster,"stroke",options)^
+pub fn paint_fill(raster,options) element^ => edit_samples(raster,"fill",options)^
+pub fn gradient(raster,options) element^ => edit_samples(raster,"gradient",options)^
+pub fn wand(raster,point,options={}) element^ =>
+    edit_samples(raster,"wand",{*:checked_options(options,["tolerance","contiguous"])^,point:point})^
+pub pn storage_info(raster) map^ { return lambda.sys.image_storage(raster)^ }
+pub fn reframe(raster,rect,options={}) element^ =>
+    edit_samples(raster,"reframe",{*:checked_options(options,["fill"])^,rect:rect})^
+pub fn mix_samples(raster,other,options={}) element^ =>
+    edit_samples(raster,"mix",{*:checked_options(options,["selection","origin"])^,other:other})^
+pub fn extract_samples(raster,options={}) element^ => edit_samples(raster,"extract",options)^

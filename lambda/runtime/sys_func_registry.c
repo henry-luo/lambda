@@ -534,6 +534,12 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
+    {SYSPROC_IMAGE_STORAGE, "image_storage", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "pn_image_storage", PROFILE_IMAGE_PROCESSING_FPTR(pn_image_storage), NULL, NULL, false, 0,
+     false, &TYPE_ANY, true},
+    {SYSFUNC_IMAGE_EDIT, "image_edit", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_image_edit", PROFILE_IMAGE_PROCESSING_FPTR(fn_image_edit), NULL, NULL, false, 0,
+     false, &TYPE_ANY, true},
     {SYSFUNC_IMAGE_CAPABILITIES, "image_capabilities", 0, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_image_capabilities", PROFILE_IMAGE_IO_FPTR(fn_image_capabilities), NULL, NULL, false, 0,
      false, &TYPE_ANY, true},

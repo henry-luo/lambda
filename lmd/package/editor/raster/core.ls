@@ -4,6 +4,9 @@ import history: lambda.editor.mod_history
 import sequence: lambda.editor.mod_doc
 import model: .model
 import registry: .commands
+import selection: .selection
+import paint: .paint
+import tools: .tools
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -17,11 +20,13 @@ pub fn open_session(image) any^ {
     let checked = model.validate(ready)^
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
-        target:"pixels",selection:null,tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null}
+        target:"pixels",selection:null,tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
+        brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
+        background:[1.0,1.0,1.0,1.0],selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
 pub fn dirty(st) => st.doc != st.saved
 pub fn record(before,after,label,group=null) {
-    if (before.doc == after.doc) after
+    if (before.doc == after.doc and before.selection == after.selection) after
     else {
         let tx = {doc_before:before.doc,doc_after:after.doc,steps:[],
             sel_before:model.context(before),sel_after:model.context(after),
@@ -106,25 +111,32 @@ fn edit_node(st,command) any^ {
         if (model.mask(node) == null) raise error("Raster: layer has no mask")
         else img.with_children(node,[for (child in content(node)) if (name(child) == 'mask')
             img.with_properties(child,{enabled:child.enabled == false})^ else child])^)
-    else if (command.id == "pixels.fill" or command.id == "pixels.adjust" or command.id == "pixels.clear") (
-        let old = if (st.target == "mask") model.mask(node)[0] else img.raster_of(node),
-        if (old == null) raise error("Raster: target has no editable samples")
-        else {
-            let raster = if (command.id == "pixels.fill") img.fill(old,command.color)^
-                else if (command.id == "pixels.clear") img.clear(old)^
-                else if (st.target == "mask") raise error("Raster: color adjustments require a pixel target")
-                else img.adjust(old,command.options)^
-            img.with_children(node,[for (child in content(node))
-                if (st.target == "pixels" and name(child) == 'raster') raster
-                else if (st.target == "mask" and name(child) == 'mask') img.with_children(child,[raster])^
-                else child])^
-        })
     else raise error("Raster: unknown layer edit")
     {*:st,doc:model.replace(st.doc,row.id,changed)^,target:if (command.id == "mask.remove") "pixels" else st.target}
 }
 pub fn apply_command(st,command) any^ {
     let id = command.id;
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
+    else if (id == "tool.configure") tools.configure(st,command)^
+    else if (starts_with(id,"selection.") or id in ["mask.from_selection","mask.invert","mask.apply"]) selection.run_command(st,command)^
+    else if (starts_with(id,"paint.") or id in ["pixels.fill","pixels.clear","pixels.adjust"]) paint.run_command(st,command)^
+    else if (id in ["clipboard.copy","clipboard.copy_merged","clipboard.cut"]) {
+        let copied = paint.copy_pixels(st,id == "clipboard.copy_merged")^;
+        if (id == "clipboard.cut") paint.run_command(copied,{id:"pixels.clear"})^ else copied
+    }
+    else if (id == "clipboard.paste") (
+        if (st.clipboard == null) raise error("Raster: copy pixels before pasting")
+        else insert(st,img.layer(st.clipboard.raster,{id:model.fresh_id(st.doc),name:st.clipboard.name,position:st.clipboard.position}))^)
+    else if (id == "document.crop") {
+        let rect = model.value(command.rect,if (st.selection == null) null else img.coverage_bounds(st.selection)^)
+        if (not (rect is array) or len(rect)!=4 or not all([for (n in rect) n is int]) or
+            rect[0]<0 or rect[1]<0 or rect[2]>st.doc.width or rect[3]>st.doc.height or rect[2]<=rect[0] or rect[3]<=rect[1])
+            raise error("Raster: crop requires a nonempty rectangle inside the canvas")
+        else {
+            let moved = img.replace_at(st.doc,model.root_path(st.doc),model.translated(img.composition(st.doc),-rect[0],-rect[1])^)^;
+            {*:st,doc:img.with_properties(moved,{width:rect[2]-rect[0],height:rect[3]-rect[1]})^,selection:null}
+        }
+    }
     else if (id == "layer.insert" or id == "layer.new") {
         let raster = if (id == "layer.insert") command.raster else img.blank({width:st.doc.width,height:st.doc.height})^
         if (name(raster) != 'raster') raise error("Raster: insert requires Raster content")

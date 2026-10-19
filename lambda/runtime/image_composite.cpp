@@ -30,6 +30,12 @@ bool lambda_image_position(Item owner, int64_t* left, int64_t* top) {
     *left = (int64_t)coordinates[0]; *top = (int64_t)coordinates[1];
     return true;
 }
+bool lambda_image_rect(Item value, int64_t* rect) {
+    ItemReader input(value.to_const());
+    if (!input.isArray() || input.asArray().length() != 4) return false;
+    for (int i=0;i<4;i++) if (!lambda_item_to_int64_exact(input.asArray().get(i).item(),rect+i)) return false;
+    return true;
+}
 
 bool lambda_image_setting(Item owner, const char* key, const char* expected) {
     Item value = item_attr(owner, key);
@@ -41,6 +47,7 @@ bool lambda_image_setting(Item owner, const char* key, const char* expected) {
 struct ImageComposite {
     const char* failure = nullptr;
     size_t scratch = 0;
+    int64_t origin_x = 0, origin_y = 0;
     bool fail(const char* message) { failure = message; return false; }
 
     bool render(RasterBuffer* target, Item source, unsigned depth) {
@@ -50,7 +57,7 @@ struct ImageComposite {
         const RasterBuffer* pixels = lambda_raster_buffer(owner.get());
         if (pixels) {
             if (!lambda_image_setting(owner.get(), "color", "srgb")) return fail("unsupported raster working color space");
-            raster_buffer_over(target, pixels, 0, 0, 1, nullptr, 0, 0, 1, false); return true;
+            raster_buffer_over(target, pixels, -origin_x, -origin_y, 1, nullptr, 0, 0, 1, false); return true;
         }
         if (get_type_id(owner.get()) != LMD_TYPE_ELEMENT) return fail("composition content must be an element");
         Item unsupported = item_attr(owner.get(), "unsupported");
@@ -121,7 +128,7 @@ struct ImageComposite {
                 if (lambda_image_tag(child.get(), "mask") || lambda_image_tag(child.get(), "effect")) continue;
                 valid = render(isolated, child.get(), depth + 1);
             }
-            if (valid) raster_buffer_over(target, isolated, 0, 0, opacity, mask, mask_left, mask_top, outside, inverse);
+            if (valid) raster_buffer_over(target, isolated, 0, 0, opacity, mask, mask_left-origin_x, mask_top-origin_y, outside, inverse);
             scratch -= isolated->size;
             raster_buffer_destroy(isolated);
             return valid;
@@ -144,7 +151,7 @@ struct ImageComposite {
                 return fail("unsupported layer content");
         }
         if (!pixels) return empty || fail("raster layer has no primary raster");
-        raster_buffer_over(target, pixels, left, top, opacity, mask, mask_left, mask_top, outside, inverse);
+        raster_buffer_over(target, pixels, left-origin_x, top-origin_y, opacity, mask, mask_left-origin_x, mask_top-origin_y, outside, inverse);
         return true;
     }
 };
@@ -157,7 +164,7 @@ extern "C" Item fn_image_render(Item source, Item options) {
     MapReader config = MapReader::fromItem(settings.get());
     auto entries = config.entries(); const char* key; ItemReader value;
     while (entries.next(&key, &value))
-        if (strcmp(key, "frame") && strcmp(key, "width") && strcmp(key, "height"))
+        if (strcmp(key, "frame") && strcmp(key, "width") && strcmp(key, "height") && strcmp(key, "rect"))
             return lambda_image_error("unknown image render option");
     double width, height;
     if (!lambda_image_number(owner.get(), "width", 0, &width) || !lambda_image_number(owner.get(), "height", 0, &height))
@@ -199,9 +206,16 @@ extern "C" Item fn_image_render(Item source, Item options) {
             return lambda_image_error("frame requires exactly one root stack");
         composition.set(item_at(composition.get(), 0));
     }
+    ImageComposite renderer;
+    if (!config.get("rect").isNull()) {
+        int64_t rect[4];
+        if (!lambda_image_rect(config.get("rect").item(),rect)) return lambda_image_error("render region requires four integer bounds");
+        if (rect[0]<0 || rect[1]<0 || rect[2]<=rect[0] || rect[3]<=rect[1] || rect[2]>width || rect[3]>height)
+            return lambda_image_error("render region is outside the canvas");
+        renderer.origin_x=rect[0]; renderer.origin_y=rect[1]; width=rect[2]-rect[0]; height=rect[3]-rect[1];
+    }
     RasterBuffer* target = raster_buffer_create((uint32_t)width, (uint32_t)height, 4, 64 * 1024 * 1024);
     if (!target) return lambda_image_error("cannot allocate composition result");
-    ImageComposite renderer;
     if (!renderer.render(target, composition.get(), 0)) {
         raster_buffer_destroy(target);
         return lambda_image_error(renderer.failure);

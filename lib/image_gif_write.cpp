@@ -88,7 +88,7 @@ ImageStatus image_encode_gif_frames(ImageContext* context, const RasterBuffer* c
         unsigned color_count = 0;
         memset(colors, 0, sizeof(colors));
         for (size_t p = 0; p < size && valid; p++) {
-            const uint8_t* pixel = frame->pixels + p * 4;
+            const uint8_t* pixel = raster_buffer_pixel(frame, (uint32_t)(p % width), (uint32_t)(p / width));
             if (!pixel[3]) { indices[p] = 255; continue; }
             if (pixel[3] != 255) {
                 valid = false; failure = "GIF needs binary alpha; quantize alpha explicitly"; status = IMAGE_UNSUPPORTED_FEATURE; break;

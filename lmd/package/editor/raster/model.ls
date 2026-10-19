@@ -67,6 +67,21 @@ pub fn active(st) any^ {
     if (len(st.selected) != 1) raise error("Raster: select one layer")
     else lookup(st.doc,st.selected[0])
 }
+pub fn pixel_target(st,writing=true) any^ {
+    let row = active(st)^
+    let mask_node = if (st.target == "mask") mask(row.node) else null
+    let raster = if (st.target == "mask") mask_node[0] else img.raster_of(row.node)
+    if (name(row.node) != 'layer' or raster == null) raise error("Raster: select an editable pixel layer or mask")
+    else if (writing and locked(st.doc,[row.path])) raise error("Raster: target layer is locked")
+    else {row:row,raster:raster,position:[position(row.node)[0]+value(mask_node.position,[0,0])[0],
+        position(row.node)[1]+value(mask_node.position,[0,0])[1]]}
+}
+pub fn replace_pixels(st,target,raster) any^ {
+    let changed = img.with_children(target.row.node,[for (child in content(target.row.node))
+        if (st.target == "pixels" and name(child) == 'raster') raster
+        else if (st.target == "mask" and name(child) == 'mask') img.with_children(child,[raster])^ else child])^;
+    {*:st,doc:replace(st.doc,target.row.id,changed)^}
+}
 pub fn selected_rows(st) any^ {
     let chosen = [for (row in layers(st.doc) where row.id in st.selected) row]
     if (len(chosen) == 0) raise error("Raster: select a layer") else chosen

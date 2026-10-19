@@ -9,6 +9,7 @@ import surface: lambda.editor.raster.view
 import files: .mod_files
 import scene: .mod_scene
 import present: .mod_present
+import tools: lambda.editor.raster.tools
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
@@ -43,6 +44,8 @@ pn replace_document(st,action,path="") any^ {
         path:if (ends_with(lower(path),".psd")) path else ""}
 }
 pn command(owner,st,action) any^ {
+    if (action == "selection-feather") { return editor.exec(st,{id:"selection.feather",radius:float(field(owner,"feather-radius"))})^ }
+    if (action == "swap-colors") { return editor.exec(st,{id:"tool.configure",foreground:st.background,background:st.foreground})^ }
     if (action == "file-cancel" or action == "discard-cancel") {
         dom.focus_set(present.node(owner,if (st.dialog == "discard") "stage" else st.dialog),false)
         return {*:st,dialog:"",pending:"",error:""}
@@ -118,7 +121,9 @@ on photos_activate(evt) {
 }
 on photos_frame(evt) {
     if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
-    session = publish(evt.target,{*:session,token:0})
+    var next = {*:session,token:0}
+    interaction.render(next) ^ { next = {*:cancel_preview(evt.target,next),error:^.message,status:^.message} } ~ { next = ~ }
+    session = publish(evt.target,next)
     return 'handled'
 }
 on click(evt) {
@@ -129,8 +134,10 @@ on click(evt) {
     let button = dom.closest(evt.target,"[data-action]")
     let layer = dom.closest(evt.target,"[data-layer],[data-mask],[data-visibility]")
     let tool = dom.closest(evt.target,"[data-tool]")
-    var next = {*:session,error:""}
-    if (tool != null and tool != owner) { next = {*:next,tool:dom.get_attribute(tool,"data-tool")} }
+    var next = {*:cancel_preview(owner,session),error:""}
+    if (tool != null and tool != owner) {
+        editor.exec(next,{id:"tool.configure",tool:dom.get_attribute(tool,"data-tool")}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    }
     else if (layer != null) {
         let mask = dom.get_attribute(layer,"data-mask")
         let visible = dom.get_attribute(layer,"data-visibility")
@@ -159,7 +166,11 @@ on change(evt) {
         return 'handled'
     }
     var next = {*:session,error:""}
-    let action = if (id == "layer-name") {id:"layer.rename",name:field(owner,id)}
+    let action = if (starts_with(id,"brush-")) {id:"tool.configure",brush:{[slice(id,6,len(id))]:float(field(owner,id))}}
+        else if (id in ["foreground","background","tolerance","selection-mode","gradient-kind"])
+            {id:"tool.configure",[if (id == "selection-mode") "selection_mode" else if (id == "gradient-kind") "gradient_kind" else id]:
+                if (id == "tolerance") float(field(owner,id)) else field(owner,id)}
+        else if (id == "layer-name") {id:"layer.rename",name:field(owner,id)}
         else if (id == "opacity") {id:"layer.opacity",opacity:float(field(owner,id))}
         else if (id in ["position-x","position-y"]) (
             let active = model.active(session)^,
@@ -191,7 +202,7 @@ on mousedown(evt) {
 on pointermove(evt) {
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
-    interaction.preview(session,pointer_input(owner,evt)) ^ { session = {*:cancel_preview(owner,session),error:^.message,status:^.message} } ~ { session = ~ }
+    session = interaction.sample(session,pointer_input(owner,evt))
     if (session.token == 0) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
     return 'prevent-default'
 }
@@ -231,9 +242,29 @@ on keydown(evt) {
     if (typing) { return 'pass' }
     if (modifier and lower(evt.key) == "z") { action = if (evt.shiftKey) "history.redo" else "history.undo" }
     else if (modifier and lower(evt.key) == "s") { action = "save" }
-    else if (evt.key == "Delete" or evt.key == "Backspace") { action = "layer.delete" }
-    else if (not modifier and lower(evt.key) in ["v","h"]) {
-        session = publish(owner,{*:session,tool:if (lower(evt.key) == "h") "pan" else "move"})
+    else if (modifier and lower(evt.key) == "a") { action = "selection.all" }
+    else if (modifier and lower(evt.key) == "d") { action = "selection.clear" }
+    else if (modifier and evt.shiftKey and lower(evt.key) == "i") { action = "selection.invert" }
+    else if (modifier and lower(evt.key) == "o") { action = "open" }
+    else if (modifier and lower(evt.key) == "n") { action = "new" }
+    else if (modifier and lower(evt.key) == "c") { action = if (evt.shiftKey) "clipboard.copy_merged" else "clipboard.copy" }
+    else if (modifier and lower(evt.key) == "x") { action = "clipboard.cut" }
+    else if (modifier and lower(evt.key) == "v") { action = "clipboard.paste" }
+    else if (not modifier and lower(evt.key) == "x") { action = "swap-colors" }
+    else if (not modifier and evt.key in ["[","]"]) {
+        editor.exec(session,{id:"tool.configure",brush:{size:max(0.5,min(4096,session.brush.size*(if (evt.key == "[") 0.8 else 1.25)))}}) ^ {
+            session = {*:session,error:^.message,status:^.message}
+        } ~ { session = ~ }
+        session = publish(owner,session)
+        return 'prevent-default'
+    }
+    else if (evt.key == "Delete" or evt.key == "Backspace") {
+        action = if (session.selection != null or session.tool in ["brush","erase","bucket","gradient"]) "pixels.clear" else "layer.delete"
+    }
+    else if (not modifier and lower(evt.key) in [for (tool in tools.catalog) tool.key]) {
+        let tool = [for (tool in tools.catalog where tool.key == lower(evt.key)) tool.id][0]
+        editor.exec(cancel_preview(owner,session),{id:"tool.configure",tool:tool}) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
+        session = publish(owner,session)
         return 'prevent-default'
     } else if (evt.key in ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"]) {
         let amount = if (evt.shiftKey) 10 else 1
@@ -243,6 +274,7 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (action == "") { return 'pass' }
+    session = cancel_preview(owner,session)
     command(owner,session,action) ^ { session = {*:session,error:^.message,status:^.message} } ~ { session = ~ }
     session = publish(owner,session)
     return 'prevent-default'

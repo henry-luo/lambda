@@ -15,11 +15,11 @@ full target vocabulary is not a claim that all Photoshop behavior is supported.
 
 | Milestone | Delivered behavior | Remaining limits |
 |---|---|---|
-| 1. Working Raster | Native owned contiguous `u8`, gray/gray-alpha/RGB/RGBA; Raster Velmt; canonical materialization; declared non-enumerable channel projections; array/channel/region snapshots; PNG/JPEG import | Channel/region writes copy the contiguous owner; high-depth storage is outstanding |
-| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse | One active mask per node; normal source-over only; retained transforms and enabled effects need baking; region rendering is eager |
+| 1. Working Raster | Native owned `u8`, dense inputs and shared COW tiles for region/paint edits; gray/gray-alpha/RGB/RGBA; Raster Velmt; canonical materialization; declared non-enumerable channel projections; array/channel/region snapshots; PNG/JPEG import | High-depth storage is outstanding |
+| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse; requested-region composition | One active mask per node; normal source-over only; retained transforms and enabled effects need baking |
 | 3. Animation | Frame-owned stacks; GIF patch/disposal normalization; exact zero delays and total plays; frame editing; full-frame GIF output with exact local palettes | At most 255 opaque colors plus transparency; binary alpha and exact centisecond timing; no implicit quantization; other temporal formats need separate profiles |
 | 4. PSD interchange | Version-1 RGB/grayscale8 read; raw/RLE/ZIP/prediction decode; raw layered write; Unicode names, groups, empty layers, user masks; regenerated IDs/composite; export report; original-byte session passthrough; `input(...,'psd')`/automatic detection and runtime adoption | PSB, native text/smart objects/effects, pass-through groups, group masks, inverted-mask writing and opaque block reuse are not qualified; strict rendering/export rejects unsupported features |
-| 5. Photo scale/precision | Not delivered | Sparse tiled COW, demand/halo evaluation, high-depth adapters, ICC conversion and broader blending remain work |
+| 5. Photo scale/precision | Photos M2 adds shared COW tiles, native painting/coverage and true region composition | Effect halos, high-depth adapters, ICC conversion and broader blending remain work; photo-scale budgets are unqualified |
 
 ## Implementation map
 

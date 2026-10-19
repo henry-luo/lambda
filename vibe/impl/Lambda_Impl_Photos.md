@@ -27,7 +27,7 @@ Build a worktree-local host; shared dependency links follow Developer Guide §7.
 |---|---|
 | M0 reuse and measurement | Complete for the bounded initial profile; optimized timings below |
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
-| M2 tiles, selections and painting | Pending |
+| M2 tiles, selections and painting | Core implemented; focused native/package checks and 63 UI assertions pass; aggregate qualification follows the next native batch |
 | M3 transforms, reversible effects and rich persistence | Pending |
 | M4 retouch, type/shapes, channels and actions | Pending |
 | M5 high depth/color and scale qualification | Pending |
@@ -192,7 +192,40 @@ processes may use filesystem/compiler caches. No input-to-display latency is
 measured, and no M5 latency/scale target is claimed. Full-composition validation
 on each committed move is a measured cost for M2's region-processing work.
 
-M2–M5 remain pending: sparse tiles/region evaluation, brush and selection tools,
-retained transforms/effects, rich-project persistence, retouch/type/shapes,
+## M2 continuation — 2026-10-19
+
+Shared `lambda.image` now provides sparse tiles backed by `ByteStorage`;
+region/stroke writes detach touched tiles and preserve old Raster/channel
+snapshots (**S9.2.2 / D4.1.4v5**). Dense inputs remain shared spans until edited.
+GC accounting follows physical byte-store lifetime rather than charging each
+history snapshot for the full logical image. Region composition allocates the
+requested viewport and group scratch directly. PSD/GIF readers of Raster samples
+use the same tile-aware accessors.
+
+Native edit kernels implement rectangle/ellipse/even-odd polygon coverage,
+connected/global color selection, add/subtract/intersect/invert, box-filter
+feather, brush/eraser, selection-clipped fill, linear/radial gradients, extent
+mapping and sample extraction/mixing. Stroke spacing carries across pointer
+segments; flow accumulates coverage while stroke opacity applies once. Paint can
+expand a layer or independent mask within canvas/buffer budgets, preserving
+existing pixels and mask origin. Storage diagnostics are procedural because
+refcounts can change after collection (**S12.1.1v3**).
+
+The reusable editor exposes eleven tools, normalized settings, selection history,
+selection-to/from-mask, mask invert/apply, copy/cut/paste and crop-to-selection.
+The demo coalesces draft rendering to frames and presents selection coverage in
+a separate retained canvas. Selection history does not dirty document pixels;
+completed/canceled strokes share the existing transaction path (**S12.1.3**).
+
+Focused evidence so far: native image I/O **34/34** pass, including cross-tile
+sharing/detachment and allocation failure; image paint kernel goldens, procedural
+storage diagnostics and four Photos package fixtures pass with forced GC and
+poisoned frees. The new native painting replay passes **14/14 assertions**,
+including actual red pixels, undo/redo, marquee-to-mask, mask erasing and PSD
+reopen. All five Photos replays pass **63/63 assertions** with forced GC and
+poisoned frees. Evidence: `temp/photos-m2-native.log`, `temp/photos-m2-targeted.log`,
+`temp/photos-m2-ui-paint.log`, `temp/photos-m2-ui-all.log`.
+
+M3–M5 remain pending: retained transforms/effects, rich-project persistence, retouch/type/shapes,
 actions/multiple documents, and high-depth/color/scale qualification. This
 checkpoint does not claim complete PhotoCraft feature parity.

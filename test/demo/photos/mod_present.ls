@@ -3,6 +3,8 @@ import editor: lambda.editor.raster
 import model: lambda.editor.raster.model
 import surface: lambda.editor.raster.view
 import scene: .mod_scene
+import tools: lambda.editor.raster.tools
+import colors: lambda.slide.color
 
 pub fn node(owner,id) => dom.get_element_by_id(owner,id)
 // these nodes are non-void markup fragments; the HTML document formatter adds a shell.
@@ -26,6 +28,7 @@ pub pn publish(owner,st) any^ {
         'data-x':if (active == null) "" else string(model.bounds(active.node).x),
         'data-y':if (active == null) "" else string(model.bounds(active.node).y),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
+        'data-selection':if (st.selection == null) "none" else "active",
         'data-drag':if (st.gesture == null) "" else st.gesture.mode})
         dom.set_attribute(owner,string(key),requested)
     let layer_html = markup(scene.layer_rows(st))
@@ -38,12 +41,17 @@ pub pn publish(owner,st) any^ {
         opacity:if (active == null) 1 else model.value(active.node.opacity,1),
         'image-width':st.size_draft.width,'image-height':st.size_draft.height,
         'position-x':if (active == null) 0 else model.bounds(active.node).x,
-        'position-y':if (active == null) 0 else model.bounds(active.node).y}) {
+        'position-y':if (active == null) 0 else model.bounds(active.node).y,
+        foreground:colors.css(st.foreground),background:colors.css(st.background),
+        'brush-size':st.brush.size,'brush-hardness':st.brush.hardness,'brush-spacing':st.brush.spacing,
+        'brush-flow':st.brush.flow,'brush-opacity':st.brush.opacity,tolerance:st.tolerance,
+        'selection-mode':st.selection_mode,'gradient-kind':st.gradient_kind}) {
         let control = node(owner,string(id))
         if (not dom.matches(control,":focus") and dom.get_state(control,"value") != string(requested))
             dom.set_state(control,"value",string(requested))
     }
-    for (tool in ["move","pan"]) dom.set_attribute(node(owner,"tool-" ++ tool),"class",if (st.tool == tool) "active" else "")
+    for (tool in tools.catalog) dom.set_attribute(node(owner,"tool-" ++ tool.id),"class",if (st.tool == tool.id) "active" else "")
+    dom.set_text_content(node(owner,"tool-label"),[for (tool in tools.catalog where tool.id == st.tool) tool.label][0])
     for (entry in [{id:"undo",disabled:not editor.can_undo(st)^},{id:"redo",disabled:not editor.can_redo(st)^}]) {
         if (entry.disabled) dom.set_attribute(node(owner,entry.id),"disabled","")
         else if (dom.get_attribute(node(owner,entry.id),"disabled") != null) dom.remove_attribute(node(owner,entry.id),"disabled")

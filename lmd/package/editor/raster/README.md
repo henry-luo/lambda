@@ -26,22 +26,32 @@ node and actual content path; `layers` returns foreground-first tree rows.
 Supported commands cover layer insertion/new/delete/duplication, selection,
 translation, ordering, grouping/ungrouping/adjacent merge, names/visibility/opacity,
 locks, raster masks, fill/clear/baked adjustments, canvas/image resizing, flattening
-and history. Duplication assigns fresh subtree identities. Group movement updates
+and history. Rectangle, ellipse, lasso and color-wand selections combine in
+replace/add/subtract/intersect modes and support invert, feather and mask creation.
+Brush/eraser, selection-aware fill, flood fill, linear/radial gradients, mask
+painting, copy/cut/paste and selection cropping use the same command path.
+Duplication assigns fresh subtree identities. Group movement updates
 descendants once. Mask positions remain local to their layer.
 
-`interaction.begin/preview/finish/cancel` implements pointer transactions.
+`tool.configure` validates tool IDs, normalized foreground/background colors,
+brush size/hardness/spacing/flow/opacity, selection mode and color tolerance.
+`interaction.begin/sample/render/preview/finish/cancel` implements pointer transactions.
 Drafts retain the original image and history; a completed move records one edit.
-Panning has no image history. `mark_saved(session,snapshot)` tracks a content
+Stroke sampling carries distance across event segments, and pointer drafts render
+at the host's frame rate. Selection coverage has undo history without dirtying
+document pixels. Panning has no image history. `mark_saved(session,snapshot)` tracks a content
 checkpoint independently of selection/camera state. History reuses
 `lambda.editor.mod_history`, including target restoration (**S9.2.2**).
 
 The optional `lambda.editor.raster.view` module copies rendered pixels into a
 retained native canvas and computes camera/target presentation (**D4.5.2**).
-Its host supplies `.raster-stage`, `.raster-surface`, `.raster-canvas` and
-`.raster-target` nodes. The facade and command tests need no native DOM.
+Its host supplies `.raster-stage`, `.raster-surface`, `.raster-canvas`,
+`.raster-selection` and `.raster-target` nodes. The selection overlay is separate
+from saved/exported pixels. The facade and command tests need no native DOM.
 
-This is the initial contiguous `u8`, normal-composition profile. Sparse tiles,
-brush/selection tools, reversible effects, native rich projects, high depth and
+Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
+are retained as shared backing until a touched tile detaches (**S9.2.2 /
+D4.1.4v5**). Reversible effects, native rich projects, high depth and
 color conversion remain subsequent proposal milestones. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor
 locks, which its writer cannot preserve; flat export intentionally renders pixels.

@@ -33,7 +33,8 @@ ICC profile; `preview` is derived content. Empty PSD layers retain metadata
 as `kind: empty`.
 
 Raster attributes are `width`, `height`, `sample_type`, `channels`, `color`,
-`alpha_mode` and `pixels`. Native storage is contiguous, immutable `u8` with
+`alpha_mode` and `pixels`. Native storage is immutable `u8` with dense inputs
+and sparse copy-on-write tiles for region/paint edits, with
 one through four channels: gray, gray/alpha, RGB or RGBA. The canonical
 pixel snapshot has shape `[height,width,channels]`; `r`, `g`, `b`, `a` are
 declared, non-enumerable channel projections (**D7.4.4 / D7.4.5v2**).
@@ -42,14 +43,17 @@ Absent RGB projections on gray storage return null; `channel` checks names.
 Construction, replacement, channel reads and pixel reads preserve value
 snapshots (**S9.1.2 / S9.2.2**). Editing a returned sample array changes that
 array. Use the checked replacement or procedural APIs to publish pixels
-back into a Raster. Current writes copy contiguous samples; tile sharing is
-a later storage milestone.
+back into a Raster. Region and paint writes share untouched backing and detach
+only edited tiles. Shared native byte storage is GC-accounted once until its
+last owner releases it (**D4.1.4v5**).
 
 ## API
 
 All computational APIs are pure. Checked functions declare raised contracts
 and use postfix `^`; callers can catch failures with `expr ^ { handler }`.
-`read` and `write` are procedures because they perform I/O (**S12.1.1v3**).
+`read` and `write` are procedures because they perform I/O. `storage_info` is a
+procedure because allocation/refcount observations can change after GC
+(**S12.1.1v3**).
 Unknown options fail (**S17.8.1**); arbitrary layer properties are document
 data rather than codec options.
 
@@ -75,13 +79,19 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `fill(raster,color)`, `clear(raster)`, `stamp(raster,brush,position,options={})` | Return filled, cleared or source-over stamped storage. Stamp accepts normalized `opacity`. |
 | `crop(raster,rect)`, `resize(raster,width,height)`, `adjust(raster,options)` | Return transformed samples using the shared numeric/image kernels. |
 | `transform(raster,options)`, `rotate(raster,quarter_turns)`, `flip(raster,horizontal=true,vertical=false)` | Explicitly bake geometry; image-process adjustments/transforms require RGBA8. |
-| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render normal source-over composition or read a sample. Region rendering currently renders eagerly and crops. |
+| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render normal source-over composition or read a sample. Region rendering allocates/evaluates only the requested canvas rectangle, including isolated-group scratch and mask placement. |
+| `selection(width,height,options)`, `wand(raster,point,options={})` | Gray coverage from rectangle, ellipse, even-odd polygon or all; color selection with normalized tolerance and contiguous/global matching. Shape options use `start`/`end` or polygon `points`. |
+| `combine_coverage(a,b,mode)`, `invert_coverage(a)`, `feather_coverage(a,radius)`, `coverage_bounds(a)` | Replace/add/subtract/intersect, finite inversion, bounded box-filter feather and nonzero half-open bounds (`null` for empty). |
+| `paint_stroke(raster,options)`, `paint_fill(raster,options)`, `gradient(raster,options)` | Gray/RGBA painting with color, opacity and optional document-space selection/origin. Strokes accept points, size/hardness/spacing/flow and paint/erase mode; gradients accept linear/radial endpoints and endpoint colors. |
+| `reframe(raster,rect,options={})`, `mix_samples(a,b,options={})`, `extract_samples(raster,options={})` | Extend/crop samples with optional fill; interpolate through coverage; retain selected alpha. Unchanged snapshots remain intact. |
+| `coverage_overlay(coverage)` | Produce a separate translucent blue RGBA preview; overlays are not authored image content. |
+| `pn storage_info(raster)` | Observe logical/index bytes, resident/shared backing references and currently private payload bytes. Shared references are counted as references, not summed as unique resident bytes. |
 | `validate(image)` | Check all frame compositions using this render profile. |
 | `decode(binary,options={})`, `encode(image,options={})`, `encode_report(image,options={})` | Interchange captured bytes. Reports identify regenerated/rasterized/omitted content. |
 | `read(target,options={})`, `write(image,target,options={})` | Read binary input or write encoded bytes through existing target I/O. Specify output `format`; the default is PNG. |
 | `capabilities()` | Query actual codec availability and declared editing/animation profiles. |
 
-`render_frame` options are `frame`, `width` and `height`; dimensions describe
+`render_frame` options are `frame`, `width`, `height` and `rect`; dimensions describe
 the output viewport. Decode options are `page_index` and
 `normalize_orientation`. Encode options are `format`, `frame`, `quality`
 and `lossless`, subject to the selected writer's profile.

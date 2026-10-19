@@ -1,5 +1,6 @@
 #include "image_raster.hpp"
 #include "transpiler.hpp"
+#include "value_builder.hpp"
 #include "heap_api.h"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
@@ -13,6 +14,7 @@ struct RasterValue {
     RasterBuffer* buffer;
     Item color, channels, tag;
     void* accounting;
+    size_t accounted_bytes;
 };
 
 Item lambda_image_error(const char* message) {
@@ -26,7 +28,7 @@ static Item raster_name(const char* name) {
 
 static void raster_destroy(void* data) {
     RasterValue* value = (RasterValue*)data;
-    heap_gc_external_record_release(value->accounting, value->buffer->size, GC_EXTERNAL_KIND_OTHER);
+    heap_gc_external_record_release(value->accounting, value->accounted_bytes, GC_EXTERNAL_KIND_OTHER);
     raster_buffer_destroy(value->buffer);
     mem_free(value);
 }
@@ -152,11 +154,40 @@ static const JubeModuleDef raster_module = {
     "type image_raster { r: any, g: any, b: any, a: any }\n", &raster_binding, 1
 };
 
+struct RasterByteAccounting {
+    void* token;
+    ByteStorageReleaseFn release;
+    void* context;
+};
+static void raster_release_bytes(void* data, size_t capacity, void* opaque) {
+    RasterByteAccounting* accounting = (RasterByteAccounting*)opaque;
+    heap_gc_external_record_release(accounting->token, capacity, GC_EXTERNAL_KIND_OTHER);
+    accounting->release(data, capacity, accounting->context);
+    mem_free(accounting);
+}
+static bool raster_track_bytes(ByteStorage* storage, void*) {
+    if (storage->release_data == raster_release_bytes) return true;
+    RasterByteAccounting* accounting = (RasterByteAccounting*)mem_alloc(sizeof(RasterByteAccounting), MEM_CAT_CONTAINER);
+    if (!accounting) return false;
+    // account shared backing once, until its last tile/span owner releases it (D4.1.4v5).
+    accounting->token = heap_gc_external_preflight(storage->capacity, GC_EXTERNAL_KIND_OTHER);
+    accounting->release = storage->release_data; accounting->context = storage->release_context;
+    heap_gc_external_record_alloc(accounting->token, storage->capacity, GC_EXTERNAL_KIND_OTHER);
+    storage->release_data = raster_release_bytes; storage->release_context = accounting;
+    storage->flags |= BYTE_STORAGE_FLAG_READ_ONLY;
+    return true;
+}
+
 Item lambda_raster_wrap(RasterBuffer* buffer, Item color) {
     if (!buffer) return lambda_image_error("raster allocation exceeds the image budget");
     RootFrame roots(3);
     Rooted<Item> description(roots, color), channels(roots, ItemNull), tag(roots, ItemNull);
-    void* accounting = heap_gc_external_preflight(buffer->size, GC_EXTERNAL_KIND_OTHER);
+    if (get_type_id(description.get()) == LMD_TYPE_NULL) description.set(raster_name("srgb"));
+    size_t accounted_bytes = raster_buffer_index_bytes(buffer);
+    void* accounting = heap_gc_external_preflight(accounted_bytes, GC_EXTERNAL_KIND_OTHER);
+    if (!raster_buffer_stores(buffer, raster_track_bytes, nullptr)) {
+        raster_buffer_destroy(buffer); return ItemError;
+    }
     if (!jube_find_static_module(raster_module.name) && jube_register_static_module(&raster_module) != 0) {
         raster_buffer_destroy(buffer);
         return lambda_image_error("cannot register raster projection interface");
@@ -177,8 +208,8 @@ Item lambda_raster_wrap(RasterBuffer* buffer, Item color) {
     cow_mark_shared(description.get());
     RasterValue* value = (RasterValue*)mem_calloc(1, sizeof(RasterValue), MEM_CAT_CONTAINER);
     if (!value) { raster_buffer_destroy(buffer); return ItemError; }
-    *value = {buffer, description.get(), channels.get(), tag.get(), accounting};
-    heap_gc_external_record_alloc(accounting, buffer->size, GC_EXTERNAL_KIND_OTHER);
+    *value = {buffer, description.get(), channels.get(), tag.get(), accounting, accounted_bytes};
+    heap_gc_external_record_alloc(accounting, accounted_bytes, GC_EXTERNAL_KIND_OTHER);
     Item result = velmt_new(&raster_vtable, value, &raster_type, value);
     value->color = description.get(); value->channels = channels.get(); value->tag = tag.get();
     if (get_type_id(result) != LMD_TYPE_VELMT) raster_destroy(value);
@@ -221,8 +252,9 @@ extern "C" Item fn_image_raster(Item samples, Item options) {
     color.set(opts.get("color_space").item());
     if (get_type_id(color.get()) != LMD_TYPE_NULL && !is_text_type_id(get_type_id(color.get())))
         return lambda_image_error("color_space must be a color identity name");
-    RasterBuffer* buffer = raster_buffer_create((uint32_t)shape[1], (uint32_t)shape[0],
-        (uint8_t)shape[2], 64 * 1024 * 1024);
+    RasterBuffer* buffer = blank && opts.get("color").isNull()
+        ? raster_buffer_sparse((uint32_t)shape[1], (uint32_t)shape[0], (uint8_t)shape[2], 64 * 1024 * 1024)
+        : raster_buffer_create((uint32_t)shape[1], (uint32_t)shape[0], (uint8_t)shape[2], 64 * 1024 * 1024);
     if (!buffer) return lambda_image_error("raster allocation failed");
     if (!blank) {
         const uint8_t* data = (const uint8_t*)source.get().array_num->data;
@@ -253,10 +285,7 @@ extern "C" Item fn_image_raster(Item samples, Item options) {
 static const char* raster_region_bounds(const RasterBuffer* buffer, Item bounds, int64_t* region) {
     region[0] = region[1] = 0; region[2] = buffer->width; region[3] = buffer->height;
     if (get_type_id(bounds) != LMD_TYPE_NULL) {
-        ItemReader input(bounds.to_const());
-        if (!input.isArray() || input.asArray().length() != 4) return "region requires [left,top,right,bottom]";
-        for (size_t i = 0; i < 4; i++) if (!lambda_item_to_int64_exact(input.asArray().get(i).item(), &region[i]))
-            return "region bounds must be integers";
+        if (!lambda_image_rect(bounds,region)) return "region requires integer [left,top,right,bottom]";
     }
     if (region[0] < 0 || region[1] < 0 || region[2] <= region[0] || region[3] <= region[1] ||
             region[2] > buffer->width || region[3] > buffer->height) return "raster region is out of bounds";
@@ -311,14 +340,15 @@ extern "C" Item fn_image_write_region(Item raster, Item samples, Item options) {
     if (rank != (channel < 0 ? 3 : 2) || shape[0] != rect[3] - rect[1] || shape[1] != rect[2] - rect[0] ||
             (channel < 0 && shape[2] != channels)) return lambda_image_error("region sample shape does not match the destination");
     // validate before allocation/publication; source snapshots may alias the original owner.
-    RasterBuffer* result = raster_buffer_create(original->width, original->height, original->channels, original->size);
+    RasterBuffer* result = raster_buffer_fork(original);
     if (!result) return lambda_image_error("cannot allocate region edit");
-    memcpy(result->pixels, original->pixels, original->size);
     const uint8_t* data = (const uint8_t*)input.get().array_num->data;
-    for (int64_t y = 0; y < shape[0]; y++) for (int64_t x = 0; x < shape[1]; x++)
-        for (int c = 0; c < channels; c++)
-            result->pixels[((size_t)(rect[1] + y) * original->width + rect[0] + x) * original->channels + (channel < 0 ? c : channel)] =
-                data[y * strides[0] + x * strides[1] + (channel < 0 ? c * strides[2] : 0)];
+    for (int64_t y = 0; y < shape[0]; y++) for (int64_t x = 0; x < shape[1]; x++) {
+        uint8_t* pixel = raster_buffer_edit_pixel(result, (uint32_t)(rect[0] + x), (uint32_t)(rect[1] + y));
+        if (!pixel) { raster_buffer_destroy(result); return lambda_image_error("cannot detach region tile"); }
+        for (int c = 0; c < channels; c++) pixel[channel < 0 ? c : channel] =
+            data[y * strides[0] + x * strides[1] + (channel < 0 ? c * strides[2] : 0)];
+    }
     return lambda_raster_wrap(result, item_attr(owner.get(), "color"));
 }
 
@@ -339,4 +369,28 @@ extern "C" Item fn_image_patch(Item source, Item attributes, Item children) {
         if (item_is_error(set)) return set;
     }
     return result.get();
+}
+
+extern "C" Item pn_image_storage(Item raster) {
+    GUARD_ERROR1(raster);
+    RootFrame roots(1);
+    Rooted<Item> owner(roots,raster);
+    const RasterBuffer* source=lambda_raster_buffer(owner.get());
+    if (!source) return lambda_image_error("storage diagnostics require a Raster");
+    // refcounts can change after GC; this observation is procedural (S12.1.1v3).
+    size_t resident=source->storage ? 1 : 0;
+    size_t shared=source->storage && byte_storage_ref_count(source->storage)>1 ? 1 : 0;
+    size_t private_bytes=source->storage && !shared ? source->storage->capacity : 0;
+    for (size_t i=0;source->tiles && i<(size_t)source->columns*source->rows;i++) if (source->tiles[i].storage) {
+        resident++;
+        if (byte_storage_ref_count(source->tiles[i].storage)>1) shared++;
+        else private_bytes+=source->tiles[i].storage->capacity;
+    }
+    RootedValueBuilder result;
+    result.put("logical_bytes",{.item=i2it(source->size)});
+    result.put("index_bytes",{.item=i2it(raster_buffer_index_bytes(source))});
+    result.put("resident_references",{.item=i2it(resident)});
+    result.put("shared_references",{.item=i2it(shared)});
+    result.put("private_bytes",{.item=i2it(private_bytes)});
+    return result.value.get();
 }

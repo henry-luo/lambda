@@ -25,6 +25,10 @@ pub pn publish(owner,st) any^ {
         let pixels = img.render_frame(st.doc)^
         dom.set_canvas_pixels(node(owner,".raster-canvas"),pixels.pixels)^
     }
+    let selection = node(owner,".raster-selection")
+    dom.style_set_property(selection,"display",if (st.selection == null) "none" else "block")
+    if (st.selection != null and st.painted_selection != st.selection)
+        dom.set_canvas_pixels(selection,img.coverage_overlay(st.selection)^.pixels)^
     let overlay = node(owner,".raster-target")
     let active = if (len(st.selected)==1) model.lookup(st.doc,st.selected[0]) else null
     dom.style_set_property(overlay,"display",if (active == null) "none" else "block")
@@ -33,5 +37,5 @@ pub pn publish(owner,st) any^ {
         for (key,requested in {left:box.x,top:box.y,width:box.width,height:box.height})
             dom.style_set_property(overlay,string(key),string(requested*scale) ++ "px")
     }
-    return {*:st,painted_doc:st.doc,scale:scale}
+    return {*:st,painted_doc:st.doc,painted_selection:st.selection,scale:scale}
 }

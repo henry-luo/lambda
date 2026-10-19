@@ -6,7 +6,7 @@
     {"type":"advance_time","ms":50},
     {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-error","equals":""},
     {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-layers","equals":"1"},
-    {"type":"assert_rect","target":{"selector":"#preview"},"width":851,"height":566,"tolerance":2},
+    {"type":"assert_rect","target":{"selector":"#preview"},"width":824,"height":548,"tolerance":2},
     {"type":"click","target":{"selector":"#add-layer"}},
     {"type":"click","target":{"selector":"#fill-white"}},
     {"type":"click","target":{"selector":"#add-mask"}},

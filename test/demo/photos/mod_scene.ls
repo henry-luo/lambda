@@ -1,5 +1,6 @@
 import model: lambda.editor.raster.model
 import editor: lambda.editor.raster
+import tools: lambda.editor.raster.tools
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -24,11 +25,11 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
         <output id:"zoom","Fit">,button("zoom-in","zoom-in","+")]>,
     <div class:"workspace", *[
         <nav class:"tool-rail",'aria-label':"Tools", *[
-            <button id:"tool-move",'data-tool':"move",title:"Move layer (V)","↖" <small "Move">>,
-            <button id:"tool-pan",'data-tool':"pan",title:"Pan workspace (H)","✥" <small "Hand">>,
-            <div class:"swatch",title:"Foreground color">]>,
+            *[for (tool in tools.catalog) <button id:"tool-" ++ tool.id,'data-tool':tool.id,
+                title:tool.label ++ " (" ++ upper(tool.key) ++ ")",*[tool.icon,<small (tool.label)>]>]]>,
         <section id:"stage",class:"raster-stage",tabindex:"0",'aria-label':"Image workspace",
-            <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition"> <div class:"raster-target">>>,
+            <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
+                <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">>>,
         <aside class:"dock", *[
             <section class:"properties", *[<h2 "Properties">,
                 <p id:"target-label","Select a layer">,
@@ -39,6 +40,23 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                     button("lock","layer.lock","Lock / unlock"),button("add-mask","mask.add","Add mask"),
                     button("toggle-mask","mask.toggle","Toggle mask"),button("remove-mask","mask.remove","Remove mask")]>]>,
             <section class:"layer-panel", *[<header <h2 "Layers"> <span id:"layer-count","0">>,<div id:"layers">]>,
+            <section class:"paint-panel", *[<h2 "Paint & selection">,
+                <p id:"tool-label","Move">,
+                <div class:"fields", *[field("foreground","Foreground","#1a59f2"),field("background","Background","#ffffff"),
+                    field("brush-size","Size",28,"number"),field("brush-hardness","Hardness",0.8,"number"),
+                    field("brush-spacing","Spacing",0.2,"number"),field("brush-flow","Flow",1,"number"),
+                    field("brush-opacity","Stroke opacity",1,"number"),field("tolerance","Color tolerance",0.1,"number")]>,
+                <label "Selection mode" <select id:"selection-mode", *[for (mode in ["replace","add","subtract","intersect"]) <option value:mode,mode>]>>,
+                <label "Gradient" <select id:"gradient-kind",<option value:"linear","Linear"> <option value:"radial","Radial">>>,
+                field("feather-radius","Feather radius",4,"number"),
+                <div class:"button-grid", *[button("select-all","selection.all","Select all"),button("deselect","selection.clear","Deselect"),
+                    button("invert-selection","selection.invert","Invert"),button("feather","selection-feather","Feather"),
+                    button("selection-mask","mask.from_selection","Selection → mask"),button("fill-color","paint.fill","Fill foreground"),
+                    button("mask-invert","mask.invert","Invert mask"),button("mask-apply","mask.apply","Apply mask"),
+                    button("mask-select","selection.from_mask","Select mask"),button("crop-selection","document.crop","Crop to selection"),
+                    button("copy","clipboard.copy","Copy pixels"),button("copy-merged","clipboard.copy_merged","Copy merged"),
+                    button("cut","clipboard.cut","Cut pixels"),button("paste","clipboard.paste","Paste pixels"),
+                    button("swap-colors","swap-colors","Swap colors")]>]>,
             <section class:"adjustments", *[<h2 "Quick adjustments">,
                 <div class:"button-grid", *[button("exposure-up","exposure-up","Exposure +"),button("exposure-down","exposure-down","Exposure −"),
                     button("mono","mono","Monochrome"),button("sharpen","sharpen","Sharpen"),
