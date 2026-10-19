@@ -166,6 +166,10 @@
     .pattern-bar-title .eyebrow { font-size: .64rem; margin-bottom: 4px; }
     .pattern-bar-title strong { font-size: .88rem; }
     .pattern-bar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 15px; }
+    .scramble-button { min-height: 36px; padding: 8px 12px; border: 1px solid #c6d7fa; border-radius: 10px; background: #edf3ff; color: var(--blue); font: inherit; font-size: .78rem; font-weight: 900; cursor: pointer; }
+    .scramble-button:hover:not(:disabled) { background: #dce8ff; }
+    .scramble-button:disabled { opacity: .45; cursor: default; }
+    .scramble-button:focus-visible { outline: 3px solid #4e8cff; outline-offset: 3px; }
 
     .game-board {
       overflow: hidden;
@@ -188,6 +192,9 @@
     }
 
     .round-label { display: flex; align-items: center; gap: 9px; font-size: .84rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .board-ribbon .scramble-button { border-color: rgba(255,255,255,.6); background: rgba(255,255,255,.15); color: white; }
+    .board-ribbon .scramble-button:hover:not(:disabled) { background: rgba(255,255,255,.28); }
+    .board-ribbon .scramble-button:focus-visible { outline-color: var(--yellow); }
     .round-label .sparkle { color: var(--yellow); font-size: 1.2rem; }
     .round-navigation { margin-bottom: 20px; }
     .round-navigation .board-ribbon { border-radius: 22px; }
@@ -266,6 +273,16 @@
     .card-copy { display: block; width: 100%; }
     .card-name { display: block; font-size: .88rem; font-weight: 900; line-height: 1.2; }
     .card-hint { display: block; margin-top: 4px; color: var(--muted); font-size: .7rem; font-weight: 700; }
+    .mixed-bank { min-width: 0; }
+    .mixed-bank-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+    .mixed-bank-heading h2 { margin: 0; font-size: .95rem; }
+    .mixed-help { margin: 8px 0 15px; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+    .mixed-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .mixed-cards .card { flex-direction: column; align-items: flex-start; border-color: var(--part); background: var(--part-soft); }
+    .mixed-cards .card:hover { border-color: var(--part-ink); }
+    .mixed-cards .card-art { background: rgba(255,255,255,.75); }
+    .mixed-cards .card-hint { display: none; }
+    .card-key { display: inline-block; margin-top: 6px; padding: 2px 5px; border: 1px solid var(--part); border-radius: 4px; color: var(--part-ink); font-size: .6rem; }
 
     .sentence-zone {
       position: relative;
@@ -417,6 +434,8 @@
     .picture-choice-copy { display: block; padding: 18px; }
     .picture-choice-copy strong { display: block; font-size: 1.05rem; line-height: 1.3; }
     .picture-choice-copy > span { display: block; margin-top: 10px; color: var(--blue); font-size: .77rem; font-weight: 800; }
+    .picture-choice-copy .picture-meta { margin: 0 0 10px; color: var(--muted); font-size: .67rem; }
+    .picture-choice-copy .picture-meta.advanced { color: #67449f; }
     .scene-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .picture-recipes { padding: 16px 18px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 17px; background: var(--paper); }
     .picture-recipes .chooser-heading { margin-bottom: 9px; }
@@ -434,10 +453,11 @@
     .scene-prompts p + p { margin-top: 12px; }
     /* the picture shares the desktop width with a compact version of the same piles. */
     .picture-workspace .card-column { display: block; }
+    .picture-workspace .mixed-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .picture-workspace > .game-board { width: 100%; min-width: 0; }
     .picture-workspace .section-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
     .picture-workspace .section-heading h2 { margin: 0; }
-    .picture-workspace .section-tag, .picture-workspace .card-hint { display: none; }
+    .picture-workspace .section-heading .section-tag, .picture-workspace .card-hint { display: none; }
     .picture-workspace .key-hint { margin: 0 0 0 auto; }
     .picture-workspace .card { flex-direction: column; align-items: flex-start; min-height: 120px; }
     .picture-workspace .board-ribbon { flex-wrap: wrap; font-size: .7rem; }
@@ -496,6 +516,7 @@
       .section-heading .section-tag { display: none; }
       .key-hint { margin: 0 0 0 auto; }
       .card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .mixed-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .card { min-height: 124px; gap: 8px; padding: 10px 9px; }
       .card-art { width: 54px; height: 54px; border-radius: 13px; }
       .card-art img { width: 52px; height: 52px; }

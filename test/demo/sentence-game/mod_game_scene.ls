@@ -20,7 +20,7 @@ fn levels_screen(app) => base.frame({phase:"levels",book:[],clauses:[]},0,"Three
 >)
 fn word_button(card,index,locked) => <button id:"word-" ++ card.id,type:"button",class:"word-card",'data-action':"word",'data-card':card.id,
     *:(if (locked) {disabled:""} else {}),
-    <span card.text><span class:"word-key",if (index < 9) string(index+1) else if (index == 9) "0" else "">
+    <span card.text><span class:"word-key",model.bank_keys[index] or "">
 >
 fn placed_word(card,index,word_count,locked) => <span class:"placed-word",
     <button type:"button",class:"move-word",'data-action':"word-left",'data-card':card.id,'aria-label':"Move " ++ card.text ++ " left",
@@ -74,7 +74,10 @@ fn picture_picker(st) => <section id:"picture-screen",class:"picture-picker",'ar
     <div class:"picture-grid",*[for (scene in picture.pictures)
         <button id:"picture-" ++ scene.id,type:"button",class:"picture-choice",'data-action':"picture",'data-card':scene.id,
             (art.scene(scene.art,scene.alt));
-            <span class:"picture-choice-copy",<strong scene.title><span "Look closely & tell a story →">>
+            <span class:"picture-choice-copy",
+                <span class:"picture-meta" ++ (if (scene.advanced == true) " advanced" else ""),
+                    (if (scene.advanced == true) "Advanced · " else "") ++ string(len(scene.decks.subject)) ++ " subjects · " ++ string(picture.card_count(scene)) ++ " cards">
+                <strong scene.title><span "Look closely & tell a story →">>
         >]>;
     (base.collection(st))
 >
@@ -98,9 +101,9 @@ fn picture_play(st) {
                     <p "Save one sentence, then use the same cards to tell us something else. You can keep adding descriptions.">>
             >
             <section class:"game-board",'aria-label':"Describe this picture",
-                <div class:"board-ribbon",<span class:"round-label","Your picture story"><span "Use the cards again & again">>
+                <div class:"board-ribbon",<span class:"round-label","Your picture story">; (base.scramble_button(st))>
                 ; (base.sentence_zone(st));
-                <div class:"card-area",*[for (kind in model.kinds(st.pattern)) base.pile(st,kind)]>;
+                (base.card_area(st));
                 <div class:"builder-actions",(base.join_controls(st));
                     <div class:"sentence-actions",
                         <p id:"feedback",class:"feedback",role:"status",if (model.repeated(st)) "That description is already in your book. Try another detail!" else st.notice>

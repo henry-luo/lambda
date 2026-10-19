@@ -132,6 +132,8 @@ pub let parts = [
     {id:"how",question:"How?",name:"Manner",caption:"Pick how",keys:["f","g","h"]},
     {id:"why",question:"Why?",name:"Reason",caption:"Pick a reason",keys:["v","b","n"]}
 ]
+pub let bank_keys = ["1","2","3","4","5","6","7","8","9","0"]
+pub fn bank_index(key) => [for (i,value in bank_keys where value == key) i][0]
 pub let patterns = [
     {id:"pair",title:"Start with two",parts:["subject","predicate"],example:"The hen lays eggs."},
     {id:"triple",title:"Add an object",parts:["subject","predicate","object"],example:"The joker wears a funny cap."},
@@ -164,7 +166,7 @@ let catalogs = {subject:subjects,predicate:predicates,object:objects,where:place
 pub let card_count = sum([for (part in parts) len(catalogs[part.id])])
 let part_ids = [for (part in parts) part.id]
 let empty_choices = reduce([{},*part_ids],(choices,kind)=>{*:choices,[kind]:""})
-let round_fields = ["phase","pattern","hands","clauses","link","previous","seed",*part_ids]
+let round_fields = ["phase","pattern","hands","mixed_cards","clauses","link","previous","seed",*part_ids]
 
 fn lookup(cards,id) => [for (card in cards where card.id == id) card][0]
 pub fn pattern(id) => lookup(patterns,id)
@@ -181,6 +183,18 @@ pub fn deck(st,kind) => display_cards((if (st.decks == null) catalogs else st.de
 pub fn card(st,kind) => lookup(deck(st,kind),st[kind])
 pub fn ranked(cards,seed) => [for (entry in sort(
     [for (i,card in cards) {card:card,rank:math.random(seed+i)[0]}],(entry)=>entry.rank)) entry.card]
+pub fn scrambled(cards,seed) {
+    let shuffled = ranked(cards,seed)
+    // keep a scramble visibly different even when the random draw keeps its order.
+    if (len(cards) > 1 and all([for (i,card in shuffled) card.id == cards[i].id]))
+        [*slice(shuffled,1),shuffled[0]] else shuffled
+}
+fn scramble(st) {
+    // qualify IDs because an action and its object can share the same card ID.
+    let cards = if (st.mixed_cards != null) st.mixed_cards else
+        [for (kind in kinds(st.pattern),card in st.hands[kind]) {id:kind ++ ":" ++ card.id,kind:kind,card:card}]
+    {*:st,mixed_cards:scrambled(cards,st.seed),seed:st.seed+len(cards)}
+}
 fn offer(cards,required) => if (contains([for (card in cards) card.id],required.id)) cards
     else [cards[0],required,cards[1]]
 fn deal(st) {
@@ -196,11 +210,13 @@ fn deal(st) {
             else if (kind == "object") offer(hand,lookup(objects,natural.object)) else hand
         {hands:{*:acc.hands,[kind]:offered},seed:acc.seed+len(cards)}
     })
-    clear_choices({*:st,hands:dealt.hands,seed:dealt.seed})
+    let next = clear_choices({*:st,hands:dealt.hands,mixed_cards:null,seed:dealt.seed})
+    // a new recipe or clause rebuilds the mixed bank with the new displayed words.
+    if (st.mixed_cards != null) scramble(next) else next
 }
 pub fn clear_choices(st) => {*:st,*:empty_choices,phase:"build"}
 pub fn new_game(seed=42,round_id=1) => {*:empty_choices,round:round_id,seed:seed,book:[],pattern:"",hands:null,
-    phase:"pattern",clauses:[],link:"",previous:null,visits:{}}
+    mixed_cards:null,phase:"pattern",clauses:[],link:"",previous:null,visits:{}}
 pub fn jump_round(st,target) => progress.jump(st,target,rounds,round_fields,new_game,"saved")
 pub fn round_saved(st,id) => progress.finished(st,id)
 pub fn choose_pattern(st,id) => if (st.phase != "pattern" or pattern(id) == null) st
@@ -244,6 +260,7 @@ pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
     else if (command == "resume" and st.phase == "pattern" and st.pattern != "") {*:st,phase:"build"}
     else if (command == "round" and st.unlimited != true) progress.requested(st,value,rounds,round_fields,new_game,"saved")
     else if (command == "deal" and st.phase == "build" and st.unlimited != true) deal(st)
+    else if (command == "scramble" and st.phase == "build") scramble(st)
     else if (command == "extend") extend(st,value)
     // undo restores local choices while keeping work saved in other rounds.
     else if (command == "undo-join") (if (st.phase == "build" and st.previous != null)
@@ -251,7 +268,10 @@ pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
     else choose(st,command,value)
 pub fn shortcut(st,key) {
     let options = [for (kind in kinds(st.pattern),i,value in part(kind).keys where value == key) {kind:kind,id:st.hands[kind][i].id}]
-    if (len(options) == 0) st else choose(st,options[0].kind,options[0].id)
+    let index = bank_index(key)
+    let mixed = if (st.mixed_cards != null and index != null) st.mixed_cards[index] else null
+    if (st.mixed_cards != null) (if (mixed == null) st else choose(st,mixed.kind,mixed.card.id))
+    else if (len(options) == 0) st else choose(st,options[0].kind,options[0].id)
 }
 pub fn saved_entry(st) => progress.entry(st,st.round)
 pub fn feedback(st) => if (st.phase == "saved")

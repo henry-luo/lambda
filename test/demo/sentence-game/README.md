@@ -55,6 +55,11 @@ familiar subject/action/object match alongside imaginative combinations.
 choosing the same pattern, keeps your draft and cards. Choosing another
 pattern deals fresh cards for the current clause and keeps earlier clauses.
 **New cards** deals another hand for the current clause, keeping earlier clauses.
+**Scramble cards** combines all available cards into one shuffled group across
+word categories. Category headings and rows disappear; each card’s color is
+the category hint. It keeps your selections, joined clauses and saved sentences.
+**Scramble again** reshuffles the group. Recipe changes, new cards and joined
+clauses keep the mixed layout; each round remembers its own layout and draft.
 
 Complete a clause, then click **and +**, **but +**, **or +**, **so +**, **yet +**
 or **because +** to add another clause. **Although**, **while**, **when**, and
@@ -105,9 +110,10 @@ Keys **1–9** and **0** select the corresponding available word card.
 
 ## Level 3: Describe a picture
 
-Choose from three original illustrated scenes: a park, a kitchen, and a beach.
-Each picture has a related, fixed bank of subjects, actions, objects, places,
-and a time, plus related How and Why cards for the advanced recipes. The large
+Choose from six polished picture-book scenes: a park, a kitchen, a beach, a
+harvest farm, a woodland gathering, and a school discovery fair.
+Each picture has a related, fixed bank of subjects, actions, objects, places
+and times, plus related How and Why cards for the advanced recipes. The large
 picture has a descriptive alternative text.
 
 Choose a recipe and select cards to describe what you see. **Save description**
@@ -120,6 +126,28 @@ saved descriptions. **Clear this sentence** clears the draft. Recipes, letter
 shortcuts, conjunctions and **Undo join** work as in Level 1. This level checks
 that the selected sentence parts are complete; players judge how accurately
 their descriptions match the picture.
+
+Use **Scramble cards** in the red story header to combine all the available
+cards into one shuffled bank, with colors as category hints. The same cards
+remain reusable, and your current sentence and book stay intact. Mixed cards
+stay mixed when you save or clear a description, change recipes or add clauses.
+
+### Advanced pictures
+
+Each new scene has **six subjects and 32 reusable cards** across all recipes:
+six subjects, six actions, six objects, six places, two times, three manners
+and three reasons. A recipe shows the card types it needs; **Add every detail**
+offers the whole 32-card bank.
+
+| Picture | Six subjects | Some things to describe |
+| --- | --- | --- |
+| Harvest morning on the farm | Farmer, gardener, chef, musician, rabbit, hen | Growing a pumpkin, watering flowers, stirring soup, playing a drum, nibbling a carrot, laying eggs |
+| Stories in the woodland | Grandma, teacher, bear, fox, monkey, dog | Reading, painting a rainbow, picking berries, following a butterfly, tossing a banana, chasing a ball |
+| The school discovery fair | Scientist, astronaut, robot, teacher, dragon, firefighter | Examining a crystal, carrying a flag, dancing, reading, painting, holding a hose |
+
+These scenes reuse the existing subject, action and object cards, with new
+scene-specific place cards such as **beside the barn**, **along the path** and
+**beside the moon display**. The scene picker shows the subject and card counts.
 
 ## Cards and controls
 
@@ -141,7 +169,10 @@ flowers, a drum, a crystal, berries, a butterfly, a sled and a banana. There
 are 40 new original SVG illustrations, shared where cards show the same prop.
 
 Use the mouse or native button keyboard navigation (Tab, Enter and Space).
-Letter shortcuts choose the left, middle or right card:
+In a mixed bank, **1–9** and **0** select the first ten cards in display order;
+Tab and Enter reach every card, including those after the tenth. Category
+letter shortcuts apply only while cards are grouped. They select the first,
+second or third card of the corresponding pile:
 
 | Pile | Keys |
 | --- | --- |
@@ -184,13 +215,29 @@ the current session. The direct entry point is still available:
 | `mod_puzzle.ls` | Scrambled lessons, card order, hints, checking and progression |
 | `mod_rounds.ls` | Shared round snapshots, navigation and ordered saved entries |
 | `mod_picture.ls` | Picture metadata, related cards and unlimited descriptions |
-| `mod_art.ls`, `assets/` | Local SVG illustration assets |
+| `mod_art.ls`, `assets/` | SVG card illustrations and painted PNG scenes |
+| `artwork/prompts.json` | Scene artwork prompts and source references |
 | `sentence-game.css` | Responsive card-table theme |
 
 The model returns immutable state values (**S1.4**). The view constructs its
 document from those values; mutations happen in event handlers (**S12.1.3**).
 Each deal includes a familiar match and other combinations. All illustrations
 and styles are local, with no downloads or external services.
+
+### Scene artwork
+
+The six Level 3 scenes use full-resolution PNG artwork generated with the
+built-in imagegen tool. They share a warm picture-book style with expressive
+characters, natural poses, textured surfaces, and detailed lighting. The park
+painting provides the style reference for the other scenes. Each scene
+keeps the actors, actions and props used by its sentence cards.
+
+The final assets are `assets/scene-{park,kitchen,beach,harvest,woodland,discovery}.png`.
+Prompts, dimensions and source references are recorded in
+[artwork/prompts.json](artwork/prompts.json). The original three scene SVGs
+provide composition references for future redraws; the advanced scenes are new
+compositions. Artwork is bundled locally; playing the game makes no
+image-generation or network requests.
 
 ## Focused checks
 

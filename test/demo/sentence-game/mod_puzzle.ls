@@ -18,9 +18,7 @@ pub fn available(st) => [for (card in st.cards where not contains(st.order,card.
 fn deal(st) {
     let words = split(replace(lesson(st).answers[0],"."," .")," ")
     let cards = [for (i,text in words) {id:string(i),text:text}]
-    let shuffled = model.ranked(cards,st.seed)
-    // avoid presenting a solved line when the shuffle happens to draw one.
-    let bank = if (all([for (i,card in shuffled) card.id == cards[i].id])) [*slice(shuffled,1),shuffled[0]] else shuffled
+    let bank = model.scrambled(cards,st.seed)
     {*:st,cards:bank,order:[],phase:"build",notice:"",hint:false,seed:st.seed+len(cards)}
 }
 let round_fields = ["seed","cards","order","phase","notice","hint"]
@@ -60,7 +58,7 @@ pub fn action(st,command,value="") => if (command == "reset") new_game(st.seed)
     else if (command == "hint" and st.phase == "build") {*:st,hint:not st.hint}
     else st
 pub fn shortcut(st,key) {
-    let index = [for (i,value in ["1","2","3","4","5","6","7","8","9","0"] where value == key) i][0]
+    let index = model.bank_index(key)
     if (key == "backspace") action(st,"undo-word")
     else if (index != null) put_word(st,available(st)[index].id) else st
 }

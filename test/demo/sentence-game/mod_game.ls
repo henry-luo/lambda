@@ -5,7 +5,7 @@ import picture: .mod_picture
 pub let levels = [
     {id:1,title:"Build a sentence",tag:"Choose & create",art:"book",copy:"Pick a pattern. Mix picture cards to make your own sentences.",detail:string(len(model.patterns)) ++ " patterns · " ++ string(model.card_count) ++ " cards"},
     {id:2,title:"Unscramble a sentence",tag:"Think & rearrange",art:"robot",copy:"The words are all mixed up! Put every card back in the right order.",detail:"8 word puzzles · clues & hints"},
-    {id:3,title:"Describe a picture",tag:"Look & tell stories",art:"rainbow",copy:"Look closely at a picture. Use its cards again and again to tell what you see.",detail:"3 pictures · reusable cards"}
+    {id:3,title:"Describe a picture",tag:"Look & tell stories",art:"rainbow",copy:"Look closely at a picture. Use its cards again and again to tell what you see.",detail:string(len(picture.pictures)) ++ " pictures · reusable cards"}
 ]
 let engines = [
     {create:model.new_game,action:model.action,shortcut:model.shortcut},

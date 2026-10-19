@@ -21,11 +21,13 @@ fn chooser(st) => <section id:"pattern-screen",class:"pattern-screen",'aria-labe
             <div class:"pattern-grid",*[for (pattern in model.patterns where (pattern.advanced == true) == group.advanced) pattern_choice(st,pattern)]>>];
     (collection(st))
 >
-fn card_tile(card,kind,selected,locked) => <button id:kind ++ "-" ++ card.id,type:"button",class:"card",
+fn card_tile(card,kind,selected,locked,key="") => <button id:kind ++ "-" ++ card.id,type:"button",class:"card kind-" ++ kind,
     'data-action':kind,'data-card':card.id,'aria-pressed':string(selected == card.id),
     *:(if (locked) {disabled:""} else {}),
+    *:(if (key != "") {'aria-keyshortcuts':key} else {}),
     <span class:"card-art",style:"--art-bg:" ++ card.color,(art.picture(card.art))>
-    <span class:"card-copy",<span class:"card-name",card.text><span class:"card-hint",card.hint>>
+    <span class:"card-copy",<span class:"card-name",card.text><span class:"card-hint",card.hint>
+        if (key != "") <span class:"card-key",'aria-hidden':"true",key>>
 >
 pub fn pile(st,kind) {
     let info = model.part(kind);
@@ -37,10 +39,26 @@ pub fn pile(st,kind) {
             *[for (card in st.hands[kind]) card_tile(card,kind,st[kind],st.phase != "build")]>
     >
 }
+pub fn card_area(st) => <div class:"card-area",
+    if (st.mixed_cards == null) *[for (kind in model.kinds(st.pattern)) pile(st,kind)]
+    else <section class:"mixed-bank",'aria-labelledby':"mixed-heading",
+        <div class:"mixed-bank-heading",<h2 id:"mixed-heading","All cards, mixed together">
+            <span class:"section-tag",string(len(st.mixed_cards)) ++ " cards">>
+        <p class:"mixed-help","Use the colors as clues. Pick the words you need from anywhere in the group.">
+        <div id:"mixed-cards",class:"card-grid mixed-cards",role:"group",'aria-label':"Mixed picture cards",
+            *[for (i,entry in st.mixed_cards) card_tile(entry.card,entry.kind,st[entry.kind],st.phase != "build",model.bank_keys[i] or "")]>
+    >
+>
+pub fn scramble_button(st) => <button id:"scramble-cards",type:"button",class:"scramble-button",'data-action':"scramble",
+    title:"Mix all the cards into one group. Keep the card colors and your sentence.",
+    *:(if (st.phase != "build") {disabled:""} else {}),
+    <span 'aria-hidden':"true","⇄">; (if (st.mixed_cards != null) " Scramble again" else " Scramble cards")
+>
 fn pattern_bar(st) => <section class:"pattern-bar",'aria-label':"Selected pattern",
     <div class:"pattern-bar-title",<p class:"eyebrow","Your sentence recipe"><strong model.pattern(st.pattern).title>>
     ; (pattern_strip(st.pattern));
     <div class:"pattern-bar-actions",
+        (scramble_button(st));
         <button id:"new-cards",type:"button",class:"text-button",'data-action':"deal",title:"Deal new cards for this clause",
             *:(if (st.phase != "build") {disabled:""} else {}),"↻ New cards">
         <button id:"change-pattern",type:"button",class:"text-button",'data-action':"patterns",
@@ -69,7 +87,7 @@ pub fn join_controls(st) => <div class:"join-controls",
 pub fn sentence_zone(st) => <section class:"sentence-zone",'aria-labelledby':"sentence-heading",
     <div class:"sentence-topline",<h2 id:"sentence-heading","Your sentence">
         <span class:"sentence-instruction",if (st.phase == "saved") "Saved to your book!"
-            else "Clause " ++ string(len(st.clauses)+1) ++ " · Pick one card for each question.">>
+            else "Clause " ++ string(len(st.clauses)+1) ++ (if (st.mixed_cards != null) " · Pick from the mixed cards." else " · Pick one card for each question.")>>
     ; (preview(st))
 >
 fn sentence_actions(st) => <div class:"builder-actions",
@@ -117,7 +135,7 @@ fn builder(st) => <div id:"play-screen",
     (pattern_bar(st));
     <section class:"game-board",'aria-label':"Sentence building game",
         (sentence_zone(st));
-        <div class:"card-area",*[for (kind in model.kinds(st.pattern)) pile(st,kind)]>;
+        (card_area(st));
         (sentence_actions(st));(collection(st))
     >
 >
@@ -159,5 +177,6 @@ pub fn page(st) => frame(st,1,<span "★ " string(len(st.book)) " of " string(mo
         else if (st.phase == "done") <div class:"game-board",(finish(st))>
         else builder(st);
         <p class:"footer-note","Who · Doing what · To what · Where · When · How · Why — each part has its own color."
-            <br>"Pick cards with a mouse, or use Tab and Enter. Letter shortcuts appear beside each pile.">
+            <br>; (if (st.mixed_cards != null) "Keys 1–9 and 0 pick the first ten mixed cards. Use a mouse or Tab and Enter for every card."
+                else "Pick cards with a mouse, or use Tab and Enter. Letter shortcuts appear beside each pile.")>
     >)
