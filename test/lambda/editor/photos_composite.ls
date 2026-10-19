@@ -103,3 +103,13 @@ check("flatten-retains-metadata",[for (child in content(flattened.doc) where nam
 let pass_session = editor.open_session(img.document(img.stack([img.stack([img.layer(red)],
     {id:"pass",name:"Pass",isolation:'pass_through'}),img.layer(blue,{id:"blue",name:"Blue"})]),{width:2,height:1}))^
 check("merge-pass-refusal",(editor.exec(pass_session,{id:"layer.merge"}) ^ { true }) is bool)
+
+let translated_mask = img.with_children(img.layer(strip,{position:[-1,1],transform:[1,0,0,1,2,0]}),
+    [strip,img.mask(coverage,{position:[0,0],default:0})])^
+let translated_doc = img.document(img.stack([translated_mask]),{width:5,height:3})
+let translated_pixels = img.render_frame(translated_doc)^
+check("integer-translation-mask",img.sample(translated_pixels,1,1)^ == [255,0,0,255] and translated_pixels.a[1,2] == 0 and translated_pixels.a[1,0] == 0)
+check("translated-mask-region",img.render_region(translated_doc,[1,1,4,3])^.pixels == img.read_region(translated_pixels,[1,1,4,3])^)
+let half_blue = img.with_region(strip,[1,0,2,1],img.blank({width:1,height:1,color:[0.0,0.0,1.0,128/255]})^.pixels)^
+let fraction_doc = img.document(img.stack([img.layer(half_blue,{position:[0,1],transform:[1,0,0,1,0.5,0]})]),{width:4,height:3})
+check("fractional-translation",img.sample(img.render_frame(fraction_doc)^,1,1)^ == [170,0,85,192])

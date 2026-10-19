@@ -258,7 +258,7 @@ The PSD writer now explicitly rejects retained attributes it cannot serialize.
 
 Photos provides project saving/opening, explicit PSD export, transform/blend and
 effect controls, and a histogram derived from its presented raster. Quick
-adjustments add editable effects. Focused package tests include 46 composition
+adjustments add editable effects. Focused package tests include 49 composition
 checks and project file persistence, plus existing photo/image tests; 11 cases
 pass under forced GC and poisoned frees. All 34 native ImageIO checks pass.
 The composite UI replay covers gray/red pixels, transform undo/redo, effect
@@ -325,7 +325,7 @@ adding a Photos-only input workaround (**S12.1.3**).
 
 - The 16 selected package/runtime cases pass with forced GC and poisoned frees;
   the eager-JIT pass of the 10 Photos/new dynamic-index cases also passes.
-  Photos fixtures contain 41 core, 13 interaction, 26 paint, 46 composite,
+  Photos fixtures contain 41 core, 13 interaction, 26 paint, 49 composite,
   21 retouch and 16 action semantic checks, with procedural PSD/project/action
   round trips. The final composite review includes mask/effect, transform
   gestures, identity reset and metadata-preserving flattening.
@@ -342,3 +342,49 @@ adding a Photos-only input workaround (**S12.1.3**).
   all seven scoped RDB tunnel/trust checks and the entire native rerun pass.
 - The Radiant integer-cast lint passes; document/fixture pairing and whitespace
   checks are clean. Full Lambda/Radiant and optimized qualification follow.
+
+## Expanded aggregate qualification
+
+`make test-lambda-baseline` reports **5783/5785** runtime checks passing and
+**2112/2112** input checks. The native MIR GC stress suite passes **315/315**.
+The core script executable passes **1633/1634**; all Photos cases pass.
+The earlier `BinarySchemaTest.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`
+stdout failure remains. A second failure is
+`math_test_math_includegraphics`: its PNG metrics are invalid after the full
+50-script LaTeX/math batch. It passes alone, twice in one process, after the
+immediate preceding HTML script, and in each smaller partition tested. The exact
+50-script replay reproduces the error. No workaround, expected-output change or
+claim of a pre-existing cause was made. Evidence:
+`temp/photos-expanded-lambda-baseline.log`,
+`temp/photos-lambda-baseline-summary.json`,
+`temp/photos-math-full-batch.txt`, `temp/photos-math-full-batch.log`.
+
+`make test-radiant-baseline` reports **5956 passed, 6 failed, 146 partial,
+1 skipped**. All seven Photos workflows pass together in this aggregate,
+including all 93 assertions. Native views pass 208/208; UI automation passes
+647/651 workflows. The same six failures reported at M1 remain observable:
+Bootstrap kitchen-sink page loading, CSS cascade live memory 381630 bytes versus
+373940 budget, and four SVG foreignObject workflows (base/CSS/interaction/
+namespaces). The snapshot comparator passes 51/51. Evidence:
+`temp/photos-expanded-radiant-baseline.log`,
+`temp/photos-radiant-baseline-summary.json`. These aggregate gates are not green;
+no baseline budget, expected output or inventory was weakened.
+
+## Integer-placement rendering optimization
+
+The first expanded release benchmark (functional checkpoint `28ada37f3`) measured
+2984 ms construction, 9794 ms for 16 moves, 677 ms PSD encoding and 14273 ms total,
+with 224657408 bytes maximum child RSS. The common integer-placement case was
+paying inverse affine and premultiplied bilinear sample work despite requiring
+exact source reads. The shared raster blender now selects exact source/mask
+reads when the affine is an integral translation; fractional/rotated/scaled cases
+retain interpolation. This changes no blend or alpha equation.
+
+Three additional pixel checks cover retained integer translation, a local mask,
+requested-region agreement and the fractional interpolation boundary. The
+composite fixture now has 49 semantic checks. The optimized host passes all 16
+focused package/runtime cases under forced GC and poisoned frees, and all 34
+ImageIO cases pass in the optimized native executable. The broader aggregate
+results above precede this exact-sampling optimization; final focused UI and
+measurement results follow. No interactive-latency claim is inferred from the
+headless benchmark.

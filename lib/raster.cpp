@@ -209,30 +209,41 @@ bool raster_buffer_blend(RasterBuffer* destination, const RasterBuffer* source,
     int64_t y0=(int64_t)fmax(0,fmin(destination->height,floor(min_y)));
     int64_t x1=(int64_t)fmax(0,fmin(destination->width,ceil(max_x)));
     int64_t y1=(int64_t)fmax(0,fmin(destination->height,ceil(max_y)));
+    // integral translations need exact sample reads, without inverse affine interpolation.
+    bool aligned=m[0]==1 && m[1]==0 && m[2]==0 && m[3]==1 &&
+        floor(left+m[4])==left+m[4] && floor(top+m[5])==top+m[5];
+    bool aligned_mask=aligned && floor(mask_left)==mask_left && floor(mask_top)==mask_top;
     for (int64_t y=y0;y<y1;y++) for (int64_t x=x0;x<x1;x++) {
-        double dx=x+0.5-left-m[4],dy=y+0.5-top-m[5];
-        double sx=(m[3]*dx-m[2]*dy)/det,sy=(-m[1]*dx+m[0]*dy)/det;
-        if (sx<0 || sy<0 || sx>=source->width || sy>=source->height) continue;
-        sx-=0.5; sy-=0.5;
-        int64_t ix=(int64_t)floor(sx),iy=(int64_t)floor(sy);
-        double fx=sx-ix,fy=sy-iy,alpha=0,colors[3]={};
-        // interpolate premultiplied samples so hidden RGB cannot bleed across transparent edges.
-        for (int j=0;j<4;j++) {
-            double weight=((j&1)?fx:1-fx)*((j&2)?fy:1-fy);
-            if (weight==0) continue;
-            uint8_t pixel[4];
-            raster_rgba_pixel(source,(uint32_t)image_edge_index(ix+(j&1),source->width),
-                (uint32_t)image_edge_index(iy+((j>>1)&1),source->height),pixel);
-            double a=pixel[3]/255.0; alpha+=weight*a;
-            for (int c=0;c<3;c++) colors[c]+=weight*a*pixel[c];
+        double sx,sy; uint8_t rgba[4]={};
+        if (aligned) {
+            sx=x-left-m[4]; sy=y-top-m[5];
+            raster_rgba_pixel(source,(uint32_t)sx,(uint32_t)sy,rgba);
+        } else {
+            double dx=x+0.5-left-m[4],dy=y+0.5-top-m[5];
+            sx=(m[3]*dx-m[2]*dy)/det; sy=(-m[1]*dx+m[0]*dy)/det;
+            if (sx<0 || sy<0 || sx>=source->width || sy>=source->height) continue;
+            sx-=0.5; sy-=0.5;
+            int64_t ix=(int64_t)floor(sx),iy=(int64_t)floor(sy);
+            double fx=sx-ix,fy=sy-iy,alpha=0,colors[3]={};
+            // interpolate premultiplied samples so hidden RGB cannot bleed across transparent edges.
+            for (int j=0;j<4;j++) {
+                double weight=((j&1)?fx:1-fx)*((j&2)?fy:1-fy);
+                if (weight==0) continue;
+                uint8_t pixel[4];
+                raster_rgba_pixel(source,(uint32_t)image_edge_index(ix+(j&1),source->width),
+                    (uint32_t)image_edge_index(iy+((j>>1)&1),source->height),pixel);
+                double a=pixel[3]/255.0; alpha+=weight*a;
+                for (int c=0;c<3;c++) colors[c]+=weight*a*pixel[c];
+            }
+            rgba[3]=(uint8_t)lround(alpha*255);
+            if (alpha>0) for (int c=0;c<3;c++) rgba[c]=(uint8_t)lround(colors[c]/alpha);
         }
-        uint8_t rgba[4]={0,0,0,(uint8_t)lround(alpha*255)};
-        if (alpha>0) for (int c=0;c<3;c++) rgba[c]=(uint8_t)lround(colors[c]/alpha);
         double coverage=1;
         if (mask) {
             double mx=sx-mask_left,my=sy-mask_top;
             int64_t bx=(int64_t)floor(mx),by=(int64_t)floor(my);
-            coverage=image_bilinear_mix(raster_mask_sample(mask,bx,by,outside),
+            coverage=aligned_mask ? raster_mask_sample(mask,bx,by,outside) :
+                image_bilinear_mix(raster_mask_sample(mask,bx,by,outside),
                 raster_mask_sample(mask,bx+1,by,outside),raster_mask_sample(mask,bx,by+1,outside),
                 raster_mask_sample(mask,bx+1,by+1,outside),mx-bx,my-by);
             if (inverse) coverage=1-coverage;
