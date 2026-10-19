@@ -168,6 +168,23 @@ bool css_property_runtime_inherited(CssPropertyCode property) {
     return false;
 }
 
+const CssPropertyCode* css_property_runtime_inherited_list(size_t* count) {
+    struct InheritedProperties {
+        CssPropertyCode values[CSS_PROPERTY_COUNT];
+        size_t count = 0;
+        InheritedProperties() {
+            for (int code = CSS_PROPERTY_DISPLAY; code < CSS_PROPERTY_COUNT; code++) {
+                CssPropertyCode property = (CssPropertyCode)code;
+                if (css_property_runtime_inherited(property)) values[count++] = property;
+            }
+        }
+    };
+    // the property database is immutable; enumerate its inheritance policy once, not per element.
+    static const InheritedProperties properties;
+    *count = properties.count;
+    return properties.values;
+}
+
 void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync) {
     s_cssom_used_value_sync = sync;
 }

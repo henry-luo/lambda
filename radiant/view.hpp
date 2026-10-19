@@ -3861,6 +3861,7 @@ const CssPropertyRuntimeMetadata* css_property_runtime_metadata_at(size_t index)
 // Resolver inheritance keeps the historical author-facing subset while the
 // CSS database continues to expose broader metadata to other consumers.
 bool css_property_runtime_inherited(CssPropertyCode property);
+const CssPropertyCode* css_property_runtime_inherited_list(size_t* count);
 
 // Forward declaration from view.hpp
 struct TransformFunction;

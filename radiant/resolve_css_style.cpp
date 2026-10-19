@@ -5318,6 +5318,57 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
     }
 }
 
+static bool collect_inherited_declaration_mask(StyleNode* node, void* context) {
+    uint64_t* mask = (uint64_t*)context;
+    CssPropertyCode property = node->property_code;
+    if (property == CSS_PROPERTY_ALL) {
+        *mask = UINT64_MAX;
+        return false;
+    }
+    auto include = [&](CssPropertyCode code) {
+        if (css_property_runtime_inherited(code)) *mask |= UINT64_C(1) << ((unsigned)code % 64);
+    };
+    include(property);
+    const CssProperty* definition = css_property_get_by_code(property);
+    if (definition && definition->shorthand) {
+        for (int i = 0; i < definition->longhand_count; i++) include(definition->longhand_props[i]);
+    }
+    return true;
+}
+
+// ancestry, cascade edits and DOM moves invalidate this selected-view cache (D4.5.1v4).
+static uint64_t inherited_declaration_mask(LayoutContext* context, DomElement* element) {
+    DomDocument* doc = context->doc;
+    uint32_t generation = doc && doc->view_tree ? doc->view_tree->measurement_cache_generation : 0;
+    if (!generation || context->css_query_probe || !element || element->doc != doc ||
+        (context->selected_view_tree && context->selected_view_tree != doc->view_tree) ||
+        !dom_element_is_connected(element)) return UINT64_MAX;
+    // wrappers above the root survive view-prop retirement and cannot retain a cache (D4.5.1v4).
+    radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(context, element);
+    uint64_t mask = 0;
+    bool within_root = true;
+    for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor)) {
+        if (ancestor->doc != doc) return UINT64_MAX;
+        radiant::LayoutCache* inherited = within_root ? ancestor->layout_cache.get() : nullptr;
+        if (inherited && inherited->inherited_generation == generation &&
+            inherited->inherited_style_epoch == doc->style_query_epoch &&
+            inherited->inherited_mutation_epoch == doc->mutation_epoch) {
+            mask |= inherited->inherited_declaration_mask;
+            break;
+        }
+        style_tree_foreach(ancestor->specified_style, collect_inherited_declaration_mask, &mask);
+        if (mask == UINT64_MAX) break;
+        if (ancestor == doc->root) within_root = false;
+    }
+    if (cache) {
+        cache->inherited_declaration_mask = mask;
+        cache->inherited_style_epoch = doc->style_query_epoch;
+        cache->inherited_mutation_epoch = doc->mutation_epoch;
+        cache->inherited_generation = generation;
+    }
+    return mask;
+}
+
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     if (dom_elem->blk) {
@@ -5523,12 +5574,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // This handles anonymous table elements that have font but no specified_style
     if (parent_tree || (parent && parent->font)) {
         ViewSpan* inheritance_span = lam::view_require_element(lycon->view);
+        uint64_t inherited_candidates = inherited_declaration_mask(lycon, parent);
         // The CSS property database is the sole source of default inheritance
         // metadata; resolver-specific exceptions below retain their policy.
-        for (int property_code = CSS_PROPERTY_DISPLAY;
-             property_code < CSS_PROPERTY_COUNT; property_code++) {
-            CssPropertyCode prop_id = (CssPropertyCode)property_code;
-            if (!css_property_runtime_inherited(prop_id)) continue;
+        size_t inherited_count = 0;
+        const CssPropertyCode* inherited_properties = css_property_runtime_inherited_list(&inherited_count);
+        for (size_t property_index = 0; property_index < inherited_count; property_index++) {
+            CssPropertyCode prop_id = inherited_properties[property_index];
             CssDeclaration* existing = style_tree_get_declaration(style_tree, prop_id);
             if (existing && existing->property_code != CSS_PROPERTY_ALL) {
                 continue;
@@ -5728,6 +5780,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->blk->text_align = inherited_align;
                 continue;
             }
+            // collisions retain the full walk; absent bits prove no ancestor declares this property.
+            if (!(inherited_candidates & (UINT64_C(1) << ((unsigned)prop_id % 64)))) continue;
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);

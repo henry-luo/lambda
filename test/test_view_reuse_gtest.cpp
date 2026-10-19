@@ -23,6 +23,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/strbuf.h"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
@@ -911,6 +912,29 @@ TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes
     repeated = measure_element_intrinsic_widths(&context, block);
     EXPECT_FLOAT_EQ(repeated.max_content, 120.0f);
     EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+
+    // a flex height query with a known wrapping width must not measure widths again.
+    set_property("height", "24px");
+    set_property("padding-top", "10%");
+    uint64_t requests = context.profiler.intrinsic_requests;
+    EXPECT_FLOAT_EQ(flex_measure_intrinsic_max_height(&context, block, 40.0f, 100.0f), 34.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests);
+    IntrinsicSizes row = calculate_grid_item_intrinsic_sizes(&context,
+        lam::view_require_block(block), true);
+    EXPECT_FLOAT_EQ(row.min_content, 44.0f);
+    EXPECT_FLOAT_EQ(row.max_content, 44.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests);
+
+    // source ancestors above the selected root outlive its view-prop generation.
+    DomElement* outside = element();
+    outside->tag_id = MARKUP_NAME_DIV;
+    outside->doc = lam::up(&doc);
+    outside->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    doc.root = lam::up(block);
+    ASSERT_TRUE(outside->DomNode::append_child(block));
+    block->set_needs_style_recompute(true);
+    calculate_max_content_height(&context, block, 40.0f);
+    EXPECT_EQ(outside->layout_cache, nullptr);
 
     scratch_release(&context.scratch);
     arena_destroy(scratch);

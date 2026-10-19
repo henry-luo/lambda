@@ -493,6 +493,36 @@ TEST_F(RadiantTextQuery, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
     }
 }
 
+TEST_F(RadiantTextQuery, InheritedDeclarationFilteringRetainsAncestorsResetsAndNewProperties) {
+    DomElement* body = load("test/html/layout_inherited_declaration_filter.html");
+    ASSERT_NE(body, nullptr);
+    bool reflow = false;
+    auto check = [&](CssEnum white_space, float letter_spacing) {
+        layout_html_doc(&ui, document, reflow);
+        reflow = true;
+        DomElement* inherited = dom_find_element_by_id(document->root->as_element(), "inherited");
+        DomElement* initial = dom_find_element_by_id(document->root->as_element(), "initial");
+        ASSERT_NE(inherited, nullptr); ASSERT_NE(initial, nullptr);
+        ASSERT_NE(inherited->font, nullptr); ASSERT_NE(initial->font, nullptr);
+        EXPECT_FLOAT_EQ(inherited->font->font_size, 17.0f);
+        EXPECT_EQ(inherited->block()->white_space, white_space);
+        EXPECT_FLOAT_EQ(inherited->font->letter_spacing, letter_spacing);
+        EXPECT_EQ(inherited->block()->text_transform, CSS_VALUE_UPPERCASE);
+        EXPECT_FLOAT_EQ(initial->font->font_size, 9.0f);
+        EXPECT_FLOAT_EQ(initial->font->letter_spacing, 0.0f);
+        // an absent stored keyword represents the initial normal white-space value.
+        EXPECT_TRUE(initial->block()->white_space == CSS_VALUE_NORMAL ||
+                    initial->block()->white_space == CSS_VALUE__UNDEF);
+    };
+    check(CSS_VALUE_PRE, 0.0f);
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(body, "white-space", "normal", &changed));
+    ASSERT_TRUE(dom_element_set_presentation_style(body, "letter-spacing", "2px", &changed));
+    check(CSS_VALUE_NORMAL, 2.0f);
+    ASSERT_TRUE(dom_element_clear_presentation_style(body));
+    check(CSS_VALUE_PRE, 0.0f);
+}
+
 TEST_F(RadiantTextQuery, IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSides) {
     ASSERT_NE(load("test/html/layout_intrinsic_box_variables.html"), nullptr);
     struct Sample { const char* id; float width, left; } samples[] = {

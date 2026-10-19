@@ -6220,7 +6220,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     return sizes;
 }
 
-static IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* node) {
+IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* node) {
     IntrinsicSizes sizes = {};
     if (!node) return sizes;
 

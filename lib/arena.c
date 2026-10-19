@@ -661,7 +661,8 @@ void arena_rewind(Arena* arena, ArenaMark mark) {
         return;
     }
     // chunks past the mark keep their capacity for reuse
-    for (chunk = target->next; chunk; chunk = chunk->next) {
+    // a rewind inside the current chunk must not scan its unused retained successors.
+    for (chunk = target != arena->current ? target->next : NULL; chunk; chunk = chunk->next) {
         chunk->used = 0;
         if (chunk == arena->current) break;
     }

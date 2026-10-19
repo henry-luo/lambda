@@ -263,7 +263,7 @@ void GridLayoutScope::close() {
     active = false;
 }
 // Main grid layout algorithm entry point
-void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container, bool intrinsic_width_only) {
     // validate before diagnostics; a null container cannot provide a source location.
     if (!container) return;
     // Check if this is actually a grid container by display type
@@ -333,7 +333,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         // 1. Absolutely positioned children can use grid-line positions for their containing block.
         // 2. The container gets the correct height from explicit grid-template-rows + padding.
         determine_grid_size(grid_layout);
-        resolve_track_sizes_enhanced(grid_layout, container);
+        resolve_track_sizes_enhanced(grid_layout, container, intrinsic_width_only);
         if (grid_layout->storage_failed) return;
         // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
@@ -540,7 +540,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
-    resolve_track_sizes_enhanced(grid_layout, container);
+    resolve_track_sizes_enhanced(grid_layout, container, intrinsic_width_only);
     if (grid_layout->storage_failed) return;
     // An intrinsic width constraint is resolved by the track-sizing result, just like
     // shrink-to-fit; retaining the provisional width makes auto tracks visibly too wide.
@@ -552,6 +552,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             container, total_column_width, true);
         grid_layout->container_width = container->width;
     }
+    // an intrinsic inline contribution ends at column sizing, before row geometry and alignment.
+    if (intrinsic_width_only) return;
     // Phase 6: Position grid items
     position_grid_items(grid_layout, container, &lycon->scratch);
     // Phase 7: Align grid items

@@ -342,6 +342,7 @@ struct IntrinsicFontScope {
     ~IntrinsicFontScope();
 };
 
+IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
@@ -767,6 +768,11 @@ struct LayoutCache {
     // Percentage terms and content-only requests each need a distinct result;
     // retain all four contributions within the current layout pass.
     IntrinsicWidthCacheEntry intrinsic_widths[4];
+    // conservative ancestry declarations for negative inheritance queries.
+    uint64_t inherited_declaration_mask;
+    uint64_t inherited_style_epoch;
+    uint64_t inherited_mutation_epoch;
+    uint32_t inherited_generation;
     bool is_empty;
     uint32_t generation;
 };
@@ -781,6 +787,7 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
         cache->intrinsic_widths[i].generation = 0;
     }
     cache->is_empty = true;
+    cache->inherited_generation = 0;
     cache->generation = generation;
 }
 
@@ -3745,7 +3752,8 @@ int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
 int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
 void determine_grid_size(GridContainerLayout* grid_layout);
 void initialize_track_sizes(GridContainerLayout* grid_layout);
-void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container,
+    bool columns_only = false);
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
@@ -3754,7 +3762,8 @@ void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const CssValue
 bool copy_grid_template_areas(Pool* pool, GridProp* target, const GridProp* source);
 bool grid_serialize_used_tracks(StringBuf* output, const GridContainerLayout* grid, bool columns);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
-void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container,
+    bool intrinsic_width_only = false);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
 void init_grid_item_view(LayoutContext* lycon, DomNode* child);
@@ -3763,9 +3772,7 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
 IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container);
 void layout_apply_grid_item_min_content_floor(
     LayoutContext* lycon, DomElement* item, IntrinsicSizes* sizes);
-void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
-                                  float* min_width, float* max_width,
-                                  float* min_height, float* max_height);
+
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 // tier-3: layout-transient, valid within pass

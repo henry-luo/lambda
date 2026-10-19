@@ -400,12 +400,13 @@ static const CssValue* css_compute_custom_property_uncached(Pool* pool, DomEleme
     const CssCustomProp* specified_entry = nullptr) {
     if (!element) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
+    // registrations are document-wide, so ancestry cannot change the lookup result.
+    const CssPropertyRegistration* registration = element->doc
+        ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     // inheritance is an ancestry walk, not another variable dependency or native stack frame.
     while (element) {
         if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
         css_var_observe_dependency(element, name, name_length);
-        const CssPropertyRegistration* registration = element->doc
-            ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
         const CssValue* initial = registration ? registration->initial_value : nullptr;
         const CssCustomProp* entry = specified_entry ? specified_entry : dom_element_lookup_own_custom_property_entry(element,
             name, name_length, css_active_var_context->exclude_animation_element == element);
