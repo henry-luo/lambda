@@ -3819,6 +3819,78 @@ TEST(SvgCascadeTest, InvalidPaintDoesNotDisplaceValidDeclaration) {
     pool_destroy(pool);
 }
 
+TEST_F(SvgAnimationLifetimeTest, ResolvedHostPresentationMatchesFreshCascadeAcrossMutation) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("style", "fill:red;stroke:blue;transform-box:fill-box"));
+    ASSERT_NE(rect->specified_style, nullptr);
+    char fresh[64] = {}, resolved[64] = {};
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "fill", true,
+        fresh, sizeof(fresh)), nullptr);
+    ASSERT_TRUE(rect->set_attribute("data-pass", "resolved"));
+    rect->set_styles_resolved(true);
+    rect->set_needs_style_recompute(false);
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "fill", true,
+        resolved, sizeof(resolved)), nullptr);
+    EXPECT_STREQ(resolved, fresh);
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "transform-box", false,
+        resolved, sizeof(resolved)), nullptr);
+    EXPECT_STREQ(resolved, "fill-box");
+
+    ASSERT_TRUE(rect->set_attribute("style", "fill:green;stroke:blue"));
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "fill", true,
+        fresh, sizeof(fresh)), nullptr);
+    EXPECT_STREQ(fresh, "green");
+    ASSERT_TRUE(rect->set_attribute("data-pass", "updated"));
+    rect->set_styles_resolved(true);
+    rect->set_needs_style_recompute(false);
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "fill", true,
+        resolved, sizeof(resolved)), nullptr);
+    EXPECT_STREQ(resolved, fresh);
+}
+
+TEST_F(SvgAnimationLifetimeTest, TransitionBaseCacheKeepsAnimatedPaintAndRetargetingSeparate) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("fill", "red"));
+    ASSERT_TRUE(rect->set_attribute("style", "transition:fill 2s linear"));
+    LayoutContext layout = {};
+    layout.doc = lam::up(&doc);
+    layout.ui_context = lam::up(&ui);
+    layout.pool = lam::up(doc.document_pool.get());
+    layout.run_mode = radiant::RunMode::PerformLayout;
+    AnimationScheduler* scheduler = doc.state->animation_scheduler;
+    ASSERT_NE(scheduler, nullptr);
+    css_transition_resolve(rect, &layout);
+    ASSERT_TRUE(rect->set_attribute("fill", "blue"));
+    css_transition_resolve(rect, &layout);
+    ASSERT_EQ(scheduler->count, 1);
+    AnimationInstance* original = scheduler->first;
+    animation_scheduler_tick(scheduler, 1.0, nullptr);
+    char paint[64] = {};
+    ASSERT_NE(svg_get_dom_presentation_property(rect, "fill", true,
+        paint, sizeof(paint)), nullptr);
+    EXPECT_STREQ(paint, "rgb(128, 0, 128)");
+
+    // repeated measurements retain the blue target while paint observes its midpoint.
+    for (unsigned repeat = 0; repeat < 8; repeat++) {
+        css_transition_resolve(rect, &layout);
+        ASSERT_EQ(scheduler->count, 1);
+        EXPECT_EQ(scheduler->first, original);
+        auto* active = static_cast<CssTransitionState*>(scheduler->first->state);
+        EXPECT_EQ(active->to.value.color.b, 255);
+        EXPECT_EQ(active->to.value.color.r, 0);
+    }
+    ASSERT_TRUE(rect->set_attribute("fill", "green"));
+    css_transition_resolve(rect, &layout);
+    ASSERT_EQ(scheduler->count, 1);
+    auto* retargeted = static_cast<CssTransitionState*>(scheduler->first->state);
+    EXPECT_EQ(retargeted->to.value.color.g, 128);
+    EXPECT_EQ(retargeted->to.value.color.b, 0);
+}
+
 TEST_F(SvgAnimationLifetimeTest, ComputedPaintOwnsOutputAndRejectsShortDestination) {
     struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
     ASSERT_TRUE(css_property_system_init(doc.document_pool));

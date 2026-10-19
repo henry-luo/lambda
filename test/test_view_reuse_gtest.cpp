@@ -53,6 +53,48 @@ protected:
     }
 };
 
+TEST_F(ViewReuseTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
+    DomElement* owner = element();
+    FormControlProp forms[2] = {};
+    NameId tags[] = {MARKUP_NAME_IMG, MARKUP_NAME_OBJECT};
+    for (size_t i = 0; i < 2; i++) {
+        DomElement* parent = element();
+        DomElement* child = element();
+        parent->tag_id = tags[i];
+        parent->display.inner = RDT_DISPLAY_REPLACED;
+        forms[i].custom_validity_msg = mem_strdup("fallback control", MEM_CAT_LAYOUT);
+        ASSERT_NE(forms[i].custom_validity_msg, nullptr);
+        child->form = lam::view_prop(&forms[i]);
+        ASSERT_TRUE(parent->DomNode::append_child(child));
+        ASSERT_TRUE(owner->DomNode::append_child(parent));
+    }
+    tree.root = lam::up(owner);
+    tree.destroy();
+    for (FormControlProp& form : forms) {
+        EXPECT_EQ(form.custom_validity_msg, nullptr);
+        mem_free(form.custom_validity_msg);
+    }
+}
+
+TEST_F(ViewReuseTest, RetainedResetPreservesScriptCreatedFormProperties) {
+    DomElement* control = element();
+    FormControlProp form = {};
+    form.control_type = FORM_CONTROL_TEXT;
+    form.custom_validity_msg = mem_strdup("invalid value", MEM_CAT_LAYOUT);
+    ASSERT_NE(form.custom_validity_msg, nullptr);
+    control->form = lam::view_prop(&form);
+    control->set_role_kind(DomElement::ROLE_FORM);
+    tree.root = lam::up(control);
+
+    view_pool_reset_retained_subtree(&tree, control);
+    EXPECT_EQ(control->form, &form);
+    EXPECT_EQ(control->form_control(), &form);
+    EXPECT_STREQ(form.custom_validity_msg, "invalid value");
+    tree.destroy();
+    EXPECT_EQ(form.custom_validity_msg, nullptr);
+    mem_free(form.custom_validity_msg);
+}
+
 TEST(TextIntrinsicWrap, BreakAllRetainsPunctuationAndMaxContentWidth) {
     LayoutContext context = {};
     TextIntrinsicWidths normal = measure_text_intrinsic_widths(&context,

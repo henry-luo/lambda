@@ -8,21 +8,11 @@
 #define TSF_IMPLEMENTATION
 #define TSF_NO_STDIO
 #include "../lib/tinysoundfont/tsf.h"
-#define MA_NO_DECODING
-#define MA_NO_ENCODING
-#define MA_NO_RESOURCE_MANAGER
-#define MA_NO_NODE_GRAPH
-#define MA_NO_ENGINE
-#define MA_NO_GENERATION
-#define MINIAUDIO_IMPLEMENTATION
-#include "../lib/miniaudio/miniaudio.h"
 
 struct MidiKey { uint8_t velocity; bool down; };
 struct MidiChannel { MidiKey keys[128]; bool sustain; };
 struct MidiPlayer {
     tsf* synth;
-    ma_device device;
-    bool realtime, device_ready;
     MidiEvent* events;
     size_t count, next;
     uint32_t sample_rate;
@@ -128,19 +118,20 @@ void midi_player_render(MidiPlayer* p, float* output, uint32_t frames) {
     if (midi_state(p) == MIDI_ERROR) { midi_silence(p); memset(output, 0, (size_t)frames * 2 * sizeof(float)); }
     midi_set_position(p, position);
 }
-static void midi_callback(ma_device* device, void* output, const void*, ma_uint32 frames) {
-    midi_player_render((MidiPlayer*)device->pUserData, (float*)output, frames);
-}
-static void midi_notification(const ma_device_notification* notification) {
-    // a lost device cannot leave a logically running player whose clock no longer advances.
-    if (notification->type == ma_device_notification_type_stopped ||
-        notification->type == ma_device_notification_type_interruption_began) {
-        auto* p = (MidiPlayer*)notification->pDevice->pUserData;
-        if (midi_state(p) == MIDI_PLAYING) midi_set_state(p, MIDI_ERROR);
+void midi_player_mix(void* source, float* output, uint32_t frames, uint64_t) {
+    float chunk[512 * 2];
+    for (uint32_t done = 0; done < frames;) {
+        uint32_t count = frames - done < 512 ? frames - done : 512;
+        midi_player_render((MidiPlayer*)source, chunk, count);
+        for (uint32_t i = 0; i < count * 2; i++) output[done * 2 + i] += chunk[i];
+        done += count;
     }
 }
+void midi_player_fail(MidiPlayer* p) {
+    if (p && midi_state(p) == MIDI_PLAYING) { midi_silence(p); midi_set_state(p, MIDI_ERROR); }
+}
 MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double duration,
-    const void* font, size_t font_size, bool realtime, uint32_t sample_rate) {
+    const void* font, size_t font_size, uint32_t sample_rate) {
     if (!font || font_size < 12 || font_size > 128 * 1024 * 1024 || !events || !count || count > 200000 ||
         !isfinite(duration) || duration <= 0 || duration > 86400 || sample_rate < 8000 || sample_rate > 192000) return nullptr;
     for (size_t i = 0; i < count; i++) {
@@ -154,34 +145,23 @@ MidiPlayer* midi_player_open(const MidiEvent* events, size_t count, double durat
     p->synth = tsf_load_memory(font, (int)font_size); // INT_CAST_OK: bounded soundfont byte length.
     if (!p->events || !p->synth || !tsf_set_max_voices(p->synth, 256)) { midi_player_close(p); return nullptr; }
     memcpy(p->events, events, count * sizeof(MidiEvent));
-    p->count = count; p->duration = duration; p->speed = 1; p->volume = 0.8; p->sample_rate = sample_rate; p->realtime = realtime;
+    p->count = count; p->duration = duration; p->speed = 1; p->volume = 0.8; p->sample_rate = sample_rate;
     tsf_set_output(p->synth, TSF_STEREO_INTERLEAVED, sample_rate, -6);
     // allocate every MIDI channel before the first callback, and verify the GM baseline bank.
     for (int ch = 0; ch < 16; ch++) if (!tsf_channel_set_presetnumber(p->synth, ch, 0, ch == 9)) {
         midi_player_close(p); return nullptr;
     }
     midi_restore(p, 0, false);
-    if (realtime) {
-        ma_device_config config = ma_device_config_init(ma_device_type_playback);
-        config.playback.format = ma_format_f32; config.playback.channels = 2; config.sampleRate = sample_rate;
-        config.dataCallback = midi_callback; config.notificationCallback = midi_notification; config.pUserData = p;
-        if (ma_device_init(nullptr, &config, &p->device) != MA_SUCCESS) { midi_player_close(p); return nullptr; }
-        p->device_ready = true;
-        // miniaudio's null backend advances a clock without a physical output device.
-        if (p->device.pContext->backend == ma_backend_null) { midi_player_close(p); return nullptr; }
-    }
     return p;
 }
 void midi_player_close(MidiPlayer* p) {
     if (!p) return;
-    midi_set_state(p, MIDI_PAUSED);
-    if (p->device_ready) ma_device_uninit(&p->device);
     if (p->synth) tsf_close(p->synth);
     mem_free(p->events); mem_free(p);
 }
 MidiSnapshot midi_player_info(MidiPlayer* p) {
-    if (!p) return {MIDI_ERROR, 0, 0, 1, 0, 0, 0};
-    return {midi_state(p), midi_position(p), p->duration, p->speed, p->volume, p->mute, p->solo};
+    if (!p) return {MIDI_ERROR, 0, 0, 1, 0, 0, 0, 0};
+    return {midi_state(p), midi_position(p), p->duration, p->speed, p->volume, p->mute, p->solo, 0};
 }
 bool midi_player_command(MidiPlayer* p, const char* command, double value) {
     if (!p || !command || !isfinite(value) || midi_state(p) == MIDI_ERROR) return false;
@@ -191,10 +171,8 @@ bool midi_player_command(MidiPlayer* p, const char* command, double value) {
     if (!(play || pause || stop || seek || speed || volume || mute || solo) ||
         (seek && (value < 0 || value > p->duration)) || (speed && (value < 0.25 || value > 4)) ||
         (volume && (value < 0 || value > 1)) || ((mute || solo) && (value < 0 || value > 65535 || value != floor(value)))) return false;
+    // the caller excludes the audio thread (audio_voice_lock) before control-thread mutations.
     MidiState previous = midi_state(p);
-    // stopping joins the callback before control-thread mutations; the callback itself never locks.
-    midi_set_state(p, MIDI_PAUSED);
-    if (p->device_ready && ma_device_stop(&p->device) != MA_SUCCESS) { midi_set_state(p, MIDI_ERROR); return false; }
     double position = midi_position(p);
     bool audible[16];
     for (unsigned ch = 0; ch < 16; ch++) audible[ch] = midi_audible(p, ch);
@@ -213,6 +191,5 @@ bool midi_player_command(MidiPlayer* p, const char* command, double value) {
     }
     if (midi_state(p) == MIDI_ERROR) return false;
     midi_set_state(p, running ? MIDI_PLAYING : stop ? MIDI_READY : MIDI_PAUSED);
-    if (running && p->device_ready && ma_device_start(&p->device) != MA_SUCCESS) { midi_silence(p); midi_set_state(p, MIDI_ERROR); return false; }
     return true;
 }

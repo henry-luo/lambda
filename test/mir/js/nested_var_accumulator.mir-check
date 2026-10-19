@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.4/D5.3.4: nested var observations after one block initializer retain a native accumulator. Hoisted, skipped, captured, eval and exceptional observations keep their JS behavior.",
+  "args": ["--runtime=mvp-lmd"],
+  "checks": [{
+    "in_func": "mvp_lmd_f1",
+    "count": {"dadd\t": 2, "ddiv\t": 1},
+    "forbid": ["call\tmvp_lmd_primitive_to_number", "call\tmvp_lmd_to_primitive"],
+    "expect_seq": ["ddiv\t{{r:term}}", "dadd\t{{r:sum}}, {{r}}, {{r:term}}", "dmov\t{{r}}, {{r:sum}}"]
+  }, {
+    "in_func": "mvp_lmd_f1",
+    "in_range": {"from": "ddiv\t", "to": "dmov\td:144(runtime)"},
+    "forbid": ["call\t", "ursh\t", "or\t"]
+  }]
+}

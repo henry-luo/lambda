@@ -915,7 +915,9 @@ void log_item(Item item, const char* msg) {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
     // `--no-log` disables diagnostics entirely; traversing runtime values here
     // can touch representation-specific storage even though the message is discarded.
-    if (log_is_disabled() || !log_level_enabled(log_default_category, LOG_LEVEL_DEBUG)) return;
+    // Release builds strip log_debug, so the level check alone printed every closed
+    // element's whole subtree for nothing -- O(depth x size) on nested documents.
+    if (!log_debug_enabled(log_default_category)) return;
     StrBuf *strbuf = strbuf_new();
     bool previous = print_diagnostic_only;
     print_diagnostic_only = true;

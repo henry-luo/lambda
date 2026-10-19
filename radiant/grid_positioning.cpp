@@ -822,7 +822,9 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 // An intrinsic block size equal to the track still occupies
                 // the track; rejecting it turns auto margins into a zero-size box.
                 : content[i] >= 0.0f && content[i] <= available[i];
-            float actual = explicit_sizes[i] && refs.given ? *refs.given
+            // placement already resolved the border box; intrinsic keywords
+            // retain a -1 authored-size sentinel that is never used geometry.
+            float actual = explicit_sizes[i] ? refs.get_size()
                 : (content_is_usable ? content[i] : refs.get_size());
             float free_space = available[i] - actual;
             refs.set_size(actual);

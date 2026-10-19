@@ -118,6 +118,8 @@ int radiant_init_network_support(DomDocument* doc,
         log_error("network: failed to create resource manager");
         return -1;
     }
+    // cached fonts can complete during CSS discovery, before the window takes ownership.
+    resource_manager_set_ui_context(doc->resource_manager, doc->js.host_ui_context);
     if (!dom_document_add_resource(doc, doc, destroy_document_network_support)) {
         log_error("network: failed to register document resource manager cleanup");
         destroy_document_network_support(doc);

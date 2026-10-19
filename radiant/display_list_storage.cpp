@@ -599,8 +599,7 @@ bool dl_validate_range(const DisplayList* dl, int first, int end,
                 }
                 break;
             case DL_DRAW_GLYPH:
-                if (!item->draw_glyph.bitmap.buffer || item->draw_glyph.bitmap.width <= 0 ||
-                    item->draw_glyph.bitmap.height <= 0 || item->draw_glyph.bitmap.pitch <= 0) {
+                if (!render_glyph_bitmap_has_ink(&item->draw_glyph.bitmap)) {
                     return fail("glyph payload is invalid");
                 }
                 break;

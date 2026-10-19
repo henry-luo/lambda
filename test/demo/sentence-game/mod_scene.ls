@@ -21,8 +21,9 @@ fn chooser(st) => <section id:"pattern-screen",class:"pattern-screen",'aria-labe
             <div class:"pattern-grid",*[for (pattern in model.patterns where (pattern.advanced == true) == group.advanced) pattern_choice(st,pattern)]>>];
     (collection(st))
 >
+// `data-say` holds the words a double-click reads aloud (sentence-game.ls).
 fn card_tile(card,kind,selected,locked,key="") => <button id:kind ++ "-" ++ card.id,type:"button",class:"card kind-" ++ kind,
-    'data-action':kind,'data-card':card.id,'aria-pressed':string(selected == card.id),
+    'data-action':kind,'data-card':card.id,'data-say':card.text,'aria-pressed':string(selected == card.id),
     *:(if (locked) {disabled:""} else {}),
     *:(if (key != "") {'aria-keyshortcuts':key} else {}),
     <span class:"card-art",style:"--art-bg:" ++ card.color,(art.picture(card.art))>
@@ -84,10 +85,24 @@ pub fn join_controls(st) => <div class:"join-controls",
     <button id:"undo-join",type:"button",class:"undo-join",'data-action':"undo-join",
         *:(if (st.phase != "build" or st.previous == null) {disabled:""} else {}),"↶ Undo join">
 >
+fn read_icon(reading) => if (reading) <svg class:"read-icon",width:16,height:16,viewBox:"0 0 24 24",'aria-hidden':"true",
+        <rect x:6,y:6,width:12,height:12,rx:2,fill:"currentColor">>
+    else <svg class:"read-icon",width:16,height:16,viewBox:"0 0 24 24",'aria-hidden':"true",
+        <path d:"M3 9 H7 L12 5 V19 L7 15 H3 Z",fill:"currentColor">
+        <path d:"M15.5 9 A4 4 0 0 1 15.5 15 M18 6.5 A7.5 7.5 0 0 1 18 17.5",fill:"none",stroke:"currentColor",'stroke-width':2,'stroke-linecap':"round">>
+// the view reads `words` aloud (sentence-game.ls); while that reading lasts, the same button stops it.
+pub fn read_button(st,words) {
+    let reading = st.reading == true;
+    <button id:"read-aloud",type:"button",class:"read-aloud",'data-action':"read",'data-say':words,'aria-pressed':string(reading),
+        title:if (reading) "Stop reading" else "Hear your sentence read aloud",
+        *:(if (words == "" and not reading) {disabled:""} else {}),
+        (read_icon(reading)); (if (reading) "Stop" else "Read aloud")>
+}
 pub fn sentence_zone(st) => <section class:"sentence-zone",'aria-labelledby':"sentence-heading",
     <div class:"sentence-topline",<h2 id:"sentence-heading","Your sentence">
-        <span class:"sentence-instruction",if (st.phase == "saved") "Saved to your book!"
-            else "Clause " ++ string(len(st.clauses)+1) ++ (if (st.mixed_cards != null) " · Pick from the mixed cards." else " · Pick one card for each question.")>>
+        <div class:"sentence-tools",<span class:"sentence-instruction",if (st.phase == "saved") "Saved to your book!"
+            else "Clause " ++ string(len(st.clauses)+1) ++ (if (st.mixed_cards != null) " · Pick from the mixed cards." else " · Pick one card for each question.")>
+            ; (read_button(st,model.sentence(st)))>>
     ; (preview(st))
 >
 fn sentence_actions(st) => <div class:"builder-actions",

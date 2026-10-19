@@ -171,8 +171,9 @@ pn formatted_output() int[] {
         size = size + len(line)
         buffer = buffer ++ line
         if (i % 256 == 0 or i == 100000) {
-            let written = output(buffer, sink) or -1
-            if (written != len(buffer)) { return [-1, digest, writes, i] }
+            // retain the byte count as data; a sink error must fail the output oracle.
+            let written: any | error = output(buffer, sink)
+            if (type(written) == error or written != len(buffer)) { return [-1, digest, writes, i] }
             writes = writes + 1
             buffer = ""
         }

@@ -1,0 +1,12 @@
+{
+  "name": "Speech M1 smoke: the macOS engine speaks en-US, zh-CN and markup with word boundaries",
+  "html": "test/speech/_speech_smoke.ls",
+  "viewport": {"width": 360, "height": 160},
+  "events": [
+    {"type": "click", "target": {"selector": "#speak"}},
+    {"type": "assert_text", "target": {"selector": "#en"}, "equals": "ok", "assert_timeout": 20000},
+    {"type": "assert_text", "target": {"selector": "#zh"}, "equals": "ok", "assert_timeout": 20000},
+    {"type": "assert_text", "target": {"selector": "#markup"}, "equals": "ok", "assert_timeout": 20000},
+    {"type": "assert_text", "target": {"selector": "#errors"}, "equals": ""}
+  ]
+}

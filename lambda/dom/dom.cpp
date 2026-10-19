@@ -970,11 +970,8 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         dom_flush_pending_document_layout(uicon, doc);
     } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
-        // First-layout geometry is renderer work required for the initial
-        // paint; a page's CSSOM read must not consume its JS CPU budget.
-        script_runner_suspend_js_watchdog();
+        ScriptRunnerHostLayoutScope host_layout;
         dom_engine_layout_document(uicon, doc, false);
-        script_runner_resume_js_watchdog();
     }
 
     dom_geometry_flush_in_progress = false;
@@ -1031,6 +1028,7 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
     // commit pending mutations and layout-only scroll requests.
+    ScriptRunnerHostLayoutScope host_layout;
     return dom_flush_pending_document_layout(uicon, doc);
 }
 
@@ -2359,8 +2357,7 @@ extern "C" const char* dom_element_namespace_uri(void* element) {
 }
 
 extern "C" bool dom_element_is_svg(void* element) {
-    const char* uri = dom_element_namespace_uri(element);
-    return uri && strcmp(uri, "http://www.w3.org/2000/svg") == 0;
+    return dom_element_is_svg((DomElement*)element);
 }
 
 extern "C" const char* dom_document_preferred_languages(void* document) {

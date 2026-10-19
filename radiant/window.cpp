@@ -21,6 +21,7 @@
 #include "render.hpp"
 #include "radiant.hpp"
 #include "rdt_video.h"
+#include "speech.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -1728,7 +1729,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             // A static headless view is a first-render snapshot. It has no
             // later host turn, so close post-load background handles here.
             headless && sim_ctx == nullptr,
-            headless && sim_ctx != nullptr,
+            // native layout time must not advance the snapshot's timer clock.
+            headless,
             0.0,
             0.0,
             false,
@@ -1986,6 +1988,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     // native document/media work needs wall time before virtual assertion retries advance.
                     if (radiant_async_document_loads_pending(&ui_context) ||
                         dom_document_has_pending_work(ui_context.document) ||
+                        radiant_speech_wall_clock_pending(ui_context.document) ||
                         radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr)) {
                         if (retry_wait_ms > 50) retry_wait_ms = 50;
                         uv_sleep((unsigned int)retry_wait_ms);

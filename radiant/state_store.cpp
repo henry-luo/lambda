@@ -8359,7 +8359,7 @@ int focus_tab_index(View* view) {
 
 // Collect candidates in DOM order once. The package receives this snapshot and
 // owns tabindex ordering; native only answers layout-coupled eligibility.
-void focus_collect_candidates(View* view, ArrayList* list, bool sequential_only) {
+static void focus_collect_candidates_inner(View* view, ArrayList* list, bool sequential_only) {
     if (!view) return;
     bool focusable = sequential_only ? is_view_focusable(view)
                                      : is_view_programmatically_focusable(view);
@@ -8371,10 +8371,15 @@ void focus_collect_candidates(View* view, ArrayList* list, bool sequential_only)
         DomElement* elem = lam::dom_require_element(view);
         DomNode* child = elem->first_child;
         while (child) {
-            focus_collect_candidates(static_cast<View*>(child), list, sequential_only);
+            focus_collect_candidates_inner(static_cast<View*>(child), list, sequential_only);
             child = child->next_sibling;
         }
     }
+}
+
+void focus_collect_candidates(View* view, ArrayList* list, bool sequential_only) {
+    CssomCascadeQueryScope cascade;
+    focus_collect_candidates_inner(view, list, sequential_only);
 }
 
 bool focus_move(DocState* state, View* root, bool forward) {

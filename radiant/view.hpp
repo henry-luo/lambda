@@ -159,6 +159,16 @@ typedef bool (*RadiantCssomUsedValueSync)(DomDocument* doc);
 void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync);
 bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
 
+// synchronous declaration reads can share refreshed ancestors without committing layout.
+struct CssomCascadeQueryScope {
+    CssomCascadeQueryScope* previous;
+    HashMap* refreshed;
+    CssomCascadeQueryScope();
+    ~CssomCascadeQueryScope();
+    CssomCascadeQueryScope(const CssomCascadeQueryScope&) = delete;
+    CssomCascadeQueryScope& operator=(const CssomCascadeQueryScope&) = delete;
+};
+
 // ===== animation =====
 
 struct DirtyTracker;

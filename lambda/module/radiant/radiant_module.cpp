@@ -10,6 +10,7 @@
 #include "radiant_webgl_bridge.hpp"
 #include "../../dom/dom_style.h"
 #include "../../dom/dom_host_engine.h"
+#include "../../dom/dom.h"
 #include "../../dom/dom_collection_types.h"
 #include "../../dom/dom_event_host.h"
 #include "radiant_input_value.hpp"
@@ -24,6 +25,7 @@
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
+#include "../../../radiant/speech.hpp"
 #include "../../../radiant/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
@@ -2427,6 +2429,119 @@ RADIANT_C_API Item fn_radiant_midi_info(Item node, Item token) {
     radiant_rooted_obj_set(result, "volume", radiant_float_item(snapshot.volume));
     radiant_rooted_obj_set(result, "mute", radiant_int_item(snapshot.mute));
     radiant_rooted_obj_set(result, "solo", radiant_int_item(snapshot.solo));
+    radiant_rooted_obj_set(result, "reverb", radiant_float_item(snapshot.reverb));
+    return result.get();
+}
+
+// speech synthesis rows (Radiant_Design_Speech.md §4.1).
+static const char* speech_quality_name(uint8_t quality) {
+    return quality == RDT_SPEECH_QUALITY_PREMIUM ? "premium" : quality == RDT_SPEECH_QUALITY_ENHANCED ? "enhanced" : "default";
+}
+static const char* speech_gender_name(uint8_t gender) {
+    return gender == RDT_SPEECH_GENDER_MALE ? "male" : gender == RDT_SPEECH_GENDER_FEMALE ? "female" : "unspecified";
+}
+// voices come best first, so a page takes the first that fits its language and gender.
+RADIANT_C_API Item fn_radiant_speech_voices(void) {
+    // the reading document hears voiceschanged from now on (§3.5).
+    radiant_speech_watch_voices((DomDocument*)dom_get_document());
+    size_t count = radiant_speech_voices(nullptr, 0);
+    if (count > 4096) count = 4096;
+    auto* voices = count ? (RdtSpeechVoice*)mem_calloc(count, sizeof(RdtSpeechVoice), MEM_CAT_RENDER) : nullptr;
+    if (count && !voices) return radiant_array_new_item(0);
+    // the list can shrink between the two reads; never report unfilled entries.
+    size_t filled = radiant_speech_voices(voices, count);
+    if (filled < count) count = filled;
+    RootFrame roots(2);
+    Rooted<Item> list(roots, radiant_array_new_item((int)count)); // INT_CAST_OK: bounded voice count.
+    Rooted<Item> entry(roots, ItemNull);
+    for (size_t i = 0; i < count; i++) {
+        entry.set(radiant_obj_new());
+        radiant_rooted_obj_set(entry, "id", radiant_string_item(voices[i].id));
+        radiant_rooted_obj_set(entry, "name", radiant_string_item(voices[i].name));
+        radiant_rooted_obj_set(entry, "lang", radiant_string_item(voices[i].lang));
+        radiant_rooted_obj_set(entry, "local", radiant_bool_item(voices[i].local));
+        radiant_rooted_obj_set(entry, "quality", radiant_string_item(speech_quality_name(voices[i].quality)));
+        radiant_rooted_obj_set(entry, "gender", radiant_string_item(speech_gender_name(voices[i].gender)));
+        radiant_array_push_item(list.get(), entry.get());
+    }
+    mem_free(voices);
+    return list.get();
+}
+// reads an optional speak option: a non-empty string, or a number within [lo, hi].
+static bool speech_option_text(const MapReader& options, const char* key, const char** out) {
+    ItemReader value = options.get(key);
+    if (value.isNull()) return true;
+    *out = value.isString() ? value.cstring() : value.isSymbol() ? value.asSymbol()->chars : nullptr;
+    return *out && **out;
+}
+static bool speech_option_number(const MapReader& options, const char* key, float lo, float hi, float* out) {
+    ItemReader value = options.get(key);
+    if (value.isNull()) return true;
+    float number = 0;
+    if (!radiant_item_to_float(value.item(), &number) || !(number >= lo && number <= hi)) return false;
+    *out = number;
+    return true;
+}
+RADIANT_C_API Item fn_radiant_speak(Item node, Item utterance, Item options_item) {
+    DomElement* owner = radiant_dom_element_from_item(node, "SPEAK");
+    if (!owner) return ItemNull;
+    SpeechOptions options = {nullptr, nullptr, 1.0f, 1.0f, 1.0f, -1};
+    ItemReader opts(options_item.to_const());
+    const char* problem = nullptr;
+    float at = -1;
+    if (!opts.isNull()) {
+        if (!opts.isMap()) problem = "speak options must be a map";
+        else {
+            MapReader map = opts.asMap();
+            if (!speech_option_text(map, "voice", &options.voice_id)) problem = "speak option voice must be a voice id";
+            else if (!speech_option_text(map, "lang", &options.lang)) problem = "speak option lang must be a language tag";
+            else if (!speech_option_number(map, "rate", 0.1, 10, &options.rate)) problem = "speak option rate must be 0.1 to 10";
+            else if (!speech_option_number(map, "pitch", 0, 2, &options.pitch)) problem = "speak option pitch must be 0 to 2";
+            else if (!speech_option_number(map, "volume", 0, 1, &options.volume)) problem = "speak option volume must be 0 to 1";
+            else if (!map.get("at").isNull() && !(radiant_item_to_float(map.get("at").item(), &at) && at >= 0 && at <= 86400))
+                problem = "speak option at must be seconds on the audio clock (dom.audio_clock)";
+        }
+    }
+    // seconds on the document sub-mix clock (Radiant_Design_Speech §3.4).
+    if (at >= 0) options.at = at;
+    SpeechText text = {};
+    const char* error = nullptr;
+    uint64_t token = 0;
+    if (!problem) {
+        ItemReader value(utterance.to_const());
+        bool built = value.isString() ? speech_text_from_string(value.asString()->chars, value.asString()->len, &text)
+            : speech_text_from_markup(utterance, &text);
+        // radiant_speech_speak owns the text from here, refused or not.
+        if (!built) problem = text.error[0] ? text.error : "the utterance must be a string or a <speak> element";
+        else if (!(token = radiant_speech_speak(owner, &text, &options, &error))) problem = error;
+    }
+    if (token) return radiant_int_item((int64_t)token);
+    // refusals are visible (S7.4.2): a speecherror on the owner, and null here.
+    radiant_speech_report_error(owner, problem);
+    speech_text_release(&text);
+    return ItemNull;
+}
+RADIANT_C_API Item fn_radiant_speech_command(Item node, Item token, Item command) {
+    DomDocument* doc = radiant_window_document_from_item(node, "SPEECH_COMMAND");
+    ItemReader id(token.to_const());
+    if (!doc || !id.isInt() || id.asInt() <= 0 || get_type_id(command) != LMD_TYPE_STRING) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_speech_command(doc, (uint64_t)id.asInt(), command.get_chars()));
+}
+// the document sub-mix clock in seconds, which `at:` schedules against (§3.4).
+RADIANT_C_API Item fn_radiant_audio_clock(Item node) {
+    DomDocument* doc = radiant_window_document_from_item(node, "AUDIO_CLOCK");
+    return radiant_float_item(doc ? radiant_audio_clock(doc) : 0.0);
+}
+RADIANT_C_API Item fn_radiant_speech_info(Item node, Item token) {
+    DomDocument* doc = radiant_window_document_from_item(node, "SPEECH_INFO");
+    ItemReader id(token.to_const());
+    SpeechInfo info;
+    if (!doc || !id.isInt() || id.asInt() <= 0 || !radiant_speech_info(doc, (uint64_t)id.asInt(), &info)) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "state", radiant_string_item(radiant_speech_state_name(info.state)));
+    radiant_rooted_obj_set(result, "position", radiant_float_item(info.position));
+    radiant_rooted_obj_set(result, "char_index", radiant_int_item(info.char_index));
     return result.get();
 }
 
@@ -5443,6 +5558,11 @@ RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_3(midi_open, fn_radiant_midi_open)
 RADIANT_PROVIDE_ENGINE_4(midi_command, fn_radiant_midi_command)
 RADIANT_PROVIDE_ENGINE_2(midi_info, fn_radiant_midi_info)
+RADIANT_PROVIDE_ENGINE_0(speech_voices, fn_radiant_speech_voices)
+RADIANT_PROVIDE_ENGINE_3(speak, fn_radiant_speak)
+RADIANT_PROVIDE_ENGINE_3(speech_command, fn_radiant_speech_command)
+RADIANT_PROVIDE_ENGINE_2(speech_info, fn_radiant_speech_info)
+RADIANT_PROVIDE_ENGINE_1(audio_clock, fn_radiant_audio_clock)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)

@@ -353,6 +353,10 @@ bool render_path_metrics_project(const RdtPathMetrics* metrics, float x, float y
 // shared decoration geometry; wavy_fill closes a ribbon for SVG fill/stroke paint.
 RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill = false);
 float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap = nullptr);
+inline bool render_glyph_bitmap_has_ink(const GlyphBitmap* bitmap) {
+    return bitmap && bitmap->buffer &&
+        bitmap->width > 0 && bitmap->height > 0 && bitmap->pitch > 0;
+}
 // logical coordinates retain the raster painter's one-device-pixel inset.
 Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, float space_width);
 Color render_text_missing_glyph_color();

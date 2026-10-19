@@ -12508,13 +12508,19 @@ static Item js_window_post_message(Item message, Item target_origin,
     return make_js_undefined();
 }
 
+static void js_reset_existing_root_slot(RootVector* roots, int64_t index, Item value) {
+    // D5.4.2: teardown observes the retired heap generation without publishing roots.
+    Item* slot = root_vector_at(roots, index);
+    if (slot) *slot = value;
+}
+
 static void js_global_var_define_cache_reset() {
-    if (!js_global_bindings_ensure_roots()) return;
+    if (!js_global_environment_state) return;
     js_global_environment_remove_kind(js_global_environment_state,
         JS_GLOBAL_BINDING_OBJECT_VAR);
     js_global_environment_state->object_var_epoch = 0;
-    js_global_environment_slot(js_global_environment_state,
-        JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL) = ItemNull;
+    js_reset_existing_root_slot(&js_global_environment_state->roots,
+        JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL, ItemNull);
 }
 
 /**
@@ -12523,8 +12529,10 @@ static void js_global_var_define_cache_reset() {
  */
 extern "C" void js_globals_batch_reset() {
     if (!js_active_runtime_state) return;
-    js_global_this_obj = (Item){0};
-    js_window_event_value = make_js_undefined();
+    js_reset_existing_root_slot(&js_global_environment_state->roots,
+        JS_GLOBAL_ENV_GLOBAL_THIS, (Item){0});
+    js_reset_existing_root_slot(&js_global_environment_state->roots,
+        JS_GLOBAL_ENV_WINDOW_EVENT, make_js_undefined());
     js_window_event_intercept_enabled = false;
     js_global_environment_clear_bindings(js_global_environment_state);
     // Partial batch resets retain the heap but recreate realm builtins; clear
@@ -14892,8 +14900,9 @@ void js_ctor_cache_reset() {
     // re-creation of new JsFunction objects on next access, breaking identity with
     // the harness-cached references. Skip the reset; snapshot/restore handles state.
     if (js_proto_snapshot_is_valid()) return;
-    if (!js_realm_intrinsic_slots_ensure_roots()) return;
-    for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache_at(i) = (Item){0};
+    for (int i = 0; i < JS_CTOR_MAX; i++)
+        js_reset_existing_root_slot(&js_runtime_state.realm_slots.values,
+            JS_REALM_SLOT_CONSTRUCTOR_BASE + i, (Item){0});
     js_intrinsic_proto_cache_reset();
     js_ctor_cache_init = false;
     js_typed_array_base_reset();
@@ -15622,13 +15631,15 @@ extern "C" void js_reset_constructor_prototypes() {
         js_proto_snapshot_take_locked();
         js_intrinsic_state_reset();
         // Still clear globalThis so it's regenerated against the snapshotted prototypes.
-        js_global_this_obj = (Item){0};
+        js_reset_existing_root_slot(&js_global_environment_state->roots,
+            JS_GLOBAL_ENV_GLOBAL_THIS, (Item){0});
         return;
     }
     // Subsequent calls: restore snapshot (preserves Map* identity).
     js_proto_snapshot_restore_locked();
     js_intrinsic_state_reset();
-    js_global_this_obj = (Item){0};
+    js_reset_existing_root_slot(&js_global_environment_state->roots,
+        JS_GLOBAL_ENV_GLOBAL_THIS, (Item){0});
 }
 
 JS_FORWARD_EXPRESSION(bool, js_proto_snapshot_is_valid, (void), js_proto_snapshot_valid)
@@ -15716,10 +15727,13 @@ extern "C" Item js_get_typed_array_base_proto() {
 }
 
 static void js_typed_array_base_reset() {
-    js_typed_array_base = (Item){0};
-    js_typed_array_base_proto = (Item){0};
+    js_reset_existing_root_slot(&js_runtime_state.realm_slots.values,
+        JS_REALM_SLOT_TYPED_ARRAY_BASE, (Item){0});
+    js_reset_existing_root_slot(&js_runtime_state.realm_slots.values,
+        JS_REALM_SLOT_TYPED_ARRAY_BASE_PROTOTYPE, (Item){0});
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++)
-        js_typed_array_per_type_proto_at(i) = (Item){0};
+        js_reset_existing_root_slot(&js_runtime_state.realm_slots.values,
+            JS_REALM_SLOT_TYPED_ARRAY_PROTO_INT8 + i, (Item){0});
 }
 
 // Get/create per-type prototype for a typed array element type.

@@ -148,7 +148,8 @@ music.player(score, {layout:{width:760.0}})^
 ```
 
 Run `./lambda.exe view test/music/_player.ls` and press **Play**. The player
-opens the audio device only on that action, following S12.1.1v2/D7.4.6.
+opens the audio device only on that action: playback is a procedural effect
+(S12.1.1v3/D7.4.6), and starting sound is gated by D7.5.4.
 Pause/resume, stop, position, speed, master volume, and part mute/solo share
 the audio sample clock. Speed choices apply before playback, while playing,
 and while paused; the status displays the synthesizer's current multiplier.
@@ -219,7 +220,12 @@ tempos are rounded to MIDI's integer microseconds per quarter.
 Limits are 16 MB MIDI input, 128 source tracks, 200,000 events, 24 hours of
 performance, 8,192 performed measures and 16 repeat passes. Seek replays the
 bounded event prefix on the control thread. Up to four live MIDI sessions
-belong to one document. SoundFont loading and device startup are synchronous
+belong to one document. They play through the document's audio mix on the
+window's single output device, which speech shares, so a page can cue
+narration against its score with `dom.audio_clock`. Music plays in a light
+room: each session sends 0.2 of its sound to its document's reverb (Freeverb,
+medium room). `dom.midi_command(owner, token, "reverb", level)` sets the send
+from 0 (dry) to 1, and `dom.midi_info` reports it as `reverb`. SoundFont loading and device startup are synchronous
 control-thread work; the audio callback performs no file IO, GC, or DOM work
 (D4.5.2/D5.3.3).
 

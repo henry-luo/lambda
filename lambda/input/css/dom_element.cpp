@@ -127,6 +127,11 @@ const char* dom_element_namespace_uri(DomElement* element) {
     return "http://www.w3.org/1999/xhtml";
 }
 
+bool dom_element_is_svg(DomElement* element) {
+    const char* uri = dom_element_namespace_uri(element);
+    return uri && strcmp(uri, "http://www.w3.org/2000/svg") == 0;
+}
+
 NameId dom_element_html_tag(DomElement* element) {
     if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return 0;
     // HTML element types use the case-sensitive local name, independent of an XML prefix.

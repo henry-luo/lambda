@@ -880,6 +880,7 @@ struct DocWindowLaunchOptions {
     bool event_log;
     bool state_dump;
     bool fullscreen;
+    bool autoplay;
     const char* graph_view_key;
     bool source_surface;
     bool browse_archive;
@@ -934,6 +935,9 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->headless = true;
         } else if (strcmp(argv[i], "--fullscreen") == 0) {
             out->fullscreen = true;
+        } else if (is_view && strcmp(argv[i], "--autoplay") == 0) {
+            // D7.5.4: only the host grants audio activation up front.
+            out->autoplay = true;
         } else if (strcmp(argv[i], "--event-log") == 0) {
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
@@ -1002,6 +1006,8 @@ int cmd_layout(int argc, char** argv);
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 #ifndef LAMBDA_HEADLESS
+// D7.5.4 host grant: every document in this viewer may start audio without a gesture.
+extern void radiant_audio_grant_activation(bool granted);
 // The runtime-only host excludes these providers and their rendering types.
 extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
@@ -2458,6 +2464,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"note", "test/demo/note/note.ls"},
     {"scene3d", "test/demo/scene3d/index.html"},
     {"chart", "test/demo/chart/index.html"},
+    {"cityscape", "test/demo/cityscape/cityscape.ls"},
     {"slides", "test/demo/slides/northstar.slides"},
     {"wordcloud", "test/demo/wordcloud.ls"},
 };
@@ -4164,6 +4171,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                   "  --right-binding          Use right-bound book order\n"
                   "  --block-remote-resources Disable remote subresources\n", stdout);
             fputs("  --fullscreen              Start in fullscreen (F11 toggles)\n", stdout);
+            fputs("  --autoplay                Grant audio activation up front: network documents may start sound without a click (D7.5.4)\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
@@ -4195,6 +4203,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (!parse_doc_window_launch_options(argc, argv, true, &launch)) {
             return lambda_main_finish(1);
         }
+        if (launch.autoplay) radiant_audio_grant_activation(true);
         const char* filename = launch.filename;
         const char* event_file = launch.event_file;
         bool headless = launch.headless;

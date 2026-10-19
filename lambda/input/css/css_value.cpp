@@ -360,6 +360,8 @@ void css_rule_attach(CssRule* rule, CssRule* parent, CssStylesheet* stylesheet) 
         rule->owner_document = stylesheet->owner_document;
     rule->parent = parent;
     rule->stylesheet = stylesheet;
+    // detached edits can precede attachment to a sheet with the same generation.
+    rule->declaration_filter_valid = false;
     // descriptor declaration wrappers retain the existing lazy style-rule cache.
     if ((rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) &&
         rule->property_names && rule->property_values)

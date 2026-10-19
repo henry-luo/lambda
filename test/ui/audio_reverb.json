@@ -1,0 +1,12 @@
+{
+  "name": "MIDI reverb send: default, command and range check",
+  "html": "test/ui/_audio_reverb.ls",
+  "viewport": {"width": 320, "height": 120},
+  "env": [
+    {"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}
+  ],
+  "events": [
+    {"type": "click", "target": {"selector": "#run"}},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "2;true;0.5;true;true;0"}
+  ]
+}

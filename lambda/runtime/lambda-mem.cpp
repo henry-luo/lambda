@@ -353,9 +353,11 @@ Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
 // Pre-allocated table of 128 String objects for ASCII chars 0-127.
 // These are statically allocated (not GC-managed) and never freed.
-// Each entry is sizeof(String) + 2 bytes (1 char + null terminator).
-#define ASCII_CHAR_ENTRY_SIZE (sizeof(String) + 2)
-static char ascii_char_storage[128 * ASCII_CHAR_ENTRY_SIZE];
+// each cached header and its stride must satisfy the String ABI alignment.
+struct alignas(String) AsciiCharEntry {
+    char storage[sizeof(String) + 2];
+};
+static AsciiCharEntry ascii_char_storage[128];
 static String* ascii_char_table[128];
 static bool ascii_char_table_initialized = false;
 
@@ -553,7 +555,7 @@ void lambda_root_witness_dump(void) {
 
 static void init_ascii_char_table() {
     for (int i = 0; i < 128; i++) {
-        String* s = (String*)(ascii_char_storage + i * ASCII_CHAR_ENTRY_SIZE);
+        String* s = (String*)ascii_char_storage[i].storage;
         s->len = 1;
         s->flags = 0;
         s->is_ascii = 1;

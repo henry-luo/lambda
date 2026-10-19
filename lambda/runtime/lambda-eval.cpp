@@ -8823,6 +8823,12 @@ Item fn_chr(Item cp_item) {
         return {.item = s2it(empty)};
     }
 
+    // immutable ASCII characters share the same storage as string indexing and JS.
+    if (codepoint < 128) {
+        String* shared = get_ascii_char_string((unsigned char)codepoint);
+        if (shared) return {.item = s2it(shared)};
+    }
+
     char buf[4];
     size_t len = str_utf8_encode((uint32_t)codepoint, buf, sizeof(buf));
     if (len == 0) {
