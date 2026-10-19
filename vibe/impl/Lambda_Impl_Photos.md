@@ -11,9 +11,10 @@ handlers, **D5.3.3** precise roots, **D4.5.2** owned pixel transport,
 
 ## Active checkpoint
 
-M0/M1: deliver a reusable raster command/session API and a native layered Photos
-workspace. Acceptance: place three images; group/reorder/mask/move; undo/redo;
-save/reopen layered PSD with current pixels; failed opens/saves preserve state.
+Current delivery includes M2 raster interaction, the M3 composition/project core
+and M4 retouch/actions. Remaining M4/M5 work is listed explicitly below. Initial
+M0/M1 acceptance covered three-image placement, grouping/masks/movement, undo/redo
+and strict layered PSD save/reopen with failed file operations preserving state.
 
 Reuse `lambda.image` storage/composition/PSD and `lambda.editor.mod_history`.
 The demo owns shell/file dialogs; generic commands and gestures live under
@@ -28,7 +29,7 @@ Build a worktree-local host; shared dependency links follow Developer Guide §7.
 |---|---|
 | M0 reuse and measurement | Complete for the bounded initial profile; optimized timings below |
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
-| M2 tiles, selections and painting | Core implemented; focused native/package checks and 63 UI assertions pass; aggregate qualification follows the next native batch |
+| M2 tiles, selections and painting | Implemented; native/package/UI and aggregate results recorded below |
 | M3 transforms, reversible effects and rich persistence | Implemented core: affine, eight blends, clipping/pass-through, effects, histogram and versioned project data; focused checks below |
 | M4 retouch, type/shapes, channels and actions | Partial: retouch and single-layer action recording/replay implemented; typed artwork/styles, channels, tabs and batch orchestration remain |
 | M5 high depth/color and scale qualification | Pending |
@@ -42,9 +43,9 @@ and restore targets on undo. Gesture previews record one completed move and
 create no edit for a canceled or zero-distance drag. The native view adapter
 retains its canvas while copying current composition pixels.
 
-Photos supplies Open/Place, layer/property/history docks, mask targeting, baked
+Photos supplies Open/Place, layer/property/history docks, mask targeting, editable
 adjustments, fit/zoom/pan, keyboard/touch movement, protected document replacement,
-atomic PSD saving and PNG export. `demo photos` is registered. The existing
+atomic project/PSD saving and PNG export. `demo photos` is registered. The existing
 singular photo demo and its attributed sample assets are reused without copying
 its image-processing pipeline.
 
@@ -400,3 +401,39 @@ overlay stretched and subsequent selection combination could reject mismatched
 extents. Four semantic cases cover growth, combination after growth, image
 scaling, immutable old coverage and undo restoration (**S9.2.2**). The paint
 fixture now has 30 checks.
+
+## Final optimized checkpoint
+
+Native/package checkpoint: `743eec4c1324c1acd777835e1dc34dcc40422a37`. Built with
+`make build-release-compile` in the worktree (never `make release`). The current
+`lambda.exe` is optimized; switching back to debug requires removing that host
+before `make build`, per Developer Guide §7.
+
+- Binary SHA-256: `7265208ff7082b300b7edb829597ebcb6694932dec6ba5bec75ca110240fd38d`.
+- Bundled Lambda-package SHA-256: `e47ed317286ecc0f125ee0df33ed0353617e0711dc6cb557788f04fbd16398fb`.
+- Platform: `macOS-26.3-arm64-arm-64bit`; `arm64`, 10 logical CPUs.
+- Scenario: 3 processes, 8 shared 1024×768 layers, 16 moves, layered PSD encoding.
+- Median construction: **2528 ms**; moves: **8372 ms**; encoding: **666 ms**;
+  wall: **12297 ms**. Peak child RSS: **225443840 bytes (215 MiB)**.
+- Report: `temp/photos/performance/final-results.json`. The earlier expanded
+  measurement was 14273 ms total; exact integer sampling removes the measured
+  affine overhead. RSS is higher than the M1 measurement; neither this test nor
+  storage diagnostics establishes a photo-scale memory or presented-frame target.
+
+The final optimized native executable passes all 34 ImageIO checks; optimized
+package checks pass all 16 selected cases with forced GC and poisoned frees.
+The composite and retouch/action native replays pass 30/30 assertions on the
+optimized host with the same stress knobs. Final selection-resize cases are
+included in the 16-case package pass. Evidence:
+`temp/photos-expanded-fast-native.log`, `temp/photos-final-package.log`,
+`temp/photos-expanded-release-ui.log`, `temp/photos-final-jit.log`.
+
+The delivered checkpoint includes M2, the M3 composition/project core, and the
+retouch/actions subset of M4. Typed artwork/styles, channel UI, multi-document
+tabs, file-batch orchestration, high depth/ICC and larger-scene qualification are
+still pending. Aggregate Lambda/Radiant failures above remain open and visible.
+
+Final eager-JIT requalification also passes all 16 selected cases with forced GC
+and poisoned frees after the selection-resize repair. The final optimized UI
+subset passes all 30 assertions. The worktree retains the release host for the
+demo; generated reports and images remain under `temp/photos/`.
