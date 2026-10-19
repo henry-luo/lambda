@@ -12,6 +12,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
+| `photos` | `photos/photos.ls` | [Layered Photos editor](photos/README.md) |
 | `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
 | `word` | `word/word.ls` | [Word](word/README.md) |
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |

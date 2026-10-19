@@ -335,10 +335,11 @@ int view_lambda_document_transform_with_events(const char* document_file,
 int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
     const char* event_file, bool headless, const char** font_dirs,
     int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen = false);
-// Edit-application window decisions. Each acts only when `doc` is the
+// Application window decisions. Each acts only when `doc` is the
 // presented top-level document: the session arms the close guard while it is
 // dirty, approves a close after its Save / Discard decision, and retitles the
-// window to show the file name and unsaved state.
+// window to show the file name and unsaved state. Setting a guard also opts a
+// view-launched application into document-owned Escape and close handling.
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
 bool radiant_window_approve_close(DomDocument* doc);
 bool radiant_window_set_title(DomDocument* doc, const char* title);

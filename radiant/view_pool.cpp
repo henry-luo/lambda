@@ -522,7 +522,7 @@ static void clear_item_prop(DomElement* elem, ViewTree*) {
     elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
-static void free_item_prop(DomElement* elem, ViewTree* tree) {
+static void free_item_prop_storage(DomElement* elem, ViewTree* tree, bool retain_form) {
     if (!elem) return;
     switch (elem->parent_item_kind()) {
         case DomElement::PARENT_ITEM_FLEX:
@@ -536,15 +536,23 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
     }
     view_pool_free(tree, elem->tb);
     view_pool_free(tree, elem->td);
-    // a heap form prop is released by release_form_prop
-    if (elem->form && !elem->form->heap_allocated) view_pool_free(tree, elem->form);
+    // restyles retain the live control, including script-created heap ownership.
+    if (!retain_form && elem->form && !elem->form->heap_allocated) view_pool_free(tree, elem->form);
     elem->fi = nullptr;
     elem->gi = nullptr;
     elem->tb = nullptr;
     elem->td = nullptr;
-    elem->form = nullptr;
+    if (!retain_form) elem->form = nullptr;
     elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
-    elem->set_role_kind(DomElement::ROLE_NONE);
+    elem->set_role_kind(elem->form ? DomElement::ROLE_FORM : DomElement::ROLE_NONE);
+}
+
+static void free_item_prop(DomElement* elem, ViewTree* tree) {
+    free_item_prop_storage(elem, tree, false);
+}
+
+static void reset_item_prop(DomElement* elem, ViewTree* tree) {
+    free_item_prop_storage(elem, tree, true);
 }
 
 static const PseudoContentProp PSEUDO_CONTENT_PROP_DEFAULT = {};
@@ -639,7 +647,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },
     // retained restyles rebuild font caches without ending the control's live session.
     { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr, release_form_prop_fonts },
-    { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, free_item_prop },
+    { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, reset_item_prop },
     { "pseudo", nullptr, nullptr, view_prop_get_pseudo, view_prop_clear_pseudo, view_prop_free_pseudo, nullptr, nullptr, &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path", nullptr, free_vector_path_payload, view_prop_get_vpath, view_prop_clear_vpath, view_prop_free_vpath, nullptr, nullptr, &VECTOR_PATH_PROP_DEFAULT, sizeof(VectorPathProp), nullptr },
     { "layout-fragments", nullptr, nullptr, view_prop_get_layout_fragments, view_prop_clear_layout_fragments, nullptr, nullptr, free_layout_fragments, nullptr, 0, free_layout_fragments },

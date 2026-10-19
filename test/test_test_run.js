@@ -522,7 +522,7 @@ try {
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
+        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade,photos', 'view', 'dom'].entries()) {
             const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
             assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
         }
