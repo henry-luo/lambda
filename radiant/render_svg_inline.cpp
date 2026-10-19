@@ -1,3 +1,5 @@
+#include "rdt_path_internal.hpp"
+#include "render_metrics.hpp"
 /**
  * render_svg_inline.cpp - Inline SVG Rendering via PaintIR/DisplayList
  *
@@ -313,6 +315,8 @@ typedef void (*SvgElementDrawFn)(SvgInlineRenderContext*, Element*, void*);
 static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* elem,
     SvgElementDrawFn draw, void* data = nullptr, bool frame_ready = false);
 static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem);
+static RdtPath* svg_intern_basic_path(SvgInlineRenderContext* ctx, RdtPath* path);
+
 static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem);
 static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem);
 static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem);
@@ -3159,6 +3163,7 @@ static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
         return;
     }
 
+    path = svg_intern_basic_path(ctx, path);
     RdtMatrix matrix = compose_element_transform(ctx, elem);
     // lines use the same computed stroke as other shapes; the initial paint is none.
     draw_svg_fill_stroke(ctx, path, elem, &matrix,
@@ -3529,6 +3534,7 @@ static void svg_path_emit_quadratic(SvgPathEmitContext* context, float qx, float
 static RdtPath* parse_svg_path_d(const char* d, SvgPathTopology* topology = nullptr,
                                  bool allow_move_only = false) {
     if (!d || !*d) return nullptr;
+    RENDER_METRIC_ADD(path_parses, 1);
 
     RdtPath* path = rdt_path_new();
 
@@ -3667,6 +3673,122 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathTopology* topology = null
     }
 
     if (allow_move_only) svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+    return path;
+}
+
+struct SvgCachedPath {
+    char* source;
+    RdtPath* path;
+    SvgPathTopology topology;
+    ~SvgCachedPath() { mem_free(source); rdt_path_free(path); }
+};
+struct SvgPathCacheKey { const char* source; SvgCachedPath* value; };
+using SvgPathCacheMap = TypedHashMap<SvgPathCacheKey,
+    HashMapCStrMemberKeyOps<SvgPathCacheKey, &SvgPathCacheKey::source>>;
+struct SvgBasicPathKey { uint64_t hash; RdtPath* path; };
+struct SvgBasicPathKeyOps {
+    static uint64_t hash(const SvgBasicPathKey& key, uint64_t first, uint64_t second) {
+        return hashmap_hash_bytes(&key.hash, sizeof(key.hash), first, second);
+    }
+    static bool equals(const SvgBasicPathKey& first, const SvgBasicPathKey& second) {
+        return first.hash == second.hash && rdt_path_geometry_equal(first.path, second.path);
+    }
+};
+using SvgBasicPathMap = TypedHashMap<SvgBasicPathKey, SvgBasicPathKeyOps>;
+struct SvgPathCache : DomDocumentResourceData {
+    SvgPathCacheMap map;
+    SvgBasicPathMap basic;
+    DomDocument* document;
+    size_t bytes;
+};
+static const size_t SVG_PATH_CACHE_MAX_BYTES = (size_t)8 << 20;
+
+static void svg_path_cache_destroy(DomDocumentResourceData* data) {
+    SvgPathCache* cache = (SvgPathCache*)data;
+    size_t cursor = 0; SvgPathCacheKey* entry;
+    while (cache->map.next(&cursor, &entry)) {
+        entry->value->~SvgCachedPath(); mem_free(entry->value);
+    }
+    SvgBasicPathKey* shape; cursor = 0;
+    while (cache->basic.next(&cursor, &shape)) rdt_path_free(shape->path);
+    cache->basic.destroy();
+    cache->map.destroy(); cache->document->services.svg_geometry_cache = nullptr;
+    cache->~SvgPathCache(); mem_free(cache);
+}
+
+static SvgPathCache* svg_path_cache(SvgInlineRenderContext* ctx) {
+    SvgStyleContext* style = ctx ? (SvgStyleContext*)ctx->style_context : nullptr;
+    // pure local geometry can share the host owner even when external image styles are isolated.
+    DomDocument* document = g_svg_active_rdcon && g_svg_active_rdcon->ui_context
+        ? g_svg_active_rdcon->ui_context->document : style ? style->document : nullptr;
+    if (!document) return nullptr;
+    SvgPathCache* cache = (SvgPathCache*)document->services.svg_geometry_cache;
+    if (cache) return cache;
+    cache = (SvgPathCache*)mem_calloc(1, sizeof(SvgPathCache), MEM_CAT_RENDER);
+    if (!cache) return nullptr;
+    new (cache) SvgPathCache(); cache->document = document; cache->bytes = 0;
+    if (!cache->map.init(32) || !cache->basic.init(32)) {
+        cache->map.destroy(); cache->basic.destroy(); cache->~SvgPathCache(); mem_free(cache); return nullptr;
+    }
+    if (!dom_document_add_resource(document, cache, svg_path_cache_destroy)) {
+        cache->map.destroy(); cache->basic.destroy(); cache->~SvgPathCache(); mem_free(cache); return nullptr;
+    }
+    document->services.svg_geometry_cache = cache;
+    return cache;
+}
+
+static RdtPath* svg_intern_basic_path(SvgInlineRenderContext* ctx, RdtPath* path) {
+    SvgPathCache* cache = svg_path_cache(ctx);
+    if (!cache || !path) return path;
+    SvgBasicPathKey key = {rdt_path_hash(path), path};
+    SvgBasicPathKey* found = cache->basic.get(key);
+    if (found) {
+        RdtPath* shared = rdt_path_clone(found->path);
+        if (shared) { rdt_path_free(path); return shared; }
+        return path;
+    }
+    // key the resolved local geometry: percentages, font units and sampled animation
+    // have already contributed their values; instance paints and placement remain separate.
+    size_t bytes = rdt_path_storage_bytes(path) + sizeof(SvgBasicPathKey);
+    if (cache->bytes >= SVG_PATH_CACHE_MAX_BYTES || bytes > SVG_PATH_CACHE_MAX_BYTES - cache->bytes) return path;
+    RdtPath* retained = rdt_path_clone(path);
+    if (!retained) return path;
+    cache->basic.set({key.hash, retained});
+    if (cache->basic.oom()) rdt_path_free(retained);
+    else cache->bytes += bytes;
+    return path;
+}
+
+static RdtPath* svg_acquire_path(SvgInlineRenderContext* ctx, const char* source,
+    SvgPathTopology* local, const SvgPathTopology** topology) {
+    *topology = local;
+    if (!source || !*source) return nullptr;
+    SvgPathCache* cache = svg_path_cache(ctx);
+    SvgPathCacheKey* found = cache ? cache->map.get({source, nullptr}) : nullptr;
+    if (found) {
+        *topology = &found->value->topology;
+        return rdt_path_clone(found->value->path);
+    }
+    RdtPath* path = parse_svg_path_d(source, local, true);
+    if (!path || !cache || cache->bytes >= SVG_PATH_CACHE_MAX_BYTES) return path;
+    // path data has no style/viewport dependencies; the key includes the actual sampled d value.
+    size_t bytes = strlen(source) + 1 + sizeof(SvgCachedPath) +
+        local->vertices.capacity() * sizeof(SvgPathVertex);
+    bytes += rdt_path_storage_bytes(path);
+    if (bytes > SVG_PATH_CACHE_MAX_BYTES - cache->bytes) return path;
+    SvgCachedPath* entry = (SvgCachedPath*)mem_calloc(1, sizeof(SvgCachedPath), MEM_CAT_RENDER);
+    if (!entry) return path;
+    new (entry) SvgCachedPath();
+    entry->source = mem_strdup(source, MEM_CAT_RENDER);
+    entry->path = rdt_path_clone(path);
+    if (!entry->source || !entry->path) { entry->~SvgCachedPath(); mem_free(entry); return path; }
+    cache->map.set({entry->source, entry});
+    if (cache->map.oom()) { entry->~SvgCachedPath(); mem_free(entry); return path; }
+    entry->topology.vertices = (lam::ArrayList<SvgPathVertex>&&)local->vertices;
+    entry->topology.subpath_start = local->subpath_start;
+    entry->topology.valid = local->valid;
+    *topology = &entry->topology;
+    cache->bytes += bytes;
     return path;
 }
 
@@ -3862,8 +3984,9 @@ static void render_svg_markers(SvgInlineRenderContext* ctx, Element* elem, RdtPa
 
 static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
     const char* d = get_svg_attr(elem, "d");
-    SvgPathTopology topology;
-    RdtPath* path = parse_svg_path_d(d, &topology, true);
+    SvgPathTopology local_topology;
+    const SvgPathTopology* topology;
+    RdtPath* path = svg_acquire_path(ctx, d, &local_topology, &topology);
     if (!path) return;
 
     RdtMatrix m = compose_element_transform(ctx, elem);
@@ -3877,7 +4000,7 @@ static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
 
     float bx = 0.0f, by = 0.0f, right = 0.0f, bottom = 0.0f;
     rdt_path_get_bounds(path, &bx, &by, &right, &bottom);
-    draw_svg_fill_stroke(ctx, draw_path, elem, &m, bx, by, right - bx, bottom - by, true, nullptr, nullptr, nullptr, &topology);
+    draw_svg_fill_stroke(ctx, draw_path, elem, &m, bx, by, right - bx, bottom - by, true, nullptr, nullptr, nullptr, topology);
     if (stable_path) rdt_path_free(stable_path);
     rdt_path_free(path);
 
@@ -8273,19 +8396,16 @@ static bool svg_layer_paint_equal(const SvgInitialPaint* a, const SvgInitialPain
 }
 
 // Rasterise the SVG at the layer origin into a straight-alpha surface. Every
-// painter that shares the page surface (ThorVG fills, glyph blits, group
-// opacity composites) assumes an opaque target, so the content is rendered
-// twice, over black and over white, and the exact colour and coverage of each
-// pixel are recovered from the difference. Each pass records its own display
-// list: serial replay hands owned payloads such as pictures to the backend, so
-// one recorded list cannot be replayed twice. Glyph runs record through the
-// active RasterRenderContext, so its list, clip, transform and dirty state are pointed
-// at the private layer while recording.
-static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
+// vector-only layers share a premultiplied-alpha contract. Mixed CPU/effect
+// recordings keep black/white reconstruction until their alpha writers are qualified.
+static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
+                                    uint32_t* out, size_t count);
+static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
                                   float viewport_width, float viewport_height, float scale,
-                                  const SvgInitialPaint* paint, uint32_t* pixels,
-                                  int width, int height, uint32_t backdrop) {
-    for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = backdrop;
+                                  const SvgInitialPaint* paint, ImageSurface* surface) {
+    int width = surface->width, height = surface->height;
+    size_t count = (size_t)width * (size_t)height;
+    RENDER_METRIC_ADD(layer_recordings, 1);
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.svg_layer", "render.svg_layer.list_arena",
                      "render.svg_layer.scratch_arena")) {
@@ -8339,7 +8459,20 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     rdcon->has_dirty_union = saved_has_dirty_union;
 
     bool ok = dl_validate_or_log(&dl, "render_svg_layer_capture");
-    if (ok) {
+    bool transparent = dl_supports_premultiplied_vector_capture(&dl);
+    lam::Temp<uint32_t> over_black, over_white;
+    if (ok && !transparent) {
+        over_black = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
+        over_white = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
+        ok = over_black && over_white;
+    }
+    // recording resources outlive all raster passes; the eligible subset needs no reconstruction buffers.
+    for (int pass_index = 0; ok && pass_index < (transparent ? 1 : 2); pass_index++) {
+        RENDER_METRIC_ADD(layer_passes, 1);
+        uint32_t* pixels = transparent ? (uint32_t*)surface->pixels :
+            pass_index == 0 ? over_black.get() : over_white.get();
+        uint32_t backdrop = transparent ? 0 : pass_index == 0 ? 0xFF000000u : 0xFFFFFFFFu;
+        for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = backdrop;
         ImageSurface pass = {};
         pass.format = IMAGE_FORMAT_UNKNOWN;
         pass.width = width;
@@ -8359,6 +8492,9 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
             rdt_vector_destroy(&vec);
         }
     }
+    if (ok && !transparent) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
+        (uint32_t*)surface->pixels, count);
+    surface->alpha_mode = transparent ? IMAGE_ALPHA_PREMULTIPLIED : IMAGE_ALPHA_STRAIGHT;
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
@@ -8401,22 +8537,12 @@ static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* regi
     }
     ImageSurface* surface = image_surface_create(width, height);
     if (!surface) return false;
-    lam::Temp<uint32_t> over_black = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
-    lam::Temp<uint32_t> over_white = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
-    bool ok = over_black && over_white &&
-        svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_black.get(), width, height, 0xFF000000u) &&
-        svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_white.get(), width, height, 0xFFFFFFFFu);
-    if (ok) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
-                                    (uint32_t*)surface->pixels, count);
-    over_black.reset();
-    over_white.reset();
+    bool ok = svg_layer_render_passes(rdcon, svg_elem, dom_elem, viewport_width, viewport_height,
+        scale, paint, surface);
     if (!ok) {
         image_surface_destroy(surface);
         return false;
     }
-    surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
     entry->surface = surface;
     registry->cached_bytes += bytes;
     log_debug("svg-layer: captured %dx%d layer for <svg> node=%u generation=%u", width, height,

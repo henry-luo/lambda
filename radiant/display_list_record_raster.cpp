@@ -7,6 +7,8 @@
 void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           uint32_t color, const Bound* clip,
                           ClipShape** clip_shapes, int clip_depth) {
+    lam::Up<const DlClipShapeStack> clips;
+    if (!dl_store_clip_shapes(dl, &clips, clip_shapes, clip_depth)) return;
     DisplayItem* item = dl_alloc_item(dl);
     if (!item) return;
     item->op = DL_FILL_SURFACE_RECT;
@@ -17,7 +19,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
     item->fill_surface_rect.h = h;
     item->fill_surface_rect.color = color;
     item->fill_surface_rect.clip = clip ? *clip : dl_unbounded_clip();
-    dl_store_clip_shapes(dl, &item->fill_surface_rect.clip_shapes, clip_shapes, clip_depth);
+    item->fill_surface_rect.clip_shapes = clips;
 }
 
 void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
@@ -25,6 +27,8 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
                             int scale_mode, const Bound* clip,
                             ClipShape** clip_shapes, int clip_depth, uint8_t opacity,
                             uint64_t src_generation) {
+    lam::Up<const DlClipShapeStack> clips;
+    if (!dl_store_clip_shapes(dl, &clips, clip_shapes, clip_depth)) return;
     DisplayItem* item = dl_alloc_item(dl);
     if (!item) return;
     item->op = DL_BLIT_SURFACE_SCALED;
@@ -41,7 +45,7 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
     item->blit_surface_scaled.scale_mode = scale_mode;
     item->blit_surface_scaled.opacity = opacity;
     item->blit_surface_scaled.clip = clip ? *clip : dl_unbounded_clip();
-    dl_store_clip_shapes(dl, &item->blit_surface_scaled.clip_shapes, clip_shapes, clip_depth);
+    item->blit_surface_scaled.clip_shapes = clips;
 }
 
 void dl_video_placeholder(DisplayList* dl, struct RdtVideo* video,

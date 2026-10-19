@@ -6,6 +6,9 @@
 #include "../lambda/dom/dom_observers.h"
 #include "../lib/memtrack.h"
 #include <string.h>
+#include <thorvg_capi.h>
+#include "../radiant/rdt_path_internal.hpp"
+#include "../radiant/render_metrics.hpp"
 
 TEST(SvgTransformTest, IndividualPropertiesComposeBeforeCssAndAttributeLists) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
@@ -818,6 +821,44 @@ protected:
         return allocations;
     }
 };
+
+TEST_F(SvgAnimationLifetimeTest, PathGeometrySurvivesPaintPlacementAndSourceValueChanges) {
+    MarkBuilder builder(authored_input());
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "200")
+        .child(builder.element("path").attr("d", "M0 0 L20 0 L20 20 Z").attr("fill", "red").final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* path = svg->first_child->as_element(); ASSERT_NE(path, nullptr);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    RdtPathStorage* original = nullptr;
+    for (int iteration = 0; iteration < 5; iteration++) {
+        SCOPED_TRACE(iteration);
+        if (iteration == 1) ASSERT_TRUE(path->set_attribute("fill", "blue"));
+        if (iteration == 2) ASSERT_TRUE(svg->set_attribute("viewBox", "0 0 100 100"));
+        if (iteration == 3) ASSERT_TRUE(path->set_attribute("d", "M0 0 L40 0 L40 20 Z"));
+        if (iteration == 4) ASSERT_TRUE(path->set_attribute("d", "M0 0 L20 0 L20 20 Z"));
+        DisplayList list; PaintList paint;
+        RasterRenderContext context = {}; context.ui_context = lam::up(&ui);
+        context.dl = lam::up(&list); context.paint_list = lam::up(&paint);
+        context.raster_scale = 1; context.block.clip = {0, 0, 200, 200};
+        context.block.x = (float)iteration;
+        scratch_init(&context.scratch, arena);
+        render_svg_begin_paint_pass();
+        render_custom_svg_subscene(&context, dom_element_to_element(svg), 200, 200);
+        const DlFillPath* fill = nullptr;
+        for (size_t i = 0; i < list.size(); i++) if (list[i].op == DL_FILL_PATH) fill = &list[i].fill_path;
+        ASSERT_NE(fill, nullptr) << "commands=" << list.size() << " parses=" << counters.path_parses;
+        if (iteration == 0) original = fill->path->storage;
+        if (iteration == 3) EXPECT_NE(fill->path->storage, original);
+        else EXPECT_EQ(fill->path->storage, original);
+        EXPECT_EQ(counters.path_parses, iteration < 3 ? 1u : 2u);
+        EXPECT_EQ(counters.path_copy_bytes, 0u);
+        dl_destroy(&list); paint_list_destroy(&paint); scratch_release(&context.scratch);
+    }
+    arena_destroy(arena);
+}
 
 TEST_F(SvgAnimationLifetimeTest, WallclockGrammarCalendarZonesAndFractionalSeconds) {
     const double origin = 946684800.25; // 2000-01-01T00:00:00.25Z
@@ -2431,7 +2472,7 @@ TEST(RdtImageTest, AlphaModeSurvivesOwnedImageReleaseAndSeparatesCachedUploads) 
     uint32_t pixels[64];
     for (uint32_t& pixel : pixels) pixel = 0xffffffffu;
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 8, 8, 8);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_NEAR((float)(pixels[36] & 255u), 177.0f, 1.0f);
     EXPECT_NEAR((float)((pixels[36] >> 8) & 255u), 127.0f, 1.0f);
     const uint32_t source = 0x80000064u;
@@ -2462,7 +2503,7 @@ TEST(GradientImagePaintTest, SourceReplacementAndRecordingReleasePreserveDeferre
         ASSERT_EQ(dl.item_count(), 1);
         ASSERT_TRUE(dl_validate(&dl, nullptr));
         RdtVector vector = {}; rdt_vector_init(&vector, pixels, 16, 16, 16);
-        EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+        EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
         rdt_vector_destroy(&vector); dl_destroy(&dl); arena_destroy(arena);
     };
     for (GradientType type : {GRADIENT_LINEAR, GRADIENT_RADIAL, GRADIENT_CONIC})
@@ -2823,7 +2864,7 @@ TEST(SvgStrokeTest, MiterLimitSurvivesRecordingAndChangesCachedStrokeGeometry) {
     EXPECT_FLOAT_EQ(dl.data()[0].stroke_path.miter_limit, 1.0f);
     uint32_t pixels[100 * 120] = {};
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 100, 120, 100);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 100 + 50], 0u);
     memset(pixels, 0, sizeof(pixels));
     rdt_stroke_path(&vector, path, blue, 12.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
@@ -2884,7 +2925,7 @@ TEST(SvgGradientTest, RecordingOwnsStrokeDashesAndReplayPreservesSpread) {
     EXPECT_FLOAT_EQ(gradient->options.dash_array[0], 10.0f);
     uint32_t pixels[80 * 50] = {};
     RdtVector vector = {}; rdt_vector_init(&vector, pixels, 80, 50, 80);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 80 + 15], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 35], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 25], 0u);
@@ -2928,7 +2969,7 @@ TEST(SvgGradientTest, RetainedFragmentOwnsStrokeFactsAfterRecordingArenaDies) {
     EXPECT_FLOAT_EQ(gradient->options.dash_array[0], 10.0f);
     uint32_t pixels[80 * 50] = {}; RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 80, 50, 80);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &replay.data()[1], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &replay.data()[1]), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 80 + 15], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 35], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 25], 0u);
@@ -3041,13 +3082,13 @@ TEST(SvgImageTest, ReplayRefreshesPixelsAfterSharedDecodePromotion) {
     RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 8, 8, 8);
     rdt_vector_begin_batch(&vector);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(pixels[4 * 8 + 4], 0xffff0000u);
     image_surface_detach_pixels(image); image_surface_destroy(image);
     memset(pixels, 0, sizeof(pixels));
     rdt_vector_begin_batch(&vector);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0]), DL_REPLAY_VECTOR_DREW);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(pixels[4 * 8 + 4], 0u);
     rdt_vector_destroy(&vector);
@@ -5154,8 +5195,10 @@ TEST(PaintOwnership, FailedDisplayRecordingLeavesEarlierCommandsAndRecovers) {
             RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
         else dl_push_clip(&list, path, nullptr);
         memtrack_fault_clear();
-        EXPECT_EQ(list.item_count(), 1);
+        EXPECT_EQ(list.item_count(), fail_at == 0 ? 1 : 2);
+        if (op == DL_PUSH_CLIP && fail_at == 1) dl_pop_clip(&list);
         EXPECT_TRUE(dl_validate(&list, nullptr));
+        dl_truncate(&list, 1);
     }
     dl_fill_path(&list, path, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
     EXPECT_EQ(list.item_count(), 2);
@@ -5266,4 +5309,136 @@ TEST(PaintOwnership, PrivateCaptureTrimmingRetainsEveryCoveredPixelAndPublishedB
     EXPECT_FALSE(image_surface_trim_transparent_margin(surface, &x, &y));
     EXPECT_EQ(surface->width, 3); EXPECT_EQ(surface->height, 2);
     image_surface_destroy(surface);
+}
+
+TEST(PaintOwnership, NativePicturesSurviveRepeatedSerialReplayAndSourceRetirement) {
+    rdt_engine_init(0);
+    Tvg_Paint shape = tvg_shape_new(); ASSERT_NE(shape, nullptr);
+    ASSERT_EQ(tvg_shape_append_rect(shape, 4, 4, 20, 18, 0, 0, true), TVG_RESULT_SUCCESS);
+    ASSERT_EQ(tvg_shape_set_fill_color(shape, 240, 30, 10, 180), TVG_RESULT_SUCCESS);
+    ASSERT_EQ(tvg_paint_translate(shape, 2, 3), TVG_RESULT_SUCCESS);
+    RdtPicture* picture = rdt_picture_take_tvg_paint(shape, 32, 32); ASSERT_NE(picture, nullptr);
+    DisplayList list;
+    dl_draw_picture(&list, rdt_picture_dup(picture), 210, nullptr);
+    rdt_picture_free(picture);
+    ASSERT_EQ(list.item_count(), 1);
+    DisplayItem frozen = list.data()[0];
+    uint32_t reference[32 * 32];
+    for (uint32_t background : {0xff000000u, 0xffffffffu}) for (int repeat = 0; repeat < 3; repeat++) {
+        ImageSurface* surface = image_surface_create(32, 32); ASSERT_NE(surface, nullptr);
+        for (size_t i = 0; i < 32 * 32; i++) ((uint32_t*)surface->pixels)[i] = background;
+        RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, 32, 32, surface->pitch / 4);
+        Bound clip = {0, 0, 32, 32}; ScratchArena scratch = {};
+        dl_replay(&list, &vec, surface, &clip, &scratch, 1, nullptr);
+        rdt_vector_destroy(&vec); scratch_release(&scratch);
+        EXPECT_NE(((uint32_t*)surface->pixels)[10 * 32 + 10], background);
+        EXPECT_EQ(((uint32_t*)surface->pixels)[5 * 32 + 5], background);
+        if (repeat == 0) memcpy(reference, surface->pixels, sizeof(reference));
+        else EXPECT_EQ(memcmp(reference, surface->pixels, sizeof(reference)), 0);
+        EXPECT_EQ(memcmp(&frozen, list.data(), sizeof(frozen)), 0);
+        image_surface_destroy(surface);
+    }
+    dl_destroy(&list); rdt_engine_term();
+}
+
+TEST(PaintOwnership, PathSnapshotsShareGeometryAndDetachWithoutChangingPublishedPaint) {
+    RdtPath* source = rdt_path_new(); ASSERT_NE(source, nullptr);
+    rdt_path_move_to(source, 1, 2); rdt_path_line_to(source, 10, 12);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayList list;
+    dl_fill_path(&list, source, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
+    dl_stroke_path(&list, source, Color{0xff00ff00u}, 2, RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
+    ASSERT_EQ(list.item_count(), 2);
+    RdtPath* fill = list.data()[0].fill_path.path;
+    RdtPath* stroke = list.data()[1].stroke_path.path;
+    EXPECT_EQ(fill->storage, stroke->storage); EXPECT_EQ(fill->storage, source->storage);
+    EXPECT_EQ(counters.path_copy_bytes, 0u);
+    uint64_t frozen_hash = rdt_path_hash(fill);
+    memtrack_fault_inject(0); rdt_path_line_to(source, 20, 25); memtrack_fault_clear();
+    EXPECT_EQ(source->storage, fill->storage); EXPECT_EQ(source->count, 2);
+    rdt_path_line_to(source, 20, 25);
+    EXPECT_NE(source->storage, fill->storage); EXPECT_EQ(source->count, 3);
+    EXPECT_EQ(fill->count, 2); EXPECT_EQ(rdt_path_hash(fill), frozen_hash);
+    EXPECT_NE(rdt_path_hash(source), frozen_hash);
+    rdt_path_free(source);
+    float left, top, right, bottom;
+    ASSERT_TRUE(rdt_path_get_bounds(stroke, &left, &top, &right, &bottom));
+    EXPECT_FLOAT_EQ(right, 10); EXPECT_FLOAT_EQ(bottom, 12);
+    dl_destroy(&list);
+}
+
+TEST(PaintOwnership, TransparentVectorCaptureComposesLikeDirectReplayAcrossBackdrops) {
+    rdt_engine_init(0);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    DisplayList list; dl_init(&list, arena);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_circle(path, 16, 16, 13, 11);
+    dl_push_clip(&list, path, nullptr);
+    dl_fill_rect(&list, 3, 4, 18, 16, Color{0x803020e0u});
+    dl_fill_rounded_rect(&list, 8, 10, 22, 18, 4, 3, Color{0x9040e030u});
+    dl_stroke_path(&list, path, Color{0xa0e04030u}, 3, RDT_CAP_ROUND, RDT_JOIN_ROUND, nullptr, 0, 0, nullptr);
+    RdtGradientStop stops[] = {{0, 220, 20, 50, 90}, {1, 10, 80, 230, 170}};
+    dl_fill_linear_gradient(&list, path, 0, 0, 32, 32, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    dl_pop_clip(&list); rdt_path_free(path);
+    ASSERT_TRUE(dl_supports_premultiplied_vector_capture(&list));
+    uint32_t layer[32 * 32] = {}, actual[32 * 32];
+    Bound clip = {0, 0, 32, 32}; ScratchArena scratch = {};
+    auto replay = [&](uint32_t* pixels) {
+        ImageSurface surface = {}; surface.width = surface.height = 32;
+        surface.pitch = 32 * 4; surface.pixels = pixels; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        RdtVector vec = {}; rdt_vector_init(&vec, pixels, 32, 32, 32);
+        dl_replay(&list, &vec, &surface, &clip, &scratch, 1, nullptr);
+        rdt_vector_destroy(&vec); scratch_release(&scratch);
+    };
+    replay(layer); EXPECT_NE(layer[16 * 32 + 16], 0u);
+    for (uint32_t background : {0xff000000u, 0xffffffffu, 0xffa03020u, 0x80203040u}) {
+        for (size_t i = 0; i < 32 * 32; i++) actual[i] = background;
+        replay(actual);
+        unsigned largest_error = 0;
+        for (size_t i = 0; i < 32 * 32; i++) {
+            uint32_t composed = render_pixel_source_over_premultiplied_pair(background, layer[i]);
+            for (unsigned shift = 0; shift < 32; shift += 8) {
+                int delta = (int)((composed >> shift) & 255) - (int)((actual[i] >> shift) & 255);
+                unsigned error = (unsigned)(delta < 0 ? -delta : delta);
+                if (error > largest_error) largest_error = error;
+            }
+        }
+        EXPECT_LE(largest_error, 2u) << "background=" << background;
+    }
+    dl_save_backdrop(&list, 0, 0, 32, 32);
+    EXPECT_FALSE(dl_supports_premultiplied_vector_capture(&list));
+    dl_destroy(&list); arena_destroy(arena); rdt_engine_term();
+}
+
+TEST(PaintOwnership, NestedFramesKeepIndependentPayloadArenasAndReuseOuterCapacity) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session, "<html><body>frame</body></html>", 80, 60, false));
+    UiContext* ui = session.ui_context;
+    ViewTree* tree = ui->document->view_tree;
+    DisplayItem* retained_storage = nullptr;
+    {
+        RenderProfiler profiler = {}; RasterRenderContext first, second;
+        RenderFrameScope outer(&first, ui, tree, &profiler);
+        RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+        rdt_path_add_rect(path, 0, 0, 20, 20, 0, 0);
+        RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+        dl_fill_linear_gradient(outer.list(), path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+        ASSERT_TRUE(dl_validate(outer.list(), nullptr));
+        retained_storage = outer.list()->data();
+        {
+            RenderFrameScope inner(&second, ui, tree, &profiler);
+            EXPECT_NE(inner.list()->arena.arena, outer.list()->arena.arena);
+            EXPECT_NE(second.scratch.arena, first.scratch.arena);
+            dl_fill_linear_gradient(inner.list(), path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+            EXPECT_TRUE(dl_validate(inner.list(), nullptr));
+        }
+        EXPECT_TRUE(dl_validate(outer.list(), nullptr)); rdt_path_free(path);
+    }
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope next(&context, ui, tree, &profiler);
+        EXPECT_EQ(next.list()->data(), retained_storage); EXPECT_TRUE(next.list()->empty());
+    }
+    render_export_session_end(&session); rdt_engine_term();
 }

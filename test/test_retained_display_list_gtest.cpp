@@ -2,6 +2,7 @@
 #include <pthread.h>
 
 #include "../radiant/render.hpp"
+#include "../radiant/render_metrics.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 
@@ -541,11 +542,10 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     fill->bounds[1] = 0.0f;
     fill->bounds[2] = 20.0f;
     fill->bounds[3] = 20.0f;
-    fill->fill_surface_rect.clip_shapes.depth = 1;
-    fill->fill_surface_rect.clip_shapes.type[0] = CLIP_SHAPE_POLYGON;
-    fill->fill_surface_rect.clip_shapes.polygon_count[0] = 3;
-    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = lam::own_arr(vx);
-    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = lam::own_arr(vy);
+    ClipShape polygon = {}; polygon.type = CLIP_SHAPE_POLYGON;
+    polygon.polygon = {lam::own_arr(vx), lam::own_arr(vy), 3};
+    ClipShape* clips[] = {&polygon};
+    ASSERT_TRUE(dl_store_clip_shapes(&source, &fill->fill_surface_rect.clip_shapes, clips, 1));
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -562,7 +562,7 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_EQ(replay.size(), 3u);
     ASSERT_EQ(replay.data()[1].op, DL_FILL_SURFACE_RECT);
-    const DlClipShapeStack* copied = &replay.data()[1].fill_surface_rect.clip_shapes;
+    const DlClipShapeStack* copied = replay.data()[1].fill_surface_rect.clip_shapes;
     EXPECT_EQ(copied->depth, 1);
     EXPECT_EQ(copied->type[0], CLIP_SHAPE_POLYGON);
     EXPECT_EQ(copied->polygon_count[0], 3);
@@ -1201,4 +1201,60 @@ TEST_F(RetainedDisplayListTest, EvictionWhileReadersReplayIsSafe) {
     EXPECT_GT(__atomic_load_n(&observed_checksum, __ATOMIC_RELAXED), 0u);
     pthread_cond_destroy(&start.condition);
     pthread_mutex_destroy(&start.mutex);
+}
+
+TEST_F(RetainedDisplayListTest, NestedChunksCaptureEachCommandOnceAndBorrowedFramesOutliveCache) {
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayList source; dl_init(&source, arena);
+    int markers[64];
+    for (size_t i = 0; i < 64; i++) {
+        markers[i] = dl_begin_element(&source, 1000 + (uint32_t)i, 0, 0, 100, 100);
+        DisplayItem* rect = retained_test_add_rect(&source, 1, 2, 3, 4); ASSERT_NE(rect, nullptr);
+        rect->fill_rect.color.c = 0xff002244u;
+    }
+    for (size_t i = 64; i > 0; i--) dl_end_element(&source, markers[i - 1]);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_begin_frame(cache); retained_dl_cache_capture(cache, &source);
+    RetainedDisplayListStats stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.captured, 64); EXPECT_EQ(stats.captured_commands, source.size());
+    // retained command capacity must scale with unique commands, including unused slots.
+    EXPECT_GE(counters.retained_command_capacity_bytes, source.size() * sizeof(DisplayItem));
+    EXPECT_LE(counters.retained_command_capacity_bytes, source.size() * sizeof(DisplayItem) * 2);
+    const RetainedDisplayListFragment* root = retained_dl_cache_get(cache, 1000); ASSERT_NE(root, nullptr);
+    DisplayList frame; dl_init(&frame, replay_arena);
+    ASSERT_NE(retained_test_add_rect(&frame, 0, 0, 1, 1), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, root));
+    EXPECT_TRUE(dl_validate(&frame, nullptr));
+    EXPECT_EQ(frame.size(), source.size() + 1);
+    counters.retained_command_capacity_bytes = 0;
+    retained_dl_cache_begin_frame(cache); retained_dl_cache_capture(cache, &frame);
+    stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.captured_commands, 0u); EXPECT_EQ(stats.captured, 0);
+    EXPECT_EQ(stats.reused_captures, 64u);
+    EXPECT_EQ(counters.retained_command_capacity_bytes, 0u);
+    dl_destroy(&source); retained_dl_cache_destroy(cache);
+    // active frame leases keep every chunk and its payloads alive after cache retirement.
+    EXPECT_TRUE(dl_validate(&frame, nullptr));
+    EXPECT_EQ(frame.data()[2].fill_rect.color.c, 0xff002244u);
+    dl_destroy(&frame);
+}
+
+TEST_F(RetainedDisplayListTest, FailedChunkAssemblyRollsBackCommandsAndOwnerLeases) {
+    DisplayList source; dl_init(&source, arena);
+    int begin = dl_begin_element(&source, 2000, 0, 0, 20, 20);
+    ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr);
+    dl_end_element(&source, begin);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 2000); ASSERT_NE(fragment, nullptr);
+    for (size_t fail_at : {size_t(0), size_t(1)}) {
+        DisplayList frame; dl_init(&frame, replay_arena);
+        memtrack_fault_inject(fail_at);
+        bool appended = retained_dl_append_fragment(&frame, fragment);
+        memtrack_fault_clear();
+        EXPECT_FALSE(appended); EXPECT_TRUE(frame.empty()); EXPECT_TRUE(frame.payload_owners.empty());
+        ASSERT_TRUE(retained_dl_append_fragment(&frame, fragment)); EXPECT_TRUE(dl_validate(&frame, nullptr));
+        dl_destroy(&frame);
+    }
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
 }

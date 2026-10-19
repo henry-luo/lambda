@@ -1,3 +1,4 @@
+#include "render_metrics.hpp"
 #include "scene3d.hpp"
 #include "render.hpp"
 #include "../lib/base64.h"
@@ -716,7 +717,7 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
 }
 
 static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
-                                       RenderProfiler* profiler) {
+                                       RenderProfiler* profiler, Arena* scratch_backing) {
     memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
@@ -725,7 +726,7 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
         rdcon->retained_dl_cache = lam::up(uicon->document->state->retained_dl_cache);
     }
 
-    mem_scratch_init(NULL, &rdcon->scratch, view_tree->render_scratch_arena, MEM_ROLE_RENDER, "render.scratch");
+    mem_scratch_init(NULL, &rdcon->scratch, scratch_backing, MEM_ROLE_RENDER, "render.scratch");
     rdcon->content_bounds_cache = lam::up(layout_content_bounds_cache_create());
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
@@ -768,18 +769,63 @@ static void render_output_cleanup_context(RasterRenderContext* rdcon) {
 
 RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
                                    RenderProfiler* profiler)
-    : rdcon(r), display_list{}, context_active(false), display_list_active(false) {
+    : rdcon(r), display_list{}, storage_owner(nullptr), active_list(nullptr),
+      context_active(false), display_list_active(false) {
     if (!rdcon || !view_tree) return;
-    render_output_init_context(rdcon, uicon, view_tree, profiler);
+    bool nested = view_tree->render_list_in_use;
+    Arena* scratch_backing = nested ? mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER,
+        "render.nested_scratch") : view_tree->render_scratch_arena;
+    render_output_init_context(rdcon, uicon, view_tree, profiler, scratch_backing);
     context_active = true;
-    dl_init(&display_list, view_tree->display_list_arena);
+    if (!view_tree->render_list_in_use) {
+        if (!view_tree->render_list) {
+            DisplayList* cached = (DisplayList*)mem_alloc(sizeof(DisplayList), MEM_CAT_RENDER);
+            if (cached) {
+                new (cached) DisplayList();
+                dl_init(cached, view_tree->display_list_arena);
+                view_tree->render_list = lam::own(cached);
+            }
+        }
+        if (view_tree->render_list) {
+            storage_owner = lam::up(view_tree);
+            view_tree->render_list_in_use = true;
+            active_list = lam::up(view_tree->render_list.get());
+        }
+    }
+    if (!active_list) {
+        // nested frames own both scratch stacks; a null backing arena cannot store gradient/clip payloads.
+        Arena* list_arena = mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER, "render.nested_list");
+        if (!nested) {
+            // a failed cache allocation also needs a privately owned scratch stack.
+            scratch_backing = mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER, "render.nested_scratch");
+            scratch_release(&rdcon->scratch);
+            mem_scratch_init(nullptr, &rdcon->scratch, scratch_backing, MEM_ROLE_RENDER, "render.nested_scratch");
+        }
+        dl_init(&display_list, list_arena);
+        rdcon->paint_failed = !list_arena || !scratch_backing;
+        active_list = lam::up(&display_list);
+    }
     display_list_active = true;
-    rdcon->dl = lam::up(&display_list);
+    rdcon->dl = active_list;
 }
 
 RenderFrameScope::~RenderFrameScope() {
-    if (display_list_active) dl_destroy(&display_list);
+    Arena* nested_scratch = context_active && !storage_owner ? rdcon->scratch.arena : nullptr;
+    if (display_list_active && storage_owner) {
+        size_t used = active_list->size();
+        dl_clear(active_list);
+        // a small job following a large one returns excess idle command storage.
+        if (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH ||
+            (active_list->capacity() > DL_INITIAL_CAPACITY && used < active_list->capacity() / 4))
+            active_list->lam::ArrayList<DisplayItem>::release();
+        storage_owner->render_list_in_use = false;
+    } else if (display_list_active) {
+        Arena* nested_list = display_list.arena.arena;
+        dl_destroy(&display_list);
+        if (nested_list) mem_arena_destroy(nested_list);
+    }
     if (context_active) render_output_cleanup_context(rdcon);
+    if (nested_scratch) mem_arena_destroy(nested_scratch);
 }
 
 static uint32_t render_output_canvas_background(View* root_view) {
@@ -1241,6 +1287,7 @@ static bool render_output_save_surface(ImageSurface* surface, const char* output
 
 static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_tree,
                                               RenderOutputTarget* target) {
+    RenderPipelineMeasurement measurement;
     uint64_t t_start = time_now_ns();
 
     if (!uicon || !view_tree || !target) {
@@ -1266,6 +1313,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
     uint64_t t_init = time_now_ns();
+    measurement.checkpoint("setup_clear");
 
     render_output_render_view_tree(&rdcon, view_tree);
 
@@ -1275,6 +1323,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
 
     uint64_t t_render = time_now_ns();
+    measurement.checkpoint("record_lower");
     log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
              time_elapsed_ms_f(t_init, t_render), dl_item_count(&display_list));
     render_profiler_log(rdcon.profiler);
@@ -1291,7 +1340,17 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     if (!dl_validate_or_log(&display_list, "render_output_raster")) {
         return 1;
     }
+    uint64_t t_capture = time_now_ns();
+    measurement.checkpoint("overlays_validate");
     retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    uint64_t t_captured = time_now_ns();
+    measurement.checkpoint("retained_capture");
+    if (render_pipeline_metrics) {
+        log_notice("[RENDER_METRICS] setup_ms=%.3f record_ms=%.3f overlays_validate_ms=%.3f retained_capture_ms=%.3f command_size=%zu command_count=%zu command_capacity_bytes=%zu paint_capacity_bytes=%zu",
+            time_elapsed_ms_f(t_start, t_init), render_ms, time_elapsed_ms_f(t_render, t_capture),
+            time_elapsed_ms_f(t_capture, t_captured), sizeof(DisplayItem), display_list.size(),
+            display_list.capacity() * sizeof(DisplayItem), rdcon.paint_list->capacity() * sizeof(PaintCmd));
+    }
 
     uint64_t t_replay_start = time_now_ns();
 
@@ -1300,6 +1359,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_replay_display_list(&rdcon, &display_list, canvas_bg, clear_result.replay_dirty);
 
     uint64_t t_replay_end = time_now_ns();
+    measurement.checkpoint("replay");
     double replay_ms = time_elapsed_ms_f(t_replay_start, t_replay_end);
     if (replay_result.tiled) {
         log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
@@ -1316,6 +1376,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
     uint64_t t_sync = time_now_ns();
+    measurement.checkpoint("media_trace");
     log_info("[TIMING] render complete: %.1fms", time_elapsed_ms_f(t_render, t_sync));
     render_profiler_emit_event(rdcon.profiler, uicon, rstate, render_ms, replay_ms,
         time_elapsed_ms_f(t_start, t_sync), item_count, selective,
@@ -1344,6 +1405,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
 
     uint64_t t_save = time_now_ns();
+    measurement.checkpoint("encode_write");
     if (target->output_file) {
         log_info("[TIMING] save_to_file: %.1fms", time_elapsed_ms_f(t_sync, t_save));
     }

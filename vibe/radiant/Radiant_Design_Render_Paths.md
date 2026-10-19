@@ -2,6 +2,12 @@
 
 Date: 2026-05-22
 
+> Current pipeline overview: [Radiant Rendering Design](Radiant_Design_Rendering.md)
+> (2026-10-19). This document retains the two-level paint design and its migration
+> history; early descriptions of strip rendering and PDF generation are historical.
+> Proposed storage and replay work is tracked in the
+> [rendering optimization plan](../impl/Radiant_Impl_Rendering_Optimization.md).
+
 ## Purpose
 
 Radiant rendering now has several overlapping paths: screen and PNG rendering record and replay a display list, large PNG export can render by strips, PDF and SVG export use a shared tree walker with backend callbacks, and inline SVG has its own SVG-to-vector bridge. This note documents those paths and proposes a more unified design.

@@ -1,3 +1,4 @@
+#include "render_metrics.hpp"
 // ==========================================================================
 // DisplayList storage and lifecycle helpers.
 // ==========================================================================
@@ -12,8 +13,6 @@
 #include <math.h>
 #include "../lib/generation.h"
 
-#define DL_INITIAL_CAPACITY 2048
-#define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
 
 static const DisplayOpDescriptor DISPLAY_OP_DESCRIPTORS[] = {
 #define DL_OP_DESCRIPTOR(name, flags, owned_kind, owned_offset) \
@@ -34,6 +33,13 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags) {
     return desc && (desc->flags & flags) == flags;
 }
 
+bool dl_supports_premultiplied_vector_capture(const DisplayList* list) {
+    if (!list) return false;
+    for (size_t i = 0; i < list->size(); i++)
+        if (!dl_op_has_flags(list->data()[i].op, DL_OP_FLAG_PREMULTIPLIED_VECTOR)) return false;
+    return true;
+}
+
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
     if (dl->capacity() == 0 && !dl->reserve(DL_INITIAL_CAPACITY)) return nullptr;
@@ -47,6 +53,7 @@ RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, in
     size_t sz = count * sizeof(RdtGradientStop);
     RdtGradientStop* copy = (RdtGradientStop*)scratch_alloc(&dl->arena, sz);
     if (!copy) return nullptr;
+    RENDER_METRIC_ADD(payload_copy_bytes, sz);
     memcpy(copy, stops, sz);
     return copy;
 }
@@ -56,6 +63,7 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
     size_t sz = count * sizeof(float);
     float* copy = (float*)scratch_alloc(&dl->arena, sz);
     if (!copy) return nullptr;
+    RENDER_METRIC_ADD(payload_copy_bytes, sz);
     memcpy(copy, dashes, sz);
     return copy;
 }
@@ -89,41 +97,39 @@ bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
     return true;
 }
 
-void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
+bool dl_store_clip_shapes(DisplayList* dl, lam::Up<const DlClipShapeStack>* out,
                           ClipShape** clip_shapes, int clip_depth) {
-    if (!dst) return;
-    memset(dst, 0, sizeof(DlClipShapeStack));
-    if (!dl || !clip_shapes || clip_depth <= 0) return;
+    if (!dl || !out) return false;
+    *out = nullptr;
+    if (!clip_shapes || clip_depth <= 0) return true;
     if (clip_depth > RDT_MAX_CLIP_SHAPES) {
         log_warn("[RAD_CAP_DL_CLIP_SHAPES] truncating clip stack from %d to %d shapes",
                  clip_depth, RDT_MAX_CLIP_SHAPES);
         clip_depth = RDT_MAX_CLIP_SHAPES;
     }
+    DlClipShapeStack* dst = (DlClipShapeStack*)scratch_calloc(&dl->arena, sizeof(DlClipShapeStack));
+    if (!dst) return false;
     dst->depth = clip_depth;
     for (int i = 0; i < clip_depth; i++) {
         ClipShape* shape = clip_shapes[i];
         clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
         if (shape && shape->type == CLIP_SHAPE_POLYGON &&
             shape->polygon.count > 0 && shape->polygon.vx && shape->polygon.vy) {
-            int count = shape->polygon.count;
-            size_t sz = count * sizeof(float);
+            size_t sz = (size_t)shape->polygon.count * sizeof(float);
             float* vx = (float*)scratch_alloc(&dl->arena, sz);
             float* vy = (float*)scratch_alloc(&dl->arena, sz);
-            if (!vx || !vy) {
-                dst->type[i] = CLIP_SHAPE_NONE;
-                continue;
-            }
+            if (!vx || !vy) return false;
             memcpy(vx, shape->polygon.vx, sz);
             memcpy(vy, shape->polygon.vy, sz);
-            dst->type[i] = CLIP_SHAPE_POLYGON;
-            dst->polygon_count[i] = count;
+            dst->polygon_count[i] = shape->polygon.count;
             dst->polygon_vx[i] = lam::own_arr(vx);
             dst->polygon_vy[i] = lam::own_arr(vy);
-            continue;
         }
     }
+    // publish only complete stacks; an allocation failure must never discard a clip.
+    *out = lam::up(dst);
+    return true;
 }
-
 
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                            ClipShape** shape_ptrs, ScratchArena* scratch,
@@ -169,8 +175,15 @@ void DisplayList::init(Arena* backing_arena) {
     mem_scratch_init(NULL, &arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
+bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner) {
+    if (!list || !owner || !ref_count_retain(&owner->refs)) return false;
+    if (list->payload_owners.append(owner)) return true;
+    dl_payload_owner_release(owner);
+    return false;
+}
+
 void dl_item_free_owned_payload(DisplayItem* item) {
-    if (!item) return;
+    if (!item || item->payload_owner) return;
     if (item->op == DL_DRAW_IMAGE && item->draw_image.snapshot_lease) {
         image_surface_snapshot_release(item->draw_image.snapshot_lease);item->draw_image.snapshot_lease=nullptr;
     }
@@ -198,6 +211,8 @@ void DisplayList::clear() {
         dl_item_free_owned_payload(&dl->data()[i]);
     }
     lam::ArrayList<DisplayItem>::clear();
+    for (size_t i = 0; i < payload_owners.size(); i++) dl_payload_owner_release(payload_owners[i]);
+    payload_owners.clear();
     Arena* backing_arena = dl->arena.arena;
     scratch_release(&dl->arena);
     if (backing_arena) {
@@ -211,6 +226,7 @@ void DisplayList::clear() {
 void DisplayList::destroy() {
     clear();
     lam::ArrayList<DisplayItem>::release();
+    payload_owners.release();
     scratch_release(&arena);
 }
 
@@ -789,35 +805,16 @@ ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item) {
 }
 
 // shared cloning/replacement preserves payload ownership for retained lists and deferred effects.
-static void dl_copy_clip_shape_stack(DisplayList* dst,
-                                              DlClipShapeStack* out,
-                                              const DlClipShapeStack* in) {
-    if (!out) return;
-    memset(out, 0, sizeof(DlClipShapeStack));
-    if (!dst || !in || in->depth <= 0) return;
-
-    *out = *in;
-    for (int i = 0; i < out->depth && i < RDT_MAX_CLIP_SHAPES; i++) {
-        if (in->type[i] != CLIP_SHAPE_POLYGON ||
-            in->polygon_count[i] <= 0 ||
-            !in->polygon_vx[i] || !in->polygon_vy[i]) {
-            continue;
-        }
-        size_t sz = (size_t)in->polygon_count[i] * sizeof(float);
-        float* vx = (float*)scratch_alloc(&dst->arena, sz);
-        float* vy = (float*)scratch_alloc(&dst->arena, sz);
-        if (!vx || !vy) {
-            out->type[i] = CLIP_SHAPE_NONE;
-            out->polygon_count[i] = 0;
-            out->polygon_vx[i] = nullptr;
-            out->polygon_vy[i] = nullptr;
-            continue;
-        }
-        memcpy(vx, in->polygon_vx[i], sz);
-        memcpy(vy, in->polygon_vy[i], sz);
-        out->polygon_vx[i] = lam::own_arr(vx);
-        out->polygon_vy[i] = lam::own_arr(vy);
-    }
+static bool dl_copy_clip_shape_stack(DisplayList* dst,
+                                     lam::Up<const DlClipShapeStack>* out,
+                                     const DlClipShapeStack* in) {
+    if (!dst || !out) return false;
+    *out = nullptr;
+    if (!in || in->depth <= 0) return true;
+    ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+    ClipShape* pointers[RDT_MAX_CLIP_SHAPES];
+    int depth = dl_restore_clip_shapes(in, shapes, pointers);
+    return dl_store_clip_shapes(dst, out, pointers, depth);
 }
 
 static bool dl_clone_path(lam::Own<RdtPath>* out, RdtPath* in) {
@@ -881,13 +878,13 @@ static bool dl_clone_item_payload(DisplayList* dst,
             if (!dl_clone_path(&out->push_clip.path, in->push_clip.path)) return false;
             break;
         case DL_FILL_SURFACE_RECT:
-            dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
-                                              &in->fill_surface_rect.clip_shapes);
+            if (!dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
+                                          in->fill_surface_rect.clip_shapes)) return false;
             break;
         case DL_BLIT_SURFACE_SCALED:
             out->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(in->blit_surface_scaled.snapshot_lease));
-            dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
-                                              &in->blit_surface_scaled.clip_shapes);
+            if (!dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
+                                          in->blit_surface_scaled.clip_shapes)) return false;
             break;
         case DL_BEGIN_ELEMENT:
             if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
@@ -930,7 +927,9 @@ bool dl_copy_range(DisplayList* dst, const DisplayList* src,
             dl_truncate(dst, dest_start);
             return false;
         }
+        RENDER_METRIC_ADD(command_copy_bytes, sizeof(DisplayItem));
         DisplayItem copy = src->data()[i];
+        copy.payload_owner = nullptr; // deep copies acquire independent payload ownership.
         *out = copy;
         if (!dl_clone_item_payload(dst, out, &src->data()[i], start, dest_start)) {
             dl_truncate(dst, dest_start);

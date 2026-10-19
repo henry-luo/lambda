@@ -493,14 +493,14 @@ TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
     EXPECT_FLOAT_EQ(item->bounds[1], 3.0f);
     EXPECT_FLOAT_EQ(item->bounds[2], 7.0f);
     EXPECT_FLOAT_EQ(item->bounds[3], 7.0f);
-    EXPECT_EQ(item->fill_surface_rect.clip_shapes.depth, 1);
-    EXPECT_EQ(item->fill_surface_rect.clip_shapes.type[0], CLIP_SHAPE_POLYGON);
-    ASSERT_NE(item->fill_surface_rect.clip_shapes.polygon_vx[0], nullptr);
-    ASSERT_NE(item->fill_surface_rect.clip_shapes.polygon_vy[0], nullptr);
-    EXPECT_NE(item->fill_surface_rect.clip_shapes.polygon_vx[0], vx);
-    EXPECT_NE(item->fill_surface_rect.clip_shapes.polygon_vy[0], vy);
-    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes.polygon_vx[0][0], 1.0f);
-    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes.polygon_vy[0][0], 4.0f);
+    EXPECT_EQ(item->fill_surface_rect.clip_shapes->depth, 1);
+    EXPECT_EQ(item->fill_surface_rect.clip_shapes->type[0], CLIP_SHAPE_POLYGON);
+    ASSERT_NE(item->fill_surface_rect.clip_shapes->polygon_vx[0], nullptr);
+    ASSERT_NE(item->fill_surface_rect.clip_shapes->polygon_vy[0], nullptr);
+    EXPECT_NE(item->fill_surface_rect.clip_shapes->polygon_vx[0], vx);
+    EXPECT_NE(item->fill_surface_rect.clip_shapes->polygon_vy[0], vy);
+    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes->polygon_vx[0][0], 1.0f);
+    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes->polygon_vy[0][0], 4.0f);
 }
 
 TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {

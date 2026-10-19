@@ -1,3 +1,4 @@
+#include "render_metrics.hpp"
 // ==========================================================================
 // TilePool — Tile grid, worker pool, and tile-aware display list replay.
 //
@@ -194,6 +195,7 @@ static void* worker_thread_fn(void* arg) {
         // double-check in case of spurious wakeup race
         if (job_idx >= pool->job_count) continue;
 
+        RenderPipelineMetricsScope metrics_scope(pool->metrics);
         TileJob* job = &pool->jobs[job_idx];
         if (job->work) {
             // Pure pixel jobs touch disjoint rows and need no ThorVG lock.
@@ -306,6 +308,7 @@ void RenderPool::destroy() {
 
 void RenderPool::dispatch(TileJob* jobs, int count) {
     pthread_mutex_lock(&mutex);
+    metrics = render_pipeline_metrics;
     this->jobs = lam::up(jobs);
     job_count = count;
     next_job = 0;
@@ -317,6 +320,7 @@ void RenderPool::dispatch(TileJob* jobs, int count) {
         pthread_cond_wait(&all_done, &mutex);
     }
     this->jobs = nullptr;
+    metrics = nullptr;
     pthread_mutex_unlock(&mutex);
 }
 
@@ -399,7 +403,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             continue;
         }
 
-        DisplayReplayVectorResult vector_result = dl_replay_vector_item(vec, item, true);
+        DisplayReplayVectorResult vector_result = dl_replay_vector_item(vec, item);
         if (vector_result != DL_REPLAY_VECTOR_NOT_HANDLED) {
 #ifndef NDEBUG
             if (vector_result == DL_REPLAY_VECTOR_DREW) items_drawn++;

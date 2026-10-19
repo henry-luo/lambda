@@ -1,5 +1,6 @@
 #pragma once
 #include "../lib/arraylist.hpp"
+#include "../lib/ref_count.h"
 #include "../lib/mem_factory.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -300,7 +301,7 @@ void     rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
 void     rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry);
 void     rdt_path_free(RdtPath* p);
 
-// Deep-copy a path (entries array is duplicated).
+// snapshot a path: immutable entries are shared; subsequent builder writes detach.
 RdtPath* rdt_path_clone(const RdtPath* src);
 
 // Compute an axis-aligned geometry bound in path-local coordinates, excluding
@@ -624,6 +625,7 @@ enum {
     DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR = 1u << 2,
     DL_OP_FLAG_FLUSHES_VECTOR_BATCH = 1u << 3,
     DL_OP_FLAG_OWNED_PAYLOAD = 1u << 4,
+    DL_OP_FLAG_PREMULTIPLIED_VECTOR = 1u << 5,
 };
 
 typedef enum {
@@ -633,17 +635,17 @@ typedef enum {
 } DisplayOwnedPayloadKind;
 
 #define DISPLAY_OP_LIST(X) \
-    X(DL_FILL_RECT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_PATH, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
-    X(DL_STROKE_PATH, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
-    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
-    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
-    X(DL_DRAW_IMAGE, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_RECT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_PATH, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
+    X(DL_STROKE_PATH, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
+    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
+    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
+    X(DL_DRAW_IMAGE, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_DRAW_GLYPH, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_DRAW_PICTURE, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PICTURE, offsetof(DisplayItem, draw_picture.picture)) \
-    X(DL_PUSH_CLIP, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
-    X(DL_POP_CLIP, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_PUSH_CLIP, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
+    X(DL_POP_CLIP, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_FILL_SURFACE_RECT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_BLIT_SURFACE_SCALED, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_COMPOSITE_OPACITY, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
@@ -657,8 +659,8 @@ typedef enum {
     X(DL_SHADOW_CLIP_SAVE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_SHADOW_CLIP_RESTORE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_OUTER_SHADOW, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_END_ELEMENT, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0)
+    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0)
 
 typedef enum DisplayOp {
 #define DL_OP_ENUM(name, flags, owned_kind, owned_offset) name,
@@ -666,6 +668,7 @@ typedef enum DisplayOp {
 #undef DL_OP_ENUM
 } DisplayOp;
 enum { DL_OP_COUNT = DL_END_ELEMENT + 1 };
+enum { DL_INITIAL_CAPACITY = 2048, DL_VALIDATE_ELEMENT_STACK_LIMIT = 1024 };
 
 // ---------------------------------------------------------------------------
 // Per-op payload structures
@@ -683,7 +686,7 @@ typedef struct {
 } DlFillRoundedRect;
 
 typedef struct {
-    lam::Own<RdtPath> path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     Color color;
     RdtFillRule rule;
     bool has_transform;
@@ -691,7 +694,7 @@ typedef struct {
 } DlFillPath;
 
 typedef struct {
-    lam::Own<RdtPath> path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     Color color;
     float width;
     RdtStrokeCap cap;
@@ -705,7 +708,7 @@ typedef struct {
 } DlStrokePath;
 
 typedef struct {
-    lam::Own<RdtPath> path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     float x1, y1, x2, y2;
     lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
     int stop_count;
@@ -718,7 +721,7 @@ typedef struct {
 } DlFillLinearGradient;
 
 typedef struct {
-    lam::Own<RdtPath> path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     float cx, cy, r;
     lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
     int stop_count;
@@ -770,7 +773,7 @@ typedef struct {
 } DlDrawPicture;
 
 typedef struct {
-    lam::Own<RdtPath> path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     bool has_transform;
     RdtMatrix transform;
     RdtFillRule rule;
@@ -790,7 +793,7 @@ typedef struct {
     float x, y, w, h;
     uint32_t color;          // ABGR8888
     Bound clip;              // rectangular clip bounds at recording time
-    DlClipShapeStack clip_shapes;
+    lam::Up<const DlClipShapeStack> clip_shapes; // immutable list-arena payload; null is the empty stack
 } DlFillSurfaceRect;
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
@@ -803,7 +806,7 @@ typedef struct {
     int scale_mode;
     uint8_t opacity;
     Bound clip;              // rectangular clip bounds at recording time
-    DlClipShapeStack clip_shapes;
+    lam::Up<const DlClipShapeStack> clip_shapes; // immutable list-arena payload; null is the empty stack
 } DlBlitSurfaceScaled;
 
 // CSS opacity stacking context: composite element group over saved backdrop at opacity.
@@ -931,8 +934,17 @@ typedef struct {
 // DisplayItem — tagged union of all draw commands
 // ---------------------------------------------------------------------------
 
+struct DisplayPayloadOwner {
+    RefCount refs;
+    void (*destroy)(DisplayPayloadOwner*);
+};
+inline void dl_payload_owner_release(DisplayPayloadOwner* owner) {
+    if (owner && ref_count_release(&owner->refs) == REF_COUNT_LAST) owner->destroy(owner);
+}
+
 typedef struct DisplayItem {
     DisplayOp op;
+    lam::Up<DisplayPayloadOwner> payload_owner; // null for owned payloads; otherwise pinned by the list
     float bounds[4];  // x, y, w, h for tile culling
 
     union {
@@ -969,6 +981,7 @@ typedef struct DisplayItem {
 
 struct DisplayList : lam::ArrayList<DisplayItem> {
     ScratchArena arena;      // all variable-length data (paths, stops, dashes)
+    lam::ArrayList<DisplayPayloadOwner*> payload_owners{MEM_CAT_RENDER, 0};
     DisplayList() : ArrayList(MEM_CAT_RENDER, 0), arena{} {}
 #ifdef __cplusplus
     void init(Arena* backing_arena);
@@ -999,6 +1012,8 @@ typedef struct DisplayOpDescriptor {
 const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op);
 bool dl_op_has_flags(DisplayOp op, uint32_t flags);
 void dl_item_free_owned_payload(DisplayItem* item);
+bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner);
+bool dl_supports_premultiplied_vector_capture(const DisplayList* list);
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -1110,6 +1125,7 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    const RdtMatrix* transform = nullptr,
                    uint64_t resource_generation = 0);
 
+// takes one picture reference, released when the list is cleared; replay preserves it.
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
 
@@ -1369,16 +1385,9 @@ typedef enum {
 // Per-op payloads (vector primitives mirror the dl_* parameter shapes)
 // ---------------------------------------------------------------------------
 
-typedef struct {
-    float x, y, w, h;
-    Color color;
-} PaintFillRect;
+typedef DlFillRect PaintFillRect;
 
-typedef struct {
-    float x, y, w, h;
-    float rx, ry;
-    Color color;
-} PaintFillRoundedRect;
+typedef DlFillRoundedRect PaintFillRoundedRect;
 
 typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
@@ -1471,12 +1480,7 @@ typedef struct {
     uint64_t resource_generation;
 } PaintDrawGlyph;
 
-typedef struct {
-    lam::Counted<RdtPicture> picture;  // one reference, handed to the display list at lowering
-    uint8_t opacity;
-    bool has_transform;
-    RdtMatrix transform;
-} PaintDrawPicture;
+typedef DlDrawPicture PaintDrawPicture;
 
 typedef struct {
     struct RdtVideo* video;  // borrowed; checked by video_generation when retained (handle in M6)
@@ -1973,6 +1977,8 @@ typedef struct RetainedDisplayListFragment RetainedDisplayListFragment;
 typedef struct RetainedDisplayListStats {
     int capture_candidates;
     int captured;
+    size_t captured_commands; // own commands only; child chunks are referenced
+    size_t reused_captures;
     int skipped_non_retainable;
     int copy_failed;
     int reuse_hits;
@@ -2094,12 +2100,14 @@ typedef struct RasterRenderContext : RenderContext {
 struct RenderFrameScope {
     lam::Up<RasterRenderContext> rdcon;
     DisplayList display_list;
+    lam::Up<ViewTree> storage_owner;
+    lam::Up<DisplayList> active_list;
     bool context_active;
     bool display_list_active;
     RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
                      RenderProfiler* profiler);
     ~RenderFrameScope();
-    DisplayList* list() { return display_list_active ? &display_list : nullptr; }
+    DisplayList* list() { return display_list_active ? active_list.get() : nullptr; }
     RenderFrameScope(const RenderFrameScope&) = delete;
     RenderFrameScope& operator=(const RenderFrameScope&) = delete;
 };
@@ -2373,7 +2381,7 @@ RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, in
 float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
 bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
                             const RenderSemanticGroup* source);
-void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
+bool dl_store_clip_shapes(DisplayList* dl, lam::Up<const DlClipShapeStack>* dst,
                           ClipShape** clip_shapes, int clip_depth);
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                            ClipShape** shape_ptrs,
@@ -2480,9 +2488,8 @@ typedef enum DisplayReplayVectorResult {
 } DisplayReplayVectorResult;
 
 DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
-                                                DisplayItem* item,
-                                                bool duplicate_picture);
-bool dl_replay_vector_clip_item(RdtVector* vec, DisplayItem* item);
+                                                const DisplayItem* item);
+bool dl_replay_vector_clip_item(RdtVector* vec, const DisplayItem* item);
 
 // ===== display_list_replay_glyph.hpp =====
 void dl_replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* glyph);
@@ -2710,11 +2717,14 @@ typedef struct WorkerState {
     void destroy();
 } WorkerState;
 
+struct RenderPipelineMetrics;
+
 typedef struct RenderPool {
     lam::OwnArr<pthread_t> threads;
     int thread_count;
 
     // job queue (simple array — all jobs submitted before workers start)
+    RenderPipelineMetrics* metrics; // borrowed only during synchronous dispatch
     lam::Up<TileJob> jobs;
     int job_count;
 
@@ -3133,6 +3143,7 @@ static inline bool paint_record_ready(PaintRecordTarget* target) {
 }
 
 static inline void paint_record_lower_pending(PaintRecordTarget* target) {
+    if (target->paint_list->empty()) return;
     paint_ir_lower_raster_fragment(target->paint_list, target->display_list);
     paint_list_clear(target->paint_list);
 }
@@ -3143,36 +3154,31 @@ static inline void paint_record_missing(PaintRecordTarget* target, const char* o
               op ? op : "paint op");
 }
 
+static inline bool paint_record_begin_primitive(PaintRecordTarget* target, const char* op) {
+    if (!paint_record_ready(target)) { paint_record_missing(target, op); return false; }
+    // pending semantic/effect commands precede a direct primitive in painter order.
+    paint_record_lower_pending(target);
+    return true;
+}
+
 static inline void paint_record_fill_rect(PaintRecordTarget* target, const char* op,
                                           float x, float y, float w, float h, Color color) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_fill_rect(target->paint_list, x, y, w, h, color);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_fill_rect(target->display_list, x, y, w, h, color);
 }
 
 static inline void paint_record_fill_rounded_rect(PaintRecordTarget* target, const char* op,
                                                   float x, float y, float w, float h,
                                                   float rx, float ry, Color color) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_fill_rounded_rect(target->paint_list, x, y, w, h, rx, ry, color);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_fill_rounded_rect(target->display_list, x, y, w, h, rx, ry, color);
 }
 
 static inline void paint_record_fill_path(PaintRecordTarget* target, const char* op,
                                           RdtPath* path, Color color,
                                           RdtFillRule rule, const RdtMatrix* transform) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_fill_path(target->paint_list, path, color, rule, transform);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_fill_path(target->display_list, path, color, rule, transform);
 }
 
 static inline void paint_record_stroke_path(PaintRecordTarget* target, const char* op,
@@ -3181,13 +3187,9 @@ static inline void paint_record_stroke_path(PaintRecordTarget* target, const cha
                                             const float* dash_array, int dash_count,
                                             float dash_phase, const RdtMatrix* transform,
                                             float miter_limit = 4.0f) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_stroke_path(target->paint_list, path, color, width, cap, join,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_stroke_path(target->display_list, path, color, width, cap, join,
                       dash_array, dash_count, dash_phase, transform, miter_limit);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_fill_linear_gradient(PaintRecordTarget* target, const char* op,
@@ -3198,14 +3200,10 @@ static inline void paint_record_fill_linear_gradient(PaintRecordTarget* target, 
                                                      const RdtMatrix* transform,
                                                      const RdtMatrix* gradient_transform,
                                                      const RdtGradientOptions* options = nullptr) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_fill_linear_gradient(target->paint_list, path, x1, y1, x2, y2,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_fill_linear_gradient(target->display_list, path, x1, y1, x2, y2,
                                stops, stop_count, rule, transform,
                                gradient_transform, options);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_fill_radial_gradient(PaintRecordTarget* target, const char* op,
@@ -3215,14 +3213,10 @@ static inline void paint_record_fill_radial_gradient(PaintRecordTarget* target, 
                                                      const RdtMatrix* transform,
                                                      const RdtMatrix* gradient_transform,
                                                      const RdtGradientOptions* options = nullptr) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_fill_radial_gradient(target->paint_list, path, cx, cy, r,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_fill_radial_gradient(target->display_list, path, cx, cy, r,
                                stops, stop_count, rule, transform,
                                gradient_transform, options);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_draw_image(PaintRecordTarget* target, const char* op,
@@ -3231,14 +3225,11 @@ static inline void paint_record_draw_image(PaintRecordTarget* target, const char
                                            float dst_x, float dst_y, float dst_w, float dst_h,
                                            uint8_t opacity, const RdtMatrix* transform,
                                            ImageSurface* resource_owner, ScaleMode scale_mode = SCALE_MODE_LINEAR) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_draw_image(target->paint_list, pixels, src_w, src_h, src_stride,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_draw_image(target->display_list, pixels, src_w, src_h, src_stride,
                      dst_x, dst_y, dst_w, dst_h, opacity, transform,
-                     resource_owner, scale_mode);
-    paint_record_lower_pending(target);
+                     resource_owner, resource_owner ? resource_owner->generation : 0, false,
+                     resource_owner && resource_owner->alpha_mode == IMAGE_ALPHA_STRAIGHT, scale_mode);
 }
 
 static inline void paint_record_draw_glyph(PaintRecordTarget* target, const char* op,
@@ -3246,24 +3237,16 @@ static inline void paint_record_draw_glyph(PaintRecordTarget* target, const char
                                            Color color, bool is_color_emoji,
                                            const Bound* clip, const RdtMatrix* transform,
                                            uint64_t resource_generation) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_draw_glyph(target->paint_list, bitmap, x, y, color, is_color_emoji,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_draw_glyph(target->display_list, bitmap, x, y, color, is_color_emoji,
                      clip, transform, resource_generation);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_draw_picture(PaintRecordTarget* target, const char* op,
                                              RdtPicture* picture, uint8_t opacity,
                                              const RdtMatrix* transform) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_draw_picture(target->paint_list, picture, opacity, transform);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) { rdt_picture_free(picture); return; }
+    dl_draw_picture(target->display_list, picture, opacity, transform);
 }
 
 static inline void paint_record_video_placeholder(PaintRecordTarget* target, const char* op,
@@ -3272,13 +3255,9 @@ static inline void paint_record_video_placeholder(PaintRecordTarget* target, con
                                                   float dst_w, float dst_h,
                                                   int object_fit, const Bound* clip,
                                                   uint64_t video_generation) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_video_placeholder(target->paint_list, video, dst_x, dst_y, dst_w, dst_h,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_video_placeholder(target->display_list, video, dst_x, dst_y, dst_w, dst_h,
                             object_fit, clip, video_generation);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_webview_layer_placeholder(PaintRecordTarget* target,
@@ -3287,33 +3266,21 @@ static inline void paint_record_webview_layer_placeholder(PaintRecordTarget* tar
                                                          float dst_w, float dst_h,
                                                          const Bound* clip,
                                                          uint64_t surface_generation) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_webview_layer_placeholder(target->paint_list, surface, dst_x, dst_y,
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_webview_layer_placeholder(target->display_list, surface, dst_x, dst_y,
                                     dst_w, dst_h, clip, surface_generation);
-    paint_record_lower_pending(target);
 }
 
 static inline void paint_record_push_clip(PaintRecordTarget* target, const char* op,
                                           RdtPath* path, const RdtMatrix* transform,
                                           RdtFillRule rule = RDT_FILL_WINDING) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_push_clip(target->paint_list, path, transform, rule);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_push_clip(target->display_list, path, transform, rule);
 }
 
 static inline void paint_record_pop_clip(PaintRecordTarget* target, const char* op) {
-    if (!paint_record_ready(target)) {
-        paint_record_missing(target, op);
-        return;
-    }
-    paint_pop_clip(target->paint_list);
-    paint_record_lower_pending(target);
+    if (!paint_record_begin_primitive(target, op)) return;
+    dl_pop_clip(target->display_list);
 }
 
 static inline void paint_record_draw_image_resource(PaintRecordTarget* target, const char* op,

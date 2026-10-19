@@ -16,7 +16,7 @@
 #include <string.h>
 #include <limits.h>
 
-#define PAINT_LIST_INITIAL_CAPACITY 1024
+#define PAINT_LIST_INITIAL_CAPACITY 8 // primitive recording usually drains after one command
 
 // Stack recordings own path/image payloads as well as their command storage.
 PaintList::~PaintList() { paint_list_clear(this); }
