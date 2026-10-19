@@ -7,6 +7,11 @@
 
 static void path_storage_release(RdtPathStorage* storage);
 
+size_t rdt_path_storage_bytes(const RdtPath* path) {
+    return path ? sizeof(RdtPath) + (path->storage ? sizeof(RdtPathStorage) +
+        (size_t)path->capacity * sizeof(RdtPath::Entry) : 0) : 0;
+}
+
 static RdtPath::Entry* path_append_entry(RdtPath* path, RdtPath::Cmd command) {
     if (!path || path->count == INT_MAX) return nullptr;
     RdtPathStorage* old = path->storage;

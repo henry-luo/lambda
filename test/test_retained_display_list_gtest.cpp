@@ -1258,3 +1258,51 @@ TEST_F(RetainedDisplayListTest, FailedChunkAssemblyRollsBackCommandsAndOwnerLeas
     }
     retained_dl_cache_destroy(cache); dl_destroy(&source);
 }
+
+TEST_F(RetainedDisplayListTest, StorageBudgetEvictsOldRootsInUseOrderAndPinsActiveReaders) {
+    DisplayList source; dl_init(&source, arena);
+    for (uint32_t id : {3001u, 3002u}) {
+        int begin = dl_begin_element(&source, id, 0, 0, 20, 20);
+        ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr);
+        dl_end_element(&source, begin);
+    }
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    size_t initial = retained_dl_cache_stats(cache).charged_storage_bytes; ASSERT_GT(initial, 0u);
+    const RetainedDisplayListFragment* first = retained_dl_cache_get(cache, 3001); ASSERT_NE(first, nullptr);
+    DisplayList frame; dl_init(&frame, replay_arena);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, first));
+    retained_dl_cache_set_storage_budget(cache, initial / 2);
+    retained_dl_cache_begin_frame(cache);
+    EXPECT_EQ(retained_dl_cache_get(cache, 3002), nullptr);
+    EXPECT_NE(retained_dl_cache_get(cache, 3001), nullptr);
+    EXPECT_LE(retained_dl_cache_stats(cache).charged_storage_bytes, initial / 2);
+    retained_dl_cache_set_storage_budget(cache, 0);
+    retained_dl_cache_begin_frame(cache);
+    EXPECT_EQ(retained_dl_cache_get(cache, 3001), nullptr);
+    EXPECT_GT(retained_dl_cache_stats(cache).charged_storage_bytes, 0u);
+    EXPECT_TRUE(dl_validate(&frame, nullptr));
+    dl_clear(&frame);
+    EXPECT_EQ(retained_dl_cache_stats(cache).charged_storage_bytes, 0u);
+    retained_dl_cache_capture(cache, &source);
+    EXPECT_GT(retained_dl_cache_stats(cache).budget_rejections, 0);
+    EXPECT_EQ(retained_dl_cache_get(cache, 3001), nullptr);
+    retained_dl_cache_destroy(cache); dl_destroy(&frame); dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, StorageBudgetRetiresWholeNestedGraphWithoutAncestorPins) {
+    DisplayList source; dl_init(&source, arena);
+    int parent = dl_begin_element(&source, 3100, 0, 0, 20, 20);
+    int child = dl_begin_element(&source, 3101, 0, 0, 20, 20);
+    ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr);
+    dl_end_element(&source, child); dl_end_element(&source, parent);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    ASSERT_NE(retained_dl_cache_get(cache, 3100), nullptr);
+    retained_dl_cache_set_storage_budget(cache, 0); retained_dl_cache_begin_frame(cache);
+    EXPECT_EQ(retained_dl_cache_get(cache, 3100), nullptr);
+    EXPECT_EQ(retained_dl_cache_get(cache, 3101), nullptr);
+    EXPECT_EQ(retained_dl_cache_stats(cache).charged_storage_bytes, 0u);
+    EXPECT_EQ(retained_dl_cache_stats(cache).evictions, 2);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+}

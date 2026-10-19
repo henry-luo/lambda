@@ -172,6 +172,8 @@ void rdt_path_free(RdtPath* path) {
     (void)path;
 }
 
+size_t rdt_path_storage_bytes(const RdtPath*) { return 0; } // stub paths own no geometry buffers
+
 RdtPath* rdt_path_clone(const RdtPath* path) {
     (void)path;
     return NULL;

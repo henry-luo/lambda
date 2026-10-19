@@ -2,11 +2,17 @@
 
 **Date:** 2026-10-19
 
-**Status:** core optimization pass implemented, 2026-10-19. The storage/replay,
-geometry, retained-chunk, direct primitive sink and qualified vector-layer
-changes have focused, sanitizer and output qualification with the known baseline
-failures described in §7. The full M0–M7 acceptance envelope remains open; §7
-separates implemented behavior, evidence and remaining scope.
+**Status:** committed core pass plus a qualified continuation, 2026-10-19.
+The committed checkpoint and its qualification limits are in §7. The latest
+serial/recording reuse, shared paint buffers, shape lookup, native batching and
+storage-budget changes are described in §8, with their own qualification.
+The full original M0–M7 acceptance envelope remains open.
+
+**Artifact retention:** an external cleanup removed `./temp/` during continuation
+qualification. The earlier temporary receipts cited in §7 and the historical
+measurements in §8 were observed before that cleanup; their raw files no longer
+exist. The recorded summaries remain here. Regenerated qualification and benchmark
+receipts are identified separately below; the benchmark driver is now versioned.
 
 **Current design:** [Radiant Rendering Design](../radiant/Radiant_Design_Rendering.md).
 
@@ -476,7 +482,7 @@ switches belong to qualification and should not become permanent parallel paint
 algorithms. Do not reset a borrowed arena, drop generation checks or bypass
 effects to make a benchmark faster.
 
-## 7. Implementation checkpoint — 2026-10-19
+## 7. Committed core checkpoint — 2026-10-19 (`689eb13d0`)
 
 The implementation follows **D4.5.1v4 / D4.2.4 / D4.5.3v2**. No formal ruling
 has changed. Qualification receipts below distinguish implemented behavior
@@ -621,3 +627,192 @@ bytes and ends at 4,780,738 bytes, with a process peak of 5,179,742 bytes. The
 remaining live storage includes retained chunks, document caches and the reusable
 frame array; these are known Lambda-tracked bytes, not the total process or
 ThorVG footprint. This probe is not a baseline-versus-optimized memory comparison.
+
+## 8. Continuation delivery
+
+The user requested implementation of the remaining work after commit `689eb13d0`.
+This delivery continues **D4.5.3v2 / D4.5.1v4 / D4.2.4**; no formal ruling changes.
+
+This delivery covers native cost attribution, clip-segment submission,
+serial canvas reuse, unchanged full-frame recording reuse, and basic-shape cache
+lookup before contour construction. Required acceptance cases are pixel parity
+across nested clip changes and CPU barriers; default SVG layer warm-up; visible
+SVG paint mutation; opaque/transparent targets; and independent nested frames.
+Reuse must reject unknown/foreign dependencies and incomplete dirty recordings.
+
+Verification budget: focused native ownership/geometry/clip tests during edits;
+one interleaved release comparison against the frozen parent implementation;
+ownership ASan after stabilization, including the previously uncovered nested
+arena correction; then the Radiant baseline and affected SVG/PDF output gates.
+Keep earlier independent runtime/PDF failures visible. The same continuation
+also implements the shared primitive field declarations, shared gradient/dash
+buffers, a managed retained-storage budget, and the extended premultiplied capture
+subset described below. Placement-only composition remains a separate milestone.
+
+The initial release timing probe (`continuation-profile.stdout`) attributes the
+dense 2× serial vector fixture's work to about 356 ms of native drawing versus
+0.073 ms of path submission, with 63 clip-triggered draws. This identifies
+clip-triggered canvas submission as a measured target. Phase timers accumulate
+worker wall time and may overlap; their sum is not another frame duration.
+ThorVG internal allocation bytes remain untracked.
+
+### Implemented continuation behavior
+
+| Area | Change and boundary |
+|---|---|
+| M0 attribution | Separate lowering, native shape/path/clip/submit/draw/sync/remove/duplicate/canvas time, flush reasons, tile/native lock waits, basic-shape construction, shared-array leases and full-frame reuse. Worker times overlap; native internal bytes remain untracked. |
+| M2 serial state | ViewTree owns a reusable serial vector context. A frame rebinds its target and zeroes tile offsets; nested frames use separate contexts and arenas. Pressure/teardown releases ownership. |
+| M3 geometry | Resolve basic-shape geometry before a content lookup; construct the path only on a miss. Shared paint buffers use one immutable allocation per distinct value within a list and explicit list-index leases. Copies from owned or borrowed chunks retain buffers after all source owners retire; unrelated lists are not globally interned. |
+| M4 unchanged recording | Eligible complete frames retain their document prefix. Matching document/style/state/layout/font/image/SVG/video and target stamps plus current resource handles bypass traversal, descriptor assembly and capture. Pending reflow, selective recordings and producers without complete dependency stamps reject reuse. Default SVG layers warm before publication. Overlays always append/rollback their own commands, array references and arena allocations. Admission is conservatively limited to 8 MiB; unused arena chunks are reclaimed only with exclusive scope ownership and no live/earlier arena data. |
+| M4 reclamation | A 32 MiB per-cache managed command-storage ledger follows admitted chunks. Reclamation chooses old roots by last use and retires their old descendants together. Current-frame publications and active reader leases prevent premature reclamation; new admission can fail. Charges include command/span capacity, arenas, shared arrays and conservative per-reference paths; they exclude ThorVG/native-picture internals and separately owned image/font data. |
+| M5 schema | Common path-fill, stroke and gradient field declarations complement the existing rectangle/picture payload types. Raster shared-buffer and semantic owned-buffer annotations remain explicit. PaintIR and DisplayList keep their distinct semantic/device roles. |
+| M6 submission | Clip changes seal ordered native segments. A single segment uses its own scene; multiple segments share a submission wrapper. CPU access, target changes and batch completion synchronize. No native vector prototype survives a batch. Fewer submissions alone do not establish a speedup. |
+| M7 alpha | CPU surface fills, scaled image blits and monochrome coverage glyphs join the qualified premultiplied capture subset. Emoji, effects and native pictures keep black/white reconstruction. The SVG pass declares its destination alpha mode explicitly. |
+
+### Reproducible release comparison
+
+The versioned [benchmark driver](../../utils/benchmark_radiant_rendering.py)
+generates bounded vector, deep, mixed and cache-pressure fixtures, pins
+Liberation Sans, alternates variant order and checks every PNG and event result.
+The final frozen release is SHA-256
+`f285b823a4bb2d9b9e1e5776c2607a95a3998a4f263fb94e1c3a832e7bab6a42`.
+The clean committed control is `7b857b860`, SHA-256
+`ffa8ede1b836a65a71145832eb4fa92f58dc3032257947a12db24c858bf871ce`.
+Both include the concurrently committed PDF/font changes. The earlier,
+deleted-receipt comparisons used different fixtures/controls and are superseded
+by this protocol.
+
+Environment: macOS 26.3 arm64, 800×600 viewport, densities 1 and 2, one renderer
+thread, default SVG-layer policy, five alternating-order fresh-process pairs.
+Warm sessions use the same binary with `RADIANT_RECORDING_CACHE=off`/enabled:
+one live tree and twelve forced PNG render events after initial presentation.
+Logging is disabled for wall samples; metrics use separate processes. Times
+include startup and PNG encoding. OS caches and scheduling are uncontrolled.
+No builds or other test sweeps ran during collection.
+
+| Workload | Density | Cold control → final (ms) | Warm cache off → on (ms) |
+|---|---|---|---|
+| vector | 1× | 98.31 → 100.16 | 365.52 → 340.65 |
+| vector | 2× | 139.88 → 156.20 | 897.02 → 921.89 |
+| deep | 1× | 83.75 → 85.81 | 224.38 → 220.45 |
+| deep | 2× | 105.64 → 105.39 | 684.00 → 643.84 |
+| mixed | 1× | 106.64 → 105.14 | 444.90 → 379.58 |
+| mixed | 2× | 171.45 → 171.85 | 1088.95 → 1058.23 |
+| pressure-128 | 1× | 55.59 → 54.18 | 204.44 → 207.98 |
+| pressure-128 | 2× | 78.82 → 78.13 | 679.75 → 642.32 |
+| pressure-512 | 1× | 127.96 → 126.54 | 387.15 → 393.50 |
+| pressure-512 | 2× | 178.59 → 176.95 | 974.75 → 999.99 |
+
+All ten cold and ten warm scenarios produce byte-identical PNGs. Medians remain
+mixed; these results do not establish a general latency improvement. Individual
+cold vector 2× samples overlap: control 133.50–156.15 ms, final 131.78–157.06 ms.
+The median difference must not be presented as a stable isolated backend cost.
+
+After discarding the first two profiled frames, all eleven remaining frames in
+each warm scenario reuse the recording, copy zero command bytes and create no
+serial canvas. Off-mode frames copy 3,584–202,496 descriptor bytes. The cold
+vector 2× profile copies 576 paint-array bytes versus 18,432 in the control;
+native batches remain 793 versus 794 because analytic-gradient CPU barriers
+still require synchronization. These counters prove eliminated work, separately
+from the noisy end-to-end timing.
+
+Across the ten scenarios, profiled per-scenario median record/lower time falls
+from 0.016–0.219 ms to 0.002–0.003 ms; capture falls from 0.005–0.051 ms to
+0.001–0.002 ms. These are logging-enabled stage measurements, not wall samples.
+
+The regenerated pre-trim three-pair peak-RSS probe reports vector 2× medians
+52,822,016 → 52,871,168 bytes and pressure-512 2× 46,186,496 → 46,055,424 bytes
+(`continuation-peak-rss.json`). This is total process peak, not native-only
+allocation or steady retained memory; it establishes no broad memory reduction.
+
+Receipts are below `temp/rendering-optimization/`: `final-binaries.json`,
+`final-benchmark-cold/results.json`, `final-benchmark-warm/results.json` and their
+logs. To repeat after building/freezing the release binaries:
+
+```sh
+python3 utils/benchmark_radiant_rendering.py --mode warm --profile \
+  --executable temp/rendering-optimization/lambda-final-qualified.exe \
+  --out temp/rendering-optimization/final-benchmark-warm
+python3 utils/benchmark_radiant_rendering.py --mode cold --profile \
+  --executable temp/rendering-optimization/lambda-final-qualified.exe \
+  --control temp/rendering-control/lambda.exe \
+  --out temp/rendering-optimization/final-benchmark-cold
+```
+
+### Recording admission correction
+
+The regenerated warm probe exposed a real 2× admission miss: a prior capture
+left 8,047,632 reserved arena bytes with zero live arena bytes, pushing a small
+recording to 8,509,584 bytes against the 8 MiB admission limit. The correction
+retires overlay marks, then trims unused chunks only when there is exactly one
+arena scope, no earlier arena allocations and no live scratch data or nested
+scope. The same recording then reserves 4,096 arena bytes and charges 462,848
+bytes on reuse. The admission limit is unchanged (**D4.2.4 / D4.5.1v4**).
+`trim-admission/results.json` first reproduced successful admission; the full
+final warm matrix above confirms it across all ten scenarios.
+
+### Continuation correctness qualification
+
+The final release focused suites pass 179 vector, 90 display-list, 34 retained
+and 25 state-store cases (`trim-*-release.log`). All four full suites also pass
+under `debug_asan_native`, `ASAN_OPTIONS=detect_leaks=0` (`trim-*-asan.log`).
+Coverage includes nested frames, live/earlier arena-data protection, repeated
+recording reuse, buffer/checkpoint retirement, CPU/clip painter order and pinned
+budget-ledger teardown. Leak detection was disabled; vendor libraries are not
+claimed as instrumented. Changed ASan shared archives were retired before the
+release rebuild (`trim-retired-asan-products.json`, `final-release-build.log`).
+
+An older clip assertion read pixels before batch synchronization. Its pixel
+assertions now run after synchronization; the dedicated segment test checks
+deferred submission and CPU ordering independently. No tolerance was relaxed.
+Integer-cast lint, local documentation links and scoped diff checks pass.
+
+The final unchanged `make run-radiant-baseline` invocation on this release
+completed in 405,387 ms: 5,913 passed, one failed, 157 partial and one skipped
+of 6,072 reported cases. All 644 UI, 208 view, 500 paged-media, 160 DOM, 32 input,
+20 map and the focused native cases pass. Layout retains 3,141 fully passing
+and 153 partial cases with zero failures. Render visual completes normally:
+207 passing comparisons, four expected differences and one skip; all 211
+baseline entries pass. The earlier Node 24 shutdown deadlock did not recur.
+Receipts: `final-radiant-baseline.log`, `final-radiant-summary.json` and the
+copied `final-*_results.json` files.
+
+The sole aggregate failure is the same Bootstrap kitchen-sink page's 15-second
+parallel-load timeout observed earlier. Three isolated runs per configuration
+all pass with the original deadline: final 3.45–3.52 s; clean committed control
+3.41–8.20 s, from its own checkout. See `final-bootstrap-reruns.json` and its
+per-run output. This does not turn the failed aggregate into a passing gate.
+The final SVG paint gate passes all twelve off/eager 1×/2× scenarios and their
+680 assertions (`final-svg-paint/report.json`, `final-svg-paint.log`). The
+portable PNG/SVG/PDF export matrix passes 178/180 format scenarios. Its only
+failures are `css_containment_boxes` PDF at 1× and 2×. A fresh control run from
+its own checkout produces identical nested assertion results and byte-identical
+PNG rasterizations for all six containment outputs, including the two failures
+(`final-svg-export-report.json`, `final-containment-control-parity.json`).
+
+The complete current PDF inventory also ran on the final binary: 439/440 pass
+in 99,478 ms. All 307 output-parity, 34 source-PDF roundtrip, 53 formatting,
+25 gradient and four canvas cases pass. The sole failure is
+`PdfImportVisual.CompareLambdaPagesAgainstPopplerReference/04_Ghent_PDF_OutputSuite50_ReadMes`.
+Its four full page PNGs are byte-identical to the clean committed control's
+files, confirming the existing import-baseline discrepancy is independent of
+this continuation (`final-pdf-control-parity.json`). No baseline was changed.
+Receipts: `final-pdf-output.log`, `final-pdf-results.json`,
+`final-pdf-summary.json`. This supersedes the earlier filtered 406-case pass.
+The harness used `node --no-concurrent-sparkplug test/test_run.js
+--include-test=test_pdf_render_visual_gtest`, four case workers, and the frozen
+host via `RADIANT_TEST_EXECUTABLE`; the Node flag avoids the previously observed
+external shutdown issue without changing native tests or expectations.
+
+### Remaining original envelope
+
+Partial/dirty frames still assemble flat descriptors from immutable chunks.
+A lightweight reference index, placement-only reflow, fine inherited/reference
+dependency summaries and producer-specific invalidation remain open. The new
+whole-frame key is deliberately conservative. Semantic/raster validation and
+all cross-target ownership metadata are not yet one universal schema. Native
+internal peak allocation profiling and a reliable broad latency improvement
+remain open. Universal one-pass capture is not claimed; unsupported writers
+retain the existing reconstruction path. The final qualification limits are
+the parallel page-load timeout and the control-identical PDF import/containment
+failures above; the final UI automation and view inventories pass in full.

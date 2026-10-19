@@ -32,6 +32,8 @@
 struct RdtVectorImpl {
     Tvg_Canvas canvas;
     Tvg_Paint batch_scene;
+    Tvg_Paint batch_root;
+    bool batch_root_group;
     uint32_t* pixels;
     int width;
     int height;
@@ -162,8 +164,14 @@ static void vector_cache_destroy(void* allocator) {
 static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static Tvg_Paint rdt_tvg_shape_new() {
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_shape_ns);
     RENDER_METRIC_ADD(native_shapes, 1);
     return tvg_shape_new();
+}
+
+static void tvg_lock(pthread_mutex_t* mutex) {
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_lock_wait_ns);
+    pthread_mutex_lock(mutex);
 }
 
 // ============================================================================
@@ -180,7 +188,8 @@ static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mi
 static Tvg_Paint tvg_duplicate_paint_locked(Tvg_Paint paint) {
     if (!paint) return nullptr;
     RENDER_METRIC_ADD(native_duplicates, 1);
-    pthread_mutex_lock(&g_tvg_dup_mutex);
+    tvg_lock(&g_tvg_dup_mutex);
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_duplicate_ns);
     Tvg_Paint dup = tvg_paint_duplicate(paint);
     pthread_mutex_unlock(&g_tvg_dup_mutex);
     return dup;
@@ -387,7 +396,7 @@ static bool picture_cache_free_scan(const void* item, void* udata) {
 }
 
 static void picture_cache_clear_all() {
-    pthread_mutex_lock(&g_picture_cache_mutex);
+    tvg_lock(&g_picture_cache_mutex);
     HashMap* path_cache = g_picture_path_cache;
     HashMap* data_cache = g_picture_data_cache;
     g_picture_path_cache = nullptr;
@@ -458,7 +467,7 @@ static bool image_paint_cache_ensure_locked() {
 
 static Tvg_Paint image_paint_cache_store(const uint32_t* pixels, int src_w, int src_h,
                                          int src_stride, uint64_t generation, bool straight_alpha, uint64_t identity, Tvg_Paint paint) {
-    pthread_mutex_lock(&g_image_paint_cache_mutex);
+    tvg_lock(&g_image_paint_cache_mutex);
     Tvg_Paint existing = image_paint_cache_dup_locked(pixels, src_w, src_h, src_stride, generation, straight_alpha, identity);
     if (existing) {
         tvg_paint_unref(paint, true);
@@ -510,7 +519,7 @@ static bool image_paint_cache_free_scan(const void* item, void* udata) {
 }
 
 static void image_paint_cache_clear_all() {
-    pthread_mutex_lock(&g_image_paint_cache_mutex);
+    tvg_lock(&g_image_paint_cache_mutex);
     HashMap* cache = g_image_paint_cache;
     g_image_paint_cache = nullptr;
     g_image_paint_cache_count = 0;
@@ -553,6 +562,7 @@ static bool path_replay_bulk(const RdtPath* path, Tvg_Paint shape) {
     lam::Temp<Tvg_Path_Command> commands = lam::temp_array<Tvg_Path_Command>((size_t)path->count, MEM_CAT_RENDER);
     lam::Temp<Tvg_Point> points = lam::temp_array<Tvg_Point>(point_count, MEM_CAT_RENDER);
     if (!commands || !points) return false;
+    RENDER_METRIC_ADD(native_path_temp_bytes, (size_t)path->count * sizeof(Tvg_Path_Command) + point_count * sizeof(Tvg_Point));
     size_t next = 0;
     for (int i = 0; i < path->count; i++) {
         const RdtPath::Entry& entry = path->entries[i];
@@ -571,6 +581,7 @@ static bool path_replay_bulk(const RdtPath* path, Tvg_Paint shape) {
 
 // Replay a path's commands onto a ThorVG shape
 static void path_replay(RdtPath* p, Tvg_Paint shape) {
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_path_ns);
     if (path_replay_bulk(p, shape)) return;
     for (int i = 0; i < p->count; i++) {
         RdtPath::Entry* e = &p->entries[i];
@@ -689,32 +700,60 @@ static void path_replay_projective(RdtVectorImpl* impl, RdtPath* p, Tvg_Paint sh
 // Central draw-and-remove: resets target, pushes, draws, syncs, removes.
 // This encapsulates the ThorVG immediate-mode workaround.
 static void tvg_draw_paint_now(RdtVectorImpl* impl, Tvg_Paint shape) {
-    // reset target to prevent ThorVG from clearing previously-drawn content
-    tvg_swcanvas_set_target(impl->canvas, impl->pixels, impl->stride,
-                            impl->width, impl->height, TVG_COLORSPACE_ABGR8888);
-    // for tiled rendering: wrap the shape in a scene translated by (-tile_offset_x, -tile_offset_y)
-    // so page-absolute coordinates map to tile-relative coordinates
-    if (impl->tile_offset_x != 0.0f || impl->tile_offset_y != 0.0f) {
-        Tvg_Paint scene = tvg_scene_new();
-        tvg_scene_push(scene, shape);
-        tvg_paint_translate(scene, -impl->tile_offset_x, -impl->tile_offset_y);
-        shape = scene;
+    {
+        RenderMetricTimer timer(&RenderPipelineMetrics::native_submit_ns);
+        // reset target to prevent ThorVG from clearing previously-drawn content
+        tvg_swcanvas_set_target(impl->canvas, impl->pixels, impl->stride,
+                                impl->width, impl->height, TVG_COLORSPACE_ABGR8888);
+        // for tiled rendering: wrap the shape in a scene translated by (-tile_offset_x, -tile_offset_y)
+        // so page-absolute coordinates map to tile-relative coordinates
+        if (impl->tile_offset_x != 0.0f || impl->tile_offset_y != 0.0f) {
+            Tvg_Paint scene = tvg_scene_new();
+            tvg_scene_push(scene, shape);
+            tvg_paint_translate(scene, -impl->tile_offset_x, -impl->tile_offset_y);
+            shape = scene;
+        }
+        tvg_canvas_push(impl->canvas, shape);
     }
-    tvg_canvas_push(impl->canvas, shape);
-    tvg_canvas_draw(impl->canvas, false);
-    tvg_canvas_sync(impl->canvas);
-    tvg_canvas_remove(impl->canvas, NULL);
+    { RenderMetricTimer timer(&RenderPipelineMetrics::native_draw_ns); tvg_canvas_draw(impl->canvas, false); }
+    { RenderMetricTimer timer(&RenderPipelineMetrics::native_sync_ns); tvg_canvas_sync(impl->canvas); }
+    { RenderMetricTimer timer(&RenderPipelineMetrics::native_remove_ns); tvg_canvas_remove(impl->canvas, NULL); }
 }
 
 static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape);
 
-static void tvg_flush_batch_scene(RdtVectorImpl* impl) {
-    if (impl && impl->batch_scene) RENDER_METRIC_ADD(batch_flushes, 1);
+static void tvg_finish_clip_segment(RdtVectorImpl* impl) {
     if (!impl || !impl->batch_scene) return;
     Tvg_Paint scene = impl->batch_scene;
     impl->batch_scene = nullptr;
-    // Clip the whole stable scene once; path-by-path masks multiply SVG work.
+    // seal the current clip into its group before changing the execution stack.
     apply_clip_masks(impl, scene);
+    if (!impl->batch_root) impl->batch_root = scene;
+    else {
+        if (!impl->batch_root_group) {
+            Tvg_Paint group = tvg_scene_new();
+            if (!group) {
+                tvg_draw_paint_now(impl, impl->batch_root);
+                impl->batch_root = scene;
+                return;
+            }
+            tvg_scene_push(group, impl->batch_root);
+            impl->batch_root = group; impl->batch_root_group = true;
+        }
+        tvg_scene_push(impl->batch_root, scene);
+    }
+    RENDER_METRIC_ADD(clip_segments, 1);
+}
+
+static void tvg_flush_batch_scene(RdtVectorImpl* impl,
+    uint64_t RenderPipelineMetrics::*reason = &RenderPipelineMetrics::flush_boundary) {
+    tvg_finish_clip_segment(impl);
+    if (!impl || !impl->batch_root) return;
+    RENDER_METRIC_ADD(batch_flushes, 1);
+    if (render_pipeline_metrics) __atomic_fetch_add(&(render_pipeline_metrics->*reason), (uint64_t)1, __ATOMIC_RELAXED);
+    Tvg_Paint scene = impl->batch_root;
+    impl->batch_root = nullptr;
+    impl->batch_root_group = false;
     tvg_draw_paint_now(impl, scene);
 }
 
@@ -787,6 +826,8 @@ static const RdtVectorCaps g_tvg_caps = {
 };
 
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_canvas_ns);
+    RENDER_METRIC_ADD(native_canvases, 1);
     RdtVectorImpl* impl = (RdtVectorImpl*)mem_calloc(1, sizeof(RdtVectorImpl), MEM_CAT_RENDER); // OBJ_HEAP_OK: owned by RdtVector::impl; rdt_vector_destroy releases it
     impl->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
     impl->pixels = pixels;
@@ -807,7 +848,7 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
 void rdt_vector_destroy(RdtVector* vec) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
-    tvg_flush_batch_scene(impl);
+    tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_destroy);
     if (impl->canvas) tvg_canvas_destroy(impl->canvas);
     if (impl->projection_arena) {
         scratch_release(&impl->projection_scratch);
@@ -819,7 +860,7 @@ void rdt_vector_destroy(RdtVector* vec) {
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
-    tvg_flush_batch_scene(impl);
+    tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_target);
     impl->pixels = pixels;
     impl->width = w;
     impl->height = h;
@@ -872,7 +913,7 @@ void rdt_vector_end_batch(RdtVector* vec) {
     }
     impl->batch_depth--;
     if (impl->batch_depth == 0) {
-        tvg_flush_batch_scene(impl);
+        tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_end);
     }
 }
 
@@ -1234,7 +1275,7 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
         return;
     }
 
-    tvg_flush_batch_scene(vec->impl);
+    tvg_finish_clip_segment(vec->impl);
 
     // clip state pins immutable geometry instead of copying its entries.
     RdtPath* copy = rdt_path_clone(clip_path);
@@ -1253,7 +1294,7 @@ void rdt_pop_clip(RdtVector* vec) {
         log_error("rdt_pop_clip: clip stack underflow");
         return;
     }
-    tvg_flush_batch_scene(vec->impl);
+    tvg_finish_clip_segment(vec->impl);
     s_clip_depth--;
     ClipEntry* entry = &s_clip_stack[s_clip_base + s_clip_depth];
     rdt_path_free(entry->path);
@@ -1285,6 +1326,7 @@ void rdt_clip_restore_depth(int saved_depth) {
 // for every image batch; nested clippers preserve the clip stack's intersection.
 static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape) {
     if (s_clip_depth <= 0) return;
+    RenderMetricTimer timer(&RenderPipelineMetrics::native_clip_ns);
     impl->clip_mask_count++;
 
     // Build a single composed mask from all clip entries.
@@ -1398,7 +1440,7 @@ static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float
     if (!vector_raster_clip_rect(impl, x, y, w, h, &bounds)) return false;
     if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) return true;
     // an integral rectangle intersection needs no coverage rasterization; flush before exact source-over on the borrowed target.
-    tvg_flush_batch_scene(impl);
+    tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_cpu);
     Rect rect = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
     ImageSurface target = {};
     target.pixels = impl->pixels; target.width = impl->width; target.height = impl->height;
@@ -1446,7 +1488,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         Bound clip;
         if (vector_raster_clip_rect(impl, rect.x, rect.y, rect.width, rect.height, &clip)) {
             // projected samples already own pixel coverage; use the common rounded source-over compositor.
-            tvg_flush_batch_scene(impl);
+            tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_cpu);
             ImageSurface source = {}, target = {};
             source.pixels = projected;
             source.width = (int)rect.width; // INT_CAST_OK: projected buffer pixel columns.
@@ -1480,7 +1522,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     if (src_w <= 0 || src_h <= 0 || src_stride < src_w) return;
 
     if (resource_generation != 0) {
-        pthread_mutex_lock(&g_image_paint_cache_mutex);
+        tvg_lock(&g_image_paint_cache_mutex);
         Tvg_Paint cached = image_paint_cache_dup_locked(pixels, src_w, src_h, src_stride,
                                                         resource_generation, straight_alpha, resource_identity);
         pthread_mutex_unlock(&g_image_paint_cache_mutex);
@@ -1609,7 +1651,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
 RdtPicture* rdt_picture_load(const char* path) {
     if (!path) return nullptr;
 
-    pthread_mutex_lock(&g_picture_cache_mutex);
+    tvg_lock(&g_picture_cache_mutex);
     RdtPicture* cached = picture_cache_dup_path_locked(path);
     pthread_mutex_unlock(&g_picture_cache_mutex);
     if (cached) {
@@ -1639,7 +1681,7 @@ RdtPicture* rdt_picture_load(const char* path) {
         return nullptr;
     }
 
-    pthread_mutex_lock(&g_picture_cache_mutex);
+    tvg_lock(&g_picture_cache_mutex);
     cached = picture_cache_dup_path_locked(path);
     if (cached) {
         pthread_mutex_unlock(&g_picture_cache_mutex);
@@ -1658,7 +1700,7 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     // mime_type is accepted for API compatibility; non-svg types fall through
     // to the SVG parser which will fail gracefully.
     uint64_t hash = rdt_picture_data_hash(data, size, mime_type);
-    pthread_mutex_lock(&g_picture_cache_mutex);
+    tvg_lock(&g_picture_cache_mutex);
     RdtPicture* cached = picture_cache_dup_data_locked(data, size, mime_type, hash);
     pthread_mutex_unlock(&g_picture_cache_mutex);
     if (cached) {
@@ -1670,7 +1712,7 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     RdtPicture* p = svg_picture_create(data, size, nullptr);
     if (!p) return nullptr;
 
-    pthread_mutex_lock(&g_picture_cache_mutex);
+    tvg_lock(&g_picture_cache_mutex);
     cached = picture_cache_dup_data_locked(data, size, mime_type, hash);
     if (cached) {
         pthread_mutex_unlock(&g_picture_cache_mutex);

@@ -1169,6 +1169,7 @@ void ViewTree::init(MemContext* owner) {
     // tree before it releases the document's Input context.
     mem_ctx = lam::up(owner);
     render_list = nullptr;
+    render_frame_cache = nullptr;
     render_list_in_use = false;
     content_visibility_state = nullptr;
     content_visibility_activation_margin = 1.0f;
@@ -1231,6 +1232,7 @@ void ViewTree::destroy() {
         root = NULL;
     }
     view_tree_canonical_destroy(this);
+    render_frame_cache_destroy(render_frame_cache); render_frame_cache = nullptr;
     if (render_list) {
         dl_destroy(render_list);
         render_list->~DisplayList();

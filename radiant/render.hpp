@@ -303,6 +303,7 @@ void     rdt_path_free(RdtPath* p);
 
 // snapshot a path: immutable entries are shared; subsequent builder writes detach.
 RdtPath* rdt_path_clone(const RdtPath* src);
+size_t rdt_path_storage_bytes(const RdtPath* path);
 
 // Compute an axis-aligned geometry bound in path-local coordinates, excluding
 // Bezier control points that are outside the curve.
@@ -625,7 +626,7 @@ enum {
     DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR = 1u << 2,
     DL_OP_FLAG_FLUSHES_VECTOR_BATCH = 1u << 3,
     DL_OP_FLAG_OWNED_PAYLOAD = 1u << 4,
-    DL_OP_FLAG_PREMULTIPLIED_VECTOR = 1u << 5,
+    DL_OP_FLAG_PREMULTIPLIED_CAPTURE = 1u << 5,
 };
 
 typedef enum {
@@ -635,19 +636,19 @@ typedef enum {
 } DisplayOwnedPayloadKind;
 
 #define DISPLAY_OP_LIST(X) \
-    X(DL_FILL_RECT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_PATH, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
-    X(DL_STROKE_PATH, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
-    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
-    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
-    X(DL_DRAW_IMAGE, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_DRAW_GLYPH, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_PATH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
+    X(DL_STROKE_PATH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
+    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
+    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
+    X(DL_DRAW_IMAGE, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_DRAW_GLYPH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_DRAW_PICTURE, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PICTURE, offsetof(DisplayItem, draw_picture.picture)) \
-    X(DL_PUSH_CLIP, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
-    X(DL_POP_CLIP, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_SURFACE_RECT, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_BLIT_SURFACE_SCALED, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_PUSH_CLIP, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
+    X(DL_POP_CLIP, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_SURFACE_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_BLIT_SURFACE_SCALED, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_COMPOSITE_OPACITY, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_SAVE_BACKDROP, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_APPLY_BLEND_MODE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
@@ -659,8 +660,8 @@ typedef enum {
     X(DL_SHADOW_CLIP_SAVE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_SHADOW_CLIP_RESTORE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_OUTER_SHADOW, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_VECTOR | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0)
+    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0)
 
 typedef enum DisplayOp {
 #define DL_OP_ENUM(name, flags, owned_kind, owned_offset) name,
@@ -673,6 +674,34 @@ enum { DL_INITIAL_CAPACITY = 2048, DL_VALIDATE_ELEMENT_STACK_LIMIT = 1024 };
 // ---------------------------------------------------------------------------
 // Per-op payload structures
 // ---------------------------------------------------------------------------
+
+// shared vector facts are declared once; semantic and raster commands keep explicit storage owners.
+#define RDT_VECTOR_FILL_FIELDS \
+    Color color; \
+    RdtFillRule rule; \
+    bool has_transform; \
+    RdtMatrix transform;
+
+#define RDT_VECTOR_STROKE_FIELDS(Dashes) \
+    Color color; \
+    float width; \
+    RdtStrokeCap cap; \
+    RdtStrokeJoin join; \
+    float miter_limit; \
+    Dashes \
+    int dash_count; \
+    float dash_phase; \
+    bool has_transform; \
+    RdtMatrix transform;
+
+#define RDT_VECTOR_GRADIENT_FIELDS \
+    int stop_count; \
+    RdtFillRule rule; \
+    bool has_transform; \
+    RdtMatrix transform; \
+    bool has_gradient_transform; \
+    RdtMatrix gradient_transform; \
+    RdtGradientOptions options;
 
 typedef struct {
     float x, y, w, h;
@@ -687,50 +716,26 @@ typedef struct {
 
 typedef struct {
     lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
-    Color color;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
+    RDT_VECTOR_FILL_FIELDS
 } DlFillPath;
 
 typedef struct {
     lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
-    Color color;
-    float width;
-    RdtStrokeCap cap;
-    RdtStrokeJoin join;
-    float miter_limit;
-    lam::OwnArr<float> dash_array;   // arena-allocated copy, NULL if no dashes
-    int dash_count;
-    float dash_phase;
-    bool has_transform;
-    RdtMatrix transform;
+    RDT_VECTOR_STROKE_FIELDS(lam::Shared<const float> dash_array;)
 } DlStrokePath;
 
 typedef struct {
     lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     float x1, y1, x2, y2;
-    lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
-    int stop_count;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
-    bool has_gradient_transform;
-    RdtMatrix gradient_transform;
-    RdtGradientOptions options;
+    lam::Shared<const RdtGradientStop> stops; // immutable buffer pinned by the list's resource index
+    RDT_VECTOR_GRADIENT_FIELDS
 } DlFillLinearGradient;
 
 typedef struct {
     lam::Own<RdtPath> path;       // owned snapshot handle; immutable geometry is shared
     float cx, cy, r;
-    lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
-    int stop_count;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
-    bool has_gradient_transform;
-    RdtMatrix gradient_transform;
-    RdtGradientOptions options;
+    lam::Shared<const RdtGradientStop> stops; // immutable buffer pinned by the list's resource index
+    RDT_VECTOR_GRADIENT_FIELDS
 } DlFillRadialGradient;
 
 typedef struct {
@@ -937,6 +942,7 @@ typedef struct {
 struct DisplayPayloadOwner {
     RefCount refs;
     void (*destroy)(DisplayPayloadOwner*);
+    lam::Up<const struct DisplayList> commands; // shared resource index of an immutable producer
 };
 inline void dl_payload_owner_release(DisplayPayloadOwner* owner) {
     if (owner && ref_count_release(&owner->refs) == REF_COUNT_LAST) owner->destroy(owner);
@@ -980,8 +986,9 @@ typedef struct DisplayItem {
 // ---------------------------------------------------------------------------
 
 struct DisplayList : lam::ArrayList<DisplayItem> {
-    ScratchArena arena;      // all variable-length data (paths, stops, dashes)
+    ScratchArena arena;      // private clip stacks, metadata and copied pixels
     lam::ArrayList<DisplayPayloadOwner*> payload_owners{MEM_CAT_RENDER, 0};
+    lam::Own<struct DlSharedArrayCache> shared_arrays{};
     DisplayList() : ArrayList(MEM_CAT_RENDER, 0), arena{} {}
 #ifdef __cplusplus
     void init(Arena* backing_arena);
@@ -1013,14 +1020,16 @@ const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op);
 bool dl_op_has_flags(DisplayOp op, uint32_t flags);
 void dl_item_free_owned_payload(DisplayItem* item);
 bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner);
-bool dl_supports_premultiplied_vector_capture(const DisplayList* list);
+bool dl_supports_premultiplied_capture(const DisplayList* list);
+// caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.
+bool dl_trim_empty_arena(DisplayList* list);
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-// Initialise a display list.  backing_arena is used for variable-length data
-// (path copies, gradient stops, dash arrays).
+// Initialise a display list. backing_arena stores private variable payloads;
+// paths, gradient stops and dashes have explicit shared-resource owners.
 // `backing_arena` must not be shared: the list's scratch owns its tail.
 void dl_init(DisplayList* dl, Arena* backing_arena);
 
@@ -1206,6 +1215,10 @@ bool dl_contains_glyphs(const DisplayList* dl);
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result);
 bool dl_validate_or_log(const DisplayList* dl, const char* context);
 bool dl_item_is_retainable_for_fragment(const DisplayItem* item);
+bool dl_resources_current(const DisplayList* list, uint64_t video_generation, uint64_t glyph_generation);
+size_t dl_shared_array_bytes(const DisplayList* list);
+uint64_t dl_shared_array_checkpoint(const DisplayList* list);
+void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint);
 
 #ifdef __cplusplus
 }
@@ -1392,25 +1405,13 @@ typedef DlFillRoundedRect PaintFillRoundedRect;
 typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
-    Color color;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
+    RDT_VECTOR_FILL_FIELDS
 } PaintFillPath;
 
 typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
-    Color color;
-    float width;
-    RdtStrokeCap cap;
-    RdtStrokeJoin join;
-    float miter_limit;
-    lam::OwnArr<float> dash_array; // copied; owned by this command
-    int dash_count;
-    float dash_phase;
-    bool has_transform;
-    RdtMatrix transform;
+    RDT_VECTOR_STROKE_FIELDS(lam::OwnArr<float> dash_array;)
 } PaintStrokePath;
 
 typedef struct {
@@ -1420,13 +1421,7 @@ typedef struct {
     bool image_sampling; // a replaced CSS image retains image-edge sampling in vector fallbacks
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
-    int stop_count;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
-    bool has_gradient_transform;
-    RdtMatrix gradient_transform;
-    RdtGradientOptions options;  // options.dash_array views owned_dashes
+    RDT_VECTOR_GRADIENT_FIELDS
     lam::OwnArr<float> owned_dashes;
 } PaintFillLinearGradient;
 
@@ -1437,15 +1432,13 @@ typedef struct {
     bool image_sampling;
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
-    int stop_count;
-    RdtFillRule rule;
-    bool has_transform;
-    RdtMatrix transform;
-    bool has_gradient_transform;
-    RdtMatrix gradient_transform;
-    RdtGradientOptions options;  // options.dash_array views owned_dashes
+    RDT_VECTOR_GRADIENT_FIELDS
     lam::OwnArr<float> owned_dashes;
 } PaintFillRadialGradient;
+
+#undef RDT_VECTOR_FILL_FIELDS
+#undef RDT_VECTOR_STROKE_FIELDS
+#undef RDT_VECTOR_GRADIENT_FIELDS
 
 typedef struct {
     lam::Up<const uint32_t> pixels; // borrowed
@@ -1979,6 +1972,9 @@ typedef struct RetainedDisplayListStats {
     int captured;
     size_t captured_commands; // own commands only; child chunks are referenced
     size_t reused_captures;
+    size_t charged_storage_bytes;
+    int budget_rejections;
+    int evictions;
     int skipped_non_retainable;
     int copy_failed;
     int reuse_hits;
@@ -1993,6 +1989,7 @@ void retained_dl_cache_destroy(RetainedDisplayListCache* cache);
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache);
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source);
 RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache);
+void retained_dl_cache_set_storage_budget(RetainedDisplayListCache* cache, size_t bytes);
 void retained_dl_cache_note_reuse_miss(RetainedDisplayListCache* cache);
 void retained_dl_cache_note_reuse_rejected_resources(RetainedDisplayListCache* cache);
 void retained_dl_cache_note_reuse_rejected_dirty(RetainedDisplayListCache* cache);
@@ -2066,6 +2063,7 @@ typedef struct RasterRenderContext : RenderContext {
     RdtMatrix4 children_transform_3d;
     bool has_transform_3d;
     bool paint_failed;             // abort replay when preserved-context composition fails
+    bool has_foreign_paint_dependencies; // embedded documents need their own generation summaries
     lam::Up<Css3dPaintContext> css3d_context; // borrowed only during a preserved-context walk
 
     // Derived logical-paint -> destination-surface scale (RSC7).
@@ -2104,13 +2102,16 @@ struct RenderFrameScope {
     lam::Up<DisplayList> active_list;
     bool context_active;
     bool display_list_active;
+    int preserved_commands = -1;
     RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
-                     RenderProfiler* profiler);
+                     RenderProfiler* profiler, bool reuse_recording = false);
     ~RenderFrameScope();
     DisplayList* list() { return display_list_active ? active_list.get() : nullptr; }
     RenderFrameScope(const RenderFrameScope&) = delete;
     RenderFrameScope& operator=(const RenderFrameScope&) = delete;
 };
+
+void render_frame_cache_destroy(struct RenderFrameCache* cache);
 
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
@@ -2377,8 +2378,8 @@ Bound dl_content_bounds_range(const DisplayList* dl, int start, int end);
 bool dl_effect_bounds_to_region(const Bound* bounds, IRect* region);
 Bound dl_effect_capture_bounds(const DisplayList* dl, int start, int end, Bound bounds, float padding);
 bool dl_resize_saved_backdrops(DisplayList* dl, int start, int end, const Bound* bounds);
-RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count);
-float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
+const RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count);
+const float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
 bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
                             const RenderSemanticGroup* source);
 bool dl_store_clip_shapes(DisplayList* dl, lam::Up<const DlClipShapeStack>* dst,
@@ -4707,6 +4708,7 @@ void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
 void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view);
 // Starts a paint pass: inline SVGs painted in it share one host style context.
 void render_svg_begin_paint_pass(void);
+bool render_svg_layers_pending(DomDocument* document);
 void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height);
 

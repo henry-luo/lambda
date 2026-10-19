@@ -27,11 +27,6 @@ struct RdtPathStorage {
 
 uint64_t rdt_path_hash(const RdtPath* path);
 
-inline size_t rdt_path_storage_bytes(const RdtPath* path) {
-    return path ? sizeof(RdtPath) + (path->storage ? sizeof(RdtPathStorage) +
-        (size_t)path->capacity * sizeof(RdtPath::Entry) : 0) : 0;
-}
-
 inline bool rdt_path_geometry_equal(const RdtPath* first, const RdtPath* second) {
     if (first == second || (first && second && first->storage == second->storage)) return true;
     return first && second && first->count == second->count &&

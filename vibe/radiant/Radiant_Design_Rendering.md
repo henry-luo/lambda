@@ -93,9 +93,9 @@ pages can own longer-lived PaintLists.
 |---|---|---|
 | DOM/view | Document structure, computed styles, layout geometry | Document; mutable between settled frames |
 | `PaintList` / `PaintCmd` | Semantic glyph/effect/subscene commands, vector primitives, transitional raster operations | Transient fragment, fallback group, or published edition |
-| `DisplayList` / `DisplayItem` | Raster operations, device bounds, element markers and resource references | Frame/offscreen job; immutable own-command lists in retained chunks |
+| `DisplayList` / `DisplayItem` | Raster operations, device bounds, element markers and resource references | Offscreen job, retained unchanged frame, or immutable own-command list in a retained chunk |
 | `RdtPath` | Geometry commands used by paint commands, clipping, geometry visitors and the backend | Owned snapshot handles share immutable entry buffers; writes detach |
-| `RdtVector` | Raster target and backend execution state | Serial frame/offscreen job or reusable tile worker |
+| `RdtVector` | Raster target and backend execution state | Reusable ViewTree serial context, independent offscreen job, or reusable tile worker |
 | ThorVG paint/scene | Backend paths, paint properties, clips and submitted groups | Vector shapes/scenes: submission batch; native picture/image resources have separate owners |
 | `ImageSurface` | Pixels with explicit alpha mode and resource identity | Target, document resource, snapshot or temporary effect |
 
@@ -133,9 +133,10 @@ masks and supported filters. SVG text normally uses Radiant's positioned text
 and font outlines; a ThorVG text bridge remains a fallback. Geometry becomes
 backend-neutral `RdtPath` resources. A document-owned, 8 MiB payload budget caches
 path `d` geometry and authored marker topology by the actual sampled source
-value. Resolved basic-shape geometry is interned by hash plus exact comparison;
-its attributes are still resolved and its temporary geometry is constructed
-before interning. Paint, placement and reference context remain per instance.
+value. Basic shapes resolve their geometry once, then look up kind, resolved
+float values and polygon/polyline source before constructing a contour. A hit
+acquires the existing immutable path. Paint, placement and reference context
+remain per instance.
 An admission miss uses ordinary geometry construction. Cache retirement drops
 its references while published path snapshots remain valid.
 
@@ -169,7 +170,8 @@ The ordinary raster gateway flushes any pending semantic/effect fragment, then
 calls the shared DisplayList primitive builder. It avoids a temporary PaintCmd
 and duplicate dash/clip payloads for each vector primitive. Common rectangle
 and picture payload definitions are shared by the semantic and raster command
-schemas. Semantic producers continue to use PaintList; glyph/effect/subscene
+schemas. Shared field declarations also define path fills, strokes and gradients;
+semantic ownership and raster shared-resource annotations remain explicit. Semantic producers continue to use PaintList; glyph/effect/subscene
 lowering stays explicit, including streaming export and published editions.
 
 PaintList's initial reserve is eight commands and grows normally. There are
@@ -194,7 +196,10 @@ command formats are later consolidated.
 
 Each DisplayItem carries an opcode, culling bounds and a tagged payload.
 Variable data is either copied into the list's scratch arena or held by an
-explicit resource owner. Path handles share refcounted immutable entry buffers;
+explicit resource owner. Gradient stops and dash arrays use immutable,
+content-indexed buffers. A list holds one reference per distinct value; copying
+from another list or a retained chunk acquires the same buffer. Source-list
+retirement cannot invalidate the copy. Path handles share refcounted immutable entry buffers;
 subsequent builder writes detach. Bounds and hashes are cached before sharing.
 Raster clip stacks are immutable optional arena payloads, with null representing
 the empty stack. Every command no longer embeds a maximum-size clip stack. Generation-checked
@@ -205,16 +210,20 @@ Element begin/end markers delimit subtrees and carry matching indices, marker
 geometry and visual bounds. The command descriptor table centralizes state,
 culling, batch-flush and owned-payload properties. Copying a range remaps marker
 indices and acquires independent payload ownership. Retained frame assembly
-borrows immutable chunk payloads and pins their owners. ViewTree keeps an empty
-command array between frames; small jobs and memory pressure release excess
-capacity. Nested frames use independent storage.
+borrows immutable chunk payloads and pins their owners. ViewTree reuses command
+capacity, its serial canvas, and eligible unchanged document recordings. Overlays
+append after a checkpoint and release their commands, array references and arena
+allocations after replay. Small jobs and memory pressure release excess idle
+capacity. Nested frames use independent list and scratch arenas and a separate
+vector context.
 
 ### 5.2 Replay and ordering
 
 Serial replay dispatches vector commands to `RdtVector` and direct-pixel
 commands to Radiant's glyph, raster, shadow, filter and composite helpers.
-ThorVG work is batched until a clip transition or a pixel operation requires
-synchronization. A saved backdrop must observe preceding drawing; a glyph or
+Clip transitions seal ordered native scene segments with the previous clip
+state; subsequent segments can share one canvas submission. A pixel operation
+flushes preceding vector work before accessing the target. A saved backdrop must observe preceding drawing; a glyph or
 CPU blit must preserve its position in painter order. Batching cannot reorder
 these boundaries merely to group similar colors or geometry.
 
@@ -249,7 +258,9 @@ constructs native shapes, applies paint/placement, submits them and releases
 submitted scenes after synchronization. Pure move/line/cubic/close paths use
 ThorVG's bulk path API; compact rectangle/circle commands retain their established
 contour expansion. Active clips pin shared Radiant path snapshots. Stable batches
-compose their clip mask once; clip transitions and CPU operations still flush.
+compose their clip mask once. Clip transitions seal segments; CPU operations,
+target changes and the batch end synchronize and release the native submission.
+A single segment is submitted directly, avoiding an extra wrapper scene.
 
 ThorVG's public API owns its temporary command/point arrays. Zero temporary
 native geometry is impossible through that API. Radiant's persistent native
@@ -271,7 +282,8 @@ generations under **D4.5.1v4 / D4.2.4**. The current caches have different units
 
 | Cache / retained owner | Reused unit | Validity and retirement |
 |---|---|---|
-| Retained display-list cache | Chunk own commands plus ordered child references | Checks marker geometry, dirty-source relation and image/glyph/media generations; borrowed chunks avoid recapture, stale entries are pruned, and high memory pressure drops cache ownership between frames. |
+| Retained display-list cache | Chunk own commands plus ordered child references | Checks marker geometry, dirty-source relation and image/glyph/media generations; borrowed chunks avoid recapture. A 32 MiB managed-storage budget evicts old roots by last use; active readers keep their leases and charges. High pressure drops cache ownership between frames. |
+| ViewTree frame recording | Complete document command prefix and serial vector context | 8 MiB conservative recording admission; matching document/style/state/layout/resource/target stamps and current handles; overlays record afresh. |
 | SVG layer registry | Raster surface for an inline SVG | Document-owned; keyed by element identity/generation, document/style and interaction state, animation, fonts, images, size, scale and inherited paint. |
 | External SVG picture caches | Parsed SVG owner plus cheap duplicate handles | Process caches keyed by path or data; cache eviction and retained handles govern parse lifetime. |
 | SVG geometry cache | Canonical path buffers and marker topology | Actual path source / resolved basic geometry keys; bounded document ownership; published readers keep snapshots. |
@@ -291,12 +303,37 @@ SVG layers avoid both SVG recording and vector rasterization on a hit. Default
 admission first observes stable content and captures on the next unchanged
 paint; eager/off modes support controlled comparisons. Only supported placement
 transforms qualify. Capture records once. A descriptor-qualified subset of vector
-fills/strokes/gradients, images, clips and markers renders once into a transparent
-premultiplied surface. Mixed CPU/effect/native-picture recordings replay the same
-list over black and white and reconstruct a straight-alpha surface.
+fills/strokes/gradients, images, clips, markers, CPU surface fills/scaled blits and
+monochrome coverage glyphs renders once into a transparent premultiplied surface.
+Color emoji, effects and native pictures retain black/white replay and
+straight-alpha reconstruction.
 Whole-pixel layer placement avoids resampling but can differ from fractional
 direct placement. Layer reuse is therefore a distinct, existing raster policy,
 not evidence that vector geometry itself is retained optimally.
+
+Complete unchanged frames can reuse their recorded document prefix without
+traversal or flat descriptor copying. The key includes document mutation, style,
+interaction/scroll state, layout, fonts/glyphs, images, SVG animation, video,
+viewport, density, canvas background and transparency. Pending reflow, selective
+incomplete recordings, active animation scheduling, canvas/3D/webview producers,
+foreign child-document paint and high memory pressure reject this reuse.
+Default SVG layers finish their warm-up before a recording is frozen.
+`RADIANT_RECORDING_CACHE=off` provides a controlled comparison.
+
+Before admission, transient overlays retire their command, shared-array and
+scratch checkpoints. A rewound capture can leave large unused arena chunks;
+these are reclaimed only when the list owns the sole arena scope, has no live
+scratch payloads and has no earlier arena allocations. This preserves the
+8 MiB limit without charging empty capture capacity to a small recording
+(**D4.2.4 / D4.5.1v4**).
+
+The retained budget charges managed command/span capacity, arena storage,
+shared arrays and a conservative per-reference path footprint. Shared geometry
+can be charged more than once. ThorVG internals and native picture bytes are
+untracked; image pixels and font caches retain their separate resource owners
+and are outside this command-storage charge. A refcounted ledger follows chunks
+beyond cache eviction/destruction; new admission can fail while active readers
+retain the remaining charge.
 
 Document-wide style/interaction/resource epochs provide conservative invalidation.
 A future dependency-specific cache must account for inherited values and
@@ -310,8 +347,10 @@ no paint are different from forced redraws of unchanged content.
 
 Screen and ordinary image output create a frame context, clear the full surface
 or damaged regions, record content and overlays, capture retained fragments,
-replay, then present or encode the surface. Serial frame setup currently creates
-fresh command-array storage and a fresh vector context.
+replay, then present or encode the surface. Serial frame setup creates
+or borrows its ViewTree's reusable command-array storage and serial vector
+context; nested frames use independent storage. Eligible unchanged recordings
+skip traversal and capture, then append current overlays before replay.
 
 Large PNG export records the full page once, with a full-page recording clip,
 then replays horizontal strips through the shared tile machinery. Rows stream
@@ -360,10 +399,12 @@ Existing profiling and event traces report paint categories, path selection,
 record/replay time, capabilities and retained outcomes. Opt-in
 `RADIANT_RENDER_METRICS=1` adds release-compatible stage timing through teardown,
 command/paint capacity, tracked memory, geometry parse/clone/hash/copy counters,
-retained descriptor copies/borrows and reserved chunk capacity, native construction/duplication, batch flushes
-and layer recording/pass counts. Tile dispatch propagates the active measurement
+retained descriptor copies/borrows and reserved chunk capacity, shared-array
+copies/leases, full-frame reuse, native construction/duplication and phase timing,
+flush reasons, clip segments, lock waits and layer recording/pass counts. Tile dispatch propagates the active measurement
 to workers. Disabled counters take no locks. Nested layer work is included in
-its containing stage, not added again as frame wall time.
+its containing stage, not added again as frame wall time. Native phase timers
+can nest and worker times overlap; their sum is not a frame duration.
 
 Release allocation tracking requires `MEMTRACK_MODE=STATS`; with tracking off,
 zero tracked-byte fields do not measure actual live memory. Tracked process
@@ -408,6 +449,8 @@ sizes alone are not speedup claims.
 The original transient PaintList reserve was 1,024 commands; it is now eight.
 The display-list initial reserve remains 2,048 commands and is reused across
 frames within its ViewTree. Retained chunks reserve only their own command
-storage. Basic-shape construction, gradient/dash interning, descriptor copying,
-finer invalidation and serial canvas reuse remain measurement-driven follow-up
-work where the current implementation still has costs.
+storage. Basic-shape lookup precedes construction; gradients/dashes share
+immutable buffers; serial canvas and unchanged full-frame recording reuse are
+implemented. Partial-frame descriptor copying, placement-only chunk composition
+and finer invalidation remain follow-up work. Performance and qualification
+limits are recorded separately from these structural changes.

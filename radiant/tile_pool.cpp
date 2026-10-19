@@ -204,7 +204,12 @@ static void* worker_thread_fn(void* arg) {
         Tile* tile = job->tile;
 
         // ThorVG rasterization uses shared internal state even with separate canvases.
-        pthread_mutex_lock(&s_thorvg_tile_mutex);
+        {
+            RenderMetricTimer timer(&RenderPipelineMetrics::tile_lock_wait_ns);
+            pthread_mutex_lock(&s_thorvg_tile_mutex);
+        }
+        {
+        RenderMetricTimer timer(&RenderPipelineMetrics::tile_work_ns);
 
         // initialise thread-local resources on first use
         worker_init_local(tile);
@@ -227,6 +232,7 @@ static void* worker_thread_fn(void* arg) {
                        &tl_worker.scratch,
                        tile->x, tile->y, tile->w, tile->h,
                        job->raster_scale);
+        }
         pthread_mutex_unlock(&s_thorvg_tile_mutex);
         }
 

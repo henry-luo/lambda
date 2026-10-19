@@ -43,6 +43,8 @@ void test_display_list_stub_set_picture_size(RdtPicture* picture, float w, float
     g_test_picture_h = h;
 }
 
+size_t rdt_path_storage_bytes(const RdtPath*) { return 0; } // stub paths own no geometry buffers
+
 RdtPath* rdt_path_clone(const RdtPath* src) {
     return (RdtPath*)src;
 }

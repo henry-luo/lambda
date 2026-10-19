@@ -13,6 +13,13 @@
 #include "../lib/generation.h"
 
 struct RetainedPaintChunk;
+struct RetainedStorageBudget {
+    RefCount refs;
+    size_t used, limit;
+};
+static void retained_budget_release(RetainedStorageBudget* budget) {
+    if (budget && ref_count_release(&budget->refs) == REF_COUNT_LAST) mem_free(budget);
+}
 struct RetainedPaintSpan {
     RetainedPaintChunk* child; // owns one child reference, or a range of own commands
     int start, count;
@@ -22,6 +29,9 @@ struct RetainedPaintChunk : DisplayPayloadOwner {
     DisplayList own;
     lam::ArrayList<RetainedPaintSpan> spans{MEM_CAT_RENDER, 0};
     int logical_count = 0;
+    uint32_t parent_count = 0;
+    RetainedStorageBudget* budget = nullptr;
+    size_t charged_bytes = 0;
 };
 struct RetainedDisplayListFragment {
     uint32_t view_id;
@@ -29,13 +39,22 @@ struct RetainedDisplayListFragment {
     Bound marker_bounds;
     RetainedPaintChunk* chunk;
     uint32_t last_stored_epoch;
+    uint64_t last_used;
 };
 
 static void retained_chunk_destroy(DisplayPayloadOwner* owner) {
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
-    for (size_t i = 0; i < chunk->spans.size(); i++) dl_payload_owner_release(chunk->spans[i].child);
+    for (size_t i = 0; i < chunk->spans.size(); i++) {
+        RetainedPaintChunk* child = chunk->spans[i].child;
+        if (child) __atomic_fetch_sub(&child->parent_count, 1u, __ATOMIC_RELAXED);
+        dl_payload_owner_release(child);
+    }
     dl_destroy(&chunk->own);
     if (chunk->arena) mem_arena_destroy(chunk->arena);
+    if (chunk->budget) {
+        __atomic_fetch_sub(&chunk->budget->used, chunk->charged_bytes, __ATOMIC_RELAXED);
+        retained_budget_release(chunk->budget);
+    }
     chunk->~RetainedPaintChunk(); mem_free(chunk);
 }
 
@@ -53,6 +72,8 @@ struct RetainedDisplayListCache {
     Pool* pool;
     RetainedDisplayListMap map;
     uint32_t epoch;
+    uint64_t clock;
+    RetainedStorageBudget* budget;
     RetainedDisplayListStats stats;
 
     bool init(Pool* owner_pool);
@@ -60,6 +81,8 @@ struct RetainedDisplayListCache {
     void begin_frame();
     RetainedDisplayListStats snapshot_stats() const;
 };
+
+static bool retained_dl_trim(RetainedDisplayListCache* cache, size_t needed);
 
 RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
     if (!pool) return nullptr;
@@ -89,8 +112,12 @@ static void retained_dl_fragment_free(Pool* pool, RetainedDisplayListFragment* f
 
 bool RetainedDisplayListCache::init(Pool* owner_pool) {
     pool = owner_pool;
+    budget = (RetainedStorageBudget*)mem_calloc(1, sizeof(RetainedStorageBudget), MEM_CAT_RENDER);
+    if (!budget) return false;
+    ref_count_init(&budget->refs); budget->limit = (size_t)32 << 20;
     if (!map.init(128)) {
         destroy();
+        retained_budget_release(budget); budget = nullptr;
         return false;
     }
     epoch = 1;
@@ -114,6 +141,7 @@ void retained_dl_cache_destroy(RetainedDisplayListCache* cache) {
     if (!cache) return;
     lam::Temp<RetainedDisplayListCache> owned(cache);  // the owner hands the cache over
     cache->destroy();
+    retained_budget_release(cache->budget);
 }
 
 void RetainedDisplayListCache::begin_frame() {
@@ -125,6 +153,7 @@ void RetainedDisplayListCache::begin_frame() {
     epoch++;
     if (epoch == 0) epoch = 1;
     memset(&stats, 0, sizeof(stats));
+    retained_dl_trim(this, 0);
 }
 
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache) {
@@ -132,7 +161,13 @@ void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache) {
 }
 
 RetainedDisplayListStats RetainedDisplayListCache::snapshot_stats() const {
-    return stats;
+    RetainedDisplayListStats snapshot = stats;
+    snapshot.charged_storage_bytes = budget ? __atomic_load_n(&budget->used, __ATOMIC_RELAXED) : 0;
+    return snapshot;
+}
+
+void retained_dl_cache_set_storage_budget(RetainedDisplayListCache* cache, size_t bytes) {
+    if (cache && cache->budget) cache->budget->limit = bytes;
 }
 
 RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache) {
@@ -194,6 +229,62 @@ static void retained_dl_publish(RetainedDisplayListCache* cache, RetainedPaintCh
         begin->element_marker.marker_x + begin->element_marker.marker_w,
         begin->element_marker.marker_y + begin->element_marker.marker_h};
     fragment->last_stored_epoch = cache->epoch;
+    fragment->last_used = ++cache->clock;
+}
+
+static void retained_dl_drop_old_subtree(RetainedDisplayListCache* cache, RetainedPaintChunk* chunk) {
+    uint32_t view_id = chunk->own[0].element_marker.view_id;
+    RetainedDisplayListEntry* entry = cache->map.get({view_id, nullptr});
+    if (entry && entry->fragment && entry->fragment->chunk == chunk &&
+        entry->fragment->last_stored_epoch != cache->epoch) {
+        RetainedDisplayListFragment* fragment = entry->fragment;
+        cache->map.erase({view_id, nullptr});
+        retained_dl_fragment_free(cache->pool, fragment);
+        cache->stats.evictions++;
+    }
+    for (size_t i = 0; i < chunk->spans.size(); i++)
+        if (chunk->spans[i].child) retained_dl_drop_old_subtree(cache, chunk->spans[i].child);
+}
+
+static bool retained_dl_trim(RetainedDisplayListCache* cache, size_t needed) {
+    if (!cache || !cache->budget || needed > cache->budget->limit) return false;
+    while (__atomic_load_n(&cache->budget->used, __ATOMIC_RELAXED) > cache->budget->limit - needed) {
+        RetainedDisplayListFragment* oldest = nullptr;
+        size_t cursor = 0; RetainedDisplayListEntry* entry;
+        while (cache->map.next(&cursor, &entry)) {
+            RetainedDisplayListFragment* fragment = entry->fragment;
+            if (!fragment || !fragment->chunk || fragment->last_stored_epoch == cache->epoch ||
+                __atomic_load_n(&fragment->chunk->parent_count, __ATOMIC_RELAXED)) continue;
+            if (!oldest || fragment->last_used < oldest->last_used) oldest = fragment;
+        }
+        if (!oldest) return false; // current readers or this frame's new chunks retain the remaining charge.
+        RetainedPaintChunk* root = oldest->chunk;
+        if (!ref_count_retain(&root->refs)) return false;
+        // evict one old root and its old descendants together; ancestor references otherwise prevent reclamation.
+        retained_dl_drop_old_subtree(cache, root);
+        dl_payload_owner_release(root);
+    }
+    return true;
+}
+
+static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPaintChunk* chunk) {
+    size_t bytes = sizeof(*chunk) + sizeof(RetainedDisplayListFragment) +
+        chunk->own.capacity() * sizeof(DisplayItem) + chunk->spans.capacity() * sizeof(RetainedPaintSpan) +
+        arena_total_allocated(chunk->arena) + dl_shared_array_bytes(&chunk->own);
+    for (size_t i = 0; i < chunk->own.size(); i++) {
+        const DisplayItem* item = &chunk->own[i];
+        const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
+        if (!descriptor || descriptor->owned_payload_kind != DL_OWNED_PAYLOAD_PATH) continue;
+        const RdtPath* path = *(RdtPath* const*)((const char*)item + descriptor->owned_payload_offset);
+        size_t path_bytes = rdt_path_storage_bytes(path);
+        if (path_bytes > SIZE_MAX - bytes) return false;
+        bytes += path_bytes;
+    }
+    // charge shared resources conservatively per chunk; borrowed frames keep the ledger alive after eviction.
+    if (!retained_dl_trim(cache, bytes) || !ref_count_retain(&cache->budget->refs)) return false;
+    chunk->budget = cache->budget; chunk->charged_bytes = bytes;
+    __atomic_fetch_add(&cache->budget->used, bytes, __ATOMIC_RELAXED);
+    return true;
 }
 
 static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, RetainedPaintChunk* chunk) {
@@ -211,7 +302,7 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
     DisplayPayloadOwner* owner = marker.payload_owner;
     if (owner && owner->destroy == retained_chunk_destroy) {
         RetainedPaintChunk* existing = (RetainedPaintChunk*)owner;
-        if (existing->logical_count == end - begin + 1 &&
+        if (existing->budget == cache->budget && existing->logical_count == end - begin + 1 &&
             source->data()[end].payload_owner == owner && ref_count_retain(&owner->refs)) {
             // borrowed frame commands still identify their immutable producer; never recapture them.
             retained_dl_touch_chunk(cache, existing);
@@ -222,6 +313,7 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
     if (chunk) {
         new (chunk) RetainedPaintChunk();
         ref_count_init(&chunk->refs); chunk->destroy = retained_chunk_destroy;
+        chunk->commands = lam::up(&chunk->own);
         chunk->logical_count = end - begin + 1;
         chunk->arena = mem_arena_create(
             cache->pool ? mem_node_owner((MemNode*)pool_get_mem_node(cache->pool)) : nullptr,
@@ -240,7 +332,7 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
             if (!chunk || !child || !chunk->spans.append({child, 0, 0})) {
                 dl_payload_owner_release(child);
                 if (child) copied = false;
-            }
+            } else __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
             i = child_end + 1;
             continue;
         }
@@ -260,6 +352,8 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         }
         i++;
     }
+    bool budget_rejected = chunk && retainable && copied && !retained_dl_admit_chunk(cache, chunk);
+    if (budget_rejected) { copied = false; cache->stats.budget_rejections++; }
     if (!retainable || !copied) {
         RetainedDisplayListEntry* previous = cache->map.get({marker.element_marker.view_id, nullptr});
         if (previous && previous->fragment) {
@@ -268,7 +362,7 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         }
         if (marker.element_marker.view_id) {
             if (!retainable) cache->stats.skipped_non_retainable++;
-            else cache->stats.copy_failed++;
+            else if (!budget_rejected) cache->stats.copy_failed++;
         }
         dl_payload_owner_release(chunk);
         return nullptr;
@@ -322,6 +416,7 @@ const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCach
     RetainedDisplayListEntry query = { view_id, nullptr };
     RetainedDisplayListEntry* found = cache->map.get(query);
     if (!found || !found->fragment || !found->fragment->chunk) return nullptr;
+    found->fragment->last_used = ++cache->clock;
     return found->fragment;
 }
 
@@ -374,13 +469,12 @@ static bool retained_dl_generation_current(const void* resource, uint64_t genera
     return !resource || generation_current(generation, current_generation);
 }
 
-static bool retained_chunk_resources_valid(const RetainedPaintChunk* chunk,
+bool dl_resources_current(const DisplayList* list,
                                           uint64_t current_video_generation,
                                           uint64_t current_glyph_generation) {
-    if (!chunk) return false;
+    if (!list) return false;
     // owners are read for their generation
     ImageSurfaceReadScope read_scope;
-    const DisplayList* list = &chunk->own;
     for (int i = 0; i < list->item_count(); i++) {
         const DisplayItem* item = &list->data()[i];
         switch (item->op) {
@@ -411,6 +505,12 @@ static bool retained_chunk_resources_valid(const RetainedPaintChunk* chunk,
                 break;
         }
     }
+    return true;
+}
+
+static bool retained_chunk_resources_valid(const RetainedPaintChunk* chunk,
+    uint64_t current_video_generation, uint64_t current_glyph_generation) {
+    if (!chunk || !dl_resources_current(&chunk->own, current_video_generation, current_glyph_generation)) return false;
     for (size_t i = 0; i < chunk->spans.size(); i++)
         if (chunk->spans[i].child && !retained_chunk_resources_valid(chunk->spans[i].child,
             current_video_generation, current_glyph_generation)) return false;

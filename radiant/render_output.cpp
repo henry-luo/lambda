@@ -1,5 +1,6 @@
 #include "render_metrics.hpp"
 #include "scene3d.hpp"
+#include "svg_animation.hpp"
 #include "render.hpp"
 #include "../lib/base64.h"
 #include "layout.hpp"
@@ -716,8 +717,87 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
     trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
 }
 
+struct RenderFrameKey {
+    uint64_t generations[12];
+    const UiContext* ui;
+    const View* root;
+    float scale;
+    int width, height;
+};
+
+struct RenderFrameCache {
+    RdtVector vector;
+    RenderFrameKey key;
+    bool valid;
+};
+
+void render_frame_cache_destroy(RenderFrameCache* cache) {
+    if (!cache) return;
+    rdt_vector_destroy(&cache->vector);
+    cache->~RenderFrameCache(); mem_free(cache);
+}
+
+static RenderFrameKey render_frame_key(UiContext* ui, ViewTree* tree, uint32_t background, bool transparent) {
+    DomDocument* doc = ui->document;
+    RenderFrameKey key = {};
+    key.ui = ui; key.root = tree->root; key.scale = ui_context_raster_scale(ui);
+    key.width = ui->surface->width; key.height = ui->surface->height;
+    key.generations[10] = background;
+    key.generations[11] = transparent;
+    if (!doc) return key;
+    key.generations[0] = doc->mutation_epoch;
+    key.generations[1] = doc->style_content_epoch;
+    key.generations[2] = doc->style_query_epoch;
+    key.generations[3] = doc_state_content_version(doc->state);
+    key.generations[4] = font_context_glyph_cache_generation(ui->font_ctx);
+    key.generations[5] = font_context_resource_generation(ui->font_ctx);
+    key.generations[6] = image_cache_resource_generation(ui);
+    key.generations[7] = svg_animation_generation(doc);
+    key.generations[8] = tree->layout_generation;
+    key.generations[9] = doc->state ? doc->state->video_frame_generation : 0;
+    return key;
+}
+
+static bool render_frame_key_equal(const RenderFrameKey& a, const RenderFrameKey& b) {
+    return a.ui == b.ui && a.root == b.root && a.scale == b.scale &&
+        a.width == b.width && a.height == b.height &&
+        memcmp(a.generations, b.generations, sizeof(a.generations)) == 0;
+}
+
+static bool render_frame_can_retain(UiContext* ui) {
+    const char* setting = getenv("RADIANT_RECORDING_CACHE");
+    if (setting && strcmp(setting, "off") == 0) return false;
+    DomDocument* doc = ui->document;
+    if (!doc) return false;
+    DocState* state = doc->state;
+    // native/GPU and child-document producers do not yet publish a complete paint dependency stamp.
+    return state && !state->needs_reflow && !state->dirty_tracker.full_reflow &&
+        !doc->services.scene3d_registry && !doc->services.canvas_registry &&
+        !ui->webview_mgr && (!state->animation_scheduler || state->animation_scheduler->count == 0) &&
+        memtrack_get_pressure_level() < MEM_PRESSURE_HIGH;
+}
+
+struct RenderOverlayRecordingScope {
+    DisplayList* list;
+    int start;
+    uint64_t arrays;
+    ScratchMark scratch;
+    explicit RenderOverlayRecordingScope(DisplayList* recording)
+        : list(recording), start(recording->item_count()), arrays(dl_shared_array_checkpoint(recording)),
+          scratch(scratch_mark(&recording->arena)) {}
+    ~RenderOverlayRecordingScope() { restore(); }
+    void restore() {
+        if (!list) return;
+        // retained document payloads precede the checkpoint; transient overlays cannot accumulate between hits.
+        dl_truncate(list, start);
+        dl_shared_array_rewind(list, arrays);
+        scratch_restore(&list->arena, scratch);
+        list = nullptr;
+    }
+};
+
 static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
-                                       RenderProfiler* profiler, Arena* scratch_backing) {
+                                       RenderProfiler* profiler, Arena* scratch_backing, RenderFrameCache* cache) {
     memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
@@ -733,8 +813,15 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
     rdcon->paint_list = lam::up((PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER));
     if (rdcon->paint_list) new (rdcon->paint_list) PaintList();
     paint_list_init(rdcon->paint_list, nullptr);
-    rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
-        uicon->surface->width, uicon->surface->height, uicon->surface->width);
+    if (cache && cache->vector.impl) {
+        rdcon->vec.impl = cache->vector.impl; cache->vector.impl = nullptr;
+        rdt_vector_set_target(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
+            uicon->surface->width, uicon->surface->height, uicon->surface->width);
+        rdt_vector_set_tile_offset_x(&rdcon->vec, 0); rdt_vector_set_tile_offset_y(&rdcon->vec, 0);
+    } else {
+        rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
+            uicon->surface->width, uicon->surface->height, uicon->surface->width);
+    }
     rdcon->transform = rdt_matrix_identity();
     rdcon->has_transform = false;
     rdcon->raster_scale = ui_context_raster_scale(uicon);
@@ -768,14 +855,23 @@ static void render_output_cleanup_context(RasterRenderContext* rdcon) {
 }
 
 RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
-                                   RenderProfiler* profiler)
+                                   RenderProfiler* profiler, bool reuse_recording)
     : rdcon(r), display_list{}, storage_owner(nullptr), active_list(nullptr),
       context_active(false), display_list_active(false) {
     if (!rdcon || !view_tree) return;
     bool nested = view_tree->render_list_in_use;
+    if (!nested && !view_tree->render_frame_cache) {
+        RenderFrameCache* cache = (RenderFrameCache*)mem_calloc(1, sizeof(RenderFrameCache), MEM_CAT_RENDER);
+        if (cache) { new (cache) RenderFrameCache(); view_tree->render_frame_cache = lam::own(cache); }
+    }
+    RenderFrameCache* cache = nested ? nullptr : view_tree->render_frame_cache.get();
+    if (!reuse_recording && cache) {
+        cache->valid = false;
+        if (view_tree->render_list) dl_clear(view_tree->render_list);
+    }
     Arena* scratch_backing = nested ? mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER,
         "render.nested_scratch") : view_tree->render_scratch_arena;
-    render_output_init_context(rdcon, uicon, view_tree, profiler, scratch_backing);
+    render_output_init_context(rdcon, uicon, view_tree, profiler, scratch_backing, cache);
     context_active = true;
     if (!view_tree->render_list_in_use) {
         if (!view_tree->render_list) {
@@ -810,14 +906,22 @@ RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, Vie
 }
 
 RenderFrameScope::~RenderFrameScope() {
+    if (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) preserved_commands = -1;
     Arena* nested_scratch = context_active && !storage_owner ? rdcon->scratch.arena : nullptr;
     if (display_list_active && storage_owner) {
         size_t used = active_list->size();
-        dl_clear(active_list);
+        if (preserved_commands >= 0) dl_truncate(active_list, preserved_commands);
+        else dl_clear(active_list);
         // a small job following a large one returns excess idle command storage.
-        if (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH ||
+        if (preserved_commands < 0 && (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH ||
             (active_list->capacity() > DL_INITIAL_CAPACITY && used < active_list->capacity() / 4))
-            active_list->lam::ArrayList<DisplayItem>::release();
+            ) active_list->lam::ArrayList<DisplayItem>::release();
+        RenderFrameCache* cache = storage_owner->render_frame_cache.get();
+        if (cache && memtrack_get_pressure_level() < MEM_PRESSURE_HIGH) {
+            rdt_vector_flush_batch(&rdcon->vec);
+            cache->vector.impl = rdcon->vec.impl; rdcon->vec.impl = nullptr;
+        }
+        if (cache && preserved_commands < 0) cache->valid = false;
         storage_owner->render_list_in_use = false;
     } else if (display_list_active) {
         Arena* nested_list = display_list.arena.arena;
@@ -1298,7 +1402,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
     RasterRenderContext rdcon;
-    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
+    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler, true);
     DisplayList& display_list = *frame.list();
 
     // image compositions request alpha explicitly; document exports retain their opaque default.
@@ -1310,12 +1414,22 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
     bool selective = clear_result.selective;
 
+    RenderFrameCache* cache = frame.storage_owner ? view_tree->render_frame_cache.get() : nullptr;
+    bool can_retain = cache && !selective && render_frame_can_retain(uicon);
+    RenderFrameKey key = render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background);
+    bool reused = can_retain && cache->valid && render_frame_key_equal(cache->key, key) &&
+        dl_resources_current(&display_list, key.generations[9], key.generations[4]);
+    if (cache) cache->valid = false; // only a completed render can publish another reusable recording.
+    if (!reused) dl_clear(&display_list);
+    else RENDER_METRIC_ADD(full_frame_reuses, 1);
+
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
     uint64_t t_init = time_now_ns();
     measurement.checkpoint("setup_clear");
 
-    render_output_render_view_tree(&rdcon, view_tree);
+    if (!reused) render_output_render_view_tree(&rdcon, view_tree);
+    int document_commands = display_list.item_count();
 
     if (rdcon.paint_failed) {
         uicon->render_failed = true;
@@ -1333,6 +1447,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         uicon->surface->height, dl_item_count(&display_list));
     render_profiler_write_counters_stderr(rdcon.profiler);
 
+    RenderOverlayRecordingScope overlays(&display_list);
     if (uicon->document && uicon->document->state) {
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
@@ -1342,7 +1457,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
     uint64_t t_capture = time_now_ns();
     measurement.checkpoint("overlays_validate");
-    retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    if (!reused) retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
     uint64_t t_captured = time_now_ns();
     measurement.checkpoint("retained_capture");
     if (render_pipeline_metrics) {
@@ -1412,6 +1527,43 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
 
     if (uicon->document && uicon->document->state) {
         doc_state_clear_render_flags(uicon->document->state);
+    }
+
+    overlays.restore();
+    // overlays always record afresh; retain only document commands with independently owned payloads.
+    if (render_pipeline_metrics) {
+        log_notice("[RENDER_RECORDING] eligible=%d foreign=%d pending_layers=%d key_changed=%d",
+            can_retain, rdcon.has_foreign_paint_dependencies, render_svg_layers_pending(uicon->document),
+            !render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background)));
+    }
+    if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document) &&
+        render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background))) {
+        dl_trim_empty_arena(&display_list);
+        size_t recording_bytes = display_list.capacity() * sizeof(DisplayItem) +
+            arena_total_allocated(display_list.arena.arena) + dl_shared_array_bytes(&display_list);
+        bool retainable = true;
+        for (int i = 0; !reused && i < document_commands && retainable; i++) {
+            const DisplayItem* item = &display_list.data()[i];
+            retainable = dl_item_is_retainable_for_fragment(item);
+            if (!retainable && render_pipeline_metrics)
+                log_notice("[RENDER_RECORDING] rejected_op=%d", item->op);
+            const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
+            if (descriptor && descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
+                const RdtPath* path = *(RdtPath* const*)((const char*)item + descriptor->owned_payload_offset);
+                // conservatively charge shared path buffers per reference; native picture storage remains untracked.
+                size_t bytes = rdt_path_storage_bytes(path);
+                if (bytes > SIZE_MAX - recording_bytes) retainable = false;
+                else recording_bytes += bytes;
+            }
+        }
+        if (render_pipeline_metrics)
+            log_notice("[RENDER_RECORDING] bytes=%zu arena_used=%zu arena_reserved=%zu retainable=%d reused=%d",
+                recording_bytes, arena_total_used(display_list.arena.arena),
+                arena_total_allocated(display_list.arena.arena), retainable, reused);
+        if (retainable && (reused || recording_bytes <= ((size_t)8 << 20))) {
+            cache->key = key; cache->valid = true;
+            frame.preserved_commands = document_commands;
+        }
     }
 
     uint64_t t_end = time_now_ns();

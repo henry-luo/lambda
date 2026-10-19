@@ -7,6 +7,7 @@
 // ==========================================================================
 
 #include "render.hpp"
+#include "render_metrics.hpp"
 #include "layout.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -1328,6 +1329,7 @@ static void paint_raster_lower_rect(DisplayList* dl, float x, float y, float w, 
 static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl,
         const RdtMatrix* root_transform = nullptr) {
     if (!pl || !dl) return;
+    RenderMetricTimer timer(&RenderPipelineMetrics::lowering_ns);
 
     PaintIrRasterEffectFrame effect_stack[PAINT_IR_RASTER_EFFECT_STACK_MAX];
     int effect_depth = 0;

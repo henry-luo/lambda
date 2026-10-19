@@ -3123,7 +3123,8 @@ struct ViewTree {
     // scratch and the frame display list each get their own arena.
     lam::Own<Arena> render_scratch_arena;
     lam::Own<Arena> display_list_arena;
-    lam::Own<struct DisplayList> render_list; // empty reusable command storage between frames
+    lam::Own<struct DisplayList> render_list; // reusable commands; qualified full recordings survive frames
+    lam::Own<struct RenderFrameCache> render_frame_cache; // serial context and recording dependencies
     bool render_list_in_use;
     lam::OwnArr<lam::Own<CanonicalInlineEntry>> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
