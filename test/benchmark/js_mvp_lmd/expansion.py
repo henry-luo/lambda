@@ -21,6 +21,7 @@ from run_benchmarks import (build_benchmark_list, check_release_build, expand_be
     NAVIER_STOKES_DENSITY_ORACLE_V1)
 from run_paired_benchmarks import run_once, paired_ratio_bootstrap, normalized_stdout
 from closures import sha
+from contracts import freeze_lambda_closure, havlak_contract, match_havlak
 
 TARGETS = ('awfy/deltablue', 'awfy/json', 'text/text_search', 'text/three_way_merge',
     'text/log_pipeline', 'julia/parse_integers', 'julia/iteration_pi_sum',
@@ -101,17 +102,10 @@ def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
         if references:
             untyped, _ = mir_script_variants(spec)
             path = Path(untyped)
-            frozen = out / 'lambda_reference' / spec['suite'] / path.name
-            frozen.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, frozen)
+            frozen, closure, annotated = freeze_lambda_closure(path, ROOT / 'test/benchmark',
+                out / 'lambda_reference')
             commands['lambda_untyped'] = [binary, 'run', '--no-log', str(frozen)]
-            sources.extend([{'reference': str(path), 'sha256': sha(path)},
-                            {'frozen': str(frozen), 'sha256': sha(frozen)}])
-            if spec['suite'] == 'julia':
-                helper = path.parent / 'micro_common.ls'
-                shutil.copy2(helper, frozen.parent / helper.name)
-                sources.extend([{'reference': str(helper), 'sha256': sha(helper)},
-                    {'frozen': str(frozen.parent / helper.name), 'sha256': sha(helper)}])
+            sources.extend(closure)
             golden = path.with_suffix('.txt')
             row['lambda_expected'] = normalized_stdout(golden.read_text()) if golden.exists() else None
             if spec['suite'] == 'jetstream':
@@ -120,13 +114,17 @@ def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
                     'navier_stokes': 'navier-stokes: PASS (checksum=77)',
                     'splay': 'splay: PASS (nodes=8000)',
                     'raytrace3d': '3d-raytrace: PASS (pixels=7200)'}.get(spec['name'], row['lambda_expected'])
-            row['lambda_variant'] = 'canonical .ls with annotations' if re.search(
-                r':\s*(?:int|float|u32)\b', path.read_text()) else 'untyped canonical .ls'
+            row['lambda_numeric_annotations'] = annotated
+            row['lambda_variant'] = 'canonical .ls with numeric annotations in source closure' if annotated else 'untyped canonical .ls'
             row['lambda_comparability'] = {
+                'awfy/havlak': 'unmatched repeats: Lambda performs 2 full recognitions; JS performs 51; equal output is insufficient',
                 'jetstream/hashmap': 'unmatched storage/allocation: Lambda preallocates parallel arrays; JS grows chained entry objects; counts and sums match',
                 'jetstream/navier_stokes': 'unmatched: Lambda times setup and 15 frames; JS times one frame',
                 'jetstream/splay': 'unmatched: Lambda includes setup and uses LCG/tree port; JS uses Jenkins fixture',
             }.get(identifier, 'canonical counts and script-defined timing; source hashes retained')
+            if identifier == 'awfy/havlak':
+                row['work_contracts'] = {'candidate': havlak_contract(script.read_text(), 'js'),
+                    'lambda_untyped': havlak_contract(frozen.read_text(), 'lambda')}
         rows.append(row)
     return rows
 
@@ -303,6 +301,8 @@ def main():
     parser.add_argument('--out', default='temp/mvp_expansion/capture')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--lambda-reference', action='store_true')
+    parser.add_argument('--havlak-matched-repeats', type=int, choices=(1, 50),
+        help='version frozen JS/Lambda Havlak copies with equal extra recognitions; requires --lambda-reference')
     args = parser.parse_args()
     os.chdir(ROOT)
     out = Path(args.out).resolve()
@@ -330,6 +330,12 @@ def main():
     if args.population in ('new16', 'new11', 'new1', 'all'):
         rows.extend(prepare_new(out, str(binary), args.lambda_reference,
             PROPERTIES_TARGETS if properties else LIBRARY_TARGETS if library else TARGETS, 'new1' if properties else 'new11' if library else 'new16'))
+        if control_record:
+            # Fresh contracts need the same engine controls as archived workloads.
+            for row in rows:
+                command = row['commands']['candidate']
+                for lane in ('control', 'control_peer'):
+                    row['commands'][lane] = [str(control)] + command[1:]
     if args.population in ('prior60', 'prior76', 'prior87', 'all'):
         if not control_record and sha(control) != (PROPERTIES_CONTROL_SHA if properties else LIBRARY_CONTROL_SHA if library else CONTROL_SHA):
             parser.error('control differs from the accepted phase binary')
@@ -346,6 +352,11 @@ def main():
         if not excluded.issubset({row['id'] for row in rows}):
             parser.error('unknown workload ID in --exclude')
         rows = [row for row in rows if row['id'] not in excluded]
+    if args.havlak_matched_repeats is not None:
+        havlak = next((row for row in rows if row['id'] == 'awfy/havlak'), None)
+        if not args.lambda_reference or not havlak or 'lambda_untyped' not in havlak['commands']:
+            parser.error('matched Havlak requires the fresh Havlak contract and --lambda-reference')
+        match_havlak(havlak, args.havlak_matched_repeats)
     environment = {k: v for k, v in os.environ.items() if not k.startswith('LAMBDA_GC_') and k not in
         ('LAMBDA_MIR_DUMP_PATH', 'JS_MIR_DUMP', 'LAMBDA_MIR_LOG_FRAME_SLOTS', 'LAMBDA_LOG_FILE',
          'JS_OPT_TRACE', 'JS_TRANSPILE_TIMING', 'LAMBDA_COMPILER_TIMING')}
@@ -377,8 +388,11 @@ def main():
             save()
         if valid:
             for iteration in range(1, args.runs + 1):
-                lanes = list(permutations[(iteration - 1) % 6]) if 'control' in row['commands'] else list(row['commands'])
-                if 'control' not in row['commands']:
+                if 'control' in row['commands']:
+                    lanes = list(permutations[(iteration - 1) % 6])
+                    lanes.extend(lane for lane in row['commands'] if lane not in permutations[0])
+                else:
+                    lanes = list(row['commands'])
                     offset = iteration % len(lanes)
                     lanes = lanes[offset:] + lanes[:offset]
                 for lane in lanes:

@@ -2,7 +2,14 @@
 
 import hashlib
 import os
+import re
 import subprocess
+
+
+def mask_lambda_source(source):
+    """Keep offsets/newlines while hiding comments and string contents for audits."""
+    return re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: re.sub(r'[^\n]', ' ', match.group()), source)
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

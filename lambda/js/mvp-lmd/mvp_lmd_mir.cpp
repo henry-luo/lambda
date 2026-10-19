@@ -82,6 +82,7 @@ struct LmdShapeSet { int count; LmdObjectPlan* plans[4]; };
 struct LmdValue;
 struct LmdScalarField;
 struct LmdInlineFrame;
+struct LmdInlineBody;
 struct LmdNumericRegion;
 struct LmdDenseArrayLoopPlan;
 struct LmdWithLookup;
@@ -178,6 +179,12 @@ struct LmdFunction {
     bool owns_captures;
     bool complex_params;
     bool parameter_expressions;
+    bool duplicate_params;
+    uint8_t formal_length;
+    uint8_t home_slot;
+    bool non_constructible;
+    bool constructor;
+    bool static_method;
     LmdBinding* arguments_binding;
     LmdBinding* body_arguments_binding;
     bool mapped_arguments;
@@ -523,7 +530,9 @@ struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count
     MIR_label_t exit; MIR_reg_t result; LmdObjectPlan* scalar_receiver;
     MIR_reg_t self; MIR_reg_t receiver_cell;
     LmdNumericRegion* region; LmdValue region_values[16]; LmdObjectPlan* scalar_return;
-    unsigned result_kind; };
+    unsigned result_kind;
+    LmdBinding* callback_binding; LmdFunction* callback;
+    const LmdInlineBody* callback_body; MIR_reg_t callback_receiver_cell; };
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
@@ -1116,6 +1125,8 @@ static void walk(AstNode* n, LmdWalk* state) {
         JsAstParameterFacts params = js_ast_collect_parameter_facts(ast->params);
         f->complex_params = params.has_non_simple_params;
         f->parameter_expressions = params.has_parameter_expressions;
+        f->duplicate_params = params.has_duplicate_param_names;
+        f->formal_length = (uint8_t)(params.formal_length < 0 ? params.parameter_count : params.formal_length);
         JsAstFunctionFacts facts = js_ast_collect_function_facts(ast->params, ast->body);
         bool arrow = n->node_type == AST_NODE_ARROW_FUNC;
         if (arrow && (facts.observations & (JS_AST_OBSERVES_THIS | JS_AST_OBSERVES_NEW_TARGET))) {
@@ -1923,7 +1934,7 @@ static AstNode* scalar_field_initializer(MvpLmdProgram* p, AstNode* node);
 static LmdArrayFacts array_facts(MvpLmdProgram* p, AstNode* n);
 static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped = false, bool present_only = false);
 static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** path, int depth = 0,
-    unsigned primitive = K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED | K_BIGINT);
+    unsigned primitive = K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED | K_BIGINT, uint8_t* visited = NULL);
 static LmdRange finite_range(double lower, double upper);
 static bool finite_integer(double value);
 static AstNode* enclosing_loop(MvpLmdProgram* p, AstNode* node, LmdFunction* owner, bool include_for_of = false);
@@ -6323,7 +6334,7 @@ static void plan_numeric_region(MvpLmdProgram* p, LmdFunction* f, bool calls = f
     if (!p->receiver_abi || p->property_callbacks || !f->ast || f->arguments_binding || f->complex_params || f->owns_captures || f->lexical_receiver ||
             f->receiver_captured || (f->captures && f->captures->length) ||
             (f->home && f->id == f->home->constructor_id) ||
-            js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return;
+            f->duplicate_params) return;
     LmdNumericRegion region = {}; region.function = f; region.calls = calls;
     for (AstNode* param = f->ast->params; param; param = param->next) {
         LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(param)->entry);
@@ -6429,7 +6440,7 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
     // generic callable guards do not prove a class method's layout or a scalar return ABI.
     if (recursive && ((!f->native && !(guarded_method && f->home)) || recursive > 1)) return false;
     // duplicate formals need the ordinary parameter installation order.
-    if (js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return false;
+    if (f->duplicate_params) return false;
     int locals = 0;
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
@@ -6469,7 +6480,7 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
 static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const LmdInlineBody& body,
         AstNode* arguments, LmdValue* values, int count, MIR_label_t fallback, bool* guarded) {
     LmdFunction* f = frame.function;
-    if (f->lexical_receiver) {
+    if (f->lexical_receiver && !frame.receiver_cell) {
         MIR_reg_t env = em_load_at(&c->em, frame.self, offsetof(Function, closure_env), MIR_T_I64, "inline_env");
         frame.receiver_cell = em_load_at(&c->em, env, 0, MIR_T_I64, "inline_receiver_cell");
         root_value(c, frame.receiver_cell, JIT_VALUE_BOXED_ITEM);
@@ -6564,7 +6575,103 @@ static LmdValue capture_member_callee(LmdCompiler* c, AstNode* member, AstNode* 
     *ref = {}; ref->owner = boxed(c, receiver);
     return boxed(c, callee);
 }
+static bool synchronous_callback_consumer(MvpLmdProgram* p, LmdFunction* f, LmdBinding** parameter) {
+    AstNode* formal = f->ast->params;
+    if (!formal || formal->next || f->complex_params || f->arguments_binding || f->eval_environment ||
+            f->ast->is_generator || f->ast->is_async) return false;
+    LmdBinding* b = binding(p, js_ast_parameter_binding_identifier(formal)->entry);
+    if (!b || b->writes || b->captured || b->external) return false;
+    AstIndex* index = &p->frontend->ast_index;
+    uint32_t count = 0, calls = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index,
+        ast_index_find_binding_entry(index, b->entry), &count);
+    for (uint32_t i = 0; i < count; i++) {
+        AstNode* use = index->nodes[uses[i]];
+        if (use == formal || use == (AstNode*)js_ast_parameter_binding_identifier(formal)) continue;
+        AstNode* parent = ast_index_parent(index, use);
+        if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return false;
+        AstCallNode* call = (AstCallNode*)parent;
+        if (call->callee != use || call->optional || call->interp_has_spread_args ||
+                index->owner_functions[uses[i]] != index->owner_functions[ast_index_find(index, f->ast)])
+            return false;
+        calls++;
+    }
+    *parameter = b;
+    return calls != 0;
+}
+static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured);
+static bool inline_literal_callback(LmdCompiler* c, AstCallNode* n, LmdValue callee,
+        const LmdReference& method, LmdValue* result) {
+    AstNode* argument = n->arguments;
+    if (c->inlining || !c->function->id || !method.spelling || !argument || argument->next ||
+            argument->node_type != AST_NODE_ARROW_FUNC || n->interp_has_spread_args) return false;
+    LmdFunction* callback = function(c->program, argument);
+    if (!callback || callback->parent != c->function || callback->lexical_super ||
+            callback->ast->is_async || callback->ast->is_generator ||
+            (callback->lexical_receiver && !c->receiver_cell)) return false;
+    LmdInlineBody callback_body = {};
+    if (!inline_body(c, callback, &callback_body, true)) return false;
+    LmdFunction* consumer = NULL;
+    LmdBinding* parameter = NULL;
+    LmdInlineBody body = {};
+    for (int i = 1; i < c->program->functions->length; i++) {
+        LmdFunction* candidate = (LmdFunction*)c->program->functions->data[i];
+        if (!named(method_candidate_name(c->program, candidate), method.spelling->chars) ||
+                !synchronous_callback_consumer(c->program, candidate, &parameter) ||
+                !inline_body(c, candidate, &body, true)) continue;
+        // one proved consumer per site; homonymous wrappers keep the ordinary miss path.
+        consumer = candidate; break;
+    }
+    if (!consumer ||
+            c->method_inline_nodes + body.nodes + callback_body.nodes > 768) return false;
+    c->method_inline_nodes += body.nodes + callback_body.nodes;
+    MIR_label_t slow = label(c), done = label(c);
+    MIR_reg_t joined = em_new_reg(&c->em, "callback_consumer_result", MIR_T_I64);
+    // the method Get precedes the literal argument. No argument effects are replayed
+    // on a miss; only the unobservable, nonescaping callback allocation is deferred.
+    branch(c, MIR_BNE, slow, reg(c, tag(c, callee)), integer(c, LMD_TYPE_FUNC));
+    branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+        offsetof(Function, entry_abi), MIR_T_U8, "callback_consumer_abi")), integer(c, FN_ENTRY_ABI_MVP_LMD));
+    branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+        offsetof(Function, ptr), MIR_T_I64, "callback_consumer_entry")), MIR_new_ref_op(c->em.ctx, consumer->forward));
+    MvpLmdCallable marker = {};
+    marker.requires_runtime_context = true;
+    branch(c, MIR_BEQ, slow, reg(c, op(c, MIR_AND, reg(c, em_load_at(&c->em, callee.reg,
+        offsetof(Function, flags), MIR_T_U32, "callback_consumer_flags")), integer(c, marker.flags))), integer(c, 0));
+    branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+        offsetof(Function, runtime_context), MIR_T_I64, "callback_consumer_context")), reg(c, c->em.frame.runtime));
+    branch(c, MIR_BNE, slow, reg(c, em_load_at(&c->em, callee.reg,
+        (char*)&marker.program - (char*)&marker, MIR_T_I64, "callback_consumer_program")), reg(c, c->unit));
+    MIR_reg_t receiver = method.receiver ? method.receiver : method.owner.reg;
+    em_guard_container(&c->em, receiver, LMD_TYPE_MAP, slow);
+    LmdInlineFrame frame = {}; frame.function = consumer; frame.self = callee.reg; frame.receiver = receiver;
+    frame.callback_binding = parameter; frame.callback = callback; frame.callback_body = &callback_body;
+    frame.callback_receiver_cell = c->receiver_cell;
+    LmdValue placeholder = boxed(c, constant(c, ITEM_JS_UNDEFINED), K_FUNCTION);
+    bool guarded = false;
+    LmdValue inlined = inline_call_body(c, frame, body, NULL, &placeholder, 1, slow, &guarded);
+    move(c, joined, reg(c, box(c, inlined).reg)); jump(c, done);
+    put_label(c, slow);
+    LmdValue materialized = new_function(c, callback);
+    LmdCallCapture capture = {callee, &materialized, NULL, true}; capture.receiver = method.owner;
+    if (method.receiver) capture.receiver = boxed(c, method.receiver);
+    move(c, joined, reg(c, box(c, call(c, n, &capture)).reg));
+    put_label(c, done); *result = boxed(c, joined); return true;
+}
 static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = NULL) {
+    if (!captured && c->inlining && n->callee->node_type == AST_NODE_IDENT) {
+        LmdBinding* binding = identifier_binding(c->program, (AstIdentNode*)n->callee);
+        for (LmdInlineFrame* consumer = c->inlining; consumer; consumer = consumer->parent) {
+            if (consumer->callback_binding != binding || !consumer->callback) continue;
+            LmdValue* values = call_arguments(c, n, false);
+            LmdInlineFrame frame = {}; frame.parent = c->inlining; frame.function = consumer->callback;
+            frame.receiver_cell = consumer->callback_receiver_cell;
+            bool guarded = false; MIR_label_t done = label(c);
+            LmdValue result = inline_call_body(c, frame, *consumer->callback_body, n->arguments,
+                values, ast_linked_node_count(n->arguments), done, &guarded);
+            put_label(c, done); mem_free(values); return result;
+        }
+    }
     // the TS language intrinsic shares its existing helper and respects source bindings.
     if (c->program->typescript && !captured && !n->optional &&
             n->callee->node_type == AST_NODE_IDENT) {
@@ -6917,6 +7024,9 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         branch(c, MIR_BEQ, c->optional_exit, reg(c, callee.reg), integer(c, ITEM_NULL));
         branch(c, MIR_BEQ, c->optional_exit, reg(c, callee.reg), integer(c, ITEM_JS_UNDEFINED));
     }
+    LmdValue callback_result = {};
+    if (!captured && member && inline_literal_callback(c, n, callee, method, &callback_result))
+        return callback_result;
     int count = ast_linked_node_count(n->arguments);
     bool typed_fill = !compact_call && member && semantic(method.owner) == K_TYPED_ARRAY && method.key_known && method.index == -4;
     unsigned receiver = semantic(method.owner);
@@ -9890,6 +10000,15 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
     // reservation/stack failure has no frame to unwind and allocates nothing.
     emit_return(&c, true);
     em_finalize_function_metadata(&c.em);
+    if (p->frontend->pass_timing.enabled) {
+        // correlate the shared MIR telemetry/address map with immutable source spans.
+        String* name = f->ast ? f->ast->name : NULL;
+        log_notice("js-mvp-function: function=%s name=%.*s start=%u end=%u instructions=%u roots=%u homes=%u",
+            f->name, name ? (int)name->len : 0, name ? name->chars : "",
+            f->ast ? f->ast->source_span.start_byte : 0, f->ast ? f->ast->source_span.end_byte : 0,
+            c.em.last_function.mir_instruction_count, c.em.last_function.root_slot_count,
+            c.em.last_function.scalar_home_count);
+    }
     MIR_finish_func(p->mir);
     em_frame_dispose(&c.em);
     return !p->diagnostic[0];
@@ -10022,8 +10141,7 @@ extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
         p->receiver_abi ? sizeof(MvpLmdCallable) : sizeof(Function), LMD_TYPE_FUNC);
     if (!value) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     function_init_abi(value, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
-    JsAstParameterFacts parameters = js_ast_collect_parameter_facts(f->ast->params);
-    value->arity = (uint8_t)(parameters.formal_length < 0 ? parameters.parameter_count : parameters.formal_length);
+    value->arity = f->formal_length;
     value->ptr = (fn_ptr)f->address;
     if (f->ast->is_generator || f->ast->is_async) {
         ((MvpLmdNativeCallable*)value)->state = f->address;
@@ -10034,18 +10152,10 @@ extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
     if (p->receiver_abi) {
         MvpLmdCallable* callable = (MvpLmdCallable*)value;
         callable->requires_runtime_context = true; callable->program = p; callable->home = f->home;
-        if (f->object_home || f->lexical_super)
-            callable->home_slot = function_capture_count(f) + 1;
-        AstNode* parent = ast_index_parent(&p->frontend->ast_index, (AstNode*)f->ast);
-        callable->non_constructible = f->object_home || f->ast->node_type == AST_NODE_ARROW_FUNC || f->ast->is_generator || f->ast->is_async ||
-            (parent && parent->node_type == AST_NODE_PROPERTY && (((AstPropertyNode*)parent)->method ||
-                ((AstPropertyNode*)parent)->is_getter || ((AstPropertyNode*)parent)->is_setter));
-        if (f->home) {
-            AstMethodNode* method = (AstMethodNode*)f->ast;
-            callable->constructor = method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR;
-            callable->static_method = method->static_method;
-            callable->non_constructible = !callable->constructor;
-        }
+        callable->home_slot = f->home_slot;
+        callable->non_constructible = f->non_constructible;
+        callable->constructor = f->constructor;
+        callable->static_method = f->static_method;
     }
     return Item{.item = (uint64_t)value};
 }
@@ -11091,6 +11201,35 @@ static void reset_representation_facts(MvpLmdProgram* p) {
         f->returns = 0; f->range = {}; f->range_changes = 0;
     }
 }
+static bool block_initializer_dominates(MvpLmdProgram* p, LmdBinding* b) {
+    if (!b->initializer || b->external || b->captured || b->implicit_write ||
+            b->entry->is_parameter || b->entry->is_lexical || !b->owner->ast ||
+            b->owner->eval_environment || b->owner->ast->is_generator || b->owner->ast->is_async)
+        return false;
+    AstIndex* index = &p->frontend->ast_index;
+    AstNode* declarator = ast_index_parent(index, b->initializer);
+    AstNode* declaration = ast_index_parent(index, declarator);
+    AstNode* block = ast_index_parent(index, declaration);
+    if (!declarator || declarator->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !declaration || declaration->node_type != AST_NODE_VAR_STAM ||
+            !block || block->node_type != AST_NODE_BLOCK) return false;
+    AstNodeId block_id = ast_index_find(index, block);
+    AstNodeId declaration_id = ast_index_find(index, declaration);
+    AstNodeId after = ast_index_subtree_end(index, declaration_id);
+    uint32_t count = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index,
+        ast_index_find_binding_entry(index, b->entry), &count);
+    if (!count) return false;
+    // D8.2.4: reuse the shared binding-use index. Every observation must follow
+    // this complete statement in the same block activation, including loop reentry.
+    for (uint32_t i = 0; i < count; i++) {
+        AstNodeId id = uses[i];
+        if (index->nodes[id] == declarator || index->nodes[id] == ((AstDeclaratorNode*)declarator)->id) continue;
+        if (id < after || !ast_index_node_descends(index, id, block_id) ||
+                index->owner_functions[id] != index->owner_functions[declaration_id]) return false;
+    }
+    return true;
+}
 static int representation_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     p->typed_named_kinds = K_UNDEFINED;
@@ -11331,6 +11470,9 @@ static int representation_pass(void* opaque) {
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
         if (!b->kinds) b->kinds = K_ANY;
+        if (!b->dominated && (b->kinds == K_NUMBER || b->kinds == K_BOOL ||
+                b->kinds == (K_NUMBER | K_UNDEFINED)))
+            b->dominated = block_initializer_dominates(p, b);
         b->native = !b->external && (b->kinds == K_NUMBER || b->kinds == K_BOOL ||
             (!b->entry->is_parameter && b->kinds == (K_NUMBER | K_UNDEFINED))) &&
             (b->entry->is_parameter ? b->owner->closed_calls : b->initializer && b->dominated);
@@ -12200,7 +12342,30 @@ static bool property_key_may_name(String* affix, bool prefix, const char* name, 
     for (; i < digits; i++) if (number[i] < '0' || number[i] > '9') return false;
     return true;
 }
-static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** path, int depth, unsigned primitive) {
+static bool primitive_property_key_body(MvpLmdProgram* p, AstNode* node, AstNode** path,
+        int depth, unsigned primitive, uint8_t* visited);
+static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** path,
+        int depth, unsigned primitive, uint8_t* visited) {
+    if (!node) return true;
+    if (!visited) {
+        auto* states = (uint8_t*)mem_calloc(p->frontend->ast_index.count, sizeof(uint8_t), MEM_CAT_TEMP);
+        if (!states) return false;
+        bool result = primitive_property_key(p, node, path, depth, primitive, states);
+        mem_free(states); return result;
+    }
+    AstNodeId id = ast_index_find(&p->frontend->ast_index, node);
+    if (id == AST_NODE_ID_INVALID) return false;
+    // all recursive obligations are conjunctive: a failed descendant rejects the
+    // whole query. Reuse completed/active nodes only within this one induction,
+    // never across roots whose assumptions or representation facts may differ.
+    if (visited[id]) return visited[id] != 3;
+    visited[id] = 1;
+    bool result = primitive_property_key_body(p, node, path, depth, primitive, visited);
+    visited[id] = result ? 2 : 3;
+    return result;
+}
+static bool primitive_property_key_body(MvpLmdProgram* p, AstNode* node, AstNode** path,
+        int depth, unsigned primitive, uint8_t* visited) {
     if (!node) return true;
     unsigned known = kind(p, node);
     if (known && !(known & ~primitive)) return true;
@@ -12226,7 +12391,7 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
     if (depth == 48) return false;
     for (int i = 0; i < depth; i++) if (path[i] == node) return true;
     path[depth++] = node;
-    auto safe = [&](AstNode* value) { return primitive_property_key(p, value, path, depth, primitive); };
+    auto safe = [&](AstNode* value) { return primitive_property_key(p, value, path, depth, primitive, visited); };
     if (node->node_type == AST_NODE_BINARY) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         AstNode* literal = binary->left;
@@ -12951,8 +13116,32 @@ static StrBuf* mvp_lmd_code_image(MIR_context_t mir) {
     mvp_lmd_code_write_failed = previous_failed;
     return image;
 }
+static void timed_codegen_interface(MIR_context_t ctx, MIR_item_t item) {
+    uint64_t before = time_now_us();
+    MIR_set_gen_interface(ctx, item);
+    log_notice("js-mvp-codegen: function=%s us=%llu", item ? item->u.func->name : "<link-finish>",
+        (unsigned long long)(time_now_us() - before));
+}
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
+    bool timing = p->frontend->pass_timing.enabled;
+    uint64_t started = timing ? time_now_us() : 0;
+    // creation facts depend on the definition, not the fresh closure's identity or realm.
+    for (int i = 1; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        AstNode* parent = ast_index_parent(&p->frontend->ast_index, (AstNode*)f->ast);
+        f->home_slot = f->object_home || f->lexical_super ? function_capture_count(f) + 1 : 0;
+        f->non_constructible = f->object_home || f->ast->node_type == AST_NODE_ARROW_FUNC ||
+            f->ast->is_generator || f->ast->is_async ||
+            (parent && parent->node_type == AST_NODE_PROPERTY && (((AstPropertyNode*)parent)->method ||
+                ((AstPropertyNode*)parent)->is_getter || ((AstPropertyNode*)parent)->is_setter));
+        if (f->home) {
+            AstMethodNode* method = (AstMethodNode*)f->ast;
+            f->constructor = method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR;
+            f->static_method = method->static_method;
+            f->non_constructible = !f->constructor;
+        }
+    }
     p->global_bindings_exposed = global_bindings_are_exposed(p);
     plan_fixed_global_bindings(p);
     for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
@@ -13137,6 +13326,7 @@ static int lower_pass(void* opaque) {
         if (named(name, "toString") || named(name, "valueOf") || named(name, "join")) p->coercion_callbacks = true;
     }
     p->import_cache = em_import_cache_new(32);
+    uint64_t planned = timing ? time_now_us() : 0;
     p->mir = MIR_init(); p->module = MIR_new_module(p->mir, "js_mvp_lmd");
     MIR_type_t result_type = MIR_T_I64;
     int entry_arity = p->receiver_abi ? 7 : 5;
@@ -13184,7 +13374,14 @@ static int lower_pass(void* opaque) {
         }
     }
     bool ok = true;
-    for (int i = 0; i < p->functions->length && ok; i++) ok = compile_function(p, (LmdFunction*)p->functions->data[i]);
+    for (int i = 0; i < p->functions->length && ok; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        uint64_t before = timing ? time_now_us() : 0;
+        ok = compile_function(p, f);
+        if (timing) log_notice("js-mvp-emit: function=%s us=%llu", f->name,
+            (unsigned long long)(time_now_us() - before));
+    }
+    uint64_t emitted = timing ? time_now_us() : 0;
     MIR_finish_module(p->mir); mir_dump_finalized(p->mir, NULL, false);
     if (!ok) return false;
     StrBuf* image = p->relocatable ? mvp_lmd_code_image(p->mir) : NULL;
@@ -13208,10 +13405,19 @@ static int lower_pass(void* opaque) {
     }
     if (cached) log_debug("js-mvp-code-cache: realm metadata changed emitted MIR; compile fresh code");
     MIR_load_module(p->mir, p->module); MIR_gen_init(p->mir); p->linked = true;
-    MIR_gen_set_optimize_level(p->mir, 2); MIR_link(p->mir, MIR_set_gen_interface, import_resolver);
+    MIR_gen_set_optimize_level(p->mir, 2);
+    // MIR's eager link interface generates code here; later MIR_gen calls only retrieve it.
+    MIR_link(p->mir, timing ? timed_codegen_interface : MIR_set_gen_interface, import_resolver);
+    uint64_t linked = timing ? time_now_us() : 0;
     for (int i = 0; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i]; f->address = MIR_gen(p->mir, f->item);
     }
+    if (timing) log_notice("js-mvp-phases: parse_us=%llu bind_us=%llu validate_us=%llu plan_us=%llu emit_us=%llu finalize_link_codegen_us=%llu address_us=%llu",
+        (unsigned long long)p->frontend->pass_timing.parse_build_us,
+        (unsigned long long)p->frontend->pass_timing.bind_us,
+        (unsigned long long)p->frontend->pass_timing.validate_us,
+        (unsigned long long)(planned - started), (unsigned long long)(emitted - planned),
+        (unsigned long long)(linked - emitted), (unsigned long long)(time_now_us() - linked));
     jit_log_code_addresses(p->mir);
     if (image) {
         auto* code = (MvpLmdCode*)mem_calloc(1, sizeof(MvpLmdCode), MEM_CAT_EVAL);
