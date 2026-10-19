@@ -154,6 +154,54 @@ results are in `temp/pdf_repair_release_after_results/`, the Radiant summary in
 controls in `temp/pdf_repair_bootstrap_isolated.json`. Qualification covers
 macOS; sanitizer and other-platform runs remain separate work.
 
+## PDF import roundtrip repair (2026-10-19)
+
+The recursive source-PDF roundtrip gate exposed five export failures. Linearized
+PDF intake now continues past the first-page trailer/footer, and direct stream
+lengths preserve binary CR/LF and embedded `endstream` bytes. Native font export
+uses the least restrictive legacy OS/2 embedding permission while retaining
+the original flags in the embedded face.
+
+Native image materialization resolves indirect Indexed palettes, packed and
+16-bit samples, decode ranges, stencil polarity and Separation/DeviceN tint
+alternates, including Lab with its reference white. TIFF horizontal prediction
+operates on samples; PNG Paeth retains the entire previous row. JPEG2000 uses
+OpenJPEG, CCITT reuses the bundled TIFF decoder, and a bounded T.88 decoder
+handles page information and generic JBIG2 regions. Symbol dictionaries, text
+and refinement JBIG2 segments, general calculator procedures and full ICC
+profile conversion remain outside this implementation. Unknown operators or
+segment kinds fail materialization rather than inventing replacement pixels.
+
+PDF generation remains in the Lambda package under **S2.6.6v3**; these native
+helpers expose decoded input resources, without a PDF-writer escape hatch.
+OpenJPEG is included in the platform dependency scripts and Linux container;
+Linux obtains the installed header directory through `pkg-config`.
+
+The five original roundtrip cases pass with unchanged page/box/rotation,
+cross-reference/stream and independent all-page raster checks. All 33 native
+PDF parser tests and 19 font tests pass. All five exports also pass
+AddressSanitizer with stack-use-after-return checks enabled, followed by
+independent validation of their 113 generated pages.
+The two Ghent JBIG2 image decodes match independently extracted Poppler pixels.
+Evidence: `temp/pdf_fix/five6_results/`, `input_results6.log`, `font_all6.log`
+and `*_asan.{out,err}` under `temp/pdf_fix/`.
+
+All 34 distinct roundtrip cases pass. The PDF aggregate was interrupted in four
+sandbox-stalled WebGL workers; its raw report records 407 passes and 33 failures
+(one visual comparison and four unfinished eight-case batches). The 28 other
+cases from those batches pass on recovery, and all four WebGL modes pass with
+native graphics/IPC access. Combined completed coverage is 439/440. The remaining
+ReadMes visual baseline was captured from `Page N not available` placeholders:
+the old host still passes it with blank pages, while the repaired parser renders
+actual page content. Its four old scores and the baseline file remain unchanged;
+they do not establish the fidelity of the newly available content.
+
+The input baseline passes 2,112/2,112. The remaining input-suite selection reports
+4,062/4,084, with 22 unrelated wiki-markup and AsciiDoc/man/Typst prose failures.
+Generator self-tests, dependency-script syntax and `git diff --check` pass.
+`temp/pdf_fix/qualification.json` records raw reports, recovery provenance,
+source/executable hashes, the unchanged visual baseline and remaining failures.
+
 ## Remaining limits
 
 Complete static fonts are embedded; static-font subsetting is a later size

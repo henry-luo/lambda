@@ -3670,6 +3670,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef LAMBDA_HEADLESS
     // Handle render-batch command (shared UiContext for all renders)
     if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
+        default_render_cmd_to_interp();
         int result = cmd_render_batch(argc - 2, argv + 2);
         return lambda_main_finish(result);
     }

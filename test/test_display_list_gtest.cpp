@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/render.hpp"
+#include "../radiant/render_metrics.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
@@ -95,6 +96,37 @@ TEST_F(DisplayListTest, ClearKeepsReusableScratchRegistered) {
     EXPECT_EQ(dl.size(), 0u);
     EXPECT_EQ(scratch_live_count(&dl.arena), 0u);
     EXPECT_NE(dl.arena.mem_node, nullptr);
+}
+
+TEST_F(DisplayListTest, EmptyArenaTrimPreservesCommandsAndRejectsLivePayloads) {
+    ScratchMark before = scratch_mark(&dl.arena);
+    ASSERT_NE(scratch_alloc(&dl.arena, (size_t)1 << 20), nullptr);
+    scratch_restore(&dl.arena, before);
+    size_t reserved = arena_total_allocated(arena);
+    dl_fill_rect(&dl, 1, 2, 3, 4, test_color(0xff0000ffu));
+    DisplayItem* commands = dl.data();
+    ASSERT_TRUE(dl_trim_empty_arena(&dl));
+    EXPECT_LT(arena_total_allocated(arena), reserved);
+    EXPECT_EQ(dl.data(), commands);
+    EXPECT_EQ(dl[0].fill_rect.color.c, 0xff0000ffu);
+    EXPECT_TRUE(dl_validate(&dl, nullptr));
+    char* live = (char*)scratch_alloc(&dl.arena, (size_t)1 << 20); ASSERT_NE(live, nullptr);
+    live[0] = 42;
+    EXPECT_FALSE(dl_trim_empty_arena(&dl));
+    EXPECT_EQ(live[0], 42);
+}
+
+TEST(DisplayListStorageTest, EmptyArenaTrimPreservesEarlierArenaAllocations) {
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    uint64_t* earlier = (uint64_t*)arena_alloc(arena, sizeof(uint64_t)); ASSERT_NE(earlier, nullptr);
+    *earlier = 123;
+    DisplayList list; dl_init(&list, arena);
+    ScratchMark before = scratch_mark(&list.arena);
+    ASSERT_NE(scratch_alloc(&list.arena, (size_t)1 << 20), nullptr);
+    scratch_restore(&list.arena, before);
+    EXPECT_FALSE(dl_trim_empty_arena(&list));
+    EXPECT_EQ(*earlier, 123u);
+    dl_destroy(&list); arena_destroy(arena);
 }
 
 TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
@@ -319,6 +351,45 @@ TEST_F(DisplayListTest, LinearGradientCopiesStopsAndTracksPathBounds) {
     EXPECT_FLOAT_EQ(item->bounds[3], 12.0f);
 }
 
+TEST_F(DisplayListTest, GradientAndDashBuffersShareAcrossCopiesAndSurviveSourceRetirement) {
+    char token = 0; RdtPath* path = (RdtPath*)&token;
+    test_display_list_stub_set_path_bounds(path, true, 0, 0, 20, 20);
+    RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+    float dashes[] = {2, 3};
+    dl_fill_linear_gradient(&dl, path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    dl_fill_radial_gradient(&dl, path, 10, 10, 10, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    for (unsigned i = 0; i < 2; i++) dl_stroke_path(&dl, path, Color{0xff0000ffu},
+        2 + (float)i, RDT_CAP_BUTT, RDT_JOIN_MITER, dashes, 2, 0, nullptr);
+    ASSERT_EQ(dl.size(), 4u);
+    EXPECT_EQ(dl[0].fill_linear_gradient.stops, dl[1].fill_radial_gradient.stops);
+    EXPECT_EQ(dl[2].stroke_path.dash_array, dl[3].stroke_path.dash_array);
+    DisplayList copied;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(dl_copy_range(&copied, &dl, 0, 3));
+    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_EQ(counters.shared_array_retains, 2u);
+    EXPECT_EQ(copied[0].fill_linear_gradient.stops, dl[0].fill_linear_gradient.stops);
+    EXPECT_EQ(copied[2].stroke_path.dash_array, dl[2].stroke_path.dash_array);
+    stops[0].r = 0; dashes[0] = 99;
+    dl_clear(&dl);
+    EXPECT_EQ(copied[0].fill_linear_gradient.stops[0].r, 255);
+    EXPECT_FLOAT_EQ(copied[2].stroke_path.dash_array[0], 2);
+    EXPECT_TRUE(dl_validate(&copied, nullptr));
+    dl_destroy(&copied);
+}
+
+TEST_F(DisplayListTest, ArrayCheckpointsReleaseTransientValuesAndPreserveEarlierBuffers) {
+    float first[] = {1, 2}, overlay[] = {3, 4};
+    const float* retained = dl_copy_dashes(&dl, first, 2); ASSERT_NE(retained, nullptr);
+    size_t before = dl_shared_array_bytes(&dl);
+    uint64_t checkpoint = dl_shared_array_checkpoint(&dl);
+    ASSERT_NE(dl_copy_dashes(&dl, overlay, 2), nullptr);
+    EXPECT_GT(dl_shared_array_bytes(&dl), before);
+    dl_shared_array_rewind(&dl, checkpoint);
+    EXPECT_EQ(dl_shared_array_bytes(&dl), before);
+    EXPECT_EQ(dl_copy_dashes(&dl, first, 2), retained);
+    EXPECT_FLOAT_EQ(retained[1], 2);
+}
+
 TEST_F(DisplayListTest, RadialGradientCopiesStopsAndTracksTransformedBounds) {
     char path_token = 0;
     RdtPath* path = (RdtPath*)&path_token;
@@ -493,14 +564,14 @@ TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
     EXPECT_FLOAT_EQ(item->bounds[1], 3.0f);
     EXPECT_FLOAT_EQ(item->bounds[2], 7.0f);
     EXPECT_FLOAT_EQ(item->bounds[3], 7.0f);
-    EXPECT_EQ(item->fill_surface_rect.clip_shapes.depth, 1);
-    EXPECT_EQ(item->fill_surface_rect.clip_shapes.type[0], CLIP_SHAPE_POLYGON);
-    ASSERT_NE(item->fill_surface_rect.clip_shapes.polygon_vx[0], nullptr);
-    ASSERT_NE(item->fill_surface_rect.clip_shapes.polygon_vy[0], nullptr);
-    EXPECT_NE(item->fill_surface_rect.clip_shapes.polygon_vx[0], vx);
-    EXPECT_NE(item->fill_surface_rect.clip_shapes.polygon_vy[0], vy);
-    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes.polygon_vx[0][0], 1.0f);
-    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes.polygon_vy[0][0], 4.0f);
+    EXPECT_EQ(item->fill_surface_rect.clip_shapes->depth, 1);
+    EXPECT_EQ(item->fill_surface_rect.clip_shapes->type[0], CLIP_SHAPE_POLYGON);
+    ASSERT_NE(item->fill_surface_rect.clip_shapes->polygon_vx[0], nullptr);
+    ASSERT_NE(item->fill_surface_rect.clip_shapes->polygon_vy[0], nullptr);
+    EXPECT_NE(item->fill_surface_rect.clip_shapes->polygon_vx[0], vx);
+    EXPECT_NE(item->fill_surface_rect.clip_shapes->polygon_vy[0], vy);
+    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes->polygon_vx[0][0], 1.0f);
+    EXPECT_FLOAT_EQ(item->fill_surface_rect.clip_shapes->polygon_vy[0][0], 4.0f);
 }
 
 TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {

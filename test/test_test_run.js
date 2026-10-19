@@ -78,7 +78,8 @@ if (process.argv.includes('--gtest_list_tests')) {
     else process.exit(0);
 }
 const filter = process.argv.find(arg => arg.startsWith('--gtest_filter=Fixture.'));
-const workerCase = filter ? filter.slice('--gtest_filter=Fixture.'.length) : '';
+const workerCases = filter ? filter.slice('--gtest_filter='.length).split(':').map(c => c.slice('Fixture.'.length)) : [];
+const workerCase = workerCases.includes('Case1') ? 'Case1' : workerCases[0] || '';
 const scenario = !workerCase || workerCase === 'Case1' ? requestedScenario : 'pass';
 const output = process.argv.find(arg => arg.startsWith('--gtest_output=json:')).slice('--gtest_output=json:'.length);
 if (process.env.FAKE_SUITE_TRACE_DIR) {
@@ -93,14 +94,21 @@ const data = { tests: scenario === 'empty' ? 0 : 4, failures: 0,
     skipped: scenario === 'skip' ? 1 : 0, args: process.argv.slice(2),
     testsuites: [{ name: 'Fixture', testsuite: [{ name: 'Case', time: '0.001s' }] }] };
 if (workerCase) {
-    if (scenario !== 'empty') data.tests = 1;
-    data.testsuites[0].testsuite[0] = { name: scenario === 'wrong-case' ? 'Other' : workerCase,
-        status: 'RUN', result: scenario === 'skip' ? 'SKIPPED' : 'COMPLETED', time: '0.001s' };
+    if (scenario !== 'empty') data.tests = workerCases.length;
+    data.testsuites[0].testsuite = workerCases.map(c => ({ name: scenario === 'wrong-case' && c === workerCase ? 'Other' : c,
+        status: 'RUN', result: scenario === 'skip' && c === workerCase ? 'SKIPPED' : 'COMPLETED', time: '0.001s' }));
+    if (scenario === 'assertion') {
+        data.failures = 1;
+        data.testsuites[0].testsuite.find(c => c.name === 'Case1').failures = [{ failure: 'deliberate assertion' }];
+    }
+    if (scenario === 'duplicate-case') data.testsuites[0].testsuite[1] = data.testsuites[0].testsuite[0];
+    if (scenario === 'missing-case') data.testsuites[0].testsuite.pop();
+    if (scenario === 'extra-case') { data.tests++; data.testsuites[0].testsuite.push({ name: 'Unassigned', status: 'RUN' }); }
     if (process.env.FAKE_CASE_TRACE_DIR) {
         const trace = { start: Date.now(), cap: process.env.LAMBDA_TEST_MAX_CONCURRENT,
-            cwd: process.cwd(), args: process.argv.slice(2) };
-        process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_CASE_TRACE_DIR, workerCase + '.json'),
-            JSON.stringify({ ...trace, end: Date.now() })));
+            cwd: process.cwd(), args: process.argv.slice(2), pid: process.pid, cases: workerCases };
+        process.on('exit', () => { for (const c of workerCases)
+            fs.writeFileSync(path.join(process.env.FAKE_CASE_TRACE_DIR, c + '.json'), JSON.stringify({ ...trace, end: Date.now() })); });
     }
     if (process.env.FAKE_VERIFY_WORKSPACE) {
         const scratch = path.join('temp', 'shared-name.txt');
@@ -141,9 +149,10 @@ if (scenario === 'log-io') {
 else if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
 else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
-else process.exit(scenario === 'exit' ? 7 : 0);
+else process.exit(scenario === 'exit' ? 7 : scenario === 'assertion' ? 1 : 0);
 `;
-for (const test of inventory.filter(t => t.buildTarget)) {
+const pdfInventory = JSON.parse(invoke(['--target=input', '--include-test=test_pdf_render_visual_gtest', '--list']).stdout);
+for (const test of [...inventory, ...pdfInventory].filter(t => t.buildTarget)) {
     fs.writeFileSync(path.join(fixture, test.buildTarget + '.exe'), fake, { mode: 0o755 });
 }
 
@@ -169,7 +178,9 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
     if (scenario === 'missing') fs.unlinkSync(executable);
     let child;
     try {
-        child = invoke(['--target=radiant', '--category=baseline', ...(parallel ? [] : ['--sequential']),
+        const pdf = names.includes('test_pdf_render_visual_gtest');
+        child = invoke([pdf ? '--target=input' : '--target=radiant', '--category=baseline',
+            ...(pdf ? ['--include-test=test_pdf_render_visual_gtest'] : []), ...(parallel ? [] : ['--sequential']),
             '--exclude-test=' + excluded.join(','), ...extra], {
             LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: output,
             LAMBDA_TEST_IDLE_TIMEOUT: '1', FAKE_TEST: names[0], FAKE_SCENARIO: scenario,
@@ -379,6 +390,52 @@ try {
             assert.ok(peak > 1 && peak <= limit, `peak workers: ${peak}`);
         });
     }
+    check('PDF case batches reuse bounded processes and retain discovery order', () => {
+        const trace = path.join(fixture, 'trace-pdf-batches'); fs.mkdirSync(trace);
+        const { child, summary, output } = runSelected(['test_pdf_render_visual_gtest'], 'parallel', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '2', FAKE_CASE_TRACE_DIR: trace,
+        }, true);
+        assert.equal(child.status, 0, child.stderr);
+        assert.equal(summary.total_tests, 4); assert.equal(summary.total_passed, 4);
+        const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        assert.equal(new Set(rows.map(row => row.pid)).size, 2);
+        assert.ok(rows.every(row => row.cap === '1' && row.cases.length === 2));
+        const data = JSON.parse(fs.readFileSync(path.join(output, 'test_pdf_render_visual_gtest_results.json'), 'utf8'));
+        assert.deepEqual(data.testsuites[0].testsuite.map(tc => tc.name), ['Case0', 'Case1', 'Case2', 'Case3']);
+    });
+    for (const scenario of ['assertion', 'skip', 'exit', 'crash', 'no-json', 'invalid-json', 'empty',
+        'wrong-case', 'duplicate-case', 'missing-case', 'extra-case', 'timeout']) {
+        check(`PDF batches preserve individual results and detect ${scenario}`, () => {
+            const { child, summary } = runSelected(['test_pdf_render_visual_gtest'], scenario, [], {
+                LAMBDA_TEST_MAX_CONCURRENT: '2',
+            }, true);
+            assert.equal(child.status, scenario === 'skip' ? 0 : 1, child.stderr);
+            assert.equal(summary.total_tests, 4);
+            assert.equal(summary.total_passed, ['assertion', 'skip'].includes(scenario) ? 3 : 2);
+            assert.equal(summary.total_failed, scenario === 'skip' ? 0 : scenario === 'assertion' ? 1 : 2);
+            assert.equal(summary.total_skipped, scenario === 'skip' ? 1 : 0);
+        });
+    }
+    check('PDF batches can restore per-case process isolation', () => {
+        const trace = path.join(fixture, 'trace-pdf-individual'); fs.mkdirSync(trace);
+        const { child, summary } = runSelected(['test_pdf_render_visual_gtest'], 'parallel', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '2', LAMBDA_PDF_TEST_BATCH_SIZE: '1', FAKE_CASE_TRACE_DIR: trace,
+        }, true);
+        assert.equal(child.status, 0, child.stderr); assert.equal(summary.total_passed, 4);
+        const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        assert.equal(new Set(rows.map(row => row.pid)).size, 4);
+    });
+    check('PDF batches keep the configured 16-case limit when more work is queued', () => {
+        const trace = path.join(fixture, 'trace-pdf-batch-limit'); fs.mkdirSync(trace);
+        const { child, summary } = runSelected(['test_pdf_render_visual_gtest'], 'parallel', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '2', FAKE_CASE_TRACE_DIR: trace,
+            FAKE_CASE_NAMES: JSON.stringify(Array.from({ length: 39 }, (_, i) => `Batch${i}`)),
+        }, true);
+        assert.equal(child.status, 0, child.stderr); assert.equal(summary.total_passed, 39);
+        const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        assert.equal(rows.length, 39); assert.equal(new Set(rows.map(row => row.pid)).size, 3);
+        assert.ok(rows.every(row => row.cases.length <= 16));
+    });
     for (const scenario of ['exit', 'crash', 'no-json', 'invalid-json', 'empty', 'wrong-case', 'timeout']) {
         check(`A ${scenario} case worker fails its own case and preserves other cases`, () => {
             const { child, summary } = runSelected(['test_radiant_view_gtest'], scenario, [], {}, true);

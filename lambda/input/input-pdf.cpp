@@ -4,12 +4,14 @@
 #include "input-postscript.hpp"
 #include "pdf_decompress.h"
 #include "../io/mark_builder.hpp"
+#include "../core/mark_reader.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../io/pdf_content_stream.h"
 #include "lib/log.h"
 #include "lib/str.h"
 #include <stdlib.h>
+#include <math.h>
 #include "../../lib/string.h"
 
 using namespace lambda;
@@ -819,17 +821,33 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     size_t max_search = bytes_remaining;
     // candidate scan (memchr + memcmp, binary-safe like the strncmp-at-every-
     // byte loop it replaces: a match needs all nine bytes, so NULs never match)
-    size_t stream_at = str_find(search_start, max_search, "endstream", 9);
-    if (stream_at != STR_NPOS) end_stream = search_start + stream_at;
+    size_t stream_at = STR_NPOS, data_length = 0;
+    ItemReader declared = MapReader(dict).get("Length");
+    double declared_length = declared.isFloat() ? declared.asFloat() : declared.isInt() ? (double)declared.asInt() : -1;
+    if (isfinite(declared_length) && declared_length >= 0 && floor(declared_length) == declared_length &&
+            declared_length <= (double)max_search) {
+        size_t offset = (size_t)declared_length;
+        const char* marker = search_start + offset;
+        if (marker < ctx.source_end() && *marker == '\r') marker++;
+        if (marker < ctx.source_end() && *marker == '\n') marker++;
+        if ((size_t)(ctx.source_end() - marker) >= 9 && !memcmp(marker, "endstream", 9)) {
+            end_stream = marker; stream_at = (size_t)(marker - search_start); data_length = offset;
+        }
+    }
+    if (!end_stream) {
+        stream_at = str_find(search_start, max_search, "endstream", 9);
+        if (stream_at != STR_NPOS) {
+            end_stream = search_start + stream_at;
+            data_length = stream_at;
+            // an unresolved indirect Length still permits the stream's separator EOL.
+            if (data_length && search_start[data_length - 1] == '\n') data_length--;
+            if (data_length && search_start[data_length - 1] == '\r') data_length--;
+        }
+    }
     
     if (!end_stream) return {.item = ITEM_ERROR};
 
-    // keep the bounded search offset in the size_t lane used by StrView.
-    size_t data_length = stream_at;
-    // Trim trailing whitespace from data
-    while (data_length > 0 && ((*pdf)[data_length-1] == '\r' || (*pdf)[data_length-1] == '\n')) {
-        data_length--;
-    }
+    // Length counts binary bytes, including trailing CR/LF and embedded endstream text.
     // Limit stream size to 10MB for safety (most PDF streams are well under 1MB)
     if (data_length > 10 * 1024 * 1024) {
         data_length = 10 * 1024 * 1024;
@@ -1235,7 +1253,16 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             // Check for trailer
             if (strncmp(pdf, "trailer", 7) == 0) {
                 trailer = parse_pdf_trailer(ctx, &pdf);
-                break; // trailer usually means we're at the end
+                // linearized files place a first-page trailer before the remaining objects.
+                continue;
+            }
+
+            if (strncmp(pdf, "startxref", 9) == 0) {
+                pdf += 9;
+                skip_pdf_whitespace_and_comments(&pdf);
+                while (pdf < pdf_file_end && str_char_is_digit(*pdf)) pdf++;
+                // the following EOF comment can precede more objects in a linearized revision.
+                continue;
             }
 
             // Try to parse indirect object first (e.g., "1 0 obj")

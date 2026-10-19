@@ -210,7 +210,7 @@ Coordination notes: P0.3 lands **before** `Radiant_Impl_Clean_Up.md` P5 (paint d
 | `picture_cache_eviction` | P6.2 | ✅ added | 70 unique SVG data pictures exceed the 64-entry cache while early/late recorded handles remain visible |
 | long-session font instrumentation | P6.4 | ✅ added | 200 growth/reset cycles keep glyph arena reserved/used bytes at the configured plateau |
 
-CI addition (cheap, catches regressions of the whole campaign): ✅ `.github/workflows/run-tests-linux.sh` runs a real layout subcommand with `--mem-dump=./temp/ci_mem_snapshot.json` and fails unless `count == 0` and `nodes == []`. `lambda_main_finish` now owns the snapshot hook, so early-returning subcommands cannot bypass it. The verified local snapshot is `{"count":0,"total_reserved":0,"total_in_use":0,"nodes":[]}`.
+Former CI regression check (GitHub Actions wiring removed 2026-10-19): `.github/workflows/run-tests-linux.sh` ran a real layout subcommand with `--mem-dump=./temp/ci_mem_snapshot.json` and failed unless `count == 0` and `nodes == []`. `lambda_main_finish` owns the snapshot hook, so early-returning subcommands cannot bypass it. The verified local snapshot is `{"count":0,"total_reserved":0,"total_in_use":0,"nodes":[]}`. D1.10's enforcement requirement remains; no replacement CI configuration is checked into this repository.
 
 ---
 

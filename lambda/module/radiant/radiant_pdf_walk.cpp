@@ -8,6 +8,7 @@
 #include "../../../lib/tagged.hpp"
 #include "../../runtime/binary_schema.hpp"
 #include "../../runtime/heap_api.h"
+#include "../../runtime/context_capsule.h"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/lambda-number-types.hpp"
 #include "../../core/mark_reader.hpp"
@@ -30,6 +31,8 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/log.h"
 #include "../../../lib/math_checked.hpp"
+#include "../../../lib/lru_cache.h"
+#include "../../../lib/hashmap.h"
 #include <limits.h>
 #include <math.h>
 
@@ -739,17 +742,95 @@ RADIANT_C_API Item fn_radiant_pdf_value(Item value) {
     return pdf_encode_object(value);
 }
 
+struct PdfDeflateEntry {
+    uint8_t* source;
+    size_t length;
+    NodeZlibBytes encoded;
+};
+
+struct PdfDeflateCache { LruCache* entries; };
+
+static void pdf_deflate_entry_free(const char*, void* value, size_t, void*) {
+    PdfDeflateEntry* entry = (PdfDeflateEntry*)value;
+    mem_free(entry->source);
+    node_zlib_bytes_free(&entry->encoded);
+    mem_free(entry);
+}
+
+static const size_t PDF_DEFLATE_CACHE_BYTES = 8 * 1024 * 1024;
+static const uint32_t PDF_DEFLATE_CACHE_OWNER = 0x52504446; // RPDF
+
+static void* pdf_deflate_cache_create(EvalContext*) {
+    PdfDeflateCache* cache = (PdfDeflateCache*)mem_calloc(1, sizeof(PdfDeflateCache), MEM_CAT_RENDER);
+    if (!cache) return nullptr;
+    LruCacheConfig config = {};
+    config.max_entries = 64; config.max_bytes = PDF_DEFLATE_CACHE_BYTES;
+    config.on_evict = pdf_deflate_entry_free;
+    cache->entries = lru_cache_new(&config);
+    if (!cache->entries) { mem_free(cache); return nullptr; }
+    return cache;
+}
+
+static void pdf_deflate_cache_destroy(void* value) {
+    PdfDeflateCache* cache = (PdfDeflateCache*)value;
+    lru_cache_free(cache->entries);
+    mem_free(cache);
+}
+
+static PdfDeflateCache* pdf_deflate_cache() {
+    if (!context) return nullptr;
+    PdfDeflateCache* cache = (PdfDeflateCache*)context_capsule_extension(context, PDF_DEFLATE_CACHE_OWNER, 0);
+    if (cache) return cache;
+    static const ContextCapsuleOps operations = {
+        "radiant.pdf_deflate", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(PdfDeflateCache),
+        pdf_deflate_cache_create, nullptr, pdf_deflate_cache_destroy
+    };
+    cache = (PdfDeflateCache*)pdf_deflate_cache_create(context);
+    if (cache && !context_capsule_extension_install(context, PDF_DEFLATE_CACHE_OWNER, 0, cache, &operations)) {
+        pdf_deflate_cache_destroy(cache); return nullptr;
+    }
+    return cache;
+}
+
 RADIANT_C_API Item fn_radiant_pdf_deflate(Item bytes) {
-    RootFrame roots(1);
-    Rooted<Item> source(roots, bytes);
+    RootFrame roots(2);
+    Rooted<Item> source(roots, bytes), retained(roots, ItemNull);
     if (get_type_id(source.get()) != LMD_TYPE_BINARY || source.get().get_len() > INT_MAX)
         return radiant_pdf_error("PDF compression requires a supported binary extent");
+    size_t length = (size_t)source.get().get_len();
+    PdfDeflateCache* cache = length <= PDF_DEFLATE_CACHE_BYTES ? pdf_deflate_cache() : nullptr;
+    char key[64];
+    if (cache) {
+        uint64_t hash = hashmap_xxhash3(source.get().get_chars(), length, 0, 0);
+        snprintf(key, sizeof(key), "%llx:%zu", (unsigned long long)hash, length);
+        PdfDeflateEntry* entry = (PdfDeflateEntry*)lru_cache_get(cache->entries, key);
+        // hashes only locate candidates; owned source bytes prove identity across GC and font retirement.
+        if (entry && entry->length == length && !memcmp(entry->source, source.get().get_chars(), length)) {
+            Binary* result = heap_binary_from_bytes((const char*)entry->encoded.data, (size_t)entry->encoded.length);
+            return result ? Item{.item = x2it(result)} : radiant_pdf_error("cannot retain compressed PDF stream");
+        }
+    }
     NodeZlibBytes encoded = {};
     struct Cleanup { NodeZlibBytes* bytes; ~Cleanup() { node_zlib_bytes_free(bytes); } } cleanup = {&encoded};
     if (!node_zlib_deflate_encode((const uint8_t*)source.get().get_chars(), (int)source.get().get_len(), &encoded))
         return radiant_pdf_error("cannot compress PDF stream");
     Binary* result = heap_binary_from_bytes((const char*)encoded.data, (size_t)encoded.length);
-    return result ? Item{.item = x2it(result)} : radiant_pdf_error("cannot retain compressed PDF stream");
+    if (result) retained.set(Item{.item = x2it(result)});
+    if (result && cache && length && length <= PDF_DEFLATE_CACHE_BYTES - sizeof(PdfDeflateEntry) &&
+            (size_t)encoded.length <= PDF_DEFLATE_CACHE_BYTES - sizeof(PdfDeflateEntry) - length) {
+        PdfDeflateEntry* entry = (PdfDeflateEntry*)mem_calloc(1, sizeof(PdfDeflateEntry), MEM_CAT_RENDER);
+        if (entry) {
+            entry->source = (uint8_t*)mem_alloc(length, MEM_CAT_RENDER);
+            if (entry->source) {
+                memcpy(entry->source, source.get().get_chars(), length);
+                entry->length = length; entry->encoded = encoded;
+                encoded = {};
+                size_t cost = sizeof(*entry) + length + (size_t)entry->encoded.length;
+                if (!lru_cache_put(cache->entries, key, entry, cost)) pdf_deflate_entry_free(nullptr, entry, cost, nullptr);
+            } else mem_free(entry);
+        }
+    }
+    return result ? retained.get() : radiant_pdf_error("cannot retain compressed PDF stream");
 }
 
 RADIANT_C_API Item fn_radiant_pdf_measure(Item content) {

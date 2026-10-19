@@ -91,6 +91,7 @@ Color render_document_output_background(View* root_view) {
 }
 
 void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block) {
+    if (rdcon) rdcon->has_foreign_paint_dependencies = true;
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 

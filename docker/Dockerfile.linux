@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libuv1-dev \
     libbrotli-dev \
     libglfw3-dev libfreetype6-dev libpng-dev libbz2-dev \
-    libturbojpeg0-dev libgif-dev gettext \
+    libturbojpeg0-dev libgif-dev libopenjp2-7-dev gettext \
     libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
     libwebkit2gtk-4.1-dev \
     ninja-build \

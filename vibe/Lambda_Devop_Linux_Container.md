@@ -29,7 +29,7 @@ architecture- and platform-specific.
 ```
 
 The Linux image is defined by
-`.github/workflows/Dockerfile.linux` and is tagged:
+`docker/Dockerfile.linux` and is tagged:
 
 ```text
 lambda-linux-arm64:latest
@@ -53,7 +53,7 @@ Run these commands from the Linux checkout on the macOS host:
 cd /Users/henryluo/Projects/lambda-linux
 container build \
   --platform linux/arm64 \
-  --file .github/workflows/Dockerfile.linux \
+  --file docker/Dockerfile.linux \
   --tag lambda-linux-arm64:latest \
   .
 ```
@@ -67,7 +67,7 @@ archives. Rebuild the image after changing the Dockerfile or dependency setup:
 container build \
   --no-cache \
   --platform linux/arm64 \
-  --file .github/workflows/Dockerfile.linux \
+  --file docker/Dockerfile.linux \
   --tag lambda-linux-arm64:latest \
   .
 ```

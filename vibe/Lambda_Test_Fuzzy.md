@@ -41,7 +41,7 @@ acceptance criteria in §16:
 | Tier/lifetime matrix | `run_fuzz.py`, `lambda_process.py` | Explicit T0, eager JIT, AUTO hot scenario, forced GC, poison, and root witness preserve byte output. |
 | Findings lifecycle | `run_fuzz.py` | Content/signature deduplication, bounded artifacts, replay, oracle-preserving reduction, and a non-automatic promotion review. |
 | Feature/campaign ratchets | `feature_inventory.py`, `feature_inventory.lock`, `feature_campaigns.tsv`, `semantic_campaigns.tsv` | New production inventory items or unowned semantic campaigns fail **D1.10** review. |
-| Automation | `Makefile`, `.github/workflows/fuzz-lambda*.yml` | PR smoke, ASan nightly, and scheduled/manual soak retain only `temp/lambda-fuzz/` artifacts. |
+| Automation | `Makefile` | Local fuzz gates remain available. GitHub Actions workflows were removed 2026-10-19; D1.10 remains in force and no replacement CI configuration is checked into this repository. |
 
 Current local gates:
 

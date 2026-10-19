@@ -37,12 +37,12 @@
   short_verb: true,
   no_hidden_object: true,
   object_shortcut: true,
-  mode_switch: true,
-  invalid_mode: true,
-  saved_mode_locked: true,
-  cross_mode_duplicate: true,
+  pattern_switch: true,
+  invalid_pattern: true,
+  saved_pattern_locked: true,
+  cross_pattern_duplicate: true,
   three_book: true,
-  reset_keeps_mode: true
+  reset_to_picker: true
 }
 {
   incomplete_no_join: true,
@@ -56,7 +56,7 @@
   proper_name: true,
   undo_restores_snapshot: true,
   undo_empty: true,
-  mixed_modes: true,
+  mixed_patterns: true,
   mixed_saved: true,
   joined_feedback: true,
   next_clears_chain: true,

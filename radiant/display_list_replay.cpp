@@ -26,7 +26,7 @@ static bool dl_replay_skip_clean_item(const DisplayReplayDirtyClip* dirty_clip,
 
 static bool dl_replay_vector_or_descriptor_skip(RdtVector* vec, DisplayItem* item) {
     if (!item) return true;
-    if (dl_replay_vector_item(vec, item, false) != DL_REPLAY_VECTOR_NOT_HANDLED) {
+    if (dl_replay_vector_item(vec, item) != DL_REPLAY_VECTOR_NOT_HANDLED) {
         return true;
     }
     if (dl_op_has_flags(item->op, DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR)) {

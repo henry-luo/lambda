@@ -1,3 +1,4 @@
+#include "render_metrics.hpp"
 // ==========================================================================
 // TilePool — Tile grid, worker pool, and tile-aware display list replay.
 //
@@ -194,6 +195,7 @@ static void* worker_thread_fn(void* arg) {
         // double-check in case of spurious wakeup race
         if (job_idx >= pool->job_count) continue;
 
+        RenderPipelineMetricsScope metrics_scope(pool->metrics);
         TileJob* job = &pool->jobs[job_idx];
         if (job->work) {
             // Pure pixel jobs touch disjoint rows and need no ThorVG lock.
@@ -202,7 +204,12 @@ static void* worker_thread_fn(void* arg) {
         Tile* tile = job->tile;
 
         // ThorVG rasterization uses shared internal state even with separate canvases.
-        pthread_mutex_lock(&s_thorvg_tile_mutex);
+        {
+            RenderMetricTimer timer(&RenderPipelineMetrics::tile_lock_wait_ns);
+            pthread_mutex_lock(&s_thorvg_tile_mutex);
+        }
+        {
+        RenderMetricTimer timer(&RenderPipelineMetrics::tile_work_ns);
 
         // initialise thread-local resources on first use
         worker_init_local(tile);
@@ -225,6 +232,7 @@ static void* worker_thread_fn(void* arg) {
                        &tl_worker.scratch,
                        tile->x, tile->y, tile->w, tile->h,
                        job->raster_scale);
+        }
         pthread_mutex_unlock(&s_thorvg_tile_mutex);
         }
 
@@ -306,6 +314,7 @@ void RenderPool::destroy() {
 
 void RenderPool::dispatch(TileJob* jobs, int count) {
     pthread_mutex_lock(&mutex);
+    metrics = render_pipeline_metrics;
     this->jobs = lam::up(jobs);
     job_count = count;
     next_job = 0;
@@ -317,6 +326,7 @@ void RenderPool::dispatch(TileJob* jobs, int count) {
         pthread_cond_wait(&all_done, &mutex);
     }
     this->jobs = nullptr;
+    metrics = nullptr;
     pthread_mutex_unlock(&mutex);
 }
 
@@ -399,7 +409,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             continue;
         }
 
-        DisplayReplayVectorResult vector_result = dl_replay_vector_item(vec, item, true);
+        DisplayReplayVectorResult vector_result = dl_replay_vector_item(vec, item);
         if (vector_result != DL_REPLAY_VECTOR_NOT_HANDLED) {
 #ifndef NDEBUG
             if (vector_result == DL_REPLAY_VECTOR_DREW) items_drawn++;
