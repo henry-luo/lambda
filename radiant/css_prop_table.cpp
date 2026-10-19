@@ -12,6 +12,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/arraylist.h"
 #include "../lib/tagged.hpp"
+#include "../lib/hashmap_typed.hpp"
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
@@ -2332,6 +2333,25 @@ const CssPropAccessor* css_prop_accessors(size_t* count) {
     return CSS_PROP_ROWS;
 }
 
+struct CssomRefreshedElement {
+    DomElement* element;
+    uint32_t version;
+    uint64_t mutation_epoch;
+};
+using CssomRefreshedMap = TypedHashMap<CssomRefreshedElement,
+    HashMapPointerMemberKeyOps<CssomRefreshedElement, &CssomRefreshedElement::element>>;
+static thread_local CssomCascadeQueryScope* s_cssom_cascade_scope = nullptr;
+
+CssomCascadeQueryScope::CssomCascadeQueryScope()
+    : previous(s_cssom_cascade_scope), refreshed(CssomRefreshedMap::create(32)) {
+    s_cssom_cascade_scope = this;
+}
+
+CssomCascadeQueryScope::~CssomCascadeQueryScope() {
+    s_cssom_cascade_scope = previous;
+    hashmap_free(refreshed);
+}
+
 static void cssom_refresh_cascade_chain(DomElement* element) {
     ArrayList* ancestors = cssom_collect_style_ancestors(element);
     if (!ancestors) return;
@@ -2339,8 +2359,21 @@ static void cssom_refresh_cascade_chain(DomElement* element) {
     SelectorMatcher matcher;
     selector_matcher_init(&matcher, element->doc->document_pool);
     for (int index = ancestors->length; index > 0; index--) {
-        radiant_cascade_styles_for_element_with_matcher(
-            (DomElement*)ancestors->data[index - 1], &matcher);
+        DomElement* current = (DomElement*)ancestors->data[index - 1];
+        CssomRefreshedElement query = {current, current->style_version, current->doc->mutation_epoch};
+        HashMap* refreshed = s_cssom_cascade_scope ? s_cssom_cascade_scope->refreshed : nullptr;
+        const CssomRefreshedElement* cached = refreshed ? CssomRefreshedMap::get(refreshed, query) : nullptr;
+        // D4.5.1v4: this synchronous borrow ends with the candidate walk. A
+        // pending mutation must not recascade common ancestors per descendant.
+        if (cached && cached->version == query.version && cached->mutation_epoch == query.mutation_epoch) continue;
+        // an unlaid-out descendant (head, defs, display:none) does not make
+        // its committed ancestors stale. Recascading them dirties every later
+        // focus/visibility query that shares that inheritance chain.
+        if (!element->doc->js.mutation_count && current->styles_resolved() &&
+            !current->needs_style_recompute()) continue;
+        radiant_cascade_styles_for_element_with_matcher(current, &matcher);
+        query.version = current->style_version;
+        if (refreshed) CssomRefreshedMap::set(refreshed, query);
     }
     arraylist_free(ancestors);
 }

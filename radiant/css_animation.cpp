@@ -3183,6 +3183,12 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
 
 void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
+    if (layout_context_is_measuring(lycon)) {
+        // intrinsic passes are speculative: retain existing samples without
+        // publishing transition baselines or targets from temporary used values.
+        css_motion_sample_existing(element, lycon);
+        return;
+    }
     if (lycon->ui_context->document &&
         lycon->ui_context->document->disable_css_animations) {
         return;

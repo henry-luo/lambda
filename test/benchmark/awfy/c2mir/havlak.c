@@ -655,7 +655,8 @@ static int verify_result(int result, int innerIterations) {
 }
 
 int main(void) {
-    int result = lta_main(1, 1, 10, 10, 5);
+    /* match the other AWFY ports' 50 extra full-graph recognitions */
+    int result = lta_main(1, 50, 10, 10, 5);
     int ok = verify_result(result, 1);
     printf(ok == 1 ? "Havlak: PASS\n" : "Havlak: FAIL\n");
     return ok != 1;

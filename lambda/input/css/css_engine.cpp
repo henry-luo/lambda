@@ -166,6 +166,48 @@ static bool css_query_declaration_relevant(const CssElementDeclarationQuery* que
     return font_shorthand || shorthand || break_alias || all_reset || same_property;
 }
 
+static uint64_t css_query_property_filter_bit(CssPropertyCode code, const char* name) {
+    if (code > 0 && code < CSS_PROPERTY_CUSTOM)
+        return UINT64_C(1) << ((unsigned)code % 64);
+    // SVG-only properties have names but no native property code. Fold ordinary
+    // names like the query matcher; custom-property spelling stays case-sensitive.
+    bool custom = name[0] == '-' && name[1] == '-';
+    uint64_t hash = custom ? hash_cstr(name) : str_ihash(name, strlen(name));
+    return UINT64_C(1) << (hash % 64);
+}
+
+static bool css_query_rule_may_set_property(const CssElementDeclarationQuery* query,
+                                           CssRule* rule) {
+    if (!rule->stylesheet) return true;
+    uint64_t generation = rule->stylesheet->mutation_generation;
+    if (!rule->declaration_filter_valid || rule->declaration_filter_generation != generation) {
+        uint64_t filter = 0;
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+            if (!declaration || !declaration->valid) continue;
+            CssPropertyCode code = declaration->property_code;
+            if (!declaration->property_name || code == CSS_PROPERTY_FONT || code == CSS_PROPERTY_ALL ||
+                strncmp(declaration->property_name, "page-break-", 11) == 0) {
+                filter = UINT64_MAX;
+                break;
+            }
+            filter |= css_query_property_filter_bit(code, declaration->property_name);
+            const CssProperty* metadata = css_property_get_by_code(code);
+            if (metadata && metadata->shorthand) {
+                for (int j = 0; j < metadata->longhand_count; j++)
+                    filter |= UINT64_C(1) << ((unsigned)metadata->longhand_props[j] % 64);
+            }
+        }
+        rule->declaration_property_filter = filter;
+        rule->declaration_filter_generation = generation;
+        rule->declaration_filter_valid = true;
+    }
+    // collisions only do extra work; stylesheet edits invalidate the filter.
+    // SVG transition queries otherwise rescan every declaration for each property.
+    return (rule->declaration_property_filter &
+        css_query_property_filter_bit(query->requested, query->property)) != 0;
+}
+
 static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin,
     const char* source_url = nullptr) {
@@ -226,8 +268,10 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
     // a single-property query skips selector matching for the many rules that
     // cannot set it; nested child rules below are still visited.
     bool relevant = false;
-    for (size_t i = 0; !relevant && i < rule->data.style_rule.declaration_count; i++)
-        relevant = css_query_declaration_relevant(query, rule->data.style_rule.declarations[i]);
+    if (css_query_rule_may_set_property(query, rule)) {
+        for (size_t i = 0; !relevant && i < rule->data.style_rule.declaration_count; i++)
+            relevant = css_query_declaration_relevant(query, rule->data.style_rule.declarations[i]);
+    }
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
     size_t count = !relevant ? 0 : group ? group->selector_count : 1;
     for (size_t i = 0; i < count; i++) {
@@ -484,16 +528,32 @@ bool css_register_document_property(DomDocument* doc,
     return true;
 }
 
+static bool css_condition_cache_find(CssEngine* engine, CssConditionKind kind,
+                                     const char* condition, size_t length,
+                                     CssConditionCacheEntry** result) {
+    uint64_t hash = css_condition_hash_bytes(condition, length);
+    size_t first = (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u));
+    // distinct @supports conditions often hash to the same slot. Probe unused
+    // slots before evicting so repeated SVG cascades do not reparse them all.
+    for (size_t i = 0; i < CSS_CONDITION_CACHE_CAPACITY; i++) {
+        CssConditionCacheEntry* entry = &engine->condition_cache[
+            (first + i) & (CSS_CONDITION_CACHE_CAPACITY - 1u)];
+        *result = entry;
+        if (!entry->condition) return false;
+        if (entry->kind == (uint8_t)kind && entry->condition_length == length &&
+            memcmp(entry->condition, condition, length) == 0) return true;
+    }
+    *result = &engine->condition_cache[first];
+    return false;
+}
+
 static bool css_condition_cache_lookup(CssEngine* engine, CssConditionKind kind,
                                        const char* condition, bool* result, uint64_t dependency_key = 0) {
     if (!engine || !condition || !result) return false;
     size_t length = strlen(condition);
-    uint64_t hash = css_condition_hash_bytes(condition, length);
-    size_t slot = (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u));
-    CssConditionCacheEntry* entry = &engine->condition_cache[slot];
-    if (entry->kind != (uint8_t)kind || entry->condition_length != length ||
-        entry->environment_key != hash_combine_u64(css_condition_environment_key(engine, kind), dependency_key) ||
-        !entry->condition || memcmp(entry->condition, condition, length) != 0) return false;
+    CssConditionCacheEntry* entry = nullptr;
+    if (!css_condition_cache_find(engine, kind, condition, length, &entry) ||
+        entry->environment_key != hash_combine_u64(css_condition_environment_key(engine, kind), dependency_key)) return false;
     *result = entry->result != 0;
     engine->condition_cache_hits++;
     return true;
@@ -504,9 +564,8 @@ static void css_condition_cache_store(CssEngine* engine, CssConditionKind kind,
     if (!engine || !condition) return;
     size_t length = strlen(condition);
     if (length > CSS_CONDITION_CACHE_MAX_TEXT_BYTES) return;
-    uint64_t hash = css_condition_hash_bytes(condition, length);
-    CssConditionCacheEntry* entry = &engine->condition_cache[
-        (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u))];
+    CssConditionCacheEntry* entry = nullptr;
+    css_condition_cache_find(engine, kind, condition, length, &entry);
     char* copy = pool_dup_n(engine->pool, condition, length);
     if (!copy) return;
     pool_free(engine->pool, (void*)entry->condition);

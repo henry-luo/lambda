@@ -522,7 +522,7 @@ static void clear_item_prop(DomElement* elem, ViewTree*) {
     elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
-static void free_item_prop(DomElement* elem, ViewTree* tree) {
+static void free_item_prop_storage(DomElement* elem, ViewTree* tree, bool preserve_form) {
     if (!elem) return;
     switch (elem->parent_item_kind()) {
         case DomElement::PARENT_ITEM_FLEX:
@@ -536,15 +536,26 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
     }
     view_pool_free(tree, elem->tb);
     view_pool_free(tree, elem->td);
-    // a heap form prop is released by release_form_prop
-    if (elem->form && !elem->form->heap_allocated) view_pool_free(tree, elem->form);
+    // script-created form state survives restyling; full teardown releases
+    // its heap storage through release_form_prop before clearing this slot.
+    if (!preserve_form) {
+        if (elem->form && !elem->form->heap_allocated) view_pool_free(tree, elem->form);
+        elem->form = nullptr;
+    }
     elem->fi = nullptr;
     elem->gi = nullptr;
     elem->tb = nullptr;
     elem->td = nullptr;
-    elem->form = nullptr;
     elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
-    elem->set_role_kind(DomElement::ROLE_NONE);
+    elem->set_role_kind(elem->form ? DomElement::ROLE_FORM : DomElement::ROLE_NONE);
+}
+
+static void free_item_prop(DomElement* elem, ViewTree* tree) {
+    free_item_prop_storage(elem, tree, false);
+}
+
+static void reset_item_prop(DomElement* elem, ViewTree* tree) {
+    free_item_prop_storage(elem, tree, true);
 }
 
 static const PseudoContentProp PSEUDO_CONTENT_PROP_DEFAULT = {};
@@ -639,7 +650,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },
     // retained restyles rebuild font caches without ending the control's live session.
     { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr, release_form_prop_fonts },
-    { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, free_item_prop },
+    { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, reset_item_prop },
     { "pseudo", nullptr, nullptr, view_prop_get_pseudo, view_prop_clear_pseudo, view_prop_free_pseudo, nullptr, nullptr, &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path", nullptr, free_vector_path_payload, view_prop_get_vpath, view_prop_clear_vpath, view_prop_free_vpath, nullptr, nullptr, &VECTOR_PATH_PROP_DEFAULT, sizeof(VectorPathProp), nullptr },
     { "layout-fragments", nullptr, nullptr, view_prop_get_layout_fragments, view_prop_clear_layout_fragments, nullptr, nullptr, free_layout_fragments, nullptr, 0, free_layout_fragments },
@@ -873,43 +884,6 @@ static void view_teardown_reset_text(ViewTree* tree, DomText* text) {
     view_teardown_clear_text(text);
 }
 
-static bool release_should_walk_dom_children(DomElement* elem) {
-    if (!elem) {
-        return false;
-    }
-
-    NameId tag = elem->tag_id;
-    switch (tag) {
-        case MARKUP_NAME_AREA:
-        case MARKUP_NAME_BASE:
-        case MARKUP_NAME_BR:
-        case MARKUP_NAME_COL:
-        case MARKUP_NAME_EMBED:
-        case MARKUP_NAME_HR:
-        case MARKUP_NAME_IMG:
-        case MARKUP_NAME_INPUT:
-        case MARKUP_NAME_LINK:
-        case MARKUP_NAME_META:
-        case MARKUP_NAME_PARAM:
-        case MARKUP_NAME_SOURCE:
-        case MARKUP_NAME_TRACK:
-        case MARKUP_NAME_WBR:
-            return false;
-        default:
-            break;
-    }
-
-    if (elem->display.inner == RDT_DISPLAY_REPLACED) {
-        // Select, textarea, and button keep real DOM children/state that can own
-        // layout handles; skipping them leaks fallback font handles on removal.
-        // SVG's foreignObject descendants own ordinary CSS layout resources too.
-        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
-            tag == MARKUP_NAME_BUTTON || tag == MARKUP_NAME_SVG;
-    }
-
-    return true;
-}
-
 static void view_teardown_visit_node(ViewTree* tree,
                                      DomNode* node,
                                      int flags,
@@ -920,18 +894,15 @@ static void view_teardown_visit_node(ViewTree* tree,
             DomElement* elem = node->as_element();
             PseudoContentProp* pseudo = elem->pseudo;
             DomNode* first_child = elem->first_child;
-            int child_flags = flags;
-            if (!release_should_walk_dom_children(elem)) {
-                child_flags &= ~VIEW_TEARDOWN_RELEASE_EXTERNAL;
-            }
-
             view_teardown_visit_pseudo(tree, elem, pseudo, flags);
-            view_teardown_visit_node(tree, first_child, child_flags, true);
+            // non-rendering fallback children can still own script-created
+            // control props; release their payloads before clearing their slots.
+            view_teardown_visit_node(tree, first_child, flags, true);
             DomElement* shadow_root = elem->shadow_root_element();
             if (shadow_root) {
                 // Shadow descendants own the same view-pool epoch as their host.
                 view_teardown_visit_node(tree, static_cast<DomNode*>(shadow_root),
-                                         child_flags, false);
+                                         flags, false);
             }
             view_teardown_apply_table(tree, elem, flags);
             if (flags & (VIEW_TEARDOWN_CLEAR_POINTERS | VIEW_TEARDOWN_RESET_IN_PLACE)) {

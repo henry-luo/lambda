@@ -2460,6 +2460,169 @@ TEST(RadiantViewTest, RecoversTimedOutLoadScriptWithoutUnsafeBatchReset) {
     shell_result_free(&shell_result);
 }
 
+static bool test_radiant_view_write_native_layout_probe(const char* page, bool observer_loop) {
+    FILE* file = fopen(page, "wb");
+    if (!file) return false;
+    bool written = fputs("<!doctype html><style>"
+            "body{--ink:blue;--paint:var(--ink);--size:12px}"
+            ".row{display:grid;grid-template-columns:50% 1fr;background:var(--paint)}"
+            ".row span{font-size:var(--size);color:var(--ink)}"
+            "</style><body>", file) >= 0;
+    for (unsigned row = 0; row < 9000 && written; row++)
+        written = fputs("<div class=row><span>registry title</span><span>reference</span></div>", file) >= 0;
+    written = written && fputs("<script>var body=document.body;"
+            "setTimeout(function(){console.log('SNAPSHOT_READY_TIMER')},0);"
+            "setTimeout(function(){console.log('SNAPSHOT_LATE_TIMER')},50);"
+            "body.getBoundingClientRect();", file) >= 0;
+    written = written && fputs(observer_loop
+            ? "new ResizeObserver(function(){while(true){}}).observe(body);"
+              "body.style.width='450px';</script>"
+            : "body.style.width='500px';console.log('NATIVE_LAYOUT_BUDGET_DONE');</script>", file) >= 0;
+    bool closed = fclose(file) == 0;
+    return written && closed;
+}
+
+TEST(RadiantViewTest, NativeLayoutPreservesScriptCpuBudgetAndObserversRemainBounded) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_native_layout_budget.html";
+    const ShellEnvEntry env[] = {{"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "1"}, {NULL, NULL}};
+    const bool observer_cases[] = {false, true};
+    for (bool observer_loop : observer_cases) {
+        SCOPED_TRACE(observer_loop);
+        ASSERT_TRUE(test_radiant_view_write_native_layout_probe(page, observer_loop));
+        ShellResult result = test_radiant_view_run_logged_headless(
+            page, nullptr, env, nullptr, nullptr, 60000);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_FALSE(result.timed_out) << output;
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_EQ(strstr(output, "JS execution timed out") != nullptr, observer_loop) << output;
+        if (!observer_loop) EXPECT_NE(strstr(output, "NATIVE_LAYOUT_BUDGET_DONE"), nullptr) << output;
+        shell_result_free(&result);
+    }
+}
+
+TEST(RadiantViewTest, StaticSnapshotDoesNotAdvanceTimersDuringNativeLayout) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_native_layout_clock.html";
+    ASSERT_TRUE(test_radiant_view_write_native_layout_probe(page, false));
+    ShellResult result = test_radiant_view_run_logged_headless(
+        page, nullptr, nullptr, nullptr, nullptr, 60000);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "SNAPSHOT_READY_TIMER"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "SNAPSHOT_LATE_TIMER"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, AuthorScriptFailureDoesNotPublishRootsAfterHeapRetirement) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_failed_script_cleanup.html";
+    FILE* file = fopen(page, "wb");
+    ASSERT_NE(file, nullptr);
+    bool written = fputs("<!doctype html><body><input><script>"
+        "missing_script_dependency(function(){});</script></body>", file) >= 0;
+    bool closed = fclose(file) == 0;
+    ASSERT_TRUE(written && closed);
+    ShellResult result = test_radiant_view_run_logged_headless(
+        page, nullptr, nullptr, nullptr, nullptr, 30000);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "ReferenceError: missing_script_dependency"), nullptr) << output;
+    EXPECT_NE(strstr(output, "view: render complete"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "root-vector:"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "cannot prepare realm slot"), nullptr) << output;
+    shell_result_free(&result);
+    remove(page);
+}
+
+TEST(RadiantViewTest, TextShadowSkipsBlankGlyphMasks) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_blank_shadow.html";
+    const char source[] = "<!doctype html><style>body{font:32px Arial}"
+        "div{white-space:pre;text-shadow:2px 2px 4px #123}</style>"
+        "<div> A\xc2\xa0" "B\xe2\xa0\x80" "C </div>";
+    ASSERT_EQ(write_binary_file(page, source, sizeof(source) - 1), 0);
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "view: render complete"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "glyph payload is invalid"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "TEXT_SHADOW_CAPTURE"), nullptr) << output;
+    shell_result_free(&result);
+    remove(page);
+}
+
+TEST(RadiantViewTest, GridAutoMarginsPreserveUsedIntrinsicBorderBox) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_view_grid_intrinsic_auto_margin.html";
+    const char source[] = "<!doctype html><style>*{box-sizing:border-box}"
+        "body{display:grid;grid-template-columns:3fr 2fr;width:1000px}"
+        ".main{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}"
+        ".tabs{display:flex;width:fit-content;max-width:100%;margin:0 auto 16px;"
+        "border:1px solid black;border-radius:999px;padding:3px}"
+        "#minimum{width:min-content}#maximum{width:max-content}"
+        "#fixed{width:60px;box-sizing:content-box}</style><p>left</p><div class=main>"
+        "<div class=tabs><button>One</button><button>Two</button></div>"
+        "<div class=tabs id=minimum>minimum</div><div class=tabs id=maximum>maximum</div>"
+        "<div class=tabs id=fixed>fixed</div></div><script>"
+        "var host=document.querySelector('.main').getBoundingClientRect();"
+        "document.querySelectorAll('.tabs').forEach(function(box){"
+        "var r=box.getBoundingClientRect();if(r.width<=0||"
+        "Math.abs(2*(r.left-host.left)+r.width-host.width)>1)throw Error('grid auto margin size');"
+        "if(box.id==='fixed'&&r.width!==68)throw Error('grid border box');});"
+        "console.log('GRID_INTRINSIC_AUTO_MARGIN_PASS');</script>";
+    ASSERT_EQ(write_binary_file(page, source, sizeof(source) - 1), 0);
+    ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "GRID_INTRINSIC_AUTO_MARGIN_PASS"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "post-dom exception"), nullptr) << output;
+    shell_result_free(&result);
+    remove(page);
+}
+
+#ifndef _WIN32
+TEST(RadiantViewTest, RegistersDownloadedFontsDuringStylesheetDiscovery) {
+    test_radiant_view_ensure_temp_dir();
+    char* font = nullptr; size_t font_size = 0;
+    ASSERT_TRUE(file_read_all("test/ui/svg_font_assets/rectangle.ttf", MEM_CAT_TEMP, &font, &font_size));
+    const char source[] = "<!doctype html><style>@font-face{font-family:OnlineProbe;"
+        "src:url('/font.ttf')}body{font-family:OnlineProbe}</style><body>font probe"
+        "<script>document.body.getBoundingClientRect();var x=new XMLHttpRequest();"
+        "x.open('GET','/font.ttf',false);x.send();console.log('EARLY_FONT_READY='+x.status);</script></body>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /page.html ", "text/html", source, sizeof(source) - 1},
+        {"GET /font.ttf ", "font/ttf", font, font_size},
+    };
+    RadiantViewImageServer server = {};
+    bool started = test_radiant_view_unsupported_image_server_start(&server, resources, 2);
+    mem_free(font);
+    ASSERT_TRUE(started);
+    struct ServerScope {
+        pid_t pid;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
+    } server_scope = {server.pid};
+    char remote[128];
+    ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/page.html", server.port), 0);
+    const char* view_log = "./temp/test_radiant_view_early_font.log";
+    const ShellEnvEntry env[] = {{"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "DEBUG"}, {nullptr, nullptr}};
+    // repeat the same URL to cover both downloaded and immediately cached completion.
+    for (unsigned repeat = 0; repeat < 2; repeat++) {
+        ShellResult result = test_radiant_view_run_logged_headless(remote, nullptr, env);
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "EARLY_FONT_READY=200"), nullptr);
+        EXPECT_FALSE(test_radiant_view_file_contains(view_log, "no UI context available for font loading"));
+        shell_result_free(&result);
+    }
+    remove(view_log);
+}
+#endif
+
 TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
     const char* timed_out_page = "test/ui/js_load_watchdog_recovery.html";
     const char* following_page = "test/layout/data/page/sample1.html";

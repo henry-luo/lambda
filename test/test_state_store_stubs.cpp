@@ -158,6 +158,10 @@ bool is_view_focusable(View* view) {
     return false;
 }
 
+// focus eligibility is stubbed here; this target owns no CSSOM cascade.
+CssomCascadeQueryScope::CssomCascadeQueryScope() : previous(nullptr), refreshed(nullptr) {}
+CssomCascadeQueryScope::~CssomCascadeQueryScope() = default;
+
 bool is_view_programmatically_focusable(View* view) {
     // StateStore tests need the DOM focus contract without linking the event
     // dispatcher; synthetic element fixtures model programmatic focus targets.

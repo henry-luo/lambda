@@ -18,11 +18,14 @@ historical tuning documents are implementation evidence only.
 
 ## 1. Conclusions and priority
 
-The earlier **36.62× Havlak execution gap is invalid**: the JS benchmark runs
-50 extra full-graph recognitions, while the Lambda port runs one. With those
-counts matched, this investigation measures **1.39–1.50×** MVP/Lambda execution
-time. The ports still use different representations and some different
-algorithmic steps. Neither number is a pure comparison of compiler overhead.
+The archived **36.62× Havlak execution gap is invalid**: the JS benchmark ran
+50 extra full-graph recognitions, while the Lambda port ran one. Matched-repeat
+diagnostic runs measured **1.39–1.50×** MVP/Lambda execution time. On
+2026-10-19, the Lambda MIR, C2MIR and Go ports were aligned to the same 50 extra
+recognitions. Existing result tables retain their original source hashes and
+timings; refresh them before drawing cross-engine conclusions. The ports still
+use different representations and some different algorithmic steps, so even
+matched counts do not isolate compiler overhead.
 
 There are nevertheless concrete opportunities:
 
@@ -46,25 +49,31 @@ semantic responsibilities separate.
 
 ## 2. Correcting the benchmark evidence
 
-### 2.1 Havlak repeat mismatch
+### 2.1 Havlak repeat mismatch and alignment
 
-The relevant entrypoints are:
+The archived comparison used these entrypoints:
 
 | Port | Source and symbol | Arguments affecting repeated work |
 |---|---|---|
-| Untyped Lambda | `test/benchmark/awfy/havlak.ls:851`, `main` | `lta_main(1, 1, 10, 10, 5)` |
+| Archived untyped Lambda capture | frozen pre-alignment `havlak.ls` | `lta_main(1, 1, 10, 10, 5)` |
 | JavaScript | `test/benchmark/awfy/havlak2_bundle.js:1201`, `Havlak.innerBenchmarkLoop` | `LoopTesterApp.main(innerIterations, 50, 10, 10, 5)`; harness supplies `innerIterations = 1` |
 
-Both perform one initial full-graph recognition, then the specified extra
-recognitions. Thus the canonical Lambda run performs **2**, versus **51** in
-JS; both also perform one small dummy recognition. Both verify **1,605 loops
+Both performed one initial full-graph recognition, then the specified extra
+recognitions. Thus the captured Lambda run performed **2**, versus **51** in
+JS; both also performed one small dummy recognition. Both verify **1,605 loops
 and 5,213 nodes**, because the extra recognitions use disposable loop graphs.
 The output oracle cannot detect the repeat mismatch. Dividing the old ratio by
 50 or 25.5 would also be wrong: setup and the timed work are not uniform.
 
+The current Lambda MIR typed and untyped scripts, C2MIR port and Go port now all
+perform one initial plus 50 extra full-graph recognitions, matching the JS,
+Python, Julia, Java and Erlang ports. Existing benchmark reports are historical
+captures of the earlier call counts and have not been rewritten.
+
 This investigation froze diagnostic copies and changed only the repeat argument.
-Canonical files and goldens remain unchanged. Each row below has one warmup per
-lane, a Node JS oracle warmup, and seven alternating fresh-process pairs.
+Canonical files and goldens remained unchanged for those captures. Each row
+below has one warmup per lane, a Node JS oracle warmup, and seven alternating
+fresh-process pairs.
 
 | Extra recognitions, both ports | Full-graph recognitions | Lambda execution ms | MVP execution ms | MVP / Lambda | Lambda process wall ms | MVP process wall ms |
 |---:|---:|---:|---:|---:|---:|---:|
