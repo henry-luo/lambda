@@ -1103,7 +1103,8 @@ func awfyHavlak() (int, int) {
 	}
 	app.constructCFG(10, 10, 5)
 	newHavlakFinder(app.cfg, app.graph).findLoops()
-	for iteration := 0; iteration < 1; iteration++ {
+	// match the other AWFY ports' 50 extra full-graph recognitions
+	for iteration := 0; iteration < 50; iteration++ {
 		newHavlakFinder(app.cfg, newHavlakLoopGraph()).findLoops()
 	}
 	app.graph.calculateNestingLevel()

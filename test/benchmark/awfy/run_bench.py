@@ -32,7 +32,7 @@ PYTHON_EXE = "python3"
 #   NBody: number of advance() steps (1000)
 #   DeltaBlue: n parameter for chain/projection test (100)
 #   CD: number of aircraft (100)
-#   Havlak: numDummyLoops (1, but JS uses findLoopIterations=50 vs Lambda's 1)
+#   Havlak: one dummy loop and 50 extra full-graph recognitions in Lambda, JS and Python
 BENCHMARKS = [
     ("Sieve",         1,      "micro"),
     ("Permute",       1,      "micro"),
