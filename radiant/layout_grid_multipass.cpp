@@ -533,7 +533,7 @@ IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* co
         if (!lycon->grid_container) return result;
         resolve_grid_item_styles(lycon, container);
         measure_grid_items(lycon, lycon->grid_container, true);
-        layout_grid_container(lycon, container);
+        layout_grid_container(lycon, container, true);
         float extent = lycon->grid_container->content_width;
         if (minimum) result.min_content = extent;
         else result.max_content = extent;
@@ -669,15 +669,18 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
             // Skip absolute positioned and display:none items
             bool is_absolute = layout_view_is_abs_or_fixed(item);
             if (!is_absolute && !layout_block_is_display_none(item)) {
-                float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
-                measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
-                                            &min_height, &max_height);
+                // row contributions need final column widths; measure only widths in this pass.
+                IntrinsicSizes widths = layout_measure_intrinsic_widths(lycon, item);
+                if (item->blk && !layout_axis_size_is_percentage(item, true) &&
+                    item->block()->given_width > 0.0f) {
+                    float explicit_width = layout_css_size_to_border_box(
+                        item->bound, layout_box_sizing(item), item->block()->given_width, true);
+                    widths.min_content = widths.max_content =
+                        layout_floor_border_box_axis(item, explicit_width, true);
+                }
                 if (intrinsic_width_contribution) {
                     // intrinsic grid contributions retain the item's authored minimum, including zero.
-                    IntrinsicSizes widths = {min_width, max_width};
                     layout_apply_grid_item_min_content_floor(lycon, item, &widths);
-                    min_width = widths.min_content;
-                    max_width = widths.max_content;
                 }
                 layout_reresolve_percentage_box(item, container_content_width);
                 // Store only WIDTH measurements in the item for later use
@@ -687,8 +690,8 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
                 // This follows CSS Grid spec §11.5 where row sizing happens after column sizing
                 GridItemProp* gi = grid_item_prop(item);
                 if (gi) {
-                    gi->measured_min_width = min_width;
-                    gi->measured_max_width = max_width;
+                    gi->measured_min_width = widths.min_content;
+                    gi->measured_max_width = widths.max_content;
                     // Note: We don't set measured_min/max_height here.
                     // The calculate_grid_item_intrinsic_sizes function will compute
                     // heights on-demand using the actual column width.
@@ -701,63 +704,6 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
     log_leave();
 }
 
-void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
-                                  float* min_width, float* max_width,
-                                  float* min_height, float* max_height) {
-    if (!item) {
-        *min_width = *max_width = *min_height = *max_height = 0;
-        return;
-    }
-
-    MeasurementCacheEntry* cached = get_from_measurement_cache(static_cast<DomNode*>(item));
-    if (cached) {
-        *min_width = cached->content_width;
-        *max_width = cached->measured_width;
-        *min_height = cached->content_height;
-        *max_height = cached->measured_height;
-        return;
-    }
-
-    IntrinsicSizes width = {0.0f, 0.0f};
-    IntrinsicSizes height = {0.0f, 0.0f};
-    if (lycon) {
-        // pass-one grid width is content measurement; stretch limits resolve only
-        // after the automatic track establishes its containing block.
-        width = layout_measure_intrinsic_widths(
-            lycon, lam::dom_require<DOM_NODE_ELEMENT>(item));
-        if (item->blk && !layout_axis_size_is_percentage(item, true) &&
-            item->block()->given_width > 0.0f) {
-            float explicit_width = layout_css_size_to_border_box(
-                item->bound, layout_box_sizing(item), item->block()->given_width, true);
-            width.min_content = width.max_content =
-                layout_floor_border_box_axis(item, explicit_width, true);
-        }
-
-        bool explicit_height = item->blk && item->block()->given_height > 0.0f &&
-            layout_intrinsic_min_size_keyword(item, false) == CSS_VALUE__UNDEF &&
-            layout_intrinsic_max_size_keyword(item, false) == CSS_VALUE__UNDEF;
-        if (explicit_height) {
-            float value = layout_css_size_to_border_box(
-                item->bound, layout_box_sizing(item), item->block()->given_height, false);
-            height.min_content = height.max_content =
-                layout_floor_border_box_axis(item, value, false);
-        } else {
-            float width_for_height = min(width.max_content, 2000.0f);
-            float content_height = calculate_max_content_height(
-                lycon, static_cast<DomNode*>(item), width_for_height);
-            height.min_content = height.max_content = content_height;
-        }
-    } else {
-        width.max_content = item->width > 0.0f ? item->width : 0.0f;
-        height.max_content = item->height > 0.0f ? item->height : 0.0f;
-    }
-    *min_width = width.min_content;
-    *max_width = width.max_content;
-    *min_height = height.min_content;
-    *max_height = height.max_content;
-    store_in_measurement_cache(static_cast<DomNode*>(item), *max_width, *max_height,
-                               *min_width, *min_height);
-}
 // Pass 3: Final Content Layout
 
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout) {

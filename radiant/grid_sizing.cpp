@@ -73,7 +73,7 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
 
 // Enhanced track sizing using the new algorithm adapted from Taffy
 // This provides more accurate CSS Grid spec compliance
-void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* container) {
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* container, bool columns_only) {
     if (!grid_layout || !container) return;
 
 
@@ -105,7 +105,8 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         &col_intrinsic_width,
         &row_intrinsic_height,
         grid_layout->is_min_content_width,
-        grid_layout->is_max_content_width
+        grid_layout->is_max_content_width,
+        columns_only
     );
 
     if (grid_layout->storage_failed) return;

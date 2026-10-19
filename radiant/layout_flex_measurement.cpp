@@ -227,13 +227,13 @@ float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, flo
     ViewBlock* block = node->is_element() ? lam::view_as_block(node->as_element()) : NULL;
     if (!block) return calculate_max_content_height(lycon, node, width);
 
-    AvailableSpace available = AvailableSpace::make_width_definite(width);
     // The intrinsic query re-resolves style, so percentages must retain the
     // flex container's definite cross-size instead of the outer block width.
     LayoutContainingBlockScope percentage_parent_scope(
         lycon, LAYOUT_AXIS_X, percentage_containing_width,
         percentage_containing_width > 0.0f);
-    return measure_intrinsic_sizes(lycon, block, available).max_content_height;
+    // a definite wrapping width makes a second subtree width measurement unnecessary.
+    return calculate_max_content_height(lycon, node, width);
 }
 
 struct FlexChildExplicitSizes {

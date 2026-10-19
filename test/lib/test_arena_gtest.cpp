@@ -1115,6 +1115,16 @@ TEST(ArenaRewindTest, RewindReturnsTailAndKeepsChunks) {
     EXPECT_EQ(arena_total_allocated(arena), allocated);
     EXPECT_EQ(((unsigned char*)keep)[63], 0x5A);
 
+    // empty and same-chunk rewinds leave the spare chain available without changing the live prefix.
+    arena_rewind(arena, mark);
+    void* short_tail = arena_alloc(arena, 128);
+    ASSERT_NE(short_tail, nullptr);
+    arena_rewind(arena, mark);
+    EXPECT_EQ(arena_alloc(arena, 128), short_tail);
+    arena_rewind(arena, mark);
+    EXPECT_EQ(arena_total_used(arena), used_at_mark);
+    EXPECT_EQ(((unsigned char*)keep)[63], 0x5A);
+
     // the retained chunks serve the same pattern again without growth
     for (int i = 0; i < 40; i++) ASSERT_NE(arena_alloc(arena, 256), nullptr);
     EXPECT_EQ(arena_total_allocated(arena), allocated);
