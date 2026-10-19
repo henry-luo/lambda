@@ -1,0 +1,40 @@
+{
+  "name": "Speech M1: fake-engine events, markup, cancellation and refusals",
+  "html": "test/ui/_speech_fake.ls",
+  "viewport": {"width": 480, "height": 240},
+  "env": [
+    {"key": "LAMBDA_SPEECH_ENGINE", "value": "fake"},
+    {"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}
+  ],
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#voices"}, "equals": "2"},
+    {"type": "assert_text", "target": {"selector": "#best"}, "equals": "zh-CN male enhanced"},
+    {"type": "click", "target": {"selector": "#say"}},
+    {"type": "advance_time", "ms": 1500, "steps": 90},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;"},
+    {"type": "click", "target": {"selector": "#info"}},
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "ended"},
+    {"type": "click", "target": {"selector": "#markup"}},
+    {"type": "advance_time", "ms": 2000, "steps": 120},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;"},
+    {"type": "click", "target": {"selector": "#long"}},
+    {"type": "advance_time", "ms": 400, "steps": 24},
+    {"type": "click", "target": {"selector": "#cancel"}},
+    {"type": "advance_time", "ms": 200, "steps": 12},
+    {"type": "click", "target": {"selector": "#info"}},
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "cancelled"},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;start;w0:1;w2:1;cancelled;"},
+    {"type": "click", "target": {"selector": "#bad"}},
+    {"type": "advance_time", "ms": 100, "steps": 6},
+    {"type": "assert_text", "target": {"selector": "#refusals"}, "equals": "9/9"},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;start;w0:1;w2:1;cancelled;"},
+    {"type": "click", "target": {"selector": "#cue"}},
+    {"type": "advance_time", "ms": 400, "steps": 24},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;start;w0:1;w2:1;cancelled;"},
+    {"type": "advance_time", "ms": 1000, "steps": 60},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;start;w0:1;w2:1;cancelled;start;w0:3;end;"},
+    {"type": "click", "target": {"selector": "#late"}},
+    {"type": "advance_time", "ms": 1000, "steps": 60},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "start;w0:5;w6:3;w10:5;w17:3;end;start;w0:3;m=half;w4:3;w8:5;end;start;w0:1;w2:1;cancelled;start;w0:3;end;late;w0:4;end;"}
+  ]
+}

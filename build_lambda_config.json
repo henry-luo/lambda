@@ -4574,7 +4574,8 @@
               "gtest_main"
             ],
             "additional_sources": [
-              "radiant/midi_player.cpp"
+              "radiant/midi_player.cpp",
+              "radiant/audio_bus.cpp"
             ],
             "binary": "test_midi_player_gtest.exe",
             "icon": "\ud83c\udfb5"

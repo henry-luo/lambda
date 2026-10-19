@@ -21,6 +21,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `three-gallery` | `scene3d/three-gallery.html` | [Native 3D](scene3d/README.md) |
 | `asset-gallery` | `scene3d/asset-gallery.ls` | [Native 3D](scene3d/README.md) |
 | `shared-animation` | `scene3d/shared-animation.html` | [Native 3D](scene3d/README.md) |
+| `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
 | `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
 
@@ -40,6 +41,13 @@ The [physics playground](physics/README.md) contains four interactive native
 Scene3D experiments: a domino cascade, compound bodies in zero gravity, a
 marble sorter and a bounce comparison with trajectory charts. Open its gallery
 with `./lambda.exe view test/demo/physics/index.ls`.
+
+[The Rings of a City](cityscape/README.md) rebuilds Chengdu inside the Third Ring
+Road from OpenStreetMap, then plays its history from 1250 BC to 2022 as one
+150-second native Scene3D clip. **♪ Sound** replays it with an original score composed in
+Lambda and played through the music package's SoundFont. Generate the model with
+`python3 -I test/demo/cityscape/_generate.py --fetch`, then open it with
+`./lambda.exe demo cityscape`.
 
 ## Readability extraction
 

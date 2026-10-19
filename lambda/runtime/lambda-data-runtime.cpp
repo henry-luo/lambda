@@ -1571,7 +1571,8 @@ Item list_end(List *list) {
         return builder && builder->ops->finish(builder) ? (Item){.array = list} : ItemError;
     }
     if (list->type_id == LMD_TYPE_ELEMENT) {
-        log_item({.array = list}, "elmt_end");
+        // no subtree dump here: logging each closed element re-printed every
+        // descendant at every nesting level, O(depth x size) on large documents.
         return {.array = list};
     }
     else {

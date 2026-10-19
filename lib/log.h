@@ -167,6 +167,19 @@ void log_mem_stage(const char *stage);
     int log_trace(const char *format, ...);
 #endif
 
+/*
+ * True only when log_debug() output can reach a sink. Guard eager formatting
+ * (printing a value just to log it) with this rather than log_level_enabled():
+ * release builds strip log_debug() while log.conf may still enable DEBUG, so a
+ * level check alone formats text that is then discarded.
+ */
+#if (defined(NDEBUG) || defined(LAMBDA_NO_LOG)) && !defined(LOG_IMPL)
+    #define log_debug_enabled(category) 0
+#else
+    #define log_debug_enabled(category) \
+        (!log_is_disabled() && log_level_enabled((category), LOG_LEVEL_DEBUG))
+#endif
+
 /* Default category variadic versions */
 int log_vfatal(const char *format, va_list args);
 int log_verror(const char *format, va_list args);

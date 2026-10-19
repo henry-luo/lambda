@@ -201,7 +201,10 @@ Successful values carry diagnostics for recoverable omissions.
 use in `fn`; it does not retain an open stream. Acquiring an audio device,
 starting playback, and writing exported bytes are procedural effects
 (S12.1.1v2). Player construction does not start sound. Its template handlers
-issue transport commands through the host boundary (S12.1.3/D7.4.6).
+issue transport commands through the host boundary (S12.1.3/D7.4.6). Whether
+a document may start sound at all follows the audible-output gate D7.5.4
+(USER, 2026-10-19): local documents may, and network documents need
+activation; the player's Play button satisfies both.
 
 Display example:
 
@@ -491,7 +494,11 @@ export, and cursor timing.
 MIDI events require a synthesizer and audio output to become audible. The
 selected default is **TinySoundFont** behind a small native interface, fed by
 an immutable performance buffer, with **miniaudio 0.11.23** supplying streaming
-PCM/device timing. Both are pinned, unmodified dependencies. The bundled
+PCM/device timing. Both are pinned, unmodified dependencies. Since speech M2
+(2026-10-19) the window audio bus owns the one miniaudio device. Each MIDI
+session is a voice of its document's sub-mix, and transport commands exclude
+the audio thread with the voice lock instead of stopping a per-session device
+([Radiant_Design_Speech §3.2](radiant/Radiant_Design_Speech.md)). The bundled
 **TimGM6mb** sound bank is separately licensed GPL-2.0; callers may supply a
 compatible SF2. Provenance and checksums are recorded beside each asset.
 [TinySoundFont](https://github.com/schellingb/TinySoundFont),

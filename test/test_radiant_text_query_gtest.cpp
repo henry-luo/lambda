@@ -4,6 +4,8 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/audio.hpp"
+#include "../radiant/speech.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
@@ -2962,6 +2964,73 @@ TEST_F(RadiantFrameDelivery, FullscreenCatalogRefusesWindowlessTransitions) {
     EXPECT_STREQ(owner->get_attribute("data-actual"), "false");
     EXPECT_STREQ(owner->get_attribute("data-enter"), "false");
     EXPECT_STREQ(owner->get_attribute("data-exit"), "false");
+}
+
+TEST_F(RadiantFrameDelivery, AudibleOutputGateFollowsDocumentOrigin) {
+    // D7.5.4: a local document may start audio; a network one needs trusted
+    // activation or the host grant, and activation is sticky.
+    ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
+    EXPECT_TRUE(radiant_document_may_start_audio(document));
+    Url* local = document->url.get();
+    Url* network = url_parse("https://example.com/narration.html");
+    ASSERT_NE(network, nullptr);
+    document->url = lam::own(network);
+    EXPECT_FALSE(radiant_document_may_start_audio(document));
+    radiant_audio_grant_activation(true);
+    EXPECT_TRUE(radiant_document_may_start_audio(document));
+    radiant_audio_grant_activation(false);
+    EXPECT_FALSE(radiant_document_may_start_audio(document));
+    radiant_audio_note_activation(document);
+    EXPECT_TRUE(radiant_document_may_start_audio(document));
+    document->url = lam::own(local);
+    url_destroy(network);
+}
+
+TEST_F(RadiantFrameDelivery, ScheduledUtteranceStartsAtItsSubmixSampleOffline) {
+    // Radiant_Design_Speech §3.2/§3.4: `at` is seconds on the document sub-mix
+    // clock, and an offline sub-mix renders without a device.
+    DomElement* owner = load("test/lambda/ui/_window_fullscreen.ls");
+    ASSERT_NE(owner, nullptr);
+#ifdef _WIN32
+    _putenv_s("LAMBDA_SPEECH_ENGINE", "fake");
+#else
+    setenv("LAMBDA_SPEECH_ENGINE", "fake", 1);
+#endif
+    audio_bus_set_offline(true);
+    SpeechText text = {};
+    ASSERT_TRUE(speech_text_from_string("go go go go", 11, &text));   // 1.2 s of fake speech
+    SpeechOptions options = {nullptr, nullptr, 1, 1, 1, 0.5};
+    const char* error = nullptr;
+    uint64_t token = radiant_speech_speak(owner, &text, &options, &error);
+    ASSERT_NE(token, 0u) << (error ? error : "");
+    EXPECT_TRUE(radiant_speech_tick(document));   // arms the utterance on the speech voice
+    AudioSubmixId submix = radiant_document_submix(document);
+    const uint32_t frames = AUDIO_BUS_RATE;
+    auto* mix = (float*)mem_calloc((size_t)frames * 2, sizeof(float), MEM_CAT_RENDER);
+    ASSERT_NE(mix, nullptr);
+    ASSERT_TRUE(audio_submix_render(submix, mix, frames));
+    uint32_t first = frames;
+    for (uint32_t i = 0; i < frames && first == frames; i++) if (mix[i * 2] != 0) first = i;
+    // the fake tone begins at sin(0), so its first audible sample follows the start frame.
+    EXPECT_GE(first, AUDIO_BUS_RATE / 2);
+    EXPECT_LE(first, AUDIO_BUS_RATE / 2 + 4);
+    EXPECT_DOUBLE_EQ(radiant_audio_clock(document), 1.0);
+    radiant_speech_tick(document);
+    SpeechInfo info = {};
+    ASSERT_TRUE(radiant_speech_info(document, token, &info));
+    EXPECT_EQ(info.state, SPEECH_SPEAKING);
+    EXPECT_NEAR(info.position, 0.5, 1e-9);
+    // leaving the bus idle lets the output mode change back.
+    EXPECT_TRUE(radiant_speech_command(document, token, "cancel"));
+    EXPECT_FALSE(radiant_speech_tick(document));
+    EXPECT_FALSE(radiant_audio_frames_pending(document));
+    mem_free(mix);
+    audio_bus_set_offline(false);
+#ifdef _WIN32
+    _putenv_s("LAMBDA_SPEECH_ENGINE", "");
+#else
+    unsetenv("LAMBDA_SPEECH_ENGINE");
+#endif
 }
 
 TEST_F(RadiantFrameDelivery, HidingFocusedPanelSettlesBeforeValidationWithoutHostBatch) {

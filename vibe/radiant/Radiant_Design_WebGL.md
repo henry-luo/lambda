@@ -911,7 +911,12 @@ corpus, not Three.js execution.
 - Phase II ES-source adaptation and desktop precision-query mapping;
   native desktop shader acceptance is already selected.
 - Revisions to initial resource quotas and a measurable frame-pacing target for the required
-  scenes on named hardware.
+  scenes on named hardware. **Graphics-context budget revised 2026-10-19 (user ruling):
+  128 MiB → 512 MiB.** A drawing buffer costs `width × height × (8 × samples + 4)` bytes.
+  On a 2× Retina display, a 1280×720 native scene with 4× MSAA needs 132.7 MB, which left
+  1.5 MB of the old budget for everything else. The OpenStreetMap city demo
+  (`test/demo/cityscape`, 1.66M vertices, 74.9 MB of buffers) failed with "resource byte
+  quota exceeded" and rendered black. The derived per-buffer limits scale with the budget.
 - Whether WebGL1 is ever added as a separate API; it is deferred initially.
 - The Phase II optional-extension manifest and whether advanced asset loaders
   join either phase's required workload set.
@@ -1305,7 +1310,8 @@ vertex and instance buffers omit CPU copies, while index buffers retain their
 validation data. Native textures optionally
 accept `max-size` (integer 1..4096, default 4096); upload uses power-of-two box
 downsampling with alpha-weighted RGB, preserving the source image. Mip memory
-accounting uses the uploaded size. The graphics-context budget remains 128 MiB.
+accounting uses the uploaded size. The graphics-context budget is 512 MiB
+(revised from 128 MiB on 2026-10-19, see §13).
 
 Resource limits include 64 MiB per glTF buffer or HTTP scene-asset response,
 8,388,608 decoded components per accessor, 1,048,576 source vertices and

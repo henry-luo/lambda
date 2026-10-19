@@ -538,7 +538,8 @@ TEST_F(Scene3dTest, ShaderReflectionUniformsFailuresAndForeignGenerations) {
     EXPECT_FALSE(native_gl_valid(foreign,program,NATIVE_GL_PROGRAM));EXPECT_FALSE(native_gl_uniform_set(foreign,uniform,color,4));
     native_gl_destroy(foreign);EXPECT_EQ(glfwGetCurrentContext(),previous);
     native_gl_release(graphics,program);EXPECT_FALSE(native_gl_uniform_set(graphics,uniform,color,4));
-    EXPECT_EQ(native_gl_buffer(graphics,color,129u*1024u*1024u).id,0u);
+    // just over the 512 MiB context budget: refused before the 16-byte source is read.
+    EXPECT_EQ(native_gl_buffer(graphics,color,513u*1024u*1024u).id,0u);
     native_gl_destroy(graphics);EXPECT_EQ(native_gl_create(false,diagnostic,sizeof(diagnostic)),nullptr);
 }
 TEST_F(Scene3dTest, TextureResolutionCapBoundsMipBytesAndPreservesSourceAndOrientation) {

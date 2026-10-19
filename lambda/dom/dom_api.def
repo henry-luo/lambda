@@ -792,6 +792,14 @@ DOM_OP(CORE, clipboard_write, input, 1, "pn(text: string) -> bool", dom_engine_c
 
 DOM_OP(CORE, close_dialog, forms, 2, "pn(n: any, value: any) -> null", dom_core_close_dialog, DOM_F_MUTATES, "", html_element, "", "close")
 
+// speech synthesis (Radiant_Design_Speech.md §4.1), appended to preserve catalog slots.
+// the voice list is a live host read (fn, §9 question 6); starting audio is gated by D7.5.4.
+DOM_OP(CORE, speech_voices, media, 0, "fn() -> array", dom_engine_speech_voices, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, speak, media, 3, "pn(n: any, utterance: any, options: any) -> int|null", dom_engine_speak, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, speech_command, media, 3, "pn(n: any, token: int, command: string) -> bool", dom_engine_speech_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, speech_info, media, 2, "fn(n: any, token: int) -> map|null", dom_engine_speech_info, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, audio_clock, media, 1, "fn(n: any) -> float", dom_engine_audio_clock, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP
