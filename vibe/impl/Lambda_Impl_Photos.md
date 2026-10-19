@@ -325,7 +325,7 @@ adding a Photos-only input workaround (**S12.1.3**).
 
 - The 16 selected package/runtime cases pass with forced GC and poisoned frees;
   the eager-JIT pass of the 10 Photos/new dynamic-index cases also passes.
-  Photos fixtures contain 41 core, 13 interaction, 26 paint, 51 composite,
+  Photos fixtures contain 41 core, 13 interaction, 30 paint, 51 composite,
   21 retouch and 16 action semantic checks, with procedural PSD/project/action
   round trips. The final composite review includes mask/effect, transform
   gestures, identity reset and metadata-preserving flattening.
@@ -392,3 +392,11 @@ headless benchmark.
 PSD profile checks also cover disabled editable effects: they are refused instead
 of being silently discarded, while project reopen retains their disabled state
 and original appearance. The composite fixture now contains 51 semantic checks.
+
+Final workflow review also repairs selection coverage during document resizing.
+Image resizing resamples coverage with the pixels; canvas resizing reframes it
+with zero outside coverage. Previously the mask kept its old dimensions, so its
+overlay stretched and subsequent selection combination could reject mismatched
+extents. Four semantic cases cover growth, combination after growth, image
+scaling, immutable old coverage and undo restoration (**S9.2.2**). The paint
+fixture now has 30 checks.

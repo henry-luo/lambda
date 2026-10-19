@@ -85,3 +85,7 @@ artwork/styles, a channel palette and batch-file orchestration remain pending.
 
 Retouch source selection must be recorded as a step or supplied by the replay
 session. Actions operate with that session's current selection coverage.
+
+Image resizing resamples active selection coverage; canvas resizing reframes it
+with zero coverage outside the old extent. Undo restores its original dimensions
+and samples with the document (**S9.2.2**).

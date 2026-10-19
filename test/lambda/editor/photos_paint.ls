@@ -52,3 +52,14 @@ let saved = editor.open_session(img.decode(img.encode(masked.doc,{format:'psd'})
 check("painted-psd",img.render_frame(saved.doc)^ == img.render_frame(masked.doc)^)
 check("invalid-setting",editor.exec(configured,{id:"tool.configure",brush:{hardnes:0.5}}) ^ { true } ~ { false })
 check("locked-paint",editor.exec(editor.exec(painted,{id:"layer.lock"})^,{id:"paint.stroke",points:[[255,10]]}) ^ { true } ~ { false })
+
+let resize_base = editor.open_session(editor.new_document({width:4,height:4})^)^
+let all_selected = editor.exec(resize_base,{id:"selection.all"})^
+let canvas_expanded = editor.exec(all_selected,{id:"document.resize_canvas",width:8,height:8})^
+check("canvas-resize-selection",canvas_expanded.selection.width == 8 and canvas_expanded.selection.height == 8 and img.coverage_bounds(canvas_expanded.selection)^ == [0,0,4,4])
+let combined = editor.exec(canvas_expanded,{id:"selection.shape",mode:"add",options:{shape:"rectangle",start:[6,6],end:[8,8]}})^
+check("resized-selection-combine",img.coverage_bounds(combined.selection)^ == [0,0,8,8])
+let scaled_selection = editor.exec(all_selected,{id:"document.resize_image",width:8,height:8})^
+check("image-resize-selection",scaled_selection.selection.width == 8 and img.coverage_bounds(scaled_selection.selection)^ == [0,0,8,8])
+let resized_undo = editor.exec(scaled_selection,{id:"history.undo"})^
+check("resize-selection-undo",resized_undo.doc == all_selected.doc and resized_undo.selection == all_selected.selection and all_selected.selection.width == 4)

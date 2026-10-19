@@ -251,7 +251,11 @@ pub fn apply_command(st,command) any^ {
         let dimensions = new_document({width:command.width,height:command.height})^;
         let changed = if (id == "document.resize_image") img.replace_at(st.doc,model.root_path(st.doc),
             scaled(img.composition(st.doc),dimensions.width/st.doc.width,dimensions.height/st.doc.height)^)^ else st.doc;
-        {*:st,doc:img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^}
+        // coverage remains in document coordinates, so its extent must follow the canvas.
+        let coverage = if (st.selection == null) null else if (id == "document.resize_image")
+            img.resize(st.selection,dimensions.width,dimensions.height)^
+            else img.reframe(st.selection,[0,0,dimensions.width,dimensions.height])^;
+        {*:st,doc:img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,selection:coverage}
     }
     else edit_node(st,command)^
 }
