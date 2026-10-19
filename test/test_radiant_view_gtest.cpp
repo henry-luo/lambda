@@ -3029,6 +3029,30 @@ TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
         "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", RADIANT_IMAGE_GC_ENV, true);
 }
 
+static const ShellEnvEntry RADIANT_SPEECH_FAKE_GC_ENV[] = {
+    {"LAMBDA_SPEECH_ENGINE", "fake"}, {"LAMBDA_AUDIO_OUTPUT", "offline"},
+    {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+    {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+};
+
+TEST(RadiantViewTest, SpeechFakeEngineEventsSurviveGcWithoutLeaks) {
+    // Radiant_Design_Speech §6: queued speech events root their payloads and
+    // utterances are released with the document.
+    test_radiant_view_expect_replay("test/ui/_speech_fake.ls", "test/ui/speech_fake.json",
+        RADIANT_SPEECH_FAKE_GC_ENV, true);
+}
+
+TEST(RadiantViewTest, SpeechSmokeSpeaksWithBoundaries) {
+#ifdef __APPLE__
+    // opt-in: the real engine needs an audio device and the default system voices.
+    if (!getenv("LAMBDA_SPEECH_SMOKE")) GTEST_SKIP() << "set LAMBDA_SPEECH_SMOKE=1 to run the macOS speech smoke test";
+    test_radiant_view_expect_replay("test/speech/_speech_smoke.ls", "test/speech/speech_smoke.json",
+        nullptr, false, 60000);
+#else
+    GTEST_SKIP() << "the speech smoke test needs the macOS engine";
+#endif
+}
+
 TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
     test_radiant_view_expect_replay("test/demo/photo/tests/_image_jobs.ls",
         "test/demo/photo/tests/image_jobs.json",RADIANT_IMAGE_GC_ENV,true);

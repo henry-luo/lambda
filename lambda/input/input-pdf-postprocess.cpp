@@ -33,6 +33,8 @@
 #include "lib/strbuf.h"
 #include "lib/utf.h"
 #include "lib/string.h"
+#include "lib/endian.h"
+#include "lib/color.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -849,8 +851,21 @@ static const char* get_decompressed_stream(Map* stream_map, size_t* out_len,
         return data_s->chars;
     }
 
-    char* decoded = pdf_decompress_stream(data_s->chars, data_s->len,
-                                          filters_buf, n_filters, out_len);
+    PDFDecodeParams params[8];
+    Item parms = map_lookup(dict, "DecodeParms");
+    Array* array = item_as_array(parms);
+    for (int i = 0; i < n_filters; i++) {
+        pdf_decode_params_init(params + i);
+        Map* values = item_as_map(array && i < array->length ? array->items[i] : parms);
+        if (!values) continue;
+        params[i].predictor = item_as_int(map_lookup(values, "Predictor"), 1);
+        params[i].colors = item_as_int(map_lookup(values, "Colors"), 1);
+        params[i].bits = item_as_int(map_lookup(values, "BitsPerComponent"), 8);
+        params[i].columns = item_as_int(map_lookup(values, "Columns"), 1);
+        params[i].early_change = item_as_int(map_lookup(values, "EarlyChange"), 1);
+    }
+    char* decoded = pdf_decompress_stream_with_params(data_s->chars, data_s->len,
+        filters_buf, n_filters, params, out_len);
     if (!decoded) {
         log_warn("pdf_postprocess: ToUnicode stream decompression failed "
                  "(filter=%s)", filters_buf[0]);
@@ -1504,47 +1519,238 @@ static void expand_object_streams(Input* input, MarkBuilder& builder, Array* obj
 // element so downstream renderers (Radiant, browsers) can display the
 // image without needing to know about PDF's `img:N` handle convention.
 //
-// Supported in this pass:
-//   - /Filter /FlateDecode (already inflated by Pass 3)
-//   - /BitsPerComponent 8
-//   - /ColorSpace DeviceGray, DeviceRGB, or ["ICCBased", N-component]
-//     (3-component ICC treated as DeviceRGB, 1-component as DeviceGray)
-//   - Optional 8-bit /SMask alpha
-// JPEG-compressed images (/DCTDecode) get the original (pre-decompress)
-// bytes wrapped as data:image/jpeg;base64,... — but only when the
-// parser preserved the encoded bytes (currently no, so JPEG falls into
-// the generic raw-pixel path). Out-of-scope formats are skipped silently.
+// Packed and 16-bit samples, Indexed palettes, Lab and tint alternates share
+// this path. ICC profiles currently use their device component interpretation.
+// JPEG bytes are preserved; JPX, fax and generic-region JBIG2 use native codecs.
+// Unsupported colour functions or JBIG2 segment kinds remain unresolved.
 
-// Determine the number of colour components for a PDF colour space Item.
-// Returns 1 (gray), 3 (RGB) or 0 (unsupported).
-static int color_space_ncomp(Item cs, ObjTable* table) {
-    String* s = item_as_pdf_name(cs);
-    if (s) {
-        if (str_eq(s, "DeviceGray") || str_eq(s, "G")) return 1;
-        if (str_eq(s, "DeviceRGB")  || str_eq(s, "RGB")) return 3;
-        return 0;  // DeviceCMYK and others not handled here
+static double pdf_number(Item value, double fallback = 0) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_FLOAT ? value.get_double() :
+        type == LMD_TYPE_INT ? (double)lambda_int_item_to_i64(value) : fallback;
+}
+
+static double pdf_array_number(Array* values, int index, double fallback) {
+    return values && index >= 0 && index < values->length ? pdf_number(values->items[index], fallback) : fallback;
+}
+
+static uint8_t pdf_color_byte(double value) {
+    return (uint8_t)floor(fmax(0.0, fmin(1.0, value)) * 255 + 0.5);
+}
+
+static bool pdf_tint_function(Item function, ObjTable* table, const double* inputs, int input_count, double* output, int count) {
+    function = resolve_ref_deep(function, table);
+    Map* stream = item_as_map(function), *dict = pdf_dictionary_for_item(function);
+    if (!dict || count < 1 || count > 4) return false;
+    int type = item_as_int(map_lookup(dict, "FunctionType"), -1);
+    if (type == 2) {
+        if (input_count != 1) return false;
+        Array* c0 = item_as_array(map_lookup(dict, "C0"));
+        Array* c1 = item_as_array(map_lookup(dict, "C1"));
+        double fraction = pow(inputs[0], pdf_number(map_lookup(dict, "N"), 1));
+        for (int c = 0; c < count; c++) {
+            double first = pdf_array_number(c0, c, 0), last = pdf_array_number(c1, c, 1);
+            output[c] = first + fraction * (last - first);
+        }
+        return true;
     }
-    Array* arr = item_as_array(cs);
-    if (!arr || arr->length < 1) return 0;
-    String* head = item_as_pdf_name(arr->items[0]);
-    if (!head) return 0;
-    if (str_eq(head, "ICCBased") && arr->length >= 2) {
-        // ["ICCBased", indirect_ref-to-stream]. The stream's dictionary
-        // has /N (number of components).
-        Item stream_it = resolve_ref_deep(arr->items[1], table);
-        Map* sm = item_as_map(stream_it);
-        if (!sm) return 0;
-        Item dict_it = map_lookup(sm, "dictionary");
-        Map* dict = item_as_map(dict_it);
-        if (!dict) return 0;
-        int n = item_as_int(map_lookup(dict, "N"), 0);
-        if (n == 1 || n == 3) return n;
-        return 0;
+    if (type == 0) {
+        Array* size = item_as_array(map_lookup(dict, "Size"));
+        int bits = item_as_int(map_lookup(dict, "BitsPerSample"), 0);
+        String* data = item_as_string(map_lookup(stream, "data"));
+        if (!size || size->length != input_count || input_count < 1 || input_count > 4 ||
+                !(bits == 1 || bits == 2 || bits == 4 || bits == 8 || bits == 16) ||
+                !data || item_as_int(map_lookup(dict, "Order"), 1) != 1) return false;
+        Array* encode = item_as_array(map_lookup(dict, "Encode"));
+        Array* decode = item_as_array(map_lookup(dict, "Decode"));
+        Array* range = item_as_array(map_lookup(dict, "Range"));
+        size_t entries = 1, stride[4]; int first[4], last[4]; double fraction[4];
+        for (int d = 0; d < input_count; d++) {
+            int extent = (int)pdf_array_number(size, d, 0);
+            if (extent < 1 || extent > 65536 || entries > 1048576u / extent) return false;
+            stride[d] = entries; entries *= extent;
+            double encoded = fmax(0, fmin(extent - 1, pdf_array_number(encode, d * 2, 0) + inputs[d] *
+                (pdf_array_number(encode, d * 2 + 1, extent - 1) - pdf_array_number(encode, d * 2, 0))));
+            first[d] = (int)floor(encoded); last[d] = first[d] + 1 < extent ? first[d] + 1 : first[d];
+            fraction[d] = encoded - first[d];
+        }
+        if (data->len < (entries * count * bits + 7) / 8) return false;
+        double maximum = (1u << bits) - 1;
+        for (int c = 0; c < count; c++) {
+            double sample = 0;
+            for (int corner = 0; corner < (1 << input_count); corner++) {
+                size_t index = 0; double weight = 1;
+                for (int d = 0; d < input_count; d++) {
+                    bool upper = corner & (1 << d);
+                    index += (upper ? last[d] : first[d]) * stride[d];
+                    weight *= upper ? fraction[d] : 1 - fraction[d];
+                }
+                sample += weight * pdf_read_sample((const uint8_t*)data->chars, (index * count + c) * bits, bits);
+            }
+            double low = pdf_array_number(decode, c * 2, pdf_array_number(range, c * 2, 0));
+            double high = pdf_array_number(decode, c * 2 + 1, pdf_array_number(range, c * 2 + 1, 1));
+            output[c] = low + (sample / maximum) * (high - low);
+        }
+        return true;
     }
-    if (str_eq(head, "DeviceGray") || str_eq(head, "G")) return 1;
-    if (str_eq(head, "DeviceRGB")  || str_eq(head, "RGB")) return 3;
-    // CalGray, CalRGB, Lab, Indexed, Pattern, Separation, DeviceN — skip.
-    return 0;
+    if (type != 4) return false;
+    String* program = item_as_string(map_lookup(stream, "data"));
+    if (!program) return false;
+    // bounded calculator stack for straight-line PDF tint functions; unknown operators reject.
+    if (input_count < 1 || input_count > 32) return false;
+    double stack[64] = {}; int used = input_count;
+    memcpy(stack, inputs, input_count * sizeof(double));
+    const char* p = program->chars, *end = p + program->len;
+    while (p < end) {
+        p = skip_ws(p, end);
+        if (p == end) break;
+        if (*p == '{' || *p == '}') { p++; continue; }
+        char* after = nullptr; double value = strtod(p, &after);
+        if (after != p) {
+            if (used == 64 || after > end || !isfinite(value)) return false;
+            stack[used++] = value; p = after; continue;
+        }
+        const char* token = p;
+        while (p < end && !str_is_space(*p) && *p != '}') p++;
+        StrView op = strview_init(token, p - token);
+        if (strview_equal(&op, "cvr")) { if (!used) return false; }
+        else if (strview_equal(&op, "dup")) {
+            if (!used || used == 64) return false; stack[used] = stack[used - 1]; used++;
+        } else if (strview_equal(&op, "exch")) {
+            if (used < 2) return false; double swap = stack[used - 1]; stack[used - 1] = stack[used - 2]; stack[used - 2] = swap;
+        } else if (strview_equal(&op, "pop")) {
+            if (!used) return false; used--;
+        } else if (strview_equal(&op, "index")) {
+            if (used < 2 || stack[used - 1] < 0 || stack[used - 1] >= used - 1 || floor(stack[used - 1]) != stack[used - 1]) return false;
+            int index = (int)stack[--used]; stack[used] = stack[used - 1 - index]; used++;
+        } else if (strview_equal(&op, "roll")) {
+            if (used < 2) return false;
+            double turns = stack[used - 1], size = stack[used - 2]; used -= 2;
+            if (size < 0 || size > used || floor(size) != size || !isfinite(turns) || floor(turns) != turns) return false;
+            int n = (int)size, shift = n ? (int)fmod(turns, n) : 0;
+            if (shift < 0) shift += n;
+            double copy[64];
+            for (int i = 0; i < n; i++) copy[(i + shift) % n] = stack[used - n + i];
+            for (int i = 0; i < n; i++) stack[used - n + i] = copy[i];
+        } else {
+            const char* operators[] = {"add", "sub", "mul", "div"}; int operation = -1;
+            for (int i = 0; i < 4; i++) if (strview_equal(&op, operators[i])) operation = i;
+            if (operation < 0 || used < 2) return false;
+            double right = stack[--used], left = stack[used - 1];
+            if (operation == 3 && right == 0) return false;
+            stack[used - 1] = operation == 0 ? left + right : operation == 1 ? left - right : operation == 2 ? left * right : left / right;
+        }
+    }
+    if (used != count) return false;
+    Array* range = item_as_array(map_lookup(dict, "Range"));
+    for (int c = 0; c < count; c++) output[c] = fmax(pdf_array_number(range, c * 2, 0),
+        fmin(pdf_array_number(range, c * 2 + 1, 1), stack[c]));
+    return true;
+}
+
+struct PdfDeviceColor {
+    int components = 0;
+    bool lab = false;
+    double white[3] = {0,1,0};
+    double low[4] = {}, high[4] = {1,1,1,1};
+};
+
+struct PdfImageColor {
+    int components = 0;
+    bool indexed = false, lookup = false;
+    Item tint = ItemNull;
+    PdfDeviceColor device;
+    uint8_t colors[256][3] = {};
+};
+
+static void pdf_device_rgb(const PdfDeviceColor* device, const double* values, uint8_t* rgb) {
+    if (device->lab) {
+        double converted[3]; color_lab_to_rgb(values[0], values[1], values[2], device->white, converted);
+        for (int c = 0; c < 3; c++) rgb[c] = pdf_color_byte(converted[c]);
+        return;
+    }
+    int components = device->components;
+    for (int c = 0; c < 3; c++) rgb[c] = pdf_color_byte(components == 1 ? values[0] :
+        components == 3 ? values[c] : (1 - values[c]) * (1 - values[3]));
+}
+
+static bool pdf_image_rgb(const PdfImageColor* color, ObjTable* table, const double* values, uint8_t* rgb) {
+    if (color->lookup) {
+        unsigned index = color->indexed ? (unsigned)fmax(0, fmin(255, floor(values[0] + 0.5))) : pdf_color_byte(values[0]);
+        memcpy(rgb, color->colors[index], 3); return true;
+    }
+    if (color->tint.item != ITEM_NULL) {
+        double transformed[4] = {};
+        if (!pdf_tint_function(color->tint, table, values, color->components, transformed, color->device.components)) return false;
+        pdf_device_rgb(&color->device, transformed, rgb);
+    } else pdf_device_rgb(&color->device, values, rgb);
+    return true;
+}
+
+static bool pdf_image_color(Item raw, ObjTable* table, PdfImageColor* color, int depth = 0) {
+    if (depth > 8) return false;
+    Item cs = resolve_ref_deep(raw, table);
+    Array* array = item_as_array(cs);
+    String* name = item_as_pdf_name(array && array->length ? array->items[0] : cs);
+    if (!name) return false;
+    if (str_eq(name, "DeviceGray") || str_eq(name, "G") || str_eq(name, "CalGray")) color->components = 1;
+    else if (str_eq(name, "DeviceRGB") || str_eq(name, "RGB") || str_eq(name, "CalRGB")) color->components = 3;
+    else if (str_eq(name, "DeviceCMYK") || str_eq(name, "CMYK")) color->components = 4;
+    else if (str_eq(name, "Lab") && array && array->length >= 2) {
+        Map* dict = item_as_map(resolve_ref_deep(array->items[1], table));
+        Array* white = item_as_array(resolve_ref_deep(map_lookup(dict, "WhitePoint"), table));
+        Array* range = item_as_array(resolve_ref_deep(map_lookup(dict, "Range"), table));
+        if (!white || white->length != 3) return false;
+        color->components = 3; color->device.lab = true;
+        color->device.high[0] = 100;
+        for (int c = 0; c < 3; c++) {
+            color->device.white[c] = pdf_array_number(white, c, 0);
+            if (!isfinite(color->device.white[c]) || color->device.white[c] <= 0) return false;
+            if (c) {
+                color->device.low[c] = pdf_array_number(range, (c - 1) * 2, -100);
+                color->device.high[c] = pdf_array_number(range, (c - 1) * 2 + 1, 100);
+            }
+        }
+    }
+    else if (str_eq(name, "ICCBased") && array && array->length >= 2) {
+        Map* profile = pdf_dictionary_for_item(resolve_ref_deep(array->items[1], table));
+        color->components = item_as_int(map_lookup(profile, "N"), 0);
+    } else if (array && array->length >= 4 &&
+            (str_eq(name, "Indexed") || str_eq(name, "I") || str_eq(name, "Separation") || str_eq(name, "DeviceN"))) {
+        bool indexed = str_eq(name, "Indexed") || str_eq(name, "I");
+        PdfImageColor base;
+        if (!pdf_image_color(array->items[indexed ? 1 : 2], table, &base, depth + 1) || (!indexed && base.lookup)) return false;
+        color->components = 1; color->indexed = indexed; color->lookup = true;
+        Item lookup = resolve_ref_deep(array->items[3], table);
+        String* palette = item_as_string(lookup);
+        if (!palette) palette = item_as_string(map_lookup(item_as_map(lookup), "data"));
+        int highest = indexed ? item_as_int(array->items[2], -1) : 255;
+        if (highest < 0 || highest > 255 || (indexed && (!palette || palette->len < (size_t)(highest + 1) * base.components))) return false;
+        if (str_eq(name, "DeviceN")) {
+            Array* names = item_as_array(resolve_ref_deep(array->items[1], table));
+            if (!names || names->length < 1 || names->length > 32) return false;
+            color->components = names->length;
+            if (names->length > 1) {
+                color->lookup = false; color->tint = array->items[3];
+                color->device = base.device; return true;
+            }
+        }
+        for (int i = 0; i < 256; i++) {
+            double values[32] = {};
+            if (indexed) for (int c = 0; c < base.components; c++) {
+                double sample = (uint8_t)palette->chars[(i > highest ? highest : i) * base.components + c] / 255.0;
+                values[c] = base.tint.item != ITEM_NULL ? sample :
+                    base.device.low[c] + sample * (base.device.high[c] - base.device.low[c]);
+            }
+            else {
+                double tint = i / 255.0;
+                if (!pdf_tint_function(array->items[3], table, &tint, 1, values, base.components)) return false;
+            }
+            if (!pdf_image_rgb(&base, table, values, color->colors[i])) return false;
+        }
+    }
+    color->device.components = color->components;
+    return color->components == 1 || color->components == 3 || color->components == 4;
 }
 
 static void bb_u32be(uint8_t* p, uint32_t v) {
@@ -1681,7 +1887,8 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
 
     int w   = item_as_int(map_lookup(dict, "Width"),  0);
     int h   = item_as_int(map_lookup(dict, "Height"), 0);
-    int bpc = item_as_int(map_lookup(dict, "BitsPerComponent"), 8);
+    bool stencil = get_type_id(map_lookup(dict, "ImageMask")) == LMD_TYPE_BOOL && map_lookup(dict, "ImageMask").bool_val;
+    int bpc = item_as_int(map_lookup(dict, "BitsPerComponent"), stencil ? 1 : 8);
 
     Item data_it = map_lookup(stream_map, "data");
     String* pix = item_as_string(data_it);
@@ -1692,15 +1899,44 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
         return bytes_to_data_uri(input, "image/jpeg", (const uint8_t*)pix->chars, pix->len);
     }
 
-    if (w <= 0 || h <= 0 || bpc != 8) return nullptr;
-
-    int ncomp = color_space_ncomp(map_lookup(dict, "ColorSpace"), table);
-    if (ncomp != 1 && ncomp != 3) return nullptr;
-
-    // Pixel data must be plain (Pass 3 should have decompressed it).
-    size_t expect = (size_t)w * (size_t)h * (size_t)ncomp;
-    if ((size_t)pix->len < expect) return nullptr;
-    const uint8_t* rgb = (const uint8_t*)pix->chars;
+    if (w <= 0 || h <= 0 || (size_t)w > (128u * 1024 * 1024) / ((size_t)h * 4)) return nullptr;
+    PdfImageColor color;
+    if (stencil) color.components = color.device.components = 1;
+    else if (!pdf_image_color(map_lookup(dict, "ColorSpace"), table, &color)) return nullptr;
+    int ncomp = color.components;
+    ByteBuilder decoded = {}; byte_builder_init(&decoded, 0, MEM_CAT_INPUT_PDF, false);
+    struct Cleanup { ByteBuilder* bytes; ~Cleanup() { byte_builder_destroy(bytes); } } cleanup = {&decoded};
+    const uint8_t* samples = (const uint8_t*)pix->chars; size_t length = pix->len;
+    bool codec_ok = true;
+    if (filter_item_has_name(filter_it, "CCITTFaxDecode", "CCF")) {
+        Item parms = resolve_ref_deep(map_lookup(dict, "DecodeParms"), table);
+        Array* sequence = item_as_array(parms);
+        if (sequence && sequence->length) parms = resolve_ref_deep(sequence->items[sequence->length - 1], table);
+        Map* values = item_as_map(parms);
+        auto flag = [&](const char* name) { Item value = map_lookup(values, name);
+            return get_type_id(value) == LMD_TYPE_BOOL && value.bool_val; };
+        int columns = item_as_int(map_lookup(values, "Columns"), 1728);
+        int rows = item_as_int(map_lookup(values, "Rows"), h);
+        codec_ok = columns == w && (rows == 0 || rows == h) && pdf_decode_fax_samples(samples, length, w, h,
+            item_as_int(map_lookup(values, "K"), 0), flag("EndOfLine"), flag("EncodedByteAlign"), flag("BlackIs1"), &decoded);
+        bpc = 8;
+    } else if (filter_item_has_name(filter_it, "JBIG2Decode", "JBIG2Decode")) {
+        codec_ok = pdf_decode_jbig2_samples(samples, length, w, h, &decoded); bpc = 8;
+    } else if (filter_item_has_name(filter_it, "JPXDecode", "JPX")) {
+        int components = 0;
+        codec_ok = pdf_decode_jpx_samples(samples, length, w, h, color.indexed, &components, &bpc, &decoded) && components == ncomp;
+    }
+    if (!codec_ok || !(bpc == 1 || bpc == 2 || bpc == 4 || bpc == 8 || bpc == 16)) return nullptr;
+    if (decoded.length) { samples = decoded.data; length = decoded.length; }
+    size_t row_bytes = ((size_t)w * ncomp * bpc + 7) / 8;
+    if (length < row_bytes * h) return nullptr;
+    Array* decode = item_as_array(resolve_ref_deep(map_lookup(dict, "Decode"), table));
+    double first[32], span[32]; unsigned maximum = (1u << bpc) - 1;
+    for (int c = 0; c < ncomp; c++) {
+        bool direct = !color.lookup && color.tint.item == ITEM_NULL;
+        first[c] = pdf_array_number(decode, c * 2, direct ? color.device.low[c] : 0);
+        span[c] = pdf_array_number(decode, c * 2 + 1, color.indexed ? maximum : direct ? color.device.high[c] : 1) - first[c];
+    }
 
     // Optional alpha from /SMask.
     const uint8_t* alpha = nullptr;
@@ -1732,15 +1968,15 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
         for (int x = 0; x < w; x++) {
             size_t pi = (size_t)y * w + x;
             size_t di = pi * 4;
-            if (ncomp == 1) {
-                uint8_t g = rgb[pi];
-                rgba[di+0] = g; rgba[di+1] = g; rgba[di+2] = g;
-            } else {
-                rgba[di+0] = rgb[pi*3+0];
-                rgba[di+1] = rgb[pi*3+1];
-                rgba[di+2] = rgb[pi*3+2];
+            double values[32] = {};
+            for (int c = 0; c < ncomp; c++) {
+                size_t bit = ((size_t)x * ncomp + c) * bpc;
+                unsigned value = pdf_read_sample(samples + (size_t)y * row_bytes, bit, bpc);
+                values[c] = first[c] + value * span[c] / maximum;
             }
-            rgba[di+3] = alpha ? alpha[pi] : 255;
+            if (!pdf_image_rgb(&color, table, values, rgba + di)) { mem_free(rgba); return nullptr; }
+            rgba[di+3] = stencil ? 255 - pdf_color_byte(values[0]) : alpha ? alpha[pi] : 255;
+            if (stencil) rgba[di] = rgba[di+1] = rgba[di+2] = 0;
         }
     }
 

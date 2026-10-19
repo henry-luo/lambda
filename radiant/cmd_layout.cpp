@@ -3408,10 +3408,9 @@ LayoutLoaderHostScope::~LayoutLoaderHostScope() {
     s_layout_loader_host = saved.get();
 }
 
-// The loader runtime of the window named by the innermost host scope, created
-// on first use; null outside a scope, where a stateless loader owns its own.
-static Runtime* layout_loader_runtime(void) {
-    UiContext* host = s_layout_loader_host;
+// lazily create the host's loader runtime, shared by its documents and PDF
+// exports; hostless callers must provide their own runtime.
+Runtime* ui_context_loader_runtime(UiContext* host) {
     if (!host) return nullptr;
     if (!host->loader_runtime) {
         Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
@@ -3653,7 +3652,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     // Plain Markdown keeps its runtime-free path; math and diagrams share one loader.
     if (has_embedded) {
         auto embedded_start = time_now_ns();
-        shared_runtime = layout_loader_runtime();
+        shared_runtime = ui_context_loader_runtime(s_layout_loader_host);
         Runtime* render_runtime = shared_runtime;
         if (!render_runtime) {
             render_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
@@ -4163,7 +4162,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     // runtime. A script page, the edit application, and a load outside any
     // window (an iframe, a worker) own a runtime per document.
     bool stateless = transform && transform->stateless;
-    Runtime* shared_runtime = stateless ? layout_loader_runtime() : nullptr;
+    Runtime* shared_runtime = stateless ? ui_context_loader_runtime(s_layout_loader_host) : nullptr;
     Runtime* runtime = shared_runtime;
     if (!runtime) {
         runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);

@@ -1,6 +1,7 @@
 #include "scene3d.hpp"
 #include "event.hpp"
 #include "audio.hpp"
+#include "speech.hpp"
 #include "../lib/queue.h"
 #include "layout.hpp"
 #include "render.hpp"
@@ -9316,6 +9317,13 @@ static bool radiant_dispatch_button_pointer_event(
         event_mod_alt(event->mods), event_mod_super(event->mods), "mouse");
 }
 
+// EventSim pointer and touch input stands in for trusted host input; it
+// activates the target's document as handle_event does for presses (D7.5.4).
+static void event_sim_note_activation(UiContext* uicon, View* target) {
+    DomElement* element = view_geometry_nearest_dom_element(target, 0);
+    radiant_audio_note_activation(element ? element->doc : uicon->document);
+}
+
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type)
@@ -9324,6 +9332,7 @@ extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* targe
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = uicon->document;
+    if (!strcmp(type, "pointerdown")) event_sim_note_activation(uicon, target);
     return radiant_dispatch_pointer_event(&evcon, target, type,
         client_x, client_y, button, buttons,
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
@@ -9368,6 +9377,7 @@ extern "C" bool radiant_dispatch_event_sim_touch(UiContext* uicon, View* target,
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = uicon->document;
+    if (!strcmp(type, "touchend")) event_sim_note_activation(uicon, target);
     TouchEventBuildArgs args = {
         target, type, client_x, client_y,
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
@@ -11311,6 +11321,7 @@ void radiant_queue_template_render_events(DomDocument* doc, DomNode* root) {
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root) {
     radiant_audio_follow_rebuild(doc, old_root, new_root);
+    radiant_speech_follow_rebuild(doc, old_root, new_root);
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue || !old_root || !new_root || old_root == new_root) return;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
@@ -11319,7 +11330,7 @@ void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
     }
 }
 
-bool radiant_document_has_pending_frames(DomDocument* doc) {
+static bool frame_requests_pending(DomDocument* doc) {
     radiant_audio_prune(doc);
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue) return false;
@@ -11332,9 +11343,19 @@ bool radiant_document_has_pending_frames(DomDocument* doc) {
     return false;
 }
 
+// live speech, and offline audio, keep the host loop frame-driven so boundaries arrive on time.
+bool radiant_document_has_pending_frames(DomDocument* doc) {
+    return frame_requests_pending(doc) || radiant_speech_active(doc) || radiant_audio_frames_pending(doc);
+}
+
 extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
+    // offline output advances the sub-mix on this clock, which is virtual under
+    // EventSim; speech then queues events for what played, to run after the tick
+    // (Radiant_Design_Speech §3.2, §3.5).
+    radiant_audio_tick(doc, timestamp_ms);
+    radiant_speech_tick(doc);
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
-    if (!queue || !radiant_document_has_pending_frames(doc)) return false;
+    if (!queue || !frame_requests_pending(doc)) return false;
     // requests made by a callback belong to the next frame, including reused slots
     uint64_t watermark = queue->next_token;
     EventContext evcon = {};
@@ -13989,6 +14010,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
             event_note_pointer_active_frame(pressed_doc);
+            // a trusted press activates the pressed document (D7.5.4).
+            radiant_audio_note_activation(pressed_doc);
         }
 
         // Forward mouse button events to layer-mode webview
@@ -15083,6 +15106,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         KeyEvent* key_event = &event->key;
         DocState* state = event_context_target_state(&evcon);
         if (!state) break;
+        // a trusted non-modifier key press activates the focused document (D7.5.4).
+        if (key_event->key < RDT_KEY_LEFT_SHIFT || key_event->key > RDT_KEY_RIGHT_SUPER)
+            radiant_audio_note_activation(event_context_target_document(&evcon));
 
         if (key_event->key == RDT_KEY_ESCAPE) {
             NativePointerCapture* capture = native_pointer_capture(doc, false);

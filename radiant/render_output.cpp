@@ -1,4 +1,6 @@
+#include "render_metrics.hpp"
 #include "scene3d.hpp"
+#include "svg_animation.hpp"
 #include "render.hpp"
 #include "../lib/base64.h"
 #include "layout.hpp"
@@ -448,7 +450,7 @@ static bool render_export_session_begin_internal(
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
         float device_scale, bool raster_surface, bool print_media, bool paged,
-        RenderExportDocumentLoader loader, void* request) {
+        RenderExportDocumentLoader loader, void* request, UiContext* shared_ui = nullptr) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
 
@@ -474,16 +476,23 @@ static bool render_export_session_begin_internal(
     session->auto_height = auto_height;
     session->print_media = print_media || paged;
 
-    session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+    session->ui_context = lam::up(shared_ui);
+    if (!shared_ui) {
+        session->owned_ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+        session->ui_context = session->owned_ui_context.borrow();
+    }
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
     }
-    if (ui_context_init(session->ui_context, true, session->device_scale) != 0) {
+    if (!shared_ui && ui_context_init(session->ui_context, true, session->device_scale) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
-        lam::free_owned(session->ui_context);
+        lam::free_owned(session->owned_ui_context);
+        session->ui_context = nullptr;
         return false;
     }
+    ui_context_set_device_scale(session->ui_context, session->device_scale, session->device_scale);
+    session->ui_context->render_failed = false;
     // Only documents that actually request scene pixels acquire a graphics host.
     session->ui_context->export_native_graphics=true;
     int surface_width = raster_surface
@@ -501,8 +510,7 @@ static bool render_export_session_begin_internal(
     session->base_url = lam::own(get_current_dir());
     if (!session->base_url) {
         log_error("[EXPORT_SESSION] Could not resolve the current directory");
-        ui_context_cleanup(session->ui_context);
-        lam::free_owned(session->ui_context);
+        render_export_session_end(session);
         return false;
     }
 
@@ -658,10 +666,11 @@ void render_export_session_end(RenderExportSession* session) {
         url_destroy(session->base_url);
         session->base_url = nullptr;
     }
-    if (session->ui_context) {
-        ui_context_cleanup(session->ui_context);
-        lam::free_owned(session->ui_context);
+    if (session->owned_ui_context) {
+        ui_context_cleanup(session->owned_ui_context);
+        lam::free_owned(session->owned_ui_context);
     }
+    session->ui_context = nullptr;
     session->document = nullptr;
     session->paged_view = nullptr;
 }
@@ -708,8 +717,87 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
     trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
 }
 
+struct RenderFrameKey {
+    uint64_t generations[12];
+    const UiContext* ui;
+    const View* root;
+    float scale;
+    int width, height;
+};
+
+struct RenderFrameCache {
+    RdtVector vector;
+    RenderFrameKey key;
+    bool valid;
+};
+
+void render_frame_cache_destroy(RenderFrameCache* cache) {
+    if (!cache) return;
+    rdt_vector_destroy(&cache->vector);
+    cache->~RenderFrameCache(); mem_free(cache);
+}
+
+static RenderFrameKey render_frame_key(UiContext* ui, ViewTree* tree, uint32_t background, bool transparent) {
+    DomDocument* doc = ui->document;
+    RenderFrameKey key = {};
+    key.ui = ui; key.root = tree->root; key.scale = ui_context_raster_scale(ui);
+    key.width = ui->surface->width; key.height = ui->surface->height;
+    key.generations[10] = background;
+    key.generations[11] = transparent;
+    if (!doc) return key;
+    key.generations[0] = doc->mutation_epoch;
+    key.generations[1] = doc->style_content_epoch;
+    key.generations[2] = doc->style_query_epoch;
+    key.generations[3] = doc_state_content_version(doc->state);
+    key.generations[4] = font_context_glyph_cache_generation(ui->font_ctx);
+    key.generations[5] = font_context_resource_generation(ui->font_ctx);
+    key.generations[6] = image_cache_resource_generation(ui);
+    key.generations[7] = svg_animation_generation(doc);
+    key.generations[8] = tree->layout_generation;
+    key.generations[9] = doc->state ? doc->state->video_frame_generation : 0;
+    return key;
+}
+
+static bool render_frame_key_equal(const RenderFrameKey& a, const RenderFrameKey& b) {
+    return a.ui == b.ui && a.root == b.root && a.scale == b.scale &&
+        a.width == b.width && a.height == b.height &&
+        memcmp(a.generations, b.generations, sizeof(a.generations)) == 0;
+}
+
+static bool render_frame_can_retain(UiContext* ui) {
+    const char* setting = getenv("RADIANT_RECORDING_CACHE");
+    if (setting && strcmp(setting, "off") == 0) return false;
+    DomDocument* doc = ui->document;
+    if (!doc) return false;
+    DocState* state = doc->state;
+    // native/GPU and child-document producers do not yet publish a complete paint dependency stamp.
+    return state && !state->needs_reflow && !state->dirty_tracker.full_reflow &&
+        !doc->services.scene3d_registry && !doc->services.canvas_registry &&
+        !ui->webview_mgr && (!state->animation_scheduler || state->animation_scheduler->count == 0) &&
+        memtrack_get_pressure_level() < MEM_PRESSURE_HIGH;
+}
+
+struct RenderOverlayRecordingScope {
+    DisplayList* list;
+    int start;
+    uint64_t arrays;
+    ScratchMark scratch;
+    explicit RenderOverlayRecordingScope(DisplayList* recording)
+        : list(recording), start(recording->item_count()), arrays(dl_shared_array_checkpoint(recording)),
+          scratch(scratch_mark(&recording->arena)) {}
+    ~RenderOverlayRecordingScope() { restore(); }
+    void restore() {
+        if (!list) return;
+        // retained document payloads precede the checkpoint; transient overlays cannot accumulate between hits.
+        dl_truncate(list, start);
+        dl_shared_array_rewind(list, arrays);
+        scratch_restore(&list->arena, scratch);
+        list = nullptr;
+    }
+};
+
 static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
-                                       RenderProfiler* profiler) {
+                                       RenderProfiler* profiler, Arena* scratch_backing, RenderFrameCache* cache) {
     memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
@@ -718,15 +806,22 @@ static void render_output_init_context(RasterRenderContext* rdcon, UiContext* ui
         rdcon->retained_dl_cache = lam::up(uicon->document->state->retained_dl_cache);
     }
 
-    mem_scratch_init(NULL, &rdcon->scratch, view_tree->render_scratch_arena, MEM_ROLE_RENDER, "render.scratch");
+    mem_scratch_init(NULL, &rdcon->scratch, scratch_backing, MEM_ROLE_RENDER, "render.scratch");
     rdcon->content_bounds_cache = lam::up(layout_content_bounds_cache_create());
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
     rdcon->paint_list = lam::up((PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER));
     if (rdcon->paint_list) new (rdcon->paint_list) PaintList();
     paint_list_init(rdcon->paint_list, nullptr);
-    rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
-        uicon->surface->width, uicon->surface->height, uicon->surface->width);
+    if (cache && cache->vector.impl) {
+        rdcon->vec.impl = cache->vector.impl; cache->vector.impl = nullptr;
+        rdt_vector_set_target(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
+            uicon->surface->width, uicon->surface->height, uicon->surface->width);
+        rdt_vector_set_tile_offset_x(&rdcon->vec, 0); rdt_vector_set_tile_offset_y(&rdcon->vec, 0);
+    } else {
+        rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
+            uicon->surface->width, uicon->surface->height, uicon->surface->width);
+    }
     rdcon->transform = rdt_matrix_identity();
     rdcon->has_transform = false;
     rdcon->raster_scale = ui_context_raster_scale(uicon);
@@ -760,19 +855,81 @@ static void render_output_cleanup_context(RasterRenderContext* rdcon) {
 }
 
 RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
-                                   RenderProfiler* profiler)
-    : rdcon(r), display_list{}, context_active(false), display_list_active(false) {
+                                   RenderProfiler* profiler, bool reuse_recording)
+    : rdcon(r), display_list{}, storage_owner(nullptr), active_list(nullptr),
+      context_active(false), display_list_active(false) {
     if (!rdcon || !view_tree) return;
-    render_output_init_context(rdcon, uicon, view_tree, profiler);
+    bool nested = view_tree->render_list_in_use;
+    if (!nested && !view_tree->render_frame_cache) {
+        RenderFrameCache* cache = (RenderFrameCache*)mem_calloc(1, sizeof(RenderFrameCache), MEM_CAT_RENDER);
+        if (cache) { new (cache) RenderFrameCache(); view_tree->render_frame_cache = lam::own(cache); }
+    }
+    RenderFrameCache* cache = nested ? nullptr : view_tree->render_frame_cache.get();
+    if (!reuse_recording && cache) {
+        cache->valid = false;
+        if (view_tree->render_list) dl_clear(view_tree->render_list);
+    }
+    Arena* scratch_backing = nested ? mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER,
+        "render.nested_scratch") : view_tree->render_scratch_arena;
+    render_output_init_context(rdcon, uicon, view_tree, profiler, scratch_backing, cache);
     context_active = true;
-    dl_init(&display_list, view_tree->display_list_arena);
+    if (!view_tree->render_list_in_use) {
+        if (!view_tree->render_list) {
+            DisplayList* cached = (DisplayList*)mem_alloc(sizeof(DisplayList), MEM_CAT_RENDER);
+            if (cached) {
+                new (cached) DisplayList();
+                dl_init(cached, view_tree->display_list_arena);
+                view_tree->render_list = lam::own(cached);
+            }
+        }
+        if (view_tree->render_list) {
+            storage_owner = lam::up(view_tree);
+            view_tree->render_list_in_use = true;
+            active_list = lam::up(view_tree->render_list.get());
+        }
+    }
+    if (!active_list) {
+        // nested frames own both scratch stacks; a null backing arena cannot store gradient/clip payloads.
+        Arena* list_arena = mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER, "render.nested_list");
+        if (!nested) {
+            // a failed cache allocation also needs a privately owned scratch stack.
+            scratch_backing = mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER, "render.nested_scratch");
+            scratch_release(&rdcon->scratch);
+            mem_scratch_init(nullptr, &rdcon->scratch, scratch_backing, MEM_ROLE_RENDER, "render.nested_scratch");
+        }
+        dl_init(&display_list, list_arena);
+        rdcon->paint_failed = !list_arena || !scratch_backing;
+        active_list = lam::up(&display_list);
+    }
     display_list_active = true;
-    rdcon->dl = lam::up(&display_list);
+    rdcon->dl = active_list;
 }
 
 RenderFrameScope::~RenderFrameScope() {
-    if (display_list_active) dl_destroy(&display_list);
+    if (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) preserved_commands = -1;
+    Arena* nested_scratch = context_active && !storage_owner ? rdcon->scratch.arena : nullptr;
+    if (display_list_active && storage_owner) {
+        size_t used = active_list->size();
+        if (preserved_commands >= 0) dl_truncate(active_list, preserved_commands);
+        else dl_clear(active_list);
+        // a small job following a large one returns excess idle command storage.
+        if (preserved_commands < 0 && (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH ||
+            (active_list->capacity() > DL_INITIAL_CAPACITY && used < active_list->capacity() / 4))
+            ) active_list->lam::ArrayList<DisplayItem>::release();
+        RenderFrameCache* cache = storage_owner->render_frame_cache.get();
+        if (cache && memtrack_get_pressure_level() < MEM_PRESSURE_HIGH) {
+            rdt_vector_flush_batch(&rdcon->vec);
+            cache->vector.impl = rdcon->vec.impl; rdcon->vec.impl = nullptr;
+        }
+        if (cache && preserved_commands < 0) cache->valid = false;
+        storage_owner->render_list_in_use = false;
+    } else if (display_list_active) {
+        Arena* nested_list = display_list.arena.arena;
+        dl_destroy(&display_list);
+        if (nested_list) mem_arena_destroy(nested_list);
+    }
     if (context_active) render_output_cleanup_context(rdcon);
+    if (nested_scratch) mem_arena_destroy(nested_scratch);
 }
 
 static uint32_t render_output_canvas_background(View* root_view) {
@@ -1234,6 +1391,7 @@ static bool render_output_save_surface(ImageSurface* surface, const char* output
 
 static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_tree,
                                               RenderOutputTarget* target) {
+    RenderPipelineMeasurement measurement;
     uint64_t t_start = time_now_ns();
 
     if (!uicon || !view_tree || !target) {
@@ -1244,7 +1402,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
     RasterRenderContext rdcon;
-    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
+    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler, true);
     DisplayList& display_list = *frame.list();
 
     // image compositions request alpha explicitly; document exports retain their opaque default.
@@ -1256,11 +1414,22 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
     bool selective = clear_result.selective;
 
+    RenderFrameCache* cache = frame.storage_owner ? view_tree->render_frame_cache.get() : nullptr;
+    bool can_retain = cache && !selective && render_frame_can_retain(uicon);
+    RenderFrameKey key = render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background);
+    bool reused = can_retain && cache->valid && render_frame_key_equal(cache->key, key) &&
+        dl_resources_current(&display_list, key.generations[9], key.generations[4]);
+    if (cache) cache->valid = false; // only a completed render can publish another reusable recording.
+    if (!reused) dl_clear(&display_list);
+    else RENDER_METRIC_ADD(full_frame_reuses, 1);
+
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
     uint64_t t_init = time_now_ns();
+    measurement.checkpoint("setup_clear");
 
-    render_output_render_view_tree(&rdcon, view_tree);
+    if (!reused) render_output_render_view_tree(&rdcon, view_tree);
+    int document_commands = display_list.item_count();
 
     if (rdcon.paint_failed) {
         uicon->render_failed = true;
@@ -1268,6 +1437,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
 
     uint64_t t_render = time_now_ns();
+    measurement.checkpoint("record_lower");
     log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
              time_elapsed_ms_f(t_init, t_render), dl_item_count(&display_list));
     render_profiler_log(rdcon.profiler);
@@ -1277,6 +1447,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         uicon->surface->height, dl_item_count(&display_list));
     render_profiler_write_counters_stderr(rdcon.profiler);
 
+    RenderOverlayRecordingScope overlays(&display_list);
     if (uicon->document && uicon->document->state) {
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
@@ -1284,7 +1455,17 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     if (!dl_validate_or_log(&display_list, "render_output_raster")) {
         return 1;
     }
-    retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    uint64_t t_capture = time_now_ns();
+    measurement.checkpoint("overlays_validate");
+    if (!reused) retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    uint64_t t_captured = time_now_ns();
+    measurement.checkpoint("retained_capture");
+    if (render_pipeline_metrics) {
+        log_notice("[RENDER_METRICS] setup_ms=%.3f record_ms=%.3f overlays_validate_ms=%.3f retained_capture_ms=%.3f command_size=%zu command_count=%zu command_capacity_bytes=%zu paint_capacity_bytes=%zu",
+            time_elapsed_ms_f(t_start, t_init), render_ms, time_elapsed_ms_f(t_render, t_capture),
+            time_elapsed_ms_f(t_capture, t_captured), sizeof(DisplayItem), display_list.size(),
+            display_list.capacity() * sizeof(DisplayItem), rdcon.paint_list->capacity() * sizeof(PaintCmd));
+    }
 
     uint64_t t_replay_start = time_now_ns();
 
@@ -1293,6 +1474,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_replay_display_list(&rdcon, &display_list, canvas_bg, clear_result.replay_dirty);
 
     uint64_t t_replay_end = time_now_ns();
+    measurement.checkpoint("replay");
     double replay_ms = time_elapsed_ms_f(t_replay_start, t_replay_end);
     if (replay_result.tiled) {
         log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
@@ -1309,6 +1491,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
     uint64_t t_sync = time_now_ns();
+    measurement.checkpoint("media_trace");
     log_info("[TIMING] render complete: %.1fms", time_elapsed_ms_f(t_render, t_sync));
     render_profiler_emit_event(rdcon.profiler, uicon, rstate, render_ms, replay_ms,
         time_elapsed_ms_f(t_start, t_sync), item_count, selective,
@@ -1337,12 +1520,50 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
 
     uint64_t t_save = time_now_ns();
+    measurement.checkpoint("encode_write");
     if (target->output_file) {
         log_info("[TIMING] save_to_file: %.1fms", time_elapsed_ms_f(t_sync, t_save));
     }
 
     if (uicon->document && uicon->document->state) {
         doc_state_clear_render_flags(uicon->document->state);
+    }
+
+    overlays.restore();
+    // overlays always record afresh; retain only document commands with independently owned payloads.
+    if (render_pipeline_metrics) {
+        log_notice("[RENDER_RECORDING] eligible=%d foreign=%d pending_layers=%d key_changed=%d",
+            can_retain, rdcon.has_foreign_paint_dependencies, render_svg_layers_pending(uicon->document),
+            !render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background)));
+    }
+    if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document) &&
+        render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background))) {
+        dl_trim_empty_arena(&display_list);
+        size_t recording_bytes = display_list.capacity() * sizeof(DisplayItem) +
+            arena_total_allocated(display_list.arena.arena) + dl_shared_array_bytes(&display_list);
+        bool retainable = true;
+        for (int i = 0; !reused && i < document_commands && retainable; i++) {
+            const DisplayItem* item = &display_list.data()[i];
+            retainable = dl_item_is_retainable_for_fragment(item);
+            if (!retainable && render_pipeline_metrics)
+                log_notice("[RENDER_RECORDING] rejected_op=%d", item->op);
+            const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
+            if (descriptor && descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
+                const RdtPath* path = *(RdtPath* const*)((const char*)item + descriptor->owned_payload_offset);
+                // conservatively charge shared path buffers per reference; native picture storage remains untracked.
+                size_t bytes = rdt_path_storage_bytes(path);
+                if (bytes > SIZE_MAX - recording_bytes) retainable = false;
+                else recording_bytes += bytes;
+            }
+        }
+        if (render_pipeline_metrics)
+            log_notice("[RENDER_RECORDING] bytes=%zu arena_used=%zu arena_reserved=%zu retainable=%d reused=%d",
+                recording_bytes, arena_total_used(display_list.arena.arena),
+                arena_total_allocated(display_list.arena.arena), retainable, reused);
+        if (retainable && (reused || recording_bytes <= ((size_t)8 << 20))) {
+            cache->key = key; cache->valid = true;
+            frame.preserved_commands = document_commands;
+        }
     }
 
     uint64_t t_end = time_now_ns();
@@ -1488,6 +1709,35 @@ static int render_output_render_html_file_to_target(const char* html_file,
     return 1;
 }
 
+static int render_export_session_to_target(RenderExportSession* session, RenderOutputTarget* target) {
+    switch (target->kind) {
+        case RENDER_OUTPUT_PNG: return render_export_session_to_png(session, target->output_file, target->transparent_background);
+        case RENDER_OUTPUT_JPEG: return render_export_session_to_jpeg(session, target->output_file, target->jpeg_quality);
+        case RENDER_OUTPUT_SVG: return render_export_session_to_svg(session, target->output_file);
+        case RENDER_OUTPUT_PDF: return render_export_session_to_pdf(session, target->output_file);
+        default: return 1;
+    }
+}
+
+int render_batch_export(UiContext* ui, const char* source, const char* filename,
+        float viewport_width, float viewport_height, float device_scale) {
+    if (!ui || !source || !filename) return 1;
+    RenderOutputTarget target;
+    render_output_target_init(&target, render_output_kind_from_file(filename), filename);
+    bool raster = target.kind == RENDER_OUTPUT_PNG || target.kind == RENDER_OUTPUT_JPEG;
+    bool pdf = target.kind == RENDER_OUTPUT_PDF;
+    RenderExportHtmlRequest request = {source, INPUT_RESOURCE_ALLOW_NETWORK, false};
+    RenderExportSession session = {};
+    // share only the host; each job uses the ordinary format's media and layout defaults.
+    if (!render_export_session_begin_internal(&session,
+            (int)viewport_width, (int)viewport_height, // INT_CAST_OK: existing CLI viewport contract uses whole CSS pixels.
+            pdf ? 800 : 1200, pdf ? 1200 : 800, 1, device_scale, raster, pdf, false,
+            render_export_load_html_document, &request, ui)) return 1;
+    int result = render_export_session_to_target(&session, &target);
+    render_export_session_end(&session);
+    return result;
+}
+
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
         const char* base_url, bool block_remote_resources) {
     if (!html_source || !target || !target->output_file || target->kind == RENDER_OUTPUT_SCREEN) return 1;
@@ -1498,14 +1748,7 @@ int render_html_source_to_output_target(const char* html_source, RenderOutputTar
     if (!render_export_session_begin_internal(&session, target->viewport_width, target->viewport_height,
         800, 600, target->output_scale, target->device_scale, raster, target->kind == RENDER_OUTPUT_PDF,
         false, render_export_load_html_source, &request)) return 1;
-    int result = 1;
-    switch (target->kind) {
-        case RENDER_OUTPUT_PNG: result = render_export_session_to_png(&session, target->output_file, target->transparent_background); break;
-        case RENDER_OUTPUT_JPEG: result = render_export_session_to_jpeg(&session, target->output_file, target->jpeg_quality); break;
-        case RENDER_OUTPUT_SVG: result = render_export_session_to_svg(&session, target->output_file); break;
-        case RENDER_OUTPUT_PDF: result = render_export_session_to_pdf(&session, target->output_file); break;
-        default: break;
-    }
+    int result = render_export_session_to_target(&session, target);
     render_export_session_end(&session);
     return result;
 }

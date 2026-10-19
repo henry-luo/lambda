@@ -1168,6 +1168,9 @@ void ViewTree::init(MemContext* owner) {
     // The document context outlives the view tree: free_document destroys the
     // tree before it releases the document's Input context.
     mem_ctx = lam::up(owner);
+    render_list = nullptr;
+    render_frame_cache = nullptr;
+    render_list_in_use = false;
     content_visibility_state = nullptr;
     content_visibility_activation_margin = 1.0f;
     max_content_visibility_passes = 256;
@@ -1229,6 +1232,12 @@ void ViewTree::destroy() {
         root = NULL;
     }
     view_tree_canonical_destroy(this);
+    render_frame_cache_destroy(render_frame_cache); render_frame_cache = nullptr;
+    if (render_list) {
+        dl_destroy(render_list);
+        render_list->~DisplayList();
+        lam::free_owned(render_list);
+    }
     Arena* old_arena = scratch_arena;
     Arena* old_pass_arena = layout_pass_arena;
     Arena* old_render_arena = render_scratch_arena;

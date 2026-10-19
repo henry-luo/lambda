@@ -155,7 +155,7 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
     item->stroke_path.cap = cap;
     item->stroke_path.join = join;
     item->stroke_path.miter_limit = miter_limit;
-    item->stroke_path.dash_array = lam::own_arr(dl_copy_dashes(dl, dash_array, dash_count));
+    item->stroke_path.dash_array = lam::shared(dl_copy_dashes(dl, dash_array, dash_count));
     item->stroke_path.dash_count = dash_count;
     item->stroke_path.dash_phase = dash_phase;
     item->stroke_path.has_transform = (transform != nullptr);
@@ -176,7 +176,7 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
     item->fill_linear_gradient.y1 = y1;
     item->fill_linear_gradient.x2 = x2;
     item->fill_linear_gradient.y2 = y2;
-    item->fill_linear_gradient.stops = lam::own_arr(dl_copy_stops(dl, stops, stop_count));
+    item->fill_linear_gradient.stops = lam::shared(dl_copy_stops(dl, stops, stop_count));
     item->fill_linear_gradient.stop_count = stop_count;
     item->fill_linear_gradient.rule = rule;
     item->fill_linear_gradient.has_transform = (transform != nullptr);
@@ -201,7 +201,7 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
     item->fill_radial_gradient.cx = cx;
     item->fill_radial_gradient.cy = cy;
     item->fill_radial_gradient.r = r;
-    item->fill_radial_gradient.stops = lam::own_arr(dl_copy_stops(dl, stops, stop_count));
+    item->fill_radial_gradient.stops = lam::shared(dl_copy_stops(dl, stops, stop_count));
     item->fill_radial_gradient.stop_count = stop_count;
     item->fill_radial_gradient.rule = rule;
     item->fill_radial_gradient.has_transform = (transform != nullptr);

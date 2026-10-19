@@ -69,6 +69,49 @@ def decoded_content(objects):
     return b"".join(programs)
 
 
+def roundtrip(source, destination):
+    """Check regenerated PDFs with an independent reader, including every page."""
+    import subprocess
+
+    def inspect(path):
+        result = subprocess.run(["pdfinfo", "-box", "-f", "1", "-l", "2147483647", str(path)],
+                                check=True, capture_output=True, text=True, timeout=30)
+        pages = int(re.search(r"^Pages:\s+(\d+)$", result.stdout, re.M)[1])
+        geometry = {}
+        for match in re.finditer(r"^Page\s+(\d+)\s+(rot|MediaBox|CropBox|BleedBox|TrimBox|ArtBox):\s*(.*)$",
+                                 result.stdout, re.M):
+            key = (int(match[1]), match[2])
+            assert key not in geometry, "duplicate page geometry"
+            geometry[key] = tuple(map(float, match[3].split()))
+        assert pages > 0 and len(geometry) == pages * 6, "missing page geometry"
+        assert {page for page, _ in geometry} == set(range(1, pages + 1)), "incomplete page sequence"
+        return pages, geometry
+
+    source, destination = Path(source), Path(destination)
+    pages, expected = inspect(source)
+    actual_pages, actual = inspect(destination)
+    assert actual_pages == pages, f"lost pages: {pages} -> {actual_pages}"
+    assert actual.keys() == expected.keys(), "lost page boxes or rotation"
+    # pdfinfo reports box coordinates rounded to two decimal places.
+    for key, coordinates in expected.items():
+        assert len(actual[key]) == len(coordinates) and all(
+            abs(left - right) <= 0.02 for left, right in zip(coordinates, actual[key])), (
+                f"changed page geometry {key}: {coordinates} -> {actual[key]}")
+    assert source.read_bytes() != destination.read_bytes(), "roundtrip bypassed PDF generation"
+    validate(destination, pages, None, quiet=True)
+    # one Poppler process checks all content streams without retaining full-size page images.
+    prefix = str(destination.with_suffix("")) + "_checked"
+    for raster in destination.parent.glob(destination.stem + "_checked-*.png"):
+        raster.unlink()
+    subprocess.run(["pdftoppm", "-scale-to", "128", "-png", str(destination), prefix],
+                   check=True, capture_output=True, timeout=60)
+    rasters = list(destination.parent.glob(destination.stem + "_checked-*.png"))
+    assert len(rasters) == pages, f"rasterized {len(rasters)} of {pages} pages"
+    for raster in rasters:
+        raster.unlink()
+    print(f"PDF_ROUNDTRIP_CHECK: {pages} pages, page boxes/rotation, object offsets and streams verified")
+
+
 def text_export(path, expected_pages):
     import subprocess
 
@@ -139,7 +182,9 @@ def phase6(path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 3 and sys.argv[2] == "content":
+    if len(sys.argv) > 3 and sys.argv[2] == "roundtrip":
+        roundtrip(sys.argv[1], sys.argv[3])
+    elif len(sys.argv) > 3 and sys.argv[2] == "content":
         pages = len(re.findall(rb"/Type /Page\b", Path(sys.argv[1]).read_bytes()))
         objects = validate(sys.argv[1], pages, None)
         needle = sys.argv[3].replace(r"\n", "\n").encode()

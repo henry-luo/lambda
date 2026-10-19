@@ -338,7 +338,7 @@ With no name, opens the bundled `lambda.doc` viewer with its startup splash from
 `lambda view test/demo/tetris/tetris.ls`.
 
 Names include `tetris`, `superlambda`, `doom`, `photo`, `draw`, `word`, `finder`,
-`note`, `scene3d`, `slides`, and `wordcloud`. `scene3d` opens one tile index for
+`note`, `scene3d`, `cityscape`, `slides`, and `wordcloud`. `scene3d` opens one tile index for
 CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
 Crystal garden, Observatory, and Shared Animation. Run named demos from the checkout or unpacked release root; their
 relative paths and local assets are under `test/demo/`.
@@ -373,9 +373,15 @@ lambda view [document_file] [options]
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | | `--archive` | Browse ZIP package parts, including those inside DOCX | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
+| | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D7.5.4) | off |
 | `-h` | `--help` | Show help | |
 
 Unknown options are silently ignored.
+
+**Audible output (D7.5.4):** a local document may start music and speech from
+any `pn` handler. A document loaded over the network may start them only after
+the user has pressed a pointer, ended a touch or pressed a non-modifier key in
+it; `--autoplay` lifts that rule for the session.
 
 **Default file:** `<LAMBDA_HOME>/package/doc/doc_viewer.ls`, the bundled
 `lambda.doc` document viewer (D7.2.4). It browses the current working directory.

@@ -6,6 +6,7 @@
 #include <zlib.h>
 #include "lib/log.h"
 #include "lib/hex.h"
+#include "lib/endian.h"
 
 /**
  * PDF Stream Decompression Implementation
@@ -443,15 +444,37 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
         return output;
     }
 
-    int colors = params->colors > 0 ? params->colors : 1;
-    int bits = params->bits > 0 ? params->bits : 8;
-    int columns = params->columns > 0 ? params->columns : 1;
-    
-    int pix_bytes = (colors * bits + 7) / 8;
-    int row_bytes = (columns * colors * bits + 7) / 8;
+    int colors = params->colors, bits = params->bits, columns = params->columns;
+    if (colors <= 0 || colors > 32 || columns <= 0 ||
+            !(bits == 1 || bits == 2 || bits == 4 || bits == 8 || bits == 16)) return nullptr;
+    size_t pix_bytes = ((size_t)colors * bits + 7) / 8;
+    size_t row_bytes = ((size_t)columns * colors * bits + 7) / 8;
+    if (predictor == 2) {
+        // TIFF differencing operates on component samples, including 16-bit carry and packed rows.
+        if (data_len % row_bytes) return nullptr;
+        uint8_t* output = (uint8_t*)mem_dup_n(data, data_len, MEM_CAT_INPUT_PDF);
+        if (!output) return nullptr;
+        unsigned mask = (1u << bits) - 1;
+        for (size_t row = 0; row < data_len; row += row_bytes) {
+            unsigned previous[32] = {};
+            for (size_t sample = 0; sample < (size_t)columns * colors; sample++) {
+                size_t bit = sample * bits, byte = row + bit / 8;
+                unsigned value = pdf_read_sample(output + row, bit, bits);
+                value = (value + previous[sample % colors]) & mask;
+                previous[sample % colors] = value;
+                if (bits == 16) write_be16(output + byte, (uint16_t)value);
+                else {
+                    unsigned shift = 8 - bits - bit % 8;
+                    output[byte] = (output[byte] & ~(mask << shift)) | (value << shift);
+                }
+            }
+        }
+        *out_len = data_len; return (char*)output;
+    }
+    if (predictor < 10 || predictor > 15 || data_len % (row_bytes + 1)) return nullptr;
     
     // for PNG predictors (10-15), each row has a 1-byte type indicator
-    int input_row_bytes = row_bytes + 1;
+    size_t input_row_bytes = row_bytes + 1;
     size_t num_rows = data_len / input_row_bytes;
     
     size_t output_size = num_rows * row_bytes;
@@ -475,10 +498,11 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
         if (predictor >= 10 && predictor <= 15) {
             row_predictor = *in++ + 10;  // PNG predictor types are 0-4, map to 10-14
         }
+        if (row_predictor > 14) { mem_free(prev_row); mem_free(output); return nullptr; }
         
-        for (int col = 0; col < row_bytes; col++) {
+        for (size_t col = 0; col < row_bytes; col++) {
             uint8_t raw = *in++;
-            uint8_t left = (col >= pix_bytes) ? out[-pix_bytes] : 0;
+            uint8_t left = (col >= pix_bytes) ? *(out - pix_bytes) : 0;
             uint8_t above = prev_row[col];
             uint8_t upper_left = (col >= pix_bytes) ? prev_row[col - pix_bytes] : 0;
             
@@ -505,8 +529,8 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
             }
             
             *out++ = decoded;
-            prev_row[col] = decoded;
         }
+        memcpy(prev_row, out - row_bytes, row_bytes);
     }
     
     mem_free(prev_row);
@@ -605,20 +629,16 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             decoded_data = asciihex_decode(current_data, current_len, &decoded_len);
         } else if (strcmp(filter, "RunLengthDecode") == 0 || strcmp(filter, "RL") == 0) {
             decoded_data = runlength_decode(current_data, current_len, &decoded_len);
-        } else if (strcmp(filter, "DCTDecode") == 0 || strcmp(filter, "DCT") == 0) {
-            // DCT is JPEG - pass through unchanged (decoded by image handler)
+        } else if (strcmp(filter, "DCTDecode") == 0 || strcmp(filter, "DCT") == 0 ||
+                   strcmp(filter, "JPXDecode") == 0 || strcmp(filter, "JPX") == 0 ||
+                   strcmp(filter, "CCITTFaxDecode") == 0 || strcmp(filter, "CCF") == 0 ||
+                   strcmp(filter, "JBIG2Decode") == 0) {
+            // image codecs interpret these payloads after byte filters and predictor decoding.
             decoded_data = mem_dup_n(current_data, current_len, MEM_CAT_INPUT_PDF);
             if (decoded_data) {
                 decoded_len = current_len;
             }
-            log_debug("DCTDecode (JPEG) - passing through %zu bytes", decoded_len);
-        } else if (strcmp(filter, "JPXDecode") == 0 || strcmp(filter, "JPX") == 0) {
-            // JPX is JPEG2000 - pass through unchanged (decoded by image handler)
-            decoded_data = mem_dup_n(current_data, current_len, MEM_CAT_INPUT_PDF);
-            if (decoded_data) {
-                decoded_len = current_len;
-            }
-            log_debug("JPXDecode (JPEG2000) - passing through %zu bytes", decoded_len);
+            log_debug("PDF_IMAGE_FILTER: %s retains %zu encoded bytes", filter, decoded_len);
         } else {
             // unsupported filter
             log_error("Unsupported PDF filter: %s", filter);
