@@ -23,8 +23,6 @@ pub fn comparison_policy(test_case) => {
   'route-geometry': option(test_case, "route-geometry", true)
 }
 
-pub fn install() => transform.install()
-
 pub fn to_html(graph) => transform.to_html(graph)
 
 pub fn compare(source, expected, test_case, width, height) {

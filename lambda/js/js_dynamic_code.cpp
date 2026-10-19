@@ -4,7 +4,7 @@
 // whatever the caller's tier or the unit selector; MIR never lowers it. This
 // file assembles the source text, applies the source-level early errors that
 // depend on the caller's context, and hands the code to js_interp.cpp.
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
@@ -331,100 +331,6 @@ extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int 
         "function* anonymous", NULL);
 }
 
-// ============================================================================
-// eval(code) early errors that depend on the caller's context
-// ============================================================================
-typedef struct JsEvalInitializerScan {
-    bool contains_arguments;
-    bool contains_new_target;
-    bool contains_super_call;
-    bool contains_super_property;
-} JsEvalInitializerScan;
-
-static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source, size_t len) {
-    JsEvalInitializerScan scan = {false, false, false, false};
-    for (size_t pos = 0; pos < len; pos++) {
-        char ch = source[pos];
-        if (ch == '\'' || ch == '"' || ch == '`') {
-            pos = (size_t)(strn_scan_quoted(source + pos, source + len, ch, true, NULL) - source);
-            if (pos > 0) pos--;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
-            pos += 2;
-            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
-            if (pos + 1 < len) pos++;
-            continue;
-        }
-        if (js_eval_at_word(source, len, pos, "arguments", 9)) {
-            scan.contains_arguments = true;
-            pos += 8;
-            continue;
-        }
-        if (js_eval_at_word(source, len, pos, "new", 3)) {
-            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 3);
-            if (member_pos + 7 <= len && memcmp(source + member_pos, ".target", 7) == 0 &&
-                (member_pos + 7 == len || !js_eval_is_ident_char(source[member_pos + 7]))) {
-                scan.contains_new_target = true;
-            }
-            pos += 2;
-            continue;
-        }
-        if (js_eval_at_word(source, len, pos, "super", 5)) {
-            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 5);
-            if (member_pos < len && source[member_pos] == '(') scan.contains_super_call = true;
-            else if (member_pos < len && (source[member_pos] == '.' || source[member_pos] == '[')) scan.contains_super_property = true;
-            pos += 4;
-            continue;
-        }
-    }
-    return scan;
-}
-
-static Item js_eval_initializer_early_error(String* code_str, bool is_direct_eval) {
-    if ((!js_private_field_initializing && !js_eval_initializer_context) || !code_str) return js_status_ok();
-    JsEvalInitializerScan scan = js_eval_scan_initializer_source(code_str->chars, code_str->len);
-    if ((is_direct_eval && scan.contains_arguments) || (!is_direct_eval && scan.contains_new_target) ||
-        scan.contains_super_call || (!is_direct_eval && scan.contains_super_property)) {
-        return js_throw_syntax_error(js_name_item("Invalid eval in class field initializer", 39));
-    }
-    return js_status_ok();
-}
-
-// A caller's const is projected through the eval bridge as a plain binding, so
-// strict eval code cannot observe its immutability until write-back.
-static bool js_eval_source_assigns_immutable_binding(String* code_str) {
-    if (!code_str) return false;
-    const char* source = code_str->chars;
-    size_t len = code_str->len;
-    size_t pos = 0;
-    while (pos < len) {
-        if (js_eval_skip_string_or_comment(source, len, &pos)) continue;
-        char ch = source[pos];
-        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
-            pos++;
-            continue;
-        }
-        size_t start = pos++;
-        while (pos < len && js_eval_is_ident_char(source[pos])) pos++;
-        size_t after = js_eval_skip_space_and_comments(source, len, pos);
-        bool assigns = false;
-        if (after < len && source[after] == '=') {
-            assigns = (after + 1 >= len || (source[after + 1] != '=' && source[after + 1] != '>'));
-        }
-        if (assigns) {
-            Item key = js_name_item(source + start, pos - start);
-            if (js_eval_local_has_immutable_binding(key)) return true;
-        }
-    }
-    return false;
-}
-
 static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_value) {
     if (!code_str) return false;
     const char* source = code_str->chars;
@@ -478,7 +384,7 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len);
 
 // A source that is exactly one RegExp literal evaluates to that RegExp;
 // construct it without a per-call script. Other flags take the parser.
-static bool js_eval_source_is_regexp_literal(String* code_str) {
+static bool js_eval_source_is_regexp_literal(String* code_str, size_t* closing_slash) {
     const char* s = code_str->chars;
     size_t len = code_str->len;
     if (len < 2 || s[0] != '/' || s[1] == '/' || s[1] == '*') return false;
@@ -486,13 +392,18 @@ static bool js_eval_source_is_regexp_literal(String* code_str) {
     bool in_class = false;
     while (pos < len) {
         char c = s[pos];
-        if (c == '\\' && pos + 1 < len) { pos += 2; continue; }
+        if (js_eval_at_line_terminator(s, len, pos, NULL)) return false;
+        if (c == '\\' && pos + 1 < len) {
+            if (js_eval_at_line_terminator(s, len, pos + 1, NULL)) return false;
+            pos += 2; continue;
+        }
         if (c == '[') in_class = true;
         else if (c == ']') in_class = false;
         else if (c == '/' && !in_class) break;
         pos++;
     }
     if (pos >= len) return false;
+    *closing_slash = pos;
     for (pos++; pos < len; pos++) {
         char f = s[pos];
         if (f != 'g' && f != 'i' && f != 'm' && f != 's' && f != 'u' && f != 'y') return false;
@@ -503,8 +414,9 @@ static bool js_eval_source_is_regexp_literal(String* code_str) {
 // ============================================================================
 // eval(code)
 // ============================================================================
-bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result) {
-    if (!js_current_runtime()) {
+bool js_eval_source_shortcut(Item code_item, Item* result,
+        const JsInterpHostOps* host) {
+    if (!host && !js_current_runtime()) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         *result = ItemNull;
         return true;
@@ -518,44 +430,42 @@ bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result) 
     *result = (Item){.item = ITEM_JS_UNDEFINED};
     if (!code_str || code_str->len == 0) return true;
     bool native_probe_value = false;
-    if (js_eval_source_is_v8_native_probe(code_str, &native_probe_value)) {
+    if (!host && js_eval_source_is_v8_native_probe(code_str, &native_probe_value)) {
         // Node official tests use V8 native probes under --allow_natives_syntax;
         // these probes observe engine internals and should not enter the JS parser.
         if (native_probe_value) *result = (Item){.item = b2it(true)};
         return true;
     }
-    Item initializer_status = js_eval_initializer_early_error(code_str, is_direct_eval);
-    if (item_is_error(initializer_status)) {
-        *result = initializer_status;
-        return true;
-    }
     if (js_eval_source_is_blank(code_str)) return true;
-    if (js_eval_source_is_regexp_literal(code_str)) {
-        *result = js_create_regexp_from_source(code_str->chars, code_str->len);
+    size_t closing_slash = 0;
+    if (js_eval_source_is_regexp_literal(code_str, &closing_slash)) {
+        if (host) {
+            if (!host->regexp_literal) return false;
+            // each eval creates a fresh realm-local RegExp without retaining a script.
+            RootFrame roots(3);
+            if (!roots.valid()) { *result = ItemError; return true; }
+            Rooted<Item> code(roots, code_item), pattern(roots, ItemNull), flags(roots, ItemNull);
+            String* text = heap_strcpy(code.get().get_string()->chars + 1, closing_slash - 1);
+            if (!text) { *result = host->fail(JS_INTERP_HOST_MEMORY); return true; }
+            pattern.set(Item{.item = s2it(text)});
+            code_str = code.get().get_string();
+            text = heap_strcpy(code_str->chars + closing_slash + 1, code_str->len - closing_slash - 1);
+            if (!text) { *result = host->fail(JS_INTERP_HOST_MEMORY); return true; }
+            flags.set(Item{.item = s2it(text)});
+            *result = host->regexp_literal(host->state, pattern.get(), flags.get());
+        } else {
+            *result = js_create_regexp_from_source(code_str->chars, code_str->len);
+        }
         return true;
     }
     return false;
 }
 
-// eval_flags bit 1: a syntactic direct eval whose MIR caller installed the
-// EvalContext bridge; bit 2: inherit strictness from that caller. Indirect
-// eval, string timers, and $262 sources pass 1 and run as global eval code.
-// An interpreted caller links its environments instead (js_interp.cpp).
-extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
-    bool is_direct_eval = (eval_flags & 2) != 0;
-    bool inherited_strict = (eval_flags & 4) != 0;
+// direct eval receives live lexical cells through the interpreter; this intrinsic is indirect.
+extern "C" Item js_builtin_eval(Item code_item) {
     Item shortcut = ItemNull;
-    if (js_eval_source_shortcut(code_item, is_direct_eval, &shortcut)) return shortcut;
+    if (js_eval_source_shortcut(code_item, &shortcut)) return shortcut;
     String* code_str = it2s(code_item);
-    if (!is_direct_eval) {
-        return js_interp_execute_indirect_eval_source(js_current_runtime(),
-            code_str->chars, code_str->len, "<eval>", NULL);
-    }
-    // The bridge projects a MIR caller's consts as plain bindings, so this
-    // source scan stands in for their strict write error until P4 (D8.1.3v21).
-    if (inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
-        return js_throw_type_error("Assignment to constant variable");
-    }
-    return js_interp_execute_direct_eval_source(js_current_runtime(),
-        code_str->chars, code_str->len, "<eval>", inherited_strict, NULL);
+    return js_interp_execute_indirect_eval_source(js_current_runtime(),
+        code_str->chars, code_str->len, "<eval>", NULL);
 }

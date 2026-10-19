@@ -40,6 +40,9 @@ extern "C" void radiant_ime_win_attach(UiContext* uicon);
 
 // application icon for the Dock / window (radiant/app_icon.cpp)
 extern "C" void radiant_app_icon_install(GLFWwindow* window);
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+extern "C" void radiant_clipboard_mac_init(void);
+#endif
 
 static char fallback_font_noto_color_emoji[] = "Noto Color Emoji";
 static char fallback_font_apple_color_emoji[] = "Apple Color Emoji";
@@ -233,6 +236,7 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     click_count = 1;
     active_click_count = 1;
     headless = next_headless;
+    if (headless) clipboard_store_set_backend(clipboard_backend_inmemory());
     // the desktop GLFW frontend provides mouse motion/hover; headless hosts publish explicit test values.
     if (!next_headless) input_capabilities = {CSS_POINTER_FINE, CSS_POINTER_FINE, true, true, true};
     // inital window width and height - match browser test viewport
@@ -280,6 +284,9 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         }
         // GUI mode only: headless runs must not touch the Dock or a window icon
         radiant_app_icon_install(window);
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+        radiant_clipboard_mac_init();
+#endif
 
         // ensure window is shown and focused (needed on some Wayland/XWayland setups)
         glfwShowWindow(window);
@@ -397,8 +404,41 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
+struct DeferredDocumentDestroy {
+    lam::Own<DomDocument> document;
+    DeferredDocumentDestroy* next;
+};
+static thread_local DeferredDocumentDestroy* deferred_documents;
+static thread_local bool draining_documents;
+
+void radiant_defer_document_destroy(DomDocument* doc) {
+    if (!doc) return;
+    for (DeferredDocumentDestroy* pending = deferred_documents; pending; pending = pending->next)
+        if (pending->document.get() == doc) return;
+    auto* pending = (DeferredDocumentDestroy*)mem_calloc(1, sizeof(DeferredDocumentDestroy), MEM_CAT_DOM);
+    if (!pending) { log_error("document-retire: could not retain deferred document"); return; }
+    pending->document = lam::own(doc);
+    pending->next = deferred_documents;
+    deferred_documents = pending;
+}
+
+bool radiant_drain_document_destruction() {
+    if (draining_documents || (context && context->execution_depth != 0)) return false;
+    bool released = deferred_documents != nullptr;
+    draining_documents = true;
+    while (deferred_documents) {
+        DeferredDocumentDestroy* pending = deferred_documents;
+        deferred_documents = pending->next;
+        free_document(pending->document.get());
+        mem_free(pending);
+    }
+    draining_documents = false;
+    return released;
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
+    radiant_drain_document_destruction();
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).

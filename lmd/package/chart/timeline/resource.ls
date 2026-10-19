@@ -73,11 +73,12 @@ pub fn complete(current, action, revision, now = 0, source = null) {
     if (previous==null or previous.status!="pending" or action.token==null or action.token!=previous.token or
         action.revision!=revision or action.revision!=previous.revision or
         previous.deadline!=null and util.finite_number(now) and now>=previous.deadline) current else {
-        let problem=if (action.error!=null) action.error else if (action.result is error) action.result else null;
-        let completed={*:previous,status:if (problem!=null) "error" else "ready",completed_at:now,
-            result:if (problem!=null) null else action.result,error:problem};
+        // S7.9.1: error fields are outcomes; classify presence without comparing the error.
+        let problem=if (not (action.error is null)) action.error else if (action.result is error) action.result else null;
+        let completed={*:previous,status:if (not (problem is null)) "error" else "ready",completed_at:now,
+            result:if (not (problem is null)) null else action.result,error:problem};
         let candidate={*:current,resources:{*:current.resources,[action.id]:completed}};
-        let valid=if (problem==null and previous.descriptor.kind=="data" and source!=null) normalize(source,candidate) else null;
+        let valid=if (problem is null and previous.descriptor.kind=="data" and source!=null) normalize(source,candidate) else null;
         if (not (valid is error)) candidate else {*:candidate,resources:{*:candidate.resources,[action.id]:{*:completed,status:"error",result:null,error:valid}}}
     }
 }

@@ -1,0 +1,219 @@
+{
+  "name": "Chart collection navigation and rendered content",
+  "viewport": {
+    "width": 1180,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-index .demo-tile"
+      },
+      "count": 3
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/chart-demo/index-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "a[href='normal.ls']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Normal charts",
+      "assert_timeout": 60000,
+      "assert_interval": 250
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-card .lambda-chart"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#linked .lambda-chart > svg"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.card').length>=10 && Array.from(document.querySelectorAll('.chart-frame')).every(e=>e.querySelector('svg'))"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/chart-demo/normal-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".demo-tile"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "a[href='graphs.ls']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Graphs & diagrams",
+      "assert_timeout": 60000,
+      "assert_interval": 250
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#timeline .lambda-timeline-chart"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tikz svg"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#mermaid-flow .lambda-graph"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#mermaid-sequence svg"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#graphviz .lambda-graph"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wordcloud"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-id='charts']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "charts"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/chart-demo/graphs-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "a[href='scientific.ls']"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Scientific charts",
+      "assert_timeout": 60000,
+      "assert_interval": 250
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".card"
+      },
+      "count": 6
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "scene3d"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spectrogram svg"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/chart-demo/scientific-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Charts",
+      "assert_timeout": 60000,
+      "assert_interval": 250
+    }
+  ]
+}

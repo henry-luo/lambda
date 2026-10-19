@@ -64,11 +64,12 @@ pub pn finish_export(request,dimensions) any^ {
         let html=<html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>
         let done=radiant.export_document(format(html,'html'),request.pending,
             {format:"png",width:dimensions[1],height:dimensions[0],local_resources:true,transparent:true})
-        if (done!=true) { problem=error("Photo: " ++ string(done)) }
+        if (done is error) { problem=done }
+        else if (done!=true) { problem=error("Photo: " ++ string(done)) }
         io.delete(request.background) ^ { null }
     }
-    if (problem==null) { io.rename(request.pending,request.target) ^ { problem=^ } }
-    if (problem!=null) { abort_export(request); raise problem }
+    if (problem is null) { io.rename(request.pending,request.target) ^ { problem=^ } }
+    if (not (problem is null)) { abort_export(request); raise problem }
     return dimensions
 }
 pub pn export_png(path,source,recipe) any^ {
@@ -76,6 +77,6 @@ pub pn export_png(path,source,recipe) any^ {
     let pixels=pipeline.evaluate(source.pixels,recipe)^
     var problem=null
     save(pixels,request.raster) ^ { problem=^ }
-    if (problem!=null) { abort_export(request); raise problem }
+    if (not (problem is null)) { abort_export(request); raise problem }
     return finish_export(request,shape(pixels))^
 }

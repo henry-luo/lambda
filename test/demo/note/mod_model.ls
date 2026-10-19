@@ -7,6 +7,29 @@ import lambda.editor.mod_transaction
 import commands: lambda.editor.mod_commands
 import html: lambda.edit.html
 import controller: lambda.edit.controller
+import inline_format: lambda.editor.mod_inline_format
+import component: lambda.ui.core.component
+import image: lambda.editor.mod_image
+
+pub let images = image.images
+pub let selected_image = image.selected
+pub let select_image = image.select_image
+pub let resize_image = image.resize_image
+pub let move_image = image.move_image
+pub let image_move_transaction = image.move_transaction
+pub fn image_html(entry) => html.inline_html([entry.node])
+
+pub let color_properties = {color:"color",highlight:"background-color"}
+pub let default_colors = {color:"#000000",highlight:"#fff09b"}
+pub fn clipboard_command(id) => {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",selectAll:"selectAll"}[slice(id,10)]
+pub fn color_value(editor,kind) => inline_format.char_value(editor,color_properties[kind],default_colors[kind])
+pub fn format_color(editor,kind,value) map^ {
+    let chosen = lower(trim(string(value)))
+    if (color_properties[kind] is null) raise error("Unknown color style.")
+    else if (chosen!="" and not component.hex_color(chosen)) raise error("Use a six-digit hex color, such as #ff0000.")
+    else edit_apply(editor,inline_format.transaction(editor,
+        (marks)=>inline_format.styled_marks(marks,color_properties[kind],chosen)))
+}
 
 pub fn paragraph(words) => node('p',[text(words)])
 pub fn blank() => node('doc',[paragraph("")])
@@ -74,11 +97,10 @@ pub fn navigate(st,delta) {
     let at = [for (i,n in rows where n.id==st.selected) i][0] or 0;
     select(st,rows[max(0,min(len(rows)-1,at+delta))].id or "")
 }
-pub fn selection_path(editor) => if (editor.selection.kind=='text') editor.selection.head.path else editor.selection.path or []
+pub fn selection_path(editor) => inline_format.selection_path(editor.selection)
 pub fn task_path(editor,path=null) => commands.ancestor_tag(editor.doc,path or selection_path(editor),'li')
-pub fn tasks(doc,path=[]) => if (not is_node(doc)) [] else [
-    *if (doc.tag=='li' and attrs_get(doc.attrs,'checked')!=null) [{path:path,checked:attrs_get(doc.attrs,'checked')}] else [],
-    *[for (i,child in doc.content) for (task in tasks(child,[*path,i])) task]]
+pub fn tasks(doc,path=[]) => [for (entry in descendants(doc,path),let n=entry.node
+    where is_node(n) and n.tag=='li' and attrs_get(n.attrs,'checked')!=null) {path:entry.path,checked:attrs_get(n.attrs,'checked')}]
 pub fn toggle_task(editor,path=null) {
     let target = path or task_path(editor)
     let item = node_at(editor.doc,target);

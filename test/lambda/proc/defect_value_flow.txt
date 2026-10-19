@@ -10,5 +10,5 @@
 [5, error, 2, error, true, true]
 [8, error, 2, error]
 [5, error, 9, error, "type check at declaration 'n' failed: expected int, got string 'p'"]
-[true, false, true, true, false, true]
+[true, error, error, true, false, true]
 

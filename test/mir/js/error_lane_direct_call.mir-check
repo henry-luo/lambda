@@ -1,24 +1,25 @@
 {
   "schema_version": 1,
-  "description": "The literal 27 is LMD_TYPE_ERROR (lambda/lambda.h); re-pin it if the enum shifts. D8.4.3: call-site uncertainty has one tag test; the known ERROR producer itself has none.",
+  "description": "D8.4.3v2, D8.1.3v25: the known throw producer has no tag test; the open Script caller retains mutable global lookup, guarded callable entry and checked catch conversion.",
   "checks": [
     {
-      "in_func": "_js_thrower_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_throw_value"
+        "call\tmvp_lmd_throw"
       ],
       "forbid": [
-        "eq\t{{r}}, {{r}}, 27"
+        "{{r}}, 27"
       ]
     },
     {
-      "in_func": "_js_caughtCall_#_body",
+      "in_func": "mvp_lmd_f2",
       "expect": [
-        "call\t_js_thrower_",
-        "call\tjs_error_lane_payload"
+        "call\tmvp_lmd_dynamic_global",
+        "call\tmvp_lmd_signature,",
+        "call\tmvp_lmd_caught_value"
       ],
       "count": {
-        "eq\t{{r}}, {{r}}, 27": 1
+        "{{r}}, 27": 3
       }
     }
   ]

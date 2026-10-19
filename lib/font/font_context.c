@@ -451,6 +451,10 @@ const char* font_handle_get_family_name(FontHandle* handle) {
     return handle->family_name;
 }
 
+FontContext* font_handle_get_context(FontHandle* handle) {
+    return handle ? handle->ctx : NULL;
+}
+
 float font_handle_get_size_px(FontHandle* handle) {
     return handle ? handle->size_px : 0;
 }

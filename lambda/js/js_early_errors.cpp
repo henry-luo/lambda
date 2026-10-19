@@ -728,6 +728,9 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             // defaults and computed targets still contain IdentifierReferences subject to strict syntax.
             check_identifier_reserved(ctx, node, false);
             check_private_identifier_valid(ctx, node, ((JsIdentifierNode*)node)->name);
+            // eval uses the Script goal even when its caller is a module.
+            if (!ctx->tp->is_module && strcmp(((JsIdentifierNode*)node)->name->chars, "import.meta") == 0)
+                ee_error(ctx, node, "import.meta requires the Module goal");
             if (is_private_name_string(((JsIdentifierNode*)node)->name))
                 ee_error(ctx, node, "Private identifiers require member access or an in expression");
             if ((ctx->in_field_initializer || ctx->in_static_init) &&

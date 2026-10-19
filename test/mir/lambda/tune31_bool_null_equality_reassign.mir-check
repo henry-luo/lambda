@@ -5,7 +5,7 @@
     {
       "in_func": "_compare_after_write_#",
       "expect": [
-        "call\tfn_ne_p, fn_ne"
+        "call\tfn_ne_value_p, fn_ne_value"
       ]
     }
   ]

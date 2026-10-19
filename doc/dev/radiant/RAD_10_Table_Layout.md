@@ -71,11 +71,32 @@ Before sizing, it collects **all** captions — §17.4 permits multiple — by s
 
 ### 4.2 Step 1 / 1.5 — analyze and resolve borders
 
-Step 1 (`layout_table.cpp:6196`) calls `analyze_table_structure` (§3) to get the `TableMetadata`. Step 1.5 (`layout_table.cpp:6447`) runs `resolve_collapsed_borders` (`layout_table.cpp:2276`) when `border_collapse` is set. That function resolves every horizontal edge (between rows, plus top/bottom table edges) and vertical edge by collecting candidate borders in §17.6.2.1 precedence order (adjoining cells, rows, row groups, columns, column groups, then the table; the upper or left element first) and folding them with `layout_table_collapsed_winner` (hidden, then width, then style; the earlier candidate keeps a full tie, so a cell keeps its color over an equal table border as CSS Tables 3 §3.7.1 requires). The paged table producer shares that winner rule. The result goes into each cell's `*_resolved` pointers for the paint phase ([RAD_12](RAD_12_Paint_IR_Display_List.md)). Layout positioning continues to use the *original* border widths; only rendering uses the resolved ones. Immediately after, it computes `col_edge_max_border` — the max resolved border at each column grid line across all rows — so every cell in a column lands on the same fixed vertical grid line regardless of its own border (`layout_table.cpp:6455-6461`).
+Step 1 calls `analyze_table_structure` (§3) to obtain `TableMetadata`.
+Step 1.5 resolves collapsed borders through the borrowed scratch
+`LayoutTableBorderGrid`. `layout_table_collapsed_edge` folds adjoining cells,
+rows, row groups, columns, column groups and the table in CSS 2.2 §17.6.2.1
+precedence, using `layout_table_collapsed_winner` (hidden, width, style, then
+first candidate). Used layout stores the winner in each cell's `*_resolved`
+pointers for content insets and paint. Intrinsic sizing supplies source span
+occupancy to the same edge resolver, preserving fractional tracks and sharing
+winning borders by halves ([RAD_05](RAD_05_Intrinsic_Sizing.md)). The paged
+producer also shares the winner rule. `col_edge_max_border` retains the largest
+resolved border on each vertical gridline so cells align consistently. Grid
+arrays borrow nodes and resolved boundaries within the caller's scratch scope;
+selected styles retain their original owners (**D4.5.1v4 /D4.1.4v5**).
 
 ### 4.3 Step 2 — per-cell width measurement
 
 Step 2 (`layout_table.cpp:6585`) measures every cell with `measure_cell_widths` (`layout_table.cpp:5468`), which returns a border-box `CellWidths{min, max}` — the cell's minimum content width (MCW, narrowest without overflow) and preferred content width (PCW). This is the seam into intrinsic sizing: the actual min/max-content measurement of cell contents is [RAD_05](RAD_05_Intrinsic_Sizing.md)'s `layout_measure_intrinsic_widths`. CSS `min-width`/`max-width` on the cell are folded in by `apply_table_cell_width_constraints` (`layout_table.cpp:5278`), which converts content-box constraints to border-box and lets `min-width` override `max-width` per the used-width rules. Single-column cells feed their MCW/PCW directly into `col_min_widths`/`col_max_widths`; multi-column (colspan) cells are distributed across their spanned columns by `apply_colspan_width_contribution` (`layout_table.cpp:1421`), which raises the columns' min/max only if the span's requirement exceeds the sum already present.
+
+Cell inline minima (verified 2026-10-19) use the shared
+`layout_intrinsic_append_min_run` reducer from [RAD_05 §2](RAD_05_Intrinsic_Sizing.md#2-result-types-and-the-caches).
+Taking the maximum of each inline child's minimum loses an unbroken word
+through element boundaries; adding every child minimum also loses internal
+spaces. First/last segment summaries preserve both constraints, including mixed
+font sizes, sliced inline edges and forced lines. CSS Tables 3 §3.8.2 defines
+the outer min-content contribution from content plus offsets. The specific
+algorithm in CSS 2.2 §17.5.2.2 is non-normative guidance.
 
 ### 4.4 Step 3 — width distribution (auto and fixed)
 
@@ -86,6 +107,29 @@ Step 2 (`layout_table.cpp:6585`) measures every cell with `measure_cell_widths` 
 ### 4.5 Step 4 — positioning, row heights, vertical-align
 
 Step 4 (`layout_table.cpp:7815`) positions cells and computes row heights. Column x-positions are accumulated into a scratch `col_x_positions` array starting from table padding + left border-spacing (halved in collapse mode, `layout_table.cpp:7830-7833`). The per-cell absolute x comes from `table_column_visual_x` (`layout_table.cpp:1400`/`1677`), which handles RTL column ordering when `table_uses_rtl_column_order` is true (`layout_table.cpp:1642`). Row heights are the max cell height in each row; rowspanning cells distribute their extra height across the spanned rows via `distribute_rowspan_heights` (`layout_table.cpp:2617`, called from Step 4) and `update_rowspan_cell_heights` (`layout_table.cpp:4711`). Within each cell, content is vertically aligned by `apply_cell_vertical_alignment` (`layout_table.cpp:4500`) for top/middle/bottom, and baseline-aligned cells are handled by a dedicated pass that finds each cell's first baseline via `find_first_baseline_recursive` (`layout_table.cpp:905`) and shifts content so all baseline cells in a row share a baseline (`layout_table.cpp:1052-1132`), with final text-position fixups through `adjust_row_text_positions_final`/`adjust_cell_text_positions_final` (`layout.hpp`).
+
+Horizontal inline cell measurement (verified 2026-10-19) consumes the positioned
+origin and line-stack height from `table_collect_inline_line_box_extent`.
+An inline wrapper's font-box origin cannot anchor an atomic descendant's height.
+Explicit line-height inverts the formatter's snapped leading for either sign; the cell's cached
+flow height retains its root strut beside atomic-only content. Post-rowspan
+alignment reuses this natural content height and the same margin-aware origin
+as initial alignment. `layout_table_inline_extents.html` covers forced breaks,+nested atoms, root struts, glyph overflow, relative positioning and block margins
+through retained layout. Background propagation uses the paint model below;
+its coverage does not change these natural content measurements.
+
+Cells containing normal-flow blocks use the height recorded by
+`layout_table_cell_content`. Block flow has already consumed adjoining margin
+chains; reconstructing that height from promoted boundary margins counts empty
+blocks twice and makes negative overflow enlarge a row (CSS 2.2 §8.3.1,
+§17.5.3). Float extent is recorded before row alignment shifts children.
+Inline-only cells retain their line-box/root-strut measurement path.
+`layout_table_collapsed_margin_extents.html` and
+`TableRowsConsumeCollapsedBlockMarginsOnce` cover positive/negative and nested
+empty-block chains, separators, relative boxes, both border models, flex table
+wrappers and mixed floats through retained layout and causal margin changes.
+The change uses existing flow classification and leaves style snapshot ownership
+unchanged (**D4.5.1v4 /D4.1.4v5**).
 
 ### 4.6 Caption placement
 
@@ -102,6 +146,30 @@ Top captions are positioned before the grid (`layout_table.cpp:7964`, `8021`) an
 **Floats / BFC and positioned.** A table participates in the block-formatting context: direct-float intrusion is queried (the digest cites `table_direct_left/right_float_intrusion`), and relative/sticky positioning of table-internal boxes reuses the [RAD_11](RAD_11_Positioned_Float_Multicol_Lists.md) machinery (`layout_relative_positioned`/`layout_sticky_positioned`, invoked at `layout_table.cpp:9905-9941`).
 
 **Paint.** Resolved collapsed borders (`TableCellProp::*_resolved`) and cell backgrounds are consumed by the render walk ([RAD_12](RAD_12_Paint_IR_Display_List.md)/[RAD_13](RAD_13_Render_Walk_Painters.md)); layout only computes them.
+
+Table backgrounds (focused verification 2026-10-19) use the originating column
+group, column, row group and row beneath each cell's own background, in the
+existing DOM-order paint walk. `background_sources` in `render_background.cpp`
+shares this selection across raster, SVG and PDF; direct boundary optimizations
+decline cells with propagated layers. This follows
+[CSS 2.2 §17.5.1](https://www.w3.org/TR/CSS22/tables.html#table-layers) and the
+more explicit [CSS Tables 3 working draft §5.3.2](https://www.w3.org/TR/css-tables-3/#drawing-cell-backgrounds).
+Source geometry positions/sizes images; cell geometry determines coverage.
+Track/group boxes do not paint their backgrounds independently. Missing slots,
+separated gaps and hidden empty cells therefore expose the table background.
+
+The shared column lookup uses published column indices and span geometry.
+Borrowed source projections strip inapplicable track padding/borders without
+mutating canonical styles (**D4.5.1v4 / D4.1.4v5**). A zero-height originating
+row still supplies a fixed-size image to a spanning cell; resolved zero-sized
+tiles remain suppressed per CSS Backgrounds 3 §2.9. Paint/scroll extent scans
+include structural table boxes so they do not cull overflowing spanning cells.
+`TableBackgroundsUseSourcePositioningAndCellCoverage` checks 21 controls at
+both densities and through retained reflow. Native/SVG/PDF captures additionally
+cover gradients, SVG-image sources, nested alpha and effect ownership. Chromium
+differs from the explicit empty-cell and inapplicable-inset rules in two saved
+controls; the implementation follows the specifications. Continuous-export
+evidence does not establish full fragmented-table paint conformance.
 
 ---
 

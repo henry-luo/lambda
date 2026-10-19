@@ -1,6 +1,6 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Last verified against tree:** 2026-10-08 (shared chart text measurement); 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
+> **Last verified against tree:** 2026-10-18 (§5.4 SVG DOM/frame saves); 2026-10-08 (shared chart text measurement); 2026-10-07 (§4.4 layer content keys and folded uniform scale); 2026-10-06 (geometric clip intersections and lazy SVG font metrics; 2026-10-03 P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
@@ -55,7 +55,7 @@ In the active ThorVG backend, native `gaussian_blur` is advertised only under `#
 
 Two small files build geometry through the `RdtVector` API. `render_path.cpp` constructs clip/border geometry: `render_path_create_rounded_rect` (`render_path.cpp:7`) emits a per-corner rounded rectangle using the circle-approximation constant `RENDER_PATH_KAPPA` (`render_path.cpp:5`), and `render_path_create_clip_path` (`:65`) derives the current block's clip rectangle (honoring `has_clip_radius`). `render_vector_path.cpp` renders a CSS `VectorPathProp` — a block whose `vpath->segments` linked list carries `VPATH_MOVETO`/`LINETO`/`CURVETO`/`CLOSE` — into an `RdtPath` and then strokes/fills it through the render context (`render_vector_path`, `render_vector_path.cpp:6`).
 
-SVG *pictures* — standalone `.svg` files and offscreen scenes — are loaded through `rdt_picture_load`/`rdt_picture_load_data` (`render.hpp`). Critically, **Radiant parses the SVG itself**, not ThorVG's loader: `svg_picture_create` (`rdt_vector_tvg.cpp:1646`) calls `parse_svg_document` in `lambda/input/input-xml.cpp` to produce a `KIND_SVG_DOM` picture holding a Radiant-parsed `Element` root plus an owned `Pool` (`RdtPicture::Kind`, `rdt_vector_tvg.cpp:60`; the file comment at `:1710` states "the SVG path is parsed by Radiant (not ThorVG)"). Loaded pictures are cached by path under `g_picture_cache_mutex` (`rdt_vector_tvg.cpp:101,286`). Drawn into a page (an `<img>`, a CSS background, or an SVG `<image>`), a `KIND_SVG_DOM` picture is painted into the recording on the recording thread by `render_svg_record_picture`, exactly like inline SVG and with its text as glyph items. It is never deferred to replay, where tile workers would run the painter concurrently ([RAD_12 §3](RAD_12_Paint_IR_Display_List.md)). Off-screen draws (`rdt_picture_draw`, e.g. rasterizing an image cache, the PDF raster fallback) record and replay a private DisplayList (`render_svg_to_vec_via_display_list`), so file-SVG, inline-SVG, and PDF export (`render_pdf.cpp`) all share one renderer. `rdt_picture_get_svg_root`/`rdt_picture_find_svg_element_by_id` (`render.hpp`) expose that parsed tree for scripting.
+SVG *pictures* — standalone `.svg` files and offscreen scenes — are loaded through `rdt_picture_load`/`rdt_picture_load_data` (`render.hpp`). Critically, **Radiant parses the SVG itself**, not ThorVG's loader: `svg_picture_create` (`rdt_vector_tvg.cpp:1646`) calls `parse_svg_document` in `lambda/input/html5/html5_tree_builder.cpp`, sharing inline HTML SVG parsing and the Mark result model (**D2.11.1–D2.11.2**), to produce a `KIND_SVG_DOM` picture holding a Radiant-parsed `Element` root plus an owned `Pool` (`RdtPicture::Kind`, `rdt_vector_tvg.cpp:60`; the file comment at `:1710` states "the SVG path is parsed by Radiant (not ThorVG)"). Loaded pictures are cached by path under `g_picture_cache_mutex` (`rdt_vector_tvg.cpp:101,286`). Drawn into a page (an `<img>`, a CSS background, or an SVG `<image>`), a `KIND_SVG_DOM` picture is painted into the recording on the recording thread by `render_svg_record_picture`, exactly like inline SVG and with its text as glyph items. It is never deferred to replay, where tile workers would run the painter concurrently ([RAD_12 §3](RAD_12_Paint_IR_Display_List.md)). Off-screen draws (`rdt_picture_draw`, e.g. rasterizing an image cache, the PDF raster fallback) record and replay a private DisplayList (`render_svg_to_vec_via_display_list`), so file-SVG, inline-SVG, and PDF export (`render_pdf.cpp`) all share one renderer. `rdt_picture_get_svg_root`/`rdt_picture_find_svg_element_by_id` (`render.hpp`) expose that parsed tree for scripting.
 
 ---
 
@@ -252,7 +252,7 @@ synchronous lowering finishes; retained marker copies use the same copy helper
 resolution, and PDF applies output scale to its page CTM with logical tree
 coordinates. `make test-svg-export` verifies the portable output matrix.
 
-CLI exports create the document at time zero and resolve SMIL before recording.
+Rendered-page CLI exports create the document at time zero and resolve SMIL before recording.
 Negative begins and frozen intervals that ended before zero therefore contribute
 their initial sampled state. Delayed animations retain their base paint; SVG
 images start at their own initial time. PNG/SVG/PDF use the same snapshot,
@@ -260,7 +260,28 @@ including external use and animated filter resources. No CLI sample-time option
 is currently exposed. `svg_smil_export_initial` verifies this contract in all
 three formats at both densities.
 
-### 5.4 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
+### 5.4 Current SVG DOM saves and virtual-frame snapshots
+
+**D2.11.3–D2.11.4** distinguish SVG source save from rendered-page export.
+`load_svg_doc` marks standalone source documents; their SVG saves use
+`render_svg_source_document_to_file` / `render_svg_dom_to_file`. The existing
+render control can select an inline SVG root. Both reuse `dom_serialize_xml` in
+the realm-neutral DOM module, which also serves standard XMLSerializer.
+
+A frozen snapshot supplies a serialization projection: current CSS presentation
+and SMIL samples override saved values, and animation/script drivers are inert
+in the output. The live DOM retains its original attributes and declarations.
+The existing frame flush/timer chooses the sample; export adds no clock or sleep.
+The projection appends isolated frozen definitions for rendered `use` instances,
+using their existing animation source scopes and collision-free ID prefixes.
+Local SVG images embed a frozen SVG sampled through the existing isolated
+picture document path. A generic optional `DomXmlProjection.append_children`
+hook keeps the namespace-aware tree walk in the DOM module.
+General HTML-page SVG/PDF retains the paint route described above. Qualification
+and remaining cases are recorded in the
+[SVG enhancement checkpoint](../../../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up).
+
+### 5.5 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
 
 The `gaussian_blur` capability flag (§2.2) describes the **vector backend's native filter blur**, consumed by the CSS filter/backdrop path (`render_filter.cpp:208`, `render_backend_caps.cpp:10`). Inline SVG's `<feGaussianBlur>` takes a *different* route: `svg_finish_gaussian_blur_filter` records a `box_blur_region` DisplayList op (`svg_box_blur_region`, `render_svg_inline.cpp:239,1317`) that is replayed in **software** by `dl_replay_box_blur_region` (`display_list_replay_effects.cpp:28`), with no `__APPLE__` guard. So inline-SVG blur works on all platforms; only the backend-native CSS-filter blur is `__APPLE__`-limited for ThorVG. The scan digest's blanket claim ("no Gaussian blur on Linux/Windows") over-generalizes and should be read as this narrower statement.
 
@@ -292,6 +313,12 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 
 `graph.transform.paint` converts routed edge points into immutable `<svg>` elements returned as custom-layout `paint_layers`. Radiant roots those elements for the document lifetime and merges generated layers with normal node child views using one stable signed-z sequence. SVG, PDF, and raster backends consume the same sequence; hit testing consumes it in reverse while skipping generated layers, which are initially non-interactive.
 
+Radiant resolves `data-radiant-layout="lambda-graph"` directly to the pure
+`lambda.graph.transform.layout` package export (**D7.5.3v2**). Graph/TikZ
+transforms and render callers do not install callbacks. Static HTML acquires a
+package evaluator lazily; later layout passes reuse module state and compiled
+exports through the same bridge as MathML.
+
 `LambdaDocumentTransformConfig` selects `lambda.graph.document.to_html`; the native loader parses the graph input, passes typed `theme`/`view_key` options, and invokes that public package export. `render`, `view`, `layout`, and generic document loading share this route without generating Lambda source. This is an ordinary shipped-package invocation under **D7.2.1–D7.2.2**. Final SVG/PDF/PNG/JPEG output is produced by normal Radiant rendering; there is no direct C graph-to-SVG path.
 
 ---
@@ -320,7 +347,7 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 | `radiant/render.hpp` / `render_svg.cpp` | View-tree → SVG-text declarations and serializer (`render_view_tree_to_svg`, `svg_make_backend`) with raster fallback for inexpressible effects. |
 | `radiant/render_path.cpp`, `radiant/render_vector_path.cpp` | Rounded-rect/clip path construction and CSS `VectorPathProp` rendering through `rdt_*`. |
 | `lmd/package/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
-| `lmd/package/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
+| `lmd/package/graph/transform.ls`, `transform/*` | Semantic HTML, automatic package layout export, themes, and generated SVG edge layers. |
 | `radiant/graph_format.cpp` / `lmd/package/graph/document.ls` | Graph syntax detection plus the shared configured package transform for render, view, layout, and generic loading. |
 | `radiant/stacking_order.cpp` | Stable signed-z merge of generated layers and measured node views. |
 

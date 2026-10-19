@@ -128,7 +128,7 @@ fn selection_ends(selection) {
 
 fn writes_view_only(session, doc, selection, input_type) =>
   (any([for (p in selection_ends(selection)) view_only_part(session, doc, p) != null]) and
-   not member(unit_families, edit_action_family(input_type))) or false
+   not member(unit_families, edit_action_family(input_type))) ^ { false }
 
 // A deletion from inside one view-only part removes the whole part: the
 // action is retargeted to the part as a node selection.
@@ -154,34 +154,35 @@ fn key_is(evt, letter) => lower(string(evt.key)) == letter
 
 fn is_drawing(session) => session.format.surface == 'drawing'
 
-pn canvas_node(node) { dom.query_selector(doc_root(node), ".edit-canvas") }
+fn canvas_node(node) { dom.query_selector(doc_root(node), ".edit-canvas") }
 
 // A viewport point (a mouse record's `x`/`y`, MouseEvent's clientX/clientY)
 // in the drawing's user units, through the canvas box.
-pn user_point(canvas, cx, cy, doc) {
+fn user_point(canvas, cx, cy, doc) {
   let r = if (canvas == null) null else dom.bounding_box(canvas)
   let vb = dr.view_box(doc)
   if (r == null or r.width == 0 or r.height == 0) {x: vb.x, y: vb.y}
   else {x: vb.x + (cx - r.left) * vb.w / r.width, y: vb.y + (cy - r.top) * vb.h / r.height}
 }
 
-pn element_attr(node, key) {
+fn element_attr(node, key) {
   if (node == null or dom.node_type(node) != 1) null else dom.get_attribute(node, key)
 }
 
 // The top-level object a pressed node belongs to ({index, node}), or null
 // for the canvas background.
-pn object_hit(node) {
-  if (node == null) { return null }
-  let index = element_attr(node, "data-edit-path")
-  if (index != null) {index: int(index), node: node}
-  else if (dom.node_type(node) == 1 and dom.matches(node, ".edit-canvas")) null
-  else object_hit(dom.parent_node(node))
+fn object_hit(node) {
+  if (node == null) null else {
+    let index = element_attr(node, "data-edit-path")
+    if (index != null) {index: int(index), node: node}
+    else if (dom.node_type(node) == 1 and dom.matches(node, ".edit-canvas")) null
+    else object_hit(dom.parent_node(node))
+  }
 }
 
 // An object's frame: its own geometry when the tools know it, else the box
 // it rendered, in user units.
-pn frame_of(canvas, hit, doc) {
+fn frame_of(canvas, hit, doc) {
   let r = dom.bounding_box(hit.node)
   let a = if (r == null) null else user_point(canvas, r.left, r.top, doc)
   let b = if (r == null) null else user_point(canvas, r.left + r.width, r.top + r.height, doc)
@@ -201,7 +202,7 @@ fn style_dialog(ds, doc) {
 }
 
 // The view fits the drawing into the main area.
-pn fit_zoom(node, doc) {
+fn fit_zoom(node, doc) {
   let main = dom.query_selector(doc_root(node), ".edit-main")
   let r = if (main == null) null else dom.bounding_box(main)
   let vb = dr.view_box(doc)
@@ -266,7 +267,7 @@ on editaction(evt) {
                 if (session.format.surface == 'rich_text') session.format.schema_preset else null)
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
-  if (run.result.failure != null) { status = "Could not apply " ++ evt.input_type ++ "." }
+  if (not (run.result.failure is null)) { status = "Could not apply " ++ evt.input_type ++ "." }
   files.sync_window(evt.target, session, editor.doc)
   return run.result
 }
@@ -336,7 +337,7 @@ on edit_cmd(req) {
                        else item.input_type
       let run = run_request(editor, input_type, item.payload)
       editor = run.editor
-      if (run.result.failure != null) { status = "Could not apply " ++ item.title ++ "." }
+      if (not (run.result.failure is null)) { status = "Could not apply " ++ item.title ++ "." }
       else { status = "" }
       files.sync_window(req.node, session, editor.doc)
     }

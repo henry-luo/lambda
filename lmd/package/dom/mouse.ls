@@ -22,13 +22,22 @@ fn input_target(node) {
     if (elem == null) null else dom.closest(elem, "input")
 }
 
+fn selection_value(node) {
+    let elem = as_element(node);
+    if (elem == null) "text" else (
+        let value = dom.computed_style(elem, "user-select"),
+        // auto uses the ancestor's selection behavior; an explicit text value overrides none.
+        if (value == null or value == "" or value == "auto") selection_value(dom.parent_element(elem)) else value)
+}
+
 // The click-count and modifier table is policy. `selectLine` resolves to the
 // current logical line on multiline controls and rich text; an input asks for
 // the HTML select-all convention explicitly.
 fn selection_operation(evt) {
     // A declined context-menu press still places its caret; an opened menu exits
     // before this default action.
-    if (evt.shiftKey) "extend"
+    if (selection_value(evt.target) == "none") null
+    else if (evt.shiftKey) "extend"
     else if (evt.detail >= 3) {
         if (input_target(evt.target) != null) "selectAll" else "selectLine"
     }

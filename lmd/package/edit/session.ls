@@ -78,7 +78,7 @@ pub pn save(session, doc, target, overwrite) {
   }
   let same_file = same_path(target, session.path)
   let problem = if (same_file) null else new_target_problem(session, doc, target)
-  if (problem != null) {
+  if (not (problem is null)) {
     return outcome(false, session, "Not saved: " ++ problem ++ ".", null)
   }
   // probe first: reading a missing Save As target is the normal case, not a failure
@@ -112,7 +112,7 @@ pub pn reload(session) {
     return {ok: false, status: "Could not read " ++ session.path ++ "."}
   }
   let loaded = session.format.import_text(source) ^ { {error: ^.message} }
-  if (loaded.error != null) {
+  if (not (loaded.error is null)) {
     return {ok: false, status: "Could not reload: " ++ loaded.error}
   }
   {ok: true, session: new_session(session.path, session.format, source, loaded),

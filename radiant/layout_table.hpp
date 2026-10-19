@@ -7,6 +7,8 @@ struct ViewTable;
 struct ViewTableRowGroup;
 struct ViewBlock;
 struct ViewElement;
+struct ScratchScope;
+struct LayoutTableAxis;
 bool table_view_is_caption(ViewBlock* child);
 bool table_caption_is_bottom(ViewBlock* caption);
 
@@ -25,6 +27,8 @@ LayoutTableBodyEdge layout_table_source_body_edge(DomElement* table, bool after)
 
 // captions belong to the transparent wrapper, outside the grid's border box.
 RdtLogicalRect layout_table_grid_rect(const ViewTable* table);
+float layout_table_column_visual_x(ViewTable* table, float* widths, float* positions,
+    int first, int span, int columns);
 
 size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);
@@ -34,6 +38,9 @@ size_t layout_table_used_rowspan(size_t specified, size_t remaining);
 // column groups with children report their bounding range after the leaf declarations.
 typedef void (*LayoutTableColumnFn)(void*, ViewElement*, size_t first, size_t span, bool container);
 void layout_table_visit_columns(ViewTable* table, void* context, LayoutTableColumnFn visitor, bool properties);
+typedef void (*LayoutTableSourceColumnFn)(void*, DomElement*, size_t first, size_t span, bool container);
+void layout_table_visit_source_columns(DomElement* table, void* context,
+    LayoutTableSourceColumnFn visitor, bool properties = false);
 template<typename Fn>
 void layout_table_each_column(ViewTable* table, Fn fn, bool properties = false) {
     layout_table_visit_columns(table, &fn,
@@ -42,6 +49,7 @@ void layout_table_each_column(ViewTable* table, Fn fn, bool properties = false) 
         }, properties);
 }
 bool layout_table_column_range(ViewElement* source, size_t* first, size_t* span);
+ViewBlock* layout_table_find_column_source(ViewTable* table, int column, bool group);
 
 // both producers skip occupied slots before covering a cell's rectangular span.
 template<typename Index, typename Occupied, typename Cover>
@@ -63,6 +71,23 @@ void layout_table_distribute_rowspan_height(float* heights, size_t count, size_t
 // collapsed-border conflict resolution (CSS 2.2 §17.6.2.1): hidden, then width, then style;
 // the first argument wins full ties, so callers pass candidates in precedence order.
 CollapsedBorder layout_table_collapsed_winner(const CollapsedBorder& a, const CollapsedBorder& b);
+
+// borrowed computed boundaries and span slots; the caller owns the scratch scope.
+struct LayoutTableBorderGrid {
+    DomElement* table = nullptr;
+    DomElement** rows = nullptr;
+    DomElement** row_groups = nullptr;
+    DomElement** cells = nullptr;
+    DomElement** columns = nullptr;
+    DomElement** column_groups = nullptr;
+    int row_count = 0;
+    int column_count = 0;
+    DomElement* cell(int row, int column) const;
+};
+LayoutTableBorderGrid layout_table_border_grid_create(ScratchScope* scope,
+    DomElement* table, int rows, int columns);
+CollapsedBorder layout_table_collapsed_edge(const LayoutTableBorderGrid& grid,
+    const LayoutTableAxis& axis, int row, int column);
 
 // shared top/middle/bottom placement; valign uses TableCellProp::CELL_VALIGN_*.
 float layout_table_cell_vertical_align_target(int valign, float content_area_height,

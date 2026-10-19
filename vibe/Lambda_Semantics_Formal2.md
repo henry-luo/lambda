@@ -988,7 +988,7 @@ From reading the equality implementation (`lambda/lambda-eval.cpp`, dispatcher
 
 #### C8.8 Comparisons preserve errors, recursively (2026-10-16, user)
 
-**Decision; implementation pending.** Following **S3.1v2–S3.5**, errors do not
+**Decision; scalar and recursive comparison core implemented 2026-10-16.** Following **S3.1v2–S3.5**, errors do not
 produce successful comparison answers. **S5.1.1v2–S5.1.2v2** require `==` and
 `!=` to preserve an error operand; **S6.1.2v2** applies the same rule to
 `<`, `<=`, `>`, and `>=`. `!=` negates only a successful Boolean from equality.
@@ -1038,7 +1038,18 @@ versus null/nan, nested containers and captures, aliased containers, decisive
 early mismatch, and preserved payloads through `!=`. Verify clean comparisons
 and sorting keep their existing results. Inference and optimized equality
 consumers must retain the error alternative on interp, jit and auto; a native
-Bool return must not erase it. This record changes no runtime behavior.
+Bool return must not erase it.
+
+**Implementation (2026-10-16).** `EqualityContext` threads the visited error
+through the shared recursive kernels; language operators use Item-returning
+helpers, while native classification clients retain Bool adapters. Interpreter,
+MIR native/boxed branches, inference and acknowledgment were migrated together.
+Aliased arrays, maps, elements and captured errors take the recursive walk;
+primitive scalar fast paths retain guarded native comparisons. Existing map
+field order remains transitional; **SO50** is deliberately pending, including
+collection-consumer and element-wise result boundaries. Regression fixtures
+`error_operator_value_flow` and `error_operator_short_circuit` run on all three
+tiers; negative fixtures cover retained return types and hard-call obligations.
 
 ### C9. Dynamic function construction (2026-07-04) — direction set; quote syntax open
 

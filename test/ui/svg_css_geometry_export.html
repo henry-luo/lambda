@@ -1,0 +1,25 @@
+<!doctype html><style>
+body{margin:0;background:white}svg{display:block}
+#styled rect{--left:50px;x:var(--left);y:20px;width:calc(50% - 80px);height:20px;rx:4px}
+#styled circle{cx:130px;cy:30px;r:15px}
+#styled ellipse{cx:190px;cy:30px;rx:20px;ry:10px}
+</style>
+<svg width="240" height="80">
+  <defs>
+    <linearGradient id="paint"><stop offset=".75" stop-color="blue"/><stop offset=".75" stop-color="lime"/></linearGradient>
+    <clipPath id="clip" clipPathUnits="objectBoundingBox"><rect width=".875" height="1"/></clipPath>
+  </defs>
+  <svg id="styled" width="240" height="80">
+    <rect id="box" x="5" y="10" width="10" height="10" fill="url(#paint)" clip-path="url(#clip)"/>
+    <circle id="circle" cx="5" cy="60" r="3" fill="red"/>
+    <ellipse id="ellipse" cx="10" cy="65" rx="3" ry="2" fill="green"/>
+  </svg>
+</svg>
+<button id="move">move</button>
+<script>
+document.getElementById('move').onclick=function(){
+  document.getElementById('box').style.setProperty('--left','80px');
+  document.getElementById('circle').style.setProperty('cx','145px');
+  document.getElementById('ellipse').style.setProperty('rx','12px');
+};
+</script>

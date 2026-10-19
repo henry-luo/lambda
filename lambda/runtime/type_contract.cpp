@@ -2153,6 +2153,46 @@ bool lambda_type_has_proven_error(Type* type) {
         lambda_type_has_proven_error(binary->right);
 }
 
+static bool comparison_type_error(Type* type, bool deep, bool include_unknown,
+        int depth) {
+    type = contract_unwrap_type(type);
+    if (!type || depth > 32) return include_unknown;
+    if (lambda_type_has_proven_error(type)) return true;
+    if (include_unknown && lambda_type_accepts_error(type)) return true;
+    if (lambda_type_is_union(type)) {
+        TypeBinary* binary = (TypeBinary*)type;
+        return comparison_type_error(binary->left, deep, include_unknown, depth + 1) ||
+            comparison_type_error(binary->right, deep, include_unknown, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if ((unary->op == OPERATOR_ARRAY || unary->op == OPERATOR_REPEAT) && !deep) return false;
+        return comparison_type_error(unary->operand,
+            deep, include_unknown, depth + 1);
+    }
+    if (!deep) return false;
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        if (is_global_simple_type(type)) return include_unknown;
+        return comparison_type_error(((TypeArray*)type)->nested,
+            true, include_unknown, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
+        if (is_global_simple_type(type)) return include_unknown;
+        FOR_EACH_MAP_FIELD((TypeMap*)type, field) {
+            if (comparison_type_error(field->type, true, include_unknown, depth + 1)) return true;
+        }
+        // element instance types do not describe their children; virtual/deep walks may fail
+        return include_unknown;
+    }
+    return include_unknown && (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_FUNC ||
+        type->type_id == LMD_TYPE_VMAP || type->type_id == LMD_TYPE_VARRAY ||
+        type->type_id == LMD_TYPE_VELMT);
+}
+
+bool lambda_type_comparison_may_error(Type* type, bool deep, bool include_unknown) {
+    return comparison_type_error(type, deep, include_unknown, 0);
+}
+
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
     left = contract_unwrap_type(left);
     right = contract_unwrap_type(right);

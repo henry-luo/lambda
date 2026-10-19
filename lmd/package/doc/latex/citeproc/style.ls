@@ -84,7 +84,7 @@ fn check(node, inherited, source, macros, macro_stack, depth) {
 fn dependencies(node) => unique((if (node.macro == null) [] else [node.macro]) ++
     [for (child in c.children(node), dep in dependencies(child)) dep])
 
-fn uses_variable(node, key) => c.has(c.words(node.variable), key) or
+fn uses_variable(node, key) => (c.has(c.words(node.variable), key) ^ { false }) or
     any([for (child in c.children(node)) uses_variable(child, key)])
 
 fn visit(deps, key, trail, done, source) {

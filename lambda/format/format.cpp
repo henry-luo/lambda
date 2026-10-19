@@ -253,43 +253,6 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
         return format_markup_string(pool, item, rules);
     }
 
-#ifndef LAMBDA_NO_MATH_FORMAT
-    if (strcmp(t, "math") == 0) {
-        // Math flavor dispatch table
-        struct MathEntry { const char* flavor; String* (*fn)(Pool*, Item); };
-        static const MathEntry MATH_FLAVORS[] = {
-            { "latex",  format_math_latex },
-            { "typst",  format_math_typst },
-            { "ascii",  format_math_ascii },
-            { "mathml", format_math_mathml },
-            { NULL,     NULL }
-        };
-        const char* mf = f ? f : "latex";
-        for (const MathEntry* e = MATH_FLAVORS; e->flavor; e++) {
-            if (strcmp(mf, e->flavor) == 0) return e->fn(pool, item);
-        }
-        log_debug("format: unsupported math flavor: %s, defaulting to latex", mf);
-        return format_math_latex(pool, item);
-    }
-
-    // 4. Legacy "type-flavor" combined strings (backward compatibility)
-    if (f) {
-        char combined[256];
-        snprintf(combined, sizeof(combined), "%s-%s", t, f);
-
-        struct MathEntry { const char* name; String* (*fn)(Pool*, Item); };
-        static const MathEntry LEGACY_MATH[] = {
-            { "math-latex",  format_math_latex },
-            { "math-typst",  format_math_typst },
-            { "math-ascii",  format_math_ascii },
-            { "math-mathml", format_math_mathml },
-            { NULL,          NULL }
-        };
-        for (const MathEntry* e = LEGACY_MATH; e->name; e++) {
-            if (strcmp(combined, e->name) == 0) return e->fn(pool, item);
-        }
-    }
-#endif
 
     log_error("format: unsupported format type: %s%s%s", t, f ? "-" : "", f ? f : "");
     return NULL;

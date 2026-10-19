@@ -2480,8 +2480,8 @@ static void out_insn (gen_ctx_t gen_ctx, MIR_insn_t insn, const char *replacemen
 static int target_memory_ok_p (gen_ctx_t gen_ctx, MIR_op_t *op_ref) {
   gen_assert (op_ref->mode == MIR_OP_VAR_MEM);
   MIR_context_t ctx = gen_ctx->ctx;
-  size_t size = _MIR_type_size (ctx, op_ref->u.var_mem.type);
-  int scale = gen_int_log2 ((int64_t) size);
+  /* Address folding and instruction matching both use a byte scale, not its logarithm. */
+  size_t scale = _MIR_type_size (ctx, op_ref->u.var_mem.type);
 
   if (op_ref->u.var_mem.disp == 0
       && ((op_ref->u.var_mem.index == MIR_NON_VAR || op_ref->u.var_mem.scale == 1

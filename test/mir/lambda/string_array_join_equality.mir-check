@@ -8,12 +8,12 @@
         { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
         { "pattern": "bne\tL" },
         "fn_str_eq_ptr_p, fn_str_eq_ptr",
-        "fn_eq_p, fn_eq"
+        "fn_eq_value_p, fn_eq_value"
       ]
     },
     {
       "in_func": "_different_#",
-      "expect": ["fn_str_eq_ptr_p, fn_str_eq_ptr", "fn_ne_p, fn_ne"]
+      "expect": ["fn_str_eq_ptr_p, fn_str_eq_ptr", "fn_ne_value_p, fn_ne_value"]
     }
   ]
 }

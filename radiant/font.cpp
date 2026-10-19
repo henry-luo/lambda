@@ -157,6 +157,7 @@ static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
 }
 
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
+    font_prop_resolve_spacing(fprop);
     fbox->style = lam::up(fprop);
     fbox->current_font_size = font_prop_used_size(fprop);
 

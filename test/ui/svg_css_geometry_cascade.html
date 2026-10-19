@@ -1,0 +1,17 @@
+<!doctype html><style>
+html{font-size:10px}body{margin:0;background:white}svg{display:block;font-size:20px}
+g{ x:120px;cx:120px }
+#metric {x:10%;y:1em;width:calc(50% - 10px);height:2rem}
+#round {rx:auto;ry:10px}
+#fallback {x:40px;x:var(--missing)}
+#unused {r:40px;cx:120px}
+</style>
+<svg width="300" height="160">
+ <svg width="200" height="100" viewBox="0 0 200 100">
+  <rect id="metric" x="2" y="2" width="4" height="4" fill="blue"/>
+ </svg>
+ <g><rect id="plain" x="5" y="80" width="20" height="20" fill="red"/></g>
+ <ellipse id="round" cx="150" cy="85" rx="2" ry="2" fill="lime"/>
+ <rect id="fallback" x="80" y="120" width="20" height="20" fill="purple"/>
+ <rect id="unused" x="200" y="80" width="20" height="20" fill="red"/>
+</svg>

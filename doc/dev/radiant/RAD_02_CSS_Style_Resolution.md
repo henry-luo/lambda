@@ -71,6 +71,15 @@ Owned pointer fields (font family, background image, marker text, image source p
 
 **Inheritance loop.** Finally (`resolve_css_style.cpp:3971`), a static `inheritable_props[]` array of 24 property ids (font family/size/weight/style/variant, color, line-height, the text-* group, letter/word-spacing, white-space, SVG fill/stroke/stroke-width, visibility, empty-cells, direction, the list-style group) is walked: for each inheritable property *not* explicitly set on the element, the value is copied from the parent. Several special cases guard against double-application: `<th>`'s `-internal-center-or-inherit` text-align rule (`resolve_css_style.cpp:4028`), and the `font` / `font-family` / `font-size` / `line-height` shorthand cases where the shorthand wrote a value directly onto `span->font`/`span->blk` without minting a `CssDeclaration`, so a naive "is there a declaration" check would wrongly re-inherit (`resolve_css_style.cpp:4063`,`4076`,`4095`).
 
+Retained font-size inheritance refreshes the parent's current computed value
+on each resolution. A positive value in the previous `FontProp` is not an own
+declaration. Own CSS sizes, valid legacy HTML size hints and UA font scales
+retain their local role; preservation uses the shared HTML size parser and
+`HtmlUaElementDefault` metadata, including ruby annotations. The existing
+`ensure_font` ownership path remains **D4.5.1v4 /D4.1.4v5**. The causal mutation
+in `layout_system_color_font_tracking.html` checks inherited ASCII and emoji,
+fixed author sizes, valid/invalid hints and ruby at both device scales.
+
 ### 4.1 The property dispatch switch
 
 The central dispatcher is `resolve_css_property(prop_id, decl, lycon)` (`resolve_css_style.cpp:4570`) — one flat `switch(prop_id)` with **~248 `case` labels** (grep counts 262 `case CSS_PROPERTY` lines including the logical-property remap). Before the main switch it: (a) intercepts `--custom-property` declarations and stashes them on `element->css_variables` for later `var()` resolution (`resolve_css_style.cpp:4593`), returning early; (b) remaps CSS logical properties to physical ones for horizontal-LTR writing mode (`inline-size`→`width`, `block-size`→`height`, and the min/max variants, `resolve_css_style.cpp:4617`); (c) narrows `lycon->view` to `ViewSpan* span` and `ViewBlock* block` (`resolve_css_style.cpp:4629`). Each case then lazily allocates the relevant prop struct (via `alloc_inline_prop`, `alloc_prop`, etc.), writes the computed value, and sets its `has_*` flag.

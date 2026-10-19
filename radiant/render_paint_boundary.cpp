@@ -150,6 +150,8 @@ bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* 
 
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound) return false;
+    if (render_paint_boundary_hidden(view)) return true;
+    if (render_background_uses_table_layers(view)) return false;
     if (render_paint_boundary_emit_fragmented_simple(paint_list, view, rect)) return true;
     // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
     if (view->bound->border && !boundary_border_uniform_color(view->bound->border)) return false;
@@ -158,6 +160,8 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, R
 
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound || view->width <= 0.0f) return false;
+    if (render_paint_boundary_hidden(view)) return true;
+    if (render_background_uses_table_layers(view)) return false;
     // boundary painting also accepts retained blocks without a DOM node tag.
     LayoutFragmentBox* first = view->layout_fragment_list();
     if (!first || !first->next) return false;

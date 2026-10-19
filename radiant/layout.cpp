@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_paged.hpp"
 #include "page_document.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -1549,9 +1550,18 @@ float layout_br_line_box_extent(LayoutContext* lycon, FontHandle* handle) {
 
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback) {
-    if (!element || !element->specified_style) return fallback;
-    CssDeclaration* declaration =
-        style_tree_get_declaration(element->specified_style, property);
+    if (!element) return fallback;
+    CssEnum keyword = layout_html_replaced_alignment_hint(element, property);
+    CssValue hint_value = {};
+    hint_value.type = CSS_VALUE_TYPE_KEYWORD;
+    hint_value.data.keyword = keyword;
+    CssDeclaration hint = {};
+    hint.property_code = property;
+    hint.value = &hint_value;
+    hint.origin = CSS_ORIGIN_AUTHOR_HINT;
+    CssDeclaration* declaration = keyword != CSS_VALUE__UNDEF
+        ? style_tree_get_declaration_with_fallback(element->specified_style, property, &hint)
+        : style_tree_get_declaration(element->specified_style, property);
     if (!declaration || !declaration->value ||
         declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
         return fallback;
@@ -2440,12 +2450,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
 }
 
-float layout_apply_line_height_leading(float line_height,
-                                       float* ascender, float* descender) {
-    float leading = line_height - (*ascender + *descender);
+float layout_line_height_ascent_leading(float line_height, float content_height) {
     // Blink CalculateLeadingSpace floors the ascent half and assigns the
     // remainder below the baseline; preserve the full authored line-height.
-    float ascent_leading = floorf(leading / 2.0f);
+    return floorf((line_height - content_height) / 2.0f);
+}
+
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender) {
+    float content_height = *ascender + *descender;
+    float leading = line_height - content_height;
+    float ascent_leading = layout_line_height_ascent_leading(line_height, content_height);
     *ascender += ascent_leading;
     *descender += leading - ascent_leading;
     return ascent_leading;
@@ -2517,29 +2532,38 @@ CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction) {
     return align;
 }
 
+void layout_middle_inline_contribution(LayoutContext* lycon, CssEnum align,
+                                       float item_height, float* ascender, float* descender) {
+    if (!lycon || !ascender || !descender) return;
+    float x_height_half = 0.0f;
+    if (align == CSS_VALUE_MIDDLE) {
+        float parent_size = lycon->line.parent_font_size;
+        if (parent_size <= 0.0f && lycon->font.style) parent_size = lycon->font.style->font_size;
+        if (parent_size <= 0.0f) parent_size = lycon->block.init_ascender + lycon->block.init_descender;
+        FontHandle* parent_handle = lycon->line.parent_font_style
+            ? lycon->line.parent_font_style->font_handle : font_box_handle(&lycon->font);
+        x_height_half = parent_size * (parent_handle ? font_get_x_height_ratio(parent_handle) : 0.5f) / 2.0f;
+    }
+    // line extents and final placement must use the same parent-font reference point.
+    *ascender = item_height / 2.0f + x_height_half;
+    *descender = item_height / 2.0f - x_height_half;
+}
+
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
     float pa_asc = lycon->line.parent_font_ascender;
     float pa_desc = lycon->line.parent_font_descender;
-    float pa_fsize = lycon->line.parent_font_size;
     switch (align) {
     case CSS_VALUE_BASELINE:
         return baseline_pos - item_baseline -
             vertical_align_baseline_shift(lycon, align, valign_offset);
     case CSS_VALUE_TOP:
         return 0;
-    case CSS_VALUE_MIDDLE: {
-        // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with the baseline
-        float x_height_half;
-        FontHandle* parent_handle = lycon->line.parent_font_style
-            ? lycon->line.parent_font_style->font_handle : nullptr;
-        if (parent_handle) {
-            float x_ratio = font_get_x_height_ratio(parent_handle);
-            x_height_half = pa_fsize * x_ratio / 2.0f;
-        } else {
-            x_height_half = pa_fsize * 0.25f; // fallback: ~0.5em x-height
-        }
-        return baseline_pos - x_height_half - item_height / 2.0f;
+    case CSS_VALUE_MIDDLE:
+    case CSS_VALUE_BASELINE_MIDDLE: {
+        float ascender, descender;
+        layout_middle_inline_contribution(lycon, align, item_height, &ascender, &descender);
+        return baseline_pos - ascender;
     }
     case CSS_VALUE_BOTTOM:
             return line_height - item_height;
@@ -3971,7 +3995,98 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width) {
     return line->effective_right - (line->advance_x - line->left) - item_width;
 }
 
+static bool expand_line_leaders(LayoutContext* lycon) {
+    if (!lycon->line.has_leaders) return true;
+    View* first = layout_inline_fragment_root(lycon->line.start_view);
+    if (!first) return true;
+    size_t leaders = 0;
+    bool adjacent = lycon->line.has_replaced_content || lycon->line.atomic_inline_count > 0;
+    DomElement* owner = nullptr;
+    auto inspect = [&](View* view) -> bool {
+        if (view->view_type != RDT_VIEW_TEXT) return view->view_type == RDT_VIEW_INLINE;
+        ViewText* text = lam::view_require_text(view);
+        bool current = false;
+        for (TextRect* rect = text->rect; rect; rect = rect->next)
+            current |= rect->line_number == lycon->block.line_number && rect->length > 0;
+        if (current && layout_text_is_leader(text)) {
+            leaders++;
+            owner = text->parent->parent && text->parent->parent->parent
+                ? text->parent->parent->parent->as_element() : text->parent->as_element();
+        } else if (current && text->width > 0.0f) adjacent = true;
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(first, inspect, no_finish);
+    if (!leaders) return true;
+    if (!adjacent) {
+        paged_flow_layout_error(lycon, owner, TYPESET_UNPLACEABLE, "leader cannot occupy a line alone");
+        return false;
+    }
+    float edge = lycon->line.has_float_intrusion ? lycon->line.effective_right : lycon->line.right;
+    float extra = max(0.0f, edge - lycon->line.advance_x) / (float)leaders;
+    float shift = 0.0f; bool success = true;
+    auto expand = [&](View* view) -> bool {
+        if (!success) return false;
+        if (view->view_type == RDT_VIEW_INLINE) return true;
+        if (view->view_type != RDT_VIEW_TEXT) { view->x += shift; return false; }
+        ViewText* text = lam::view_require_text(view);
+        bool leader = layout_text_is_leader(text);
+        if (!leader) {
+            for (TextRect* rect = text->rect; rect; rect = rect->next)
+                if (rect->line_number == lycon->block.line_number) rect->x += shift;
+        } else if (text->rect && text->rect->line_number == lycon->block.line_number) {
+            TextRect* begin = text->rect; TextRect* last = begin; size_t parts = 1;
+            while (last->next) { last = last->next; parts++; }
+            float step = last->x + last->width - begin->x, width = step + extra;
+            if (!isfinite(step) || step <= 0.0f) {
+                paged_flow_layout_error(lycon, owner, TYPESET_UNPLACEABLE, "leader pattern has no advance");
+                success = false; return false;
+            }
+            float allocated_end = begin->x + shift + width;
+            // CSS Content 3 §2.5.3: complete pattern boxes tile from the line's end edge.
+            float end = edge - ceilf(max(0.0f, (edge - allocated_end) / step)) * step;
+            float copies = floorf(max(0.0f, (end - begin->x - shift) / step));
+            size_t limit = paged_flow_node_limit(lycon) / parts;
+            if (!isfinite(copies) || copies < 1.0f || copies >= (float)SIZE_MAX || copies > (float)limit) {
+                paged_flow_layout_error(lycon, owner, copies >= 1.0f ? TYPESET_BUDGET_EXHAUSTED : TYPESET_UNPLACEABLE,
+                    "leader has no complete pattern within its line budget");
+                success = false; return false;
+            }
+            size_t count = (size_t)copies; // INT_CAST_OK: repeated pattern count, bounded by the node budget.
+            layout_shift_text_rects(text, end - (float)count * step - begin->x, 0.0f);
+            TextRect* tail = last;
+            for (size_t i = 1; i < count; i++) {
+                // fallback fonts can split one pattern into several rects; repeat the whole group.
+                for (TextRect* part = begin; ; part = part->next) {
+                    TextRect* copy = lycon->doc->view_tree->alloc_text_rect();
+                    if (!copy) {
+                        paged_flow_layout_error(lycon, owner, TYPESET_OUT_OF_MEMORY, "leader pattern allocation failed");
+                        success = false; return false;
+                    }
+                    *copy = *part; copy->x += (float)i * step; copy->next = nullptr;
+                    tail->next = lam::own(copy); tail = copy;
+                    if (part == last) break;
+                }
+            }
+            // the final allocation also owns the unpainted gap before adjacent content.
+            tail->width += max(0.0f, allocated_end - end); shift += extra;
+        }
+        adjust_text_bounds(text);
+        return false;
+    };
+    auto finish = [&](View* view) {
+        if (view->view_type != RDT_VIEW_INLINE) return;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        recompute_span_bounding_box_after_line_layout(span, inline_span_has_multiple_line_fragments(span),
+            span->font ? span->fontp()->font_handle : nullptr);
+    };
+    layout_walk_inline_views(first, expand, finish);
+    if (success) lycon->line.advance_x += shift;
+    return success;
+}
+
 void line_align(LayoutContext* lycon) {
+    if (!expand_line_leaders(lycon)) return;
     ViewBlock* line_block = lycon->view && lycon->view->is_block()
         ? lam::view_require_block(lycon->view)
         : (lycon->view
@@ -4754,7 +4869,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         CssEnum float_value = CSS_VALUE_NONE;
 
-        if (elem->position) {
+        // a dirty retained float may now be inline; dispatch must precede its style refresh.
+        if (elem->position && elem->styles_resolved() && !elem->needs_style_recompute()) {
             float_value = elem->positionp()->float_prop;
         } else {
             float_value = layout_specified_keyword(
@@ -5053,7 +5169,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (html->display.outer == CSS_VALUE_CONTENTS) {
         html->display.outer = CSS_VALUE_BLOCK;
         html->display.inner = CSS_VALUE_FLOW;
-    }
+    } else html->display = blockify_display(html->display);
 
     bool root_is_form_control = html->form_control() != nullptr;
     if (root_is_form_control) {

@@ -353,6 +353,7 @@ RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wav
 float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap = nullptr);
 // logical coordinates retain the raster painter's one-device-pixel inset.
 Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, float space_width);
+Color render_text_missing_glyph_color();
 bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
@@ -400,7 +401,8 @@ bool svg_append_basic_shape_path(DomElement* element, RdtPath* path,
 int svg_resolve_dash_array(const char* value, const SvgLengthContext* lengths,
     float* dashes, int capacity);
 RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
-    const char* origin, const Bound* reference_box, const SvgLengthContext* lengths);
+    const char* origin, const Bound* reference_box, const SvgLengthContext* lengths,
+    const char* const* individual = nullptr);
 // Shared authored cascade/presentation lookup for SVG interaction and resources.
 struct SvgDomStyleScope {
     lam::Up<DomElement> root;
@@ -560,6 +562,7 @@ const char* rdt_picture_get_source_path(RdtPicture* pic);
 double      rdt_picture_animation_time(RdtPicture* pic);
 void        rdt_picture_set_animation_time(RdtPicture* pic, double seconds);
 bool        render_svg_picture_has_animation(RdtPicture* pic);
+bool        render_svg_picture_snapshot(RdtPicture* picture, StrBuf* output);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
@@ -1655,6 +1658,7 @@ typedef struct PaintGlyphRun {
     Color color;
     lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
+    int logical_text_offset; // logical UTF-8 follows visual bytes when bidi reverses clusters
     lam::Own<const char> owned_text;  // set when the paint list keeps the text
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
@@ -1686,7 +1690,7 @@ RdtPath* render_path_create_paint_glyph_run(const PaintGlyphRun* run, FontContex
 typedef bool (*RenderTextRunGlyphFn)(void* context, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance);
 bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* fonts,
-    RenderTextRunGlyphFn visitor, void* context);
+    RenderTextRunGlyphFn visitor, void* context, bool include_spaces = false);
 float render_text_baseline_y(const FontBox* font, float text_top);
 
 struct RenderTextEmphasis {
@@ -1789,6 +1793,7 @@ void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
 // source and its resource owner must outlive lowering and destruction of destination.
 bool paint_list_borrow_commands(PaintList* destination, const PaintList* source);
+bool paint_list_borrow_range(PaintList* destination, const PaintList* source, int begin, int end);
 // transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
                                   RdtGradientStop* stops = nullptr);
@@ -2024,6 +2029,33 @@ typedef struct PaintList PaintList;
 // SVG and PDF exporters derive from it; RenderBackend::ctx points at it.
 struct RenderTextPaintData;
 struct RenderTextPaintEntry;
+enum RadiantPaintPhase : uint8_t {
+    RADIANT_PAINT_ALL,
+    RADIANT_PAINT_BLOCK_BACKGROUNDS,
+    RADIANT_PAINT_FLOATS,
+    RADIANT_PAINT_FOREGROUND
+};
+
+struct RadiantPaintPhaseScope {
+    RadiantPaintPhase* slot;
+    RadiantPaintPhase saved;
+    RadiantPaintPhaseScope(RadiantPaintPhase* value, RadiantPaintPhase next)
+        : slot(value), saved(*value) { *slot = next; }
+    ~RadiantPaintPhaseScope() { *slot = saved; }
+    RadiantPaintPhaseScope(const RadiantPaintPhaseScope&) = delete;
+    RadiantPaintPhaseScope& operator=(const RadiantPaintPhaseScope&) = delete;
+};
+
+inline bool render_paint_phase_has_content(RadiantPaintPhase phase) {
+    return phase == RADIANT_PAINT_ALL || phase == RADIANT_PAINT_FOREGROUND;
+}
+
+inline bool render_paint_phase_has_boundary(RadiantPaintPhase phase, View* view) {
+    // inline decorations belong with their line content, rather than block backgrounds.
+    return view && view->view_type == RDT_VIEW_INLINE ? render_paint_phase_has_content(phase)
+        : phase == RADIANT_PAINT_ALL || phase == RADIANT_PAINT_BLOCK_BACKGROUNDS;
+}
+
 struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
@@ -2032,6 +2064,7 @@ struct RenderContext {
     lam::Up<RenderTextPaintData> text_paint; // borrowed from the current block paint scope
     RdtMatrix overflow_clip_transform;
     bool has_overflow_clip_transform;
+    RadiantPaintPhase paint_phase = RADIANT_PAINT_ALL;
 };
 
 struct Css3dPaintContext;
@@ -2772,6 +2805,19 @@ inline void radiant_clear_font_family(FontProp* font) {
     font->family = nullptr;
 }
 
+inline void radiant_copy_font_spacing(FontProp* target, const FontProp* source, bool letter) {
+    (letter ? target->letter_spacing : target->word_spacing) =
+        letter ? source->letter_spacing : source->word_spacing;
+    (letter ? target->letter_spacing_length : target->word_spacing_length) =
+        letter ? source->letter_spacing_length : source->word_spacing_length;
+    (letter ? target->letter_spacing_percent : target->word_spacing_percent) =
+        letter ? source->letter_spacing_percent : source->word_spacing_percent;
+    (letter ? target->letter_spacing_is_percent : target->word_spacing_is_percent) =
+        letter ? source->letter_spacing_is_percent : source->word_spacing_is_percent;
+    (letter ? target->letter_spacing_is_set : target->word_spacing_is_set) =
+        letter ? source->letter_spacing_is_set : source->word_spacing_is_set;
+}
+
 inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     if (!target || !source) return;
     if (source->family) radiant_retain_font_family(
@@ -2792,14 +2838,8 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->text_deco_style = source->text_deco_style;
     target->text_deco_thickness = source->text_deco_thickness;
     target->text_underline_offset = source->text_underline_offset;
-    target->letter_spacing = source->letter_spacing;
-    target->letter_spacing_percent = source->letter_spacing_percent;
-    target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-    target->letter_spacing_is_set = source->letter_spacing_is_set;
-    target->word_spacing = source->word_spacing;
-    target->word_spacing_percent = source->word_spacing_percent;
-    target->word_spacing_is_percent = source->word_spacing_is_percent;
-    target->word_spacing_is_set = source->word_spacing_is_set;
+    radiant_copy_font_spacing(target, source, true);
+    radiant_copy_font_spacing(target, source, false);
     target->platform_fallback_family = source->platform_fallback_family;
 }
 
@@ -2840,16 +2880,10 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
         target->text_underline_offset = source->text_underline_offset;
     }
     if (!target->letter_spacing_is_set && target->letter_spacing == 0.0f) {
-        target->letter_spacing = source->letter_spacing;
-        target->letter_spacing_percent = source->letter_spacing_percent;
-        target->letter_spacing_is_percent = source->letter_spacing_is_percent;
-        target->letter_spacing_is_set = source->letter_spacing_is_set;
+        radiant_copy_font_spacing(target, source, true);
     }
     if (!target->word_spacing_is_set && target->word_spacing == 0.0f) {
-        target->word_spacing = source->word_spacing;
-        target->word_spacing_percent = source->word_spacing_percent;
-        target->word_spacing_is_percent = source->word_spacing_is_percent;
-        target->word_spacing_is_set = source->word_spacing_is_set;
+        radiant_copy_font_spacing(target, source, false);
     }
 }
 
@@ -3032,6 +3066,11 @@ bool radiant_video_events_pending(DocState* state);
 bool radiant_stack_is_positive_z_positioned(View* view);
 bool radiant_stack_is_negative_z_block(View* view);
 bool radiant_stack_is_context(View* view);
+bool radiant_stack_is_float(View* view);
+bool radiant_stack_is_paint_atomic(View* view);
+unsigned radiant_stack_flow_phases(View* first_child);
+bool radiant_stack_in_paint_phase(View* view, RadiantPaintPhase phase);
+RadiantPaintPhase radiant_stack_paint_phase(unsigned index);
 View* radiant_stack_path_child(View* ancestor, View* descendant);
 void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
     bool (*visit)(void* context, View* owner, View* layer));
@@ -3067,6 +3106,44 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
                                               ViewBlock* block);
 
 // ===== render_paint_boundary.hpp =====
+inline bool render_paint_boundary_hidden(ViewBlock* block) {
+    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewTableCell* cell = static_cast<ViewTableCell*>(block);
+    return cell->td && cell->td->hide_empty;
+}
+
+inline bool render_background_is_table_track(ViewBlock* view) {
+    return view && (view->view_type == RDT_VIEW_TABLE_ROW ||
+        view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+        view->view_type == RDT_VIEW_TABLE_COLUMN ||
+        view->view_type == RDT_VIEW_TABLE_COLUMN_GROUP);
+}
+
+inline bool render_background_uses_table_layers(ViewBlock* view) {
+    if (render_background_is_table_track(view)) return true;
+    if (!view || view->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewTable* table = nullptr;
+    for (View* parent = view->parent; parent; parent = parent->parent) {
+        if (parent->view_type == RDT_VIEW_TABLE) { table = static_cast<ViewTable*>(parent); break; }
+        if (parent->view_type == RDT_VIEW_TABLE_ROW || parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewBlock* source = static_cast<ViewBlock*>(parent);
+            if (source->bound && source->boundary()->background) return true;
+        }
+    }
+    if (!table) return false;
+    // fast paths may conservatively decline; the producer selects the cell's actual originating column.
+    bool background = false;
+    auto has_background = [&](ViewElement* source) {
+        background |= source->bound && source->boundary()->background;
+    };
+    table->each_column_source([&](ViewElement* source) {
+        has_background(source);
+        if (source->view_type == RDT_VIEW_TABLE_COLUMN_GROUP)
+            radiant_each_table_colgroup_column(source, has_background);
+    });
+    return background;
+}
+
 // Emits a complete simple CSS boundary into PaintIR.
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
@@ -3901,7 +3978,8 @@ enum RdtSvgFilterKind {
     RDT_SVG_FILTER_MERGE, RDT_SVG_FILTER_MATRIX, RDT_SVG_FILTER_SHADOW,
     RDT_SVG_FILTER_BLEND, RDT_SVG_FILTER_COMPOSITE, RDT_SVG_FILTER_MORPHOLOGY,
     RDT_SVG_FILTER_IMAGE, RDT_SVG_FILTER_TILE, RDT_SVG_FILTER_TURBULENCE,
-    RDT_SVG_FILTER_DISPLACEMENT, RDT_SVG_FILTER_DIFFUSE, RDT_SVG_FILTER_SPECULAR
+    RDT_SVG_FILTER_DISPLACEMENT, RDT_SVG_FILTER_DIFFUSE, RDT_SVG_FILTER_SPECULAR,
+    RDT_SVG_FILTER_TRANSFER
 };
 enum RdtSvgFilterInput {
     RDT_SVG_FILTER_SOURCE = -1, RDT_SVG_FILTER_ALPHA = -2, RDT_SVG_FILTER_EMPTY = -3,
@@ -3915,11 +3993,22 @@ struct RdtSvgFilterLight {
     unsigned kind;
     bool limiting_cone;
 };
+enum RdtSvgTransferKind {
+    RDT_SVG_TRANSFER_IDENTITY, RDT_SVG_TRANSFER_TABLE, RDT_SVG_TRANSFER_DISCRETE,
+    RDT_SVG_TRANSFER_LINEAR, RDT_SVG_TRANSFER_GAMMA
+};
+struct RdtSvgTransferFunction {
+    RdtSvgTransferKind kind;
+    lam::OwnArr<float> table; // program-arena data, shared by every pixel evaluation
+    size_t count;
+    float values[3]; // slope/intercept or amplitude/exponent/offset
+};
 struct RdtSvgFilterNode {
     RdtSvgFilterKind kind;
     lam::Up<Element> element;
     lam::Own<RdtSvgFilterNoise> noise;      // program-arena data
     RdtSvgFilterLight light;
+    RdtSvgTransferFunction transfer[4];
     int input, input2;
     lam::OwnArr<int> merge_inputs;
     size_t merge_count;
@@ -3943,6 +4032,7 @@ struct RdtSvgFilterProgram {
     bool filter_bbox, primitive_bbox, compiled, valid, allocation_failed;
 };
 constexpr size_t RDT_SVG_FILTER_MAX_NODES = 4096;
+constexpr size_t RDT_SVG_FILTER_MAX_TRANSFER_VALUES = 4096;
 // A filter run calls back into the code that owns its source, image and input
 // paint; each callback's context derives from this host type.
 struct RdtSvgFilterHost {};
@@ -4002,6 +4092,7 @@ bool render_paint_inset_shadows(PaintList*, UiContext*, ViewBlock*, Rect);
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
     float viewport_height, float density, ImageSurface** surface, Rect* placement,
     DisplayList* backdrop = nullptr, const RdtMatrix* transform = nullptr);
+bool render_paint_ink_bounds(const PaintList* paint, const RdtMatrix* transform, Bound* bounds);
 
 // ===== render_background.hpp =====
 // Background rendering functions
@@ -4229,6 +4320,7 @@ int render_document_transform_to_jpeg(const char* document_file,
 // Render existing UiContext with state (caret/selection) to image file
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
 int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
+int render_uicontext_to_pdf(UiContext* uicon, const char* pdf_file);
 
 // Batch render command: reads jobs from stdin, shares one UiContext
 int cmd_render_batch(int argc, char** argv);
@@ -4378,6 +4470,9 @@ void render_export_session_end(RenderExportSession* session);
 int render_export_session_to_png(RenderExportSession* session, const char* filename,
                                   bool transparent_background = false);
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
+int render_svg_source_document_to_file(UiContext* ui, const char* filename);
+int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze);
+bool render_svg_dom_snapshot(DomElement* root, StrBuf* output);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
@@ -4664,7 +4759,8 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
 
 typedef bool (*SvgExportPaintConsumer)(PaintList* paint, void* context);
 bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
-    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback = false);
+    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback = false,
+    bool preserve_text = false, lam::ArrayList<FontContext*>* retained_fonts = nullptr);
 ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bound* logical_bounds);
 
 void render_svg_inline_register_paint_ir_lowerers(void);
@@ -4764,19 +4860,27 @@ public:
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* block);
 CssEnum render_text_inherited_transform(ViewText* text_view);
+struct RadiantWhitespaceSpec;
 bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint, float* advance);
+// callbacks borrow cached bitmaps; offsets/advance are CSS pixels from the cluster baseline.
+typedef void (*RenderClusterGlyphFn)(void* context, const GlyphBitmap* bitmap, float x, float y);
+bool render_text_visit_cluster(const FontBox* font, const unsigned char* start,
+    const unsigned char* end, RenderClusterGlyphFn visitor, void* context,
+    size_t* bytes, float* advance, bool include_scalar = false);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
                                         bool include_ellipsis,
-                                        CssEnum white_space = CSS_VALUE_PRE);
+                                        CssEnum white_space = CSS_VALUE_PRE,
+                                        const RadiantWhitespaceSpec* whitespace = nullptr);
 // fill the glyph run of one text rect painted at the containing block origin
 // (block_x, block_y) with `font` and `color`; returns the export text the run
 // borrows (caller owns it; null when the rect paints nothing)
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
                                  float block_x, float block_y, PaintGlyphRun* run,
-                                 bool reverse_clusters = false, const char** logical_text = nullptr);
+                                 bool reverse_clusters = false, const char** logical_text = nullptr,
+                                 const RadiantWhitespaceSpec* whitespace = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body { margin:0; font:0/0 sans-serif }
+.case { margin-bottom:10px }
+table { border-collapse:separate; border-spacing:0 }
+td { padding:0; background:lime }
+.ink { width:80px; height:20px; background:black }
+</style></head><body><div id="result">
+<div class="case"><table><tbody><tr style="--p:0px"><td id="row-zero" style="padding:0 var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table id="variable-table"><tbody><tr style="--p:12px"><td id="row-length" style="padding:0 var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:12px"><td id="cell-override" style="--p:7px;padding:0 var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case" style="--p:9px"><table><tbody><tr><td id="ancestor-length" style="padding:0 var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--pad:4px 11px"><td id="shorthand-pair" style="padding:var(--pad)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--v:4px;--h:8px"><td id="two-variables" style="padding:var(--v) var(--h)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr><td id="fallback" style="padding:0 var(--missing,6px)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:7px"><td id="arithmetic" style="padding:0 calc(var(--p) * 2)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--pad:red"><td id="invalid" style="padding:0 9px;padding:var(--pad)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:10%"><td id="cyclic" style="padding:0 var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:10%"><td id="cyclic-math" style="padding:0 calc(10px + var(--p))"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--pad:4px 12px"><td id="longhand-winner" style="padding:var(--pad);padding-left:2px"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:12px"><td id="logical" style="padding-inline:var(--p)"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><table><tbody><tr style="--p:10%"><td id="font-math" style="font-size:10px;padding:0 calc(1em + var(--p))"><div class="ink"></div></td></tr></tbody></table></div>
+<div class="case"><div id="block-guard" style="display:inline-block;--p:12px;padding:0 var(--p);background:lime"><div class="ink"></div></div></div>
+</div></body></html>

@@ -7,7 +7,7 @@ from pathlib import Path
 
 def validate(path, expected_pages=None, expected_box=(0, 0, 150, 90), quiet=False):
     data = Path(path).read_bytes()
-    assert data.startswith(b"%PDF-1.4\n"), "missing PDF header"
+    assert data.startswith((b"%PDF-1.4\n", b"%PDF-1.5\n", b"%PDF-1.6\n")), "missing PDF header"
     footer = re.search(rb"startxref\n([0-9]+)\n%%EOF\n$", data)
     assert footer, "missing PDF footer"
     position = int(footer[1])
@@ -60,12 +60,45 @@ def validate(path, expected_pages=None, expected_box=(0, 0, 150, 90), quiet=Fals
 
 def decoded_content(objects):
     programs = []
-    for body in objects:
+    contents = {int(match) for body in objects for match in re.findall(rb"/Contents ([0-9]+) 0 R", body)}
+    for identifier, body in enumerate(objects, 1):
         stream = re.search(rb"/Length ([0-9]+) >>\nstream\n", body)
-        if stream and b"/Subtype /Image" not in body:
+        if stream and (identifier in contents or b"/Subtype /Form" in body):
             raw = body[stream.end():stream.end() + int(stream[1])]
             programs.append(zlib.decompress(raw) if b"/Filter /FlateDecode" in body else raw)
     return b"".join(programs)
+
+
+def text_export(path, expected_pages):
+    import subprocess
+
+    objects = validate(path, expected_pages, None)
+    assert Path(path).read_bytes().startswith((b"%PDF-1.5\n", b"%PDF-1.6\n")), "ActualText requires PDF 1.5 or newer"
+    content = decoded_content(objects)
+    assert b"BT\n" in content and b"> Tj\n" in content, "text was not emitted with PDF text operators"
+    fonts = [body for body in objects if b"/Type /Font /Subtype /Type0" in body]
+    assert fonts and all(b"/ToUnicode " in font for font in fonts), "missing Unicode text font"
+    assert any(b"/FontFile2 " in body for body in objects), "selected TrueType face was not embedded"
+    assert len(fonts) < 5, "font was embedded separately for each text fragment"
+    if expected_pages > 1:
+        pages = [body for body in objects if re.search(rb"/Type /Page\b", body)]
+        keys = [set(re.findall(rb"/F[0-9]+(?:S[0-9]+)? ([0-9]+) 0 R", page)) for page in pages]
+        shared = set.intersection(*keys)
+        assert shared, "pages do not reuse their common font resource"
+        generated = {str(i).encode() for i, body in enumerate(objects, 1) if b"/Subtype /Type3" in body}
+        if generated:
+            assert shared & generated, "generated glyph fonts were embedded again for the next page"
+    extracted = subprocess.run(["pdftotext", "-layout", path, "-"], check=True, capture_output=True, text=True).stdout
+    phrases = ["Hello café Ω ∑ 𝔸", "Decorated text", "Affine text", "Synthetic italic", "Fallback 中文 😀", "Group text", "Overlap"]
+    # continuous inline SVG is supported; paged flow currently omits that replaced box.
+    if expected_pages == 1:
+        phrases.append("SVG text Ω")
+    else:
+        phrases.extend(["Second page text", "Shared font resource", "Shared fallback 中文 😀"])
+    for phrase in phrases:
+        assert phrase in extracted, f"lost searchable text: {phrase}"
+    assert extracted.count("Hello café Ω ∑ 𝔸") == 1, "logical text was emitted twice"
+    print("PDF_TEXT_CHECK: embedded fonts, Unicode extraction, affine/decorated/SVG/group text and shared page fonts verified")
 
 
 def phase6(path):
@@ -111,6 +144,8 @@ if __name__ == "__main__":
         objects = validate(sys.argv[1], pages, None)
         needle = sys.argv[3].replace(r"\n", "\n").encode()
         sys.exit(0 if needle in decoded_content(objects) else 1)
+    elif len(sys.argv) > 3 and sys.argv[2] == "text":
+        text_export(sys.argv[1], int(sys.argv[3]))
     elif len(sys.argv) > 2 and sys.argv[2] == "phase6":
         phase6(sys.argv[1])
     else:

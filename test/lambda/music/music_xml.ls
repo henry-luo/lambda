@@ -1,6 +1,6 @@
 // The shared strict-XML flavor is exercised independently of score normalization.
 fn strict(source) => parse(source,{type:'xml',flavor:'strict'})^
-fn rejected(source) => (strict(source) or "rejected")=="rejected";
+fn rejected(source) => (strict(source) ^ { "rejected" })=="rejected";
 [
  name(strict("<!DOCTYPE a><a/>"))=='document',
  name(strict("<!DOCTYPE a PUBLIC '-//Example//DTD Example 1.0//EN' 'https://invalid.example/dtd'><a/>"))=='document',

@@ -175,6 +175,59 @@ static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* eleme
     apply_html_align_attribute(lycon, element, block, false);
 }
 
+CssEnum layout_html_replaced_alignment_hint(DomElement* element, CssPropertyCode property) {
+    if (!element || (property != CSS_PROPERTY_VERTICAL_ALIGN && property != CSS_PROPERTY_FLOAT))
+        return CSS_VALUE__UNDEF;
+    const char* uri = element->get_attribute("__lambda_ns_uri");
+    if (uri && strcmp(uri, "http://www.w3.org/1999/xhtml") != 0) return CSS_VALUE__UNDEF;
+    bool supports_hint = true;
+    switch (element->tag()) {
+        case MARKUP_NAME_IMG: case MARKUP_NAME_IFRAME:
+        case MARKUP_NAME_EMBED: case MARKUP_NAME_OBJECT: break;
+        case MARKUP_NAME_INPUT:
+            supports_hint = form_input_kind(element->get_attribute("type")) == FORM_INPUT_KIND_IMAGE;
+            break;
+        default: return CSS_VALUE__UNDEF;
+    }
+    const char* align = supports_hint ? element->get_attribute("align") : nullptr;
+    if (!align) return CSS_VALUE__UNDEF;
+    size_t length = strlen(align);
+    CssEnum vertical = CSS_VALUE__UNDEF;
+    CssEnum floating = CSS_VALUE__UNDEF;
+    if (str_ieq_const(align, length, "left") || str_ieq_const(align, length, "right")) {
+        floating = str_ieq_const(align, length, "left")
+            ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+        vertical = CSS_VALUE_TOP;
+    } else if (str_ieq_const(align, length, "center") || str_ieq_const(align, length, "middle")) {
+        // HTML Rendering §15.4.3 centers these hints on the baseline, unlike CSS middle.
+        vertical = CSS_VALUE_BASELINE_MIDDLE;
+    } else if (str_ieq_const(align, length, "absmiddle") || str_ieq_const(align, length, "abscenter")) {
+        vertical = CSS_VALUE_MIDDLE;
+    } else if (str_ieq_const(align, length, "top")) {
+        vertical = CSS_VALUE_TOP;
+    } else if (str_ieq_const(align, length, "texttop")) {
+        vertical = CSS_VALUE_TEXT_TOP;
+    } else if (str_ieq_const(align, length, "baseline")) {
+        vertical = CSS_VALUE_BASELINE;
+    }
+    return property == CSS_PROPERTY_FLOAT ? floating : vertical;
+}
+
+static void apply_html_replaced_alignment(LayoutContext* lycon, DomElement* element,
+                                           ViewBlock* block) {
+    switch (element->tag()) {
+        case MARKUP_NAME_IMG: case MARKUP_NAME_IFRAME: case MARKUP_NAME_INPUT:
+        case MARKUP_NAME_EMBED: case MARKUP_NAME_OBJECT: break;
+        default: return;
+    }
+    // a removed hint or changed input type must not retain the previous pass's presentation state.
+    InlineProp* inl = block->ensure_inline(lycon);
+    inl->vertical_align = layout_specified_keyword(element, CSS_PROPERTY_VERTICAL_ALIGN, CSS_VALUE_BASELINE);
+    inl->vertical_align_offset = 0.0f;
+    CssEnum floating = layout_specified_keyword(element, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+    if (floating != CSS_VALUE_NONE || block->position) block->ensure_position(lycon)->float_prop = floating;
+}
+
 bool layout_tag_has_monospace_family_default(NameId tag) {
     HtmlUaElementDefault value;
     return layout_html_ua_element_default(tag, &value) && value.monospace;
@@ -761,7 +814,8 @@ static float html_font_size_for_level(int level) {
     return sizes[level - 1];
 }
 
-static bool parse_legacy_font_size_level(const char* input, int* out_level) {
+bool layout_parse_legacy_font_size_level(const char* input, int* out_level) {
+    if (!input || !out_level) return false;
     const char* cursor = str_skip_ascii_space(input);
     bool relative_plus = false;
     bool relative_minus = false;
@@ -1077,6 +1131,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_q_quote_defaults(lycon, elmt->as_element());
     }
     if (apply_html_inline_text_default(lycon, span, elmt_name)) return;
+    apply_html_replaced_alignment(lycon, elmt->as_element(), block);
     // literal UA values below come from the table shared with selected views' UA stylesheet.
     HtmlUaElementDefault ua;
     if (!layout_html_ua_element_default(elmt_name, &ua)) ua = {};
@@ -1204,20 +1259,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         CssEngine* engine = lycon->doc ? (CssEngine*)lycon->doc->services.cached_css_engine : nullptr;
         lam::Temp<char> selected(layout_resolve_replaced_image_source(elmt->as_element(), engine, nullptr, &dimensions));
         apply_html_dimension_attributes(lycon, dimensions, block, &policy);
-        // HTML spec §14.3.3: <img align="left|right"> maps to float: left|right
-        {
-            const char* align_attr = elmt->get_attribute("align");
-            if (align_attr) {
-                size_t align_len = strlen(align_attr);
-                if (str_ieq_const(align_attr, align_len, "left")) {
-                    block->ensure_position(lycon);
-                    block->position->float_prop = CSS_VALUE_LEFT;
-                } else if (str_ieq_const(align_attr, align_len, "right")) {
-                    block->ensure_position(lycon);
-                    block->position->float_prop = CSS_VALUE_RIGHT;
-                }
-            }
-        }
+
         break;
     }
     case MARKUP_NAME_IFRAME: {
@@ -1320,7 +1362,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         const char* size_attr = span->get_attribute("size");
         if (size_attr) {
             int level = 0;
-            if (parse_legacy_font_size_level(size_attr, &level)) {
+            if (layout_parse_legacy_font_size_level(size_attr, &level)) {
                 // HTML relative font sizes are offsets from legacy level 3, not inherited CSS size
                 float font_size = html_font_size_for_level(level);
                 apply_html_font_size(span->ensure_font(lycon), font_size, false);  // CSS logical pixels
@@ -1785,24 +1827,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (form_created) {
             block->form->name = block->get_attribute("name");
             apply_html_form_state_attributes(lycon, block, false, false, false);
-            // Count options and find selected index
+            // count options before normalizing the retained selection.
             int option_count = 0;
-            int selected_idx = -1;
             for (DomElement* option = dom_select_next_option(block, nullptr); option;
                  option = dom_select_next_option(block, option)) {
-                // Script writes to option.selected are live IDL state, not a
-                // selected attribute; preserve that state when DOM mutation
-                // reconciliation rebuilds this form control.
-                if (dom_option_is_selected(option) && selected_idx < 0) {
-                    selected_idx = option_count;
-                }
                 option_count++;
             }
             block->form->option_count = option_count;
-            bool is_multiple = block->has_attribute("multiple");
-            int init_index = (selected_idx >= 0) ? selected_idx :
-                (is_multiple ? -1 : (option_count > 0 ? 0 : -1));
             DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
+            // rebuilding layout must preserve user selection; the getter reads DOM defaults only for a new owner.
+            int init_index = form_control_get_selected_index(state, (View*)block);
             form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Intrinsic measurement can allocate FormControlProp before HTML defaults

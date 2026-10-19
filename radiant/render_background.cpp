@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "glyph_sampling.hpp"
 #include "view.hpp"
+#include "layout_table.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -40,7 +41,8 @@ static bool background_record_masked_layer(PaintList* destination, const PaintLi
     const BackgroundGlyphMask& mask, float density);
 static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                               float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster,
-                              bool text_only = false, RdtPath* text_shape = nullptr, const BackgroundGlyphMask* glyph_mask = nullptr);
+                              bool text_only = false, RdtPath* text_shape = nullptr,
+                              const BackgroundGlyphMask* glyph_mask = nullptr, const Rect* painting_area = nullptr);
 static lam::Temp<RdtGradientStop> background_repeat_linear_stops(
     const RdtGradientStop* stops, int count, float physical_length, int* expanded_count);
 
@@ -75,8 +77,8 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     return radiant_corner_inset_edges(&out, insets[0], insets[1], insets[2], insets[3]);
 }
 
-void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
-        Rect rect, float s, Rect* position_rect, Rect* paint_rect) {
+static void background_source_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
+        Rect rect, Rect painting_area, float s, Rect* position_rect, Rect* paint_rect) {
     BorderProp* border = view->boundary()->border;
     const Spacing* padding = &view->boundary()->padding;
     // Determine positioning area (bg-origin, default: padding-box)
@@ -106,13 +108,58 @@ void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeo
     // Determine paint area (bg-clip, default: border-box)
     // Controls where the background is visually clipped.
     CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
-    *paint_rect = render_geometry_adjust_box_rect(rect, clip_box, s, border, padding);
+    *paint_rect = render_geometry_adjust_box_rect(painting_area, clip_box, s, border, padding);
 
 }
 
+void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
+        Rect rect, float s, Rect* position_rect, Rect* paint_rect) {
+    background_source_rects(ui, view, bg, rect, rect, s, position_rect, paint_rect);
+}
+
+typedef bool (*BackgroundSourceVisitor)(void*, ViewBlock*, Rect, Rect);
+
+static bool background_sources(ViewBlock* view, Rect rect,
+        void* context, BackgroundSourceVisitor visit) {
+    if (!view || render_background_is_table_track(view) || render_paint_boundary_hidden(view)) return false;
+    bool recorded = false;
+    if (view->view_type == RDT_VIEW_TABLE_CELL) {
+        ViewTable* table = nullptr;
+        ViewBlock* row = nullptr;
+        ViewBlock* group = nullptr;
+        for (View* parent = view->parent; parent; parent = parent->parent) {
+            if (parent->view_type == RDT_VIEW_TABLE) { table = static_cast<ViewTable*>(parent); break; }
+            if (!row && parent->view_type == RDT_VIEW_TABLE_ROW) row = static_cast<ViewBlock*>(parent);
+            if (!group && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) group = static_cast<ViewBlock*>(parent);
+        }
+        ViewTableCell* cell = static_cast<ViewTableCell*>(view);
+        if (table && cell->td) {
+            ViewBlock* sources[] = {
+                layout_table_find_column_source(table, cell->td->col_index, true),
+                layout_table_find_column_source(table, cell->td->col_index, false), group, row
+            };
+            RdtLogicalPoint cell_origin = view_geometry_ancestor_offset(view, table);
+            // CSS Tables 3 §5.3.2: each source keeps its image basis, while the cell owns coverage.
+            for (ViewBlock* source : sources) {
+                if (!source || !source->bound || !source->boundary()->background) continue;
+                RdtLogicalPoint origin = view_geometry_ancestor_offset(source, table);
+                Rect position = {rect.x + origin.x - cell_origin.x,
+                    rect.y + origin.y - cell_origin.y, source->width, source->height};
+                BoundaryProp boundary = *source->boundary();
+                // track insets do not apply; keep their computed values on the canonical owner (D4.1.4v5).
+                boundary.padding = {};
+                boundary.border = nullptr;
+                ViewBlock box = view_with_boundary(source, &boundary);
+                recorded |= visit(context, &box, position, rect);
+            }
+        }
+    }
+    if (view->bound && view->boundary()->background) recorded |= visit(context, view, rect, rect);
+    return recorded;
+}
+
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!rdcon || !rdcon->paint_list || !rdcon->dl || !view || !view->bound ||
-            !view->boundary()->background) return;
+    if (!rdcon || !rdcon->paint_list || !rdcon->dl || !view || render_background_is_table_track(view)) return;
     float scale = rdcon->raster_scale;
     if (scale <= 0.0f) return;
     Rect logical = {rect.x / scale, rect.y / scale, rect.width / scale, rect.height / scale};
@@ -121,8 +168,18 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     RdtMatrix transform = active ? rdt_matrix_multiply(active, &density) : density;
     RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, nullptr);
+    struct RasterBackground {
+        RasterRenderContext* raster;
+        const RdtMatrix* transform;
+    } context = {rdcon, &transform};
     // background descriptors stay logical; only this raster adapter adds output density.
-    record_background(rdcon->paint_list, rdcon->ui_context, view, logical, scale, &transform, rdcon);
+    background_sources(view, logical, &context,
+        [](void* data, ViewBlock* source, Rect position, Rect painting) {
+            auto* context = (RasterBackground*)data;
+            auto* raster = context->raster;
+            return record_background(raster->paint_list, raster->ui_context, source, position,
+                raster->raster_scale, context->transform, raster, false, nullptr, nullptr, &painting);
+        });
     paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
     paint_list_clear(rdcon->paint_list);
     rc_pop_clip(rdcon);
@@ -1357,11 +1414,12 @@ static bool compute_background_tile_plan(BackgroundGeometry* bg, Rect position_r
                                          float intrinsic_w, float intrinsic_h,
                                          BackgroundTilePlan* plan, float raster_scale, bool intrinsic_ratio = true) {
     if (!bg || !plan ||
-        position_rect.width <= 0.0f || position_rect.height <= 0.0f ||
+        position_rect.width < 0.0f || position_rect.height < 0.0f ||
         coverage_rect.width <= 0.0f || coverage_rect.height <= 0.0f) {
         return false;
     }
 
+    // propagated table images may have positive coverage even when their source row has no height.
     compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
                           position_rect.width, position_rect.height,
                           &plan->tile_w, &plan->tile_h, raster_scale, intrinsic_ratio);
@@ -1389,6 +1447,8 @@ static bool compute_background_tile_plan(BackgroundGeometry* bg, Rect position_r
         if (count < 1) count = 1;
         plan->tile_h = position_rect.height / count;
     }
+    // round can reduce a tile to zero; CSS Backgrounds 3 §2.9 suppresses such images.
+    if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
 
     if (plan->repeat_x == CSS_VALUE_NO_REPEAT) {
         plan->start_col = 0; plan->end_col = 0;
@@ -1581,7 +1641,8 @@ static bool background_has_blend(const BackgroundProp* background) {
 
 static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                               float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster,
-                              bool text_only, RdtPath* text_shape, const BackgroundGlyphMask* glyph_mask) {
+                              bool text_only, RdtPath* text_shape, const BackgroundGlyphMask* glyph_mask,
+                              const Rect* painting_area) {
     if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
     BackgroundProp* background = view->boundary()->background;
     BackgroundPaintContext context = {paint, ui, view, raster, pixel_ratio, transform, nullptr, {}, {}};
@@ -1591,7 +1652,7 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
     bool recorded = false;
     bool isolated = background_has_blend(background);
     if (isolated) {
-        IRect bounds = background_blend_bounds(&context, rect);
+        IRect bounds = background_blend_bounds(&context, painting_area ? *painting_area : rect);
         PaintEffectGroup group = {};
         group.bounds = {(float)bounds.x, (float)bounds.y, (float)(bounds.x + bounds.w), (float)(bounds.y + bounds.h)};
         group.opacity = 1.0f; group.isolation = true;
@@ -1603,7 +1664,7 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
         PaintList color_layer;
         PaintList* color_target = glyph_mask ? &color_layer : paint;
         context.paint = color_target;
-        render_background_layer_rects(ui, view, bottom, rect, 1.0f, &position, &clip);
+        background_source_rects(ui, view, bottom, rect, painting_area ? *painting_area : rect, 1.0f, &position, &clip);
         const BorderProp* border = view->boundary()->border;
         if (text_shape) {
             if (background_push_layer_clip(&context, bottom, clip)) {
@@ -1630,7 +1691,7 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
             (!layer->image && layer->gradient_type == GRADIENT_NONE)) continue;
         PaintList image_layer;
         context.paint = glyph_mask ? &image_layer : paint;
-        render_background_layer_rects(ui, view, layer, rect, 1.0f, &position, &clip);
+        background_source_rects(ui, view, layer, rect, painting_area ? *painting_area : rect, 1.0f, &position, &clip);
         context.image = layer->image ? load_document_image(ui->document, ui, layer->image) : nullptr;
         if (layer->image && !context.image) continue;
         context.gradient = {};
@@ -1709,19 +1770,21 @@ bool render_paint_background_requires_composite(const BackgroundProp* background
     return composite;
 }
 
-bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
-                             RenderExportTargetKind target) {
+static bool paint_background_source(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             Rect painting, RenderExportTargetKind target) {
     if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
     const BackgroundProp* background = view->boundary()->background;
     float density = ui_context_raster_scale(ui);
     bool composite = render_paint_background_requires_composite(background, target);
-    if (!composite) return record_background(paint, ui, view, rect, density, nullptr, nullptr);
+    if (!composite) return record_background(paint, ui, view, rect, density, nullptr, nullptr,
+        false, nullptr, nullptr, &painting);
     PaintList layers;
-    if (!record_background(&layers, ui, view, rect, density, nullptr, nullptr)) return false;
+    if (!record_background(&layers, ui, view, rect, density, nullptr, nullptr,
+            false, nullptr, nullptr, &painting)) return false;
     RenderEffectRasterImage image = {};
-    Bound bounds = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
+    Bound bounds = {painting.x, painting.y, painting.x + painting.width, painting.y + painting.height};
     // PDF gradient fallbacks must composite the layers before the viewer reconstructs edge coverage.
-    if (!render_effect_rasterize_paint_list(&layers, nullptr, &bounds, rect.width, rect.height,
+    if (!render_effect_rasterize_paint_list(&layers, nullptr, &bounds, painting.width, painting.height,
             false, density, &image, "[BACKGROUND_COMPOSITE]") || !image.surface) return false;
     Color uniform = {};
     if (target == RENDER_EXPORT_TARGET_PDF && background_surface_opaque_color(image.surface, &uniform)) {
@@ -1742,6 +1805,21 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
     bool recorded = paint_list_count(paint) == index + 1;
     if (extent) { paint_pop_clip(paint); rdt_path_free(extent); }
     return recorded;
+}
+
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target) {
+    if (!paint || !ui || !view) return false;
+    struct ExportBackground {
+        PaintList* paint;
+        UiContext* ui;
+        RenderExportTargetKind target;
+    } context = {paint, ui, target};
+    return background_sources(view, rect, &context,
+        [](void* data, ViewBlock* source, Rect position, Rect painting) {
+            auto* context = (ExportBackground*)data;
+            return paint_background_source(context->paint, context->ui, source, position, painting, context->target);
+        });
 }
 
 bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
@@ -1766,8 +1844,7 @@ bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view,
     BorderProp border = {};
     if (boundary.border) { border = *boundary.border; boundary.border = lam::own(&border); }
     if (render_paint_boundary_emit_box(paint, &boundary, rect)) return true;
-    ViewBlock box = *view;
-    box.bound = lam::view_prop(&boundary);
+    ViewBlock box = view_with_boundary(view, &boundary);
     box.width = rect.width; box.height = rect.height;
     if (boundary.border) {
         resolve_border_radius_percentages(&border.radius, rect.width, rect.height);

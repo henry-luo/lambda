@@ -14,8 +14,11 @@ enum MvpLmdDynamicFunctionKind {
 // all dynamic kinds share retained-interpreter admission and source conversion.
 Item mvp_lmd_dynamic_function_kind(MvpLmdProgram*, Item*, uint64_t,
     Item new_target, MvpLmdDynamicFunctionKind);
-Item mvp_lmd_dynamic_wrap_function(MvpLmdProgram*, Item);
+// adapt Core exports once into the owning module's precise cells.
+Item mvp_lmd_dynamic_import_value(MvpLmdProgram*, Item, bool module_export = false);
 Item mvp_lmd_dynamic_unwrap_function(Item);
+Item mvp_lmd_dynamic_call_native(MvpLmdProgram*, Item callee, Item receiver,
+    Item* arguments, uint64_t count, Item new_target);
 extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right);
 // preserve native descriptor identity and rebind aliases to the active global.
 Item mvp_lmd_import_host_property(MvpLmdProgram*, Item owner, Item key,

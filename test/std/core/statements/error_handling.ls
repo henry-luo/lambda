@@ -44,15 +44,15 @@ fn process_input(s: string) int^ {
 process_input("5") ^ { ^ }
 process_input("0") ^ { ^ }
 
-// ===== Error is falsy =====
+// ===== Error conditions preserve their error (S3.5) =====
 let e = error("test error")
 if (e) "truthy" else "falsy"
 
-// ===== Error or default =====
+// ===== Explicit recovery (S7.5.3v2) =====
 fn get_value() int^ {
     raise error("not found")
 }
-let val = get_value() or 42
+let val = get_value() ^ { 42 }
 val
 
 // ===== expr is error check =====

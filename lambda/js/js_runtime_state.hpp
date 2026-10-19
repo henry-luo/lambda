@@ -19,6 +19,11 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/line_framer.h"
 
+// dynamic JS source follows the bound evaluator without changing the hot TLS read.
+static inline Runtime* js_current_runtime(void) {
+    return context ? context->runtime : NULL;
+}
+
 struct JsFunction;
 struct JsCallableCode;
 struct JsRuntimeState;
@@ -33,9 +38,11 @@ struct DomDocument;
 struct DomElement;
 struct UiContext;
 struct JsAtomicsRuntimeState;
+struct JsAgentGroup;
+struct JsAgentMember;
 struct JsWeakRuntimeState;
 struct JsPrototypeSnapshotState;
-struct JsMirCompileRecoveryState;
+struct JsCompileRecoveryState;
 struct JsPromiseHostOps;
 
 // Namespace selection is the JS profile's counterpart to the shared module
@@ -229,26 +236,10 @@ void js_realm_slots_destroy(JsRealmSlots* slots);
 void js_realm_slots_clear(JsRealmSlots* slots);
 Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
 Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
-bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
-    Item** values, int count, bool reserve);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
 LAMBDA_RT_API bool js_realm_runtime_is_active(void);
 LAMBDA_RT_API bool js_realm_runtime_has_input(void);
-bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
-    bool reserve);
-
-// A module's realm-items record is exactly one Item* per realm slot, in slot
-// order, so the record itself is the lookup's output array. The static_assert
-// pins that correspondence at every use site instead of a per-module copy loop.
-#define JS_REALM_ITEMS_FILL(Type, items, reserve, ...) \
-    static const JsRealmSlotId js_realm_item_slots[] = { __VA_ARGS__ }; \
-    static_assert(sizeof(Type) == \
-        sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0]) * sizeof(Item*), \
-        #Type " must hold exactly one Item* per realm slot, in slot order"); \
-    return js_realm_items_fill((items), js_realm_item_slots, \
-        (int)(sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0])), (reserve))
-
 
 void js_realm_slots_clear_transient(JsRealmSlots* slots);
 
@@ -273,35 +264,10 @@ static inline int js_with_frame_slots(int scope_count) {
     return scope_count + JS_WITH_MEMO_SLOTS;
 }
 
-// Generated closures retain only their MIR context and source buffer. Names
-// and observable strings are materialized through the owning module NameId
-// table, so compiler pools never cross the compile/execute boundary.
-// JSCU16: one owner per compiled unit -- its MIR context and the source
-// buffer that unit's generated code still reads -- held in a dynamic store
-// instead of two parallel fixed arrays with a hard cap.
-struct JsCompiledArtifact {
-    void* mir_context = NULL;
-    char* source_owner = NULL;   // freed with the context; may be NULL
-};
-
-struct JsCodeStore {
-    ArrayList* artifacts = NULL;
-};
-
-bool js_code_store_push(JsCodeStore* store, void* mir_context);
-// Hands the last pushed artifact ownership of a source buffer.
-void js_code_store_attach_source(JsCodeStore* store, char* source_owner);
-void* js_code_store_last_context(JsCodeStore* store);
-int js_code_store_count(const JsCodeStore* store);
-JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
-void js_code_store_clear_rows(JsCodeStore* store);
-void js_code_store_destroy(JsCodeStore* store);
-
 // Optional Node-leaf callbacks are semantic to one realm. Keep their function
 // pointers beside that realm rather than letting the last initialized module
 // overwrite a process-wide callback for every context.
 struct JsHostHooksState {
-    void (*shutdown_participant)(void) = NULL;
     Item (*console_format_hook)(Item) = NULL;
     bool redirect_stdout_to_stderr = false;
 };
@@ -492,20 +458,18 @@ struct JsRealmIntrinsicState {
 
 struct JsTest262AgentReport {
     int64_t root_slot = -1;
-    int waiter_id = 0;
 };
 
 struct JsTest262AgentState : RootVector {
     Item object = {};
-    // Agent slots contain only callback identities; report rows carry the
-    // paired waiter metadata with their one rooted report value.
-    RootVector callbacks = {};
+    JsAgentGroup* group = NULL;
+    JsAgentMember* member = NULL;
+    // FIFO rows name one precise report value; callbacks belong to child owners.
     RootVector report_values = {};
     ArrayList* reports = NULL;
-    int current_slot = -1;
     int64_t eval_script_active = 0;
-    // Atomics waiter records are allocated only when the Atomics namespace is
-    // materialized. They belong to this realm's Test262 agent simulation.
+    uint64_t next_waiter_order = 0;
+    // each execution owner retains its own promises, timers and waiter resources.
     JsAtomicsRuntimeState* atomics_waiter_state = NULL;
 };
 
@@ -523,6 +487,10 @@ struct JsProcessState : RootVector {
 };
 
 JsProcessState* js_process_state_ensure(JsRuntimeState* state);
+void js_agent_group_shutdown(JsRuntimeState* state);
+JsRuntimeState* js_agent_state_at(int index);
+bool js_agent_pump(void);
+void js_agent_checkpoint(void);
 
 // One label owns both console.count and console.time state. A label may serve
 // either operation independently, but it has one realm-local identity.
@@ -683,72 +651,22 @@ bool js_root_vector_ensure_registered(RootVector* roots);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
 
-// A direct-eval bridge exists for one generated eval call.  Item columns are
-// structure-of-arrays so each exact GC range excludes the bool metadata.
-// Each binding row keeps the parallel rooted lanes' non-Item facts; frames
-// own their start positions, so neither growth policy uses a second cap.
-struct JsEvalBridgeBinding {
-    bool had_own = false;
-    bool from_journal = false;
-    bool immutable = false;
-};
-
-struct JsEvalBridgeFrame {
-    int binding_mark = 0;
-};
-
-struct JsEvalBindingJournal {
-    RootVector keys = {};
-    RootVector old_values = {};
-    ArrayList* bindings = NULL;
-    ArrayList* frames = NULL;
-};
-
+// parser-only private-name identity scope; live values belong to JsInterpEnv.
 struct JsEvalPrivateJournal {
     RootVector unscoped_keys = {};
     RootVector scoped_keys = {};
     ArrayList* frames = NULL;
 };
 
-struct JsEvalBridgeState {
-    JsEvalBindingJournal env = {};
-    JsEvalBindingJournal global_lexical = {};
+struct JsEvalState {
     JsEvalPrivateJournal private_names = {};
 };
 
-typedef struct JsEvalLocalFrameMarks {
-    int local_mark;
-    int lexical_mark;
-    int immutable_mark;
-} JsEvalLocalFrameMarks;
-
-// Caller-local records survive multiple direct eval calls in one generated
-// function. They deliberately do not share the bridge's depth.
-struct JsEvalLocalState {
-    RootVector keys = {};
-    RootVector values = {};
-    ArrayList* frame_marks = NULL;
-    RootVector lexical_keys = {};
-    RootVector immutable_keys = {};
-};
-
-struct JsEvalState {
-    JsEvalBridgeState bridge = {};
-    JsEvalLocalState local = {};
-};
-
-// One catalog of the eval journals' rooted lanes for init/destroy/clear.
 #define JS_EVAL_STATE_VECTORS(M, state) \
-    M(&(state)->bridge.env.keys, "eval env keys") \
-    M(&(state)->bridge.env.old_values, "eval env old values") \
-    M(&(state)->bridge.global_lexical.keys, "eval global lexical keys") \
-    M(&(state)->bridge.global_lexical.old_values, "eval global lexical old values") \
-    M(&(state)->bridge.private_names.unscoped_keys, "eval private unscoped keys") \
-    M(&(state)->bridge.private_names.scoped_keys, "eval private scoped keys") \
-    M(&(state)->local.keys, "eval local keys") \
-    M(&(state)->local.values, "eval local values") \
-    M(&(state)->local.lexical_keys, "eval lexical keys") \
-    M(&(state)->local.immutable_keys, "eval immutable keys")
+    M(&(state)->private_names.unscoped_keys, "eval private unscoped keys") \
+    M(&(state)->private_names.scoped_keys, "eval private scoped keys")
+
+
 
 void js_eval_state_vectors_init(JsEvalState* state, Context* owner);
 void js_eval_state_vectors_destroy(JsEvalState* state);
@@ -838,18 +756,10 @@ struct JsRuntimeState {
     // in root slots their pushers own.
     JsWithFrame* with_head = NULL;
     bool with_memo_valid = false;
-    JsCodeStore code_store = {};
-    // P2 satellite code remains callable after the source turn ends, unlike
-    // ordinary deferred module artifacts.
-    JsCodeStore p2_code_store = {};
-    // Definition-level MIR code records are shared by closures and method
-    // wrappers while their functions remain live. The table is weak storage;
-    // each code record releases itself when its last GC function dies.
-    HashMap* callable_code_interned = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
     // process globals; compilation is cold and generated code never reads it.
-    JsMirCompileRecoveryState* mir_compile_recovery_state = NULL;
+    JsCompileRecoveryState* compile_recovery_state = NULL;
     // Wrapper identity is observable through .prototype and must therefore be
     // private to the context that owns the function objects and their heap.
     // §14.1: the fixed 512-entry cache was 12,288 B — 57 % of this
@@ -886,6 +796,7 @@ struct JsRuntimeState {
     uint64_t heap_epoch = 1;
     // non-owning: Runtime Script retirement owns the compiled MIR realm.
     struct MvpLmdExecution* formal_mir_owner = NULL;
+    struct MvpLmdExecution* auto_mir_owner = NULL;
 
     JsRegexpLastMatch regexp_last_match = {};
 
@@ -902,10 +813,14 @@ struct JsRuntimeState {
 
 void js_weak_state_destroy(JsRuntimeState* state);
 
-// This derived TLS cache is initialized once after the eval thread acquires
-// its context. It must stay paired with `context` until thread teardown.
+// The execution selector stays paired with one EvalContext; Activation snapshots
+// carry distinct agent states across cooperative switches within that owner.
 extern __thread JsRuntimeState* js_active_runtime_state;
 static inline JsRuntimeState* js_runtime_state_for(EvalContext* owner) {
+    // independent agents share a heap owner while retaining separate rooted execution state.
+    if (owner && js_active_runtime_state &&
+            js_active_runtime_state->execution.base_activation_items.owner == (Context*)owner)
+        return js_active_runtime_state;
     return owner ? (JsRuntimeState*)context_capsule(owner, CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
 }
 
@@ -961,6 +876,8 @@ public:
     JsOwnedCallActivation& operator=(const JsOwnedCallActivation&) = delete;
 };
 bool js_runtime_state_init(EvalContext* context);
+JsRuntimeState* js_runtime_state_create_agent(EvalContext* owner);
+void js_runtime_state_destroy_agent(JsRuntimeState* state);
 bool js_runtime_state_thread_matches(const EvalContext* context);
 bool js_runtime_state_shutdown(EvalContext* context);
 bool js_runtime_state_ensure_input(EvalContext* context);

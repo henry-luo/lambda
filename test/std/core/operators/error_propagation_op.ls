@@ -31,12 +31,12 @@ test_is_error_on_success()
 "hello" is error
 null is error
 
-// ===== Error is falsy =====
-fn test_error_falsy() {
+// ===== Error has no truth value (S3.5) =====
+fn test_error_condition() {
     let a = fail() ^ { ^ }
     if (a) 1 else 0
 }
-test_error_falsy()
+test_error_condition()
 
 // ===== Error or default =====
 fn test_error_or_default() {

@@ -20,6 +20,26 @@ protected:
     }
 };
 
+TEST_F(UrlExtraTest, ReplacementRetainsTheCarrierAndResolvesAgainstTheNewComponents) {
+    Url* url = url_parse("file:///original.html");
+    ASSERT_NE(url, nullptr);
+    Url* alias = url;
+    Url* replacement = url_parse("https://user:pass@example.test:8443/assets/page.html?x=1#section");
+    ASSERT_NE(replacement, nullptr);
+    ASSERT_TRUE(url_replace_contents(url, replacement));
+    EXPECT_EQ(alias, url);
+    EXPECT_STREQ(url_get_href(alias), "https://user:pass@example.test:8443/assets/page.html?x=1#section");
+    EXPECT_EQ(alias->scheme, URL_SCHEME_HTTPS);
+    EXPECT_EQ(alias->port_number, 8443);
+    Url* relative = url_parse_with_base("next.css", alias);
+    ASSERT_NE(relative, nullptr);
+    EXPECT_STREQ(url_get_href(relative), "https://user:pass@example.test:8443/assets/next.css");
+    url_destroy(relative);
+    ASSERT_TRUE(url_replace_contents(alias, alias));
+    EXPECT_STREQ(url_get_hash(alias), "#section");
+    url_destroy(url);
+}
+
 TEST_F(UrlExtraTest, ComplexUrlParsing) {
     Url* url = url_parse("https://user:pass@subdomain.example.com:9443/deep/path/file.html?param1=value1&param2=value2#section1");
     

@@ -48,13 +48,17 @@ pixels (requires Python Pillow):
 mkdir -p temp/webgl2
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/three-gallery.html \
   -o temp/webgl2/three-gallery-native.png -vw 848 -vh 650
-python3 test/webgl/compare_pixels.py temp/webgl2/three-gallery-native.png
+python3 test/webgl/compare_pixels.py temp/webgl2/three-gallery-native.png \
+  --reference temp/webgl2/browser/three-gallery-chromium.png \
+  --manifest temp/webgl2/browser/manifest.json
 ```
 
 The runner uses Puppeteer and a temporary loopback HTTP server for ESM.
 It writes screenshots and an audited call/query/shader manifest under the
 chosen output directory. The checked-in reference is under
-`test/demo/scene3d/reference/`, alongside all gallery resources.
+`test/demo/scene3d/reference/`, alongside all gallery resources. Those original
+captures predate the collection breadcrumbs; use the fresh capture and manifest
+above so the compared canvas bounds match the current page layout.
 
 The partial API is declared in `lambda/dom/webgl_methods.def`;
 `webgl_constants.def` and `webgl_parameters.def` define constants and query

@@ -1252,34 +1252,24 @@ bool xml_document_element_matches(Pool* pool, Element* element, const char* loca
         (allow_missing_namespace && !colon && !uri);
 }
 
-static Element* parse_xml_document_element(Input* input, const char* source,
-        const char* local_name, const char* namespace_uri, bool strict) {
+Element* parse_mathml_document(Input* input, const char* source) {
     if (!input || !source) return nullptr;
     if (strlen(source) >= 3 && (unsigned char)source[0] == 0xEF &&
         (unsigned char)source[1] == 0xBB && (unsigned char)source[2] == 0xBF) source += 3;
     // XML preserves namespace declarations, case and self-closing foreign-content boundaries.
     XmlParseOptions options = {};
-    options.preserve_whitespace = strict;
-    options.require_well_formed = strict;
-    options.require_namespaces = strict;
-    parse_xml_with_options(input, source, strict ? &options : nullptr);
+    options.preserve_whitespace = true;
+    options.require_well_formed = true;
+    options.require_namespaces = true;
+    parse_xml_with_options(input, source, &options);
     if (get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
     Element* document = input->root.element;
     for (int64_t i = 0; i < document->length; i++) {
         Item child = document->items[i];
         if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        // strict document formats require namespace identity; legacy SVG may omit it.
         if (xml_document_element_matches(input->pool, child.element,
-                local_name, namespace_uri, !strict)) return child.element;
+                "math", "http://www.w3.org/1998/Math/MathML")) return child.element;
     }
-    log_error("xml-document-element: expected {%s}%s root", namespace_uri, local_name);
+    log_error("xml-document-element: expected a MathML namespace root");
     return nullptr;
-}
-
-Element* parse_svg_document(Input* input, const char* source) {
-    return parse_xml_document_element(input, source, "svg", "http://www.w3.org/2000/svg", false);
-}
-
-Element* parse_mathml_document(Input* input, const char* source) {
-    return parse_xml_document_element(input, source, "math", "http://www.w3.org/1998/Math/MathML", true);
 }

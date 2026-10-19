@@ -612,6 +612,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_LINEARRGB,
     CSS_VALUE_HORIZONTAL,
     CSS_VALUE_VERTICAL,
+    // HTML legacy alignment centers a replaced box on the parent baseline, without x-height.
+    CSS_VALUE_BASELINE_MIDDLE,
     CSS_VALUE__LAST_ENTRY
 } CssEnum;
 

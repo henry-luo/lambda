@@ -26,6 +26,7 @@ __thread JsRuntimeState* js_active_runtime_state = NULL;
 // (JsOwnedCallActivation), so no later resume reads the first resumer's chain.
 typedef struct JsAmbient {
     JsRuntimeState* state;
+    Runtime* runtime;
     const JsInterpHostOps* interpreter_host;
     void* promise_context;
     JsCallActivation* current_activation;
@@ -48,6 +49,7 @@ static void js_ambient_init(void* storage) {
     memset(ambient, 0, sizeof(*ambient));
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->runtime = context ? context->runtime : NULL;
     ambient->interpreter_host = js_interp_host;
     if (!state) return;
     ambient->inherit_call_chain = true;
@@ -61,6 +63,7 @@ static void js_ambient_save(void* storage) {
     JsAmbient* ambient = (JsAmbient*)storage;
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->runtime = context ? context->runtime : NULL;
     ambient->interpreter_host = js_interp_host;
     ambient->inherit_call_chain = false;
     if (!state) return;
@@ -80,6 +83,9 @@ static void js_ambient_save(void* storage) {
 static void js_ambient_load(const void* storage) {
     const JsAmbient* ambient = (const JsAmbient*)storage;
     JsRuntimeState* state = ambient->state;
+    // same-owner async work may install its module controller lazily. Only
+    // an execution-owner switch restores a different agent's controller.
+    if (context && js_active_runtime_state != state) context->runtime = ambient->runtime;
     js_active_runtime_state = state;
     js_interp_host = ambient->interpreter_host;
     if (!state) return;
@@ -110,8 +116,7 @@ extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
-extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
-extern void jm_destroy_p2_mir_contexts(JsRuntimeState* state);
+extern void js_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -152,6 +157,7 @@ static void js_release_input_resources(void);
 
 static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state);
 static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state);
+static void js_runtime_state_release(JsRuntimeState* state);
 
 static bool js_execution_state_prepare(JsRuntimeState* state,
                                        EvalContext* owner) {
@@ -447,10 +453,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_entries = NULL;
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
-        if (state->callable_code_interned) {
-            js_callable_code_table_destroy(state->callable_code_interned);
-            state->callable_code_interned = NULL;
-        }
     }
     if (!state) return;
     if (state->global_environment) {
@@ -501,11 +503,8 @@ JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state) {
         log_error("js-runtime-state: failed to allocate lazy Test262 agent record");
         return NULL;
     }
-    root_vector_init(&agent->callbacks, (Context*)context,
-        "Test262 agent callbacks");
     root_vector_init(&agent->report_values, (Context*)context,
         "Test262 agent reports");
-    agent->current_slot = -1;
     state->test262_agent = agent;
     return agent;
 }
@@ -583,6 +582,64 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     return true;
 }
 
+static bool js_runtime_state_initialize(JsRuntimeState* state, EvalContext* owner) {
+    if (!js_runtime_state_alloc_records(state)) return false;
+    state->heap_epoch = 1;
+    root_vector_init(&state->promises.domain_stack, (Context*)owner, "domain stack");
+    js_eval_state_vectors_init(&state->eval, (Context*)owner);
+    state->batch_test_module_state_id = UINT32_MAX;
+    state->batch_preamble_module_state_id = UINT32_MAX;
+    state->batch_preamble_var_count = 0;
+    // raw allocation bypasses C++ defaults; every execution owner needs these queue identities.
+    state->event_loop->next_raf_id = 1;
+    runtime_job_queue_init(&state->event_loop->next_tick_queue, &state->event_loop->queue_storage[0]);
+    runtime_job_queue_init(&state->event_loop->microtask_queue, &state->event_loop->queue_storage[1]);
+    runtime_job_queue_init(&state->event_loop->animation_frame_queue, &state->event_loop->queue_storage[2]);
+    runtime_job_queue_init(&state->promises.unhandled_queue, &state->promises.unhandled_storage);
+    state->event_loop->next_id = 1;
+    state->string_caches->last_from_char_code_cp = -1;
+    state->string_caches->ascii_chars_epoch = ~0ULL;
+    state->clipboard.generation = 1;
+    state->clipboard.next_object_url_id = 1;
+    state->intrinsics->mutation_serial = 1;
+    state->promises.unhandled_strict = js_promise_initial_unhandled_rejections_strict();
+    state->performance.origin_epoch = UINT64_MAX;
+    return true;
+}
+
+JsRuntimeState* js_runtime_state_create_agent(EvalContext* owner) {
+    if (!eval_context_matches(owner)) return NULL;
+    auto* state = (JsRuntimeState*)mem_calloc(1, sizeof(JsRuntimeState), MEM_CAT_JS_RUNTIME);
+    if (!state) return NULL;
+    if (!js_runtime_state_initialize(state, owner)) { mem_free(state); return NULL; }
+    if (!js_execution_state_prepare(state, owner)) {
+        JsRuntimeState* previous = js_active_runtime_state;
+        js_active_runtime_state = state;
+        js_runtime_owned_cache_destroy_context(state);
+        js_runtime_state_release(state);
+        js_active_runtime_state = previous;
+        return NULL;
+    }
+    return state;
+}
+
+void js_runtime_state_destroy_agent(JsRuntimeState* state) {
+    if (!state) return;
+    if (!context || state->execution.base_activation_items.owner != (Context*)context ||
+            state == js_active_runtime_state || state == context_capsule(context, CONTEXT_CAPSULE_JS_RUNTIME)) {
+        log_error("js-agent-state: refusing to destroy an active or foreign execution owner");
+        return;
+    }
+    JsRuntimeState* previous = js_active_runtime_state;
+    js_active_runtime_state = state;
+    // abandon only this owner's timers and roots; shared context capsules stay live.
+    js_event_loop_shutdown();
+    js_runtime_owned_cache_destroy_context(state);
+    js_release_input_resources();
+    js_runtime_state_release(state);
+    js_active_runtime_state = previous;
+}
+
 bool js_runtime_state_init(EvalContext* runtime_context) {
     if (!eval_context_matches(runtime_context)) {
         log_error("js-thread-init: EvalContext is not current owner");
@@ -600,7 +657,7 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             log_error("js-runtime-state: failed to allocate context state");
             return false;
         }
-        if (!js_runtime_state_alloc_records(state)) {
+        if (!js_runtime_state_initialize(state, runtime_context)) {
             context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
             // The resource service is established during record allocation,
             // before this runtime state becomes usable by another client.
@@ -608,35 +665,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
                 CONTEXT_CAPSULE_RUNTIME_RESOURCES);
             return false;
         }
-        state->heap_epoch = 1;
-        root_vector_init(&state->promises.domain_stack,
-            (Context*)runtime_context, "domain stack");
-        js_eval_state_vectors_init(&state->eval,
-            (Context*)runtime_context);
-        state->batch_test_module_state_id = UINT32_MAX;
-        state->batch_preamble_module_state_id = UINT32_MAX;
-        state->batch_preamble_var_count = 0;
-        // This capsule is raw-allocated for C-compatible runtime ownership,
-        // so restore non-zero queue identities that C++ default initializers
-        // would otherwise provide only for a constructed object.
-        state->event_loop->next_raf_id = 1;
-        runtime_job_queue_init(&state->event_loop->next_tick_queue,
-            &state->event_loop->queue_storage[0]);
-        runtime_job_queue_init(&state->event_loop->microtask_queue,
-            &state->event_loop->queue_storage[1]);
-        runtime_job_queue_init(&state->event_loop->animation_frame_queue,
-            &state->event_loop->queue_storage[2]);
-        runtime_job_queue_init(&state->promises.unhandled_queue,
-            &state->promises.unhandled_storage);
-        state->event_loop->next_id = 1;
-        state->string_caches->last_from_char_code_cp = -1;
-        state->string_caches->ascii_chars_epoch = ~0ULL;
-        state->clipboard.generation = 1;
-        state->clipboard.next_object_url_id = 1;
-        state->intrinsics->mutation_serial = 1;
-        state->promises.unhandled_strict =
-            js_promise_initial_unhandled_rejections_strict();
-        state->performance.origin_epoch = UINT64_MAX;
     }
     if (js_active_runtime_state &&
             js_active_runtime_state != state) {
@@ -736,6 +764,7 @@ void js_runtime_state_release_heap_resources(void) {
         log_error("js-runtime-state-release: owner thread is not current");
         return;
     }
+    js_agent_group_shutdown(state);
     // Regex cache records point into the current GC heap. Release their native
     // engines before heap_destroy invalidates those records; capsule teardown
     // later only disposes context-owned containers that are still present.
@@ -754,25 +783,10 @@ void js_runtime_state_release_heap_resources(void) {
     js_release_input_resources();
 }
 
-void js_runtime_state_destroy_context(void) {
-    EvalContext* runtime_context = context;
-    JsRuntimeState* state = js_runtime_state_for(runtime_context);
-    if (!runtime_context || !state) return;
-    bool was_active = js_active_runtime_state == state;
-    if (was_active) js_event_loop_shutdown();
-    // Final runtime cleanup does not pass through batch reset, so detach the
-    // optional Node session while its heap-backed state is still valid.
-    jube_modules_runtime_detach();
-    state = (JsRuntimeState*)context_capsule_take(runtime_context,
-        CONTEXT_CAPSULE_JS_RUNTIME);
-    if (!state) return;
-    js_runtime_owned_cache_destroy_context(state);
-    // JSCU18: the DOM/web capsules leave through the directory's own walk
-    // instead of eight hand-maintained calls.
-    context_capsule_destroy_all(runtime_context);
+static void js_runtime_state_release(JsRuntimeState* state) {
     js_atomics_destroy_context(state);
     js_weak_state_destroy(state);
-    jm_compile_recovery_state_destroy_context(state);
+    js_compile_recovery_state_destroy_context(state);
     js_runtime_prototype_snapshot_destroy_context(state);
     js_runtime_regex_cache_destroy_context(state);
     // JSCU9: generators are GC-owned carriers; the heap finalizer releases
@@ -793,10 +807,29 @@ void js_runtime_state_destroy_context(void) {
     js_eval_state_vectors_destroy(&state->eval);
     // P2 entries remain callable past a source turn, so their native code is
     // released only at the owning EvalContext's final lifetime boundary.
-    jm_destroy_p2_mir_contexts(state);
-    js_code_store_destroy(&state->code_store);
     js_runtime_state_free_records(state);
     mem_free(state);
+}
+
+void js_runtime_state_destroy_context(void) {
+    EvalContext* runtime_context = context;
+    auto* state = runtime_context ? (JsRuntimeState*)context_capsule(runtime_context,
+        CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
+    if (!runtime_context || !state) return;
+    js_agent_group_shutdown(state);
+    bool was_active = js_active_runtime_state == state;
+    if (was_active) js_event_loop_shutdown();
+    // Final runtime cleanup does not pass through batch reset, so detach the
+    // optional Node session while its heap-backed state is still valid.
+    jube_modules_runtime_detach();
+    state = (JsRuntimeState*)context_capsule_take(runtime_context,
+        CONTEXT_CAPSULE_JS_RUNTIME);
+    if (!state) return;
+    js_runtime_owned_cache_destroy_context(state);
+    // JSCU18: the DOM/web capsules leave through the directory's own walk
+    // instead of eight hand-maintained calls.
+    context_capsule_destroy_all(runtime_context);
+    js_runtime_state_release(state);
     if (was_active) js_active_runtime_state = NULL;
 }
 
@@ -958,24 +991,7 @@ bool js_realm_runtime_has_input(void) {
         js_active_runtime_state->input->pool;
 }
 
-bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
-        Item** values, int count, bool reserve) {
-    if (!slots || !slot_ids || !values || count < 0) return false;
-    for (int i = 0; i < count; i++) {
-        Item* value = reserve ? js_realm_slot(slots, slot_ids[i]) :
-            js_realm_slot_existing(slots, slot_ids[i]);
-        if (!value) return false;
-        values[i] = value;
-    }
-    return true;
-}
 
-bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
-        bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    return js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids,
-        (Item**)items, count, reserve);
-}
 
 static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
         int, const char*, void*) {
@@ -1003,56 +1019,6 @@ static void js_root_vector_reset_all(void) {
 #define JS_EVAL_VECTOR_DESTROY(vec, label) root_vector_destroy(vec);
 #define JS_EVAL_VECTOR_CLEAR(vec, label) root_vector_clear(vec);
 
-// One stable row owns each compiled unit's MIR context and source buffer.
-// ArrayList is storage only; the row is the lifetime authority.
-bool js_code_store_push(JsCodeStore* store, void* mir_context) {
-    if (!store || !mir_context) return false;
-    if (!store->artifacts) store->artifacts = arraylist_new(8);
-    JsCompiledArtifact* artifact = (JsCompiledArtifact*)mem_calloc(1,
-        sizeof(JsCompiledArtifact), MEM_CAT_JS_RUNTIME);
-    if (!artifact || !store->artifacts || !arraylist_append(store->artifacts, artifact)) {
-        mem_free(artifact);
-        log_error("js-code-store: cannot grow artifact rows");
-        return false;
-    }
-    artifact->mir_context = mir_context;
-    return true;
-}
-
-void js_code_store_attach_source(JsCodeStore* store, char* source_owner) {
-    JsCompiledArtifact* artifact = js_code_store_artifact_at(store,
-        js_code_store_count(store) - 1);
-    if (artifact) artifact->source_owner = source_owner;
-}
-
-void* js_code_store_last_context(JsCodeStore* store) {
-    JsCompiledArtifact* artifact = js_code_store_artifact_at(store,
-        js_code_store_count(store) - 1);
-    return artifact ? artifact->mir_context : NULL;
-}
-
-int js_code_store_count(const JsCodeStore* store) {
-    return store && store->artifacts ? store->artifacts->length : 0;
-}
-
-JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index) {
-    return store && store->artifacts && index >= 0 && index < store->artifacts->length
-        ? (JsCompiledArtifact*)arraylist_get(store->artifacts, index) : NULL;
-}
-
-void js_code_store_clear_rows(JsCodeStore* store) {
-    if (!store || !store->artifacts) return;
-    for (int i = 0; i < store->artifacts->length; i++) {
-        mem_free(arraylist_get(store->artifacts, i));
-    }
-    arraylist_free(store->artifacts);
-    store->artifacts = NULL;
-}
-
-void js_code_store_destroy(JsCodeStore* store) {
-    js_code_store_clear_rows(store);
-}
-
 static void js_eval_native_rows_clear(ArrayList** rows) {
     if (!rows || !*rows) return;
     for (int i = 0; i < (*rows)->length; i++) {
@@ -1060,17 +1026,6 @@ static void js_eval_native_rows_clear(ArrayList** rows) {
     }
     arraylist_free(*rows);
     *rows = NULL;
-}
-
-static void js_eval_local_frames_clear(JsEvalLocalState* local) {
-    if (!local) return;
-    js_eval_native_rows_clear(&local->frame_marks);
-}
-
-static void js_eval_binding_journal_clear(JsEvalBindingJournal* journal) {
-    if (!journal) return;
-    js_eval_native_rows_clear(&journal->bindings);
-    js_eval_native_rows_clear(&journal->frames);
 }
 
 static void js_eval_private_journal_clear(JsEvalPrivateJournal* journal) {
@@ -1085,10 +1040,7 @@ void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
 
 void js_eval_state_vectors_destroy(JsEvalState* state) {
     if (!state) return;
-    js_eval_binding_journal_clear(&state->bridge.env);
-    js_eval_binding_journal_clear(&state->bridge.global_lexical);
-    js_eval_private_journal_clear(&state->bridge.private_names);
-    js_eval_local_frames_clear(&state->local);
+    js_eval_private_journal_clear(&state->private_names);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_DESTROY, state)
 }
 
@@ -1096,29 +1048,14 @@ void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_CLEAR, state)
-    js_eval_binding_journal_clear(&state->bridge.env);
-    js_eval_binding_journal_clear(&state->bridge.global_lexical);
-    js_eval_private_journal_clear(&state->bridge.private_names);
-    js_eval_local_frames_clear(&state->local);
+    js_eval_private_journal_clear(&state->private_names);
 }
 
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (!state) return;
     const char* name = reset_name ? reset_name : "reset";
-    int env_frame_depth = state->bridge.env.frames ? state->bridge.env.frames->length : 0;
-    int global_lexical_frame_depth = state->bridge.global_lexical.frames
-        ? state->bridge.global_lexical.frames->length : 0;
-    int private_frame_depth = state->bridge.private_names.frames
-        ? state->bridge.private_names.frames->length : 0;
-    if (env_frame_depth != 0 || global_lexical_frame_depth != 0 ||
-        private_frame_depth != 0) {
-        log_error("js-eval-state: %s left bridge depths env=%d lexical=%d private=%d", name,
-            env_frame_depth, global_lexical_frame_depth, private_frame_depth);
-    }
-    int local_frame_depth = state->local.frame_marks ? state->local.frame_marks->length : 0;
-    if (local_frame_depth != 0) {
-        log_error("js-eval-state: %s left local frame depth=%d", name, local_frame_depth);
-    }
+    int depth = state->private_names.frames ? state->private_names.frames->length : 0;
+    if (depth != 0) log_error("js-eval-state: %s left private-name depth=%d", name, depth);
 }
 
 struct JsErrorTextParts {
@@ -1160,9 +1097,6 @@ static Item* js_ensure_active_module_vars(void) {
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
 void js_regex_cache_reset();
 
-extern "C" void js_set_strict_mode(int64_t strict) {
-    js_strict_mode = (strict != 0);
-}
 
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -1190,8 +1124,6 @@ static void js_runtime_make_non_enumerable(Item object, Item name) {
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
 // v37: Toggle private field initialization mode (called from transpiled code)
-extern "C" void js_private_field_init_begin() { js_private_field_initializing = true; }
-extern "C" void js_private_field_init_end() { js_private_field_initializing = false; }
 
 // v37: Lazily resolve and cache Object.prototype for prototype chain fallback.
 // Plain objects without __proto__ need this for HasProperty / property_get checks.
@@ -1405,18 +1337,6 @@ extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
 // TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone.
 // Names arrive as module NameIds so delayed MIR never dereferences a compiler
 // pool spelling after that pool has been released (D5.4.3).
-extern "C" Item js_check_tdz(Item value, NameId name_id, int name_len) {
-    if (value.item == ITEM_JS_TDZ) {
-        NameRef name_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
-            name_id);
-        const char* name = name_ref ? name_ref->chars : "";
-        if (name_ref) name_len = (int)name_ref->len;
-        char buf[256];
-        snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
-        return js_throw_named_error_text("ReferenceError", buf);
-    }
-    return value;
-}
 
 // Const assignment check: throw TypeError when assigning to a const variable.
 extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
@@ -1471,7 +1391,6 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_process_reset_listeners();
     js_strict_mode = false;
     js_reset_core_module_caches();
-    if (full_reset) js_eval_preamble_cache_reset();
     if (full_reset) {
         js_array_runtime_items_cleanup_all();
         js_array_immortal_props_cleanup_all();
@@ -2045,31 +1964,13 @@ extern "C" Item js_resolve_lexical_this(Item this_val) {
     return this_val;
 }
 
-extern "C" void js_set_this(Item this_val) {
-    js_current_this = this_val;
-}
 JS_FORWARD_EXPRESSION(Item, js_get_new_target, (), (js_new_target))
 
-extern "C" void js_set_direct_new_target(Item target) {
-    // Directly set new.target (for direct calls that bypass js_call_function)
-    js_new_target = target;
-}
 
-extern "C" void js_set_pending_call_source(const char* source, int64_t len) {
-    js_pending_call_source = source;
-    js_pending_call_source_len = (len > 0 && len < 8192) ? (int)len : 0;
-    if (!source || js_pending_call_source_len == 0) {
-        js_pending_call_source = NULL;
-        js_pending_call_source_len = 0;
-    }
-}
 
 // Build the 'arguments' array-like object from the pending call args.
 // Called at the top of JIT-compiled functions that reference 'arguments'.
 
-extern "C" void js_set_arguments_info(int64_t is_strict) {
-    js_pending_args_is_strict = (int)is_strict;
-}
 
 void js_reset_transient_call_state() {
     js_current_this = (Item){0};

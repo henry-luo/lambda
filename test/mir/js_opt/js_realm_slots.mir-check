@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "D5.4, D8.1.3v25: formal intrinsic loops use the owned unit/library slots; the retained AST suffix reservation is checked separately.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_program",
+      "expect": [
+        "func\ti64, p:runtime, p:unit, p:arguments, i64:argc",
+        "call\tmvp_lmd_dynamic_global",
+        "call\tmvp_lmd_class_property",
+        "ret\t"
+      ],
+      "forbid": [
+        "js_realm_intrinsic_slots_ensure_roots"
+      ]
+    }
+  ]
+}

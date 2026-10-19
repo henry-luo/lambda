@@ -695,11 +695,12 @@ static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
 }
 
 bool is_global_simple_type(const Type* type) {
+    // Generic list/array descriptors are compact Types, with no nested payload.
     return type_is_global_meta_type(type) || type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
         type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_COMPLEX || type == &TYPE_DECIMAL ||
            type == &TYPE_INTEGER_VALUE || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
            type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
-           type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY ||
+           type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY || type == &TYPE_LIST ||
            type == &TYPE_MAP || type == &TYPE_ELMT || type == &TYPE_OBJECT ||
            type == &TYPE_FUNC || type == &TYPE_ANY ||
            type == &TYPE_ERROR || type == &TYPE_ANY_NO_ERROR ||
@@ -1625,11 +1626,11 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     if (source == &TYPE_NONE) return STATIC_BOUNDARY_DEFERRED;
     if (target->type_id == LMD_TYPE_ANY) {
         if (target == &TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
-        if (type_is_any_without_error(target) && lambda_type_accepts_error(source)) {
-            return STATIC_BOUNDARY_REJECTED;
-        }
-        if (type_is_any_without_null(target) && lambda_type_accepts_null(source)) {
-            return STATIC_BOUNDARY_REJECTED;
+        if ((type_is_any_without_error(target) && lambda_type_accepts_error(source)) ||
+                (type_is_any_without_null(target) && lambda_type_accepts_null(source))) {
+            // An internal top is still unknown; its exclusions cannot prove rejection.
+            return source->type_id == LMD_TYPE_ANY
+                ? STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_REJECTED;
         }
         return STATIC_BOUNDARY_PROVEN;
     }
@@ -1938,17 +1939,20 @@ static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature) {
 // a static parameter mismatch.
 static StaticBoundaryResult static_parameter_boundary_relation(Type* source, Type* target) {
     source = boundary_unwrap_type(source);
-    if (boundary_type_is_extended(source, TYPE_KIND_BINARY)) {
+    // S7.7.3: errors take the caller's skip edge, including nested union members.
+    if (source && source->type_id == LMD_TYPE_ERROR) return STATIC_BOUNDARY_PROVEN;
+    if (source && source->type_id == LMD_TYPE_ANY && lambda_type_accepts_error(source)) {
+        source = lambda_type_remove_error(NULL, source);
+    }
+    if (lambda_type_is_union(source)) {
         TypeBinary* binary = (TypeBinary*)source;
-        if (binary->op == OPERATOR_UNION) {
-            Type* left = boundary_unwrap_type(binary->left);
-            Type* right = boundary_unwrap_type(binary->right);
-            bool left_is_error = left && left->type_id == LMD_TYPE_ERROR;
-            bool right_is_error = right && right->type_id == LMD_TYPE_ERROR;
-            if (left_is_error && right_is_error) return STATIC_BOUNDARY_PROVEN;
-            if (left_is_error) return static_parameter_boundary_relation(right, target);
-            if (right_is_error) return static_parameter_boundary_relation(left, target);
+        StaticBoundaryResult left = static_parameter_boundary_relation(binary->left, target);
+        StaticBoundaryResult right = static_parameter_boundary_relation(binary->right, target);
+        if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED) {
+            return STATIC_BOUNDARY_REJECTED;
         }
+        return left == STATIC_BOUNDARY_PROVEN && right == STATIC_BOUNDARY_PROVEN
+            ? STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_DEFERRED;
     }
     return static_boundary_relation(source, target);
 }
@@ -2822,7 +2826,6 @@ static bool strview_matches_string(StrView* view, String* str) {
         strncmp(view->str, str->chars, view->length) == 0;
 }
 
-#ifndef SIMPLE_SCHEMA_PARSER
 static void add_jube_module_import(Transpiler* tp, String* module, String* alias) {
     JubeModuleImport* entry = (JubeModuleImport*)pool_calloc(tp->pool, sizeof(JubeModuleImport));
     entry->module = module;
@@ -2830,7 +2833,6 @@ static void add_jube_module_import(Transpiler* tp, String* module, String* alias
     entry->next = tp->jube_module_imports;
     tp->jube_module_imports = entry;
 }
-#endif
 
 static const char* registered_jube_module_name(StrView* name) {
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -2848,9 +2850,18 @@ static const char* registered_jube_module_name(StrView* name) {
 
 // Check if an identifier matches a built-in or descriptor-backed module name,
 // or a registered alias for one. Returns the real module name if matched.
+static const char* builtin_module_name(StrView name) {
+    static const char* const modules[] = {"math", "io", "mcp"};
+    if (name.length > 7 && !memcmp(name.str, "lambda.", 7)) {
+        name.str += 7;
+        name.length -= 7;
+    }
+    for (const char* module : modules) if (strview_equal(&name, module)) return module;
+    return NULL;
+}
+
 static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
-    if (strview_equal(name, "math")) return "math";
-    if (strview_equal(name, "io")) return "io";
+    if (const char* builtin = builtin_module_name(*name)) return builtin;
     // check aliases
     if (strview_matches_string(name, tp->builtin_alias_math)) return "math";
     if (strview_matches_string(name, tp->builtin_alias_io)) return "io";
@@ -2867,9 +2878,9 @@ static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
 static bool resolve_builtin_module_member(StrView path, const char** module,
         StrView* member) {
     static const char* prefixes[] = {
-        "lambda.sys.", "lambda.math.", "lambda.io.", "math.", "io."
+        "lambda.sys.", "lambda.math.", "lambda.io.", "lambda.mcp.", "math.", "io.", "mcp."
     };
-    static const char* modules[] = {"sys", "math", "io", "math", "io"};
+    static const char* modules[] = {"sys", "math", "io", "mcp", "math", "io", "mcp"};
     if (!path.str || !module || !member) return false;
     while (path.length && (path.str[path.length - 1] == ' ' ||
             path.str[path.length - 1] == '\t' ||
@@ -2892,13 +2903,7 @@ static bool resolve_builtin_module_member(StrView path, const char** module,
 }
 
 static const char* resolve_builtin_import_module(StrView* module) {
-    if (strview_equal(module, "math") || strview_equal(module, "lambda.math")) {
-        return "math";
-    }
-    if (strview_equal(module, "io") || strview_equal(module, "lambda.io")) {
-        return "io";
-    }
-    return NULL;
+    return builtin_module_name(*module);
 }
 
 static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
@@ -4538,7 +4543,12 @@ static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
     TypeId operand_type = operand->type->type_id;
     TypeId type_id;
     if (ast_node->op == OPERATOR_NOT) {
-        type_id = LMD_TYPE_BOOL;
+        // S3.4: retain an operand's error instead of narrowing it to bool.
+        ast_node->type = lambda_type_has_proven_error(operand->type)
+            ? lambda_type_union_normalized(tp->pool, &TYPE_BOOL, &TYPE_ERROR)
+            : lambda_type_accepts_error(operand->type)
+                ? set_type_any(tp, ANY_UNARY) : &TYPE_BOOL;
+        return;
     }
     else if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
         ast_node->type = operand->type;
@@ -5833,21 +5843,11 @@ typedef struct ReturnErrorOriginScan {
 
 static bool find_first_return_error_call(AstNode* node, void* data) {
     ReturnErrorOriginScan* scan = (ReturnErrorOriginScan*)data;
-    // a contained error (`risky() or default`) does not reach the return.
+    // a handler can contain an error before the return boundary.
     // stop after the first origin instead of overwriting it with later calls.
-    if (scan->call || !node || !lambda_type_has_proven_error(node->type)) return false;
+    if (scan->call || !node || !lambda_type_comparison_may_error(node->type, true, false)) return false;
     if (node->node_type == AST_NODE_CALL_EXPR) {
         scan->call = (AstCallNode*)node;
-        return false;
-    }
-    if (node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op == OPERATOR_OR) {
-        walk_lambda_ast(((AstBinaryNode*)node)->right, find_first_return_error_call, data, false);
-        return false;
-    }
-    if (node->node_type == AST_NODE_IF_EXPR) {
-        AstIfNode* branch = (AstIfNode*)node;
-        walk_lambda_ast(branch->then, find_first_return_error_call, data, false);
-        walk_lambda_ast(branch->otherwise, find_first_return_error_call, data, false);
         return false;
     }
     if (node->node_type == AST_NODE_HANDLER_EXPR) {
@@ -5960,7 +5960,7 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         lambda_type_format_contract_name(expected, contract, sizeof(contract));
         snprintf(help, sizeof(help),
             "The %s return contract `%s` excludes error. %s"
-            "Recover with `call(...) or default`, return errors as data with `T | error`, "
+            "Recover with `call(...) ^ { default }`, return errors as data with `T | error`, "
             "or declare `T^` and propagate with `call(...)^`.",
             has_explicit_contract ? "declared" : "implicit", contract,
             argument_error
@@ -6062,8 +6062,8 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
     error_call_name(tp, call, &name, &name_length);
     record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
         "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
-        "handle with '%.*s(...) ^ { ... }', or recover with '%.*s(...) or default'",
-        name_length, name, name_length, name, name_length, name, name_length, name);
+        "or handle with '%.*s(...) ^ { ... }'",
+        name_length, name, name_length, name, name_length, name);
 }
 
 static bool match_arm_is_error_handler(AstMatchArm* arm) {
@@ -6178,10 +6178,9 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        // `or` consumes an error only from its left operand. An enforcing
-        // call in the fallback remains unhandled by this expression.
+        // S7.5.3v2: logical defaulting does not acknowledge a hard error channel.
         validate_enforcing_calls_in_expression(tp, binary->left,
-            binary->op == OPERATOR_OR, return_acknowledgment);
+            false, return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, binary->right, false,
             return_acknowledgment);
         return;
@@ -8878,13 +8877,25 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
     Type* rt = right && right->type ? right->type : &TYPE_ANY;
     if (op == OPERATOR_TO) return &TYPE_RANGE;
-    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ ||
-            op == OPERATOR_IS || op == OPERATOR_SUBTYPE || op == OPERATOR_IN ||
+    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ) {
+        bool deep = op != OPERATOR_REF_EQ;
+        if (lambda_type_comparison_may_error(lt, deep, false) ||
+                lambda_type_comparison_may_error(rt, deep, false)) {
+            return lambda_type_union_normalized(tp->pool, &TYPE_BOOL, &TYPE_ERROR);
+        }
+        return lambda_type_comparison_may_error(lt, deep, true) ||
+            lambda_type_comparison_may_error(rt, deep, true)
+            ? set_type_any(tp, ANY_COMPARE) : &TYPE_BOOL;
+    }
+    if (op == OPERATOR_IS || op == OPERATOR_SUBTYPE || op == OPERATOR_IN ||
             op == OPERATOR_AT || op == OPERATOR_OF) {
         return &TYPE_BOOL;
     }
     if (op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT ||
             op == OPERATOR_GE) {
+        if (lambda_type_has_proven_error(lt) || lambda_type_has_proven_error(rt)) {
+            return lambda_type_union_normalized(tp->pool, &TYPE_BOOL, &TYPE_ERROR);
+        }
         // Dynamic magnitude comparisons retain an open result. Treating every
         // comparison as bool erased the Tree path's uncertainty and made a
         // later implicit fn boundary report a spurious E208 (S5.5.2).
@@ -8901,8 +8912,9 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         return lambda_type_union_normalized(tp->pool, lt, rt);
     }
     if (op == OPERATOR_OR) {
-        Type* clean = lambda_type_remove_error_and_null(tp->pool, lt);
-        return lambda_type_union_normalized(tp->pool, clean, rt);
+        Type* present = lambda_type_remove_exclusions(tp->pool, lt,
+            LAMBDA_TYPE_EXCLUDE_NULL);
+        return lambda_type_union_normalized(tp->pool, present, rt);
     }
     if (op == OPERATOR_THAT) return that_proviso_result_type(tp, lt);
     if (op == OPERATOR_PIPE || op == OPERATOR_FILTER) {
@@ -9136,12 +9148,14 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
         right_cmp->right = right;
         right_cmp->op = node->op;
         right_cmp->op_str = op_spelling;
-        right_cmp->type = &TYPE_BOOL;
+        right_cmp->type = direct_binary_result_type(tp, node->op,
+            right_cmp->left, right_cmp->right);
         node->left = left;
         node->op = OPERATOR_AND;
         node->op_str = strview_from_cstr("and");
         node->right = (AstNode*)right_cmp;
-        node->type = &TYPE_BOOL;
+        node->type = direct_binary_result_type(tp, OPERATOR_AND,
+            node->left, node->right);
         return;
     }
     if (node->op == OPERATOR_IS && right && right->node_type == AST_NODE_PRIMARY) {
@@ -13248,6 +13262,11 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
         else tp->builtin_import_io = true;
         return import_resolves_to_marker(node);
     }
+    if (builtin_module) {
+        // additional builtins share the prefix/alias list rather than per-module flags.
+        add_jube_module_import(tp, name_pool_create_name(tp->name_pool, builtin_module), node->alias);
+        return import_resolves_to_marker(node);
+    }
 #ifdef LAMBDA_NO_FILE_IO
     record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
         "external modules and packages are excluded from this profile: '%.*s'",
@@ -13425,6 +13444,12 @@ static void resolve_if(Transpiler* tp, AstIfNode* node) {
     // Keep ordinary mixed joins widened through the shared rule so later
     // boundary validation observes the same function return contracts.
     node->type = infer_if_result_type(tp, then_branch, else_branch);
+    // S3.5: neither arm runs for an error condition, which contributes to the join.
+    if (condition && lambda_type_has_proven_error(condition->type)) {
+        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+    } else if (condition && lambda_type_accepts_error(condition->type)) {
+        node->type = set_type_any(tp, ANY_JOIN);
+    }
     validate_if_branch_homogeneity(tp, span, then_branch, else_branch);
 }
 

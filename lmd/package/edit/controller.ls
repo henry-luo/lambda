@@ -4,11 +4,12 @@ import dom
 import lambda.editor.mod_editor
 import result: lambda.dom.edit_result
 
-pub pn surface(node, id = "edit-surface") {
+// DOM reads retain fn colour even when their receiver is mutable (D7.4.6).
+pub fn surface(node, id = "edit-surface") {
     if (node == null) null else dom.get_element_by_id(dom.root_node(node), id)
 }
 
-pub pn is_control(node) {
+pub fn is_control(node) {
     let target = if (node == null or dom.node_type(node) == 1) node else dom.parent_node(node)
     target != null and dom.closest(target, "input,textarea,select") != null
 }
@@ -37,13 +38,13 @@ pub fn accept_selection(editor, snapshot) =>
     if (snapshot == null) {editor: editor, changed: false}
     else edit_accept_dom_selection(editor, snapshot)
 
-pn owns_selection(host, node) {
-    if (host == null) { return false }
-    let selection = dom.document_selection(dom.root_node(node))
-    if (selection == null) { return false }
-    let boundary = dom.selection_boundaries(selection)
-    boundary.anchor_node != null and boundary.focus_node != null and
-        dom.contains(host,boundary.anchor_node) and dom.contains(host,boundary.focus_node)
+fn owns_selection(host, node) {
+    let selection = if (host == null) null else dom.document_selection(dom.root_node(node))
+    if (selection == null) false else {
+        let boundary = dom.selection_boundaries(selection)
+        boundary.anchor_node != null and boundary.focus_node != null and
+            dom.contains(host,boundary.anchor_node) and dom.contains(host,boundary.focus_node)
+    }
 }
 
 pub pn adopt(editor, evt, preset = "html5_subset", id = "edit-surface") {
@@ -76,7 +77,7 @@ pub pn focus(node, id = "edit-surface") {
     if (host == null) false else dom.focus_set(host, false)
 }
 
-pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface") {
+pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface", selection = null) {
     if (read_only) { return {editor: editor, result: result.decline(true, false, "read-only", 0)} }
     // copy has already populated the native clipboard; it must not redraw or
     // create history, which would replace the selected nodes unnecessarily.
@@ -84,7 +85,8 @@ pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edi
         return {editor: editor, result: result.model_applied(false, false, false, "",
             editor.selection, editor.model_revision)}
     }
-    edit_handle_dom_action(mount(editor, evt.target, preset, id), evt)
+    // keep the host event intact; an owned atomic selection is a separate model target.
+    edit_handle_dom_action(mount(editor, evt.target, preset, id), evt, selection)
 }
 
 pub pn request(editor, input_type, payload = {}) {

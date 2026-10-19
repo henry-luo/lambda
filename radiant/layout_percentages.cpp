@@ -61,11 +61,19 @@ bool layout_apply_deferred_percentage(float percent, float percentage_base, floa
 }
 
 static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side,
-                                                      CssCascadeCandidate* candidate,
-                                                      float inline_base, bool margin) {
-    if (!block || !block->bound || !candidate || !candidate->decl || !candidate->value) return;
+                                                      const CssValue* value, int64_t priority,
+                                                      float inline_base, bool margin, LayoutContext* lycon) {
+    if (!block || !block->bound || !value) return;
     float resolved = 0.0f;
-    if (!layout_resolve_percentage_value(candidate->value, inline_base, &resolved)) return;
+    if (!layout_resolve_percentage_value(value, inline_base, &resolved)) {
+        if (!lycon || !layout_css_value_has_percentage(value)) return;
+        // table padding must re-evaluate the winning math value at the final inline basis too.
+        LayoutContainingBlockScope percentage_base(lycon, LAYOUT_AXIS_X, inline_base);
+        resolved = resolve_length_value(lycon,
+            margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, value);
+        if (!isfinite(resolved)) return;
+        if (!margin) resolved = fmaxf(0.0f, resolved);
+    }
 
     Spacing* spacing = margin ? (Spacing*)&block->boundary_mut()->margin : &block->boundary_mut()->padding;
     if (side < 0 || side >= 4) return;
@@ -73,7 +81,7 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     int64_t* priorities[4] = {&spacing->top_specificity, &spacing->right_specificity,
                               &spacing->bottom_specificity, &spacing->left_specificity};
     *values[side] = resolved;
-    *priorities[side] = candidate->priority;
+    *priorities[side] = priority;
     if (margin) {
         CssEnum* types[4] = {&block->boundary_mut()->margin.top_type,
                              &block->boundary_mut()->margin.right_type,
@@ -83,21 +91,45 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     }
 }
 
-static void layout_reresolve_percentage_spacing(ViewBlock* block, float inline_base, bool margin) {
+static void layout_reresolve_percentage_spacing(ViewBlock* block, float inline_base, bool margin,
+                                                LayoutContext* lycon) {
     if (!block || !block->bound || !block->specified_style || inline_base < 0.0f) return;
 
     LayoutCssBoxCandidates candidates = {};
-    candidates.collect(block->specified_style, margin);
+    if (!lycon) candidates.collect(block->specified_style, margin);
+    LayoutViewScope owner_scope(lycon);
+    LayoutFontScope font_scope(lycon);
+    if (lycon) {
+        // final percentage updates must resolve the same owner's variables as intrinsic measurement.
+        lycon->view = lam::up(static_cast<View*>(block));
+        lycon->elmt = lam::up(static_cast<DomNode*>(block));
+        // font-relative math uses the receiving cell's font before its content layout begins.
+        if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    }
 
     for (int side = 0; side < 4; side++) {
-        layout_apply_percentage_spacing_candidate(
-            block, side, &candidates.sides[side], inline_base, margin);
+        CssPropertyCode property = radiant_box_side_property(
+            margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, (CssBoxSide)side);
+        CssDeclaration* declaration = lycon
+            ? layout_cascaded_physical_declaration(block->as_element(), property)
+            : candidates.sides[side].decl.get();
+        if (!declaration || !declaration->value) continue;
+        CssComputedValueScratch scratch(lycon, declaration->property_code, declaration->value, true);
+        const CssValue* value = lycon
+            ? layout_resolve_box_component_value(lycon, block->as_element(), declaration, (CssBoxSide)side)
+            : candidates.sides[side].value.get();
+        layout_apply_percentage_spacing_candidate(block, side, value,
+            get_cascade_priority(declaration), inline_base, margin, lycon);
     }
 }
 
+void layout_reresolve_percentage_box(ViewBlock* block, float inline_base, LayoutContext* lycon) {
+    layout_reresolve_percentage_spacing(block, inline_base, false, lycon);
+    layout_reresolve_percentage_spacing(block, inline_base, true, lycon);
+}
+
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
-    layout_reresolve_percentage_spacing(block, inline_base, false);
-    layout_reresolve_percentage_spacing(block, inline_base, true);
+    layout_reresolve_percentage_box(block, inline_base, nullptr);
 }
 
 static bool layout_element_has_percentage_spacing(ViewBlock* block) {

@@ -55,17 +55,13 @@ Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
 Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
                                              size_t source_length, const char* filename,
                                              uint64_t* result_home);
-// Execute direct eval code for a MIR caller (JSI35), which has installed the
-// EvalContext bridge; `strict` is the caller's strictness, which the eval code
-// inherits. An interpreted caller links its own environments instead.
-Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
-                                           size_t source_length, const char* filename,
-                                           bool strict, uint64_t* result_home);
 // The eval steps before parsing (js_dynamic_code.cpp): a non-string argument is
 // the result, and a blank source, a V8 native probe, or a lone RegExp literal
 // completes without a script. Returns true when *result holds the completion
 // or the early error that was thrown.
-bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result);
+struct JsInterpHostOps;
+bool js_eval_source_shortcut(Item code_item, Item* result,
+                             const JsInterpHostOps* host = NULL);
 // allocation-free shared lexer proof: an empty Script has undefined completion.
 bool js_eval_source_is_blank(String* code_str);
 // Execute source in a module-private slab. `strict` distinguishes the
@@ -95,7 +91,6 @@ struct Activation;
 extern "C" Item js_interp_generator_body(Activation* self, Item generator);
 extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
-extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);
 
 // A dynamic-source client supplies its own value semantics while sharing the
@@ -180,7 +175,7 @@ struct JsInterpHostCaller {
 };
 enum JsInterpLookupKind : uint8_t {
     JS_INTERP_LOOKUP_OUTER, JS_INTERP_LOOKUP_SLOT,
-    JS_INTERP_LOOKUP_EVAL, JS_INTERP_LOOKUP_ARGUMENTS
+    JS_INTERP_LOOKUP_EVAL, JS_INTERP_LOOKUP_ARGUMENTS, JS_INTERP_LOOKUP_OBJECT
 };
 struct JsInterpLookup {
     JsInterpLookupKind kind;
@@ -196,7 +191,7 @@ struct JsInterpHostReference {
 enum JsInterpHostReferenceOperation {
     JS_INTERP_REFERENCE_RESOLVE, JS_INTERP_REFERENCE_GET,
     JS_INTERP_REFERENCE_SET, JS_INTERP_REFERENCE_DELETE,
-    JS_INTERP_REFERENCE_TYPEOF
+    JS_INTERP_REFERENCE_TYPEOF, JS_INTERP_REFERENCE_RECEIVER
 };
 JsInterpEnv* js_interp_env_create(NameScope*, JsInterpEnv*);
 Item js_interp_initialize_body_vars(JsInterpEnv* body, JsInterpEnv* parameters);

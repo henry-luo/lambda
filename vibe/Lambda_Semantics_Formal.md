@@ -602,7 +602,7 @@ model.
 
 #### C2.4 Errors have no truth value (2026-10-16) — supersedes the error part of C2
 
-**Decision (USER); implementation pending.** Under **S3.1v2–S3.5**, the ordinary
+**Decision (USER); logical core implemented 2026-10-16.** Under **S3.1v2–S3.5**, the ordinary
 falsy values are `null`, `false`, and `""`. Errors are neither truthy nor falsy.
 When `and`, `or`, `not`, or an `if` expression must inspect an error, that
 expression yields the same error instead of selecting a successful value.

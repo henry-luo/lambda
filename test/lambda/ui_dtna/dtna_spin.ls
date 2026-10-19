@@ -27,10 +27,10 @@ let authored = ui.render(ui.spin({size:'large',percent:25,indicator:custom})^);
     ["fullscreen section",contains((ui.render(ui.spin({fullscreen:true})^)).class,"dtna-spin-fullscreen") and content(ui.render(ui.spin({fullscreen:true})^))[0].class == "dtna-spin-section"],
     ["semantic root and section",contains(styled.class,"root-extra") and contains(styled.class,"section-extra") and styled.style == "opacity:0.8;color:red;margin:2px;"],
     ["semantic indicator",content(styled)[0].class == "dtna-spin-indicator indicator-extra" and content(styled)[0].style == "color:green;"],
-    ["invalid flags",(ui.spin({spinning:null}) or null) == null and (ui.spin({fullscreen:1}) or null) == null],
-    ["invalid delay",(ui.spin({delay:-1}) or null) == null and (ui.spin({delay:inf}) or null) == null and (ui.spin({delay:"20"}) or null) == null],
-    ["invalid percent",(ui.spin({percent:nan}) or null) == null and (ui.spin({percent:null}) or null) == null and (ui.spin({percent:'automatic'}) or null) == null],
-    ["invalid size",(ui.spin({size:'giant'}) or null) == null],
-    ["invalid semantic part",(ui.spin({styles:{unknown:"color:red;"}}) or null) == null],
-    ["unknown prop",(ui.spin({unknown:true}) or null) == null]
+    ["invalid flags",((ui.spin({spinning:null}) ^ { null }) or null) == null and ((ui.spin({fullscreen:1}) ^ { null }) or null) == null],
+    ["invalid delay",((ui.spin({delay:-1}) ^ { null }) or null) == null and ((ui.spin({delay:inf}) ^ { null }) or null) == null and ((ui.spin({delay:"20"}) ^ { null }) or null) == null],
+    ["invalid percent",((ui.spin({percent:nan}) ^ { null }) or null) == null and ((ui.spin({percent:null}) ^ { null }) or null) == null and ((ui.spin({percent:'automatic'}) ^ { null }) or null) == null],
+    ["invalid size",((ui.spin({size:'giant'}) ^ { null }) or null) == null],
+    ["invalid semantic part",((ui.spin({styles:{unknown:"color:red;"}}) ^ { null }) or null) == null],
+    ["unknown prop",((ui.spin({unknown:true}) ^ { null }) or null) == null]
 ]

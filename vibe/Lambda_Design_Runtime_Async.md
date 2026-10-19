@@ -159,7 +159,7 @@ D5.1.1v2 names three stack-like mechanisms: the native C stack, the watermarked 
 
 Because each activation's segments are at fixed addresses for its lifetime, interior pointers held by frames (`InterpFrame::slots`, `Rooted<>` homes, MIR frame slots) stay valid across a park. Nothing is copied or re-homed, which keeps D5.1.3 intact.
 
-Stacks are pooled. An activation that returns hands its stack back; a stack that returns to the pool keeps its mapping and is decommitted by the existing `lambda_side_stack_decommit_unused` policy.
+Stacks are pooled. An activation that returns hands its stack back to the process-wide pool, bounded at 32 mappings. Idle mappings have no live root range. **D1.3v3, D5.1.1v3, D5.3:** the 2026-10-18 implementation batches idle-page trimming at collections, preserving the retained-first acquisition order and one warm idle mapping. Other mappings are reclaimed before reuse after trimming; teardown releases the pool. Between collections, retained usable storage is bounded by 96 MiB, committed on touch. This policy does not alter parked-stack compaction (RA13) or owner tracing (RA15). Final release, forced-GC, benchmark and integration results, including known baseline failures and retry-only cases, are recorded in [JS MVP §36.6](jube/JS_MVP_Lmd.md#366-jq-generator-stack-reuse).
 
 **RA3.** A parked activation contributes exactly one root range to a collection: its root-stack segment, traced through the carrier. Parked native stacks and number segments are never scanned.
 

@@ -1,24 +1,24 @@
 {
   "schema_version": 1,
-  "description": "D2.4.3/D8.2.3: Number-proven JS binary operations use the shared F64 plan; an incomplete proof stays on the boxed semantic helper.",
+  "description": "D2.4.3, D8.2.3: proven Number arithmetic remains native F64; a partial value retains ToPrimitive and string concatenation.",
   "checks": [
     {
-      "in_func": "_js_nativeNumberLoop_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
         "dadd",
-        "dlt",
+        "\tlt\t",
         "deq"
       ],
       "forbid": [
         "call\tjs_add",
-        "call\tjs_compare",
-        "call\tjs_strict_equal"
+        "call\tmvp_lmd_to_primitive"
       ]
     },
     {
-      "in_func": "_js_partialNumber_#_body",
+      "in_func": "mvp_lmd_f3",
       "expect": [
-        "call\tjs_add"
+        "call\tmvp_lmd_to_primitive",
+        "call\tmvp_lmd_string_concat"
       ]
     }
   ]

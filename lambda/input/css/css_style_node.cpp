@@ -48,15 +48,18 @@ static bool css_revert_can_use_origin(const CssDeclaration* revert_decl,
         case CSS_ORIGIN_USER:
             return candidate->origin == CSS_ORIGIN_USER_AGENT;
         case CSS_ORIGIN_AUTHOR:
+        case CSS_ORIGIN_AUTHOR_HINT:
             return candidate->origin == CSS_ORIGIN_USER_AGENT ||
                 candidate->origin == CSS_ORIGIN_USER;
         case CSS_ORIGIN_ANIMATION:
             return candidate->origin == CSS_ORIGIN_USER_AGENT ||
                 candidate->origin == CSS_ORIGIN_USER ||
+                candidate->origin == CSS_ORIGIN_AUTHOR_HINT ||
                 candidate->origin == CSS_ORIGIN_AUTHOR;
         case CSS_ORIGIN_TRANSITION:
             return candidate->origin == CSS_ORIGIN_USER_AGENT ||
                 candidate->origin == CSS_ORIGIN_USER ||
+                candidate->origin == CSS_ORIGIN_AUTHOR_HINT ||
                 candidate->origin == CSS_ORIGIN_AUTHOR ||
                 candidate->origin == CSS_ORIGIN_ANIMATION;
     }
@@ -688,11 +691,11 @@ static int css_get_cascade_level(const CssDeclaration* decl) {
         // Important declarations (reverse origin order)
         // Note: Inline !important is still author !important but with inline_style flag
         switch (decl->origin) {
-            case CSS_ORIGIN_USER_AGENT: return 8;
-            case CSS_ORIGIN_USER: return 7;
-            case CSS_ORIGIN_AUTHOR: return 6;
-            case CSS_ORIGIN_ANIMATION: return 5; // Animations don't typically have !important
-            case CSS_ORIGIN_TRANSITION: return 5; // Transitions don't have !important
+            case CSS_ORIGIN_USER_AGENT: return 9;
+            case CSS_ORIGIN_USER: return 8;
+            case CSS_ORIGIN_AUTHOR: case CSS_ORIGIN_AUTHOR_HINT: return 7;
+            case CSS_ORIGIN_ANIMATION: return 6; // Animations don't typically have !important
+            case CSS_ORIGIN_TRANSITION: return 6; // Transitions don't have !important
         }
     } else {
         // Normal declarations
@@ -705,18 +708,19 @@ static int css_get_cascade_level(const CssDeclaration* decl) {
         
         // Check for inline styles first (part of author origin but higher priority)
         if (decl->origin == CSS_ORIGIN_AUTHOR && decl->specificity.inline_style) {
-            return 4; // Inline styles
+            return 5; // Inline styles
         }
         
         switch (decl->origin) {
             case CSS_ORIGIN_USER_AGENT: return 1;
             case CSS_ORIGIN_USER: return 2;
-            case CSS_ORIGIN_AUTHOR: return 3;
-            case CSS_ORIGIN_ANIMATION: return 5;
-            case CSS_ORIGIN_TRANSITION: return 5;
+            case CSS_ORIGIN_AUTHOR_HINT: return 3;
+            case CSS_ORIGIN_AUTHOR: return 4;
+            case CSS_ORIGIN_ANIMATION: return 6;
+            case CSS_ORIGIN_TRANSITION: return 6;
         }
     }
-    return 3; // Default to author normal
+    return 4; // Default to author normal
 }
 
 // ============================================================================
@@ -961,8 +965,9 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
 static CssDeclaration* style_tree_best_property_candidate(
     StyleTree* style_tree, const CssPropertyCode* sources, size_t source_count,
     const CssDeclaration* ceiling, const CssRollbackFilter* filters,
-    bool authored = false) {
-    CssDeclaration* best = NULL;
+    bool authored = false, CssDeclaration* fallback = NULL) {
+    CssDeclaration* best = css_declaration_cascade_eligible(fallback, ceiling, filters)
+        ? fallback : NULL;
     for (size_t source = 0; source < source_count; source++) {
         AvlNode* entry = avl_tree_search(style_tree->tree, sources[source]);
         StyleNode* node = entry ? (StyleNode*)entry->declaration : NULL;
@@ -984,7 +989,7 @@ static CssDeclaration* style_tree_best_property_candidate(
         // rollback removes its layer/origin across every source of the component.
         CssRollbackFilter filter = {best, filters};
         return style_tree_best_property_candidate(
-            style_tree, sources, source_count, best, &filter, authored);
+            style_tree, sources, source_count, best, &filter, authored, fallback);
     }
     return best;
 }
@@ -1036,8 +1041,8 @@ void style_tree_init_declaration_cache(StyleTree* tree) {
 }
 
 static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* style_tree,
-        CssPropertyCode property_code, bool authored) {
-    if (!style_tree || !style_tree->tree) return NULL;
+        CssPropertyCode property_code, bool authored, CssDeclaration* fallback = NULL) {
+    if (!style_tree || !style_tree->tree) return fallback;
 
     AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     StyleNode* node = avl_node ? (StyleNode*)avl_node->declaration : NULL;
@@ -1045,18 +1050,18 @@ static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* style_t
         property_code == CSS_PROPERTY_UNICODE_BIDI || property_code == CSS_PROPERTY_CUSTOM ||
         property_code <= 0 || property_code >= CSS_PROPERTY_COUNT) {
         const CssPropertyCode sources[] = {property_code};
-        return authored ? style_tree_best_property_candidate(style_tree, sources, 1,
-            NULL, NULL, true) : style_node_resolve_cascade(node);
+        return authored || fallback ? style_tree_best_property_candidate(style_tree, sources, 1,
+            NULL, NULL, authored, fallback) : style_node_resolve_cascade(node);
     }
 
     CssPropertyCode shorthand = css_property_cascade_shorthand(property_code);
     AvlNode* shorthand_node = shorthand
         ? avl_tree_search(style_tree->tree, shorthand) : NULL;
     AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
-    if (!authored && !all_node && !shorthand_node) return style_node_resolve_cascade(node);
+    if (!authored && !all_node && !shorthand_node && !fallback) return style_node_resolve_cascade(node);
     const CssPropertyCode sources[] = {property_code, CSS_PROPERTY_ALL, shorthand};
     return style_tree_best_property_candidate(style_tree, sources,
-        sizeof(sources) / sizeof(sources[0]), NULL, NULL, authored);
+        sizeof(sources) / sizeof(sources[0]), NULL, NULL, authored, fallback);
 }
 
 static CssDeclaration* style_tree_lookup_declaration(StyleTree* tree,
@@ -1073,6 +1078,12 @@ static CssDeclaration* style_tree_lookup_declaration(StyleTree* tree,
 
 CssDeclaration* style_tree_get_declaration(StyleTree* tree, CssPropertyCode property) {
     return style_tree_lookup_declaration(tree, property, false);
+}
+
+CssDeclaration* style_tree_get_declaration_with_fallback(StyleTree* tree,
+        CssPropertyCode property, CssDeclaration* fallback) {
+    // CSS Cascade 5 §6.5: hints share normal layer/origin rollback, including all.
+    return style_tree_lookup_declaration_uncached(tree, property, false, fallback);
 }
 
 CssDeclaration* style_tree_get_authored_declaration(StyleTree* tree, CssPropertyCode property) {

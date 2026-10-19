@@ -43,11 +43,11 @@ let r3 = process("-10", "1") ^ { ^ }
 // -10 / 1 = -10, which is not positive
 r3.message
 
-// ===== Or default pattern =====
-let safe1 = process("10", "2") or "default"
+// ===== Explicit error default (S7.5.3v2) =====
+let safe1 = process("10", "2") ^ { "default" }
 safe1
 
-let safe2 = process("abc", "1") or "fallback"
+let safe2 = process("abc", "1") ^ { "fallback" }
 safe2;
 
 // ===== expr is error check =====
@@ -66,4 +66,4 @@ wr.source.message
 
 // ===== Batch processing with error handling =====
 let inputs = [["10", "2"], ["abc", "1"], ["20", "0"], ["15", "3"]]
-inputs |> (process(~[0], ~[1]) or "ERROR")
+inputs |> (process(~[0], ~[1]) ^ { "ERROR" })

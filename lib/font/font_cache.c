@@ -556,6 +556,13 @@ FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* st
     return fallback;
 }
 
+FontHandle* font_resolve_fallback_for_codepoint(FontHandle* source,
+        const FontStyleDesc* style, uint32_t codepoint) {
+    if (!source || !style) return NULL;
+    // the captured handle owns the platform fallback origin, even when its style names a UA default.
+    return font_find_codepoint_fallback(source->ctx, style, codepoint, source);
+}
+
 bool font_handle_is_document_font(FontHandle* handle) {
     return handle && handle->is_document_font;
 }

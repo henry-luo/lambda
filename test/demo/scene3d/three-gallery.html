@@ -1,14 +1,31 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Radiant · Three.js crystal garden</title>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="demo.css"><meta charset="utf-8"><title>Crystal garden / Scene3D</title>
 <style>
 body { margin: 0; background: #080f22; color: #e7edff; font-family: sans-serif; }
-header { padding: 24px 32px 8px; } h1 { font-size: 28px; margin: 0 0 8px; }
-p { margin: 0 0 16px; color: #9aaed4; } canvas { display: block; width: 800px; height: 500px; margin: 0 24px; }
-footer { padding: 12px 32px; font-size: 13px; color: #90a3c8; }
-</style></head><body>
+header { padding: 0 0 16px; } h1 { font-size: 28px; margin: 0 0 8px; }
+p { margin: 0 0 16px; color: #9aaed4; } canvas { display: block; width: 100%; max-width: 800px; height: auto; margin: 0; touch-action: none; }
+.garden-controls { display: flex; flex-wrap: wrap; gap: 8px; max-width: 800px; margin-top: 16px; }
+.garden-controls button[aria-pressed="true"] { background: #244a51; border-color: #74ded3; color: #b9fff0; }
+#garden:focus-visible { outline: 2px solid #74ded3; outline-offset: 3px; }
+#garden-help { margin: 12px 0 0; font-size: 12px; line-height: 1.6; max-width: 800px; }
+footer { padding: 16px 0; font-size: 13px; color: #90a3c8; }
+</style></head><body><main class="scene3d-page">
+<nav class="scene3d-breadcrumbs" aria-label="Breadcrumb" data-current="Crystal garden"><a href="index.html">Scene3D</a></nav>
 <header><h1>Crystal garden</h1><p>Three.js 0.186.1 · native WebGL2 · procedural geometry and light</p></header>
-<canvas id="garden" width="800" height="500"></canvas>
+<canvas id="garden" width="800" height="500" tabindex="0" aria-label="Interactive crystal garden" aria-describedby="garden-help"></canvas>
+<div class="garden-controls" role="group" aria-label="Camera controls">
+<button id="orbit-mode" type="button" aria-pressed="true">Orbit</button>
+<button id="pan-mode" type="button" aria-pressed="false">Pan</button>
+<button id="orbit-left" type="button" aria-label="Orbit left">Orbit ←</button>
+<button id="orbit-right" type="button" aria-label="Orbit right">Orbit →</button>
+<button id="tilt-up" type="button" aria-label="Tilt up">Tilt ↑</button>
+<button id="tilt-down" type="button" aria-label="Tilt down">Tilt ↓</button>
+<button id="zoom-in" type="button" aria-label="Zoom in">Zoom +</button>
+<button id="zoom-out" type="button" aria-label="Zoom out">Zoom −</button>
+<button id="reset" type="button">Reset view</button>
+</div>
+<p id="garden-help">Drag to orbit · Pan mode or Shift-drag to move · Scroll to zoom · Arrow keys pan · Shift + arrows tilt · + / − zoom · R resets</p>
 <footer id="status">Loading the unmodified Three.js renderer…</footer>
 <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js"}}</script>
 <script type="module" src="three-gallery.js"></script>
-</body></html>
+</main><script type="module" src="navigation.js"></script></body></html>

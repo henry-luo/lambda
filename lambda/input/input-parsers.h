@@ -61,6 +61,7 @@ struct Html5ParseOptions;
 Element* html5_parse_n(Input* input, const char* html, size_t length,
                         Html5ParseOptions* opts);
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
+// external SVG returns an HTML5 subtree retained by input->root's document model (D2.11.2).
 Element* parse_svg_document(Input* input, const char* svg_source);
 Element* parse_mathml_document(Input* input, const char* source);
 // Standalone XML roots carry their own namespace declarations, including QNames.
@@ -70,6 +71,7 @@ bool xml_document_element_matches(Pool* pool, Element* element, const char* loca
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
 void parse_eps(Input* input, const char* bytes, size_t length);
+void parse_psd(Input* input, const char* bytes, size_t length);
 // Post-processing pass run at the end of parse_pdf(): flattens the page tree
 // into a `pages: [Map]` array on the root and attaches a `to_unicode: Map`
 // field to each Font dict that carries a /ToUnicode CMap stream.

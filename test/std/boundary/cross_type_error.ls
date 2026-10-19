@@ -7,7 +7,7 @@ e is error
 e is string
 e is int
 
-// ===== Error truthiness (falsy) =====
+// ===== Error has no truth value (S3.1v2/S3.5) =====
 if (e) "truthy" else "falsy"
 
 // ===== Error or default =====
@@ -43,7 +43,7 @@ coded is error
 let e3 = error("test")
 let e4 = error("test")
 let e5 = error("other")
-// errors are compared by reference or value
+// S7.9.1: errors classify without participating in value comparison
 e3 is error
 e5 is error
 

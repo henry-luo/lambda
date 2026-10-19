@@ -1,4 +1,5 @@
 #include "radiant_pdf_graphic.hpp"
+#include "radiant_pdf_text.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "radiant_image_job.hpp"
 #include "../../core/collection_storage.h"
@@ -11,7 +12,7 @@
 
 extern "C" Item vmap_new();
 
-Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content) {
+Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content, ScaleMode sampling, float density) {
     RootFrame roots(3);
     Rooted<Item> result(roots, ItemNull), rgb(roots, ItemNull), alpha(roots, ItemNull);
     ImageSurfaceReadScope read_scope;
@@ -19,6 +20,22 @@ Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content) {
     int width = 0, height = 0, stride = 0;
     if (!render_image_resource_pixels(image, placement.width, placement.height, &pixels, &width, &height, &stride) || stride < width)
         return radiant_pdf_error("cannot decode the selected image resource");
+    if (sampling != SCALE_MODE_LINEAR) {
+        // PDF readers choose their own interpolation; resolve authored pixel-preserving sampling first.
+        RdtMatrix scale = rdt_matrix_scale(density, density);
+        Rect viewport = {content.x * density, content.y * density, content.width * density, content.height * density};
+        Rect projected = {}; uint32_t* sampled = nullptr;
+        if (!render_image_project_pixels(pixels, width, height, stride, placement, &scale, viewport,
+                sampling, image->alpha_mode == IMAGE_ALPHA_STRAIGHT, &sampled, &projected))
+            return radiant_pdf_error("cannot prepare selected image sampling");
+        lam::Temp<uint32_t> owned(sampled);
+        if (!sampled) return ItemNull;
+        ImageSurface surface = {};
+        surface.width = (int)projected.width; surface.height = (int)projected.height; // INT_CAST_OK: projected raster extents are bounded integer pixels.
+        surface.pitch = surface.width * 4; surface.pixels = sampled; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        Rect box = {projected.x / density, projected.y / density, projected.width / density, projected.height / density};
+        return radiant_pdf_surface(&surface, box, content);
+    }
     size_t count = 0, bytes = 0;
     if (!math_checked_mul((size_t)width, (size_t)height, &count) ||
             !math_checked_mul(count, 3, &bytes) || bytes > INT64_MAX)
@@ -56,8 +73,7 @@ Item radiant_pdf_surface(ImageSurface* image, Rect placement, Rect content) {
     return result.get();
 }
 
-namespace {
-Item pdf_color(Color color) {
+Item radiant_pdf_color(Color color) {
     RootFrame roots(1);
     Rooted<Item> value(roots, vmap_new());
     const char* names[] = {"r", "g", "b", "a"};
@@ -66,6 +82,7 @@ Item pdf_color(Color color) {
     return value.get();
 }
 
+namespace {
 Item pdf_matrix(const RdtMatrix& matrix) {
     RootFrame roots(1);
     Rooted<Item> value(roots, {.array = array_plain()});
@@ -74,33 +91,48 @@ Item pdf_matrix(const RdtMatrix& matrix) {
     return value.get();
 }
 
-bool pdf_vector_resource(const PaintList*, UiContext*, Rooted<Item>&,
-    const RdtMatrix* = nullptr, Array* = nullptr);
+bool pdf_vector_resource(const PaintList*, UiContext*, Rooted<Item>&, Rooted<Item>&, PdfTextResources*,
+    const RdtMatrix* = nullptr, Array* = nullptr, bool = false, int = 0, int = -1);
 struct PdfSvgResource {
     UiContext* ui;
     Rooted<Item>* paths;
     RdtMatrix matrix;
     Array* clips;
+    Rooted<Item>* error;
+    PdfTextResources* text_resources;
+    bool text_only;
 };
 bool pdf_svg_shapes(PaintList* paint, void* data) {
     PdfSvgResource* source = (PdfSvgResource*)data;
-    return pdf_vector_resource(paint, source->ui, *source->paths, &source->matrix, source->clips);
+    return pdf_vector_resource(paint, source->ui, *source->paths, *source->error, source->text_resources,
+        &source->matrix, source->clips, source->text_only);
 }
 
 // The resource contains independent geometric shapes, with each clip and
 // transform already resolved. It carries no paint opcodes or native pointers.
 bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& paths,
-        const RdtMatrix* initial, Array* parent_clips) {
-    RootFrame roots(4);
+        Rooted<Item>& error, PdfTextResources* text_resources,
+        const RdtMatrix* initial, Array* parent_clips, bool text_only, int begin, int end) {
+    RootFrame roots(7);
     Rooted<Item> clips(roots, {.array = array_plain()}), entry(roots, ItemNull),
-        commands(roots, ItemNull), active_clips(roots, ItemNull);
+        commands(roots, ItemNull), active_clips(roots, ItemNull), text(roots, ItemNull), rect_commands(roots, ItemNull),
+        image(roots, ItemNull);
+    Color rect_color = {};
+    RdtMatrix rect_matrix = rdt_matrix_identity();
+    int64_t rect_clip_count = -1;
     RdtMatrix matrix = initial ? *initial : rdt_matrix_identity();
     int64_t inherited_clips = parent_clips ? parent_clips->length : 0;
     for (int64_t i = 0; i < inherited_clips; i++) array_push(clips.get().array, array_item_read(parent_clips, i));
     lam::ArrayList<RdtMatrix> transforms(MEM_CAT_RENDER);
-    for (int index = 0; index < paint->item_count(); index++) {
+    if (end < 0) end = paint->item_count();
+    for (int index = begin; index < end; index++) {
         const PaintCmd& command = paint->data()[index];
         if (paint_op_has_flags(command.op, PAINT_OP_FLAG_RASTER_NOOP)) continue;
+        bool rectangle = command.op == PAINT_FILL_RECT || (command.op == PAINT_FILL_ROUNDED_RECT &&
+            command.fill_rounded_rect.rx == 0 && command.fill_rounded_rect.ry == 0);
+        bool scope = command.op == PAINT_PUSH_TRANSFORM || command.op == PAINT_POP_TRANSFORM ||
+            command.op == PAINT_PUSH_CLIP || command.op == PAINT_POP_CLIP;
+        if (!rectangle && !scope) rect_commands.set(ItemNull);
         if (command.op == PAINT_PUSH_TRANSFORM) {
             if (!transforms.push_back(matrix)) return false;
             matrix = rdt_matrix_multiply(&matrix, &command.push_transform.transform);
@@ -128,15 +160,48 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
             continue;
         }
         if (command.op == PAINT_SVG_SUBSCENE) {
-            PdfSvgResource source = {ui, &paths, matrix, clips.get().array};
-            if (!render_svg_subscene_with_paint(&command.svg_subscene, pdf_svg_shapes, &source, false)) return false;
+            PdfSvgResource source = {ui, &paths, matrix, clips.get().array, &error, text_resources, text_only};
+            if (!render_svg_subscene_with_paint(&command.svg_subscene, pdf_svg_shapes, &source, false, true,
+                    text_resources ? &text_resources->contexts : nullptr)) return false;
             continue;
         }
+        if (command.op == PAINT_BEGIN_EFFECT_GROUP && !text_only) {
+            const PaintEffectGroup& group = command.effect_group;
+            if (group.filter || group.backdrop || group.backdrop_filter || group.shadow ||
+                    group.mask.gradient || group.blend_mode || group.has_transform || group.has_clip) return false;
+            int stop = index + 1, depth = 1;
+            for (; stop < end; stop++) {
+                if (paint->data()[stop].op == PAINT_BEGIN_EFFECT_GROUP) depth++;
+                if (paint->data()[stop].op == PAINT_END_EFFECT_GROUP && --depth == 0) break;
+            }
+            if (stop == end) return false;
+            commands.set({.array = array_plain()});
+            if (!pdf_vector_resource(paint, ui, commands, error, text_resources, &matrix, clips.get().array,
+                    false, index + 1, stop)) return false;
+            entry.set(vmap_new());
+            radiant_rooted_obj_set(entry, "group", commands.get());
+            radiant_rooted_obj_set(entry, "opacity", push_d(group.opacity));
+            active_clips.set({.array = array_plain()});
+            PaintList body;
+            Bound ink = {};
+            if (!paint_list_borrow_range(&body, paint, index + 1, stop) ||
+                    !render_paint_ink_bounds(&body, &matrix, &ink)) return false;
+            // layout bounds omit overflowing glyph/decorative ink; a PDF form clips to its BBox.
+            const float bounds[] = {floorf(fminf(group.bounds.left, ink.left)), floorf(fminf(group.bounds.top, ink.top)),
+                ceilf(fmaxf(group.bounds.right, ink.right)), ceilf(fmaxf(group.bounds.bottom, ink.bottom))};
+            for (float value : bounds) array_push(active_clips.get().array, push_d(value));
+            radiant_rooted_obj_set(entry, "bounds", active_clips.get());
+            array_push(paths.get().array, entry.get());
+            index = stop; continue;
+        }
+        if (text_only && command.op != PAINT_GLYPH_RUN) continue;
         RdtPath* owned = nullptr;
         const RdtPath* path = nullptr;
         Color color = {};
         RdtMatrix placed = matrix;
         const PaintStrokePath* stroke = nullptr;
+        text.set(ItemNull); image.set(ItemNull);
+        float opacity = 1.0f;
         RdtFillRule rule = RDT_FILL_WINDING;
         switch (command.op) {
         case PAINT_FILL_RECT: {
@@ -160,20 +225,62 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
             if (stroke->has_transform) placed = rdt_matrix_multiply(&matrix, &stroke->transform);
             break;
         case PAINT_GLYPH_RUN:
-            owned = render_path_create_paint_glyph_run(&command.glyph_run, ui ? ui->font_ctx.get() : nullptr);
-            path = owned; color = command.glyph_run.color;
+            text.set(radiant_pdf_text(&command.glyph_run, ui, text_resources));
+            if (get_type_id(text.get()) == LMD_TYPE_ERROR) { error.set(text.get()); return false; }
+            color = command.glyph_run.color;
             if (command.glyph_run.has_transform) placed = rdt_matrix_multiply(&matrix, &command.glyph_run.transform);
             break;
+        case PAINT_DRAW_IMAGE_RESOURCE: {
+            const PaintDrawImageResource& picture = command.draw_image_resource;
+            Rect box = {picture.dst_x, picture.dst_y, picture.dst_w, picture.dst_h};
+            image.set(radiant_pdf_surface(picture.image, box, box));
+            opacity = picture.opacity / 255.0f;
+            if (picture.has_transform) placed = rdt_matrix_multiply(&matrix, &picture.transform);
+            break;
+        }
+        case PAINT_DRAW_IMAGE: {
+            const PaintDrawImage& picture = command.draw_image;
+            ImageSurface surface = {};
+            surface.width = picture.src_w; surface.height = picture.src_h;
+            surface.pitch = picture.src_stride * 4; surface.pixels = (void*)picture.pixels.get();
+            surface.alpha_mode = picture.resource_owner ? picture.resource_owner->alpha_mode : IMAGE_ALPHA_PREMULTIPLIED;
+            Rect box = {picture.dst_x, picture.dst_y, picture.dst_w, picture.dst_h};
+            image.set(radiant_pdf_surface(&surface, box, box, picture.scale_mode, ui_context_raster_scale(ui)));
+            opacity = picture.opacity / 255.0f;
+            if (picture.has_transform) placed = rdt_matrix_multiply(&matrix, &picture.transform);
+            break;
+        }
         default: return false;
         }
         struct PathCleanup { RdtPath* path; ~PathCleanup() { if (path) rdt_path_free(path); } } cleanup = {owned};
-        if (!path) return false;
-        RdtMatrix identity = rdt_matrix_identity();
-        commands.set(radiant_pdf_path_array(path, &identity));
-        if (get_type_id(commands.get()) == LMD_TYPE_ERROR) return false;
+        if (get_type_id(image.get()) == LMD_TYPE_ERROR) { error.set(image.get()); return false; }
+        if (!path && get_type_id(text.get()) == LMD_TYPE_NULL && get_type_id(image.get()) == LMD_TYPE_NULL) return false;
         entry.set(vmap_new());
-        radiant_rooted_obj_set(entry, "commands", commands.get());
-        radiant_rooted_obj_set(entry, "color", pdf_color(color));
+        // retain intrinsic image samples instead of resampling a whole graphic snapshot.
+        if (get_type_id(image.get()) != LMD_TYPE_NULL) {
+            radiant_rooted_obj_set(entry, "image", image.get());
+            radiant_rooted_obj_set(entry, "opacity", push_d(opacity));
+        } else if (get_type_id(text.get()) != LMD_TYPE_NULL) radiant_rooted_obj_set(entry, "text", text.get());
+        else {
+            RdtMatrix identity = rdt_matrix_identity();
+            commands.set(radiant_pdf_path_array(path, &identity));
+            if (get_type_id(commands.get()) == LMD_TYPE_ERROR) return false;
+            // union adjacent opaque same-color rectangles before edge antialiasing;
+            // overlapping primitives must not compound coverage inside opacity forms.
+            if (rectangle && color.a == 255) {
+                if (get_type_id(rect_commands.get()) == LMD_TYPE_ARRAY && rect_color.c == color.c &&
+                        rect_clip_count == 0 && clips.get().array->length == 0 &&
+                        !memcmp(&rect_matrix, &placed, sizeof(placed))) {
+                    for (int64_t i = 0; i < commands.get().array->length; i++)
+                        array_push(rect_commands.get().array, array_item_read(commands.get().array, i));
+                    continue;
+                }
+                rect_commands.set(commands.get()); rect_color = color;
+                rect_matrix = placed; rect_clip_count = clips.get().array->length;
+            } else rect_commands.set(ItemNull);
+            radiant_rooted_obj_set(entry, "commands", commands.get());
+        }
+        radiant_rooted_obj_set(entry, "color", radiant_pdf_color(color));
         radiant_rooted_obj_set(entry, "matrix", pdf_matrix(placed));
         radiant_rooted_obj_set(entry, "stroke", {.item = b2it(stroke != nullptr)});
         radiant_rooted_obj_set(entry, "evenodd", {.item = b2it(rule == RDT_FILL_EVEN_ODD)});
@@ -198,14 +305,21 @@ bool pdf_vector_resource(const PaintList* paint, UiContext* ui, Rooted<Item>& pa
 } // namespace
 
 Item radiant_pdf_graphic(const PaintList* paint, UiContext* ui, Bound bounds,
-        float viewport_width, float viewport_height, DisplayList* backdrop, const RdtMatrix* transform) {
+        float viewport_width, float viewport_height, DisplayList* backdrop, const RdtMatrix* transform,
+        PdfTextResources* text_resources) {
     if (!paint || !ui) return radiant_pdf_error("graphic helper requires a live native resource");
-    RootFrame roots(2);
-    Rooted<Item> result(roots, vmap_new()), paths(roots, {.array = array_plain()});
-    if (pdf_vector_resource(paint, ui, paths)) {
+    RootFrame roots(3);
+    Rooted<Item> result(roots, vmap_new()), paths(roots, {.array = array_plain()}), error(roots, ItemNull);
+    if (pdf_vector_resource(paint, ui, paths, error, text_resources)) {
         radiant_rooted_obj_set(result, "paths", paths.get());
         return result.get();
     }
+    if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
+    // pixel-only effects keep an invisible semantic text layer over the capture.
+    paths.set({.array = array_plain()});
+    if (!pdf_vector_resource(paint, ui, paths, error, text_resources, nullptr, nullptr, true))
+        return get_type_id(error.get()) == LMD_TYPE_ERROR ? error.get() : radiant_pdf_error("cannot retain raster-effect text");
+    radiant_rooted_obj_set(result, "texts", paths.get());
     RdtMatrix inverse = rdt_matrix_identity();
     ImageSurface* surface = nullptr;
     Rect placement = {};

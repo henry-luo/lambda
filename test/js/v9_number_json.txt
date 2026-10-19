@@ -3,6 +3,8 @@ isInteger 5.5: false
 isFinite 42: true
 isNaN 42: false
 isSafe 42: true
+json wide number: number true
+json negative zero: true
 host int64 typeof: bigint
 host int64 ctor: true
 host int64 isInteger: false

@@ -14,8 +14,8 @@ let empty = ui.render(ui.empty({description:"No records"})^)
 let progress = ui.render(ui.progress({percent:125})^);
 [[for (model in models) name(ui.render(model))],
     content(content(empty)[1])[0],progress["aria-valuenow"],
-    (ui.title({level:6}) or null) == null,
-    (ui.col({span:25}) or null) == null,
-    (ui.select({options:[{value:1},{value:"1"}]}) or null) == null,
-    (ui.page("body",{unknown:true}) or null) == null,
-    (ui.text({variant:'primary'},"text") or null) == null]
+    ((ui.title({level:6}) ^ { null }) or null) == null,
+    ((ui.col({span:25}) ^ { null }) or null) == null,
+    ((ui.select({options:[{value:1},{value:"1"}]}) ^ { null }) or null) == null,
+    ((ui.page("body",{unknown:true}) ^ { null }) or null) == null,
+    ((ui.text({variant:'primary'},"text") ^ { null }) or null) == null]

@@ -12,6 +12,7 @@
 #include "../lib/image.h"
 #include "../lib/str.h"
 #include "../lib/tagged.hpp"
+#include "radiant_render_test_utils.hpp"
 #include <math.h>
 
 TEST(MapCamera, AnalyticWorldAndBearingRoundTripAtFractionalZoom) {
@@ -80,14 +81,7 @@ protected:
         ASSERT_NE(viewport, nullptr);
     }
     void pixel(unsigned x, unsigned y, unsigned r, unsigned g, unsigned b, unsigned tolerance = 2) {
-        ASSERT_NE(ui.surface, nullptr);
-        ASSERT_LT(x, (unsigned)ui.surface->width); ASSERT_LT(y, (unsigned)ui.surface->height);
-        const uint8_t* p = (const uint8_t*)ui.surface->pixels + y * ui.surface->pitch + x * 4;
-        const unsigned expected[] = {r,g,b};
-        for (unsigned channel = 0; channel < 3; channel++) {
-            unsigned difference = p[channel] > expected[channel] ? p[channel] - expected[channel] : expected[channel] - p[channel];
-            EXPECT_LE(difference, tolerance) << "pixel " << x << "," << y << " channel " << channel;
-        }
+        test_radiant_expect_surface_pixel(ui.surface, x, y, r, g, b, tolerance);
     }
     void click(DomElement* target) {
         ASSERT_NE(target,nullptr);

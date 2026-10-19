@@ -7,7 +7,7 @@ pub pn copy(host, edit_context) {
     let token = edit_context.token;
     let text = dom.edit_selection_text(host, token);
     let html = dom.edit_selection_html(host, token);
-    if (text == null or len(text) == 0) false
+    if ((text == null or len(text) == 0) and (html == null or len(html) == 0)) false
     else dom.edit_clipboard_write(host, token, html, text)
 }
 

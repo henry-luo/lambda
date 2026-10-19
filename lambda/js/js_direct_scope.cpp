@@ -326,6 +326,9 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
         // FunctionDeclarationInstantiation replaces an existing parameter or
         // var carrier with the hoisted function before body statements run.
         lexical->node = (AstNode*)function;
+        if (lexical->scope && function->name->len == 9 &&
+                memcmp(function->name->chars, "arguments", 9) == 0)
+            lexical->scope->has_implicit_arguments = false;
         return;
     }
     if (scope_type != JS_SCOPE_BLOCK || !lexical || !lexical->is_lexical) return;
@@ -514,6 +517,7 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
         return;
     }
     scope->strict = parent ? parent->strict : tp->strict_mode;
+    scope->has_implicit_arguments = function->node_type != AST_NODE_ARROW_FUNC;
     if (function->has_use_strict_directive) scope->strict = true;
     function->vars = scope;
     js_scope_push(tp, scope);
@@ -525,6 +529,10 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
             parameter = parameter->next) {
         direct_bind_pattern(tp, parameter, JS_VAR_VAR, NULL, true, false);
     }
+    for (NameEntry* entry = scope->first; entry; entry = entry->next)
+        if (entry->is_parameter && entry->name->len == 9 &&
+                memcmp(entry->name->chars, "arguments", 9) == 0)
+            scope->has_implicit_arguments = false;
     for (JsAstNode* parameter = (JsAstNode*)function->params; parameter;
             parameter = parameter->next) {
         // Defaults are evaluated in the parameter environment, before the

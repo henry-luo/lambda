@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body { margin:0; font:10px/20px Ahem; }
+@font-face { font-family:Ahem; src:url("../layout/data/font/Ahem.ttf"); }
+.case { width:240px; margin-bottom:10px; }
+table { width:200px; border-collapse:collapse; border-spacing:0; }
+td { padding:5px; vertical-align:top; background:#eee; }
+p, .empty { margin:0; }
+.solid { height:40px; width:50px; background:blue; }
+.flex { display:flex; align-items:center; justify-content:center; }
+.separate { border-collapse:separate; }
+</style></head><body id="result">
+<section class="case"><table id="ordinary" class=""><tr><td id="ordinary-cell"><p style="margin-bottom:16px"></p><p class="solid" style="margin-bottom:16px"></p><p id="ordinary-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="flex" class="flex"><tr><td id="flex-cell"><p style="margin-bottom:16px"></p><p class="solid" style="margin-bottom:16px"></p><p id="flex-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="leading" class=""><tr><td id="leading-cell"><p style="margin-bottom:16px"></p><p class="solid" style="margin-bottom:0px"></p></td></tr></table></section>
+<section class="case"><table id="trailing" class=""><tr><td id="trailing-cell"><p class="solid" style="margin-bottom:16px"></p><p id="trailing-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="no-empty" class=""><tr><td id="no-empty-cell"><p class="solid" style="margin-bottom:16px"></p></td></tr></table></section>
+<section class="case"><table id="tail-larger" class=""><tr><td id="tail-larger-cell"><p class="solid" style="margin-bottom:16px"></p><p id="tail-larger-tail" class="empty" style="margin-top:0px;margin-bottom:24px;"></p></td></tr></table></section>
+<section class="case"><table id="tail-smaller" class=""><tr><td id="tail-smaller-cell"><p class="solid" style="margin-bottom:16px"></p><p id="tail-smaller-tail" class="empty" style="margin-top:4px;margin-bottom:8px;"></p></td></tr></table></section>
+<section class="case"><table id="negative" class=""><tr><td id="negative-cell"><p class="solid" style="margin-bottom:16px"></p><p id="negative-tail" class="empty" style="margin-top:-8px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="mixed-chain" class=""><tr><td id="mixed-chain-cell"><p class="solid" style="margin-bottom:16px"></p><p id="mixed-first-tail" class="empty" style="margin-top:-8px;margin-bottom:24px;"></p><p id="mixed-chain-tail" class="empty" style="margin-top:-20px;margin-bottom:4px;"></p></td></tr></table></section>
+<section class="case"><table id="leading-negative" class=""><tr><td id="leading-negative-cell"><p id="leading-negative-tail" class="empty" style="margin-top:-8px;margin-bottom:-4px;"></p><p class="solid" style="margin-top:16px"></p></td></tr></table></section>
+<section class="case"><table id="all-empty" class=""><tr><td id="all-empty-cell"><p id="all-first-tail" class="empty" style="margin-top:0px;margin-bottom:16px;"></p><p id="all-empty-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="all-empty-mixed" class=""><tr><td id="all-empty-mixed-cell"><p id="all-mixed-first-tail" class="empty" style="margin-top:-8px;margin-bottom:24px;"></p><p id="all-empty-mixed-tail" class="empty" style="margin-top:-20px;margin-bottom:4px;"></p></td></tr></table></section>
+<section class="case"><table id="nested" class=""><tr><td id="nested-cell"><p class="solid" style="margin-bottom:16px"></p><div class="empty"><p id="nested-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></div></td></tr></table></section>
+<section class="case"><table id="barrier" class=""><tr><td id="barrier-cell"><p class="solid" style="margin-bottom:16px"></p><p id="barrier-tail" class="empty" style="margin-top:4px;margin-bottom:8px;border-top:1px solid green;"></p></td></tr></table></section>
+<section class="case"><table id="min-height" class=""><tr><td id="min-height-cell"><p class="solid" style="margin-bottom:16px"></p><p id="min-height-tail" class="empty" style="margin-top:4px;margin-bottom:8px;min-height:1px;"></p></td></tr></table></section>
+<section class="case"><table id="relative" class=""><tr><td id="relative-cell"><p class="solid" style="margin-bottom:16px"></p><p id="relative-tail" class="empty" style="margin-top:0px;margin-bottom:0px;position:relative;top:10px;"></p></td></tr></table></section>
+<section class="case"><table id="separate" class="separate"><tr><td id="separate-cell"><p class="solid" style="margin-bottom:16px"></p><p id="separate-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="zero" class=""><tr><td id="zero-cell"><p class="solid" style="margin-bottom:0px"></p><p id="zero-tail" class="empty" style="margin-top:0px;margin-bottom:0px;"></p></td></tr></table></section>
+<section class="case"><table id="mixed-float"><tr><td id="mixed-float-cell"><div style="float:left;width:30px;height:80px;background:green"></div><p class="solid" style="margin-bottom:16px"></p><p class="empty"></p></td></tr></table></section>
+<section class="case"><table id="aligned-float"><tr><td id="aligned-float-cell" style="vertical-align:middle"><div style="float:left;width:30px;height:80px;background:green"></div><p class="solid" style="margin-bottom:16px"></p><p class="empty"></p></td><td><div style="height:120px;width:50px"></div></td></tr></table></section>
+</body></html>

@@ -207,7 +207,7 @@ pub fn measure_columns(content, columns) {
 pub fn render_table_cell(cell, profile, style = null) {
     let text = util.text_of(cell)
     let parts = cell_parts(text, profile)
-    if (profile.error != null) <td util.unsupported_element("siunitx", profile.error, profile.offset)>
+    if (not (profile.error is null)) <td util.unsupported_element("siunitx", profile.error, profile.offset)>
     else if (parts == null)
         <td util.unsupported_element("siunitx", "S column requires a number", profile.offset)>
     else if (profile.separator != null and trim(text) == "") <td style: style>

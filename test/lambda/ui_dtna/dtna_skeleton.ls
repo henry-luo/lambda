@@ -20,7 +20,7 @@ let section = content(detailed)[1];
     ["standalone button",contains(content(button)[0].style,"width:100%;height:40px;")],
     ["standalone image",name(content(content(image)[0])[0]) == 'svg'],
     ["custom node",content(content(node)[0])[0] == "Chart"],
-    ["invalid options",(ui.skeleton({paragraph:{rows:-1}}) or null) == null and (ui.skeleton({avatar:{bad:1}}) or null) == null and (ui.skeleton({title:1}) or null) == null],
-    ["invalid dimensions",(ui.skeleton_input({width:-1}) or null) == null and (ui.skeleton_avatar({dimension:0}) or null) == null],
-    ["invalid flags",(ui.skeleton({active:1}) or null) == null and (ui.skeleton_button({block:1}) or null) == null]
+    ["invalid options",((ui.skeleton({paragraph:{rows:-1}}) ^ { null }) or null) == null and ((ui.skeleton({avatar:{bad:1}}) ^ { null }) or null) == null and ((ui.skeleton({title:1}) ^ { null }) or null) == null],
+    ["invalid dimensions",((ui.skeleton_input({width:-1}) ^ { null }) or null) == null and ((ui.skeleton_avatar({dimension:0}) ^ { null }) or null) == null],
+    ["invalid flags",((ui.skeleton({active:1}) ^ { null }) or null) == null and ((ui.skeleton_button({block:1}) ^ { null }) or null) == null]
 ]

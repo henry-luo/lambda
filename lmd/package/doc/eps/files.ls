@@ -11,7 +11,7 @@ pub pn read_bytes(var m, value, kind, count) map^ {
     let remaining = m.limits.max_decoded_bytes - m.decoded_bytes
     let budget = obj.require(m, remaining > 0, "limitcheck: decoded bytes")^
     let result = ps_read(stream.source, stream.offset, {kind: kind, count: count, end: stream.end, limit: remaining})
-    let checked = obj.require(m, result is map and result.error == null, if (result is map) result.error else "ioerror: byte reader")^
+    let checked = obj.require(m, result is map and result.error is null, if (result is map) result.error else "ioerror: byte reader")^
     m.heap[value.id].value.offset = result.next
     m.decoded_bytes = m.decoded_bytes + len(result.bytes)
     return result

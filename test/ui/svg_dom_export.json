@@ -1,0 +1,85 @@
+{
+  "name": "SVG DOM save preserves the edited tree and references",
+  "html": "test/ui/svg_dom_export.html",
+  "viewport": {
+    "width": 200,
+    "height": 100
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('removed').remove();let r=document.getElementById('edited');r.setAttribute('width','50');r.style.setProperty('fill','url(#ink)');document.getElementById('caption').textContent='edited & saved';let c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.id='inserted';c.setAttribute('cx','110');c.setAttribute('cy','30');c.setAttribute('r','15');c.setAttribute('fill','lime');document.getElementById('drawing').appendChild(c);\ntrue;"
+    },
+    {
+      "type": "render",
+      "target": {
+        "selector": "#drawing"
+      },
+      "file": "temp/svg_enhancement/edited.svg"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/svg_enhancement/edited.svg",
+      "contains": "id=\"inserted\""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/svg_enhancement/edited.svg",
+      "contains": "edited &amp; saved"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/svg_enhancement/edited.svg",
+      "contains": "#ink"
+    },
+    {
+      "type": "navigate",
+      "url": "../../temp/svg_enhancement/edited.svg"
+    },
+    {
+      "type": "assert_count",
+      "equals": 0,
+      "target": {
+        "selector": "#removed"
+      }
+    },
+    {
+      "type": "assert_count",
+      "equals": 1,
+      "target": {
+        "selector": "#inserted"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edited"
+      },
+      "attribute": "width",
+      "equals": "50"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 3
+    }
+  ]
+}

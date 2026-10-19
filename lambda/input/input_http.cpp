@@ -594,13 +594,21 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     HttpFetchHeaderContext header_context = {
         response, config ? config->cookie_jar : NULL, curl, url
     };
+    // the download callback owns a ByteBuilder, not the FetchResponse layout.
+    HttpResponse capture = {};
+    capture.max_bytes = config ? config->max_response_bytes : 0;
+    if (!byte_builder_init(&capture.body, 0, MEM_CAT_INPUT_OTHER, true)) {
+        free_fetch_response(response);
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
 
     CURLcode res;
 
     // Basic configuration
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &capture);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_context);
     cookie_jar_import_curl(header_context.cookie_jar, curl);
@@ -640,7 +648,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     // Other configuration
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, config ? config->timeout_seconds : default_http_config.timeout_seconds);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, config && config->max_redirects == 0 ? 0L : 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, config ? config->user_agent : default_http_config.user_agent);
 
     // SSL/TLS configuration
@@ -669,11 +677,14 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
 
     if (res != CURLE_OK) {
         log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
+        byte_builder_destroy(&capture.body);
         free_fetch_response(response);
         curl_easy_cleanup(curl);
         if (headers) curl_slist_free_all(headers);
         return NULL;
     }
+
+    response->data = (char*)byte_builder_take(&capture.body, &response->size);
 
     // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);

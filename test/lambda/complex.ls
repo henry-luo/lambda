@@ -22,4 +22,4 @@ fn reflect(value: complex) complex { conj(value) }
 reflect(2 + 3j)
 
 '=== format refuses complex outside mark ===';
-[format({a: 1, b: [2, <x c: 3j>]}, 'json') or 'refused', format([2 + 3j], 'mark')]
+[format({a: 1, b: [2, <x c: 3j>]}, 'json') ^ { 'refused' }, format([2 + 3j], 'mark')]

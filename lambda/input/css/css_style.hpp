@@ -890,6 +890,15 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_STRING_SET,
     CSS_PROPERTY_FOOTNOTE_POLICY,
 
+    // SVG shape geometry appends standard dispatch keys before the custom sentinel.
+    CSS_PROPERTY_X,
+    CSS_PROPERTY_Y,
+    CSS_PROPERTY_CX,
+    CSS_PROPERTY_CY,
+    CSS_PROPERTY_R,
+    CSS_PROPERTY_RX,
+    CSS_PROPERTY_RY,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
@@ -1206,7 +1215,8 @@ typedef enum CssOrigin {
     CSS_ORIGIN_USER,          // User stylesheet
     CSS_ORIGIN_AUTHOR,        // Document stylesheet
     CSS_ORIGIN_ANIMATION,     // CSS animations
-    CSS_ORIGIN_TRANSITION     // CSS transitions
+    CSS_ORIGIN_TRANSITION,    // CSS transitions
+    CSS_ORIGIN_AUTHOR_HINT   // HTML presentation; part of author origin for revert
 } CssOrigin;
 
 typedef void (*CssDeclarationPayloadRetainFn)(void* owner);
@@ -1905,6 +1915,7 @@ bool css_cursor_value_parse(const CssValue* value, CssEnum* fallback,
 uint8_t css_intrinsic_size_axes(CssPropertyCode property, bool vertical);
 bool css_property_is_svg_paint(CssPropertyCode id);
 bool css_property_is_svg_resource(CssPropertyCode id);
+bool css_property_is_svg_geometry(CssPropertyCode id);
 bool css_property_is_svg_presentation(CssPropertyCode id);
 bool css_property_is_svg_opacity(CssPropertyCode id);
 bool css_property_is_svg_length(CssPropertyCode id);

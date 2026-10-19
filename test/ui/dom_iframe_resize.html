@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body { margin: 12px; font: 14px sans-serif; }
+.box { display: flex; width: 260px; height: 190px; margin: 8px 0; }
+iframe { display: block; width: 100%; height: 100%; border: 2px solid #778899; box-sizing: border-box; }
+</style></head><body>
+<div class="box"><iframe id="async-html" src="fixtures/iframe-resize-child.html"></iframe></div>
+<div class="box"><iframe id="async-md" src="../demo/finder/tests/fixtures/Preview%20%23%20%C3%BC.md"></iframe></div>
+<div class="box"><iframe id="inline" srcdoc='<style>body{margin:0}main{width:100vw;height:50vh}</style><main id="sized">Inline document</main>'></iframe></div>
+<div class="box"><iframe id="async-lambda" src="fixtures/_iframe-resize-child.ls"></iframe></div>
+<script>void 0;</script></body></html>

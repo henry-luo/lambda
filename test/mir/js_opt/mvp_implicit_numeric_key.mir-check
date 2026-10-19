@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.4, D8.2.6v2: the closed write inventory admits an unresolved numeric global as an array key. Keep native index stores without general indexed-property dispatch or a string-to-number key round trip.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "expect": [
+        "call\tmvp_lmd_array_store"
+      ],
+      "forbid": [
+        "call\tmvp_lmd_array_index_property",
+        "call\tmvp_lmd_string_to_number"
+      ],
+      "count": {
+        "call\tmvp_lmd_array_store": 1
+      }
+    }
+  ]
+}

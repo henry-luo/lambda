@@ -25,7 +25,6 @@ let normalized = normalize.normalize(source)
 let html = transform.to_html(source)
 let html_nodes = children(html, "node")
 let html_annotations = children(html, "annotation")
-let installed = transform.install()
 let rendered = transform.render_scene(source, 900, 650)
 let scene_nodes = children(rendered.scene, "node")
 let scene_edges = children(rendered.scene, "edge")
@@ -49,7 +48,7 @@ let processing_note = annotation_for(scene_annotations, "Processing")
       [node.id, model.tag(model.content_element(node))]]],
   html: [len(html_nodes), len(html_annotations),
     [for (node in html_nodes) [node["data-node-id"], model.tag(node[0])]]],
-  render: [installed, len(scene_nodes), len(scene_edges), len(scene_annotations),
+  render: [rendered.svg is string, len(scene_nodes), len(scene_edges), len(scene_annotations),
     all([for (node in scene_nodes) node.width > 0 and node.height > 0]),
     idle_note.x < idle.x, processing_note.x > processing.x,
     contains(rendered.svg, "Waiting for work"),

@@ -1,14 +1,9 @@
-import radiant
+import tikz: lambda.doc.tikz.tikz
 
-let installed = radiant.register_layout("clip-layer", (parent, children, ctx) => {
-  width: 200,
-  height: 200,
-  placements: [],
-  paint_layers: [{z: 0, content:
-    <svg xmlns:"http://www.w3.org/2000/svg", width:200, height:200,
-      <rect x:0, y:0, width:200, height:200, fill:"#0000ff">
-    >}]
-});
+// the named-node renderer supplies generated SVG paint through the automatic layout bridge.
+let picture = tikz.render("\\begin{tikzpicture}" ++
+  "\\node[fill=blue,minimum width=6cm,minimum height=6cm] (a) at (0,0) {};" ++
+  "\\end{tikzpicture}")^;
 
 <html
   <head
@@ -21,7 +16,7 @@ let installed = radiant.register_layout("clip-layer", (parent, children, ctx) =>
     <div class:"header">
     <div class:"viewport"
     , <div class:"offset"
-      , <div 'data-radiant-layout':"clip-layer", style:"display:block;">
+      , <div style:"display:block;", picture>
       >
     >
   >

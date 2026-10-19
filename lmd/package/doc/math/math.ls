@@ -1,7 +1,12 @@
-// Public document math API: SVG layout and Presentation MathML conversion.
+// Public document math API: layout, source formatting and MathML conversion.
 import typeset: .typeset
 import mathml: .mathml
 import mathml_layout: .mathml_layout
+import writer: .format
+
+pub fn to_latex(ast) => writer.to_latex(ast)
+pub fn to_ascii(ast) => writer.to_ascii(ast)
+pub fn format(ast, options = null) string^ => writer.format(ast, options)^
 
 // The pure mathml module can also be imported directly by runtime-only hosts.
 pub fn to_mathml(ast, options = null) element^ => mathml.to_mathml(ast, options)^

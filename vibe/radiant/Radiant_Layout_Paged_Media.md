@@ -392,6 +392,16 @@ The core shares **composition mechanisms**, while producers retain their formatt
 
 FO follows the translation route in §11: its content uses Radiant's HTML/CSS formatting contexts and its enriched page semantics are common Radiant page controls. The non-DOM contracts here remain for synthetic coverage and future TeX material; they are not a separate FO runtime path.
 
+**Implemented core profile (2026-10-18):** `PagedNativeFlowBinding` supplies body,
+nested and repeated static providers to the ordinary flow. Producer paragraph
+choices, ordered glue, pure break-candidate preferences, marks and declared
+forward targets share the page journal and reference replay. Enumeration restores
+canonical cursors on success and failure; published material retains its owner
+after source/provider teardown under **D4.5.1v4 / D4.1.4v5**. Native auxiliary
+insertion/float contributions and static mark/target events are diagnosed as
+unsupported. This profile preserves an extension point for a later TeX frontend;
+it does not implement that frontend or an external output routine.
+
 | Contract | Required capability now | Future TeX/LaTeX use |
 |---|---|---|
 | Flow provider | Stable identities, ordered/lazy contributions, checkpoint/restore and source diagnostics | Expanded horizontal/vertical material without mandatory `DomElement`s |
@@ -399,9 +409,9 @@ FO follows the translation route in §11: its content uses Radiant's HTML/CSS fo
 | Flexible space | Natural size, separate stretch/shrink capacities and ordered flexibility classes; no numeric infinity sentinel | Finite glue and `fil`/`fill`/`filll` packing without converting it to CSS margins |
 | Break policy | Legality separate from cost; forced/forbidden tags, finite penalty, reason and continuation | TeX penalties/badness and context-specific break choice, without weakening CSS hard constraints |
 | Paragraph provider | Shape/measure independently of page commitment; return line sequences/alternatives for a width profile and resume state | Knuth–Plass paragraph optimization, discretionary pre/post/no-break material, hyphenation and fitness/looseness policies |
-| Page policy | Select candidates, pack regions, interpret boundary discard/retain rules and carry policy-owned continuation | TeX page-builder decisions, top/baseline glue and vertical packing |
-| Composition services | Typed regions, insertion splits, deferred floats, mark snapshots and target-page bindings | TeX insertions/marks and LaTeX document-class/float scheduling adapters |
-| Page assembly/finalization | Assemble a page, hold/reinsert contributions or emit finalized page boxes; queue side effects until commitment | A future output-routine adapter with explicit state and shipout ownership |
+| Page policy | Pure break-candidate preferences and boundary discard rules; shared strut flow commits pages | TeX page-builder decisions, top/baseline glue and vertical packing |
+| Composition services | Native marks/targets; DOM note/float reservations; native auxiliary contributions diagnosed | TeX insertion/mark and LaTeX document-class/float scheduling adapters |
+| Page assembly/finalization | Replay restores producer cursors; published editions are immutable; external assembly callbacks remain retired | A future output-routine adapter with explicit state and shipout ownership |
 
 These are internal C+ contracts, not a new public plugin ABI. CSS may return one paragraph solution initially; a test provider must already be able to return several and drive a different selection policy. Ordered stretch classes and signed penalties must be representable and exercised now, even though TeX-specific algorithms are deferred. Do not share one unconditional greedy algorithm between all producers or encode CSS `avoid` as a conveniently large TeX-style penalty.
 
@@ -593,7 +603,7 @@ Provide a small synthetic non-DOM producer in the test harness. Feed boxes with 
 
 The gate must demonstrate paragraph-level alternative selection, vertical packing, rollback after footnote reservation, float flushing, held/reinserted contributions, convergent target references, and correctly placed non-DOM glyph/paint payloads. Provider-native metrics must survive checkpoint/restore without a float round-trip. This is the evidence for "extend without major rework"; implementing a real TeX parser, macro expansion engine, Knuth–Plass policy, package system or output routine is not part of that gate.
 
-The native synthetic session and focused hold/reinsert failure controls are implemented in `test/test_view_tree_model_gtest.cpp`. The 502-test native suite and 196 export/Type 1 controls pass at this checkpoint. Independent Poppler rasterization matches all three held/reinserted physical pages and the combined session's retained first-page paragraph glyph bounds; the combined PDF retains five 200×140 sheets. This correctness increment follows **D4.5.1v4 / D4.1.4v5**. The subsequent physical-page increment passes 507 native tests and the same 196 export controls, with independent glyph/image parity on both body and drained-region sheets. Leading/sidedness/end-padding blanks and fixed pages exercise the same journaled transitions. The full 502-test snapshot's 4,515-result aggregate retains seven failures, each reproduced exactly on unchanged HEAD across three same-directory trials; this aggregate predates the physical-page increment. Native nested/column/margin production and broader aggregate/platform/performance acceptance remain open.
+The native synthetic session and focused hold/reinsert failure controls are implemented in `test/test_paged_media_gtest.cpp`. The 502-test native suite and 196 export/Type 1 controls pass at this checkpoint. Independent Poppler rasterization matches all three held/reinserted physical pages and the combined session's retained first-page paragraph glyph bounds; the combined PDF retains five 200×140 sheets. This correctness increment follows **D4.5.1v4 / D4.1.4v5**. The subsequent physical-page increment passes 507 native tests and the same 196 export controls, with independent glyph/image parity on both body and drained-region sheets. Leading/sidedness/end-padding blanks and fixed pages exercise the same journaled transitions. The full 502-test snapshot's 4,515-result aggregate retains seven failures, each reproduced exactly on unchanged HEAD across three same-directory trials; this aggregate predates the physical-page increment. Native nested/column/margin production and broader aggregate/platform/performance acceptance remain open.
 
 ## 6. Painting and PDF output
 

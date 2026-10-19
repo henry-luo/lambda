@@ -34,7 +34,6 @@ fn run_reference(test_case) {
 }
 
 let cases = conformance.manifest_cases("test/lambda/graph/graphviz/manifest.mark")
-let installed = conformance.install()
 
 {
   cases: len(cases),

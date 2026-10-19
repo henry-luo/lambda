@@ -1,49 +1,48 @@
 {
   "schema_version": 1,
-  "description": "D1.3/D8.4.1v2: an array-literal receiver with a canonical Number key uses the packed tagged direct plan; stale shape states and partial keys retain JS semantic kernels.",
+  "description": "D1.3/D8.4.1v2: Number keys keep dense reads and descriptor fallback; fractional and partial keys preserve property-key semantics.",
   "checks": [
     {
-      "in_func": "_js_nativeRead_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_elements_get_number"
+        "call\tmvp_lmd_array_index_property",
+        "call\tmvp_lmd_class_property"
       ],
       "forbid": [
-        "call\tjs_get_reference",
-        "call\tjs_to_property_key"
+        "call\tmvp_lmd_to_primitive"
       ]
     },
     {
-      "in_func": "_js_fractionalRead_#_body",
+      "in_func": "mvp_lmd_f5",
       "expect": [
-        "call\tjs_elements_get_number"
+        "call\tmvp_lmd_number_to_string",
+        "call\tmvp_lmd_class_property"
       ],
       "forbid": [
-        "call\tjs_get_reference"
+        "call\tmvp_lmd_to_primitive"
       ]
     },
     {
-      "in_func": "_js_packedTaggedRead_#_body",
+      "in_func": "mvp_lmd_f11",
       "expect": [
         "lsh",
-        "mov\ti64:("
+        "mov\t{{r}}, i64:("
       ],
       "forbid": [
-        "call\tjs_to_property_key"
+        "call\tmvp_lmd_property_key"
       ]
     },
     {
-      "in_func": "_js_accessorFallbackRead_#_body",
+      "in_func": "mvp_lmd_f12",
       "expect": [
-        "call\tjs_elements_get_number"
+        "call\tmvp_lmd_array_index_property"
       ]
     },
     {
-      "in_func": "_js_partialRead_#_body",
+      "in_func": "mvp_lmd_f10",
       "expect": [
-        "call\tjs_get_reference"
-      ],
-      "forbid": [
-        "call\tjs_elements_get_number"
+        "call\tmvp_lmd_property_key",
+        "call\tmvp_lmd_class_property"
       ]
     }
   ]

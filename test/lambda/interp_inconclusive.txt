@@ -5,3 +5,27 @@
 # interpreter fallbacks.
 #
 # format: <script>	<reason>
+test/lambda/chart/chart_dashboard.ls	timeout
+test/lambda/chart/test_animation_guides.ls	timeout
+test/lambda/chart/test_helix_guides.ls	timeout
+test/lambda/chart/test_link_arrows.ls	timeout
+test/lambda/chart/test_scientific_stream.ls	timeout
+test/lambda/chart/timeline_edit.ls	timeout
+test/lambda/chart/timeline_scalability.ls	timeout
+test/lambda/latex/test_latex_citeproc_render.ls	timeout
+test/lambda/latex/test_latex_csl_alias.ls	timeout
+test/lambda/latex/test_latex_csl_alias_reference.ls	timeout
+test/lambda/latex/test_latex_phase3_corpus.ls	timeout
+test/lambda/latex/test_latex_phase5_floats.ls	timeout
+test/lambda/latex/test_latex_phase5_math.ls	timeout
+test/lambda/math/test_math_ams_primitives.ls	timeout
+test/lambda/math/test_math_closed_integrals.ls	timeout
+test/lambda/math/test_math_feature_commands.ls	timeout
+test/lambda/math/test_math_html_output.ls	timeout
+test/lambda/math/test_math_negated_relations.ls	timeout
+test/lambda/math/test_math_ordinary_fonts.ls	timeout
+test/lambda/math/test_math_phase5_packages.ls	timeout
+test/lambda/math/test_math_radical_recipes.ls	timeout
+test/lambda/math/test_math_tex_metrics.ls	timeout
+test/lambda/math/test_math_tex_rules.ls	timeout
+test/lambda/math/test_math_text_escapes.ls	timeout

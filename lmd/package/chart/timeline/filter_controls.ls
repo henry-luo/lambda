@@ -45,7 +45,7 @@ pub fn render(spec, current = null) {
     >
 }
 
-pub pn action(node, spec, current) {
+pub fn action(node, spec, current) {
     let field=events.attribute(node,"data-timeline-filter");
     let previous=c.attrs(current.filters);
     let selected=effective(spec,current,field);

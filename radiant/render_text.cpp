@@ -2,6 +2,7 @@
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "layout.hpp"
+#include "page_document.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -42,6 +43,44 @@ struct RenderTextPaintData {
     bool include_atoms;
 };
 
+static char* render_text_create_paint_segment(const unsigned char* text,
+    const TextRect* text_rect, CssEnum transform, bool include_ellipsis,
+    CssEnum white_space, const RadiantWhitespaceSpec* whitespace, bool word_start);
+
+struct RenderClusterSource {
+    size_t source_bytes;
+    const unsigned char* text;
+    const unsigned char* end;
+    lam::Temp<char> transformed;
+};
+
+static bool render_text_prepare_cluster(const unsigned char* start,
+        const unsigned char* end, CssEnum transform, bool word_start,
+        RenderClusterSource* source) {
+    TextGraphemeCluster cluster = {};
+    if (!text_get_grapheme_cluster(start, end, &cluster)) {
+        const unsigned char* cursor = start;
+        uint32_t mapped[3];
+        if (!layout_utf8_next_codepoint(&cursor, end, &cluster.first) ||
+            transform == CSS_VALUE_NONE ||
+            apply_text_transform_full(cluster.first, transform, word_start, mapped) <= 1) return false;
+        cluster.bytes = (size_t)(cursor - start);
+    }
+    source->source_bytes = cluster.bytes;
+    source->text = start; source->end = start + cluster.bytes;
+    if (transform != CSS_VALUE_NONE) {
+        TextRect slice = {};
+        slice.length = (int)cluster.bytes; // INT_CAST_OK: bounded source byte length.
+        // CSS transforms only the temporary paint bytes; DOM ranges retain their source ownership.
+        source->transformed.reset(render_text_create_paint_segment(start, &slice,
+            transform, false, CSS_VALUE_PRE, nullptr, word_start));
+        if (!source->transformed) return false;
+        source->text = (const unsigned char*)source->transformed.get();
+        source->end = source->text + strlen((const char*)source->text);
+    }
+    return source->text < source->end;
+}
+
 static size_t render_text_paint_cluster_bytes(const unsigned char* cursor,
                                               const unsigned char* end) {
     size_t bytes = 0;
@@ -56,6 +95,22 @@ static float render_text_paint_cluster_advance(const FontBox* font,
         const FontStyleDesc* descriptor, float scale, CssEnum transform,
         const unsigned char* cursor, const unsigned char* end,
         bool preserve_spaces, bool* has_space, bool* word_start) {
+    RenderClusterSource source = {};
+    if (render_text_prepare_cluster(cursor, end, transform, *word_start, &source) &&
+            cursor + source.source_bytes == end) {
+        const unsigned char* unit = source.text;
+        float width = 0.0f;
+        while (unit < source.end) {
+            size_t bytes = 0; float advance = 0.0f;
+            if (!render_text_visit_cluster(font, unit, source.end, nullptr, nullptr,
+                    &bytes, &advance, true)) break;
+            width += advance; unit += bytes;
+        }
+        if (unit == source.end) {
+            *has_space = false; *word_start = false;
+            return width;
+        }
+    }
     float advance = 0.0f;
     while (cursor < end) {
         uint32_t codepoint = 0;
@@ -551,10 +606,11 @@ static inline uint32_t render_text_resolve_mathlive_fallback_glyph(uint32_t code
     return codepoint;
 }
 
-char* render_text_create_export_segment(const unsigned char* text,
+static char* render_text_create_paint_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
-                                        bool include_ellipsis, CssEnum white_space) {
+                                        bool include_ellipsis, CssEnum white_space,
+                                        const RadiantWhitespaceSpec* whitespace, bool is_word_start) {
     if (!text || !text_rect) return nullptr;
 
     const char* trailing_character = text_rect->trailing_hyphenate_character;
@@ -570,9 +626,8 @@ char* render_text_create_export_segment(const unsigned char* text,
     unsigned char* src_end = src + source_length;
     char* dst = content;
 
-    bool preserve_spaces = white_space_preserves_space_advance(white_space);
+    bool preserve_spaces = whitespace ? !whitespace->collapse : white_space_preserves_space_advance(white_space);
     bool has_space = render_text_source_has_space(text, source_start, preserve_spaces);
-    bool is_word_start = render_text_source_word_start(text, source_start);
     while (src < src_end) {
         uint32_t codepoint = *src;
         int bytes = 1;
@@ -581,14 +636,26 @@ char* render_text_create_export_segment(const unsigned char* text,
             if (bytes <= 0) bytes = 1;
         }
         if (codepoint == 0x00AD) { src += bytes; continue; }
+        codepoint = layout_text_resolve_css_whitespace(codepoint);
+        bool linefeed = layout_text_is_segment_break(codepoint);
+        if (whitespace) {
+            if (linefeed && whitespace->linefeed != RADIANT_LINEFEED_SPACE) {
+                if (whitespace->linefeed == RADIANT_LINEFEED_ZERO_WIDTH) dst += utf8_encode(0x200B, dst);
+                src += bytes;
+                if (whitespace->linefeed != RADIANT_LINEFEED_IGNORE) { is_word_start = true; has_space = false; }
+                continue;
+            }
+            if (linefeed) codepoint = ' ';
+            else if (whitespace->ignore && is_space(codepoint)) { src += bytes; continue; }
+        }
         // preserved breaks already positioned the next line; their source bytes produce no glyphs.
-        if ((codepoint == '\n' || codepoint == '\r') && !layout_white_space_collapses_newlines(white_space)) {
+        if (!whitespace && linefeed && !layout_white_space_collapses_newlines(white_space)) {
             src += bytes; has_space = false; is_word_start = true;
             continue;
         }
         if (is_space(codepoint)) {
             // the source byte range stays intact; only its painted representation collapses.
-            if (preserve_spaces || !has_space) *dst++ = preserve_spaces ? *src : ' ';
+            if (preserve_spaces || !has_space) *dst++ = preserve_spaces && !linefeed ? (char)codepoint : ' ';
             has_space = true;
             is_word_start = true;
         } else {
@@ -617,6 +684,16 @@ char* render_text_create_export_segment(const unsigned char* text,
     return content;
 }
 
+char* render_text_create_export_segment(const unsigned char* text,
+        const TextRect* text_rect, CssEnum transform, bool include_ellipsis,
+        CssEnum white_space, const RadiantWhitespaceSpec* whitespace) {
+    if (!text || !text_rect) return nullptr;
+    int start, length;
+    text_rect_painted_source_range(text_rect, &start, &length);
+    return render_text_create_paint_segment(text, text_rect, transform, include_ellipsis,
+        white_space, whitespace, render_text_source_word_start(text, start));
+}
+
 static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, unsigned char* text,
     TextRect* rect, const RenderTextEmphasis* emphasis, TextShadow* shadows,
     float x, float y, float width, float height);
@@ -625,6 +702,121 @@ static bool render_text_bounds_miss_clip(RasterRenderContext* rdcon, Bound bound
     if (!rdcon || rdcon->has_transform) return false;
     return bounds.right < rdcon->block.clip.left || bounds.left > rdcon->block.clip.right ||
         bounds.bottom < rdcon->block.clip.top || bounds.top > rdcon->block.clip.bottom;
+}
+
+struct RenderNativeTextCluster {
+    RasterRenderContext* raster;
+    DisplayList* shadow;
+    DomElement* parent;
+    Color color;
+    float x, baseline_y, scale, offset_x, offset_y;
+    Bound ink;
+    bool background, failed;
+};
+
+static void render_native_cluster_emit(RenderNativeTextCluster* cluster,
+        const GlyphBitmap* source, float x, float y, bool background) {
+    if (!source) { cluster->failed = true; return; }
+    if (!source->buffer || source->width <= 0 || source->height <= 0) return;
+    RasterRenderContext* raster = cluster->raster;
+    if (background && cluster->background && cluster->parent) {
+        Rect border = {raster->block.x, raster->block.y,
+            cluster->parent->width * cluster->scale, cluster->parent->height * cluster->scale};
+        render_paint_text_background_glyph(raster, cluster->parent, border, source, x, y);
+    }
+    x += cluster->offset_x; y += cluster->offset_y;
+    GlyphBitmap bitmap = *source;
+    if (cluster->shadow) {
+        int count = cluster->shadow->item_count();
+        dl_draw_glyph(cluster->shadow, &bitmap,
+            (int)x, (int)y, cluster->color, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded physical bitmap destinations.
+        if (cluster->shadow->item_count() != count + 1) cluster->failed = true;
+    } else {
+        Color saved = raster->color; raster->color = cluster->color;
+        draw_glyph(raster, &bitmap,
+            (int)x, (int)y); // INT_CAST_OK: rounded physical bitmap destinations.
+        raster->color = saved;
+    }
+    cluster->ink.left = fminf(cluster->ink.left, x);
+    cluster->ink.top = fminf(cluster->ink.top, y);
+    cluster->ink.right = fmaxf(cluster->ink.right, x + (float)bitmap.width);
+    cluster->ink.bottom = fmaxf(cluster->ink.bottom, y + (float)bitmap.height);
+}
+
+static void render_native_cluster_glyph(void* pointer, const GlyphBitmap* bitmap,
+        float x, float y) {
+    RenderNativeTextCluster* cluster = (RenderNativeTextCluster*)pointer;
+    render_native_cluster_emit(cluster, bitmap,
+        bitmap ? roundf(cluster->x + x * cluster->scale + (float)bitmap->bearing_x) : 0.0f,
+        bitmap ? roundf(cluster->baseline_y + y * cluster->scale - (float)bitmap->bearing_y) : 0.0f, true);
+}
+
+static void render_native_cluster_emphasis(RenderNativeTextCluster* cluster,
+        const RenderTextEmphasis* emphasis, uint32_t first, float advance) {
+    if (!emphasis || !emphasis->handle || !text_emphasis_marks_codepoint(first)) return;
+    float x = 0.0f, y = 0.0f;
+    LoadedGlyph* mark = render_text_emphasis_bitmap_glyph(emphasis, first, cluster->x,
+        cluster->baseline_y, advance * cluster->scale, cluster->scale, &x, &y);
+    Color saved = cluster->color;
+    if (!cluster->shadow && !cluster->raster->font.style->text_emphasis_color_current)
+        cluster->color = emphasis->color;
+    render_native_cluster_emit(cluster, mark ? &mark->bitmap : nullptr, x, y, false);
+    cluster->color = saved;
+}
+
+static bool render_native_paint_cluster(RenderNativeTextCluster* cluster,
+        const unsigned char* start, const unsigned char* end, TextJustifyContext* justify,
+        CssEnum mode, float gap, const RenderTextEmphasis* emphasis, size_t* bytes,
+        float* advance, CssEnum transform, bool word_start) {
+    RenderClusterSource source = {};
+    if (!render_text_prepare_cluster(start, end, transform, word_start, &source)) return false;
+    float origin = cluster->x;
+    cluster->baseline_y += render_text_baseline_y(&cluster->raster->font, 0.0f) * cluster->scale;
+    TextJustifyContext next = *justify;
+    auto visit_units = [&](bool paint) {
+        const unsigned char* unit = source.text;
+        TextJustifyContext context = *justify;
+        float pen = 0.0f;
+        while (unit < source.end) {
+            size_t unit_bytes = 0; float unit_advance = 0.0f;
+            uint32_t first = 0; const unsigned char* cursor = unit;
+            layout_utf8_next_codepoint(&cursor, source.end, &first);
+            TextJustifyContext following = context;
+            size_t grapheme_bytes = 0;
+            if (!layout_get_grapheme_cluster_bytes(unit, source.end, &grapheme_bytes))
+                grapheme_bytes = (size_t)(cursor - unit);
+            if (text_justify_cluster_gap(&following, unit, unit + grapheme_bytes, mode))
+                pen += gap / cluster->scale;
+            cluster->x = origin + pen * cluster->scale;
+            if (!render_text_visit_cluster(&cluster->raster->font, unit, source.end,
+                    paint ? render_native_cluster_glyph : nullptr, paint ? cluster : nullptr,
+                    &unit_bytes, &unit_advance, true)) {
+                cluster->x = origin;
+                return false;
+            }
+            if (paint) render_native_cluster_emphasis(cluster, emphasis, first,
+                unit_advance - text_character_spacing(cluster->raster->font.style, first));
+            pen += unit_advance;
+            unit += unit_bytes; context = following;
+        }
+        cluster->x = origin; *advance = pen; next = context;
+        return true;
+    };
+    size_t first_bytes = 0;
+    if (!layout_get_grapheme_cluster_bytes(source.text, source.end, &first_bytes)) {
+        uint32_t first = 0; const unsigned char* cursor = source.text;
+        layout_utf8_next_codepoint(&cursor, source.end, &first);
+        first_bytes = (size_t)(cursor - source.text);
+    }
+    // case expansion can create several units; reject unsupported shaping before emitting any ink.
+    bool multiple = source.text + first_bytes < source.end;
+    if (multiple && !visit_units(false)) return false;
+    if (!visit_units(true)) {
+        if (!multiple) return false;
+        cluster->failed = true;
+    }
+    *justify = next; *bytes = source.source_bytes;
+    return true;
 }
 
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
@@ -747,6 +939,22 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             }
             else {
                 has_space = false;
+                Color cluster_color = is_selected && has_selection_foreground
+                    ? parent_elem->inl()->selection_color : rdcon->color;
+                RenderNativeTextCluster cluster = {rdcon, nullptr, parent_elem, cluster_color,
+                    x, y, s, 0.0f, 0.0f,
+                    {INFINITY, INFINITY, -INFINITY, -INFINITY}, !shadow_prepass, false};
+                size_t cluster_bytes = 0; float cluster_advance = 0.0f;
+                if (render_native_paint_cluster(&cluster, p, end, &justify_context,
+                        text_justify, justification_per_gap, &emphasis, &cluster_bytes, &cluster_advance,
+                        text_transform, is_word_start)) {
+                    p += cluster_bytes;
+                    char_index += (int)cluster_bytes; // INT_CAST_OK: source byte offset used for selection.
+                    x = cluster.x + cluster_advance * s;
+                    is_word_start = false;
+                    rdcon->paint_failed = rdcon->paint_failed || cluster.failed;
+                    continue;
+                }
                 int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
                 if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
                 else { p += bytes;  char_index += bytes; }
@@ -791,7 +999,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         // share the missing-glyph geometry with offscreen text captures.
                         Rect rect = render_text_missing_glyph_rect(&rdcon->font, x / s, y / s, scaled_space_width / s);
                         rect.x *= s; rect.y *= s; rect.width *= s; rect.height *= s;
-                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, render_text_missing_glyph_color().c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         x += scaled_space_width;
                     }
                     else {
@@ -998,11 +1206,16 @@ static void decoration_fill_rect(TextDecorationPaintContext* context, Rect* rect
 }
 
 static bool decoration_record_path(TextDecorationPaintContext* context, RdtPath* path,
-        Color color, float stroke_width, bool clip) {
+        Color color, float stroke_width, bool clip, const RdtMatrix* placement = nullptr) {
     if (context->failed) return false;
     if (context->raster) {
         int count = context->raster->dl ? context->raster->dl->item_count() : 0;
         const RdtMatrix* transform = render_state_current_transform(context->raster);
+        RdtMatrix combined;
+        if (placement) {
+            combined = transform ? rdt_matrix_multiply(transform, placement) : *placement;
+            transform = &combined;
+        }
         if (clip) rc_push_clip(context->raster, path, transform);
         else if (stroke_width > 0) rc_stroke_path(context->raster, path, color, stroke_width,
             RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, transform);
@@ -1012,19 +1225,19 @@ static bool decoration_record_path(TextDecorationPaintContext* context, RdtPath*
     }
     if (context->display) {
         int count = context->display->item_count();
-        if (clip) dl_push_clip(context->display, path, nullptr);
+        if (clip) dl_push_clip(context->display, path, placement);
         else if (stroke_width > 0) dl_stroke_path(context->display, path, color, stroke_width,
-            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
-        else dl_fill_path(context->display, path, color, RDT_FILL_WINDING, nullptr);
+            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, placement);
+        else dl_fill_path(context->display, path, color, RDT_FILL_WINDING, placement);
         if (context->display->item_count() != count + 1) context->failed = true;
         return false;
     }
     int index = paint_list_count(context->paint);
     PaintOp operation = clip ? PAINT_PUSH_CLIP : stroke_width > 0 ? PAINT_STROKE_PATH : PAINT_FILL_PATH;
-    if (clip) paint_push_clip(context->paint, path, nullptr);
+    if (clip) paint_push_clip(context->paint, path, placement);
     else if (stroke_width > 0) paint_stroke_path(context->paint, path, color, stroke_width,
-        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
-    else paint_fill_path(context->paint, path, color, RDT_FILL_WINDING, nullptr);
+        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, placement);
+    else paint_fill_path(context->paint, path, color, RDT_FILL_WINDING, placement);
     // vector commands outlive the recorder; transfer each shape before its caller releases scratch.
     // paint_push_clip already owns its clone; fill/stroke commands require transfer.
     bool recorded = paint_list_count(context->paint) == index + 1;
@@ -1091,6 +1304,22 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
             }
 
             s_has_space = false;
+            RenderNativeTextCluster cluster = {rdcon, &shadow_list, parent_elem, opaque_shadow,
+                sx_pos, y, s,
+                roundf(shadow->offset_x * s), roundf(shadow->offset_y * s),
+                {INFINITY, INFINITY, -INFINITY, -INFINITY}, !background_painted, false};
+            size_t cluster_bytes = 0; float cluster_advance = 0.0f;
+            if (render_native_paint_cluster(&cluster, sp, s_end, &justify_context,
+                    justify_mode, cjk_spacing, emphasis, &cluster_bytes, &cluster_advance,
+                    text_transform, s_word_start)) {
+                sp += cluster_bytes;
+                sx_pos = cluster.x + cluster_advance * s;
+                s_word_start = false;
+                left = fminf(left, cluster.ink.left); top = fminf(top, cluster.ink.top);
+                right = fmaxf(right, cluster.ink.right); bottom = fmaxf(bottom, cluster.ink.bottom);
+                decoration.failed = decoration.failed || cluster.failed;
+                continue;
+            }
             uint32_t s_cp;
             int s_bytes = str_utf8_decode((const char*)sp, (size_t)(s_end - sp), &s_cp);
             if (s_bytes <= 0) {
@@ -1185,7 +1414,10 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 Color saved_color = rdcon->color;
                 rdcon->color = glyph->color;
                 int count = rdcon->dl ? rdcon->dl->item_count() : 0;
-                draw_glyph(rdcon, &glyph->bitmap, glyph->x, glyph->y);
+                // a shadow replays the glyph's alpha mask, including BGRA color faces.
+                rc_draw_glyph(rdcon, &glyph->bitmap, glyph->x, glyph->y, glyph->color,
+                    false, &rdcon->block.clip, rdcon->has_transform ? &rdcon->transform : nullptr,
+                    font_context_glyph_cache_generation(rdcon->ui_context->font_ctx));
                 rdcon->color = saved_color;
                 if (glyph->bitmap.buffer && glyph->bitmap.width > 0 && glyph->bitmap.height > 0 &&
                         (!rdcon->dl || rdcon->dl->item_count() != count + 1)) decoration.failed = true;
@@ -1392,7 +1624,7 @@ static int collect_skip_ink_gaps(TextDecorationPaintContext* context, unsigned c
 
 static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, uint32_t color,
         SkipInkGap* gaps, int gap_count, RdtPath* decoration = nullptr,
-        float stroke_width = 0.0f) {
+        float stroke_width = 0.0f, const RdtMatrix* placement = nullptr) {
     RdtPath* clip = decoration ? rdt_path_new() : nullptr;
     if (decoration && !clip) {
         context->failed = true;
@@ -1428,7 +1660,7 @@ static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, 
         // clip the complete pattern so skipping ink never restarts its dash or wave phase.
         bool owns_clip = clip && decoration_record_path(context, clip, Color{}, 0, true);
         if (!context->failed)
-            owns_decoration = decoration_record_path(context, decoration, Color{color}, stroke_width, false);
+            owns_decoration = decoration_record_path(context, decoration, Color{color}, stroke_width, false, placement);
         if (clip && !context->failed) {
             if (context->raster) {
                 int count = context->raster->dl ? context->raster->dl->item_count() : 0;
@@ -1531,7 +1763,10 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
 
     bool styled = deco_style == CSS_VALUE_DASHED || deco_style == CSS_VALUE_DOTTED ||
         deco_style == CSS_VALUE_DOUBLE || deco_style == CSS_VALUE_WAVY;
-    RdtPath* path = styled ? render_path_create_decoration(&rect, deco_style) : nullptr;
+    // flatten patterns in local coordinates so placement cannot change subdivision rounding.
+    Rect local = {0, 0, rect.width, rect.height};
+    RdtMatrix placement = rdt_matrix_translate(rect.x, rect.y);
+    RdtPath* path = styled ? render_path_create_decoration(&local, deco_style) : nullptr;
     if (styled && !path) {
         context->failed = true;
         log_error("[TEXT_DECO_GAPS] cannot allocate decoration pattern");
@@ -1543,8 +1778,8 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
         float left, top, right, bottom;
         if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
             // gap masks select horizontal intervals; integer vertical edges retain the stroke antialias coverage.
-            ink_band.y = top - stroke_width * .5f;
-            float bottom_edge = bottom + stroke_width * .5f;
+            ink_band.y = rect.y + top - stroke_width * .5f;
+            float bottom_edge = rect.y + bottom + stroke_width * .5f;
             if (context->raster || context->display) {
                 ink_band.y = floorf(ink_band.y);
                 bottom_edge = ceilf(bottom_edge);
@@ -1566,9 +1801,9 @@ static void render_single_text_decoration(TextDecorationPaintContext* context, u
         } else {
             int count = collect_skip_ink_gaps(context, str, text_rect,
                 ink_band.y, ink_band.y + ink_band.height, thickness, gaps);
-            owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, gaps, count, path, stroke_width);
+            owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, gaps, count, path, stroke_width, &placement);
         }
-    } else owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, nullptr, 0, path, stroke_width);
+    } else owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, nullptr, 0, path, stroke_width, &placement);
     if (!owns_path) rdt_path_free(path);
 
 }
@@ -1848,10 +2083,10 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
 
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
         const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run,
-        bool reverse_clusters, const char** logical_text) {
+        bool reverse_clusters, const char** logical_text, const RadiantWhitespaceSpec* whitespace) {
     if (!text || !text_rect || !font || !font->style || !run) return nullptr;
     char* content = render_text_create_export_segment(text->text_data(), text_rect,
-        render_text_inherited_transform(text), true, get_white_space_value(text));
+        render_text_inherited_transform(text), true, get_white_space_value(text), whitespace);
     if (!content) return nullptr;
     if (reverse_clusters) {
         size_t length = strlen(content);
@@ -1881,6 +2116,7 @@ char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
     run->color = color;
     run->text = lam::up((const char*)content);
     run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    run->logical_text_offset = reverse_clusters ? run->text_len + 1 : 0;
     // vector targets name the selected face; a missing handle keeps the authored family.
     run->font_family = lam::up(font_box_handle(font)
         ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());

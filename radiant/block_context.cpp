@@ -89,6 +89,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
 
     // Initialize BFC hierarchy
     ctx->parent = nullptr;
+    ctx->flow_box = lam::up(element);
     ctx->establishing_element = lam::up(element);
     ctx->is_bfc_root = (element != nullptr);
 

@@ -448,55 +448,8 @@ static inline bool js_class_is_error_like(JsClass cls) {
     }
 }
 
-static inline bool js_class_is_event_like(JsClass cls) {
-    switch (cls) {
-        case JS_CLASS_MESSAGE_EVENT:
-        case JS_CLASS_EVENT:
-        case JS_CLASS_CUSTOM_EVENT:
-        case JS_CLASS_UI_EVENT:
-        case JS_CLASS_MOUSE_EVENT:
-        case JS_CLASS_KEYBOARD_EVENT:
-        case JS_CLASS_FOCUS_EVENT:
-        case JS_CLASS_WHEEL_EVENT:
-        case JS_CLASS_COMPOSITION_EVENT:
-        case JS_CLASS_INPUT_EVENT:
-        case JS_CLASS_POINTER_EVENT:
-        case JS_CLASS_TOUCH_EVENT:
-        case JS_CLASS_CLIPBOARD_EVENT:
-        // CSS event constructors are Event subclasses even though they do not
-        // inherit from UIEvent in the DOM interface hierarchy.
-        case JS_CLASS_TRANSITION_EVENT:
-        case JS_CLASS_ANIMATION_EVENT:
-        case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT:
-        case JS_CLASS_WEBGL_CONTEXT_EVENT:
-            return true;
-        default:
-            return false;
-    }
-}
 
-static inline bool js_class_is_ui_event_like(JsClass cls) {
-    switch (cls) {
-        case JS_CLASS_UI_EVENT:
-        case JS_CLASS_MOUSE_EVENT:
-        case JS_CLASS_KEYBOARD_EVENT:
-        case JS_CLASS_FOCUS_EVENT:
-        case JS_CLASS_WHEEL_EVENT:
-        case JS_CLASS_COMPOSITION_EVENT:
-        case JS_CLASS_INPUT_EVENT:
-        case JS_CLASS_POINTER_EVENT:
-        case JS_CLASS_TOUCH_EVENT:
-            return true;
-        default:
-            return false;
-    }
-}
 
-static inline bool js_class_is_mouse_event_like(JsClass cls) {
-    return cls == JS_CLASS_MOUSE_EVENT ||
-        cls == JS_CLASS_WHEEL_EVENT ||
-        cls == JS_CLASS_POINTER_EVENT;
-}
 
 extern "C" JsClass js_error_class_id(Item obj);
 

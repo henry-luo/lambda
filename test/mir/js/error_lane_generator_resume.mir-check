@@ -1,14 +1,18 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: a resumable generator begins without a previous frame's call-result register; its infallible implicit yield (the js_gen_park after parameter binding, RA1) emits no ERROR-tag test.",
+  "description": "D5.4, D7.4.2, D8.4.3v2: the formal generator uses Lambda Activation parking and observes its suspension-failure lane once.",
   "checks": [
     {
-      "in_func": "gen_sm_anon16_m_#",
+      "in_func": "mvp_lmd_f17",
       "expect": [
-        "call\tjs_gen_park"
+        "call\tmvp_lmd_generator_park"
       ],
+      "count": {
+        "call\tmvp_lmd_generator_park": 1,
+        "{{r}}, 27": 1
+      },
       "forbid": [
-        "eq\t{{r}}, {{r}}, 27"
+        "js_gen_park"
       ]
     }
   ]

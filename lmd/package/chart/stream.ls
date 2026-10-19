@@ -39,7 +39,7 @@ fn integrate(prepared,s,direction,points,h,length=0.0,steps=0,occupied=[]) {
         let trial=if (result.point!=null) result.point else advance(p,step,[[1.0,first.tangent]]);
         let boundary=mesh.segment_boundary(prepared,p,trial,s.components);
         let tolerance=s.atol+s.rtol*max([distance([0,0],p,s.metric_scale),distance([0,0],trial,s.metric_scale)]);
-        let acceptable=result.error!=null and result.error<=tolerance;
+        let acceptable=not (result.error is null) and result.error<=tolerance;
         if (not acceptable and step>s.min_step) integrate(prepared,s,direction,points,max(s.min_step,step/2),length,steps+1,occupied)
         else if (boundary!=null) {
             let endpoint=evaluate(prepared,boundary.point,s,direction);

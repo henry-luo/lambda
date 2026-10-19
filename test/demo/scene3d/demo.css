@@ -1,0 +1,25 @@
+.scene3d-breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 20px;
+    padding: 0 0 14px;
+    border-bottom: 1px solid #29394f;
+    color: #9aadc5;
+    font: 12px/1.5 Arial, sans-serif;
+}
+.scene3d-breadcrumbs a { color: #9aadc5; text-decoration: none; }
+.scene3d-breadcrumbs a:hover { color: #e7eef8; text-decoration: underline; }
+.scene3d-breadcrumbs a:focus-visible { outline: 2px solid #74ded3; outline-offset: 4px; }
+.scene3d-breadcrumbs [aria-current="page"] { color: #e7eef8; font-weight: bold; }
+.scene3d-breadcrumbs .scene3d-separator { color: #687c95; }
+.scene3d-light .scene3d-breadcrumbs { color: #626b7c; border-color: #dce2eb; }
+.scene3d-light .scene3d-breadcrumbs a { color: #526c93; }
+.scene3d-light .scene3d-breadcrumbs a:hover,
+.scene3d-light .scene3d-breadcrumbs [aria-current="page"] { color: #252b36; }
+.scene3d-page { box-sizing: border-box; max-width: 1104px; margin: 0 auto; padding: 24px 32px; font-family: Arial, sans-serif; }
+.scene3d-page button { padding: 7px 10px; border: 1px solid #334761; border-radius: 7px; background: #18273b; color: #dfebf8; font: 12px Arial, sans-serif; cursor: pointer; }
+.scene3d-page button:hover { background: #243a54; border-color: #74ded3; }
+.scene3d-page button:focus-visible { outline: 2px solid #74ded3; outline-offset: 3px; }
+@media (max-width: 700px) { .scene3d-page { padding: 20px 16px; } }

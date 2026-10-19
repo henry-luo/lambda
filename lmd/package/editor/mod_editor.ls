@@ -112,7 +112,7 @@ pub fn edit_dispatch(editor, intent) => dom_adapter.handle_event(editor, intent)
 
 pub fn edit_can_dispatch(editor, intent) => dom_adapter.transaction_for_event(editor, intent) != null
 
-pub fn edit_handle_dom_action(editor, action_event) => dom_adapter.handle_event(editor, action_event)
+pub fn edit_handle_dom_action(editor, action_event, selection=null) => dom_adapter.handle_event(editor, action_event, selection)
 pub fn edit_handle_request(editor, request) => dom_adapter.handle_request(editor, request)
 pub fn edit_accept_dom_selection(editor, evt) => dom_adapter.accept_dom_selection(editor, evt)
 

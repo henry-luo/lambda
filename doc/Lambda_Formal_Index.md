@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v68.0.0 (2026-10-16)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v68.0.1 (2026-10-16)
 
 | ID | Line | Title |
 |---|---|---|
@@ -78,11 +78,11 @@ in full — including lines too long for a viewer — run
 | S2.6.5 | 450 | Content stays normalized under mutation |
 | S2.6.6v3* | 457 | An explicitly PDF-formatted file selects a byte-output destination |
 | **§S3** | 489 | *Truthiness* |
-| S3.1v2* | 491 | The falsy set is exactly **`null` · `false` · `""`** |
-| S3.2v2* | 496 | Truth classification is decidable from the type tag alone |
-| S3.3v3* | 501 | Consequences to teach: truthy-0 keeps `or` a safe coalescing operator (no `??` needed); |
-| S3.4* | 510 | Logical evaluation preserves an encountered error |
-| S3.5* | 517 | An `if` expression evaluates its condition once |
+| S3.1v2 | 491 | The falsy set is exactly **`null` · `false` · `""`** |
+| S3.2v2 | 496 | Truth classification is decidable from the type tag alone |
+| S3.3v3 | 501 | Consequences to teach: truthy-0 keeps `or` a safe coalescing operator (no `??` needed); |
+| S3.4 | 510 | Logical evaluation preserves an encountered error |
+| S3.5 | 517 | An `if` expression evaluates its condition once |
 | **§S4** | 526 | *Numerics* |
 | **§S4.1** | 540 | *The `int` type (v5: int53, total)* |
 | S4.1.1 | 545 | The `int` domain is **{n ∈ ℤ : \|n\| ≤ 2⁵³−1} plus the three closure points `inf`/`-inf`/`nan`**, carried … |
@@ -123,8 +123,8 @@ in full — including lines too long for a viewer — run
 | S4.9.1 | 672 | Numeric FFI is **type-directed, never value-directed** |
 | **§S5** | 681 | *Equality* |
 | **§S5.1** | 683 | *Error-preserving deep value equality* |
-| S5.1.1v2* | 685 | `==` is deep, structural, value-based equality |
-| S5.1.2v2* | 691 | NaN is unequal; errors propagate |
+| S5.1.1v2 | 685 | `==` is deep, structural, value-based equality |
+| S5.1.2v2 | 691 | NaN is unequal; errors propagate |
 | S5.1.3 | 696 | Structural recursion is depth-limited; |
 | S5.1.4v3* | 699 | `==` is the only **value** equality and compares content alone |
 | S5.1.5* | 711 | Container equality recursively compares content and short-circuits |
@@ -145,7 +145,7 @@ in full — including lines too long for a viewer — run
 | **§S6** | 779 | *Ordering and Sort* |
 | **§S6.1** | 781 | *Two relations, by design* |
 | S6.1.1 | 785 | The comparison operators `< <= > >=` answer magnitude questions only |
-| S6.1.2v2* | 791 | An error operand to `< <= > >=` propagates unchanged, including against null or nan |
+| S6.1.2v2 | 791 | An error operand to `< <= > >=` propagates unchanged, including against null or nan |
 | **§S6.2** | 796 | *The Lambda total order* |
 | S6.2.1 | 798 | `sort` and `order by` use the separate total order:* |
 | S6.2.2v3 | 806 | The total order **totally refines `==`** |
@@ -171,16 +171,16 @@ in full — including lines too long for a viewer — run
 | S7.4.5 | 904 | System `fn` failures are values, never `T^E`: *absence in / no answer → `null`* (or `""` for string results); |
 | S7.4.6 | 912 | `raise v` with a non-error `v` is shorthand for `raise error(v)`: the constructor (S7.4.4) decides the code … |
 | **§S7.5** | 917 | *Acknowledgment* |
-| S7.5.1v2* | 919 | A call carrying a `^` channel must engage the error at the **immediate expression**, through exactly one of: … |
+| S7.5.1v2 | 919 | A call carrying a `^` channel must engage the error at the **immediate expression**, through exactly one of: … |
 | S7.5.2 | 926 | `any` never acknowledges (it admits error but engages nothing); |
-| S7.5.3v2* | 929 | `a or b` defaults only `null`, `false`, and `""`; |
+| S7.5.3v2 | 929 | `a or b` defaults only `null`, `false`, and `""`; |
 | **§S7.6** | 936 | *Discharge: the handler and postfix `^`* |
 | S7.6.1v4* | 938 | `e ^ { … ^ … }` handles the error locally and is channel-agnostic |
 | S7.6.2v3 | 969 | The handler is the left-associative postfix-primary form `primary ^ { error_body }`, optionally followed … |
 | S7.6.3v2 | 983 | Postfix `e^` propagates |
 | S7.6.4 | 994 | `?` is not propagation |
 | S7.6.5v2 | 997 | The retired forms `let a^err = e` and prefix `^err` / `if (^err)` do not exist (why: the TE-13/TE-16 record); |
-| S7.6.6v3* | 1003 | Division of labor: `or` defaults ordinary falsy values and preserves errors; |
+| S7.6.6v3 | 1003 | Division of labor: `or` defaults ordinary falsy values and preserves errors; |
 | S7.6.7v4 | 1009 | A statement-position procedure handler `pn_call() ^ { error_body }` may protect a possibly-suspending call |
 | **§S7.7** | 1019 | *Containment: the declaration-boundary skip* |
 | S7.7.1* | 1024 | Skip is a **declaration-boundary mechanism only** |
@@ -189,13 +189,13 @@ in full — including lines too long for a viewer — run
 | S7.7.4* | 1038 | Reassignment to a declared `var` carries a diagnostic obligation, in three tiers: compile error where the RHS … |
 | S7.7.5* | 1044 | In a `for`, the skip target is the **iteration body**, not the loop: per-item skip keeps the batch alive; |
 | S7.7.6* | 1050 | Edge sites: element/field stores report via S7.7.4's tiers (containers are not scoped away |
-| S7.7.7v2* | 1055 | Recovery belongs in the initializer: `let a: T = e ^ { … }` |
+| S7.7.7v2 | 1055 | Recovery belongs in the initializer: `let a: T = e ^ { … }` |
 | **§S7.8** | 1059 | *Containers and errors* |
 | S7.8.1* | 1061 | Acceptance is read from the **destination contract**, never from syntactic position |
 | S7.8.2 | 1071 | Both spellings are visible in source: `[ f(x) ^ { 0 } for x in xs ]` → `int[]`, lane preserved; |
 | **§S7.9** | 1078 | *What an error participates in* |
 | S7.9.1 | 1083 | Type family participates |
-| S7.9.2v3* | 1085 | Logical evaluation and comparisons propagate |
+| S7.9.2v3 | 1085 | Logical evaluation and comparisons propagate |
 | S7.9.3 | 1092 | Value family propagates |
 | S7.9.4 | 1098 | Containment is not participation |
 | **§S7.10** | 1103 | *The sys-func return contract* |
@@ -478,7 +478,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3024 | How an element pattern spells *content must be empty* |
 | SO48 | 3025 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v36.1.1 (2026-10-19)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v38.2.0 (2026-10-19)
 
 | ID | Line | Title |
 |---|---|---|
@@ -566,210 +566,215 @@ in full — including lines too long for a viewer — run
 | D2.9.3 | 551 | A domain document written in Mark takes its own format name and extension; it is not a Mark alias |
 | **§D2.10** | 560 | *XHTML input* |
 | D2.10.1 | 562 | `xhtml` uses XML syntax and emits the HTML element tree |
-| **§D3** | 581 | *Type and Shape* |
-| **§D3.1** | 587 | *First-class type values* |
-| D3.1.1v5* | 589 | A type value is a `Type*` graph node under one compact TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` … |
-| D3.1.2 | 602 | Types compose as values (`\|` union, `?`, `[]`, constraints) and compare **representationally** |
-| D3.1.3 | 607 | Reflection is by operators and functions, not properties: `type(x)` yields the type value, `name(T)` its name; |
-| D3.1.4v2 | 611 | A type-binder site stores its written bound, name, and stable signature-local slot; |
-| **§D3.2** | 624 | *The subtype foundation* |
-| D3.2.1 | 626 | One subtype model, three distinct operations |
-| D3.2.2* | 632 | The **validator is the runtime enforcer** for user-defined types: deep, on first crossing, producing a rich … |
-| D3.2.3 | 638 | Declared and effective types are **separate recorded facts** (declaration on the binding node, inference … |
-| D3.2.4v4* | 642 | A crossing into a named map contract is a reification, not merely a check |
-| D3.2.5v2 | 673 | The surface spelling for the shared subtype relation is the binary `<:` operator |
-| D3.2.6* | 682 | Verified once, valid while unchanged; a required field is a required field |
-| **§D3.3** | 698 | *Inference* |
-| D3.3.1v2 | 700 | A type-error-free script's evaluation result is never affected by inference |
-| D3.3.2v2 | 720 | Entry-shape inference and body/result inference are **separate products**: float arithmetic on a parameter … |
-| D3.3.3v3 | 730 | Inferred container element-type **narrowing dies with its binding**: it is a property of one binding's scope, … |
-| D3.3.4 | 744 | Representation always follows the **full inferred contract** (D2.4, D2.5): an unproven indexed read infers … |
-| D3.3.5 | 747 | System-function result relations are declarative registry metadata |
-| **§D3.4** | 758 | *Shapes* |
-| D3.4.1 | 760 | A map/element shape is a `ShapeEntry` chain on `TypeMap`/`TypeElmt`; |
-| D3.4.2v2 | 766 | Shape identity is **structural, not nominal**: the ordered (field-name, TypeId) sequence, which is the path a … |
-| D3.4.3v5 | 767 | Maps and elements share types through a per-`Input` transition tree, grown one field at a time |
-| D3.4.4v4* | 768 | ShapeEntry name identity follows S8.2.2v4: a name is identified by its resolved namespace and its normalized … |
-| D3.4.5 | 793 | Shape transitions obey the **map-layout invariant**: the exact runtime shape always describes the stored bytes |
-| D3.4.6 | 801 | Shapes carry the immutable `LaneStorageDesc` derived from the full `Type*` via the one shared descriptor … |
-| D3.4.7 | 805 | A runtime JavaScript `TypeMap` may carry one immutable `const JsClassMeta*` refinement selected before … |
-| D3.4.8 | 814 | A JavaScript accessor descriptor is a virtual, object-local `ShapeEntry`: it owns a `JsAccessorCell*`, has … |
-| **§D3.5** | 822 | *Physical binary schemas* |
-| D3.5.1v2* | 824 | Binary schemas compile to immutable, module-owned field descriptors; |
-| D3.5.2v2* | 833 | Native schema views retain an invalidatable lifetime control; |
-| **§D4** | 845 | *Memory Management* |
-| **§D4.1** | 847 | *Allocator tiers* |
-| D4.1.1v2 | 849 | Four **content tiers**: **GC heap** (runtime values), **Input arena** (parsed documents), **AST/const pool**, … |
-| D4.1.2 | 857 | Static Mark data is **born shared and immortal**: `MarkBuilder` sets the shared COW state at construction; |
-| D4.1.3 | 863 | Input/format allocations are pool/arena-owned and **outside GC rooting entirely**; |
-| D4.1.4v5* | 866 | Heap bytes are kept by exactly **four mechanisms** |
-| D4.1.5* | 897 | Two mechanism-selection corollaries of D4.1.4 |
-| **§D4.2** | 910 | *Memory Context* |
-| D4.2.1v3 | 912 | `MemContext` is a **factory that owns every allocator** |
-| D4.2.2v2 | 923 | Per-document sub-contexts key allocators to a document URL, with the **attribution/reclamation split**: … |
-| D4.2.3* | 932 | Every arena and pool is **bound at creation to a context** |
-| D4.2.4* | 938 | A shared arena/pool's lifetime is governed by an **allocator-level atomic `ref_count`**: created at 1 held by … |
-| D4.2.5v3* | 945 | Allocation tracking is a **diagnostic, never the mechanism**: release builds default `memtrack` OFF; |
-| D4.2.6 | 962 | A pool may **own a resource that is not one of its blocks** through a **cleanup**: `pool_add_cleanup` … |
-| **§D4.3** | 976 | *Garbage collection* |
-| D4.3.1 | 978 | Non-moving mark-and-sweep, dual-zone |
-| D4.3.2v2 | 983 | Object zone = size-class segregated free lists backed by VM-owned extents; |
-| D4.3.3 | 989 | Precise closure-env tracing via `closure_field_count`; |
-| D4.3.4 | 992 | A shaped field whose declared lane is `null` is traced **conservatively**: the collector marks the eight-byte … |
-| **§D4.4** | 1003 | *COW implementation* |
-| D4.4.1 | 1005 | v1 ships the **1-bit shared flag** (`cow_state`, monotonic, idempotent; |
-| D4.4.2 | 1011 | A COW copy is exactly **one level** |
-| D4.4.3 | 1017 | All copy paths precisely root source/replacement/owner chain and reload after possible GC; |
-| D4.4.4v4* | 1020 | A place handle |
-| D4.4.6 | 1054 | A **place copy** (`let`/`var h = root.path`, root mutable) is share-marked at its bind iff **the place may be … |
-| D4.4.5 | 1067 | A **move-out** place copy |
-| **§D4.5** | 1078 | *The Radiant seam* |
-| D4.5.1v4 | 1080 | One system-allocation substrate (`memtrack` + VM regions, owned through `MemContext`), **two policies**: … |
-| D4.5.2* | 1091 | Radiant never retains a GC pointer |
-| D4.5.3v2 | 1102 | UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder |
-| **§D4.6** | 1115 | *Name identity* |
-| D4.6.1v4 | 1117 | One semantic **property** identity is a `NameId`, never a `String*` address |
-| D4.6.2v2 | 1134 | Evolve NamePool, don't replace it (first definer wins and parent-first lookup) |
-| **§D4.7** | 1145 | *Const pool / MarkPack* |
-| D4.7.1* | 1147 | One binary encoding for Lambda data, four consumers |
-| D4.7.2* | 1153 | Two stream variants over one encoding (bare stream; |
-| **§D5** | 1161 | *Execution State: Stacks and Rooting* |
-| **§D5.1** | 1163 | *The stack model* |
-| D5.1.1v3 | 1165 | Three stack-like mechanisms with distinct owners: the native C stack (invisible to GC); |
-| D5.1.2 | 1181 | Static per-function frame sizing, no `MIR_ALLOCA`, two saved watermarks per frame, virtual reservation + … |
-| D5.1.3 | 1186 | Downward flows never re-home; only upward flows and outliving stores do. Suspension is a re-homing barrier |
-| D5.1.4 | 1190 | Cleanup order is load-bearing: all `MAY_GC` cleanup runs **before** root/number watermark restoration; |
-| **§D5.2** | 1195 | *Scalar homes* |
-| D5.2.1v3 | 1197 | Function wide-scalar returns use the **companion-lane convention**: a may-be-wide boxed return is the pair … |
-| D5.2.2v3 | 1213 | Scalar homes are raw payload words, never GC roots, colored in a separate slot space from root slots; |
-| D5.2.3* | 1230 | Watermark ownership selects the wide-return transport |
-| **§D5.3** | 1253 | *GC rooting* |
-| D5.3.1 | 1255 | Generated code uses **safepoint-current canonical slots**: a stable home per rootable binding plus colored … |
-| D5.3.2 | 1260 | GC begins only inside a `MAY_GC` call |
-| D5.3.3 | 1264 | C/C++ helpers use slot-backed `RootFrame` / `Rooted<T>` / handles / `PersistentRooted` on the same side-root … |
-| D5.3.4 | 1271 | Rootability is driven by the four representation classes (`BOXED_ITEM`, `RAW_GC_POINTER`, `NON_GC_SCALAR`, … |
-| D5.3.5 | 1277 | Argument passing reserves each function's **maximum lexically-overlapping argument arity as a fixed suffix of … |
-| D5.3.6v2 | 1283 | Recovery frames form **one LIFO chain per activation** (the thread's base stack is one), a frame per boundary … |
-| **§D5.4** | 1293 | *Runtime globals and EvalContext* |
-| D5.4.1 | 1295 | One canonical long-lived `EvalContext` per isolate; exactly one sanctioned TLS root |
-| D5.4.2 | 1300 | Context state lives in lazily-allocated opaque capsules; |
-| D5.4.3 | 1305 | No context-dependent value at a code-baked address |
-| D5.4.4 | 1310 | Frozen registries stay global (immutable after publication); |
-| **§D6** | 1317 | *Function* |
-| **§D6.1** | 1319 | *The effect coloring* |
-| D6.1.1v2 | 1321 | `fn`/`pn` is a one-bit, declared, compiler-checked effect system (semantics §S12.1), realized as … |
-| D6.1.2 | 1332 | The bit is load-bearing across the runtime: it is the const-folder's soundness gate, the stream-fusion and … |
-| D6.1.3v2* | 1339 | Effect analyses beyond the bit are separate compiler facts: `may_await` (the call may park, so it may collect … |
-| **§D6.2** | 1347 | *Function values and closures* |
-| D6.2.1 | 1349 | A function value is a GC object carrying its entry pointers, its attached type/signature, and its closure … |
-| D6.2.2v2 | 1355 | Dynamic calls dispatch through per-callee executable entries |
-| D6.2.3v2 | 1369 | Lambda-language closures are **immutable values**: captures snapshot at creation and are stored as `Item`s in … |
-| D6.2.4 | 1377 | The closure env is precisely traced (`closure_field_count`); |
-| **§D6.3** | 1382 | *Concurrency runtime* |
-| D6.3.1 | 1384 | Tasks share the context heap under **one scheduler per context**; |
-| D6.3.2* | 1390 | Workers are **share-nothing isolates** (thread default, process optional); |
-| D6.3.3v2 | 1396 | Faults are scoped to one thread and one stack |
-| **§D6.4** | 1403 | *System built-ins* |
-| D6.4.1 | 1405 | Public sys funcs return **boxed `Item`** at the runtime/JIT boundary; |
-| D6.4.2 | 1411 | Raw `-1` helpers are **adapter-only**; |
-| **§D7** | 1418 | *Modules and Packaging* |
-| **§D7.1** | 1424 | *Build packaging and layering* |
-| D7.1.1 | 1426 | Build packaging is **static libraries** (dynamic is reserved for Jube modules): four archives + exe |
-| D7.1.2v2* | 1433 | All resource IO lives in `lambda-io` |
-| D7.1.3 | 1442 | Provider ownership beats include ownership |
-| D7.1.4v2 | 1448 | Headless is **three profiles**: A (`lambda-cli`, D7.1.6) is a link-time omission of `radiant.a`; |
-| D7.1.5 | 1458 | Mark API ownership: `MarkReader` is core; |
-| D7.1.6 | 1462 | `lambda-cli` is the runtime-only host |
-| D7.1.7v6 | 1470 | `lambda-wasm` is the browser evaluation profile |
-| **§D7.2** | 1504 | *Script packages* |
-| D7.2.1 | 1506 | A Lambda script module (package) is the compilation unit: its language profile is a unit property (D8.2.1), … |
-| D7.2.2 | 1512 | Imports resolve to the **boxed `_b` symbol** of exported functions (export ⇒ boxed entry mandatory, D8.3.4v4); |
-| D7.2.3 | 1517 | Imported packages are cached in-process (L1, D8.5.1) and distribute as **source** (D1.7); |
-| D7.2.4v3 | 1520 | `lambda.*` is the one root for everything Lambda ships |
-| D7.2.5* | 1535 | Full user-agent editing policy belongs to the shipped Lambda DOM behavior package, never to Radiant's native … |
-| D7.2.6 | 1550 | Import resolution follows the S16.9.8 roots, one resolver for every caller |
-| D7.2.7v2* | 1562 | LaTeX is read by TeX expansion, never by TeX typesetting |
-| D7.2.8* | 1564 | Document math preserves its source notation's layout policy |
-| **§D7.3** | 1576 | *Jube modules: the module system* |
-| D7.3.1 | 1578 | Core = ECMA-262 + engine substrate + `./lib` + a **closed globals allowlist** (console, timers, … |
-| D7.3.2 | 1583 | Modules are DSOs + `module.json`: hash-verified, ABI and hosted-API negotiated before any module code runs, … |
-| D7.3.3 | 1589 | One strict host-API tier for everyone |
-| D7.3.4 | 1595 | Core never links modules; |
-| D7.3.5 | 1599 | Every module kind names its conformance gate, wired into CI |
-| D7.3.6* | 1603 | The host exports an allowlist, nothing more |
-| **§D7.4** | 1615 | *Jube modules: data and async contracts* |
-| D7.4.1v2 | 1617 | `Item` is the only value currency; |
-| D7.4.2v2 | 1624 | Modules are **fully shielded from the async substrate** |
-| D7.4.3 | 1634 | Guest hosting crosses **no core types**: no `Runtime*`, `EvalContext*`, `Input*`, `MIR_context_t`, or … |
-| D7.4.4 | 1644 | Declared interfaces + record-owned hooks are the ONLY host-object protocol — one way to be a host object, no … |
-| D7.4.5v2* | 1656 | Three virtual carriers mirror the container taxonomy and occupy their structural TypeId bands: `vmap`, … |
-| D7.4.6 | 1678 | A host module states each function's colour in its signature |
-| **§D7.5** | 1687 | *Jube modules: trust and IO* |
-| D7.5.1 | 1689 | Three trust tiers: **T1 system** (in-process DSO |
-| D7.5.2* | 1698 | One central IO API is the sole IO door |
-| D7.5.3 | 1704 | Lambda↔Radiant is two explicit contracts: Radiant embeds Lambda through a versioned, Jube-aligned embed … |
-| D7.5.4* | 1708 | Audible output is a capability gated by document origin |
-| **§D8** | 1727 | *Compilation Pipeline* |
-| **§D8.1** | 1729 | *Structure* |
-| D8.1.1v18* | 1731 | First-party Lambda C lexer + hybrid recursive-descent/Pratt parser → the shared typed AST → **tiered … |
-| D8.1.2v3 | 1886 | The shipped Lambda executable uses the first-party C parser as the final production implementation for normal … |
-| D8.1.3v25* | 1897 | LambdaJS uses its first-party C lexer and hybrid recursive-descent/Pratt parser for normal JavaScript and … |
-| **§D8.2** | 2061 | *Unified AST* |
-| D8.2.1* | 2063 | One leveled core-node catalog serves host and guests; |
-| D8.2.2* | 2068 | Variance tiers in strict preference order: fields/flags → clause chains → language-range node kinds; |
-| D8.2.3v2* | 2075 | Migration is extract-after-convergence: the common core is extracted only after two working clients exist; |
-| D8.2.4v2* | 2080 | The unified compiler has one **indexed compilation unit**: dense stable IDs name … |
-| D8.2.5v3* | 2093 | One typed pass manager owns build → bind → validate → index → collect → capture/effect → environment layout → … |
-| D8.2.6v2* | 2109 | Core expression lowering is demand-driven and returns the full `MirValue` of D2.4.2 |
-| **§D8.3** | 2121 | *Dual-function compiling* |
-| D8.3.1v2* | 2123 | Plan-dependent entries comprise the boxed `<name>_b` boundary and a **bounded set of immutable raw variants** |
-| D8.3.2 | 2136 | The check lives in the callee |
-| D8.3.3 | 2142 | Source-relative correctness is the invariant |
-| D8.3.4v4 | 2147 | Visibility decides which versions exist |
-| D8.3.5 | 2167 | Numeric admission at implicit boundaries is one rule (static whole-domain embedding admits + normalizes; |
-| **§D8.4** | 2172 | *Dispatch policy* |
-| D8.4.1v2 | 2174 | No inline caches anywhere in the Lambda lane or LambdaJS |
-| D8.4.2v2* | 2189 | Core direct calls pass individual ABI operands (`Context*`, args); |
-| D8.4.3v2* | 2193 | Every hosted-language helper uses an explicit completion ABI |
-| **§D8.5** | 2212 | *MIR module cache* |
-| D8.5.1v7* | 2214 | L1 |
-| D8.5.2* | 2251 | The disk-cache direction is **code image + relocation journal** (Route B); |
-| D8.5.3* | 2258 | The **differential write verifier is mandatory and fail-closed**: compile twice at different addresses, diff; |
-| **§D8.6** | 2268 | *Emission testing* |
-| D8.6.1 | 2270 | The MT7 ratchet: 0% slack |
-| D8.6.2 | 2276 | One artifact contract: the MIR dump path honored in release; |
-| D8.6.3 | 2280 | Liveness is verified by **dynamic oracles** |
-| D8.6.4v2* | 2285 | Unified-AST consolidation has three **hard, fail-closed exit ratchets**: at least 2,000 net physical C/C++ … |
-| DO1 | 2658 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
-| DO25 | 2662 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
-| DO2 | 2669 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
-| DO3 | 2672 | Box/unbox: union params stay boxed (revisit?); |
-| DO4 | 2674 | ValueRep: `MirValue` size (measure first); |
-| DO5 | 2679 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
-| DO6 | 2683 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
-| DO7 | 2686 | Stack maps (KIV) |
-| DO8 | 2689 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
-| DO9 | 2692 | Memory Context Stage 2 opens, incl |
-| DO10 | 2695 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
-| DO11 | 2700 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
-| DO12 | 2704 | MIR cache: GC-root registry reset under L1 (verify before relying); |
-| DO13 | 2710 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
-| DO14 | 2715 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
-| DO15 | 2717 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
-| DO25 | 2723 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
-| DO16 | 2735 | Name identity: temporal canonical accepted; |
-| DO17 | 2741 | Const pool: decimal sharing scope; |
-| DO18 | 2745 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
-| DO19 | 2748 | Jube: `js_globals.cpp` allowlist audit; |
-| DO20 | 2758 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
-| DO21 | 2761 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
-| DO22 | 2767 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
-| DO23 | 2772 | Shape system opens: cross-`Input` type sharing |
-| DO24 | 2773 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
-| DO26 | 2785 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
-| DO27 | 2807 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
-| DO28 | 2811 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
-| DO29 | 2821 | Typed `var` parameter rebind on the eager tier |
-| DO30 | 2850 | *(closed 2026-09-07 |
-| DO31 | 2862 | Whether an object declaration may name an element tag |
-| DO32 | 2864 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |
+| **§D2.11** | 581 | *SVG admission, DOM export and frame snapshots* |
+| D2.11.1 | 583 | SVG embedded in `text/html` follows browser-standard HTML parsing |
+| D2.11.2 | 589 | External SVG reuses that same HTML5 SVG parsing path and result model |
+| D2.11.3 | 598 | SVG source export serializes the current SVG DOM, including edits |
+| D2.11.4* | 603 | Animation snapshots use the frame selected by the virtual timer |
+| **§D3** | 611 | *Type and Shape* |
+| **§D3.1** | 617 | *First-class type values* |
+| D3.1.1v5* | 619 | A type value is a `Type*` graph node under one compact TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` … |
+| D3.1.2 | 632 | Types compose as values (`\|` union, `?`, `[]`, constraints) and compare **representationally** |
+| D3.1.3 | 637 | Reflection is by operators and functions, not properties: `type(x)` yields the type value, `name(T)` its name; |
+| D3.1.4v2 | 641 | A type-binder site stores its written bound, name, and stable signature-local slot; |
+| **§D3.2** | 654 | *The subtype foundation* |
+| D3.2.1 | 656 | One subtype model, three distinct operations |
+| D3.2.2* | 662 | The **validator is the runtime enforcer** for user-defined types: deep, on first crossing, producing a rich … |
+| D3.2.3 | 668 | Declared and effective types are **separate recorded facts** (declaration on the binding node, inference … |
+| D3.2.4v4* | 672 | A crossing into a named map contract is a reification, not merely a check |
+| D3.2.5v2 | 703 | The surface spelling for the shared subtype relation is the binary `<:` operator |
+| D3.2.6* | 712 | Verified once, valid while unchanged; a required field is a required field |
+| **§D3.3** | 728 | *Inference* |
+| D3.3.1v2 | 730 | A type-error-free script's evaluation result is never affected by inference |
+| D3.3.2v2 | 750 | Entry-shape inference and body/result inference are **separate products**: float arithmetic on a parameter … |
+| D3.3.3v3 | 760 | Inferred container element-type **narrowing dies with its binding**: it is a property of one binding's scope, … |
+| D3.3.4 | 774 | Representation always follows the **full inferred contract** (D2.4, D2.5): an unproven indexed read infers … |
+| D3.3.5 | 777 | System-function result relations are declarative registry metadata |
+| **§D3.4** | 788 | *Shapes* |
+| D3.4.1 | 790 | A map/element shape is a `ShapeEntry` chain on `TypeMap`/`TypeElmt`; |
+| D3.4.2v2 | 796 | Shape identity is **structural, not nominal**: the ordered (field-name, TypeId) sequence, which is the path a … |
+| D3.4.3v5 | 797 | Maps and elements share types through a per-`Input` transition tree, grown one field at a time |
+| D3.4.4v4* | 798 | ShapeEntry name identity follows S8.2.2v4: a name is identified by its resolved namespace and its normalized … |
+| D3.4.5 | 823 | Shape transitions obey the **map-layout invariant**: the exact runtime shape always describes the stored bytes |
+| D3.4.6 | 831 | Shapes carry the immutable `LaneStorageDesc` derived from the full `Type*` via the one shared descriptor … |
+| D3.4.7 | 835 | A runtime JavaScript `TypeMap` may carry one immutable `const JsClassMeta*` refinement selected before … |
+| D3.4.8 | 844 | A JavaScript accessor descriptor is a virtual, object-local `ShapeEntry`: it owns a `JsAccessorCell*`, has … |
+| **§D3.5** | 852 | *Physical binary schemas* |
+| D3.5.1v2* | 854 | Binary schemas compile to immutable, module-owned field descriptors; |
+| D3.5.2v2* | 863 | Native schema views retain an invalidatable lifetime control; |
+| **§D4** | 875 | *Memory Management* |
+| **§D4.1** | 877 | *Allocator tiers* |
+| D4.1.1v2 | 879 | Four **content tiers**: **GC heap** (runtime values), **Input arena** (parsed documents), **AST/const pool**, … |
+| D4.1.2 | 887 | Static Mark data is **born shared and immortal**: `MarkBuilder` sets the shared COW state at construction; |
+| D4.1.3 | 893 | Input/format allocations are pool/arena-owned and **outside GC rooting entirely**; |
+| D4.1.4v5* | 896 | Heap bytes are kept by exactly **four mechanisms** |
+| D4.1.5* | 927 | Two mechanism-selection corollaries of D4.1.4 |
+| **§D4.2** | 940 | *Memory Context* |
+| D4.2.1v3 | 942 | `MemContext` is a **factory that owns every allocator** |
+| D4.2.2v2 | 953 | Per-document sub-contexts key allocators to a document URL, with the **attribution/reclamation split**: … |
+| D4.2.3* | 962 | Every arena and pool is **bound at creation to a context** |
+| D4.2.4* | 968 | A shared arena/pool's lifetime is governed by an **allocator-level atomic `ref_count`**: created at 1 held by … |
+| D4.2.5v3* | 975 | Allocation tracking is a **diagnostic, never the mechanism**: release builds default `memtrack` OFF; |
+| D4.2.6 | 992 | A pool may **own a resource that is not one of its blocks** through a **cleanup**: `pool_add_cleanup` … |
+| **§D4.3** | 1006 | *Garbage collection* |
+| D4.3.1 | 1008 | Non-moving mark-and-sweep, dual-zone |
+| D4.3.2v2 | 1013 | Object zone = size-class segregated free lists backed by VM-owned extents; |
+| D4.3.3 | 1019 | Precise closure-env tracing via `closure_field_count`; |
+| D4.3.4 | 1022 | A shaped field whose declared lane is `null` is traced **conservatively**: the collector marks the eight-byte … |
+| **§D4.4** | 1033 | *COW implementation* |
+| D4.4.1 | 1035 | v1 ships the **1-bit shared flag** (`cow_state`, monotonic, idempotent; |
+| D4.4.2 | 1041 | A COW copy is exactly **one level** |
+| D4.4.3 | 1047 | All copy paths precisely root source/replacement/owner chain and reload after possible GC; |
+| D4.4.4v4* | 1050 | A place handle |
+| D4.4.6 | 1084 | A **place copy** (`let`/`var h = root.path`, root mutable) is share-marked at its bind iff **the place may be … |
+| D4.4.5 | 1097 | A **move-out** place copy |
+| **§D4.5** | 1108 | *The Radiant seam* |
+| D4.5.1v4 | 1110 | One system-allocation substrate (`memtrack` + VM regions, owned through `MemContext`), **two policies**: … |
+| D4.5.2* | 1121 | Radiant never retains a GC pointer |
+| D4.5.3v2 | 1132 | UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder |
+| **§D4.6** | 1145 | *Name identity* |
+| D4.6.1v4 | 1147 | One semantic **property** identity is a `NameId`, never a `String*` address |
+| D4.6.2v2 | 1164 | Evolve NamePool, don't replace it (first definer wins and parent-first lookup) |
+| **§D4.7** | 1175 | *Const pool / MarkPack* |
+| D4.7.1* | 1177 | One binary encoding for Lambda data, four consumers |
+| D4.7.2* | 1183 | Two stream variants over one encoding (bare stream; |
+| **§D5** | 1191 | *Execution State: Stacks and Rooting* |
+| **§D5.1** | 1193 | *The stack model* |
+| D5.1.1v3 | 1195 | Three stack-like mechanisms with distinct owners: the native C stack (invisible to GC); |
+| D5.1.2 | 1211 | Static per-function frame sizing, no `MIR_ALLOCA`, two saved watermarks per frame, virtual reservation + … |
+| D5.1.3 | 1216 | Downward flows never re-home; only upward flows and outliving stores do. Suspension is a re-homing barrier |
+| D5.1.4 | 1220 | Cleanup order is load-bearing: all `MAY_GC` cleanup runs **before** root/number watermark restoration; |
+| **§D5.2** | 1225 | *Scalar homes* |
+| D5.2.1v3 | 1227 | Function wide-scalar returns use the **companion-lane convention**: a may-be-wide boxed return is the pair … |
+| D5.2.2v3 | 1243 | Scalar homes are raw payload words, never GC roots, colored in a separate slot space from root slots; |
+| D5.2.3* | 1260 | Watermark ownership selects the wide-return transport |
+| **§D5.3** | 1283 | *GC rooting* |
+| D5.3.1 | 1285 | Generated code uses **safepoint-current canonical slots**: a stable home per rootable binding plus colored … |
+| D5.3.2 | 1290 | GC begins only inside a `MAY_GC` call |
+| D5.3.3 | 1294 | C/C++ helpers use slot-backed `RootFrame` / `Rooted<T>` / handles / `PersistentRooted` on the same side-root … |
+| D5.3.4 | 1301 | Rootability is driven by the four representation classes (`BOXED_ITEM`, `RAW_GC_POINTER`, `NON_GC_SCALAR`, … |
+| D5.3.5 | 1307 | Argument passing reserves each function's **maximum lexically-overlapping argument arity as a fixed suffix of … |
+| D5.3.6v2 | 1313 | Recovery frames form **one LIFO chain per activation** (the thread's base stack is one), a frame per boundary … |
+| **§D5.4** | 1323 | *Runtime globals and EvalContext* |
+| D5.4.1 | 1325 | One canonical long-lived `EvalContext` per isolate; exactly one sanctioned TLS root |
+| D5.4.2 | 1330 | Context state lives in lazily-allocated opaque capsules; |
+| D5.4.3 | 1335 | No context-dependent value at a code-baked address |
+| D5.4.4 | 1340 | Frozen registries stay global (immutable after publication); |
+| **§D6** | 1347 | *Function* |
+| **§D6.1** | 1349 | *The effect coloring* |
+| D6.1.1v2 | 1351 | `fn`/`pn` is a one-bit, declared, compiler-checked effect system (semantics §S12.1), realized as … |
+| D6.1.2 | 1362 | The bit is load-bearing across the runtime: it is the const-folder's soundness gate, the stream-fusion and … |
+| D6.1.3v2* | 1369 | Effect analyses beyond the bit are separate compiler facts: `may_await` (the call may park, so it may collect … |
+| **§D6.2** | 1377 | *Function values and closures* |
+| D6.2.1 | 1379 | A function value is a GC object carrying its entry pointers, its attached type/signature, and its closure … |
+| D6.2.2v2 | 1385 | Dynamic calls dispatch through per-callee executable entries |
+| D6.2.3v2 | 1399 | Lambda-language closures are **immutable values**: captures snapshot at creation and are stored as `Item`s in … |
+| D6.2.4 | 1407 | The closure env is precisely traced (`closure_field_count`); |
+| **§D6.3** | 1412 | *Concurrency runtime* |
+| D6.3.1 | 1414 | Tasks share the context heap under **one scheduler per context**; |
+| D6.3.2* | 1420 | Workers are **share-nothing isolates** (thread default, process optional); |
+| D6.3.3v2 | 1426 | Faults are scoped to one thread and one stack |
+| **§D6.4** | 1433 | *System built-ins* |
+| D6.4.1 | 1435 | Public sys funcs return **boxed `Item`** at the runtime/JIT boundary; |
+| D6.4.2 | 1441 | Raw `-1` helpers are **adapter-only**; |
+| **§D7** | 1448 | *Modules and Packaging* |
+| **§D7.1** | 1454 | *Build packaging and layering* |
+| D7.1.1 | 1456 | Build packaging is **static libraries** (dynamic is reserved for Jube modules): four archives + exe |
+| D7.1.2v2* | 1463 | All resource IO lives in `lambda-io` |
+| D7.1.3 | 1472 | Provider ownership beats include ownership |
+| D7.1.4v2 | 1478 | Headless is **three profiles**: A (`lambda-cli`, D7.1.6) is a link-time omission of `radiant.a`; |
+| D7.1.5 | 1488 | Mark API ownership: `MarkReader` is core; |
+| D7.1.6 | 1492 | `lambda-cli` is the runtime-only host |
+| D7.1.7v6 | 1500 | `lambda-wasm` is the browser evaluation profile |
+| **§D7.2** | 1534 | *Script packages* |
+| D7.2.1 | 1536 | A Lambda script module (package) is the compilation unit: its language profile is a unit property (D8.2.1), … |
+| D7.2.2 | 1542 | Imports resolve to the **boxed `_b` symbol** of exported functions (export ⇒ boxed entry mandatory, D8.3.4v4); |
+| D7.2.3 | 1547 | Imported packages are cached in-process (L1, D8.5.1) and distribute as **source** (D1.7); |
+| D7.2.4v3 | 1550 | `lambda.*` is the one root for everything Lambda ships |
+| D7.2.5* | 1565 | Full user-agent editing policy belongs to the shipped Lambda DOM behavior package, never to Radiant's native … |
+| D7.2.6 | 1580 | Import resolution follows the S16.9.8 roots, one resolver for every caller |
+| D7.2.7v2* | 1592 | LaTeX is read by TeX expansion, never by TeX typesetting |
+| D7.2.8* | 1594 | Document math preserves its source notation's layout policy |
+| **§D7.3** | 1606 | *Jube modules: the module system* |
+| D7.3.1 | 1608 | Core = ECMA-262 + engine substrate + `./lib` + a **closed globals allowlist** (console, timers, … |
+| D7.3.2 | 1613 | Modules are DSOs + `module.json`: hash-verified, ABI and hosted-API negotiated before any module code runs, … |
+| D7.3.3 | 1619 | One strict host-API tier for everyone |
+| D7.3.4 | 1625 | Core never links modules; |
+| D7.3.5 | 1629 | Every module kind names its conformance gate, wired into CI |
+| D7.3.6* | 1633 | The host exports an allowlist, nothing more |
+| **§D7.4** | 1645 | *Jube modules: data and async contracts* |
+| D7.4.1v2 | 1647 | `Item` is the only value currency; |
+| D7.4.2v2 | 1654 | Modules are **fully shielded from the async substrate** |
+| D7.4.3 | 1664 | Guest hosting crosses **no core types**: no `Runtime*`, `EvalContext*`, `Input*`, `MIR_context_t`, or … |
+| D7.4.4 | 1674 | Declared interfaces + record-owned hooks are the ONLY host-object protocol — one way to be a host object, no … |
+| D7.4.5v2* | 1686 | Three virtual carriers mirror the container taxonomy and occupy their structural TypeId bands: `vmap`, … |
+| D7.4.6 | 1708 | A host module states each function's colour in its signature |
+| **§D7.5** | 1717 | *Jube modules: trust and IO* |
+| D7.5.1 | 1719 | Three trust tiers: **T1 system** (in-process DSO |
+| D7.5.2* | 1728 | One central IO API is the sole IO door |
+| D7.5.3v2 | 1734 | Lambda↔Radiant is two explicit contracts: Radiant embeds Lambda through a versioned, Jube-aligned embed … |
+| D7.5.4* | 1742 | Audible output is a capability gated by document origin |
+| **§D8** | 1761 | *Compilation Pipeline* |
+| **§D8.1** | 1763 | *Structure* |
+| D8.1.1v18* | 1765 | First-party Lambda C lexer + hybrid recursive-descent/Pratt parser → the shared typed AST → **tiered … |
+| D8.1.2v3 | 1920 | The shipped Lambda executable uses the first-party C parser as the final production implementation for normal … |
+| D8.1.3v26* | 1931 | LambdaJS uses its first-party C lexer and hybrid recursive-descent/Pratt parser for normal JavaScript and … |
+| **§D8.2** | 2107 | *Unified AST* |
+| D8.2.1* | 2109 | One leveled core-node catalog serves host and guests; |
+| D8.2.2* | 2114 | Variance tiers in strict preference order: fields/flags → clause chains → language-range node kinds; |
+| D8.2.3v2* | 2121 | Migration is extract-after-convergence: the common core is extracted only after two working clients exist; |
+| D8.2.4v2* | 2126 | The unified compiler has one **indexed compilation unit**: dense stable IDs name … |
+| D8.2.5v3* | 2139 | One typed pass manager owns build → bind → validate → index → collect → capture/effect → environment layout → … |
+| D8.2.6v2* | 2155 | Core expression lowering is demand-driven and returns the full `MirValue` of D2.4.2 |
+| **§D8.3** | 2167 | *Dual-function compiling* |
+| D8.3.1v2* | 2169 | Plan-dependent entries comprise the boxed `<name>_b` boundary and a **bounded set of immutable raw variants** |
+| D8.3.2 | 2182 | The check lives in the callee |
+| D8.3.3 | 2188 | Source-relative correctness is the invariant |
+| D8.3.4v4 | 2193 | Visibility decides which versions exist |
+| D8.3.5 | 2213 | Numeric admission at implicit boundaries is one rule (static whole-domain embedding admits + normalizes; |
+| **§D8.4** | 2218 | *Dispatch policy* |
+| D8.4.1v2 | 2220 | No inline caches anywhere in the Lambda lane or LambdaJS |
+| D8.4.2v2* | 2235 | Core direct calls pass individual ABI operands (`Context*`, args); |
+| D8.4.3v2* | 2239 | Every hosted-language helper uses an explicit completion ABI |
+| **§D8.5** | 2258 | *MIR module cache* |
+| D8.5.1v7* | 2260 | L1 |
+| D8.5.2* | 2297 | The disk-cache direction is **code image + relocation journal** (Route B); |
+| D8.5.3* | 2304 | The **differential write verifier is mandatory and fail-closed**: compile twice at different addresses, diff; |
+| **§D8.6** | 2314 | *Emission testing* |
+| D8.6.1 | 2316 | The MT7 ratchet: 0% slack |
+| D8.6.2 | 2322 | One artifact contract: the MIR dump path honored in release; |
+| D8.6.3 | 2326 | Liveness is verified by **dynamic oracles** |
+| D8.6.4v2* | 2331 | Unified-AST consolidation has three **hard, fail-closed exit ratchets**: at least 2,000 net physical C/C++ … |
+| DO1 | 2708 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
+| DO25 | 2712 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
+| DO2 | 2719 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
+| DO3 | 2722 | Box/unbox: union params stay boxed (revisit?); |
+| DO4 | 2724 | ValueRep: `MirValue` size (measure first); |
+| DO5 | 2729 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
+| DO6 | 2733 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
+| DO7 | 2736 | Stack maps (KIV) |
+| DO8 | 2739 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
+| DO9 | 2742 | Memory Context Stage 2 opens, incl |
+| DO10 | 2745 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
+| DO11 | 2750 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
+| DO12 | 2754 | MIR cache: GC-root registry reset under L1 (verify before relying); |
+| DO13 | 2760 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
+| DO14 | 2765 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
+| DO15 | 2767 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
+| DO25 | 2773 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
+| DO16 | 2785 | Name identity: temporal canonical accepted; |
+| DO17 | 2791 | Const pool: decimal sharing scope; |
+| DO18 | 2795 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
+| DO19 | 2798 | Jube: `js_globals.cpp` allowlist audit; |
+| DO20 | 2808 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
+| DO21 | 2811 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
+| DO22 | 2817 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
+| DO23 | 2822 | Shape system opens: cross-`Input` type sharing |
+| DO24 | 2823 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
+| DO26 | 2835 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
+| DO27 | 2857 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
+| DO28 | 2861 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
+| DO29 | 2871 | Typed `var` parameter rebind on the eager tier |
+| DO30 | 2900 | *(closed 2026-09-07 |
+| DO31 | 2912 | Whether an object declaration may name an element tag |
+| DO32 | 2914 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2: reflective own data reads guard the ordinary carrier and descriptor, reuse Lambda lookup/decoding, and retain full JS Get on a miss.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "expect": [
+        "call\tmap_shape_field_to_item",
+        "call\tmvp_lmd_class_property"
+      ],
+      "count": {
+        "call\ttypemap_hash_lookup_key": 1,
+        "call\tmap_shape_field_to_item": 1
+      },
+      "expect_seq": [
+        "mov\t{{r:kind}}, u8:3({{r:owner}})",
+        ", {{r:kind}}, 0",
+        "mov\t{{r:shape}}, i64:8({{r:owner}})",
+        "call\tmvp_lmd_owns_properties",
+        "call\ttypemap_hash_lookup_key",
+        "mov\t{{r:flags}}, u8:57({{r:field}})",
+        "and\t{{r:accessor}}, {{r:flags}}, 8",
+        ", {{r:accessor}}",
+        "mov\t{{r:offset}}, i64:16({{r:field}})",
+        ", {{r:offset}}, 0",
+        "call\tmap_shape_field_to_item",
+        "call\tmvp_lmd_class_property"
+      ]
+    }
+  ]
+}

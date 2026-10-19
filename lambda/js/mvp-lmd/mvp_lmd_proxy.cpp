@@ -329,10 +329,10 @@ Item mvp_lmd_proxy_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state)
     state->proxy_shape = *state->object_shape;
     state->proxy_shape.nominal = NULL; state->proxy_shape.is_nominal = false; state->proxy_shape.js_meta = &proxy_meta;
     Item& constructor = state->values[LMD_LIBRARY_PROXY];
-    constructor = mvp_lmd_native_function(program, NULL, proxy_construct, 2);
+    constructor = mvp_lmd_native_function(program, NULL, proxy_construct, 2, "Proxy");
     if (item_is_error(constructor)) return constructor;
     ((MvpLmdCallable*)constructor.function)->native_constructor = true;
     Item ready = mvp_lmd_function_prepare(constructor);
     if (item_is_error(ready)) return ready;
-    return mvp_lmd_named_set(constructor, "revocable", mvp_lmd_native_function(program, (void*)1, proxy_construct, 2));
+    return mvp_lmd_named_set(constructor, "revocable", mvp_lmd_native_function(program, (void*)1, proxy_construct, 2, "revocable"));
 }

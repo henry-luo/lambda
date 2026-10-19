@@ -745,6 +745,15 @@ static void dom_svg_layer_note_mutation(DomNode* node) {
     }
 }
 
+extern "C" void dom_svg_invalidate_presentation(void* opaque) {
+    DomNode* node = (DomNode*)opaque;
+    if (!node || !node->is_element()) return;
+    // sampled paint changes expire SVG queries and layers without changing authored DOM.
+    DomDocument* document = node->as_element()->doc;
+    if (document) document->style_query_epoch++;
+    dom_svg_layer_note_mutation(node);
+}
+
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
@@ -3431,6 +3440,7 @@ struct DomPendingImageEvent {
     DomNodeRef ref;
     bool loaded;
 };
+struct DomPendingLoadDocument;
 struct JsDomForeignDocumentRuntimeState {
     ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
@@ -3445,6 +3455,12 @@ struct JsDomForeignDocumentRuntimeState {
     DomPendingImageEvent* pending_images = nullptr;
     int pending_image_load_count = 0;
     bool iframe_load_drain_scheduled = false;
+    DomPendingLoadDocument* pending_load_documents = nullptr;
+};
+struct DomPendingLoadDocument : DomDocumentResourceData {
+    JsDomForeignDocumentRuntimeState* state;
+    DomDocument* document;
+    DomPendingLoadDocument* next;
 };
 static void dom_foreign_document_capsule_destroy(void* capsule);
 static const ContextCapsuleOps dom_foreign_document_capsule_ops = {
@@ -4194,6 +4210,63 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     return ItemNull;
 }
 
+static void destroy_pending_load_document(DomDocumentResourceData* data) {
+    auto* held = (DomPendingLoadDocument*)data;
+    auto* state = held->state;
+    // either owner can retire first; use the stored capsule without rebinding TLS (D5.4.1).
+    DomPendingLoadDocument** document_link = &state->pending_load_documents;
+    while (*document_link && *document_link != held) document_link = &(*document_link)->next;
+    if (*document_link) *document_link = held->next;
+    int kept = 0;
+    for (int i = 0; i < state->pending_iframe_load_count; i++) {
+        if (state->pending_iframe_docs[i] == held->document) {
+            dom_node_unpin(held->document, state->pending_iframe_refs[i], DOM_NODE_PIN_EVENT_QUEUE);
+        } else {
+            state->pending_iframe_loads[kept] = state->pending_iframe_loads[i];
+            state->pending_iframe_refs[kept] = state->pending_iframe_refs[i];
+            state->pending_iframe_docs[kept++] = state->pending_iframe_docs[i];
+        }
+    }
+    for (int i = kept; i < state->pending_iframe_load_count; i++) {
+        state->pending_iframe_loads[i] = nullptr;
+        state->pending_iframe_refs[i] = {nullptr, 0};
+        state->pending_iframe_docs[i] = nullptr;
+    }
+    state->pending_iframe_load_count = kept;
+    DomPendingImageEvent** image_link = &state->pending_images;
+    while (*image_link) {
+        DomPendingImageEvent* event = *image_link;
+        if (event->document != held->document) {
+            image_link = &event->next;
+            continue;
+        }
+        *image_link = event->next;
+        dom_node_unpin(held->document, event->ref, DOM_NODE_PIN_EVENT_QUEUE);
+        state->pending_image_load_count--;
+        mem_free(event);
+    }
+    mem_free(held);
+}
+
+static bool retain_pending_load_document(DomDocument* document) {
+    auto* state = dom_foreign_document_rt_state;
+    for (auto* held = state->pending_load_documents; held; held = held->next)
+        if (held->document == document) return true;
+    auto* held = (DomPendingLoadDocument*)mem_calloc(
+        1, sizeof(DomPendingLoadDocument), MEM_CAT_JS_RUNTIME);
+    if (!held) return false;
+    held->state = state;
+    held->document = document;
+    // queued native pins must detach before either the document registry or evaluator retires (D5.3.3).
+    if (!dom_document_add_resource(document, held, destroy_pending_load_document, context)) {
+        mem_free(held);
+        return false;
+    }
+    held->next = state->pending_load_documents;
+    state->pending_load_documents = held;
+    return true;
+}
+
 static void _schedule_iframe_load(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
@@ -4202,6 +4275,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
     if (s_pending_iframe_load_count >= 16) return;
     DomNodeRef ref = dom_node_ref((DomNode*)iframe);
     if (!iframe->doc || !dom_node_ref_validate(iframe->doc, ref) ||
+        !retain_pending_load_document(iframe->doc) ||
         !dom_node_pin(iframe->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) return;
     int pending_index = s_pending_iframe_load_count++;
     s_pending_iframe_loads[pending_index] = iframe;
@@ -4235,7 +4309,8 @@ extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
     if(!image->doc||!dom_node_ref_validate(image->doc,ref)) return;
     auto* event=(DomPendingImageEvent*)mem_calloc(1,sizeof(DomPendingImageEvent),MEM_CAT_JS_RUNTIME);
     if(!event) return;
-    if(!dom_node_pin(image->doc,ref,DOM_NODE_PIN_EVENT_QUEUE)) {mem_free(event);return;}
+    if (!retain_pending_load_document(image->doc) ||
+        !dom_node_pin(image->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) {mem_free(event);return;}
     event->image=image;event->document=image->doc;event->ref=ref;event->loaded=loaded;
     *tail=event;s_pending_image_load_count++;
     if(!s_iframe_load_drain_scheduled) {
@@ -4245,21 +4320,16 @@ extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
 }
 
 static void reset_pending_iframe_loads() {
-    if (!dom_foreign_document_state_get()) return;
-    for (int i = 0; i < s_pending_iframe_load_count; i++) {
-        if (s_pending_iframe_docs[i] && s_pending_iframe_refs[i].address) {
-            dom_node_unpin(s_pending_iframe_docs[i], s_pending_iframe_refs[i],
-                           DOM_NODE_PIN_EVENT_QUEUE);
-        }
+    auto* state = dom_foreign_document_state_get();
+    if (!state) return;
+    while (state->pending_load_documents) {
+        auto* held = state->pending_load_documents;
+        dom_document_release_resource(held->document, held);
     }
     memset(s_pending_iframe_loads, 0, sizeof(s_pending_iframe_loads));
     memset(s_pending_iframe_refs, 0, sizeof(s_pending_iframe_refs));
     memset(s_pending_iframe_docs, 0, sizeof(s_pending_iframe_docs));
     s_pending_iframe_load_count = 0;
-    while(s_pending_images) {
-        auto* event=s_pending_images;s_pending_images=event->next;
-        dom_node_unpin(event->document,event->ref,DOM_NODE_PIN_EVENT_QUEUE);mem_free(event);
-    }
     s_pending_image_load_count = 0;
     s_iframe_load_drain_scheduled = false;
 }
@@ -5802,10 +5872,25 @@ static StrView dom_xml_choose_prefix(DomXmlSerialization* context, const char* u
     return prefix;
 }
 
-static void collect_xml_node(DomNode* node, StrBuf* output) {
-    if (!node || !output) return;
+static void dom_xml_append_attribute(DomXmlSerialization* context, DomAttributeView attribute,
+    DomXmlPrefixBinding* inherited) {
+    StrView prefix = {};
+    if (!strcmp(attribute.namespace_uri, DOM_XML_NAMESPACE)) prefix = {"xml", 3};
+    else if (*attribute.namespace_uri) prefix = dom_xml_choose_prefix(context, attribute.namespace_uri,
+        dom_xml_name_prefix(attribute.qualified_name, attribute.local_name), inherited);
+    if (prefix.length) dom_xml_bind_prefix(context, prefix, attribute.namespace_uri);
+    strbuf_append_char(context->output, ' ');
+    dom_xml_append_name(context->output, prefix, attribute.local_name);
+    strbuf_append_str(context->output, "=\"");
+    collect_xml_attr_value(attribute.value, context->output);
+    strbuf_append_char(context->output, '"');
+}
+
+extern "C" bool dom_serialize_xml(void* opaque, StrBuf* output, const DomXmlProjection* projection) {
+    DomNode* node = (DomNode*)opaque;
+    if (!node || !output) return false;
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "dom.xml_serialization");
-    if (!pool) return;
+    if (!pool) return false;
     DomXmlSerialization context = {pool, nullptr, 1, output};
     dom_xml_bind_prefix(&context, {"xml", 3}, DOM_XML_NAMESPACE);
     DomXmlFrame* frame = nullptr;
@@ -5818,6 +5903,10 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
                 continue;
             }
             if (!frame->fragment) {
+                if (projection && projection->append_children &&
+                    !projection->append_children(projection->context, frame->element, output)) {
+                    pool_destroy(pool); return false;
+                }
                 strbuf_append_str(output, "</");
                 dom_xml_append_name(output, frame->prefix, frame->element->local_name());
                 strbuf_append_char(output, '>');
@@ -5845,7 +5934,12 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
         }
         if (!next->is_element()) continue;
         DomElement* element = next->as_element();
+        if (projection && projection->include_element &&
+            !projection->include_element(projection->context, element)) continue;
+        DomXmlAttributeOverride* overrides = projection && projection->attributes
+            ? projection->attributes(projection->context, element) : nullptr;
         DomXmlFrame* opened = (DomXmlFrame*)pool_calloc(pool, sizeof(DomXmlFrame));
+        if (!opened) { pool_destroy(pool); return false; }
         opened->element = element;
         opened->parent = frame;
         opened->inherited_bindings = context.bindings;
@@ -5893,6 +5987,7 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
         }
         // prefix generation emits declarations, so reserve output for the name first.
         StrBuf* declarations = strbuf_new();
+        if (!declarations) { pool_destroy(pool); return false; }
         context.output = declarations;
         if (opened->prefix.length) {
             opened->prefix = dom_xml_choose_prefix(&context, uri, opened->prefix, opened->inherited_bindings);
@@ -5909,7 +6004,6 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
         iterator = dom_element_attribute_iterator(element);
         while (dom_element_next_attribute(&iterator, &attribute)) {
             if (dom_is_internal_attr(attribute.qualified_name)) continue;
-            StrView prefix = {};
             if (!strcmp(attribute.namespace_uri, DOM_XMLNS_NAMESPACE)) {
                 if (!strcmp(attribute.local_name, "xmlns")) {
                     if (!omit_default) dom_xml_append_declaration(&context, {}, attribute.value);
@@ -5924,19 +6018,23 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
                 }
                 continue;
             }
-            if (!*attribute.namespace_uri) {
-                if (omit_default && !strcmp(attribute.local_name, "xmlns")) continue;
-            } else if (!strcmp(attribute.namespace_uri, DOM_XML_NAMESPACE)) prefix = {"xml", 3};
-            else prefix = dom_xml_choose_prefix(&context, attribute.namespace_uri,
-                dom_xml_name_prefix(attribute.qualified_name, attribute.local_name), opened->inherited_bindings);
-            if (prefix.length) dom_xml_bind_prefix(&context, prefix, attribute.namespace_uri);
-            strbuf_append_char(output, ' ');
-            dom_xml_append_name(output, prefix, attribute.local_name);
-            strbuf_append_str(output, "=\"");
-            collect_xml_attr_value(attribute.value, output);
-            strbuf_append_char(output, '"');
+            if (!*attribute.namespace_uri && omit_default && !strcmp(attribute.local_name, "xmlns")) continue;
+            for (DomXmlAttributeOverride* replacement = overrides; replacement; replacement = replacement->next)
+                if (!strcmp(replacement->name, attribute.qualified_name)) {
+                    attribute.value = replacement->value; replacement->written = true; break;
+                }
+            dom_xml_append_attribute(&context, attribute, opened->inherited_bindings);
         }
-        if (!opened->child && (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
+        for (DomXmlAttributeOverride* replacement = overrides; replacement; replacement = replacement->next) {
+            if (replacement->written) continue;
+            const char* colon = strchr(replacement->name, ':');
+            const char* local = colon ? colon + 1 : replacement->name;
+            DomAttributeView attribute = {replacement->namespace_uri ? replacement->namespace_uri : "",
+                replacement->name, local, replacement->value};
+            dom_xml_append_attribute(&context, attribute, opened->inherited_bindings);
+        }
+        if (!opened->child && !(projection && projection->append_children) &&
+            (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
             strbuf_append_str(output, dom_serializes_html_void(element) ? " />" : "/>");
             context.bindings = opened->inherited_bindings;
             pool_free(pool, opened);
@@ -5946,6 +6044,7 @@ static void collect_xml_node(DomNode* node, StrBuf* output) {
         }
     }
     pool_destroy(pool);
+    return true;
 }
 JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
@@ -5961,7 +6060,7 @@ extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
     // standard DOM API; serializing the live node preserves namespaces and
     // attributes instead of substituting a format-specific graph snapshot.
     StrBuf* sb = strbuf_new_cap(256);
-    collect_xml_node(node, sb);
+    dom_serialize_xml(node, sb, nullptr);
     String* result = heap_create_name(sb->str ? sb->str : "");
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
@@ -12713,10 +12812,19 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     bool from_css = false;
     const char* value = dom_engine_svg_property(elem, "transform", false,
         value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
+    const char* names[] = {"translate", "rotate", "scale"};
+    char individual_buffers[3][256];
+    const char* individual[3] = {};
+    bool has_individual = false;
+    for (unsigned index = 0; index < 3; index++) {
+        individual[index] = dom_engine_svg_property(elem, names[index], false,
+            individual_buffers[index], sizeof(individual_buffers[index]), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+        has_individual |= individual[index] && strcmp(individual[index], "none");
+    }
     bool nested_viewport = dom_svg_tag_is(elem, "svg") &&
         elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element());
-    // absent transforms do not depend on font metrics, origin or reference box.
-    if ((!value || strcmp(value, "none") == 0) && !nested_viewport) return transform;
+    // individual transforms also depend on the SVG reference box when the list is absent.
+    if ((!value || strcmp(value, "none") == 0) && !has_individual && !nested_viewport) return transform;
     SvgLengthContext lengths = dom_svg_length_context(elem);
     Bound box = {0.0f, 0.0f, lengths.viewport_width, lengths.viewport_height};
     for (DomNode* node = dom_engine_svg_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = dom_engine_svg_style_parent(node, g_dom_svg_style_scope)) {
@@ -12740,7 +12848,8 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     char origin_buffer[128];
     const char* origin = dom_engine_svg_property(elem, "transform-origin", false,
         origin_buffer, sizeof(origin_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-    transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths);
+    transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths,
+        has_individual ? individual : nullptr);
     if (nested_viewport) {
         RdtMatrix viewport_offset = rdt_matrix_translate(
             dom_svg_attribute_number(elem, "x", 0.0f), dom_svg_attribute_number(elem, "y", 0.0f));
@@ -18798,6 +18907,6 @@ static void dom_foreign_document_capsule_destroy(void* capsule) {
     dom_destroy_context_state(capsule,
         state->foreign_doc_cache_count || state->doc_with_window_count ||
         state->iframe_cache_count || state->pending_iframe_load_count ||
-        state->pending_image_load_count,
+        state->pending_image_load_count || state->pending_load_documents,
         "js-dom-foreign-document");
 }

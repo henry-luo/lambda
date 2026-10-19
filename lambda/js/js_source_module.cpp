@@ -5,15 +5,47 @@
 #include "js_function.hpp"
 #include "js_props.h"
 #include "js_well_known_names.h"
+#include "js_event_loop.h"
 #include "../io/resource_policy.h"
 #include "../runtime/heap_api.h"
 #include "../runtime/runtime-state.h"
+#include "../runtime/transpiler.hpp"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../../lib/mem.h"
+#include "../../lib/ownership.hpp"
 #include "../../lib/utf.h"
 #include "../../lib/str.h"
+#include "../../lib/url.h"
+#include "../../lib/file.h"
 #include <string.h>
 #include <stdlib.h>
+
+bool jm_path_is_lambda_source(const char* path) {
+    size_t length = path ? strlen(path) : 0;
+    return length >= 3 && !strcmp(path + length - 3, ".ls");
+}
+Item js_load_lambda_module(Runtime* runtime, const char* path) {
+    if (!runtime || !path) return ItemError;
+    if (!input_resource_policy_admits(runtime->resource_policy, path))
+        return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
+    lam::Temp<char> local(url_file_to_local_path(path));
+    if (!strncmp(path, "file:", 5) && !local)
+        return js_throw_reference_error(js_make_string("Invalid module file URL"));
+    const char* filename = local ? local.get() : path;
+    lam::Temp<char> canonical(file_realpath(filename));
+    filename = canonical ? canonical.get() : filename;
+    ModuleDescriptor* existing = module_get_for_runtime(runtime, filename);
+    if (existing && existing->initialized) return existing->namespace_obj;
+    runtime->js_runtime_used = true;
+    // attach the Lambda scheduler without discarding jobs queued by the JS turn.
+    js_event_loop_attach_lambda_scheduler();
+    if (!module_register_loading_with_namespace_ops_for_runtime(runtime, filename, "lambda", NULL))
+        return ItemError;
+    Script* script = load_script_mir_direct(runtime, filename, NULL, true);
+    ModuleDescriptor* module = script ? module_get_for_runtime(runtime, script->reference) : NULL;
+    return module && module->initialized ? module->namespace_obj
+        : js_throw_reference_error(js_make_string("Cannot load Lambda module"));
+}
 
 bool js_module_set_source_ops(const JsSourceModuleOps* ops, void* owner) {
     if (!js_active_runtime_state || !ops || !owner) return false;
@@ -40,6 +72,8 @@ static Item module_fail(JsSourceModuleRecord* record, Item error) {
 static void source_record_destroy(void* opaque) {
     JsSourceModuleRecord* record = (JsSourceModuleRecord*)opaque;
     if (record->import_meta_registered) heap_unregister_gc_root_range(&record->import_meta.item);
+    if (record->foreign_namespace_registered) heap_unregister_gc_root_range(&record->foreign_js_namespace.item);
+    mem_free(record->foreign_entries);
     ArrayList* lists[] = {record->requests, record->imports, record->exports, record->export_cells};
     for (ArrayList* list : lists) if (list) {
         for (int index = 0; index < list->length; index++) mem_free(list->data[index]);
@@ -59,18 +93,21 @@ static JsSourceModuleRecord* module_record(Runtime* runtime, const JsSourceModul
         void* owner, const char* path) {
     ModuleDescriptor* descriptor = module_get_for_runtime(runtime, path);
     bool fresh = descriptor == NULL;
+    bool foreign = jm_path_is_lambda_source(path);
     if (!descriptor) descriptor = module_register_loading_with_namespace_ops_for_runtime(
-        runtime, path, "js", &source_namespace_ops);
+        runtime, path, foreign ? "lambda" : "js", foreign ? NULL : &source_namespace_ops);
     if (!descriptor) return NULL;
     if (descriptor->source_record) {
         auto* record = (JsSourceModuleRecord*)descriptor->source_record;
         return record->ops == ops && record->owner == owner ? record : NULL;
     }
     // a foreign backend's live module cannot be reinterpreted as this frontend's record.
-    if (!fresh) return NULL;
+    if (!fresh && !(foreign && !strcmp(descriptor->source_lang, "lambda"))) return NULL;
     auto* record = (JsSourceModuleRecord*)mem_calloc(1, sizeof(JsSourceModuleRecord), MEM_CAT_JS_RUNTIME);
     if (!record) return NULL;
     record->runtime = runtime; record->descriptor = descriptor; record->ops = ops; record->owner = owner;
+    record->foreign_module = foreign;
+    record->foreign_js_namespace = ItemNull;
     record->requests = arraylist_new(4); record->imports = arraylist_new(4);
     record->exports = arraylist_new(4); record->export_cells = arraylist_new(4);
     if (!record->requests || !record->imports || !record->exports || !record->export_cells) {
@@ -103,6 +140,39 @@ static bool append_export(JsSourceModuleRecord* record, String* name, String* so
     item->local = local; item->namespace_binding = namespace_binding;
     if (arraylist_append(record->exports, item)) return true;
     mem_free(item); return false;
+}
+static Item prepare_lambda_module(JsSourceModuleRecord* record) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> ns(roots, js_load_lambda_module(record->runtime, record->descriptor->path)), value(roots, ItemNull);
+    if (item_is_error(ns.get())) return ns.get();
+    SymbolKeyList* keys = item_keys(ns.get());
+    if (!keys) return ItemError;
+    int64_t count = symbol_key_list_len(keys);
+    if (count < 0 || count > INT32_MAX) {
+        symbol_key_list_free(keys);
+        return module_error(record, JS_SOURCE_MODULE_RANGE, "Too many Lambda module exports");
+    }
+    uint32_t module_id = 0;
+    record->foreign_entries = (NameEntry*)mem_calloc(count ? count : 1, sizeof(NameEntry), MEM_CAT_JS_RUNTIME);
+    bool valid = record->foreign_entries && lambda_module_state_reserve((uint32_t)count, &module_id);
+    RuntimeModuleStateScope scope;
+    valid = valid && scope.activate(module_id);
+    if (valid) record->foreign_module_state = context->active_module_state;
+    for (int64_t index = 0; valid && index < count; index++) {
+        Symbol* key = symbol_key_list_at(keys, index);
+        NameEntry* entry = &record->foreign_entries[index];
+        entry->name = heap_create_name(key->chars, key->len);
+        entry->slot = (uint32_t)index;
+        value.set(module_namespace_get(record->descriptor, key->chars));
+        if (!item_is_error(value.get()) && record->ops->import_value)
+            value.set(record->ops->import_value(record->owner, value.get()));
+        valid = !item_is_error(value.get()) && entry->name &&
+            append_export(record, entry->name, NULL, NULL, entry, false);
+        if (valid) lambda_module_var_store(record->foreign_module_state, entry->slot, value.get());
+    }
+    symbol_key_list_free(keys);
+    return valid ? ItemNull : item_is_error(value.get()) ? value.get() : ItemError;
 }
 struct ModulePatternExports { JsSourceModuleRecord* record; bool valid; };
 static void append_pattern_exports(AstNode* node, void* opaque) {
@@ -212,6 +282,10 @@ static JsSourceBindingStatus resolve_binding(JsSourceModuleRecord* record, Strin
             if (status == JS_SOURCE_BINDING_ERROR && child->status == JS_SOURCE_MODULE_FAILED)
                 module_fail(record, child->descriptor->evaluation_error);
             return status;
+        }
+        if (record->foreign_module) {
+            *output = {record, exported->local, record->foreign_module_state, exported->local->slot, false};
+            return JS_SOURCE_BINDING_FOUND;
         }
         return record->ops->local_binding(record->owner, record, exported->local, output)
             ? JS_SOURCE_BINDING_FOUND : JS_SOURCE_BINDING_ERROR;
@@ -341,6 +415,12 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
             }
             continue;
         }
+        if (record->foreign_module) {
+            status.set(prepare_lambda_module(record));
+            if (item_is_error(status.get())) module_fail(record, status.get());
+            else record->status = JS_SOURCE_MODULE_PARSED;
+            continue;
+        }
         size_t loaded_length = 0;
         char* loaded = record == root && source ? NULL : js_load_script_source_from_cache(
             record->descriptor->path, "js-source-module", "module", true, &loaded_length, runtime->resource_policy);
@@ -361,7 +441,7 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
     for (int index = 0; index < graph->length && !item_is_error(status.get()); index++) {
         auto* record = (JsSourceModuleRecord*)graph->data[index];
         if (record->status != JS_SOURCE_MODULE_PARSED) continue;
-        status.set(ops->link(owner, record));
+        status.set(record->foreign_module ? ItemNull : ops->link(owner, record));
         if (!item_is_error(status.get())) record->status = JS_SOURCE_MODULE_LINKED;
     }
     if (item_is_error(status.get())) module_fail(root, status.get());
@@ -379,7 +459,8 @@ static Item instantiate_graph(JsSourceModuleRecord* record) {
     Rooted<Item> status(roots, ItemNull);
     for (int index = 0; index < record->requests->length && !item_is_error(status.get()); index++)
         status.set(instantiate_graph(((JsSourceModuleRequest*)record->requests->data[index])->module));
-    if (!item_is_error(status.get())) status.set(record->ops->instantiate(record->owner, record));
+    if (!item_is_error(status.get()) && !record->foreign_module)
+        status.set(record->ops->instantiate(record->owner, record));
     record->linking = false;
     if (item_is_error(status.get())) return module_fail(record, status.get());
     record->status = JS_SOURCE_MODULE_INSTANTIATED; return ItemNull;
@@ -442,7 +523,7 @@ static Item source_start_body(JsSourceModuleRecord* record) {
     }
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> result(roots, record->ops->evaluate(record->owner, record, false));
+    Rooted<Item> result(roots, record->foreign_module ? ItemNull : record->ops->evaluate(record->owner, record, false));
     js_module_source_complete(record, result.get());
     return result.get();
 }
@@ -498,7 +579,9 @@ static Item evaluate_graph(JsSourceModuleRecord* record, ArrayList* stack, uint3
             if (!descriptor->pending_async_deps) status.set(source_start_body(record));
         }
     } else {
-        status.set(record->ops->evaluate(record->owner, record, false));
+        // foreign exports are already initialized by their language loader;
+        // there is no JS frontend unit to enter for this graph node.
+        status.set(record->foreign_module ? ItemNull : record->ops->evaluate(record->owner, record, false));
         if (!item_is_error(status.get())) descriptor->body_executed = true;
     }
     if (item_is_error(status.get())) return status.get();
@@ -545,6 +628,27 @@ Item js_module_binding_get(const JsResolvedModuleBinding* binding) {
     Item value = lambda_module_var_at(binding->slab, binding->slot);
     return value.item == ITEM_JS_TDZ ? module_error(binding->module, JS_SOURCE_MODULE_REFERENCE,
         "Module binding is not initialized") : js_retain_scalar(value);
+}
+
+Item js_module_environment_binding(JsSourceModuleRecord* record, NameEntry* entry,
+        Item value, bool write) {
+    if (!record || !entry) return ItemError;
+    JsResolvedModuleBinding binding = {};
+    bool imported = false;
+    for (int index = 0; index < record->imports->length; index++) {
+        auto* candidate = (JsSourceModuleImport*)record->imports->data[index];
+        if (candidate->local != entry) continue;
+        binding = candidate->resolved; imported = true; break;
+    }
+    if (!imported && !record->ops->local_binding(record->owner, record, entry, &binding)) return ItemError;
+    if (!write) return js_module_binding_get(&binding);
+    if (imported || entry->is_const)
+        return module_error(record, JS_SOURCE_MODULE_TYPE, "Module binding is readonly");
+    if (lambda_module_var_at(binding.slab, binding.slot).item == ITEM_JS_TDZ)
+        return module_error(record, JS_SOURCE_MODULE_REFERENCE, "Module binding is not initialized");
+    // direct eval updates the same slab read by MIR and all export/reexport cells.
+    lambda_module_var_store(binding.slab, binding.slot, value);
+    return value;
 }
 
 // Namespace carriers are the module exotic, never the physical representation
@@ -669,7 +773,7 @@ Item js_module_namespace_project(Item owner, int64_t projection) {
 }
 static Item namespace_vmap_get(void* data, Item key) {
     auto* record = (JsSourceModuleRecord*)data;
-    return js_module_namespace_property(record->descriptor->namespace_obj, key, JS_MODULE_NAMESPACE_GET);
+    return js_module_namespace_property(js_module_namespace_create(record), key, JS_MODULE_NAMESPACE_GET);
 }
 static void namespace_vmap_set(void*, Item, Item) {}
 static int64_t namespace_vmap_count(void* data) {
@@ -704,14 +808,19 @@ static void namespace_vmap_destroy(void*) {}
 static void namespace_vmap_trace(void*, gc_heap*) {}
 Item js_module_namespace_create(JsSourceModuleRecord* record) {
     if (!record) return ItemError;
-    if (record->descriptor->namespace_obj.item != ITEM_NULL) return record->descriptor->namespace_obj;
+    Item* slot = record->foreign_module ? &record->foreign_js_namespace : &record->descriptor->namespace_obj;
+    if (slot->item != ITEM_NULL) return *slot;
+    if (record->foreign_module && !record->foreign_namespace_registered) {
+        if (!heap_try_register_gc_root_range(&slot->item, 1)) return ItemError;
+        record->foreign_namespace_registered = true;
+    }
     VMap* object = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
     if (!object) return ItemError;
     object->type_id = LMD_TYPE_VMAP;
     object->data = record;
     object->vtable = &source_namespace_vtable;
-    record->descriptor->namespace_obj = Item{.vmap = object};
-    return record->descriptor->namespace_obj;
+    *slot = Item{.vmap = object};
+    return *slot;
 }
 Item js_module_import_meta(JsSourceModuleRecord* record) {
     if (!record || !record->ops->import_meta_create) return ItemError;

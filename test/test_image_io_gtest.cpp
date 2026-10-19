@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "../lib/image.h"
+#include "../lib/image_psd.h"
+#include <zlib.h>
 #include "../lib/endian.h"
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
@@ -958,4 +960,119 @@ TEST(ImageIO, LegacyWorkerSaveCannotReplaceAnExistingDestination) {
     EXPECT_EQ(image_save_png_cancelable(path, fixture.pixels, 32, 24, 4, NULL, NULL, &created), 1);
     EXPECT_EQ(created, 1);
     EXPECT_EQ(file_delete(path), 0);
+}
+
+// Minimal planar fixtures exercise each PSD compression independently of the writer.
+static StrBuf* psd_compressed_fixture(unsigned compression) {
+    StrBuf* bytes = strbuf_new();
+    uint8_t header[40] = {};
+    memcpy(header, "8BPS", 4); write_be16(header + 4, 1); write_be16(header + 12, 3);
+    write_be32(header + 14, 2); write_be32(header + 18, 2);
+    write_be16(header + 22, 8); write_be16(header + 24, 3);
+    write_be16(header + 38, (uint16_t)compression);
+    strbuf_append_str_n(bytes, (const char*)header, sizeof(header));
+    uint8_t planes[] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
+    if (compression == 0) strbuf_append_str_n(bytes, (const char*)planes, sizeof(planes));
+    else if (compression == 1) {
+        const uint8_t counts[] = {0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3};
+        strbuf_append_str_n(bytes, (const char*)counts, sizeof(counts));
+        for (unsigned row = 0; row < 6; row++) {
+            strbuf_append_char(bytes, 1);
+            strbuf_append_str_n(bytes, (const char*)planes + row * 2, 2);
+        }
+    } else {
+        if (compression == 3) for (unsigned row = 0; row < 6; row++) planes[row * 2 + 1] -= planes[row * 2];
+        uint8_t compressed[64]; uLongf length = sizeof(compressed);
+        if (compress2(compressed, &length, planes, sizeof(planes), Z_BEST_COMPRESSION) != Z_OK) {
+            strbuf_free(bytes); return nullptr;
+        }
+        strbuf_append_str_n(bytes, (const char*)compressed, length);
+    }
+    return bytes;
+}
+
+TEST(ImageIO, PsdCompressionAndBounds) {
+    const uint8_t expected[] = {10, 50, 90, 255, 20, 60, 100, 255,
+        30, 70, 110, 255, 40, 80, 120, 255};
+    for (unsigned compression = 0; compression < 4; compression++) {
+        SCOPED_TRACE(compression);
+        StrBuf* fixture = psd_compressed_fixture(compression); ASSERT_NE(fixture, nullptr);
+        PsdDocument* doc = psd_document_create(); ASSERT_NE(doc, nullptr);
+        const char* error = nullptr;
+        ASSERT_TRUE(psd_read(doc, (const uint8_t*)fixture->str, fixture->length, &error)) << error;
+        ASSERT_NE(doc->composite, nullptr);
+        EXPECT_EQ(memcmp(doc->composite->pixels, expected, sizeof(expected)), 0);
+        psd_document_destroy(doc);
+        // A truncated final row/deflate stream must not yield partially decoded pixels.
+        doc = psd_document_create();
+        EXPECT_FALSE(psd_read(doc, (const uint8_t*)fixture->str, fixture->length - 1, &error));
+        psd_document_destroy(doc);
+        if (compression >= 2) {
+            strbuf_append_char(fixture, 7);
+            doc = psd_document_create();
+            EXPECT_FALSE(psd_read(doc, (const uint8_t*)fixture->str, fixture->length, &error));
+            psd_document_destroy(doc);
+        }
+        for (size_t length = 0; length < 40; length++) {
+            doc = psd_document_create();
+            EXPECT_FALSE(psd_read(doc, (const uint8_t*)fixture->str, length, &error));
+            psd_document_destroy(doc);
+        }
+        fixture->str[5] = 2; doc = psd_document_create();
+        EXPECT_FALSE(psd_read(doc, (const uint8_t*)fixture->str, fixture->length, &error));
+        psd_document_destroy(doc); strbuf_free(fixture);
+    }
+}
+
+TEST(ImageIO, AnimatedGifExactPaletteAndTransparentDisposal) {
+    RasterBuffer* first = raster_buffer_create(2, 1, 4, 8);
+    RasterBuffer* second = raster_buffer_create(2, 1, 4, 8);
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr);
+    const uint8_t red[] = {255, 0, 0, 255, 0, 0, 0, 0};
+    const uint8_t blue[] = {0, 0, 0, 0, 0, 0, 255, 255};
+    memcpy(first->pixels, red, sizeof(red)); memcpy(second->pixels, blue, sizeof(blue));
+    const RasterBuffer* frames[] = {first, second}; uint16_t delays[] = {0, 3};
+    ImageEncoded encoded = {}; ImageError error = {};
+    ASSERT_EQ(image_encode_gif_frames(nullptr, frames, delays, 2, 3, &encoded, &error), IMAGE_OK) << error.message;
+    GifFrames* decoded = image_gif_load_from_memory(encoded.data, encoded.length);
+    ASSERT_NE(decoded, nullptr); ASSERT_EQ(decoded->frame_count, 2);
+    EXPECT_TRUE(decoded->has_loop_extension); EXPECT_EQ(decoded->loop_count, 2);
+    EXPECT_EQ(decoded->frames[0].source_delay_ms, 0); EXPECT_EQ(decoded->frames[1].source_delay_ms, 30);
+    EXPECT_EQ(decoded->frames[0].pixels[0], 0xff0000ffu);
+    EXPECT_EQ(decoded->frames[0].pixels[1], 0u);
+    EXPECT_EQ(decoded->frames[1].pixels[0], 0u);
+    EXPECT_EQ(decoded->frames[1].pixels[1], 0xffff0000u);
+    image_gif_free(decoded); image_free(encoded.data);
+    first->pixels[3] = 128;
+    EXPECT_EQ(image_encode_gif_frames(nullptr, frames, delays, 2, 1, &encoded, &error), IMAGE_UNSUPPORTED_FEATURE);
+    EXPECT_EQ(encoded.data, nullptr);
+    first->pixels[3] = 255;
+    ImageContext context; image_context_init(&context); context.limits.max_encoded_bytes = 32;
+    EXPECT_EQ(image_encode_gif_frames(&context, frames, delays, 2, 1, &encoded, &error), IMAGE_LIMIT_EXCEEDED);
+    raster_buffer_destroy(first); raster_buffer_destroy(second);
+}
+
+TEST(ImageIO, PsdGroupMaskCannotSilentlyBecomeAnUnmaskedGroup) {
+    PsdDocument* source = psd_document_create(); ASSERT_NE(source, nullptr);
+    source->width = source->height = 1;
+    source->composite = raster_buffer_create(1, 1, 4, 4);
+    ASSERT_NE(source->composite, nullptr); memset(source->composite->pixels, 255, 4);
+    for (uint32_t section : {3u, 1u}) {
+        PsdLayer* layer = (PsdLayer*)pool_calloc(source->pool, sizeof(PsdLayer));
+        ASSERT_NE(layer, nullptr); layer->section = section; layer->opacity = 255;
+        memcpy(layer->blend, "norm", 5);
+        if (section == 1) {
+            layer->mask_right = layer->mask_bottom = 1;
+            layer->mask_default = 255; layer->mask = raster_buffer_create(1, 1, 1, 1);
+            ASSERT_NE(layer->mask, nullptr);
+        }
+        ASSERT_TRUE(arraylist_append(source->layers, layer));
+    }
+    StrBuf* bytes = strbuf_new(); const char* error = nullptr;
+    ASSERT_TRUE(psd_write(source, bytes, &error)) << error;
+    PsdDocument* decoded = psd_document_create(); ASSERT_NE(decoded, nullptr);
+    ASSERT_TRUE(psd_read(decoded, (const uint8_t*)bytes->str, bytes->length, &error)) << error;
+    ASSERT_EQ(decoded->layers->length, 2);
+    EXPECT_TRUE(((PsdLayer*)decoded->layers->data[1])->unsupported);
+    psd_document_destroy(decoded); psd_document_destroy(source); strbuf_free(bytes);
 }

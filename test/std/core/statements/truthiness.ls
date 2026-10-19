@@ -37,7 +37,7 @@ if ({}) "truthy" else "falsy"
 // ===== Non-empty map truthy =====
 if ({a: 1}) "truthy" else "falsy"
 
-// ===== Error is falsy =====
+// ===== Error has no truth value (S3.5) =====
 if (error("test")) "truthy" else "falsy"
 
 // ===== Float 0.0 truthy =====

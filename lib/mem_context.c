@@ -27,6 +27,9 @@ struct MemNode {
     MemNode*      prev;        // toward newer nodes
     void*         allocator;   // identity of the tracked allocator
     MemNode*      parent;      // backing allocator's node (may be in another ctx)
+    MemNode*      first_child;
+    MemNode*      sibling_next;
+    MemNode*      sibling_prev;
     MemContext*   owner;       // owning context
     MemStatFn     stat_fn;
     MemDestroyFn  destroy_fn;
@@ -184,6 +187,37 @@ static void detach_from_parent_locked(MemContext* ctx) {
     ctx->sibling_next = NULL;
 }
 
+static void unlink_node_locked(MemNode* node);
+
+static void unlink_backing_locked(MemNode* node) {
+    if (!node->parent) return;
+    if (node->sibling_prev) node->sibling_prev->sibling_next = node->sibling_next;
+    else node->parent->first_child = node->sibling_next;
+    if (node->sibling_next) node->sibling_next->sibling_prev = node->sibling_prev;
+    node->parent->child_count--;
+    node->parent = NULL;
+    node->sibling_next = node->sibling_prev = NULL;
+}
+
+static void link_backing_locked(MemNode* node, MemNode* parent) {
+    node->parent = parent;
+    if (!parent) return;
+    node->sibling_next = parent->first_child;
+    if (parent->first_child) parent->first_child->sibling_prev = node;
+    parent->first_child = node;
+    parent->child_count++;
+}
+
+// backing edges can cross contexts or be reparented after registration;
+// reverse birth order alone can free an arena before its scratch owners.
+static void release_node_locked(MemNode* node, bool destroy_allocator) {
+    while (node->first_child) release_node_locked(node->first_child, destroy_allocator);
+    unlink_backing_locked(node);
+    unlink_node_locked(node);
+    if (destroy_allocator && node->destroy_fn) node->destroy_fn(node->allocator);
+    free(node);
+}
+
 // Destroy all nodes + child contexts of `ctx`. Lock held. The root's nodes are
 // destroyed but the root struct itself is preserved unless `free_self`.
 static void destroy_ctx_locked(MemContext* ctx, bool free_self) {
@@ -196,17 +230,7 @@ static void destroy_ctx_locked(MemContext* ctx, bool free_self) {
     }
     ctx->children = NULL;
 
-    // own nodes, newest-first (head is the most recently registered)
-    MemNode* n = ctx->head;
-    while (n) {
-        MemNode* older = n->next;
-        if (n->parent && n->parent->child_count) n->parent->child_count--;
-        if (n->destroy_fn) n->destroy_fn(n->allocator);
-        free(n);
-        n = older;
-    }
-    ctx->head = NULL;
-    ctx->live_count = 0;
+    while (ctx->head) release_node_locked(ctx->head, true);
     free(ctx->reclaimers);
     ctx->reclaimers = NULL;
 
@@ -401,7 +425,6 @@ MemNode* mem_register(MemContext* ctx, MemKind kind, MemRole role,
     LOCK();
     if (!ctx->enabled) { UNLOCK(); free(n); return NULL; }
     n->allocator = allocator;
-    n->parent = parent;
     n->owner = ctx;
     n->stat_fn = stat_fn;
     n->destroy_fn = destroy_fn;
@@ -418,7 +441,7 @@ MemNode* mem_register(MemContext* ctx, MemKind kind, MemRole role,
     if (ctx->head) ctx->head->prev = n;
     ctx->head = n;
     ctx->live_count++;
-    if (parent) parent->child_count++;
+    link_backing_locked(n, parent);
     UNLOCK();
     return n;
 }
@@ -439,16 +462,12 @@ void mem_unregister(MemNode* node) {
     // cascade frees nodes itself; the release hook must not re-enter here.
     if (g_in_teardown) return;
     LOCK();
-    if (node->parent && node->parent->child_count) node->parent->child_count--;
+    // a plain unregister leaves child allocators alive and independently owned.
+    while (node->first_child) unlink_backing_locked(node->first_child);
+    unlink_backing_locked(node);
     unlink_node_locked(node);
     UNLOCK();
     free(node);
-}
-
-// Is `n` present in the first `count` entries of `arr`?
-static bool node_in(MemNode** arr, size_t count, MemNode* n) {
-    for (size_t i = 0; i < count; i++) if (arr[i] == n) return true;
-    return false;
 }
 
 // Unregister `node` AND every allocator whose memory it owns (its transitive
@@ -460,52 +479,8 @@ void mem_unregister_subtree(MemNode* node) {
     if (!node) return;
     if (g_in_teardown) return;   // cascade teardown frees the whole graph itself
     LOCK();
-    size_t cap = 8, count = 0;
-    MemNode** doomed = (MemNode**)malloc(cap * sizeof(MemNode*));
-    if (!doomed) {
-        if (node->parent && node->parent->child_count) node->parent->child_count--;
-        unlink_node_locked(node);
-        UNLOCK();
-        free(node);
-        return;
-    }
-    doomed[count++] = node;
-    // fixpoint: add any node whose parent is already doomed (BFS over the graph)
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        MemContext* stack[64];
-        int sp = 0;
-        if (g_root) stack[sp++] = g_root;
-        while (sp > 0) {
-            MemContext* c = stack[--sp];
-            for (MemNode* n = c->head; n; n = n->next) {
-                if (n->parent && node_in(doomed, count, n->parent) &&
-                    !node_in(doomed, count, n)) {
-                    if (count == cap) {
-                        cap *= 2;
-                        MemNode** grown = (MemNode**)realloc(doomed, cap * sizeof(MemNode*));
-                        if (!grown) break;   // out of memory: stop expanding
-                        doomed = grown;
-                    }
-                    doomed[count++] = n;
-                    changed = true;
-                }
-            }
-            for (MemContext* ch = c->children; ch; ch = ch->sibling_next)
-                if (sp < 64) stack[sp++] = ch;
-        }
-    }
-    // unlink all; decrement child_count only for parents that survive
-    for (size_t i = 0; i < count; i++) {
-        MemNode* d = doomed[i];
-        if (d->parent && !node_in(doomed, count, d->parent) && d->parent->child_count)
-            d->parent->child_count--;
-        unlink_node_locked(d);
-    }
+    release_node_locked(node, false);
     UNLOCK();
-    for (size_t i = 0; i < count; i++) free(doomed[i]);
-    free(doomed);
 }
 
 void mem_node_annotate(MemNode* node, MemRole role, const char* label) {
@@ -526,9 +501,8 @@ void mem_node_set_doc(MemNode* node, uint32_t doc_id) {
 void mem_reparent(MemNode* node, MemNode* new_parent) {
     if (!node) return;
     LOCK();
-    if (node->parent && node->parent->child_count) node->parent->child_count--;
-    node->parent = new_parent;
-    if (new_parent) new_parent->child_count++;
+    unlink_backing_locked(node);
+    link_backing_locked(node, new_parent);
     UNLOCK();
 }
 

@@ -22,6 +22,6 @@ let fast=music.performance(score,{tempo:240})^;
  performance.occurrences[0].id==performance.occurrences[4].id,
  performance.occurrences[0].seconds!=performance.occurrences[4].seconds,
  music.read_midi(music.midi(performance)^)^.seconds==performance.seconds,
- (music.performance(music.load("test/music/features.musicxml")^) or "unsupported")=="unsupported",
- (music.performance(score,{tempo:0}) or "invalid")=="invalid"
+ ((music.performance(music.load("test/music/features.musicxml")^) ^ { null }) or "unsupported")=="unsupported",
+ ((music.performance(score,{tempo:0}) ^ { null }) or "invalid")=="invalid"
 ]

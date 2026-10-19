@@ -20,7 +20,7 @@ pub fn render_frame(frame) {
         if (parsed is error) parsed else content(parsed)[0]
     }
 }
-pub pn snapshot(node) {
+pub fn snapshot(node) {
     let frame=radiant.geomap_snapshot(node);
     if (frame==null) error("map: viewport has no displayed frame")
     else if (frame is string) error("map: " ++ frame) else frame
@@ -29,7 +29,7 @@ pub fn query(frame, point_or_box, options = {}) {
     let result=radiant.geomap_query_frame(frame,point_or_box,options);
     if (result is string) error("map: " ++ result) else result
 }
-pub pn query_displayed(node, point_or_box, options = {}) {
+pub fn query_displayed(node, point_or_box, options = {}) {
     let result=radiant.geomap_query_displayed(node,point_or_box,options);
     if (result is string) error("map: " ++ result) else result
 }

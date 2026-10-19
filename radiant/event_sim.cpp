@@ -1595,12 +1595,17 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         }
     }
     // F6 (Radiant_Design_Form_Input.md §3.6): clipboard helpers.
-    else if (strcmp(type_str, "paste_text") == 0) {
+    else if (strcmp(type_str, "paste_text") == 0 || strcmp(type_str, "paste_image") == 0) {
         ev->type = SIM_EVENT_PASTE_TEXT;
         const char* text = reader.get("text").cstring();
         if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
         const char* html = reader.get("html").cstring();
         if (html) ev->clipboard_html = mem_strdup(html, MEM_CAT_LAYOUT);
+        if (strcmp(type_str, "paste_image") == 0) {
+            const char* path = reader.get("file").cstring();
+            if (!path) return parse_sim_event_fail(ev);
+            ev->file_path = mem_strdup(path, MEM_CAT_LAYOUT);
+        }
         parse_target(reader, ev);
     }
     else if (strcmp(type_str, "set_prompt") == 0) {
@@ -1615,6 +1620,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         parse_assertion_strings(reader, ev, false);
         const char* mime = reader.get("mime").cstring();
         if (mime) ev->clipboard_mime = mem_strdup(mime, MEM_CAT_LAYOUT);
+        const char* path = reader.get("file").cstring();
+        if (path) ev->file_path = mem_strdup(path, MEM_CAT_LAYOUT);
     }
     // F7 (Radiant_Design_Form_Input.md §4.1): IME composition driver.
     //   {"type":"ime_compose","phase":"begin"}
@@ -1931,6 +1938,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "render") == 0) {
         ev->type = SIM_EVENT_RENDER;
+        parse_target(reader, ev);
         const char* file = reader.get("file").cstring();
         if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         else {
@@ -4228,7 +4236,28 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             const char* text = ev->input_text ? ev->input_text : "";
             log_info("event_sim: paste_text len=%zu", strlen(text));
-            if (ev->clipboard_html) {
+            if (ev->file_path) {
+                char* bytes = nullptr;
+                size_t length = 0;
+                if (!file_read_all(ev->file_path, MEM_CAT_LAYOUT, &bytes, &length)) {
+                    log_error("event_sim: cannot read clipboard image %s", ev->file_path);
+                    sim_record_assertion(ctx, false);
+                    break;
+                }
+                const ImageCapabilities* codec = image_codec_capabilities(image_detect((const uint8_t*)bytes, length));
+                if (!codec) {
+                    mem_free(bytes);
+                    sim_record_assertion(ctx, false);
+                    break;
+                }
+                ArrayList* items = arraylist_new(1);
+                ClipboardItem* item = clipboard_item_new();
+                clipboard_item_add(item, codec->mime, bytes, length);
+                arraylist_append(items, item);
+                clipboard_store_write_items(items);
+                clipboard_items_free(items);
+                mem_free(bytes);
+            } else if (ev->clipboard_html) {
                 clipboard_store_write_html(ev->clipboard_html, text);
             } else {
                 clipboard_copy_text(text);
@@ -4252,6 +4281,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_CLIPBOARD: {
+            if (ev->file_path) {
+                char* expected = nullptr;
+                size_t length = 0;
+                bool loaded = file_read_all(ev->file_path, MEM_CAT_LAYOUT, &expected, &length);
+                ArrayList* items = clipboard_store_read_items();
+                ClipboardEntry* entry = clipboard_items_find(items, ev->clipboard_mime ? ev->clipboard_mime : "image/png");
+                bool passed = loaded && entry && entry->data_len == length && memcmp(expected, entry->data, length) == 0;
+                clipboard_items_free(items);
+                mem_free(expected);
+                sim_record_assertion(ctx, passed);
+                if (!passed) log_error("event_sim: clipboard bytes differ from %s", ev->file_path);
+                break;
+            }
             const char* clip = ev->clipboard_mime
                 ? clipboard_store_read_mime(ev->clipboard_mime)
                 : clipboard_get_text();
@@ -5403,6 +5445,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
+            // navigation must publish the window density before layout and SVG layer capture.
+            ui_context_sync_document_raster_scale(uicon, new_doc);
             layout_html_doc(uicon, new_doc, false);
             render_html_doc(uicon, new_doc->view_tree, nullptr);
             log_info("event_sim: navigated to '%s'", ev->navigate_url);
@@ -5417,6 +5461,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DomDocument* prev_doc = (DomDocument*)ctx->nav_history[--ctx->nav_history_depth];
             uicon->document = lam::up(prev_doc);
+            ui_context_sync_document_raster_scale(uicon, prev_doc);
             layout_html_doc(uicon, prev_doc, false);
             render_html_doc(uicon, prev_doc->view_tree, nullptr);
             log_info("event_sim: navigate_back to previous page (history depth now %d)", ctx->nav_history_depth);
@@ -5485,7 +5530,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
                     // Vector export must prepare its own GPU snapshots without a preceding raster pass.
                     sim_flush_pending_reflow(uicon->document);
-                    if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
+                    if (ev->target_selector) {
+                        View* target = event_sim_find_element(uicon->document, ev->target_selector, ev->target_index);
+                        if (!target || !target->is_element() || render_svg_dom_to_file(target->as_element(),
+                                ev->file_path, radiant_document_virtual_clock(uicon, nullptr)) != 0) ctx->fail_count++;
+                    } else if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
+                } else if (ext && (strcmp(ext, ".pdf") == 0 || strcmp(ext, ".PDF") == 0)) {
+                    sim_flush_pending_reflow(uicon->document);
+                    if (render_uicontext_to_pdf(uicon, ev->file_path) != 0) ctx->fail_count++;
                 } else {
                     render_pending_surface(uicon);
                     // Default to PNG

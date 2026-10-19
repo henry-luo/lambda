@@ -764,6 +764,26 @@ Item scalar_storage_read(Item item, bool immortal) {
 #endif
 }
 
+// Read shape and strides into caller-provided arrays. Returns zero for invalid
+// metadata; callers must return ItemError without consuming either buffer.
+// For 1-D owned arrays, returns ndim=1 with shp[0]=length, str[0]=1.
+int array_num_get_shape_strides(ArrayNum* arr, int64_t* shp, int64_t* str) {
+    if (!shp || !str || !array_num_shape_is_valid(arr)) {
+        log_error("array-num-shape: invalid rank metadata");
+        return 0;
+    }
+    if (arr->is_ndim) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr->extra;
+        int64_t* sd = array_num_shape_dims(s);
+        int64_t* ss = array_num_shape_strides(s);
+        for (int i = 0; i < s->ndim; i++) { shp[i] = sd[i]; str[i] = ss[i]; }
+        return s->ndim;
+    }
+    shp[0] = arr->length;
+    str[0] = 1;
+    return 1;
+}
+
 // array_num_element_offset's strided case: the view's shape maps a C-order
 // position to its offset from `data`, the last axis varying fastest.
 extern "C" __attribute__((noinline)) int64_t array_num_strided_offset(

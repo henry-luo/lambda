@@ -839,6 +839,10 @@ static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, b
 
 static void target_stacking_view(EventContext* evcon, View* view) {
     if (!evcon || !view || evcon->target) return;
+    RadiantPaintPhaseScope phase(&evcon->paint_phase,
+        radiant_stack_is_paint_atomic(view) || radiant_stack_is_float(view) ||
+        radiant_stack_is_out_of_flow_positioned(view) || radiant_stack_is_in_flow_positioned_step8(view)
+            ? RADIANT_PAINT_ALL : evcon->paint_phase);
 
     if (view->is_block()) {
         target_block_view(evcon, lam::view_require_block(view));
@@ -907,56 +911,33 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 
 void target_children(EventContext* evcon, View* view) {
     if (!evcon || !view) return;
-
-    bool has_step8 = false;
-    View* last = view;
-    for (View* child = view; child; child = child->next()) {
-        if (!radiant_stack_is_deferred_from_normal_flow(child) &&
-            radiant_stack_is_in_flow_positioned_step8(child)) {
-            has_step8 = true;
+    unsigned phases = evcon->paint_phase == RADIANT_PAINT_ALL ? radiant_stack_flow_phases(view) : 0;
+    if (phases) {
+        // hit testing consumes the same CSS paint phases in reverse order.
+        for (unsigned index = 0; index < 3; index++) {
+            RadiantPaintPhase next = radiant_stack_paint_phase(2 - index);
+            if (!(phases & (1u << next))) continue;
+            RadiantPaintPhaseScope phase(&evcon->paint_phase, next);
+            target_children(evcon, view);
+            if (evcon->target) return;
         }
-        last = child;
+        return;
     }
-
-    // CSS 2.1 Appendix E step 8: in-flow positioned siblings (relative, sticky)
-    // paint after the others (render_walk_children), so they take the hit
-    // first — the later one first, as it paints on top.
-    if (has_step8) {
+    View* last = view;
+    for (View* child = view; child; child = child->next()) last = child;
+    if (render_paint_phase_has_content(evcon->paint_phase)) {
         for (View* child = last; child && !evcon->target;
              child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
             if (!radiant_stack_is_deferred_from_normal_flow(child) &&
-                radiant_stack_is_in_flow_positioned_step8(child)) {
-                target_stacking_view(evcon, child);
-            }
+                radiant_stack_is_in_flow_positioned_step8(child)) target_stacking_view(evcon, child);
         }
-        if (evcon->target) return;
     }
-
-    // overlapping normal-flow boxes also take hits in reverse paint order.
-    for (View* child = last;
-         child && !evcon->target;
+    for (View* child = last; child && !evcon->target;
          child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
-        // step-8 boxes were tried above
-        if (has_step8 && radiant_stack_is_in_flow_positioned_step8(child)) continue;
-        if (child->is_block()) {
-            ViewBlock* block = lam::view_require_block(child);
-            if (radiant_stack_is_deferred_from_normal_flow(child)) {
-                // skip deferred stacking entries; target_block_view walks them in reverse paint order.
-            } else {
-                target_block_view(evcon, block);
-            }
-        }
-        else if (child->view_type == RDT_VIEW_INLINE) {
-            if (radiant_stack_is_deferred_from_normal_flow(child)) {
-                continue;
-            }
-            ViewSpan* span = lam::view_require_element(child);
-            target_inline_view(evcon, span);
-        }
-        else if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(child);
-            target_text_view(evcon, text);
-        }
+        if (radiant_stack_is_deferred_from_normal_flow(child) ||
+            radiant_stack_is_in_flow_positioned_step8(child) ||
+            !radiant_stack_in_paint_phase(child, evcon->paint_phase)) continue;
+        target_stacking_view(evcon, child);
     }
 }
 
@@ -1109,7 +1090,10 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
 
             float score = -1.0f;
             int offset = rect->start_index;
-            if (rect_y <= event->y && event->y < rect_bottom && event->x >= rect_right) {
+            if (rect_y <= event->y && event->y < rect_bottom && event->x < rect_x) {
+                // marker/leading-margin clicks belong to this line before vertical-gap snapping.
+                score = rect_x - event->x;
+            } else if (rect_y <= event->y && event->y < rect_bottom && event->x >= rect_right) {
                 score = event->x - rect_right;
                 offset = rect->start_index + max(rect->length, 0);
             } else if (include_vertical_gap && event->y >= rect_bottom) {
@@ -1235,6 +1219,11 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // an invisible box cannot claim the hit; traversal still reaches visible descendants.
     bool self_unhittable = view_visibility_is_hidden(block) || event_view_pointer_events_none(
         static_cast<View*>(block));
+    bool content_phase = render_paint_phase_has_content(evcon->paint_phase);
+    // ordinary block self hits belong below floats; replaced content remains foreground.
+    bool phase_self_allowed = evcon->paint_phase == RADIANT_PAINT_ALL ||
+        evcon->paint_phase == RADIANT_PAINT_BLOCK_BACKGROUNDS ||
+        (content_phase && layout_tag_is_replaced_content((NameId)block->tag()));
     // Content outside the overflow clip is not painted (setup_scroller), so it
     // must not take the hit either: an overflowing child would claim clicks on
     // a later sibling painted over it, e.g. a tab bar under a long <pre>. The
@@ -1256,7 +1245,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     View* view = NULL;
     bool hover = false;
     if (block->scroller && block->scroll_mut()->pane) {
-        hover = !path_only && !self_unhittable && scrollpane_target(evcon, block);
+        hover = content_phase && !path_only && !self_unhittable && scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
@@ -1313,12 +1302,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
-    if (block->custom_layout_paint_prop()) {
+    if (content_phase && block->custom_layout_paint_prop()) {
         target_positioned_children(evcon, block);
         if (evcon->target) goto RETURN;
         target_custom_layout_children(evcon, block);
         if (evcon->target) goto RETURN;
-    } else {
+    } else if (content_phase) {
         // Positioned content paints above the block's embedded self-content; walking
         // it first prevents iframe/webview hit targets from stealing covered clicks.
         target_positive_z_descendants(evcon, block->first_child);
@@ -1414,7 +1403,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 }
             }
         }
-        if (!self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
+        if (phase_self_allowed && !self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
             bool include_vertical_gap = rich_host;
@@ -1438,7 +1427,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
 
-    target_negative_z_descendants(evcon, block);
+    if (content_phase) target_negative_z_descendants(evcon, block);
 
     RETURN:
     // Only restore block position if no target was found
@@ -1456,7 +1445,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
-    if (!path_only && !self_unhittable && !evcon->target &&
+    if (phase_self_allowed && !path_only && !self_unhittable && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
@@ -1492,6 +1481,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     if (!evcon || !view_tree) return;
+    // embedded documents own their complete stack, even inside an outer foreground visit.
+    RadiantPaintPhaseScope document_phase(&evcon->paint_phase, RADIANT_PAINT_ALL);
     float saved_x = evcon->viewport_pointer_x, saved_y = evcon->viewport_pointer_y;
     evcon->viewport_pointer_x = evcon->event.mouse_position.x;
     evcon->viewport_pointer_y = evcon->event.mouse_position.y;
@@ -1976,9 +1967,9 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     char* text = state_store_extract_selection_text(state, temp_arena);
     char* html = state_store_extract_selection_html(state, temp_arena);
     bool copied = false;
-    if (html && html[0] && text) {
-        clipboard_copy_rich(html, text);
-        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), strlen(text));
+    if (html && html[0]) {
+        clipboard_copy_rich(html, text ? text : "");
+        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), text ? strlen(text) : 0);
         copied = true;
     } else if (text) {
         clipboard_copy_text(text);
@@ -1996,9 +1987,19 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
 
 // A model-bound surface chooses what a copy or cut puts on the clipboard (its
 // selection may reach past what the DOM shows); Radiant only transports it
-// (D7.2.5). Returns false when the model supplied no text.
-static bool copy_model_text_to_clipboard(DocState* state, Item result, const char* prefix) {
+// (D7.2.5). Returns false when the model supplied no clipboard payload.
+static bool copy_model_payload_to_clipboard(DocState* state, Item result, const char* prefix) {
+    char* image = radiant_edit_result_string_copy(result, "clipboard_image");
+    char* html = radiant_edit_result_string_copy(result, "clipboard_html");
     char* text = radiant_edit_result_string_copy(result, "clipboard_text");
+    if (image) {
+        bool copied = clipboard_store_write_image(image, html, text);
+        mem_free(image);
+        mem_free(html);
+        mem_free(text);
+        return copied;
+    }
+    mem_free(html);
     bool copied = text && text[0];
     if (copied) {
         clipboard_copy_text(text);
@@ -2526,9 +2527,12 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("text", evcon->paste_text);
     }
 
+    // captured pointer gestures need the hit position rather than their selection anchor.
     bool event_uses_hit_source_pos = evcon &&
         (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
          strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0 ||
+         strcmp(event_name, "pointerdown") == 0 || strcmp(event_name, "pointermove") == 0 ||
+         strcmp(event_name, "pointerup") == 0 ||
          strcmp(event_name, "mousepress") == 0);
 
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
@@ -2605,7 +2609,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     if (event_uses_hit_source_pos && doc && doc->view_tree) {
         float event_x = 0.0f, event_y = 0.0f;
         bool has_mouse_pos = false;
-        if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
+        if (strncmp(event_name, "pointer", 7) == 0) {
+            event_x = evcon->viewport_pointer_x;
+            event_y = evcon->viewport_pointer_y;
+            has_mouse_pos = true;
+        } else if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
             event_x = evcon->event.mouse_position.x;
             event_y = evcon->event.mouse_position.y;
             has_mouse_pos = true;
@@ -2704,19 +2712,25 @@ static Item source_selection_from_edit_result(Item result) {
     return radiant_edit_result_field(result, "selection_after");
 }
 
+static bool stage_source_selection(EmitHandlerContext* emit_ctx, Item selection, uint64_t revision) {
+    if (!emit_ctx || !emit_ctx->nested_model_selection_root) return false;
+    if (get_type_id(selection) == LMD_TYPE_NULL ||
+        (emit_ctx->has_nested_model_selection && revision < emit_ctx->nested_model_revision)) return false;
+    emit_ctx->nested_model_selection_root->set(selection);
+    emit_ctx->nested_model_revision = revision;
+    emit_ctx->has_nested_model_selection = true;
+    return true;
+}
+
 static bool stage_source_selection_from_edit_result(EmitHandlerContext* emit_ctx,
                                                     Item result) {
-    if (!emit_ctx || !emit_ctx->nested_model_selection_root) return false;
     Item selection = source_selection_from_edit_result(result);
     uint64_t revision = 0;
     if (get_type_id(selection) == LMD_TYPE_NULL ||
         !model_edit_surface_revision(result, &revision)) {
         return false;
     }
-    emit_ctx->nested_model_selection_root->set(selection);
-    emit_ctx->nested_model_revision = revision;
-    emit_ctx->has_nested_model_selection = true;
-    return true;
+    return stage_source_selection(emit_ctx, selection, revision);
 }
 
 static ModelEditSurfaceBinding* model_edit_surface_find(DocState* state,
@@ -2729,17 +2743,6 @@ static ModelEditSurfaceBinding* model_edit_surface_find(DocState* state,
     return nullptr;
 }
 
-static ModelEditSurfaceBinding* model_edit_surface_find_host(
-        DocState* state, const char* host_key) {
-    if (!state || !host_key || !host_key[0]) return nullptr;
-    for (ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
-         binding; binding = binding->next) {
-        if (binding->host_key && strcmp(binding->host_key, host_key) == 0) {
-            return binding;
-        }
-    }
-    return nullptr;
-}
 
 uint64_t radiant_model_edit_surface_bind(DomElement* target,
                                          uint64_t model_revision) {
@@ -2759,6 +2762,7 @@ uint64_t radiant_model_edit_surface_bind(DomElement* target,
         if (model_revision > existing->model_revision) {
             existing->model_revision = model_revision;
         }
+        state->editing.active_model_surface_id = existing->handle_id;
         return existing->handle_id;
     }
 
@@ -2776,6 +2780,7 @@ uint64_t radiant_model_edit_surface_bind(DomElement* target,
     binding->model_revision = model_revision;
     binding->next = state->editing.model_edit_surfaces;
     state->editing.model_edit_surfaces = binding;
+    state->editing.active_model_surface_id = handle_id;
     return handle_id;
 }
 
@@ -2850,12 +2855,24 @@ bool radiant_finish_model_edit(Item surface_handle, Item edit_result) {
         return false;
     }
     binding->model_revision = revision;
+    state->editing.active_model_surface_id = binding->handle_id;
     return true;
 }
 
 static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
     if (!doc || !doc->root || !state) {
         return doc && doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
+    }
+
+    ModelEditSurfaceBinding* binding = model_edit_surface_find(state, state->editing.active_model_surface_id);
+    if (binding && binding->host_key) {
+        // a retired owner's address can be reused by toolbar DOM; resolve the bound host by identity.
+        DomElement* owner = dom_find_element_by_id(doc->root, binding->host_key);
+        EditingSurface live;
+        if (!owner || !editing_surface_from_target(owner, &live) ||
+            !editing_surface_is_rich(&live) || live.owner != owner) return nullptr;
+        editing_interaction_set_active_surface(state, &live);
+        return owner;
     }
 
     const EditingSurface* surface = nullptr;
@@ -3114,6 +3131,9 @@ static void event_context_stage_model_selection(EventContext* evcon,
                                                 Item selection,
                                                 uint64_t model_revision) {
     if (!evcon || get_type_id(selection) == LMD_TYPE_NULL) return;
+    // an outer handler can finish after a newer nested edit; retain that edit's completion.
+    if (evcon->model_edit_selection_pending &&
+        model_revision < evcon->model_edit_revision) return;
     if (evcon->dom_event_root_lifetime && !evcon->model_edit_selection_root_gc) {
         Runtime* runtime = dom_document_script_runtime(doc);
         if (runtime && runtime_heap(runtime) && runtime_heap(runtime)->gc) {
@@ -3459,7 +3479,10 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // A structured model result is the explicit source→DOM completion
     // channel. Apply only after the handler's reactive regeneration settled.
     Item result_selection = source_selection_from_edit_result(result_root.get());
-    if (cascade) {
+    if (saved_emit_ctx && saved_emit_ctx->doc == doc) {
+        // the outer keyboard handler still owns a pending redraw; complete on its live DOM.
+        stage_source_selection_from_edit_result(saved_emit_ctx, result_root.get());
+    } else if (cascade) {
         uint64_t result_revision = 0;
         if (model_edit_surface_revision(result_root.get(), &result_revision)) {
             event_context_stage_model_selection(
@@ -3470,7 +3493,9 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     }
 
     if (emit_ctx.has_nested_model_selection) {
-        if (cascade) {
+        if (saved_emit_ctx && saved_emit_ctx->doc == doc) {
+            stage_source_selection(saved_emit_ctx, nested_model_selection_root.get(), emit_ctx.nested_model_revision);
+        } else if (cascade) {
             event_context_stage_model_selection(
                 evcon, doc, nested_model_selection_root.get(),
                 emit_ctx.nested_model_revision);
@@ -8496,13 +8521,11 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         // The source-model backend owns deletion, while clipboard transport
         // remains native. Copy the DOM selection after the public copy/cut
         // event and before invoking the snapshotted model action: the
-        // handler's own render can retire the selected nodes. A cut with
-        // nothing to copy does not run.
-        if (intent->type == INPUT_INTENT_COPY) {
-            copy_current_selection_to_clipboard(state, "model copy");
-        } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
-                   !copy_current_selection_to_clipboard(state, "model cut")) {
-            return true;
+        // handler's own render can retire the selected nodes. Atomic/hidden
+        // model selections can supply their payload even when DOM copy has none.
+        if (intent->type == INPUT_INTENT_COPY || intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+            copy_current_selection_to_clipboard(state,
+                intent->type == INPUT_INTENT_COPY ? "model copy" : "model cut");
         }
         model_intent.edit_invocation_id = 0;
         model_intent.edit_plaintext_only =
@@ -8517,7 +8540,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         action_result_root.set(raw_result);
         // a model whose selection reaches past the DOM names its own text
         if (intent->type == INPUT_INTENT_COPY || intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-            copy_model_text_to_clipboard(state, action_result_root.get(), "model clipboard");
+            copy_model_payload_to_clipboard(state, action_result_root.get(), "model clipboard");
         }
         bool claimed = radiant_edit_result_bool(action_result_root.get(), "claimed");
         bool changed = radiant_edit_result_bool(action_result_root.get(), "changed");
@@ -9250,6 +9273,10 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
     };
+    // pointer transport can have no compatibility mouse event (touch/pen); project its own point.
+    RdtLogicalPoint saved_pointer = {evcon->viewport_pointer_x, evcon->viewport_pointer_y};
+    evcon->viewport_pointer_x = (float)client_x;
+    evcon->viewport_pointer_y = (float)client_y;
     NativePointerCapture* capture=native_pointer_capture(event_context_target_document(evcon),true);
     if(capture) {
         if(!strcmp(type,"pointerdown")) capture->active=true;
@@ -9266,6 +9293,8 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
             native_resize_end(capture);
         }
     }
+    evcon->viewport_pointer_x = saved_pointer.x;
+    evcon->viewport_pointer_y = saved_pointer.y;
     return prevented;
 }
 
@@ -12243,14 +12272,17 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     ViewBlock* block = lam::view_require_block(iframe_view);
     if (!block) return false;
     if (!block->embed && !block->ensure_embed(owner->view_tree)) return false;
+    LayoutContentBox viewport = layout_content_box(block);
+    const char* source = iframe->get_attribute("srcdoc");
+    if (!source) source = iframe->get_attribute("src");
+    // async and navigated documents need the same resize tracking as synchronous iframe loads.
+    if (!layout_iframe_track_source(new_doc, source, viewport.width, viewport.height)) return false;
     if (block->scroller && block->scroll_mut()->pane) {
         block->scroll()->pane->reset();
         block->content_width = 0.0f;
         block->content_height = 0.0f;
     }
 
-    int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
-    int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
     DomDocument* old_doc = block->embedp()->doc;
     if (uicon->font_ctx) {
         // Glyph-cache keys retain raw document FontHandle addresses; clear
@@ -12263,20 +12295,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     new_doc->viewport.output_scale = 1.0f;
     ui_context_sync_document_raster_scale(uicon, new_doc);
 
-    if (new_doc->html_root) {
-        DomDocument* saved_doc = uicon->document;
-        float saved_viewport_width = uicon->viewport_width;
-        float saved_viewport_height = uicon->viewport_height;
-        uicon->document = lam::up(new_doc);
-        uicon->viewport_width = (float)css_vw;
-        uicon->viewport_height = (float)css_vh;
-        process_document_font_faces(uicon, new_doc);
-        layout_html_doc(uicon, new_doc, false);
-        radiant_dispatch_lambda_body_load(uicon, new_doc);
-        uicon->document = lam::up(saved_doc);
-        uicon->viewport_width = saved_viewport_width;
-        uicon->viewport_height = saved_viewport_height;
-    }
+    layout_iframe_embedded_doc(uicon, new_doc, viewport.width, viewport.height);
     if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
         update_scroller(block, block->content_width, block->content_height);
     }
@@ -14057,7 +14076,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
-            state && evcon.target && evcon.target->is_element()) {
+            state && evcon.target) {
+            // text hits use the mouse dispatcher's existing nearest-element promotion.
             bool prevented = radiant_dispatch_button_mouse_event(
                 &evcon, evcon.target, "contextmenu", btn_event->x,
                 btn_event->y, btn_event, 0, 0);

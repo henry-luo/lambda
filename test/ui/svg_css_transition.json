@@ -1,0 +1,27 @@
+{
+  "name":"SVG paint transitions sample the virtual clock, retarget from the current value and preserve cascade precedence",
+  "html":"test/ui/svg_css_transition.html",
+  "viewport":{"width":240,"height":150},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_pixel","x":40,"y":40,"min_r":253,"max_r":255,"min_g":202,"max_g":206,"min_b":202,"max_b":206},
+    {"type":"assert_style","target":{"selector":"#child"},"property":"fill","equals":"rgb(128, 0, 128)"},
+    {"type":"assert_pixel","x":120,"y":40,"min_r":126,"max_r":130,"min_g":0,"max_g":2,"min_b":126,"max_b":130},
+    {"type":"click","target":{"selector":"#start"}},
+    {"type":"advance_time","ms":500,"steps":5},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"fill","equals":"rgb(128, 0, 128)"},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"stroke-width","equals":"4px"},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"fill-opacity","equals":"0.6"},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"stroke-opacity","equals":"0.7"},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"stroke-dashoffset","equals":"10px"},
+    {"type":"assert_pixel","x":40,"y":40,"min_r":177,"max_r":181,"min_g":100,"max_g":104,"min_b":177,"max_b":181},
+    {"type":"assert_hit_test","x":19,"y":40,"expected_selector":"#swatch"},
+    {"type":"click","target":{"selector":"#retarget"}},
+    {"type":"advance_time","ms":500,"steps":5},
+    {"type":"assert_style","target":{"selector":"#swatch"},"property":"fill","equals":"rgb(64, 128, 64)"},
+    {"type":"assert_pixel","x":40,"y":40,"min_r":62,"max_r":66,"min_g":126,"max_g":130,"min_b":62,"max_b":66},
+    {"type":"click","target":{"selector":"#priority"}},
+    {"type":"assert_style","target":{"selector":"#child"},"property":"fill","equals":"rgb(0, 255, 0)"},
+    {"type":"assert_pixel","x":120,"y":40,"min_r":0,"max_r":2,"min_g":253,"max_g":255,"min_b":0,"max_b":2}
+  ]
+}

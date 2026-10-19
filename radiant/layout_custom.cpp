@@ -28,6 +28,28 @@ static int g_custom_layout_registry_count = 0;
 static CustomLayoutUnknownLogEntry g_custom_layout_unknown_logs[CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS];
 static int g_custom_layout_unknown_log_count = 0;
 
+// shipped layouts resolve to package exports; documents never install callbacks (D7.5.3v2).
+static const struct {
+    const char* name;
+    const char* module;
+} package_layouts[] = {
+    {"lambda-graph", "lambda.graph.transform"},
+    {"lambda-tikz", "lambda.doc.tikz.named"},
+};
+
+static const char* custom_layout_package_module(const char* name) {
+    for (const auto& layout : package_layouts) {
+        if (strcmp(layout.name, name) == 0) return layout.module;
+    }
+    return nullptr;
+}
+
+static bool custom_layout_package_callback(const CustomLayoutContext* context,
+                                           CustomLayoutResult* result) {
+    const char* module = context ? custom_layout_package_module(context->layout_name) : nullptr;
+    return module && radiant_package_layout_callback(context, result, module);
+}
+
 static void radiant_velmt_edges_from_box_edges(RadiantVelmtEdges* dst, const BoxEdges* src) {
     if (!dst || !src) return;
     dst->left = src->left;
@@ -366,6 +388,7 @@ bool custom_layout_register(const char* name, CustomLayoutFn fn) {
 
 CustomLayoutFn custom_layout_lookup(const char* name) {
     if (!name || name[0] == '\0') return nullptr;
+    if (custom_layout_package_module(name)) return custom_layout_package_callback;
     for (int i = 0; i < g_custom_layout_registry_count; i++) {
         if (strcmp(g_custom_layout_registry[i].name, name) == 0) {
             return g_custom_layout_registry[i].fn;

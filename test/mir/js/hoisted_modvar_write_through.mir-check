@@ -1,19 +1,24 @@
 {
   "schema_version": 1,
-  "description": "A hoisted inner function declaration inside an IIFE stores through to its context-owned module slab right after the function object is created, so a nested closure resolving the live slot sees the real callable (Stage 4C LambdaJS bug #4).",
+  "description": "D5.4, D6.2.2v2: the hoisted local function is retained in a shared Lambda closure cell; the arrow reads its own captured environment.",
   "checks": [
     {
-      "in_func": "_js_anon1_#_body",
-      "expect_seq": [
-        { "pattern": "call\tjs_new_function_mir_p" },
-        { "pattern": "call\tlambda_active_module_var_store_p" }
-      ],
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        ", _js_helper_"
+        "call\tmvp_lmd_function_new",
+        "call\theap_calloc_closure_env",
+        "call\towned_item_slot_store"
       ],
       "count": {
-        "mov\ti64:16({{r}}), {{r}}": { "min": 1 }
+        "call\towned_item_slot_store": 1
       }
+    },
+    {
+      "in_func": "mvp_lmd_f3",
+      "expect": [
+        "i64:24(self)",
+        "call\tmvp_lmd_signature,"
+      ]
     }
   ]
 }

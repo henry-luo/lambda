@@ -1,20 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Tune6 C3: exact count/fill storage accepts classes beyond every former fixed member cap, and instance metadata is initialized once before NameId-safe per-field metadata updates.",
+  "description": "D3.4.7, D8.1.3v25: one nominal class owns all 129 methods, 33 instance initializers, 17 static initializers and nine static blocks, without former fixed member caps.",
   "checks": [
     {
-      "in_func": "*",
-      "expect": [
-        "import\tjs_init_class_instance_field_metadata"
-      ],
+      "in_func": "mvp_lmd_program",
       "count": {
-        "call\tjs_init_class_instance_field_metadata_p": 1
-      }
+        "call\tmvp_lmd_class_new": 1,
+        "call\tmvp_lmd_function_new": 188,
+        "call\tmvp_lmd_function_set_name": 129
+      },
+      "forbid": [
+        "js_init_class_instance_field_metadata"
+      ]
     },
     {
-      "in_func": "js_main",
+      "in_func": "mvp_lmd_f129",
       "expect": [
-        "Tune6ExactCollection_m128_128"
+        "ret\t{{r}}"
+      ],
+      "forbid": [
+        "call\tmvp_lmd_class_property"
       ]
     }
   ]

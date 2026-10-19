@@ -1,7 +1,7 @@
 // Markdown formatter block layer (format-md.cpp): each source is parsed and
 // written back as CommonMark; `stable` checks that writing the result again
 // changes nothing, so the output parses back to the same document.
-fn md(src) => format(parse(src, 'markdown') ^ { ^ }, 'markdown') or "(error)"
+fn md(src) => (format(parse(src, 'markdown') ^ { ^ }, 'markdown') ^ { null }) or "(error)"
 fn stable(src) => md(md(src)) == md(src)
 
 let cases = [
@@ -44,4 +44,4 @@ for (c in cases) [md(c), stable(c)];
 // subscript and underline have no Markdown spelling: subscript is written as
 // inline HTML, underline as its text
 md("x") == "x\n";
-format(<doc <p "H" <sub "2"> "O and " <u "under">>>, 'markdown') or "(error)"
+(format(<doc <p "H" <sub "2"> "O and " <u "under">>>, 'markdown') ^ { null }) or "(error)"

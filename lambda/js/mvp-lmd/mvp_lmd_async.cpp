@@ -35,7 +35,7 @@ static Item promise_invoke(void* context, Item callback, Item receiver, Item* ar
     }
     // resolving functions and capability executors keep one identity in the shared bridge cache.
     for (int i = 0; i < count; i++) {
-        Item exposed = mvp_lmd_dynamic_wrap_function((MvpLmdProgram*)context, arguments.items()[i]);
+        Item exposed = mvp_lmd_dynamic_import_value((MvpLmdProgram*)context, arguments.items()[i]);
         if (item_is_error(exposed)) return exposed;
         arguments.items()[i] = exposed;
     }
@@ -79,7 +79,7 @@ static const JsPromiseHostOps promise_ops = {
     [](void*, Item iterator, Item completion) { return mvp_lmd_iterator_close(iterator, completion); },
     promise_error,
     [](void* context, Item error) { return mvp_lmd_caught_value(mvp_lmd_program_library((MvpLmdProgram*)context), error); },
-    [](void* context, Item function) { return mvp_lmd_dynamic_wrap_function((MvpLmdProgram*)context, function); },
+    [](void* context, Item function) { return mvp_lmd_dynamic_import_value((MvpLmdProgram*)context, function); },
     [](void* opaque, Item job, Item handler) {
         MvpLmdProgram* program = (MvpLmdProgram*)opaque;
         if (!mvp_lmd_program_library(program)->test262_host) return job;
@@ -92,7 +92,7 @@ static const JsPromiseHostOps promise_ops = {
             // GetFunctionRealm failure selects the current realm for a Promise job.
             if (!item_is_error(found) && owner) program = owner;
         }
-        task.set(mvp_lmd_dynamic_wrap_function(program, task.get()));
+        task.set(mvp_lmd_dynamic_import_value(program, task.get()));
         return item_is_error(task.get()) ? task.get() : mvp_lmd_host_task(task.get(),
             Item{.item = ITEM_JS_UNDEFINED}, Item{.item = ITEM_JS_UNDEFINED});
     },

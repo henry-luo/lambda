@@ -123,7 +123,7 @@ Scratch logs, the release measurement and the preview are under
 ### Expanded playground
 
 Four additional experiments share native scene descriptions, controls and a
-responsive gallery in `test/demo/physics/`: a 32-tile domino circuit, nine
+responsive gallery in `test/demo/scene3d/physics/`: a 32-tile domino circuit, nine
 compound bodies in a switchable-gravity chamber, an 18-marble sorter with a
 kinematic paddle and unique sensor arrivals, and a five-material bounce
 comparison with batch-generated height curves. Pure traces and live scenes

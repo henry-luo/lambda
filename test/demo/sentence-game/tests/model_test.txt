@@ -1,0 +1,66 @@
+{
+  catalog: true,
+  hand_size: true,
+  unique_cards: true,
+  seeded_deal: true,
+  natural_match: true,
+  incomplete: true,
+  no_skip: true,
+  invalid_kind: true,
+  invalid_card: true,
+  selected: true,
+  sentence: true,
+  saved: true,
+  locked_save: true,
+  locked_cards: true,
+  next_round: true,
+  clears_choices: true,
+  immutable_snapshot: true
+}
+{
+  duplicate_detected: true,
+  duplicate_blocked: true,
+  duplicate_message: true,
+  five_sentences: true,
+  distinct_sentences: true,
+  done_locked: true,
+  reset_empty: true,
+  reset_new_deal: true,
+  prior_book_kept: true
+}
+{
+  three_piles: true,
+  three_familiar: true,
+  object_required: true,
+  object_completes: true,
+  three_part_text: true,
+  short_verb: true,
+  no_hidden_object: true,
+  object_shortcut: true,
+  mode_switch: true,
+  invalid_mode: true,
+  saved_mode_locked: true,
+  cross_mode_duplicate: true,
+  three_book: true,
+  reset_keeps_mode: true
+}
+{
+  incomplete_no_join: true,
+  invalid_join: true,
+  join_stores_clause: true,
+  join_requires_new_clause: true,
+  joined_ready: true,
+  all_connectors: true,
+  because_punctuation: true,
+  embedded_article: true,
+  proper_name: true,
+  undo_restores_snapshot: true,
+  undo_empty: true,
+  mixed_modes: true,
+  mixed_saved: true,
+  joined_feedback: true,
+  next_clears_chain: true,
+  long_chain: true,
+  undo_one_join: true,
+  original_choices_kept: true
+}

@@ -64,12 +64,30 @@ let doc = input('./paper.tex', 'latex')^
 
 ### 1.4 Writing Math Back Out
 
-A parsed `<math>` tree can be serialised again with `format(ast, 'math')`, or converted on the command line:
+A parsed `<math>` tree can be serialised again with `format(ast, 'math')`, or converted on the command line. All math output formats run through the shipped `lambda.doc.math` scripts, above native IO (**D7.1.1**, **D7.2.8**):
 
 ```bash
 lambda convert formula.tex -f math -t math-latex -o out.tex     # LaTeX
 lambda convert formula.tex -f math -t math-ascii -o out.txt     # ASCII math
 ```
+
+The font-independent `lambda.doc.math.format` module exposes the writers directly;
+`lambda.doc.math.math` also exports these functions:
+
+```lambda
+import writer: lambda.doc.math.format
+let ast = parse("\\sqrt[3]{x} + \\binom{n}{k}", 'math')^
+writer.to_latex(ast)                       // "\\sqrt[3]{x} + \\binom{n}{k}"
+writer.to_ascii(ast)                       // "root(3)(x) + (n)/(k)"
+writer.format(ast, {flavor: 'ascii'})^
+```
+
+`writer.format(ast, options = null)` defaults to LaTeX and accepts `flavor`
+`latex`, `ascii` or `mathml`. Runtime `format` also accepts the combined
+`math-latex` and `math-ascii` spellings. AsciiMath retains the existing subset:
+common symbols, fractions, roots, scripts and function words; it does not
+provide lossless conversion for all TeX constructs. LaTeX output normalizes
+token spacing while preserving authored text escapes and command arguments.
 
 MathML export uses the font-independent `lambda.doc.math.mathml` package:
 
@@ -89,7 +107,8 @@ mathematical alphabets, simple text, accents, spacing, phantoms and basic
 matrices are supported. Unsupported commands, explicit TeX atom classes,
 fixed delimiter sizing and other extensions report conversion errors.
 Optional `source` is inert TeX annotation data; arbitrary MathML-to-TeX
-conversion is not provided. The `math-typst` target remains a stub.
+conversion is not provided. The `math-typst` target returns an explicit
+unsupported-format error.
 
 View the native MathML gallery with:
 

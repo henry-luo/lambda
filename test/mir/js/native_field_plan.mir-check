@@ -1,74 +1,81 @@
 {
   "schema_version": 1,
-  "description": "D1.3/D8.4.1v2: a literal recipe emits one exact-shape slot hit and one NameId semantic miss.",
+  "description": "D1.3, D3.4.7, D8.4.1v2: local nonescaping literals can fold; open returned/argument/class receivers retain packed-field guards and canonical descriptor/transition fallback. D8.4.1v2: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding.",
   "checks": [
     {
-      "in_func": "_js_literalFields_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tjs_new_literal_object_with_typemap",
-        "dmov",
-        "d:(",
-        "call\tjs_get_name_id"
+        "call\tmvp_lmd_string_concat"
       ],
       "forbid": [
-        "call\tjs_get_reference"
+        "call\tmvp_lmd_object_new",
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmvp_lmd_class_property"
       ]
     },
     {
-      "in_func": "_js_directStore_#_body",
+      "in_func": "mvp_lmd_f7",
       "expect": [
-        "dmov\td:(",
-        "call\tjs_set_name_id"
+        "dmov"
+      ],
+      "forbid": [
+        "call\tmvp_lmd_object_new",
+        "call\tmvp_lmd_property_set_fixed"
       ]
     },
     {
-      "in_func": "_js_returnedFields_#_body",
+      "in_func": "mvp_lmd_f4",
       "expect": [
-        "dmov",
-        "d:(",
-        "call\tjs_get_name_id"
+        "call\tmvp_lmd_signature,",
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
-      "in_func": "_js_consumeDirectArgument_#_body",
+      "in_func": "mvp_lmd_f5",
       "expect": [
-        "dmov",
-        "d:(",
-        "call\tjs_get_name_id"
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
-      "in_func": "_js_typeTransitionFallback_#_body",
+      "in_func": "mvp_lmd_f9",
       "expect": [
-        "call\tjs_set_name_id",
-        "call\tjs_get_name_id"
+        "call\tmap_shape_set",
+        "call\tmvp_lmd_class_property"
       ]
     },
     {
-      "in_func": "_js_accessorFallback_#_body",
+      "in_func": "mvp_lmd_f11",
       "expect": [
-        "call\tjs_get_name_id"
+        "call\tmvp_lmd_class_property",
+        "call\tmvp_lmd_property_get_fixed"
       ]
     },
     {
-      "in_func": "ClassFieldPlan_read_#_body",
+      "in_func": "mvp_lmd_f16",
       "expect": [
-        "dmov",
-        "d:8(",
-        "call\tjs_get_name_id"
+        "call\tmvp_lmd_property_get_fixed",
+        "call\tmvp_lmd_class_property",
+        "call\tmap_shape_field_to_item"
       ]
     },
     {
-      "in_func": "ClassFieldPlan_store_#_body",
+      "in_func": "mvp_lmd_f17",
       "expect": [
-        "dmov\td:8(",
-        "call\tjs_set_name_id"
+        "call\tmvp_lmd_property_set_fixed",
+        "call\tmvp_lmd_class_property"
       ]
     },
     {
-      "in_func": "js_main",
-      "expect": [
-        "call\tjs_set_class_instance_shape"
+      "in_func": "mvp_lmd_program",
+      "count": {
+        "call\tmvp_lmd_class_new": 1
+      },
+      "forbid": [
+        "js_set_class_instance_shape"
       ]
     }
   ]

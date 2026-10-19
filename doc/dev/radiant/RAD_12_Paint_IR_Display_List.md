@@ -1,6 +1,7 @@
 # Radiant — Paint IR, Display List & Backend Abstraction
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+> **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two retained rendering intermediate representations that sit between the layout/view tree and the pixel/vector backends: the target-neutral, semantic **PaintIR** and its raster-only lowering, the **DisplayList**. It describes why Radiant records draw commands into an immutable buffer and replays them separately (single-threaded, tiled-parallel, or via retained fragments), the record→replay data flow through the `rc_*` painter gateway, the `RenderBackend` vtable that SVG/PDF plug into by consuming PaintIR directly, and the supporting clip/transform/tile/retained-cache machinery. The per-feature painters (backgrounds, borders, glyphs), the raster surface, and PDF/SVG page assembly are [RAD_13](RAD_13_Render_Walk_Painters.md)'s and [RAD_14](RAD_14_SVG_Vector_Graph.md)'s subjects and are only cross-referenced here.
 >
@@ -90,6 +91,14 @@ The SVG lowering (`paint_ir_lower_svg` / `_stream`, `paint_ir.cpp:1966+`) is the
 ## 6. Retained incremental replay
 
 The retained cache lets clean subtrees survive a re-record entirely. `RetainedDisplayListCache` (`retained_display_list.cpp:29`) is a `Pool`/`Arena`-backed `HashMap` keyed by `view_id`, holding one `RetainedDisplayListFragment` (`retained_display_list.cpp:15`) per view: a self-contained `DisplayList` copy of that element's `DL_BEGIN_ELEMENT..DL_END_ELEMENT` range, plus its `bounds`, `marker_bounds`, and `last_stored_epoch`.
+
+A complete subtree visit (`RADIANT_PAINT_ALL`) owns element markers and may
+reuse a whole cached fragment. A split background/float/foreground visit does
+not own that contiguous payload: `render_element_marker_begin` and
+`render_block_try_retained_fragment` reject partial phases. Complete atomic and
+outer visits retain their existing marker/cache contract (**D4.5.1v4 /
+D4.1.4v5**). A cache for individual phases would require explicit phase identity;
+a view ID alone cannot represent that ownership.
 
 **Capture** runs after recording. `retained_dl_cache_capture` (`retained_display_list.cpp:360`) scans the recorded list for `DL_BEGIN_ELEMENT` markers and calls `retained_dl_cache_store_marker` (`:319`) for each; if the range is retainable (`dl_item_is_retainable_for_fragment`, `render.hpp`, per-item at `retained_display_list.cpp:312`) it deep-copies the item range into the per-view fragment via `retained_dl_copy_range` (`:186`), which re-deep-copies clip-shape polygons into the fragment's own arena (`retained_dl_copy_clip_shape_stack`, `:39`) so the fragment is independently immutable.
 

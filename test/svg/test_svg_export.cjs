@@ -17,14 +17,27 @@ fs.mkdirSync(relocated, {recursive: true});
 const report = {binary_sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'lambda.exe'))).digest('hex'), results: []};
 const outlinedFonts = new Set(['svg_font_shorthands', 'svg_text_resources']);
 
-function render(fixture, name, scale, format) {
+function render(fixture, name, scale, format, mode) {
   const target = path.join(out, `${name}-${scale}x.${format}`);
   const fixtureEnv = Object.fromEntries((fixture.env || []).map(entry => [entry.key, entry.value]));
-  const output = execFileSync(path.join(root, 'lambda.exe'), ['render', fixture.html, '-o', target,
+  const env = {...process.env, ...fixtureEnv, TMPDIR: path.join(root, 'temp')};
+  if (mode !== 'default') env.RADIANT_SVG_LAYER = mode;
+  let args = ['render', fixture.html, '-o', target,
     '-vw', String(fixture.viewport.width), '-vh', String(fixture.viewport.height),
-    '--scale', String(scale), '--no-log'], {cwd: root, timeout: 120000,
-    env: {...process.env, ...fixtureEnv, TMPDIR: path.join(root, 'temp')}});
+    '--scale', String(scale), '--no-log'];
+  if (fixture.export_events) {
+    const eventFile = target + '-events.json', resultFile = target + '-result.json';
+    fs.writeFileSync(eventFile, JSON.stringify({...fixture, device_scale: scale,
+      events: [...fixture.export_events, {type: 'render', file: target}]}));
+    fs.rmSync(resultFile, {force: true});
+    args = ['view', fixture.html, '--event-file', eventFile, '--event-result', resultFile,
+      '--headless', '--font-dir', 'test/layout/data/font', '--no-log'];
+  }
+  const output = execFileSync(path.join(root, 'lambda.exe'), args,
+    {cwd: root, timeout: 120000, env});
   fs.writeFileSync(target + '.log', output);
+  if (fixture.export_events && JSON.parse(fs.readFileSync(target + '-result.json')).result !== 'PASS')
+    throw new Error('live export events failed');
   return target;
 }
 
@@ -40,61 +53,65 @@ async function main() {
       if (request.isNavigationRequest() || request.url().startsWith('data:')) request.continue();
       else { resourceRequests.push(request.url()); request.abort(); }
     });
+    async function readExport(target, format, name, formatResult) {
+      let raster = target;
+      if (format === 'svg') {
+        const moved = path.join(relocated, path.basename(target));
+        fs.copyFileSync(target, moved);
+        resourceRequests = [];
+        const source = fs.readFileSync(moved, 'utf8');
+        formatResult.structure = await page.evaluate(source => {
+          const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
+          const errors = [];
+          if (doc.querySelector('parsererror')) errors.push(doc.querySelector('parsererror').textContent);
+          const ids = [...doc.querySelectorAll('[id]')].map(element => element.id);
+          if (new Set(ids).size !== ids.length) errors.push('duplicate resource IDs');
+          for (const element of doc.querySelectorAll('*')) for (const attr of element.attributes) {
+            for (const match of attr.value.matchAll(/url\(#([^)]*)\)/g))
+              if (!ids.includes(match[1])) errors.push('unresolved resource: ' + match[1]);
+            if (attr.localName === 'href' && !attr.value.startsWith('data:'))
+              errors.push('non-embedded image link: ' + attr.value);
+          }
+          return {errors, dimensions: ['width', 'height'].map(name => Number(doc.documentElement.getAttribute(name))),
+            paths: doc.querySelectorAll('path').length, images: doc.querySelectorAll('image').length,
+            gradients: doc.querySelectorAll('linearGradient, radialGradient').length};
+        }, source);
+        const [width, height] = formatResult.structure.dimensions;
+        await page.setViewport({width, height, deviceScaleFactor: 1});
+        if (outlinedFonts.has(name) && (formatResult.structure.paths === 0 || formatResult.structure.images !== 0))
+          formatResult.structure.errors.push('font outlines did not remain vector paths');
+        if (name === 'svg_gradient_paints' && formatResult.structure.gradients === 0)
+          formatResult.structure.errors.push('representable SVG gradients were rasterized');
+        await page.goto('file://' + moved, {waitUntil: 'load'});
+        await page.evaluate(() => document.fonts.ready);
+        raster = target + '.png';
+        await page.screenshot({path: raster});
+        formatResult.resourceRequests = [...resourceRequests];
+      } else if (format === 'pdf') {
+        const prefix = target + '-raster';
+        // Poppler's Cairo backend preserves aligned image pixels; Splash resamples even at 1:1.
+        execFileSync('pdftocairo', ['-r', '72', '-png', '-singlefile', target, prefix], {timeout: 120000});
+        raster = prefix + '.png';
+        const images = execFileSync('pdfimages', ['-list', target], {encoding: 'utf8'});
+        fs.writeFileSync(target + '-images.txt', images);
+        formatResult.vectorRetained = !outlinedFonts.has(name) || !/^\s*\d+\s+\d+\s+(image|smask)\s/m.test(images);
+      }
+      const png = PNG.sync.read(fs.readFileSync(raster));
+      return png;
+    }
     for (const name of fixtures) {
       const fixture = JSON.parse(fs.readFileSync(path.join(root, `test/ui/${name}.json`)));
       let contentDimensions;
-      for (const scale of scales) {
+      for (const scale of scales) for (const mode of fixture.export_events ? ['off', 'eager'] : ['default']) {
         const events = fixture.pixel_oracles?.[String(scale)] || fixture.events;
-        const result = {name, scale, formats: {}};
+        const result = {name, scale, mode, formats: {}};
         report.results.push(result);
         for (const format of ['png', 'svg', 'pdf']) {
           try {
-            const target = render(fixture, name, scale, format);
-            let raster = target;
+            const target = render(fixture, mode === 'default' ? name : `${name}-${mode}`, scale, format, mode);
             const formatResult = {};
             result.formats[format] = formatResult;
-            if (format === 'svg') {
-              const moved = path.join(relocated, path.basename(target));
-              fs.copyFileSync(target, moved);
-              resourceRequests = [];
-              const source = fs.readFileSync(moved, 'utf8');
-              formatResult.structure = await page.evaluate(source => {
-                const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
-                const errors = [];
-                if (doc.querySelector('parsererror')) errors.push(doc.querySelector('parsererror').textContent);
-                const ids = [...doc.querySelectorAll('[id]')].map(element => element.id);
-                if (new Set(ids).size !== ids.length) errors.push('duplicate resource IDs');
-                for (const element of doc.querySelectorAll('*')) for (const attr of element.attributes) {
-                  for (const match of attr.value.matchAll(/url\(#([^)]*)\)/g))
-                    if (!ids.includes(match[1])) errors.push('unresolved resource: ' + match[1]);
-                  if (attr.localName === 'href' && !attr.value.startsWith('data:'))
-                    errors.push('non-embedded image link: ' + attr.value);
-                }
-                return {errors, dimensions: ['width', 'height'].map(name => Number(doc.documentElement.getAttribute(name))),
-                  paths: doc.querySelectorAll('path').length, images: doc.querySelectorAll('image').length,
-                  gradients: doc.querySelectorAll('linearGradient, radialGradient').length};
-              }, source);
-              const [width, height] = formatResult.structure.dimensions;
-              await page.setViewport({width, height, deviceScaleFactor: 1});
-              if (outlinedFonts.has(name) && (formatResult.structure.paths === 0 || formatResult.structure.images !== 0))
-                formatResult.structure.errors.push('font outlines did not remain vector paths');
-              if (name === 'svg_gradient_paints' && formatResult.structure.gradients === 0)
-                formatResult.structure.errors.push('representable SVG gradients were rasterized');
-              await page.goto('file://' + moved, {waitUntil: 'load'});
-              await page.evaluate(() => document.fonts.ready);
-              raster = target + '.png';
-              await page.screenshot({path: raster});
-              formatResult.resourceRequests = [...resourceRequests];
-            } else if (format === 'pdf') {
-              const prefix = target + '-raster';
-              // Poppler's Cairo backend preserves aligned image pixels; Splash resamples even at 1:1.
-              execFileSync('pdftocairo', ['-r', '72', '-png', '-singlefile', target, prefix], {timeout: 120000});
-              raster = prefix + '.png';
-              const images = execFileSync('pdfimages', ['-list', target], {encoding: 'utf8'});
-              fs.writeFileSync(target + '-images.txt', images);
-              formatResult.vectorRetained = !outlinedFonts.has(name) || !/^\s*\d+\s+\d+\s+(image|smask)\s/m.test(images);
-            }
-            const png = PNG.sync.read(fs.readFileSync(raster));
+            const png = await readExport(target, format, name, formatResult);
             formatResult.dimensions = [png.width, png.height];
             // vector outputs fit content bounds; the viewport controls layout and the raster crop.
             if (format === 'svg' && scale === 1) contentDimensions = formatResult.structure.dimensions;
@@ -102,17 +119,26 @@ async function main() {
               ? [fixture.viewport.width * scale, fixture.viewport.height * scale]
               : contentDimensions.map(dimension => dimension * scale);
             formatResult.assertions = assertPixels(png, events, scale);
+            if (fixture.export_reference) {
+              const referenceResult = {};
+              const referenceFile = render({...fixture, html: fixture.export_reference},
+                `${name}-${mode}-reference`, scale, format, mode);
+              const reference = await readExport(referenceFile, format, name, referenceResult);
+              formatResult.referenceMatches = png.width === reference.width && png.height === reference.height &&
+                png.data.equals(reference.data) && !referenceResult.structure?.errors.length &&
+                !referenceResult.resourceRequests?.length && referenceResult.vectorRetained !== false;
+            }
             formatResult.passed = formatResult.assertions.length > 0 &&
               formatResult.dimensions.every((dimension, index) => dimension === formatResult.expectedDimensions[index]) &&
               formatResult.assertions.every(assertion => assertion.passed) &&
               !(formatResult.structure?.errors.length) && !(formatResult.resourceRequests?.length) &&
-              formatResult.vectorRetained !== false;
-            console.log(`${name} ${scale}x ${format}: ${formatResult.assertions.filter(a => a.passed).length}/${formatResult.assertions.length}${formatResult.passed ? '' : ' FAIL'}`);
+              formatResult.vectorRetained !== false && formatResult.referenceMatches !== false;
+            console.log(`${name} ${scale}x ${mode} ${format}: ${formatResult.assertions.filter(a => a.passed).length}/${formatResult.assertions.length}${formatResult.passed ? '' : ' FAIL'}`);
             for (const failed of formatResult.assertions.filter(a => !a.passed)) console.log(JSON.stringify(failed));
             if (formatResult.structure?.errors.length) console.log(formatResult.structure.errors.join('\n'));
           } catch (error) {
             result.formats[format] = {passed: false, error: error.message};
-            console.log(`${name} ${scale}x ${format}: ERROR ${error.message}`);
+            console.log(`${name} ${scale}x ${mode} ${format}: ERROR ${error.message}`);
           }
           fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
         }

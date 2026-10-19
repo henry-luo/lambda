@@ -1,5 +1,4 @@
 #include "js_regex_generated_properties.h"
-#include "utf8proc.h"
 #include <cstring>
 
 static bool js_regex_match_property_name(const char* name, int len, const char* target) {
@@ -24,8 +23,6 @@ bool js_regex_sorted_range_contains(const CodePointInterval* ranges, int count, 
     return false;
 }
 
-// UNUSED_FUNCTION_OK: called from the generated js_regex_generated_property_tables.inc,
-// which the unused-function lint does not scan (*.inc extension).
 static bool js_regex_sorted_range_contains_cursor(const CodePointInterval* ranges, int count, int cp, int* cursor) {
     if (cp < 0) return false;
     uint32_t codepoint = (uint32_t)cp;
@@ -77,6 +74,108 @@ static bool js_regex_sorted_range_contains_cursor(const CodePointInterval* range
 
 #include "js_regex_generated_property_tables.inc"
 
+static bool js_regex_generated_property_has_prefix(const char* name, int name_len,
+                                                   const char* prefix, int prefix_len) {
+    return name && name_len > prefix_len && memcmp(name, prefix, prefix_len) == 0;
+}
+
+static int js_regex_generated_property_kind_scan_range(const char* name, int name_len,
+                                                       int start, int end) {
+    for (int i = start; i < end; i++) {
+        if (js_regex_match_property_name(name, name_len, js_regex_generated_property_tables[i].name)) {
+            return JS_REGEX_PROP_GENERATED_BASE + i;
+        }
+    }
+    return 0;
+}
+
+static void js_regex_generated_property_init_script_buckets(int* script_start, int* script_end,
+                                                           int* scx_start, int* scx_end) {
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    *script_start = table_count;
+    *script_end = 0;
+    *scx_start = table_count;
+    *scx_end = 0;
+    for (int i = 0; i < table_count; i++) {
+        const char* table_name = js_regex_generated_property_tables[i].name;
+        bool is_script = strncmp(table_name, "Script=", 7) == 0 ||
+                         strncmp(table_name, "sc=", 3) == 0;
+        bool is_scx = strncmp(table_name, "Script_Extensions=", 18) == 0 ||
+                      strncmp(table_name, "scx=", 4) == 0;
+        if (is_script) {
+            if (i < *script_start) *script_start = i;
+            if (i + 1 > *script_end) *script_end = i + 1;
+        }
+        if (is_scx) {
+            if (i < *scx_start) *scx_start = i;
+            if (i + 1 > *scx_end) *scx_end = i + 1;
+        }
+    }
+    if (*script_start > *script_end) *script_start = *script_end = 0;
+    if (*scx_start > *scx_end) *scx_start = *scx_end = 0;
+}
+
+static int js_regex_generated_property_kind_from_name(const char* name, int name_len) {
+    static bool script_buckets_ready = false;
+    static int script_start = 0;
+    static int script_end = 0;
+    static int scx_start = 0;
+    static int scx_end = 0;
+
+    bool is_script_name =
+        js_regex_generated_property_has_prefix(name, name_len, "Script=", 7) ||
+        js_regex_generated_property_has_prefix(name, name_len, "sc=", 3);
+    bool is_scx_name =
+        js_regex_generated_property_has_prefix(name, name_len, "Script_Extensions=", 18) ||
+        js_regex_generated_property_has_prefix(name, name_len, "scx=", 4);
+    if (is_script_name || is_scx_name) {
+        if (!script_buckets_ready) {
+            js_regex_generated_property_init_script_buckets(&script_start, &script_end,
+                                                            &scx_start, &scx_end);
+            script_buckets_ready = true;
+        }
+        return is_scx_name
+            ? js_regex_generated_property_kind_scan_range(name, name_len, scx_start, scx_end)
+            : js_regex_generated_property_kind_scan_range(name, name_len, script_start, script_end);
+    }
+
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    return js_regex_generated_property_kind_scan_range(name, name_len, 0, table_count);
+}
+
+static int js_regex_generated_property_canonical_kind(int kind) {
+    int index = kind - JS_REGEX_PROP_GENERATED_BASE;
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    if (index < 0 || index >= table_count) return kind;
+    const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
+    for (int i = index - 1; i >= 0; i--) {
+        const JsRegexGeneratedPropertyTable* prev = &js_regex_generated_property_tables[i];
+        if (prev->ranges == table->ranges && prev->count == table->count) {
+            kind = JS_REGEX_PROP_GENERATED_BASE + i;
+        }
+    }
+    return kind;
+}
+
+static bool js_regex_generated_property_contains(int kind, int cp) {
+    int index = kind - JS_REGEX_PROP_GENERATED_BASE;
+    int count = (int)(sizeof(js_regex_generated_property_tables) / sizeof(js_regex_generated_property_tables[0]));
+    if (index < 0 || index >= count) return false;
+    const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
+    return js_regex_sorted_range_contains(table->ranges, table->count, cp);
+}
+
+static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor) {
+    int index = kind - JS_REGEX_PROP_GENERATED_BASE;
+    int count = (int)(sizeof(js_regex_generated_property_tables) / sizeof(js_regex_generated_property_tables[0]));
+    if (index < 0 || index >= count) return false;
+    const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
+    return js_regex_sorted_range_contains_cursor(table->ranges, table->count, cp, cursor);
+}
+
 int js_regex_generated_property_lookup_kind(const char* name, int name_len) {
     return js_regex_generated_property_kind_from_name(name, name_len);
 }
@@ -113,62 +212,16 @@ extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int nam
     return 0;
 }
 
-// ECMAScript IdentifierStart/IdentifierPart follows Unicode categories;
-// the generated RegExp tables are pinned to older property data.
-// The linked utf8proc data also predates Unicode 17, so keep the generated
-// Unicode 17 identifier delta here until the system Unicode data is upgraded.
-static const CodePointInterval js_unicode_id_start_unicode17_additions[] = {
-    {0x00088F, 0x00088F}, {0x000C5C, 0x000C5C}, {0x000CDC, 0x000CDC},
-    {0x00A7CE, 0x00A7CF}, {0x00A7D2, 0x00A7D2}, {0x00A7D4, 0x00A7D4},
-    {0x00A7F1, 0x00A7F1}, {0x010940, 0x010959}, {0x010EC5, 0x010EC7},
-    {0x011DB0, 0x011DDB}, {0x016EA0, 0x016EB8}, {0x016EBB, 0x016ED3},
-    {0x016FF2, 0x016FF6}, {0x0187F8, 0x0187FF}, {0x018D09, 0x018D1E},
-    {0x018D80, 0x018DF2}, {0x01E6C0, 0x01E6DE}, {0x01E6E0, 0x01E6E2},
-    {0x01E6E4, 0x01E6E5}, {0x01E6E7, 0x01E6ED}, {0x01E6F0, 0x01E6F4},
-    {0x01E6FE, 0x01E6FF}, {0x02B73A, 0x02B73F}, {0x02CEA2, 0x02CEAD},
-    {0x0323B0, 0x033479}
-};
-
-static const CodePointInterval js_unicode_id_continue_unicode17_additions[] = {
-    {0x001ACF, 0x001ACF}, {0x001ADD, 0x001ADD}, {0x001AE0, 0x001AEB},
-    {0x010EFA, 0x010EFB}, {0x011B60, 0x011B67}, {0x011DE0, 0x011DE9},
-    {0x01E6E3, 0x01E6E3}, {0x01E6E6, 0x01E6E6}, {0x01E6EE, 0x01E6EF},
-    {0x01E6F5, 0x01E6F5}
-};
-
-static bool js_unicode_id_is_start_base(uint32_t cp) {
-    if (cp == 0x2118 || cp == 0x212E || (cp >= 0x309B && cp <= 0x309C) ||
-            (cp >= 0x1885 && cp <= 0x1886)) return true;
-    if (js_regex_sorted_range_contains(
-            js_unicode_id_start_unicode17_additions,
-            (int)(sizeof(js_unicode_id_start_unicode17_additions) /
-                  sizeof(js_unicode_id_start_unicode17_additions[0])),
-            (int)cp)) return true;
-    utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);
-    return category == UTF8PROC_CATEGORY_LU || category == UTF8PROC_CATEGORY_LL ||
-           category == UTF8PROC_CATEGORY_LT || category == UTF8PROC_CATEGORY_LM ||
-           category == UTF8PROC_CATEGORY_LO || category == UTF8PROC_CATEGORY_NL;
-}
-
+// identifiers and RegExp property escapes share the same Unicode version.
 extern "C" bool js_unicode_id_is_start(uint32_t cp) {
     if (cp == '$' || cp == '_') return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
-    return js_unicode_id_is_start_base(cp);
+    return js_regex_sorted_range_contains(js_unicode_id_start_ranges, js_unicode_id_start_count, (int)cp);
 }
 
 extern "C" bool js_unicode_id_is_continue(uint32_t cp) {
     if (cp == '$' || cp == '_' || cp == 0x200C || cp == 0x200D) return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
                           (cp >= '0' && cp <= '9');
-    if (js_unicode_id_is_start_base(cp)) return true;
-    if (js_regex_sorted_range_contains(
-            js_unicode_id_continue_unicode17_additions,
-            (int)(sizeof(js_unicode_id_continue_unicode17_additions) /
-                  sizeof(js_unicode_id_continue_unicode17_additions[0])),
-            (int)cp)) return true;
-    if (cp == 0x00B7 || cp == 0x0387 || cp == 0x30FB || cp == 0xFF65 ||
-            (cp >= 0x1369 && cp <= 0x1371) || cp == 0x19DA) return true;
-    utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);
-    return category == UTF8PROC_CATEGORY_MN || category == UTF8PROC_CATEGORY_MC ||
-           category == UTF8PROC_CATEGORY_ND || category == UTF8PROC_CATEGORY_PC;
+    return js_regex_sorted_range_contains(js_unicode_id_continue_ranges, js_unicode_id_continue_count, (int)cp);
 }

@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: ordinary top-level undefined vars retain the bulk MIR lowering path.",
+  "description": "D8.1.3v25, D8.4.3v2: global declaration instantiation precedes formal entry. Emitted global operations are reads, with no legacy per-variable module-store protocol.",
   "checks": [
     {
-      "in_func": "js_main",
-      "expect": [
-        "call\tjs_init_module_vars_undefined_bulk"
-      ],
+      "in_func": "mvp_lmd_program",
       "count": {
-        "call\tjs_init_module_vars_undefined_bulk": 1
-      }
+        "call\tmvp_lmd_dynamic_global_p_r6_n1_a5, mvp_lmd_dynamic_global,": 10,
+        ", 72057594037927936, 0, 0": 10
+      },
+      "forbid": [
+        "js_init_module_vars_undefined_bulk",
+        "js_set_module_var"
+      ]
     }
   ]
 }

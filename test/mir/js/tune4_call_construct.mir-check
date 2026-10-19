@@ -1,31 +1,42 @@
 {
   "schema_version": 1,
-  "description": "D6.2.2v2: member calls perform observable property Get before the ordinary call kernel, while construction passes callee and newTarget explicitly to the distinct construct kernel.",
+  "description": "D6.2.2v2: member Get precedes the formal call. Construction passes an explicit newTarget through its distinct route, without ambient pending-newTarget state.",
   "checks": [
     {
-      "in_func": "_js_callMember_#_body",
+      "in_func": "mvp_lmd_f1",
       "expect_seq": [
-        { "pattern": "call\tjs_get_reference_p_r6_n1_a2, js_get_reference" },
-        { "pattern": "mov\t{{r:target}}, js_call" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}, {{r}}, {{r}}, %p0, {{r}}, 1, {{r}}, 1" }
+        {
+          "pattern": "call\tmvp_lmd_property_get_fixed"
+        },
+        {
+          "pattern": "call\tmvp_lmd_signature,"
+        }
+      ],
+      "expect": [
+        "call\tmvp_lmd_class_property"
       ],
       "forbid": [
         "js_string_method",
         "js_number_method",
         "js_map_method",
-        "js_array_method",
         "js_array_method_direct"
       ]
     },
     {
-      "in_func": "_js_constructWith_#_body",
+      "in_func": "mvp_lmd_f3",
       "expect": [
-        "call\tjs_construct_value_p_r6_n1_a6, js_construct_value, {{r}}, {{r}}, {{r}}, 1, {{r}}, {{r}}, 1"
+        "call\tmvp_lmd_class_invoke",
+        "call\tmvp_lmd_signature,"
       ],
       "forbid": [
         "js_pending_new_target",
         "js_has_pending_new_target",
         "special_ctor"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "call\tmvp_lmd_class_invoke_p_r6_n1_a5, mvp_lmd_class_invoke, {{r}}, {{r:ctor}}, 144115188075855872, {{r}}, 1, {{r:ctor}}"
+        }
       ]
     },
     {

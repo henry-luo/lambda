@@ -20,7 +20,7 @@
     },
     {
       "in_func": "_both_dynamic_#",
-      "expect": ["call\tfn_eq_p, fn_eq"]
+      "expect": ["call\tfn_eq_value_p, fn_eq_value"]
     }
   ]
 }

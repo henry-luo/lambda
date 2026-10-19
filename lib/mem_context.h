@@ -166,9 +166,9 @@ MemContext* mem_context_create(MemContext* parent, MemRole role, const char* lab
 // so the root holds only contexts. Thread-safe; never destroyed.
 MemContext* mem_context_process(MemRole role);
 
-// Cascade-destroy: destroys all child contexts first, then this context's
-// owned allocators in reverse-birth (children-before-parent) order, invoking
-// each node's MemDestroyFn. Safe on NULL. Does nothing to the root.
+// Cascade-destroy: destroys child contexts and owned allocators, following
+// backing dependencies before registration order, including cross-context
+// dependents. Invokes each node's MemDestroyFn. Safe on NULL; preserves root.
 void mem_context_destroy(MemContext* ctx);
 
 // Associate a document id with a context; allocators created afterward inherit

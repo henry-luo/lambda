@@ -700,6 +700,8 @@ typedef enum SysFunc {
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
     SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
     SYSPROC_IO_EXEC,              // io.exec(program, args, options?) - cancellable byte-exact process capture
+    SYSPROC_MCP_REQUEST,          // mcp.request(endpoint, method, params) - request-owned MCP exchange
+    SYSPROC_MCP_CALL_TOOL,        // mcp.call_tool(endpoint, name, arguments)
     SYSFUNC_PARSE3,         // parse(str, grammar, 'rule') - run a grammar from a named rule (GM5.1)
     SYSFUNC_ERF,
     SYSFUNC_ERFC,
@@ -716,6 +718,14 @@ typedef enum SysFunc {
     SYSFUNC_PHYSICS_VALIDATE,
     SYSFUNC_PHYSICS_QUERY,
     SYSFUNC_BINARY_DECODE,
+    SYSFUNC_IMAGE_RASTER,
+    SYSFUNC_IMAGE_REGION,
+    SYSFUNC_IMAGE_RENDER,
+    SYSFUNC_IMAGE_DECODE,
+    SYSFUNC_IMAGE_ENCODE,
+    SYSFUNC_IMAGE_WRITE_REGION,
+    SYSFUNC_IMAGE_PATCH,
+    SYSFUNC_IMAGE_CAPABILITIES,
 } SysFunc;
 
 typedef struct Type {
@@ -2943,6 +2953,11 @@ extern "C" {
     Item op_or(Bool a, Bool b);
 
     Bool fn_eq(Item a, Item b);
+    // language operators retain the original error; Bool adapters serve native predicates
+    Item fn_eq_value(Item a, Item b);
+    Item fn_ne_value(Item a, Item b);
+    Item fn_not_value(Item a);
+    Item fn_ref_eq_value(Item a, Item b);
     Bool fn_eq_strict(Item a, Item b);
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);
@@ -3274,6 +3289,14 @@ extern "C" {
     Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)
     Item fn_blur(Item img, Item ksize);            // box (mean) blur
     Item fn_image_process(Item img, Item options); // fused, bounded RGBA8 processing
+    Item fn_image_raster(Item samples, Item options);
+    Item fn_image_region(Item raster, Item rect, Item channel);
+    Item fn_image_render(Item source, Item options);
+    Item fn_image_decode(Item bytes, Item options);
+    Item fn_image_encode(Item source, Item composite, Item options);
+    Item fn_image_write_region(Item raster, Item samples, Item options);
+    Item fn_image_patch(Item source, Item attributes, Item children);
+    Item fn_image_capabilities(void);
     Item fn_erode(Item img, Item ksize);           // morphological min
     Item fn_dilate(Item img, Item ksize);          // morphological max
     Item fn_median_filter(Item img, Item ksize);   // rank (median) filter

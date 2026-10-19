@@ -1,5 +1,5 @@
 #include "js_interp.hpp"
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
 #include "js_transpiler.hpp"
 #include "../input/input-script-cache.h"
 #include "../runtime/module_ast_prebuild.hpp"

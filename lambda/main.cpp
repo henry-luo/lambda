@@ -544,6 +544,8 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         }
         MvpLmdHost host = {0, NULL, stdout, true};
         MvpLmdOptions options = {filename, inline_module_source, harness_source, harness_length};
+        // module dependencies need the same realm-global helpers as other harnessless batch entries.
+        options.native_harness = js_batch_execution_mode && !harness_source;
         MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, source_len, NULL, &host, &options);
         MvpLmdFailurePhase phase;
         const char* type = NULL;
@@ -666,7 +668,7 @@ static bool js_test262_restore_preamble_module_state(const JsPreambleState* prea
     return true;
 }
 
-extern void jm_abandon_active_mir_after_signal(void);
+extern void js_abandon_active_compile_after_signal(void);
 #endif // LAMBDA_NO_JS
 
 #ifdef _WIN32
@@ -991,6 +993,10 @@ void clear_persistent_last_error();
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
+#ifndef LAMBDA_NO_SERVE
+int exec_mcp(int argc, char** argv);
+int exec_serve_mcp(int argc, char** argv);
+#endif
 
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
@@ -1914,23 +1920,6 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_mdx(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &MARKDOWN_RULES);
-        } else if (strcmp(to_format, "math-ascii") == 0) {
-            formatted_output = format_math_ascii(input->pool, input->root);
-        } else if (strcmp(to_format, "math-latex") == 0) {
-            formatted_output = format_math_latex(input->pool, input->root);
-        } else if (strcmp(to_format, "math-typst") == 0) {
-            formatted_output = format_math_typst(input->pool, input->root);
-        } else if (strcmp(to_format, "math-mathml") == 0) {
-            // The package owns conversion; XML serialization stays in IO (D7.2.8).
-            const LambdaDocumentTransformConfig transform = {
-                "math", "lambda.doc.math.mathml", "export_file",
-                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
-            LambdaDocumentTransformOption options[] = {
-                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
-                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
-                    flavor_string ? flavor_string->chars : "", false},
-            };
-            full_doc_output = run_document_transform_markup(input_file, &transform, options, 2, true);
         } else if (strcmp(to_format, "mark") == 0) {
             // Use print_root_item to format as mark representation
             StrBuf* sb = strbuf_new_cap(1024);
@@ -2399,6 +2388,7 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
 #endif
 #ifdef LAMBDA_NO_SERVE
     {"serve", "the HTTP server"},
+    {"mcp", "the MCP server"},
 #endif
 #ifdef LAMBDA_NO_GUI
     {"view", "a display window"}, {"edit", "a display window"},
@@ -2464,6 +2454,7 @@ struct LambdaDemo {
 // one catalog drives both command lookup and the list of launchable demos.
 static const LambdaDemo LAMBDA_DEMOS[] = {
     {"tetris", "test/demo/tetris/tetris.ls"},
+    {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
     {"photo", "test/demo/photo/photo.ls"},
@@ -2471,13 +2462,8 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"word", "test/demo/word/word.ls"},
     {"finder", "test/demo/finder/finder.ls"},
     {"note", "test/demo/note/note.ls"},
-    {"cellscope", "test/demo/cellscope/cellscope.ls"},
-    {"scene3d", "test/demo/scene3d/ringworld.ls"},
-    {"ringworld", "test/demo/scene3d/ringworld.ls"},
-    {"observatory", "test/demo/scene3d/observatory.html"},
-    {"three-gallery", "test/demo/scene3d/three-gallery.html"},
-    {"asset-gallery", "test/demo/scene3d/asset-gallery.ls"},
-    {"shared-animation", "test/demo/scene3d/shared-animation.html"},
+    {"scene3d", "test/demo/scene3d/index.html"},
+    {"chart", "test/demo/chart/index.html"},
     {"cityscape", "test/demo/cityscape/cityscape.ls"},
     {"slides", "test/demo/slides/northstar.slides"},
     {"wordcloud", "test/demo/wordcloud.ls"},
@@ -2651,6 +2637,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
     // publish the compacted vector so sys.proc.self.argv uses its live count.
     sysinfo_set_argv(argc, argv);
 
+#ifndef LAMBDA_NO_SERVE
+    // stdio MCP owns stdout before any interactive/document execution begins.
+    if (argc >= 2 && strcmp(argv[1], "mcp") == 0) {
+        return lambda_main_finish(exec_mcp(argc - 2, argv + 2));
+    }
+    if (argc >= 2 && strcmp(argv[1], "serve") == 0) {
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--mcp") == 0) {
+                return lambda_main_finish(exec_serve_mcp(argc - 2, argv + 2));
+            }
+        }
+    }
+#endif
     run_assertions();
     log_debug("Assertions completed");
 
@@ -4144,6 +4143,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .png       Portable Network Graphics\n");
             printf("  .jpg/.jpeg JPEG Image\n");
             printf("  .gif       Graphics Interchange Format\n");
+            fputs("  .psd       Layered Photoshop image (supported RGB/grayscale8 profile)\n", stdout);
             printf("  .json      JSON (source view)\n");
             printf("  .yaml/.yml YAML (source view)\n");
             printf("  .toml      TOML (source view)\n");
@@ -4356,6 +4356,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
                     strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0 ||
+                    str_ieq_cstr(ext, ".psd") ||
                     strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
                     strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
                     strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
@@ -4368,7 +4369,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);
@@ -4934,7 +4935,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (hot_reload) {
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 } else {
                     js_batch_reset();
@@ -5032,7 +5032,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     &preamble_var_checkpoint, &saved_harness_src, &saved_harness_len);
                 test262_native_harness = false;
                 if (ast_harness.script || ast_harness.prepare_failed) {
-                    jm_cleanup_deferred_mir();
                     if (hot_reload) {
                         if (!js_test262_hot_context_recycle(&runtime, batch_context)) {
                             mem_free(harness_src);
@@ -5347,7 +5346,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             if (!mvp_lmd && (result >= 128 || result == 124)) {
                 // A recovery jump bypasses the compiler epilogue; abandon the
                 // active owner before the next reset can observe it.
-                jm_abandon_active_mir_after_signal();
+                js_abandon_active_compile_after_signal();
             }
 
             gettimeofday(&tv_end, NULL);
@@ -5459,10 +5458,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     // The active compile owner may be inconsistent after a
                     // signal, so abandon it without re-entering MIR_finish.
-                    jm_abandon_active_mir_after_signal();
+                    js_abandon_active_compile_after_signal();
                     js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
                     if (ast_harness.script) {
@@ -5507,7 +5505,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     // Clear heap-bound JS caches before the realm is discarded;
                     // otherwise the next large library inherits stale Items.
                     js_batch_reset();
-                    jm_cleanup_deferred_mir();
                     if (saved_harness_src) {
                         js_test262_hot_context_destroy(&runtime, batch_context);
                         js_test262_hot_context_create(&runtime, batch_context);
@@ -5542,7 +5539,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         break;
                     }
                 } else if (ast_test_generation_active) {
-                    jm_cleanup_deferred_mir();
                     // AST JS-harness batches retain parsed source and scope
                     // facts only. Replacing their realm prevents a test
                     // from mutating harness functions seen by its successor.
@@ -5554,7 +5550,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         js_batch_reset_to(preamble_var_checkpoint);
                         // Reset clears test-owned function/cache references first;
                         // only then is it safe to finish that test's MIR context.
-                        jm_cleanup_deferred_mir();
                     } else {
                         has_preamble = false;
                     }
@@ -5565,7 +5560,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     // and globals affect the next test in this hot worker.
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
-                    jm_cleanup_deferred_mir();
                     if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 }
             } else {
@@ -5627,7 +5621,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // released. This matches the in-batch heap recycle path: heap
         // objects may still reference JIT code pages until the batch state
         // is gone.
-        jm_cleanup_deferred_mir();
 
         if (has_preamble) {
             preamble_state_destroy(&preamble);

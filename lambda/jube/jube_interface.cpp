@@ -57,6 +57,7 @@ struct JubeMemberRecord {
     bool readonly;                // no set binding and not reflected
     bool enumerable;              // fields only; aliases/constants/methods opt out
     bool can_raise;
+    TypeFunc signature;           // Lambda adapters retain the declared callable colour
     int arity;                    // methods: declared parameter count
     const JubeTypeDef* result_type; // resolved field/method result type, if declared
     int64_t const_int;            // CONST int payload
@@ -553,7 +554,8 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     env[1] = (Item){.item = i2it(rec - rec->declaring_type->members)};
     function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_HOST_ADAPTER);
     fn->arity = (uint8_t)arity;
-    fn->fn_type = NULL;
+    // member calls use the ordinary dynamic colour guard (S12.1.1v3).
+    fn->fn_type = &rec->signature;
     fn->ptr = (fn_ptr)s_jube_lambda_method_tramps[arity];
     fn->closure_env = env;
     fn->name = rec->snake_name;
@@ -618,6 +620,7 @@ extern "C" uint64_t jube_interface_registry_digest(void) {
             hash = hash_combine_u64(hash, (uint64_t)rec->kind);
             hash = hash_combine_u64(hash, (uint64_t)rec->arity);
             hash = hash_combine_u64(hash, rec->can_raise ? 1 : 0);
+            hash = hash_combine_u64(hash, rec->signature.is_proc ? 1 : 0);
             hash = jube_digest_text(hash,
                 rec->result_type ? rec->result_type->name : NULL);
             hash = jube_digest_text(hash, rec->bind ? rec->bind->name : NULL);
@@ -680,6 +683,11 @@ extern "C" uint8_t jube_member_kind_at(const JubeTypeDef* type, int ordinal) {
 extern "C" bool jube_member_can_raise_at(const JubeTypeDef* type, int ordinal) {
     JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
     return trec ? trec->members[ordinal].can_raise : false;
+}
+
+extern "C" bool jube_member_is_proc_at(const JubeTypeDef* type, int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    return trec ? trec->members[ordinal].signature.is_proc : false;
 }
 
 extern "C" int jube_member_arity_at(const JubeTypeDef* type, int ordinal) {
@@ -1447,6 +1455,7 @@ int jube_member_extensibility(Item receiver, bool prevent, Item* out) {
 typedef struct JubeParsedMember {
     char* name;
     bool is_method;
+    bool is_proc;
     int arity;
     bool can_raise;
     char* result_type_name;
@@ -1489,6 +1498,13 @@ static void jube_member_record_init(JubeMemberRecord* record,
         record->kind = JUBE_MEMBER_METHOD;
         record->arity = parsed->arity;
         record->can_raise = parsed->can_raise;
+        record->signature.type_id = LMD_TYPE_FUNC;
+        record->signature.param_count = parsed->arity;
+        record->signature.required_param_count = parsed->arity;
+        record->signature.returned = &TYPE_ANY;
+        record->signature.return_contract = &TYPE_ANY;
+        record->signature.is_proc = parsed->is_proc;
+        record->signature.can_raise = parsed->can_raise;
         record->result_type = parsed->result_type_name
             ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
         record->readonly = true;
@@ -1511,17 +1527,19 @@ static void jube_member_record_init(JubeMemberRecord* record,
         !(bind && (bind->flags & (JUBE_MEMBER_NON_ENUMERABLE | JUBE_MEMBER_PROTOTYPE)));
 }
 
-// count fn_param children and detect '^' in the return type of a fn_type node
+// count parameters and detect '^' independently of fn/pn colour (D7.4.6).
 // With the external type-pattern scanner the attr's type is ONE opaque token
 // (`type_pattern_token`), so fn-typed members are recognized and parsed from
-// the token TEXT: `fn(a: T, b: U) R^E`.
-static bool jube_text_is_fn_type(const char* text) {
+// the token TEXT: `fn(a: T, b: U) R^E` or `pn(a: T, b: U) R^E`.
+static bool jube_text_is_callable_type(const char* text, bool* is_proc) {
     if (!text) return false;
     text = str_skip_line_space(text);
-    if (text[0] != 'f' || text[1] != 'n') return false;
+    if ((text[0] != 'f' && text[0] != 'p') || text[1] != 'n') return false;
     const char* p = text + 2;
     p = str_skip_line_space(p);
-    return *p == '(' || *p == '\0';
+    if (*p != '(' && *p != '\0') return false;
+    *is_proc = text[0] == 'p';
+    return true;
 }
 
 static void jube_parse_fn_type_text(char* text, int* arity, bool* can_raise,
@@ -1801,6 +1819,7 @@ static int jube_compile_type(const JubeModuleDef* module,
         dst->readonly = src->readonly;
         dst->enumerable = src->enumerable;
         dst->can_raise = src->can_raise;
+        dst->signature = src->signature;
         dst->arity = src->arity;
         dst->result_type = src->result_type;
         dst->const_int = src->const_int;
@@ -2107,7 +2126,7 @@ static LambdaParseValue jube_direct_reduce(void* context,
             jube_direct_fail(sink, "object field type is outside the interface source span");
             return (LambdaParseValue)(uintptr_t)value;
         }
-        if (jube_text_is_fn_type(type_text)) {
+        if (jube_text_is_callable_type(type_text, &member->is_proc)) {
             member->is_method = true;
             jube_parse_fn_type_text(type_text, &member->arity, &member->can_raise,
                                     &member->result_type_name);

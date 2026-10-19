@@ -16,6 +16,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "event.hpp"
+#include "input_batch.hpp"
 #include "event_sim.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
@@ -49,10 +50,12 @@ extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern UiContext ui_context;
 static void window_release_relative_mouse(UiContext* uicon);
+static RdtInputBatch window_input_batch = {};
 
 static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
                                         EnhancedFileCache* file_cache,
                                         bool reset_virtual_clock) {
+    window_input_batch = {};
     if (pool) pool_destroy(pool);
     url_destroy(cwd);
     if (uicon && uicon->browsing_session) {
@@ -292,7 +295,7 @@ typedef enum {
     DOC_FORMAT_EBOOK,
     DOC_FORMAT_DIFF,
     DOC_FORMAT_SVG,
-    DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
+    DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF, PSD
     DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
 } DocFormat;
 
@@ -337,7 +340,8 @@ static DocFormat detect_doc_format(const char* filename) {
     } else if (str_ieq_const(ext, ext_len, "svg")) {
         return DOC_FORMAT_SVG;
     } else if (str_ieq_const(ext, ext_len, "png") || str_ieq_const(ext, ext_len, "jpg") ||
-               str_ieq_const(ext, ext_len, "jpeg") || str_ieq_const(ext, ext_len, "gif")) {
+               str_ieq_const(ext, ext_len, "jpeg") || str_ieq_const(ext, ext_len, "gif") ||
+               str_ieq_const(ext, ext_len, "psd")) {
         return DOC_FORMAT_IMAGE;
     } else if (str_ieq_const(ext, ext_len, "json") || str_ieq_const(ext, ext_len, "yaml") ||
                str_ieq_const(ext, ext_len, "yml") || str_ieq_const(ext, ext_len, "toml") ||
@@ -375,7 +379,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         // paged formats share the export loader's admission before reaching the common document router.
         if (format == DOC_FORMAT_UNKNOWN && !(print_media && render_paged_input_supported(filename))) {
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .diff, .patch, .xml, .pdf, .eps, .epsi, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .diff, .patch, .xml, .pdf, .eps, .epsi, .svg, .png, .jpg, .jpeg, .gif, .psd, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
         }
         // a source-text view takes no page host settings
@@ -413,6 +417,20 @@ static const char* get_format_name(const char* filename) {
 
 // Window dimensions
 bool do_redraw = false;
+
+static void window_dispatch_input(void*, RdtEvent* event) {
+    handle_event(&ui_context, ui_context.document, event);
+    DocState* state = ui_context.document ? ui_context.document->state : nullptr;
+    if (state && (state->needs_reflow || state->needs_repaint || state->is_dirty)) do_redraw = 1;
+}
+
+static void window_flush_pointer_motion() {
+    rdt_input_batch_flush(&window_input_batch, window_dispatch_input, nullptr);
+}
+
+static void window_submit_input(RdtEvent* event) {
+    rdt_input_batch_submit(&window_input_batch, event, window_dispatch_input, nullptr);
+}
 UiContext ui_context;
 
 static void view_close_event_log() {
@@ -509,6 +527,8 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     // layout html doc
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
+        // navigation must start Lambda load handlers as initial presentation does.
+        radiant_dispatch_lambda_body_load(&ui_context, doc);
     }
     // ES19: the init phase sits between layout and render. Positioned, not
     // gated on paint — the render below may be skipped, the init may not be.
@@ -755,6 +775,7 @@ void radiant_window_focus_changed(UiContext* uicon, bool focused) {
 }
 
 static void window_focus_callback(GLFWwindow*, int focused) {
+    window_flush_pointer_motion();
     radiant_window_focus_changed(&ui_context, focused != 0);
 }
 
@@ -839,6 +860,7 @@ extern "C" bool dom_engine_window_is_closed(void* context_ptr) {
 }
 
 static void window_close_callback(GLFWwindow* window) {
+    window_flush_pointer_motion();
     // GLFW invokes this at the user's close click (and application quit),
     // before document cleanup. A guarded edit session keeps the window open
     // until it approves; runtime cancellation waits for that decision.
@@ -850,6 +872,7 @@ static void window_close_callback(GLFWwindow* window) {
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    window_flush_pointer_motion();
     // The viewer closes on Escape; the edit application gives Escape to the
     // active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS &&
@@ -913,7 +936,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         key, rdt_mods, scancode, glfwGetTime());
 
     // Handle key events
-    handle_event(&ui_context, ui_context.document, &event);
+    window_submit_input(&event);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) window_release_relative_mouse(&ui_context);
     // Always repaint after a key event so caret motion, character
     // insertion/deletion, selection changes, and context-menu open/close
@@ -932,7 +955,7 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
         log_debug("Character entered: %u '%c'", codepoint, codepoint);
     }
 
-    handle_event(&ui_context, ui_context.document, &event);
+    window_submit_input(&event);
     // Repaint so the typed character appears without waiting for the
     // next mouse move / animation tick.
     do_redraw = 1;
@@ -946,18 +969,12 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
         (float)xpos, (float)ypos, 1.0f, 1.0f);
     rdt_event_set_mouse_position(&event, RDT_EVENT_MOUSE_MOVE,
                                  logical.x, logical.y, glfwGetTime());
-    handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
-
-    // Trigger redraw so any pending reflows/repaints from hover state
-    // changes get processed promptly. Without this, reflow requests
-    // accumulate without being cleared, causing O(n^2) list traversal.
-    DocState* mstate = ui_context.document ? ui_context.document->state : nullptr;
-    if (mstate && (mstate->needs_reflow || mstate->needs_repaint || mstate->is_dirty)) {
-        do_redraw = 1;
-    }
+    window_submit_input(&event);
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    // flush before button bookkeeping changes the state observed by the last motion.
+    window_flush_pointer_motion();
     log_info("MOUSE_BUTTON_CALLBACK: button=%d action=%d mods=%d", button, action, mods);
     RdtEvent event;
     double event_timestamp = glfwGetTime();
@@ -1018,7 +1035,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     // unused so we skip it.
     if (button == GLFW_MOUSE_BUTTON_LEFT ||
         button == GLFW_MOUSE_BUTTON_RIGHT) {
-        handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+        window_submit_input(&event);
         do_redraw = 1;  // trigger repaint after mouse click
     }
 }
@@ -1039,7 +1056,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
         (float)xpos, (float)ypos, 1.0f, 1.0f);
     rdt_event_set_scroll(&event, logical.x, logical.y,
                          xoffset, yoffset, event_timestamp);
-    handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+    window_submit_input(&event);
     do_redraw = 1;
     log_leave();
 }
@@ -1068,6 +1085,7 @@ void window_content_scale_callback(GLFWwindow* window, float scale_x, float scal
 }
 
 void window_refresh_callback(GLFWwindow *window) {
+    window_flush_pointer_motion();
     render(window);
     do_redraw = 0;
 }
@@ -1362,6 +1380,7 @@ static double view_phase_elapsed_ms(uint64_t start_ns, uint64_t end_ns) {
 static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
                                         bool log_memory, ViewPhaseTiming* timing) {
+    window_input_batch = {};
     radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
@@ -1953,6 +1972,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     continue;
                 }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
+                radiant_drain_document_destruction();
                 dom_retire_idle(2000);
                 radiant_collect_stranded_dom(&ui_context, ui_context.document);
                 if (!running) break;
@@ -2038,6 +2058,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
         // poll for new events
         glfwPollEvents();
+        // one latest motion per input batch lets layout and paint run while the mouse keeps moving.
+        window_flush_pointer_motion();
         uv_loop_t* uv_loop = lambda_uv_loop();
         if (uv_loop) {
             // Document timers run after script loading restored its transient context;
@@ -2148,6 +2170,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                      uv_loop);
         // Reclaim retired storage after painting, between input batches.
         // Pending work wakes again promptly without running a busy idle loop.
+        if (radiant_drain_document_destruction() && wait_timeout > 0.001) wait_timeout = 0.001;
         if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
             wait_timeout > 0.001) wait_timeout = 0.001;
         if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;

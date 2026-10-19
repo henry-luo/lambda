@@ -43,7 +43,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/sem",
     "test/demo/doom/tests",
     "test/demo/photo/tests",
-    "test/demo/cellscope/tests",
+    "test/demo/scene3d/cellscope/tests",
     "test/demo/draw/tests",
     "test/demo/word/tests",
     "test/demo/finder/tests",
@@ -54,6 +54,17 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(ErrorSemanticsTests, OperatorsPreserveErrorsAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/error_operator_value_flow.ls",
+            "test/lambda/error_operator_value_flow.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/proc/error_operator_short_circuit.ls",
+            "test/lambda/proc/error_operator_short_circuit.txt", true, tier);
+    }
+}
 
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
     const char* modes[] = {NULL, "--chunked"};

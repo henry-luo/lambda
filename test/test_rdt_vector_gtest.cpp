@@ -3,8 +3,34 @@
 
 #include "../radiant/render.hpp"
 #include "../lib/image_process.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lib/memtrack.h"
 #include <string.h>
+
+TEST(SvgTransformTest, IndividualPropertiesComposeBeforeCssAndAttributeLists) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    SvgLengthContext lengths = {200.0f, 100.0f, 16.0f, 8.0f};
+    Bound box = {0.0f, 0.0f, 200.0f, 100.0f};
+    const char* individual[] = {"100px 20px", "90deg", "2 1"};
+    const char* lists[] = {"translateX(5px)", "translate(5 0)"};
+    for (unsigned index = 0; index < 2; index++) {
+        RdtMatrix matrix = svg_resolve_local_transform(lists[index], index == 0,
+            nullptr, &box, &lengths, individual);
+        EXPECT_NEAR(matrix.e11, 0.0f, .0001f);
+        EXPECT_NEAR(matrix.e12, -1.0f, .0001f);
+        EXPECT_NEAR(matrix.e21, 2.0f, .0001f);
+        EXPECT_NEAR(matrix.e22, 0.0f, .0001f);
+        EXPECT_NEAR(matrix.e13, 100.0f, .0001f);
+        EXPECT_NEAR(matrix.e23, 30.0f, .0001f);
+    }
+    box = {10.0f, 20.0f, 30.0f, 30.0f};
+    const char* percentage[] = {"50% 25%", "none", "none"};
+    RdtMatrix matrix = svg_resolve_local_transform(nullptr, false, "center", &box, &lengths, percentage);
+    EXPECT_FLOAT_EQ(matrix.e13, 10.0f);
+    EXPECT_FLOAT_EQ(matrix.e23, 2.5f);
+    pool_destroy(pool);
+}
 
 TEST(ImageProcessTest, RunningBoxMatchesIndependentNeighborhoods) {
     struct Rows { double input[70], output[70]; } rows={};
@@ -588,12 +614,18 @@ TEST(TextOverflowPaint, ExportSlicesKeepTheirWhitespaceProcessingContext) {
         {"ab   cd", 3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
         {"ab   cd", 0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
         {"A\nB", 0, 2, CSS_VALUE_PRE, CSS_VALUE_NONE, "A"},
-        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A"},
+        // a DOM CR is a space before the preserved LF (CSS Text 3 §4).
+        {"A\r\nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A \nB", 0, 3, CSS_VALUE_PRE_WRAP, CSS_VALUE_NONE, "A "},
+        {"A\rB", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A B", 0, 3, CSS_VALUE_PRE, CSS_VALUE_NONE, "A B"},
+        {"A\rB", 0, 3, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A B"},
         {"A\nB", 0, 2, CSS_VALUE_PRE_LINE, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_BREAK_SPACES, CSS_VALUE_NONE, "A"},
         {"A\nB", 0, 2, CSS_VALUE_NORMAL, CSS_VALUE_NONE, "A "},
     };
     for (const Case& sample : cases) {
+        SCOPED_TRACE(sample.source);
         TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
         lam::Temp<char> visible(render_text_create_export_segment(
             (const unsigned char*)sample.source, &slice, sample.transform, false, sample.white_space));
@@ -648,6 +680,125 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
         font_handle_release(style.font_handle); font_context_destroy(fonts);
     }
 }
+
+TEST(TextOverflowPaint, ColorGlyphShadowUsesAlphaCoverage) {
+    uint8_t pixels[] = {0, 0, 255, 255, 0, 128, 0, 128};
+    GlyphBitmap bitmap = {}; bitmap.buffer = pixels; bitmap.width = 2; bitmap.height = 1;
+    bitmap.pitch = 8; bitmap.pixel_mode = GLYPH_PIXEL_BGRA; bitmap.bitmap_scale = 1.0f;
+    ImageSurface* surface = image_surface_create(2, 1); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, (size_t)surface->pitch);
+    DlDrawGlyph shadow = {}; shadow.bitmap = bitmap;
+    shadow.clip = {0, 0, 2, 1}; shadow.color = Color{.r=0,.g=0,.b=0,.a=255};
+    dl_replay_draw_glyph(surface, &shadow);
+    const uint8_t* result = (const uint8_t*)surface->pixels;
+    for (unsigned channel = 0; channel < 3; channel++) {
+        EXPECT_EQ(result[channel], 0);
+        EXPECT_EQ(result[4 + channel], 127);
+    }
+    image_surface_destroy(surface);
+}
+
+#ifdef __APPLE__
+TEST(TextOverflowPaint, SelectedFaceShapingRejectsForeignGlyphIdsAndKeepsCacheNamespaces) {
+    FontContextConfig config = {}; config.pixel_ratio = 1.0f;
+    FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* font = font_resolve(fonts, &description); ASSERT_NE(font, nullptr);
+    const GlyphBitmap* scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(scalar, nullptr); GlyphBitmap expected = *scalar;
+    const GlyphBitmap* indexed = font_render_glyph_index(font, 'A', GLYPH_RENDER_NORMAL);
+    ASSERT_NE(indexed, nullptr);
+    // the same integer names a different glyph in the Unicode and face-local namespaces.
+    EXPECT_TRUE(indexed->width != expected.width || indexed->height != expected.height ||
+        indexed->pitch != expected.pitch || memcmp(indexed->buffer, expected.buffer,
+            (size_t)expected.pitch * expected.height) != 0);
+    scalar = font_render_glyph(font, 'A', GLYPH_RENDER_NORMAL); ASSERT_NE(scalar, nullptr);
+    EXPECT_EQ(scalar->width, expected.width); EXPECT_EQ(scalar->height, expected.height);
+    EXPECT_EQ(memcmp(scalar->buffer, expected.buffer, (size_t)expected.pitch * expected.height), 0);
+
+    struct Probe { int calls; uint32_t glyph; } probe = {};
+    auto visit = [](void* pointer, uint32_t glyph, float, float, float) {
+        Probe* value = (Probe*)pointer; value->calls++; value->glyph = glyph;
+    };
+    float advance = -1.0f;
+    const char source[] = "🐕‍🦺";
+    EXPECT_FALSE(font_visit_face_glyphs(font, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 0); EXPECT_FLOAT_EQ(advance, -1.0f);
+    FontHandle* emoji = font_resolve_for_emoji(fonts, &description, 0x1F415);
+    ASSERT_NE(emoji, nullptr);
+    ASSERT_TRUE(font_visit_face_glyphs(emoji, source, sizeof(source) - 1, visit, &probe, &advance));
+    EXPECT_EQ(probe.calls, 1); EXPECT_FLOAT_EQ(advance, 20.0f);
+    EXPECT_NE(probe.glyph, font_get_glyph_index(emoji, 0x1F415));
+    const GlyphBitmap* joined = font_render_glyph_index(emoji, probe.glyph, GLYPH_RENDER_NORMAL);
+    ASSERT_NE(joined, nullptr); EXPECT_EQ(joined->pixel_mode, GLYPH_PIXEL_BGRA);
+    EXPECT_GT(joined->width, 0); EXPECT_GT(joined->height, 0);
+    font_handle_release(emoji); font_handle_release(font); font_context_destroy(fonts);
+}
+
+TEST(TextOverflowPaint, GraphemeClustersPreserveShapedGlyphsAndFollowingTextAdvance) {
+    struct Sample { const char* text; int cluster_glyphs; float advance; };
+    const Sample samples[] = {
+        {"🐕‍🦺M", 1, 20.0f}, {"👨‍👩‍👧‍👦M", 1, 20.0f},
+        {"👩🏽‍💻M", 1, 20.0f}, {"🏳️‍🌈M", 1, 20.0f},
+        {"🇸🇬M", 1, 20.0f}, {"1️⃣M", 1, 20.0f},
+        {"❤️M", 1, 20.0f}, {"😀M", 1, 20.0f},
+        {"🐕‍😀M", 2, 40.0f},
+        {"e\u0301M", 1, 8.90625f}, {"A\u030AM", 1, 10.671875f},
+        {"n\u0303M", 1, 8.90625f}, {"u\u0308\u0301M", 1, 8.90625f},
+        {"ι\u0308\u0301M", 1, 3.5625f}, {"и\u0306M", 1, 8.9375f},
+        {"=\u0338M", 1, 8.78125f}, {"ハ\u309AM", 1, 16.0f},
+    };
+    for (float density : {1.0f, 2.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 16, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 16.0f; style.letter_spacing = 3.0f;
+        FontBox box = {lam::up(&style), 16.0f};
+        FontProp replacement = FONT_PROP_DEFAULT;
+        description.size_px = 32.0f;
+        replacement.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(replacement.font_handle, nullptr);
+        replacement.font_size = 32.0f;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        for (unsigned pass = 0; pass < 3; pass++) {
+            if (pass == 1) font_context_reset_glyph_caches(fonts);
+            for (const Sample& sample : samples) {
+                SCOPED_TRACE(sample.text);
+                SCOPED_TRACE(density);
+                SCOPED_TRACE(pass);
+                PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up(sample.text);
+                run.text_len = (int)strlen(sample.text); run.x = 5.0f; run.baseline_y = 40.0f;
+                DisplayList list = {}; dl_init(&list, arena);
+                PaintList recorded;
+                if (pass == 2) {
+                    paint_glyph_run(&recorded, &run);
+                    box = {lam::up(&replacement), 32.0f};
+                    render_glyph_run_raster_lower(&recorded.data()[0].glyph_run, &list);
+                    box = {lam::up(&style), 16.0f};
+                } else render_glyph_run_raster_lower(&run, &list);
+                // browser controls distinguish one ligature from an unsupported two-glyph composition.
+                EXPECT_EQ(list.item_count(), sample.cluster_glyphs + 1);
+                if (list.item_count() > 0) {
+                    const DlDrawGlyph& marker = list.data()[list.item_count() - 1].draw_glyph;
+                    EXPECT_EQ(marker.bitmap.pixel_mode, GLYPH_PIXEL_GRAY);
+                    float pixel_to_css = render_font_pixel_to_css(style.font_handle, &marker.bitmap);
+                    float actual_x = marker.has_transform ? marker.transform.e13 : (float)marker.x;
+                    float expected_x = roundf(run.x + sample.advance + 3.0f +
+                        (float)marker.bitmap.bearing_x * pixel_to_css);
+                    EXPECT_FLOAT_EQ(actual_x, expected_x);
+                }
+                dl_destroy(&list);
+            }
+        }
+        arena_destroy(arena);
+        font_handle_release(replacement.font_handle);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+#endif
 
 TEST(TextOverflowPaint, SynthesizedPunctuationSpaceKeepsLogicalWidthAcrossDensities) {
     for (float density : {1.0f, 2.0f}) {
@@ -1009,6 +1160,52 @@ TEST_F(SvgAnimationLifetimeTest, HtmlBoundariesOwnIndependentFragmentClocksAndPr
     EXPECT_STREQ(svg_animation_value(inner_shape, "x"), "35");
 }
 
+TEST_F(SvgAnimationLifetimeTest, ComponentTransferTablesAreOwnedBoundedAndRetiredAcrossMutation) {
+    MarkBuilder builder(authored_input());
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .child(builder.element("filter").attr("id", "transfer")
+            .child(builder.element("feComponentTransfer")
+                .child(builder.element("feFuncR").attr("type", "linear").attr("slope", "0").final())
+                .child(builder.element("feFuncR").attr("type", "table").attr("tableValues", "0 .25 1").final())
+                .final()).final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* filter = svg->first_child->as_element(); ASSERT_NE(filter, nullptr);
+    DomElement* primitive = filter->first_child->as_element(); ASSERT_NE(primitive, nullptr);
+    DomElement* channel = primitive->last_child->as_element(); ASSERT_NE(channel, nullptr);
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    RdtSvgFilterProgram* original = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(original, nullptr); ASSERT_TRUE(original->valid); ASSERT_EQ(original->count, 1u);
+    ASSERT_TRUE(original->nodes[0].valid);
+    const RdtSvgTransferFunction& old = original->nodes[0].transfer[0];
+    EXPECT_EQ(old.kind, RDT_SVG_TRANSFER_TABLE); ASSERT_EQ(old.count, 3u);
+    EXPECT_FLOAT_EQ(old.table[1], .25f);
+    ASSERT_TRUE(channel->set_attribute("tableValues", "1 0"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    RdtSvgFilterProgram* changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_NE(changed, original);
+    ASSERT_TRUE(changed->nodes[0].valid); ASSERT_EQ(changed->nodes[0].transfer[0].count, 2u);
+    EXPECT_FLOAT_EQ(changed->nodes[0].transfer[0].table[0], 1.0f);
+    // pinned programs retain their tables after the authored attribute and active program change.
+    EXPECT_FLOAT_EQ(old.table[1], .25f);
+    render_svg_filter_program_release(changed);
+    StrBuf* oversized = strbuf_new(); ASSERT_NE(oversized, nullptr);
+    for (size_t index = 0; index <= RDT_SVG_FILTER_MAX_TRANSFER_VALUES; index++) strbuf_append_str(oversized, "0 ");
+    ASSERT_TRUE(channel->set_attribute("tableValues", oversized->str));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    strbuf_free(oversized);
+    changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_FALSE(changed->nodes[0].valid);
+    render_svg_filter_program_release(changed);
+    ASSERT_TRUE(channel->set_attribute("tableValues", "0 invalid 1"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, channel, primitive);
+    changed = render_css_svg_filter_compile(&doc, "#transfer", &scratch);
+    ASSERT_NE(changed, nullptr); EXPECT_FALSE(changed->nodes[0].valid);
+    render_svg_filter_program_release(changed); render_svg_filter_program_release(original);
+    scratch_release(&scratch); arena_destroy(arena);
+}
+
 TEST_F(SvgAnimationLifetimeTest, FilterProgramsTrackClockChangesWithoutDomMutation) {
     DomElement* offset = element("feOffset", svg); ASSERT_NE(offset, nullptr);
     ASSERT_NE(animate(offset, "dx", "0", "100"), nullptr);
@@ -1313,6 +1510,22 @@ TEST_F(SvgAnimationLifetimeTest, AttributeNamespaceIdentityUsesAnimationBindings
     ASSERT_TRUE(scope->set_attribute("xmlns:a", "urn:unrelated"));
     svg_animation_set_time(svg, 1.75);
     EXPECT_EQ(svg_animation_value(target, "xlink:href"), nullptr);
+}
+
+TEST_F(SvgAnimationLifetimeTest, HtmlAnimationBindingsRequireActualXmlnsAttributes) {
+    doc.page_kind = DOM_PAGE_KIND_HTML;
+    DomElement* scope = element("g", svg); ASSERT_NE(scope, nullptr);
+    ASSERT_TRUE(scope->set_attribute("xmlns:a", "http://www.w3.org/1999/xlink"));
+    DomElement* target = element("use", svg); ASSERT_NE(target, nullptr);
+    ASSERT_TRUE(target->set_attribute("id", "target"));
+    DomElement* animation = animate(scope, "a:href", "#red", "#blue"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("href", "#target"));
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, 1.5);
+    EXPECT_EQ(svg_animation_value(target, "xlink:href"), nullptr);
+    ASSERT_TRUE(dom_element_record_namespaced_attribute(scope, "http://www.w3.org/2000/xmlns/",
+        "xmlns:a", "http://www.w3.org/1999/xlink"));
+    svg_animation_set_time(svg, 1.75);
+    EXPECT_STREQ(svg_animation_value(target, "xlink:href"), "#blue");
 }
 
 TEST_F(SvgAnimationLifetimeTest, NonAnimatableAndInapplicableAttributesDoNotProduceSamples) {
@@ -1855,6 +2068,69 @@ static bool svg_filter_test_source(RdtSvgFilterHost* host, const RdtSvgFilterRun
     for (size_t index = 0, count = (size_t)output->width * (size_t)output->height; index < count; index++)
         ((uint32_t*)output->pixels)[index] = 0xff808080u;
     return true;
+}
+
+TEST(SvgFilterTest, ComponentTransferUsesStraightChannelsAndRemappedAlpha) {
+    DomDocument document; Element element = {};
+    RdtSvgFilterProgram* program = svg_filter_test_program(&document, &element, 1, 1.0f, 1.0f);
+    ASSERT_NE(program, nullptr);
+    RdtSvgFilterNode* node = program->nodes;
+    node->kind = RDT_SVG_FILTER_TRANSFER; node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
+    ImageSurface* source = image_surface_create(1, 1); ASSERT_NE(source, nullptr);
+    Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
+    run.source_bounds = run.geometry = {0.0f, 0.0f, 1.0f, 1.0f};
+    run.lengths = {1.0f, 1.0f, 16.0f, 8.0f}; run.frame = rdt_matrix_identity(); run.density = 1.0f;
+    node->transfer[0].table = lam::own_arr((float*)arena_calloc(program->arena, 3 * sizeof(float)));
+    ASSERT_NE(node->transfer[0].table, nullptr);
+    const struct { RdtSvgTransferKind kind; float values[3], table[3]; size_t count; unsigned red; } cases[] = {
+        {RDT_SVG_TRANSFER_IDENTITY, {}, {}, 0, 102},
+        {RDT_SVG_TRANSFER_TABLE, {}, {0.0f, .5f, 1.0f}, 3, 102},
+        {RDT_SVG_TRANSFER_DISCRETE, {}, {.1f, .6f, 1.0f}, 3, 153},
+        {RDT_SVG_TRANSFER_LINEAR, {.5f, .25f}, {}, 0, 115},
+        {RDT_SVG_TRANSFER_GAMMA, {2.0f, 2.0f, .1f}, {}, 0, 107},
+        {RDT_SVG_TRANSFER_TABLE, {}, {}, 0, 102},
+        {RDT_SVG_TRANSFER_TABLE, {}, {.25f}, 1, 64}
+    };
+    ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.kind);
+        ((uint32_t*)source->pixels)[0] = 0xffcc3366u;
+        node->transfer[0].kind = item.kind; node->transfer[0].count = item.count;
+        memcpy(node->transfer[0].values, item.values, sizeof(item.values));
+        memcpy(node->transfer[0].table.get(), item.table, sizeof(item.table));
+        ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+        uint32_t pixel = ((uint32_t*)result->pixels)[0];
+        EXPECT_NEAR(pixel & 255u, item.red, 1);
+        EXPECT_EQ((pixel >> 8) & 255u, 51u); EXPECT_EQ((pixel >> 16) & 255u, 204u);
+        EXPECT_EQ(pixel >> 24, 255u);
+        image_surface_destroy(result);
+    }
+    node->transfer[0].kind = RDT_SVG_TRANSFER_LINEAR;
+    node->transfer[0].values[0] = .5f; node->transfer[0].values[1] = .25f;
+    node->transfer[3].kind = RDT_SVG_TRANSFER_LINEAR; node->transfer[3].values[0] = .5f;
+    ((uint32_t*)source->pixels)[0] = 0x80661933u;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    uint32_t pixel = ((uint32_t*)result->pixels)[0];
+    EXPECT_NEAR(pixel & 255u, 29u, 1); EXPECT_NEAR((pixel >> 8) & 255u, 13u, 1);
+    EXPECT_NEAR((pixel >> 16) & 255u, 51u, 1); EXPECT_EQ(pixel >> 24, 64u);
+    image_surface_destroy(result);
+    node->transfer[3].values[0] = 0.0f; node->transfer[3].values[1] = .5f;
+    ((uint32_t*)source->pixels)[0] = 0;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    pixel = ((uint32_t*)result->pixels)[0];
+    EXPECT_NEAR(pixel & 255u, 32u, 1); EXPECT_EQ((pixel >> 8) & 65535u, 0u); EXPECT_EQ(pixel >> 24, 128u);
+    image_surface_destroy(result);
+    node->transfer[3] = {};
+    node->transfer[0].kind = RDT_SVG_TRANSFER_GAMMA;
+    node->transfer[0].values[0] = 1.0f; node->transfer[0].values[1] = 2.0f; node->transfer[0].values[2] = 0.0f;
+    node->linear = true; ((uint32_t*)source->pixels)[0] = 0xffcc3366u;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    // the shared filter pipeline quantizes linear intermediates to eight-bit surfaces.
+    EXPECT_NEAR(((uint32_t*)result->pixels)[0] & 255u, 38u, 1);
+    image_surface_destroy(result); image_surface_destroy(source);
+    scratch_release(&scratch); arena_destroy(arena);
+    render_svg_filter_program_release(program); document.destroy();
 }
 
 TEST(SvgFilterTest, ResourceFontsAndReferencingViewportHaveDistinctLengthBases) {

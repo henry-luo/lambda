@@ -42,13 +42,13 @@ test_is_error_on_string()
 // Section 2: Error truthiness and defaults
 // ============================================
 
-fn test_error_is_falsy() {
+fn test_error_condition() int | error {
     let a = fail() ^ { ^ }
     if (a) 1 else 0
 }
-test_error_is_falsy()
+test_error_condition()
 
-fn test_error_or_default() {
+fn test_error_or_default() int | error {
     let a = fail() ^ { ^ }
     a or 100
 }

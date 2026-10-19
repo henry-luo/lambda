@@ -16,13 +16,11 @@ fn run_case(test_case) {
   }
 }
 
-let installed = conformance.install()
 let cases = [for (test_case in conformance.manifest_cases(
   "test/lambda/graph/mermaid/manifest.mark") where scene_case(test_case)) test_case]
 let results = [for (test_case in cases) run_case(test_case)]
 
 {
-  installed: installed,
   retained_runs: len(results),
   cases: [for (result in results) [result.id, result.equal, result.metadata]],
   diagnostics: [for (result in results where not result.equal)

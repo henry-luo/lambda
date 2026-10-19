@@ -212,8 +212,8 @@ BlockProp* DomElement::ensure_block(LayoutContext* lycon) {
 FontProp* DomElement::ensure_font(LayoutContext* lycon) {
     bool was_absent = !font;
     FontProp* value = ensure_view_prop(this, prop_pool(lycon), font, FONT_PROP_DEFAULT);
-    if (value && was_absent && lycon) {
-        if (lycon->font.style) {
+    if (value && lycon) {
+        if (was_absent && lycon->font.style) {
             // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
             font_prop_copy(value, lycon->font.style);
             // The inherited FontProp snapshot owns its mutable text-shadow chain;
@@ -221,17 +221,23 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
             value->text_shadow = lam::own(clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow));
         }
         if (!value->family && lycon->ui_context) {
-            // Rendering falls back to this face already; materialize the CSS initial
-            // family in the computed value before descendants can snapshot it.
+            // reset-in-place keeps this allocation; restore its inherited or initial family too.
             bool is_html5 = !lycon->doc || !lycon->doc->view_tree ||
                 lycon->doc->view_tree->html_version == HTML5;
             FontProp* initial_font = is_html5
                 ? &lycon->ui_context->default_font
                 : &lycon->ui_context->legacy_default_font;
-            value->family = initial_font->family;
-            value->platform_fallback_family = initial_font->platform_fallback_family;
+            FontProp* family_source = lycon->font.style.get();
+            if (!family_source || family_source == value || !family_source->family) {
+                // a retained reset can leave the active font pointing at this cleared group.
+                DomElement* parent = dom_parent_element(this);
+                family_source = parent && parent->font && parent->fontp()->family
+                    ? parent->font.get() : initial_font;
+            }
+            value->family = family_source->family;
+            value->platform_fallback_family = family_source->platform_fallback_family;
         }
-        assert(value->font_size >= 0);
+        if (was_absent) assert(value->font_size >= 0);
     }
     return value;
 }

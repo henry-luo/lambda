@@ -1,4 +1,4 @@
-// DOM access stays procedural; input policy and changes use the pure reducer.
+// DOM reads stay fn; focus, control writes and event delivery stay pn (D7.4.6).
 import dom
 import c: .common
 import reducer: .state
@@ -31,7 +31,7 @@ pn restore_control(spec, current, evt) {
     if (evt.type=="input" and c.has(spec.value,"query") and events.attribute(evt.target,"data-timeline-search")!=null and
         dom.get_state(evt.target,"value")!=current.query) { dom.set_state(evt.target,"value",current.query) }
 }
-pn canvas_point(host, model, spec, current, evt) {
+fn canvas_point(host, model, spec, current, evt) {
     let overview=events.closest(evt.target,"[data-timeline-navigator]");
     let canvas=if (overview!=null) overview else dom.query_selector(host,".lambda-timeline-canvas");
     let bounds=if (canvas!=null) dom.bounding_box(canvas) else null;
@@ -64,7 +64,7 @@ pub fn presentation(model, clock) {
 }
 
 // Sequence cards use their native flow boxes for FLIP; geometry views already have measured boxes.
-pn sequence_geometry(geometry, host, displayed = null) {
+fn sequence_geometry(geometry, host, displayed = null) {
     let root=dom.query_selector(host,"ol");
     let origin=if (root!=null) dom.bounding_box(root) else null;
     let previous=sort([for (item in displayed.plan.events) {id:item.id,item:item}],{by:(row)=>row.id});

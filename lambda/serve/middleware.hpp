@@ -7,8 +7,6 @@
  *
  * Compatible with:
  *   Express:  app.use(middleware)        / app.use('/api', middleware)
- *   Flask:    @app.before_request       / @app.after_request
- *   FastAPI:  @app.middleware("http")
  */
 
 #pragma once

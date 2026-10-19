@@ -180,7 +180,10 @@ does not test the lanes — reduce it first with `all` or `any`.
 
 ### Equality
 
-The `==` operator performs **structural deep value equality** for all types — scalars and containers alike.
+The `==` operator performs **structural deep value equality**. An encountered
+error is preserved by `==` and `!=`, including in visited container content
+(**S5.1.1v2, S5.1.5**). Equality stops at a decisive mismatch: `[1, e] == [2, e]`
+is false, while `[e] == [e]` yields `e`. `!=` negates only a successful Boolean.
 
 | Expression | Result | |
 |---|---|---|
@@ -219,12 +222,14 @@ Ranges and arrays are **sequences** — they compare equal across types if they 
 
 #### Function Equality
 
-Functions use **reference equality** — two function values are equal only if they are the same function object:
+Functions compare by definition site and recursively compared captures
+(**S5.5.1v2**). Captured errors propagate, including when comparing a function
+with itself; shared storage cannot skip the capture comparison.
 
 ```lambda
 fn add1(x) => x + 1
 let f = add1
-f == f                            // true (same reference)
+f == f                            // true (same site, no captures)
 ```
 
 #### NaN Equality
@@ -304,11 +309,14 @@ value or "default"          // Returns value if truthy, else "default"
 
 Lambda has simple truthiness rules:
 
+Errors have no truth value (**S3.1v2**). `not`, `and`, `or`, and `if` preserve
+an encountered error; an error condition evaluates neither branch (**S3.4–S3.5**).
+Use `expr ^ { fallback }` to recover an error (**S7.5.3v2**).
+
 | Falsy Values | Note                                                                 |
 | ------------ | -------------------------------------------------------------------- |
 | `null`       |                                                                      |
 | `false`      |                                                                      |
-| `error`      | error is falsy, which allows idiom like: `err or fallback`           |
 | `""`         | Empty string is a real string value with length 0                    |
 
 | Truthy Values (Everything Else)                          |

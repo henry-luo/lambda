@@ -9,9 +9,10 @@ import util: .util
 import graphics: .graphics
 import geometry: .geometry
 import mhchem: .mhchem
+import writer: .format_latex
 
 pub fn render(ast, options) map | error {
-    if (ast.error != null) error("math: " ++ string(ast.error))
+    if (not (ast.error is null)) error("math: " ++ string(ast.error))
     else if (options.font_size != null and (not (options.font_size is number) or options.font_size <= 0 or
         options.font_size - options.font_size != 0))
         error("math: font_size must be finite positive CSS pixels")
@@ -23,7 +24,7 @@ pub fn render(ast, options) map | error {
         base_uri: options.base_uri}
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
-    let label = if (ast is string) ast else format(ast, {type: "math", flavor: "latex"})^
+    let label = if (ast is string) ast else writer.to_latex(ast)
     let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label,
         font.stylesheet(profile, result.body));
     {element: output_el, width: result.width / font.UNITS, height: result.height / font.UNITS,
@@ -436,7 +437,7 @@ fn text_baseline(c) number | error {
     else amount * font.UNITS * c.size
 }
 
-fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""))) or false
+fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""))) ^ { false }
 
 // nicefrac.sty's slanted fraction: a script-size numerator raised half an x-height,
 // a slash kerned in by 0.1em and 0.15em, and a script-size denominator lowered a

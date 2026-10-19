@@ -1,6 +1,5 @@
 import transform: lambda.graph.transform
 
-let installed = transform.install()
 let graph = transform.to_html({
   nodes: [
     {id: "a", content: <div <strong "Alpha"> <span "rich node">>,

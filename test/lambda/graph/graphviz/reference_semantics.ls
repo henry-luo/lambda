@@ -28,7 +28,6 @@ let canonical = normalize.normalize(source)
 let actual = adapter.from_canonical(canonical.graph)
 let expected = adapter.from_dot_json(reference)
 let comparison = graph_transform.compare_scenes(actual, expected, {relations: false})
-let installed = graph_transform.install()
 let rendered = graph_transform.render_scene(source, 640, 480)
 let expected_geometry = adapter.from_dot_json(reference, true,
   [for (edge in model.edges(canonical.graph)) edge.id])

@@ -1,0 +1,149 @@
+{
+  "name": "CSS SVG paint samples reach computed values, transform, pixels and pointer geometry",
+  "html": "test/ui/svg_css_motion.html",
+  "viewport": {
+    "width": 200,
+    "height": 100
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "fill",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "stroke-width",
+      "equals": "4px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "fill-opacity",
+      "equals": "0.6"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "stroke-opacity",
+      "equals": "0.7"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "stroke-dashoffset",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 40,
+      "min_r": 177,
+      "max_r": 181,
+      "min_g": 100,
+      "max_g": 104,
+      "min_b": 177,
+      "max_b": 181
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 40,
+      "expected_selector": "#mark"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 25,
+      "y": 40,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('mark').style.setProperty('animation','none')\ntrue;"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "fill",
+      "equals": "rgb(0, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mark"
+      },
+      "property": "stroke-width",
+      "equals": "1px"
+    }
+  ],
+  "pixel_oracles": {
+    "1": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 40,
+        "min_r": 177,
+        "max_r": 181,
+        "min_g": 100,
+        "max_g": 104,
+        "min_b": 177,
+        "max_b": 181
+      },
+      {
+        "type": "assert_pixel",
+        "x": 25,
+        "y": 40,
+        "min_r": 253,
+        "max_r": 255,
+        "min_g": 253,
+        "max_g": 255,
+        "min_b": 253,
+        "max_b": 255
+      }
+    ],
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 40,
+        "min_r": 177,
+        "max_r": 181,
+        "min_g": 100,
+        "max_g": 104,
+        "min_b": 177,
+        "max_b": 181
+      },
+      {
+        "type": "assert_pixel",
+        "x": 25,
+        "y": 40,
+        "min_r": 253,
+        "max_r": 255,
+        "min_g": 253,
+        "max_g": 255,
+        "min_b": 253,
+        "max_b": 255
+      }
+    ]
+  }
+}

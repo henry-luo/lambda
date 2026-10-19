@@ -1,6 +1,6 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-16
+**Date:** 2026-10-17
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
@@ -1154,6 +1154,11 @@ earlier gate instability and remaining scope are in
 
 ## 25. Guarded numeric regions
 
+**Retirement note (2026-10-18; D8.4.1v2):** the measurements below are
+historical. The cache-dependent admission and `guard_property_cache` are
+removed; §36.10 records the replacement using shared storage descriptors and
+source-predicted guards.
+
 Reduce CD's repeated generic coercions and call/root boundaries by guarding
 receiver/argument layouts once around a pure numeric body. Reuse Lambda shape
 identity and packed lanes (**D3.4.3v5**), numeric emitters and precise root analysis
@@ -1427,7 +1432,8 @@ execution, sparse arrays, and proxies including callable/constructable targets.
 Lift the earlier `__proto__` exclusion as part of this phase. The new canonical
 target `jetstream/hashmap` now passes its unchanged oracle and pinned-MIR
 preflight. Recorded coverage expands to **88 workloads** across phase checkpoints:
-84 non-jq contracts pass; the four jq workloads retain historical Result9 evidence.
+84 non-jq contracts pass. The complete output and timing record is published as
+[MVP_Result10](../../test/benchmark/js_mvp_lmd/MVP_Result10.md).
 
 Reuse Lambda functions/storage first (**D1.3v3**). Ordinary objects retain nominal
 Maps and shared shape transitions; accessors reuse object-local `JsAccessorCell`
@@ -1454,8 +1460,9 @@ through a procedural boundary, preserving pure `fn` reads (**S12.1.1v2**).
 Acceptance includes full ordinary descriptors/integrity operations, live
 prototype behavior, sparse-array interactions and all scoped proxy traps,
 focused normal/forced-GC checks, shared Lambda/Test262 gates, and paired release,
-pinned-MIR self-timing checks of all **87 Result9 workloads**. Preserve Result9's
-known gate and timing limitations; record new evidence independently. Disclose
+pinned-MIR self-timing checks of all **88 benchmark contracts**, with matched
+controls where available. Preserve the recorded gate and timing limitations;
+record new evidence independently. Disclose
 new helpers before coding. General async/Node expansion is outside this phase.
 
 The current `array-pair` release passes **162/162** MVP groups normally and
@@ -1480,9 +1487,15 @@ Triangl and Map Iteration also improve. The preceding release's complete
 tuning, Fasta is within noise (**0.882 vs 0.883 ms**), while Raytrace3D remains
 **1.8% slower** (**142.382 vs 139.804 ms**). The latest eight-workload capture
 includes all four sources affected by the final refinement. **Whole-phase
-performance acceptance remains open.** The four jq workloads retain historical
-evidence only. Capability boundaries, exact hashes and evidence are recorded
-in the plan. Results3–9 are unchanged.
+performance acceptance remains open.** Result10 records 88/88 output contracts
+with the activation-pool candidate against the pre-tuning control where
+available. This control differs from the phase-entry control used by the
+31-round capture above. Three repeated rows clear the two-control slowdown
+criterion;
+`jetstream/hashmap` is about 33x slower than Node and has no pre-tuning MVP
+measurement. Four jq rows reuse the latest existing paired/single evidence.
+Capability boundaries, exact hashes and evidence are recorded in the plan.
+Results3–9 are unchanged.
 
 Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
 [implementation plan](../impl/JS_MVP_Lmd_Property_Expansion.md).
@@ -1927,73 +1940,400 @@ are in the implementation plan. No current performance claim is made.
 
 ## 36. Formal JavaScript MIR engine
 
-**Decision (2026-10-16, USER), D8.1.3v25:** promote MVP-Lmd to the formal
-JavaScript MIR engine. Normal MIR execution must reach MVP through the public
-runtime API, including module and host entry points. Retain the AST tier for
-`eval`, Function-family constructors and other dynamic source. Legacy LJS MIR
-must not silently execute rejected programs. Reuse Lambda's Runtime,
-EvalContext, Script lifetime and shared kernels (**D1.3v3, D5.3**).
+**Decision (2026-10-16, USER), D8.1.3v25:** MVP-Lmd is the formal JavaScript MIR
+engine for public Script, Module, host and Test262 execution. Rejected source
+must not fall back to retired LJS MIR. `eval`, Function-family constructors and
+other dynamic source use the retained AST interpreter.
 
-Fix remaining failures through this activated path while keeping Test262's
-population, harness, expectations and deadlines intact. Preserve pinned MIR
-benchmark comparisons; activation alone does not establish conformance or
-performance acceptance. Details and progress:
+The engine shares Lambda nominal shapes, closures, Runtime/EvalContext,
+precise roots, owned scalar storage and collection kernels (**D3.4.7,
+D5.3/D5.4, D6.2.2v2**). Public scripts retain one realm and live bindings across
+host calls, imports, suspension and AUTO promotion. Class inheritance and native
+callable/DOM interoperability use those shared contracts. Independent agents
+use separate realm/job owners, shared buffer handles and cooperative Lambda
+Activation scheduling (**D6.3.1**); native worker threads are not qualified
+(**D6.3.2**).
+
+**Unicode 17** is included (USER, 2026-10-16). Identifier, RegExp property,
+emoji string-property and shared Lambda simple-folding data use one canonical
+version with source hashes (**S17.7.1, D8.1.3v25**). Large passive declarations
+and array literals reuse bounded initialization and Lambda ownership.
+
+**Functional migration completed (2026-10-17):** qualified optimized `host124`
+is published as `lambda.exe`. Its complete canonical formal MIR audit passes
+**40,261/40,261**, with zero failures, timeouts or unresolved results. The actual
+shared Lambda baseline passes **5,568/5,568**. Release units pass **812/812**,
+migration checks **144/144** normally and with forced/poisoned GC, Script GC
+checks **15/15**, and formal MIR fixtures **509/509** without retries.
+
+The actual standard Test262 target passes with **40,247 fully passing cases +
+14 isolated-retry-only slow classifications**, zero failures/regressions; its
+2,652 pre-existing exclusions remain separate. Native helpers preserve Script
+`var` declarations; destructuring targets and Annex B companions use the
+existing declaration checks. Implicit errors retain their callee realm
+(**D8.1.3v25, D8.4.3v2**).
+
+All **20/20 size ratchets** and **93/93 JS optimization checks** pass. One
+reviewed generic callback module needs 23 instructions for correct numeric
+coercion order; typed-number paths and the other JS budgets remain unchanged.
+Benchmark timing remains deferred; no new performance acceptance is claimed.
+
+Exact pins, source provenance, implementation and remaining gates:
 [formal MIR implementation plan](../impl/JS_MVP_Lmd_Formal_MIR.md).
 
-**Implementation checkpoint:** ordinary public Script/Module execution and
-formal MIR Test262 batches now select MVP. Repeated public Scripts share their
-global object, lexical bindings, intrinsic identities and escaping closures;
-host global access uses that same realm. Heap replacement retires the old
-Promise/module policies. Document/preamble and module caches now retain MVP
-machine-code images with per-realm relocation tables; hits still rebuild frontend
-metadata before checking exact MIR equality (D8.5.1v2). Host API coverage,
-frontend-image reuse and AUTO per-function publication remain incomplete. The implementation plan
-records failing integrated gates separately from passing focused tests.
-Performance acceptance remains open, including the cost of complete public
-realm semantics versus standalone closed-unit analysis.
+### 36.1 MIR compiler and native helper source size
 
-The RegExp migration follow-up reuses shared match-state and streaming
-replacement kernels, with precise state owned by each MVP realm (D5.3,
-D8.1.3v25). It fixes legacy capture/context reads, the wide-string replacement
-timeout, Unicode-mode refresh on `compile()`, and a stale heap pointer during
-capsule teardown.
+Counts are physical implementation lines, including comments and blanks,
+excluding headers.
+Parser/AST code, the interpreter implementation, Lambda core, third-party MIR,
+generated data tables, tests and documentation are outside the counted scope.
 
-The host integration follow-up reuses shared descriptors, exotic operations,
-lazy global catalogs and native callable identities across the MVP boundary
-(D6.2.2v2, D8.1.3v25). It preserves Lambda nominal shapes during descriptor
-mutation (D3.4), rebinds prepared Window/document roots (D5.3), and installs
-Array keys/entries through the existing iterator kernel. Large open script
-entries share generic call dispatch after the existing emission budget, fixing
-`dom_module_props` compilation. Broader library compilation remains open.
+**Historical compiler comparison (2026-10-17):** source revision `051adda5e`,
+before the legacy compiler retirement in §36.2.
 
-The next host-boundary checkpoint shares private DateValue storage between
-native DOM and MVP Date operations, admits native callables carried by host
-arrays through their existing ABI bridge, and preserves host array prototypes
-and native callable home realms (D3.4, D5.3/D5.4, D6.2.2v2). Performance and Date
-now reuse the host's existing virtual/frame clock and time origin.
+| MIR compiling | MVP-Lmd | Legacy LJS |
+|---|---:|---:|
+| Implementation files | 1 | 13 |
+| Source lines | **13,874** | **32,314** |
 
-The public host follow-up shares lazy host-family installers, native Timeout
-handles and classic string-handler execution through the retained interpreter
-(**D8.1.3v25, D5.3/D5.4**). Native property/descriptor operations and prototype
-walks use existing ABI/nominal ownership; shared iterator caches are private and
-unforgeable (**D3.4.3v5, D6.2.2v2**). Host subclasses reuse native construction,
-virtual collection `for…in` reuses foreign descriptors, and source-relative
-CommonJS require shares the existing resolver, cache and native closure layout.
-The retained AST keeps its existing implicit require policy.
+MVP's compiler has **57% fewer source lines**. The counted files are
+`mvp_lmd_mir.cpp` versus `transpile_js_mir.cpp` and `js_mir_*.cpp`; the legacy
+file family includes retained shared entrypoint/cache integration.
 
-Function-source reflection now reuses the retained interpreter's method-span
-helper and the shared IdentifierName validator. Static methods omit their
-class-only prefix; native names that cannot form an identifier use anonymous
-native-function syntax (**D6.2.2v2, D8.1.3v25**).
+**Cleaned native helper count (2026-10-17):** working tree based on `b37f6877a`,
+after the retirement, helper audit and document-cache removal in §36.2–§36.4. Current sizes and the
+measured reduction use exact file totals.
 
-**Latest verification:** `host45` passes 756/756 MVP units, 89/89 focused checks
-normally and with forced/poisoned GC, all 45 selected host fixtures, and all
-2,382 selected canonical property/Function/Date/Array iterator cases. The prior
-17 failures in that Test262 slice are repaired. Script integration remains
-198/205, with seven known AUTO publication failures; the separate replay of
-previously failing small fixtures is 24/32. This is not a whole-suite recount.
-The implementation plan records exact pins and remaining work. The earlier
-complete isolated fixture diagnostic remains 461/507 passes, 41 failures and
-five outer timeouts; focused fixes are not added to that aggregate. Full
-baseline closure and performance acceptance remain open; benchmark timing
-stays deferred.
+**Original attribution preserved (`051adda5e`):** common **72,675** lines,
+MVP-specific **10,303**, Legacy LJS MIR-only **2,782**, total **85,760**.
+The common/legacy split was a provisional static estimate.
+
+| Native runtime C/C++ support | Current implementation files | Historical comparison, reconciled | Cleaned source lines |
+|---|---:|---:|---:|
+| Shared JS helper pool: MVP, retained AST/AUTO and hosts | 27 | **73,219** | **73,219** |
+| MVP-specific helpers | 14 | **10,303** | **10,303** |
+| Legacy LJS MIR-only helpers, retired | 0 | **2,238** | **0** |
+| **Comparable helper source total** | **41** | **85,760** | **83,522** |
+| Shared execution/cache/loader/recovery services | 4 | — | **2,254** |
+| **Native support including shared services** | **45** | — | **85,776** |
+
+**Comparison accounting (USER):** charge the full **2,238-line reduction
+(2.6%)** to Legacy MIR-only code. The reconciled historical column preserves
+the **85,760-line** baseline and records those retired lines alongside the
+**83,522** retained helper lines. The original **2,782-line** estimate remains
+above as a separate historical record.
+
+Both helper totals use the same 41-file scope. Shared interpreter and
+host support remains necessary under **D8.1.3v25**, including interpreted
+dynamic source; the interpreter implementation itself remains excluded.
+
+The four shared services moved out of the legacy compiler during retirement:
+`js_execution.cpp` (1,703), `js_code_cache.cpp` (171), `js_module_loader.cpp`
+(212) and `js_compile_recovery.cpp` (168). They were previously within the
+compiler comparison's scope, so their **2,254 lines** are shown separately
+before the extended native-support total. Per-file counts and source hashes:
+`temp/js_runtime_helper_size/counts.json`. Source-size accounting and the
+function-level dependency audit are separate measurements.
+
+### 36.2 Retire legacy LJS MIR handling
+
+**Decision (2026-10-17, USER), D8.1.3v25:** remove the superseded LJS MIR
+compiler, its private compiler state, alternative compiled-entry/preamble
+handling and exclusive native helpers. Public execution APIs continue through
+MVP or the explicitly selected AST/AUTO tier. Dynamic source remains interpreted.
+
+Shared module/path resolution, code-image leases, host entry points and frontend
+recovery move into separate JS service files. MVP Runtime/Script ownership
+replaces deferred native-context stores, including DOM inline handlers
+(**D5.3/D5.4**, **D8.5.1v2**). Shared compiled-call entries remain for AST
+definitions promoted to MVP; source ownership must account for these users.
+
+TypeScript selects the existing parser profile on MVP and reuses `ts_type_info`
+for its unshadowed `type(value)` intrinsic. No new semantic runtime helper is
+introduced. Ordinary JS generated paths retain their existing representation,
+property, ownership and call plans (**D8.2.3**, **D8.4.1v2**).
+
+The compiler comparison in §36.1 is historical; its helper table reflects the
+latest cleanup. Removal size, build evidence and remaining
+runtime/performance qualification are recorded in the
+[retirement implementation record](../impl/JS_MVP_Lmd_Legacy_MIR_Retirement.md).
+The retirement removes **33,033 net physical C/C++ lines** (27,249 code lines);
+the release executable and four native Node modules build successfully.
+Runtime conformance and benchmark performance have not been requalified in
+this removal pass.
+
+### 36.3 Native helper audit after retirement
+
+**2026-10-17, USER; D8.1.3v25, D5.3/D5.4, D6.2.2v2:** trace native helpers
+through actual calls, emitted imports, callbacks, builtin tables and ownership
+hooks. An import registry entry alone does not establish use.
+
+The audit removes **92 unused function bodies** and **1,365 additional physical
+C/C++ lines**. At that checkpoint it retained 4,404 bodies with
+production/host/lifetime/diagnostic references, 18 conditional build
+implementations and five APIs with test callers only. The document-cache
+adapter was subsequently removed in §36.4. No semantic
+runtime helper is added. Method, per-function artifacts, retention decisions
+and qualification results are in the
+[native helper audit](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md).
+
+
+### 36.4 Retire the dormant document-cache adapter
+
+**2026-10-17, USER; D8.1.3v25, D8.5.1v2, D5.3/D5.4:** remove the
+`JsMirLeaseSession` API, its document-preamble/classic-script cache branches and
+layout session hooks. Browser documents already select AST execution and the
+layout runner supplied a null session. Remove `SingleFlightsCommonMirLeaseBuild`
+and simplify the remaining module-cache concurrency helper.
+
+The active `js_module_mir_cache_*` APIs, immutable MVP image ownership and their
+module-cache tests remain. Layout timing retains its zero-valued legacy cache
+fields for schema compatibility. This cleanup removes **490 production C/C++
+lines** and **75 test lines**. The current native-support total in §36.1 is
+**85,776 lines**; the original helper comparison and its **2,238 retired Legacy
+MIR-only lines** remain recorded. Source/build evidence and verification limits:
+[native helper audit follow-up](../impl/JS_MVP_Lmd_Runtime_Helper_Audit.md#document-cache-adapter-retirement).
+
+### 36.5 Performance recovery after migration
+
+**2026-10-17; D3.3.4, D3.4.5, D5.2.1v3, S7.11.4; JC24:** recover numeric
+operand consumption and bounded recursive inlining while retaining coercion
+order, precise scalar ownership and real recursive stack guards. Recursive
+expansion requires a native scalar return or a declared class method; generic
+callable guards retain their ordinary entry to bound fallback duplication. A
+closed write inventory proves numeric implicit-global keys without treating unresolved
+identifiers as `undefined`. Deferred assignments retain proven numeric index lanes
+and guard boxed Numbers at repeated sites without coercion callbacks. Object-key
+coercion remains after the RHS; canonical names are reused. Ordinary property
+helpers reuse immutable-shape cache entries, specialize Get dispatch and reuse
+the existing live array-chain proof before constructing keys for absent indices.
+Typed-array ancestors, foreign and exotic chains retain semantic lookup; no
+container-wide `is_normal` flag is introduced.
+
+The then-existing `MvpLmdPropertyCache::find_shape` lookup consolidated cache
+searches; no exported C runtime helper is added. The historical `divrec` control
+used the removed self-tail-call loop, so matching that result cannot justify
+restoring tail-call elimination contrary to JC24. Qualification and paired,
+release-MIR self-time evidence are recorded in
+[`temp/js_mvp_regression_fix_20261017/REPORT.md`](../../temp/js_mvp_regression_fix_20261017/REPORT.md).
+
+The final seven-round replay removes statistical confirmation for eight of the
+original 20 slowdowns; 12 comparable gaps remain, plus the obsolete `divrec`
+control. Final qualification passes 817 runtime tests, 7,145 selected forced-MIR
+Test262 cases, 84 benchmark output/backend checks, six forced-GC tests, 93
+optimizer tests and 20 MIR budget tests. The earlier whole Lambda gate had 12
+unrelated failures; its five introduced emission failures are fixed without
+changing sidecars or budgets. Direct comparison with the frozen pre-fix release
+still confirms Splay at +1.4–1.9%; three inconclusive helper experiments were
+reverted, and this cause remains open. Four jq timings remain deferred.
+
+### 36.6 jq generator-stack reuse
+
+**2026-10-17–18; D1.3v3, D5.1.1v3, D5.2–D5.3:** a fresh release profile of
+canonical `jq_records` identifies repeated idle-stack discard/reclaim as the
+largest native cost. Batch idle-pool trimming at GC boundaries so successive
+generator completions can reuse resident mappings. Keep the process-wide
+32-stack pool, the 16-activation parked warm window, same-address restoration,
+precise owner tracing and scalar adoption on suspension/completion.
+
+The only new production helper is internal `stacks_trim_pool`; JS continues to
+use Lambda's shared activation implementation. Between collections the existing
+pool can retain at most 32 complete 3 MiB mappings (96 MiB of usable storage,
+committed on touch); trimming leaves one warm mapping and the existing
+native-stack prefix in each other idle mapping undiscarded. Teardown releases the pool.
+Canonical jq checksums, pinned release-MIR self-times, peak RSS and normal/forced-GC
+activation and JS checks qualify the change. Results are recorded in
+[`temp/js_mvp_jq_tune_20261017/REPORT.md`](../../temp/js_mvp_jq_tune_20261017/REPORT.md).
+Final canonical self-times take **32.4% less time for `jq_records`, 4.2% for
+`jq_mix`, 23.8% for `jq_bf` and 15.7% for `jq_tree`**, with matching checksums.
+Records has two matched pairs in opposite orders; the others have one pair each.
+The first experiment's mix slowdown does not reproduce in the final fresh pair;
+reuse order is not an established cause. A seven-round, 12-workload comparison
+finds no slowdown within those 12 workloads against both control copies. The
+expanded [Result10](../../test/benchmark/js_mvp_lmd/MVP_Result10.md) capture
+adds 71 three-pair comparisons and flags Towers, `args_ctl` and Ackermann by
+the same two-control criterion. All **88/88** supported output/backend
+contracts pass. Release validation passes **817/817** MVP tests,
+**12/12** activation tests in each of normal and forced-GC/poison modes, and
+**71/71** generator/async/iterator tests with forced GC/poison. The pinned-MIR
+Test262 recount has **40,258 fully passing + three known retry-only cases**,
+zero failures and zero reported regressions. The Lambda aggregate is
+**7,707/7,719**; its 12 failures match prior TypeScript/PIL failures. These
+qualification limits and exact-case attribution remain recorded in the report.
+
+### 36.7 Ackermann and HashMap follow-up
+
+**2026-10-18; D8.4.1v2, D3.4.4v4, D5.2.1v3:** keep tuning on static
+guards and shared lookup. After existing fast paths miss, repeated named
+own-data reads on function-owned ordinary instances guard the carrier, nominal
+owner and descriptor, then reuse Lambda's shape lookup and field decoder.
+Source evidence of ordinary function construction gates emission; both paths
+share the existing decoder block to avoid duplicate calls and code growth in
+units that only use native constructors.
+Misses retain JS semantic dispatch and scalar ownership. Other object families
+retain their established dispatch. No new helper or cache change is retained.
+
+The final five-round release-MIR screen measures HashMap at **467.834 ms versus
+511.945 ms**, **8.6% less time**; fresh Node is **15.351 ms**, leaving a
+**30.5×** gap. The control is rebuilt from the same checkout without this patch;
+Result10 predates unrelated merged runtime changes. All 11 workload contracts
+pass, with no slowdown confirmed against both control copies. An earlier
+text-search slowdown was removed by keeping ordinary objects on their existing
+fast path. HashMap's remaining cost is repeated generic
+property/prototype dispatch and object construction. Ackermann's original
+**+15.3%** signal does not reproduce in 31 paired measurements against the
+pre-activation control; this is a measurement correction, not an Ackermann
+code fix. The final 31-pair current-checkout comparison is **6.572 versus
+6.536 ms**, with no confirmed change. Result10 remains the original snapshot.
+Detailed evidence and qualification are recorded in
+[`temp/js_mvp_ack_hashmap_20261018/REPORT.md`](../../temp/js_mvp_ack_hashmap_20261018/REPORT.md).
+The final build passes **820/820** MVP runtime tests, **104/104** optimizer
+contracts, **20/20** MIR budgets and **4/4** focused forced-GC/poison tests.
+The report separates the earlier aggregate failures from the corrected-suite
+reruns and the 12 known TypeScript/PIL failures.
+The explicit MIR-only Test262 recount has **40,251 fully passing + ten slow
+cases passing only on isolated retry**, zero failures and zero reported
+regressions. The retry-only count is higher than the prior three-case capture.
+Serial singleton replays pass all ten on both binaries in **24.4/24.5 seconds**
+(control/candidate), consistent with load-sensitive classification; the full
+run retains its ten retry-only cases. The report preserves both records.
+
+### 36.8 Source constructor layouts and prototype method targets
+
+**2026-10-18; D8.4.1v2, D3.4.3v5–D3.4.4v4, D3.4.7, D5.2.1v3:** extend
+static proofs to ordinary function constructors and prototype-assigned methods.
+A small constructor containing only distinct `this.field = parameter/literal`
+initializers can allocate its complete source-defined layout. Guard the live
+constructor entry and realm, and reject inherited-field or exotic-prototype
+interference before allocation. Reuse Lambda's ordinary Map allocation and
+`TypedItem` stores; keep nominal identity per constructor closure. No execution
+feedback or per-site cache is added.
+
+Prototype-literal candidates guard the receiver's nominal owner, absence of an
+own shadow and the live prototype shape. Load the current method before
+arguments; only a bounded leaf body with a matching captured entry and realm
+can inline in a function body or loop. Mutations, accessors, proxies and unproven
+constructors retain existing dispatch. The existing `mvp_lmd_object_from_constructor` gains an
+optional source-layout mode; there is no new runtime helper. Focused semantic,
+GC, emission and matched release-MIR evidence is recorded in
+[`temp/js_mvp_hashmap_static_20261018/REPORT.md`](../../temp/js_mvp_hashmap_static_20261018/REPORT.md).
+
+Keep the proofs in the existing object-plan registry and AST index; ordinary
+compiler function/program records retain their original size. Six balanced,
+source-matched release-MIR rounds measure HashMap at **371.086 ms versus
+463.929 ms** (**20.0% less time**); Node is **15.161 ms**, leaving a **24.5×**
+gap. An unrelated merge affected the initial control, so the final comparison
+rebuilds it from the current common sources. The report preserves that audit
+and the superseded captures. Result10 remains its original snapshot.
+
+All **14/14** screened workload contracts pass. Final affected gates pass
+**824/824** runtime cases, **106/106** optimizer contracts, **20/20** MIR budgets
+and **5/5** forced-GC cases. No slowdown is confirmed against both controls;
+text search measures **+0.2–0.7%**, with both intervals including no change,
+and the earlier map-lookup slowdown does not reproduce. The earlier aggregate/
+recount results and final scoped reruns remain separate in the report; this
+is not a full 88-workload sweep.
+
+### 36.9 Disable per-site optimization caches
+
+**2026-10-18; D8.4.1v2:** disable mutable property/global cache cells,
+property-reading numeric regions that require learned slots, and constructor
+allocation-site shape/argument variants. The compiler policy is fixed off;
+no runtime switch or new runtime helper is introduced. Open property calls
+pass a null cache pointer. Scalar-only numeric regions, source-predicted
+constructor/method guards, shared own-field lookup/decoding, and shared
+TypeMap/constructor metadata remain available (**D3.4.3v5, D3.4.7**).
+Template-object identity storage remains part of JS semantics.
+
+Compare the same-source cache-enabled release against the disabled release
+using pinned MIR, accepted workload/oracle contracts and self-reported time.
+Measure the 84 non-jq workloads afresh; retain the four jq rows solely as
+historical evidence at the user's request. Capture provenance, timing samples,
+MIR output and qualification under
+[`temp/js_mvp_no_site_cache_20261018/`](../../temp/js_mvp_no_site_cache_20261018/).
+
+All **84/84** fresh output/backend contracts pass. The complete three-round
+screen is **15.9% slower** geometrically; with six-round follow-ups on seven
+rows and thirty-round follow-ups on seven numeric rows, the selected medians
+are **16.1% slower**, with the median workload unchanged and **70/84** within
+±5%. CD is **4.66×**, NBody **4.26×**, Richards **4.10×**, Prettier AST **1.22×**
+and log-pipeline **1.16×** slower. HashMap is roughly unchanged (**364.807 ms
+versus 370.371 ms**, intervals include no change). All **10,210** emitted
+property-kernel call sites in **98** captured candidate MIR files pass null
+cache pointers. Raw captures and the full table are retained in the report
+directory above; Result10 remains its original snapshot.
+
+Final affected checks pass **824/824** MVP runtime, **107/107** optimizer,
+**32/32** JS MIR emission and **20/20** unchanged MIR budgets. The finalized-MIR
+harness rejects non-null cache operands; cache-only decoder expectations were
+updated while retaining JS behavior checks. The complete selected Test262
+property-access/constructor/reflection groups pass **415/415** on pinned MIR.
+The initial aggregate and affected reruns are reported separately: the broader
+baseline retains its missing Python PIL dependency, and the optional full
+Test262 recount was not completed. See the
+[`report`](../../temp/js_mvp_no_site_cache_20261018/REPORT.md) for scope and limits.
+
+### 36.10 Remove cache machinery and reuse Lambda field specialization
+
+**2026-10-18; D8.4.1v2, D3.4.6:** remove the disabled property/global
+cache cells, cache-fill paths, cache-pointer ABI arguments, constructor-site
+variants and their invalidation epoch. The former shared prototype ring also
+uses ordinary TypeMap lookup, so its cache-entry representation can disappear.
+Template identity, compiled-module reuse and canonical shape transitions keep
+their existing semantic roles.
+
+Follow untyped Lambda's inferred-field route: compare source-predicted shapes
+where available, then use packed fields; otherwise obtain the live descriptor
+through Lambda's shared lookup. Keep lookup results in invocation-local
+registers. Numeric regions share receiver admission/data bases and preload
+only checked own data fields. Arithmetic consumers and matching writable
+scalar stores use native lanes without intermediate Item boxing. Reuse
+`typemap_hash_lookup_key`, `shape_entry_storage` and `map_shape_field_to_item`;
+the additions are compiler emission helpers, with no new runtime helper.
+The shared lookup arm also imports the existing `mvp_lmd_owns_properties`
+admission so native stores cannot bypass foreign Lambda layout protection.
+Known function receivers skip Map guards; private static initializer call
+edges prove that `this` is the class constructor.
+Generic array/string `length` reads keep their sequence heads and compact
+semantic miss; only a known Map receiver gains the extra own-field arm.
+The reference is Lambda's inferred member lowering in
+`lambda/runtime/transpile-mir.cpp`: `em_guard_map_shape` with a shared
+`fn_member_by_id` miss. JS additionally checks ownership, descriptors and live
+prototype values because its objects are mutable.
+
+Bounded source-class method candidates guard nominal identity, own shadowing
+and the live prototype shape. Read the current function before arguments;
+the closed-unit proof can use the class's registered prototype directly.
+Reflective units inspect the live link through the existing prototype kernel.
+Prototype-literal and class candidates share the guarded packed method load.
+
+Accessors, missing fields, nullable/native mismatches, non-writable stores,
+indexed arguments aliases, lazy globals and exotic receivers retain semantic
+fallback. Inherited-method preloading remains unadmitted without a source
+prototype proof. Numeric-region admission still requires the existing closed
+unit effect proof; the formal open-realm path retains its reflective semantics.
+
+Validate emitted ABI/state absence and JS behavior separately. Compare pinned
+release MIR against the previous cache-disabled build using accepted self
+timers, keeping Result10 and the four historical jq rows unchanged. Evidence
+is recorded under
+[`temp/js_mvp_shared_dispatch_20261018/`](../../temp/js_mvp_shared_dispatch_20261018/).
+
+Retained release evidence: all **84/84** fresh non-jq workload contracts pass,
+with **5.2% less self-reported time** geometrically than the previous
+cache-disabled release. Six-round medians measure CD **751.974 → 419.904 ms**,
+NBody **184.282 → 143.250 ms**, Richards **290.744 → 222.944 ms**, and Havlak
+**3,419.244 → 2,654.389 ms**. Compact length admission removes the text-search
+increase; its retained screen is **1.4% faster**. No slowdown is confirmed
+against both identical controls; smaller differences remain uncertain. Keep
+the four jq rows as historical evidence and preserve Result10.
+
+Final gates pass **825/825** runtime, **107/107** optimizer, **34/34** JS MIR,
+**20/20** unchanged size budgets, **315/315** forced-GC cases, **10,162/10,162**
+selected class/property Test262 cases on pinned MIR, and **22/22** release
+semantic/ownership checks. The affected size probe shrinks **693 instructions**;
+the MIR audit finds **9,739** property calls with the four-argument ABI and no
+site-state operand. The initial aggregate's missing Python PIL dependency and
+the final focused reruns remain separate. See the
+[`report`](../../temp/js_mvp_shared_dispatch_20261018/REPORT.md) for raw captures,
+provenance, intervals, all 84 rows and qualification limits.

@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body { font: 16px sans-serif; margin: 20px; }
+section { user-select: none; }
+p, button { display: block; line-height: 32px; margin: 8px 0; }
+#override, input { user-select: text; }
+input { font: inherit; width: 280px; }
+</style></head><body>
+<section><button id="button"><span id="blocked">Filename cannot be selected.txt</span></button>
+<p id="automatic" style="user-select:auto">Automatic descendants stay unselectable</p>
+<p id="override">Selectable preview text remains selectable</p>
+<input id="input" value="Editable filename stays selectable"></section>
+<p id="ordinary">Ordinary document text remains selectable</p>
+<script>void 0;</script></body></html>

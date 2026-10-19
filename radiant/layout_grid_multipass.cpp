@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "event.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -40,7 +41,7 @@ struct GridNodeScratch {
 
     GridNodeScratch(LayoutContext* lycon, ViewBlock* container, bool initialize)
         : scope(&lycon->scratch), data(nullptr), count(0) {
-        int capacity = layout_count_flattened_item_nodes(container, false);
+        int capacity = layout_count_flattened_item_nodes(container, true);
         if (capacity > 0) {
             data = scope.array_zero<DomNode*>((size_t)capacity);
         }
@@ -147,7 +148,8 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
             float grid_baseline = vertical_baseline >= 0.0f
                 ? layout_block_start_content_offset(grid_container) + vertical_baseline
                 : item_baseline;
-            if (vertical_baseline < 0.0f && form_baseline <= 0.0f && prefer_last) {
+            if (vertical_baseline < 0.0f && form_baseline <= 0.0f &&
+                (prefer_last || grid_item->anonymous_text_runs)) {
                 grid_baseline += item->y;
             }
             if (prefer_last) {
@@ -187,53 +189,6 @@ static void grid_store_inline_baselines(LayoutContext* lycon,
     grid_container->blk->last_line_baseline = 0.0f;
     grid_store_inline_baseline(lycon, grid_layout, grid_container, false);
     grid_store_inline_baseline(lycon, grid_layout, grid_container, true);
-}
-
-static bool layout_grid_anonymous_text_content(
-    LayoutContext* lycon, ViewBlock* grid_container) {
-    if (!lycon || !grid_container) return false;
-
-    bool has_text = false;
-    for (DomNode* child = grid_container->first_child; child;
-         child = child->next_sibling) {
-        if (child->is_text() && layout_text_node_has_content(child)) {
-            has_text = true;
-        } else if (child->is_text()) {
-            layout_suppress_ignorable_container_text(child);
-        }
-    }
-    if (!has_text) return false;
-
-    // css grid §4.2: non-empty direct text is laid out as an anonymous grid item.
-    LayoutContentBox used_content = layout_content_box(grid_container);
-    float content_width = used_content.width;
-    if (content_width <= 0.0f) {
-        content_width = layout_content_size_from_border_box(
-            grid_container, grid_container->width, true);
-    }
-    float content_left = layout_axis_decoration_start(
-        grid_container->bound, LAYOUT_AXIS_X);
-    lycon->block.content_width = max(content_width, 0.0f);
-    lycon->block.advance_y = 0.0f;
-    line_init(lycon, content_left, content_left + max(content_width, 0.0f));
-    for (DomNode* child = grid_container->first_child; child;
-         child = child->next_sibling) {
-        if (child->is_text() && layout_text_node_has_content(child)) {
-            layout_flow_node(lycon, child);
-        }
-    }
-    if (!lycon->line.is_line_start) line_break(lycon, true);
-
-    float content_height = max(lycon->block.advance_y, 0.0f);
-    if (layout_axis_has_given_size(grid_container, false)) {
-        // CSS Grid §2.1: anonymous text must not replace a definite grid
-        // container block size with its intrinsic line height.
-        content_height = used_content.height;
-    }
-    grid_container->content_height = content_height;
-    grid_container->height = layout_border_size_from_content_box(
-        grid_container, content_height, false);
-    return true;
 }
 
 // Main Entry Point
@@ -295,10 +250,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     int item_count = resolve_grid_item_styles(lycon, grid_container);
 
     if (item_count == 0) {
-        if (layout_grid_anonymous_text_content(lycon, grid_container)) {
-            log_leave();
-            return;
-        }
         // Check whether positioned children need the resolved grid lines.
         // The node buffer's scope must end before layout_grid_container: the
         // track arrays it allocates belong to the enclosing grid pass.
@@ -418,6 +369,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // their overflowing tracks must not feed back into its intrinsic fallback.
     bool has_explicit_height = !layout_block_has_automatic_height(grid_container) ||
         layout_block_has_size_containment_in_axis(grid_container, false);
+    if (grid_layout && grid_layout->computed_row_count > 0 && !has_explicit_height) {
+        // final tracks replace the provisional intrinsic estimate, which may shrink after columns rewrap.
+        grid_container->height = layout_grid_row_border_box_extent(grid_container, grid_layout);
+    }
     // A row with a fixed maximum establishes the auto grid block size;
     // overflowing items must not feed back into that size.
     bool has_non_definite_row = false;
@@ -512,6 +467,16 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         }
     }
 
+    for (int index = 0; grid_layout && index < grid_layout->item_count; index++) {
+        ViewBlock* item = grid_layout->grid_items[index];
+        GridItemProp* gi = grid_item_prop(item);
+        if (!gi || !gi->anonymous_text_runs) continue;
+        // the scratch box is absent from the render tree; publish its final movement.
+        layout_shift_anonymous_text_runs(gi->anonymous_text_runs,
+            item->x - gi->anonymous_text_origin_x,
+            item->y - gi->anonymous_text_origin_y);
+    }
+
     WritingMode grid_writing_mode = layout_block_writing_mode(grid_container);
     if (grid_writing_mode == WM_VERTICAL_LR || grid_writing_mode == WM_VERTICAL_RL) {
         bool preserve_surrogate_axes =
@@ -603,6 +568,11 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
     int item_count = 0;
     for (int node_index = 0; node_index < nodes.count; node_index++) {
         DomNode* child = nodes.data[node_index];
+        if (child->is_text()) {
+            set_view(lycon, RDT_VIEW_TEXT, child);
+            if (node_index == 0 || !nodes.data[node_index - 1]->is_text()) item_count++;
+            continue;
+        }
         if (child->is_element()) {
             DomElement* elem = child->as_element();
             // Always resolve styles first (position:absolute may not be known until after cascade)
@@ -802,6 +772,12 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
         if (!item) continue;
 
         layout_grid_item_final_content_multipass(lycon, item);
+        // grid items bypass block finalization; publish their final overflow clip even when content fits.
+        if (item->scroller) {
+            BoxEdges border = layout_boundary_border_edges(item->boundary());
+            update_scroller(item, item->content_width + border.right,
+                item->content_height + border.bottom);
+        }
     }
 
     log_info("FINAL GRID CONTENT LAYOUT END");
@@ -817,6 +793,15 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
              grid_item->width, grid_item->height,
              grid_item->x, grid_item->y);
 
+    GridItemProp* anonymous = grid_item_prop(grid_item);
+    if (anonymous && anonymous->anonymous_text_runs) {
+        layout_anonymous_text_runs(grid_item, anonymous->anonymous_text_runs,
+            lycon, nullptr, true);
+        anonymous->anonymous_text_origin_x = grid_item->x;
+        anonymous->anonymous_text_origin_y = grid_item->y;
+        log_leave();
+        return;
+    }
     LayoutContextScope context_scope(lycon);
     LayoutCounterScope counter_scope;
     if (!counter_scope.enter(lycon, grid_item, grid_item->as_element(), grid_item->display)) {

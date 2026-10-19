@@ -16,6 +16,7 @@ extern "C" Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item
 extern "C" Item fn_radiant_pdf_walk_view(Item source, Item options, Item callback, Item schemas);
 extern "C" Item fn_radiant_pdf_walk_source(Item source, Item options, Item callback, Item schemas);
 extern "C" Item fn_radiant_pdf_glyph_path(Item context);
+extern "C" Item fn_radiant_pdf_text_run(Item context);
 extern "C" Item fn_radiant_pdf_clip_path(Item context);
 extern "C" Item fn_radiant_pdf_graphic(Item context);
 extern "C" Item fn_radiant_pdf_image(Item context);

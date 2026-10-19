@@ -1,6 +1,6 @@
 # Paged layout integration: one layout engine, breaks as the only paged step
 
-**Status:** implementation in progress, started 2026-10-14. P1–P5 have focused flow gates; native/FO integration (P6) and removal (P7) have also started. The current tree has removed the item engine and its `RADIANT_PAGED_ENGINE=legacy` selector, the region trial engine and the external page policy. Earlier §9 entries describe their historical state. The obsolete secondary selector/container replay, item budgets and frame/table paint fallbacks are now removed too. P2 retains shared boundary/inline paint and per-sheet fixed geometry; P3 separates caption wrappers from painted grids. Remaining paint combinations, the native-provider adapter, test migration and aggregate/release gates stay open; the latest §9 entry records current evidence. This plan supersedes the engine-level direction of the P4 "resumable main flow" milestone recorded in [Radiant_Impl_Paged_Media](Radiant_Impl_Paged_Media.md); the page-box level, the page model and the output contracts recorded there stay.
+**Status (2026-10-18):** the two remaining paged export failures are closed and the P6 core native-provider adapter is implemented. All 500 paged cases and 124 reuse cases pass. P7 qualification has run against completed PDF commit `9cce7697b` plus these paged changes: full PDF, baseline raster equivalence, performance and size gates remain open. The current receipts and measured limits are at the start of §9. The item engine and its `RADIANT_PAGED_ENGINE=legacy` selector, region trial engine, external page policy, secondary selector/container replay, item budgets and frame/table paint fallbacks remain removed. Earlier dated §9 entries are historical evidence, not the current backlog. This plan supersedes the engine-level direction of the P4 "resumable main flow" milestone recorded in [Radiant_Impl_Paged_Media](Radiant_Impl_Paged_Media.md); the page-box level, page model and output contracts recorded there stay.
 **Design authority:** [Radiant_Layout_Paged_Media §1.3](../radiant/Radiant_Layout_Paged_Media.md#13-design-principle-2026-10-14-paged-layout-is-normal-layout-with-breaks) (the principle this plan implements), §3.2, §5 and §11 for the page model.
 **Formal linkage:** D4.5.1v4 and D4.1.4v5 (ownership of published editions and retained pages), D7.1.4v2 (headless profile). No formal ruling defines Radiant page layout; the vibe design doc is the authority for this plan.
 
@@ -244,6 +244,184 @@ The user ruled on the three open questions the same day; §4 records each ruling
 
 ## 9. Progress record
 
+### Active completion plan (2026-10-18)
+
+1. **Paged exports:** diagnose and close
+   `PagedMarkdownPaginatesCollapsedTablesAndUnbreakableCodeThroughItsLoader`
+   and `FoAndNativePageControlsSharePreviewAndPhysicalPdfPages`. Preserve
+   source coverage, physical page geometry and exact FO/native output parity;
+   change an obsolete expectation only with independent evidence. Use the two
+   export cases and focused shared-layout controls during implementation.
+2. **P6 native adapter:** consume replayable `TypesetFlowProvider` material
+   through ordinary page-flow hooks, retain producer line alternatives and
+   implement the replacement break-candidate contract. Acceptance covers
+   boxes/paragraphs, replay and failure, nested/source identities, retained
+   paint and producer break decisions. Published resources remain edition-owned
+   under **D4.5.1v4 / D4.1.4v5**; the retired page-policy engine stays removed.
+3. **P7 qualification:** run the complete paged/reuse, Radiant and PDF gates
+   after implementation stabilizes, then measure optimized paged-corpus timing
+   against an available provenance-matched frozen release baseline and report
+   actual source sizes. Preserve independent failures and unavailable platform
+   or baseline evidence as explicit qualification limits. Update current
+   support documentation from delivered behavior.
+
+Continuation relayout, float deferral, column balancing and flex/grid row breaks
+remain the separate §7 backlog. Keep one milestone active; broaden verification
+at its boundary instead of rerunning aggregate gates in the edit loop.
+
+**Export milestone complete:** both original process export cases pass, including
+the full FO/native preview and physical-PDF pair inventory. Generated document
+roots now use the shared display blockification rule before fragmentation.
+Markdown retains its one actual stylesheet rather than reading three entries
+from a one-entry array. Flexible-space shrinking updates the cursor of the
+ordinary flow box, independently of BFC ownership, eliminating phantom trailing
+sheets in the flow-trait/property-binding fixtures. The native sheet-keep oracle
+now omits inter-element formatting whitespace: its inherited preserved linefeeds
+had made that input different from the FO translator's element-only flow. Its
+authored block linefeeds and exact image comparisons remain. New inline-root
+and closed-sibling shrinking regressions pass; the complete paged runner passes
+493/493. Receipts: `temp/paged_completion_exports_before.xml`,
+`paged_completion_exports_final.xml`, `paged_completion_native_exports.xml` and
+`paged_completion_stage1.xml`. Ownership still follows **D4.5.1v4 / D4.1.4v5**.
+
+**P6 core adapter complete:** `PagedNativeFlowBinding` binds replayable native
+providers to empty body or static flow controls, with nested-only registrations.
+Boxes and producer-selected paragraph alternatives enter the shared line/strut
+journal; a pure `break_candidate` callback ranks legal boundaries with signed
+costs and forced/forbidden tags. Widow repair respects forbidden boundaries and
+preserves forced breaks even at an exact natural page edge. Ordered native glue
+uses the common glue packer; conditional discarded glue has no residual shrink
+capacity. Native marks and declared forward targets participate in reference
+replay. Every enumeration exit restores the canonical provider cursor. Static
+providers use independent measurement records and repeat without growing body
+extent. Published glyph/image/exact/solution records retain the producer owner
+through the existing edition material API (**D4.5.1v4 / D4.1.4v5**).
+
+Seven adapter acceptance cases cover these behaviors, stale streams, nested
+providers, rollback and paint after provider/source teardown. The complete
+paged gate passes **500/500**; reuse passes **124/124**. Receipts:
+`temp/paged_completion_adapter_gate_final.xml`, the paged component of
+`temp/paged_completion_radiant_native.log`, and
+`temp/paged_debug_run/temp/qualify_view_reuse_retry.xml`. Native insertion/float
+contributions and static mark/target events receive explicit diagnostics; a
+complete TeX frontend/output routine remains future work. Existing DOM notes and
+page floats continue through their shared reservation paths.
+
+**P7 functional receipts (2026-10-18):** the native-access Radiant aggregate
+completed with 6,051 cases: 5,657 pass, 235 fail, 158 accepted partial and one
+skip. Another task replaced `lambda.exe` during the run; failed launches include
+`No such file or directory`. The affected components were replayed with frozen
+executables, and all **235 failing case identities** pass. The CSS syntax gate's
+minimum of 25 passes is also satisfied by 38 passes. The raw aggregate and the
+identity reconciliation remain separate receipts in
+`temp/paged_completion_radiant_native_summary.json` and
+`temp/paged_completion_qualification.json`.
+
+| Follow-up gate | Result |
+|---|---|
+| Paged media, aggregate component | 500 pass |
+| Retained view reuse | 124 pass |
+| Viewer, including gameplay/GC and native scenes | 210 pass |
+| Page loading | 111 pass |
+| WPT input events | 20 pass, 12 skip |
+| WPT CSS syntax | 38 pass, 6 skip |
+| CSS cascade memory, original fixture location | 1 pass |
+
+The frozen-tree CSS memory failure was path-dependent accounting, rather than a
+paged allocation regression: 21 extra source-URI bytes across 412 declaration
+payloads add exactly 8,652 bytes. The frozen executable uses 381,630 bytes in
+that directory and 372,978 at the original fixture path, within the unchanged
+373,940-byte limit. Reverting just this task's paged sources in a second frozen
+debug build reproduces the overrun at its longer path too. The unchanged native
+gate passes from the original location with executable replacement monitoring
+(`temp/paged_completion_css_memory_root.json`). Integer-cast lint and strict
+module-boundary validation pass. These receipts cover macOS; ASan and other
+platforms are not claimed by this run.
+
+The completed PDF-text commit `9cce7697b` also has a final native-access Radiant
+aggregate receipt: **5,891 pass / 158 accepted partial / one skip / one
+page-load timeout** of 6,051, including **500/500 paged cases**. Bootstrap's
+15-second timeout passes three independent reruns (8.1, 7.6 and 7.4 seconds),
+following Developer Guide §7.4; the separate 111-case page-load replay above also
+passes. Its preserved summary is
+`temp/paged_completion_radiant_final_summary.json`; the independent timeout
+controls are recorded in `Radiant_Impl_PDF_Text.md`. The final PDF and optimized
+candidate were refreshed to that completed commit before their qualification.
+Integer-cast lint and module-boundary validation were repeated successfully for
+the completed tree (`temp/paged_completion_lint_committed.log` and
+`temp/paged_debug_run/temp/qualify_module_boundary_final.log`).
+
+**PDF gate at P7 (2026-10-18):** **280 pass / 30 fail** of 310. Both original paged export
+failures pass, including all 53 FO/native preview and physical-PDF pairs. Of the
+remaining failures, 21 identities were already present in the earlier full PDF
+baseline; nine additional identities also fail in a control build with only
+this task's paged changes removed. The intermediate PDF snapshot had one more
+failure (`EffectsRetainOverflowingGlyphAndDecorationInk`), repaired by the
+completed PDF commit. The obsolete outline-only Unicode assertion is among the
+remaining failures after searchable PDF text was introduced. This is a red full
+output gate, not a release approval. Final receipt:
+`temp/paged_debug_run/temp/qualify_pdf_render_visual.xml`; controls:
+`temp/paged_debug_control/temp/qualify_pdf_control.xml`. The identity inventory
+and control comparison are in `temp/paged_completion_qualification.json`.
+
+**PDF follow-up (2026-10-19):** the complete output gate now passes **314/314**,
+with no skips. Shared export fixes and corrected independent controls close all
+30 failures above; the four existing WebGL modes are separately scheduled and
+one intrinsic-image geometry control was added. Frozen optimized host/harness
+runs measure **633.38 → 184.24 seconds** with four isolated case workers.
+The fixes, companion-corpus reference correction and qualification receipts are
+recorded in [the PDF text implementation follow-up](Radiant_Impl_PDF_Text.md#export-correctness-and-runtime-follow-up-2026-10-19).
+This closes the PDF gate; the separate paged raster-equivalence, composition
+performance and source-size qualifications below remain open.
+
+**Optimized release measurement:** both hosts built with
+`make build-release-compile` (`NDEBUG`, `-O3`, thin LTO); candidate source and
+executable hashes are recorded. The comparison release was reconstructed from
+`git archive 1a9921fe9` with the same installed dependencies: the original
+captured release artifact was unavailable. The actual inventory is **113
+inputs**, including the old paged fixtures, old cheatsheet and a generated
+300-page HTML document. Three alternating samples use the existing
+`RADIANT_VIEW_TIMING_PATH` composition metric; end-to-end CLI times are also
+retained. These are macOS measurements under the recorded host load.
+
+| Release control | Baseline → candidate | Assessment |
+|---|---|---|
+| Exact native preview pixels | 7/113 equal | baseline raster equivalence remains open |
+| Physical sheet geometry | 110/113 equal | two page-count changes and one rejected old SVG resource |
+| Composition, 110 geometry-matched cases / 637 pages | 2.677 → 3.380 ms/page | 0.792× speedup; about 26% slower; descriptive because pixels differ |
+| Composition, seven pixel-equal cases / 21 pages | 3.042 → 4.833 ms/page | 0.629× speedup; the ≥2× target is missed |
+| 300-page document | 0.614 → 0.323 s | 1.90×; pixel differences prevent an equivalence claim |
+| Cheatsheet | 1.222 → 0.174 s, 21 → 22 pages | excluded from geometry/equivalence aggregates |
+
+The old SVG outlines glyphs while the candidate emits text elements, so SVG
+text-node hashes are not a cross-version content oracle. Native PNG controls
+therefore compare decoded pixels for every full preview. The 300-page whole
+preview uses 1/8 scale, with additional full-density page 1/150/300 controls;
+all three samples differ. The other geometry changes are
+`paged_media_column_rules.rpd` (3 → 4 sheets) and rejection of the archived
+prefixed external SVG used by `paged_media_graphics_namespaces.fo`. That old
+resource differs from the unprefixed resource in the current fixture; it was
+kept unchanged for this comparison. The detailed differences need independent
+reference classification; they are not all asserted to be regressions.
+Receipts and scripts: `temp/paged_release/qualification.json`, `qualify.py`,
+`raster_controls.py` and `raster/`. Intermediate measurements remain explicitly
+separate as `intermediate_qualification.json`.
+
+**Actual source size:** the four audited files shrink **10,528 → 8,766 lines**
+(−1,762), excluding additional shared-layout changes. `layout_paged.cpp` is
+**7,181**, rather than the estimated ≈3,400. `view_tree_css.cpp` is 1,332,
+`typeset.cpp` 253 and `typeset_regions.cpp` is removed (baseline 179).
+The ≈−5,500 net estimate is not achieved. These are raw source counts; no
+blank/comment-line deletion or formatting reduction was used. Full inventory:
+`temp/paged_release/source_sizes.json`.
+
+**P7 remains open:** resolve the full PDF gate, classify/correct independent
+raster differences, meet or explicitly revise the release performance/size
+targets, and qualify remaining platform/reference scope. Inline SVG replaced
+publication is also incomplete in the PDF-text fixture. The core P6 adapter is
+delivered; its documented native auxiliary limits and the separate §7 feature
+extensions remain outside that profile.
+
 ### 2026-10-14: P1 hooks, P2 publication for the CSS flow, P0 gates
 
 **What runs.** `paged_layout_pass` dispatches to `paged_flow_pass` (`layout_paged.cpp`, section "Page flow through the browsing engine") unless `RADIANT_PAGED_ENGINE=legacy` selects the item engine, which stays in the file for comparison until P7. The pass resolves the first page's body rectangle (`paged_page_spec` + `paged_page_style` + `view_css_page_column`, with the opening `page` name read from the first flow content), sets the host viewport and print media on the document's engine, recascades, calls `layout_html_doc(ui, doc, false, state)` once, adopts the document's mutation epoch, publishes, then runs the unchanged composition tail (sequence end, terminal masters, page counters, margin boxes, static regions).
@@ -329,7 +507,7 @@ Space is opened inside the table by position, not source order (`paged_table_ope
 - *Leaders.* `leader()` in body content needs an inline fill that takes its line's free space and tiles its pattern; until then the page flow ignores it, as the browsing engine does.
 - *Native and FO page programs* (`r:sequence-master` master runs and terminal masters, `r:static-content` and `fo:static-content` regions) belong with the native streams in P6. CSS has no terminal masters, and the flow's sequences come only from native and FO controls.
 - `counter(page)` inside `string-set` (the item engine evaluated it on the page it reached) is diagnosed: the flow evaluates named strings before pages are numbered.
-- `CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent`: ancestor-first counter inheritance differs from the current CSS Lists editor's draft. The 2026-10-15 compatibility audit below records the conflicting browser baselines; this remains open.
+- `CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent`: the 2026-10-16 user decision targets the published parent-first rule. The compatibility audit below records this choice and the conflicting editor's draft.
 
 ### 2026-10-15: P5 footnotes and page floats
 
@@ -358,7 +536,7 @@ Space is opened inside the table by position, not source order (`paged_table_ope
 
 **Fixed content (P2).** Publication collects fixed boxes whose containing block is the initial page viewport and emits one occurrence per physical page after composition, including inserted blank pages and trailing sequence sheets. Their source parent's flow-page offset is removed; their local positioned geometry is preserved. They publish as static furniture, independently of body clipping and body mark assignment. Fixed boxes whose containing block is a transformed or containing ancestor keep their ordinary source occurrence. The fixed-content regression checks source occurrences, text, a containing ancestor, raster pixels on every page, and PDF export. Re-layout of percentage-sized fixed furniture for different page widths remains unqualified.
 
-**Counter compatibility (P4/P5, open).** The [published CSS Lists 3 §4.4.1](https://www.w3.org/TR/css-lists-3/#inheriting-counters) starts with the parent's counters and takes new names from the preceding sibling; the [current editor's draft §4.4.1](https://drafts.csswg.org/css-lists-3/#inheriting-counters) instead takes its counter set from the preceding sibling. Retaining every authored reset scope made the legacy sibling-reset fixture pass, but regressed `counters-004`, `foo-counter-reversed-007b` and `li-value-reversed-007b` against their cached browser references. That implementation change was withdrawn to preserve this plan's §5 browsing-baseline requirement; the original runtime and baseline expectations remain. `PagedFlowFootnoteNumbersFollowHeadingCounterSets` checks both calls and markers using `counter-set`, whose behavior agrees under both rules. Updating the inheritance contract and recapturing independent references remains separate outstanding work.
+**Counter compatibility (P4/P5, target resolved 2026-10-16).** The user selected the [published CSS Lists 3 Working Draft, 17 November 2020, §4.4.1](https://www.w3.org/TR/2020/WD-css-lists-3-20201117/#inheriting-counters): start with the parent's counter set and take new names from the preceding sibling. The [current editor's draft §4.4.1](https://drafts.csswg.org/css-lists-3/#inheriting-counters) takes the preceding sibling's set instead. The existing engine follows the published rule and Chromium 152; its implementation and the `counters-004`, `foo-counter-reversed-007b` and `li-value-reversed-007b` browser references remain. The legacy sibling-reset fixture preserves its original document and scopes, now checking independently captured published-rule values. Two reset/increment mutations, page-budget rollback/recovery and generated text retained across source-edition release strengthen that fixture. `PagedFlowFootnoteNumbersFollowHeadingCounterSets` still checks calls and markers using `counter-set`, which agrees under both rules. Engine ownership remains **D4.5.1v4 / D4.1.4v5**; no formal ruling defines CSS counter inheritance. Evidence: `temp/view_reuse_goal/counter_scopes_analysis/` and `temp/view_reuse_goal/counter_published_compat/`: 18 focused counter cases and fresh 470/490 paged-media plus 124/124 reuse cases pass. All 614 identities remain and the other 20 failure profiles are unchanged. Four engine archives and all engine/export producers are byte-identical to the closed table-span qualification; its complete Radiant and PDF evidence remains applicable. This is a test/ledger-only compatibility correction.
 
 **Margin lifetime and font identity (P4).** `LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilteredPreview` crashed on both HEAD and the initial candidate in `setup_font`, while measuring a reused synthetic margin box. Detached margin views kept font-family pointers borrowed from a previous composition's declarations. `PagedMarginBorrows` now resets those view properties before returning the declaration borrow. It also removes their source pointers from the published-font lookup: retaining a source-pointer cache entry across that reset incorrectly reused page 1's 10px font for page 2's 20px font. Published font copies remain pinned and immutable (**D4.5.1v4**). The page-label raster/PDF comparison and `PagedFlowMarginFontsKeepEachPagesComputedSize` pass after these fixes.
 
@@ -1518,3 +1696,976 @@ atomic Chromium comparisons. All other components pass. Evidence, unchanged
 failure comparisons and source/binary hashes are under
 `temp/view_reuse_goal/collapsed_table_edges/`. Work is paused at the user’s
 request with the full remaining goal preserved.
+
+
+### Paged-media test target split (2026-10-16)
+
+The existing 490-case baseline is now `test_paged_media_gtest.exe`, built from
+`test/test_paged_media_gtest.cpp` and the shared font-path tests. The former
+`test/test_view_tree_model_gtest.cpp` was renamed. Its twelve standalone shared
+layout/expression units moved into `test/test_view_reuse_gtest.cpp`; the two Mac
+font-metric cases moved in the opposite direction. The extended view-reuse
+selection now has its own 124-case executable, `test_view_reuse_gtest.exe`,
+rather than a filtered alias of the paged-media executable. Test names and
+assertion bodies are preserved byte for byte. Historical evidence above retains
+the executable names used when it was captured.
+
+The targets follow the same edition ownership contract (**D4.5.1v4 /
+D4.1.4v5**). This is a test/build organization change; no formal ruling changes.
+Case-inventory and runner/build verification is recorded under
+`temp/view_reuse_goal/rename_paged_media/`; the remaining 55 original failures
+and the seven known atomic reference disagreements remain in scope.
+
+
+The renamed executables verify the exact old partition: 490 and 124 cases,
+disjoint, with the same 614-case union. Full native runs retain 435/490 and
+124/124, with no new failures or changed remaining assertions. All 58 runner
+contracts and the Premake generator self-test pass. The UI runner argument
+contract was reconciled with the already merged wired/clay/blade suite list.
+
+The fresh aggregate reports 5974 cases: 5712 pass, 160 partial, 101 fail and one
+skip. Coverage is incomplete because the input-events runner idled out after
+120 seconds and produced one synthetic failure in place of its 32 cases. The
+other failures are the 55 unchanged paged-media cases, the same seven atomic
+reference disagreements, and 38 CSS-syntax cases. A direct `js --document`
+probe of the rebuilt host reports `document`, `CSS` and `window` as undefined;
+this JS host integration issue requires investigation. All 631 UI and 204 view
+cases pass. No production engine source changed during the suite split.
+
+CSS inventory regeneration also remains blocked by four PDF-writer evidence
+references already absent in HEAD; this check is recorded as failed rather than
+bypassed. The updated source-reference manifest names the new paged-media file.
+The user has resumed the full remaining-failure goal; the rename completes only
+the test-organization milestone, with all 55 original cases still in scope.
+
+
+### Repeated table groups retain measured grid insets (2026-10-16)
+
+Repeated headers now reuse the leading inset measured by common table layout.
+The table record stores the header's position relative to the caption-free grid,
+then uses it for both row fitting and published copies. Footer reservation keeps
+the corresponding natural trailing inset. These coordinates already incorporate
+resolved collapsed half-borders, separate-model spacing and applicable padding;
+there is no second border calculation or view-property cache. Retained table
+edges are subtracted from the cloned-edge reserve when repeated groups already
+include them, preventing a second gap between a header and its body.
+
+The original collapsed-table case mixed the table wrapper with its decorated
+grid child. It now selects the painted grid and the actual final body row on
+every page. Cut fragments follow slice decoration; the natural final fragment
+retains the outer half-border. A runtime geometry trace establishes that
+structural distinction. The fixture has a paragraph root with a 16px margin,
+so its exact three-page Chromium 152 print control constructs the table under a
+paragraph with DOM operations. Both show the full 4px red header edge at y10–14
+on continuations, and the final natural red bottom edge at y40–44.
+
+The expanded existing test fails before the fix at header offsets and border
+pixels. It verifies actual row/grid ancestry, source-byte and glyph coverage,
+all pages, a 4px-to-6px border/color mutation, budget failure/recovery and retained
+pixels. Eight adjacent controls cover separate/collapsed borders, slice/clone,
+padding/spacing and repeated footers. They verify that cloned edges add no
+second gap and that retained pixels survive later source changes under
+**D4.5.1v4 / D4.1.4v5**. The existing source-fragment selector gains an optional
+page filter; the shared edition-mutation helper accepts colors. No test name or
+formal ruling changes.
+
+The full native inventory now passes 436/490 paged-media and 124/124 view-reuse
+cases, with the same 614 names and no new, increased or changed remaining
+failures. Three focused border cases and all eight internal controls pass.
+Lint and diff checks pass. The rebuilt Radiant gate reports 5974 cases: 5713
+pass, 160 partial, 100 fail and one skip. Its inventory remains incomplete
+because the input-events runner times out; the JS document-context and seven
+atomic-reference limits remain open. The full PDF visual runner passes 271/309.
+All 38 failures reproduce with the engine from before this table change, with
+identical assertions; no PDF baseline changed. Evidence is recorded under
+`temp/view_reuse_goal/collapsed_table_fragments/`. This closes the table-inset
+milestone, not the remaining-failure goal.
+
+
+### Table glyph identity and computed alignment (2026-10-16)
+
+The common publisher now distinguishes table-fixup wrappers from generated
+pseudo-elements. Authored text under an anonymous cell keeps its `DomText`
+identity, source ranges and glyph occurrences. Previously the synthetic-parent
+check attributed that text to the originating table, leaving no source state
+for the actual text. The anonymous-source fixture now verifies the implemented
+[CSS 2.2 §17.2.1 behavior](https://www.w3.org/TR/CSS22/tables.html#anonymous-boxes)
+instead of requiring the retired missing-producer diagnostic. It checks the
+anonymous cell ancestry, every source byte, reflow from one line to two at 40px,
+a real node-budget failure/recovery and retained 1×/2× pixels after source-edition
+release, under **D4.5.1v4 / D4.1.4v5**. Its expanded acceptance check fails before
+the fix because the authored text has no occurrence state. Chromium 152 confirms
+the same text and width-dependent line split.
+
+The existing vertical-align resolver also resolves `initial` and `unset` to
+`baseline` before table layout, as required for the non-inherited property by
+[CSS 2.2 §10.8](https://www.w3.org/TR/CSS22/visudet.html#propdef-vertical-align).
+Unresolved CSS-wide tokens previously left the cell at its UA alignment. Both
+keywords fail the expanded baseline test before this repair and match the
+independent Chromium computed/used alignment control afterward. The baseline
+and rowspan checks use the existing font-metric glyph-position helper: common
+publication puts glyphs directly under their cell and their ink rectangle is
+not a line-box top. All previous row-height, spacing, extent, baseline-sharing
+and alignment cases remain covered. The rowspan test adds source coverage,
+height mutation, budget rollback and retained paint.
+
+Six focused cases pass. The unchanged 614-case native inventory passes 439/490
+paged-media and 124/124 view-reuse, with three further cases fixed and no new,
+increased or changed remaining assertions. Integer-cast lint and diff checks
+pass. The rebuilt aggregate reports 5974 cases: 5716 pass, 160 partial, 97 fail
+and one skip. All 631 UI and 204 view cases pass. Its failure set differs from
+the preceding table milestone only by these three corrected paged-media cases.
+The input-events inventory remains incomplete: one timeout replaces 32 cases.
+A captured live stack places its CLI child inside MVP `MIR_link` / register
+allocation, with a 3.7 GiB peak footprint; the runner waits on that compilation.
+The separate missing-DOM-globals CSS-syntax failures and seven atomic-reference
+disagreements remain unchanged. The full PDF visual runner passes 271/309;
+all 38 failures and their assertions are identical to the preceding table
+milestone. Original and isolated-copy PDF baselines are unchanged. Evidence is
+under `temp/view_reuse_goal/table_text_geometry/`. These checks close the table
+text/alignment milestone while all 51 original cases remain in scope. Counter
+inheritance remains unchanged: the published Lists specification / Chromium
+and current editor's draft still conflict as recorded in the earlier
+compatibility audit.
+
+
+### Missing table slots use the resolved common grid (2026-10-16)
+
+The common table pass now hands publication its unoccupied slots before the
+scratch-owned `TableMetadata` retires. Private composition records retain row
+identity, logical column number, resolved width and physical offset. Physical
+placement reuses the promoted `layout_table_column_visual_x` helper, including
+RTL; it does not run another track or rowspan solver. A sorted row index avoids
+rescanning the full occupancy grid while publishing each row occurrence.
+
+Publication adds generated, null-source `ViewTableRange::missing` nodes under
+ordinary, split and repeated rows. The existing visitor skips their paint, so
+the table background shows through. A Chromium 152 control independently
+matches all six original pixel assertions for colored rows/columns and missing
+cells. The shared range allocator handles real cells, column ranges and missing
+slots; the shared publication budget check covers each new slot. Captured data
+and published ranges follow **D4.5.1v4 / D4.1.4v5**; no DOM child or persistent
+view-property field is added.
+
+Original fixed/auto, rowspan, declared-column, continuation and pixel cases
+remain. Their expanded controls check RTL slot positions, source-byte coverage,
+repeated header/footer roles, an exact node-budget boundary, rollback/recovery,
+retained range storage and a visible red-to-blue/cyan mutation with changed
+track widths before source-edition release. The completed-coverage case uses
+the real shared publication diagnostic instead of the retired producer-stage
+message. Footer occurrences are checked by physical page: repeated copies
+precede the natural final footer. A shared test helper validates missing-cell
+identity, ancestry, roles, extents and fragment flags.
+
+Eight focused cases pass. The full paged inventory passes 443/490: four further
+cases are corrected, with no new failing case or increased assertion count.
+`AnonymousCellsRepeatAndRemeasureWithTheirRows` is still partial: its 32 original
+failures reduce to the four unchanged width assertions. Changed-width table
+remeasurement remains open; all other 46 remaining failure profiles are
+unchanged. Lint, diff and strict module-boundary validation pass. Fresh native
+runs retain the same 614-case inventory: 443/490 paged-media and 124/124 view-reuse.
+The rebuilt aggregate reports 5974 cases: 5720 pass, 160 partial, 93 fail and one
+skip, differing only by the four corrected paged cases. The input-events timeout
+still replaces its 32-case inventory with one synthetic failure; CSS-syntax
+and the seven atomic-reference failures remain. The full PDF runner passes
+271/309 with the same 38 failures and identical assertions. Both original and
+private PDF baselines are unchanged. Evidence is under
+`temp/view_reuse_goal/missing_table_slots/`. This closes the missing-slot milestone;
+the goal retains all 47 original cases and the earlier qualification limits.
+
+
+### Table sizing admission follows the common implementation (2026-10-16)
+
+Two legacy table cases required rejection for behavior the common engine already
+implements. They now verify successful cyclic-percentage sizing and explicit /
+min-content table widths. The cyclic block contributes its unscaled word width
+to intrinsic sizing, then resolves 50% and 25% against the final cell content
+width; the 20×10 image keeps its natural intrinsic basis and resolves to 10×5
+and 5×2.5. This follows [CSS Sizing 3 §5.2.1](https://www.w3.org/TR/css-sizing-3/#cyclic-percentage-contribution).
+A standards-mode Chromium 152 control independently confirms these relationships
+with computed 10px Arial / 12px line height. An initial quirks-mode control is
+excluded and retained as such in the analysis evidence.
+
+The width case keeps a 1000px grid on the unchanged 240px sheet and checks that
+it overflows the 220px body without scaling or rejection. The min-content case
+checks longest-word tracks against independent font advances and UA padding,
+distinguishing them from full-label/max-content tracks. The existing intrinsic
+measurement rounds cell contributions to whole CSS pixels; its 52px result
+retains the 0.1875px difference from Chromium's fractional result. No engine
+rounding policy changes in this milestone. Both policies verify all six cells'
+source bytes and published tracks.
+
+Visible background, image-percentage and table-width mutations check changed
+pixels and retained pixels after original-edition release under
+**D4.5.1v4 / D4.1.4v5**. The shared mutation helper accepts a failure page limit,
+defaulting to the existing value of one; single-page controls use zero and still
+require a real budget failure and recovery. A page-pixel overload reuses the
+existing RGB comparator. All original scenarios and case names remain.
+
+Only test source and its executable change. Four focused cases and the fresh
+490-case run pass these checks: 445/490, with the same 45 remaining assertion
+profiles. The complementary 124-case evidence and completed engine gates are
+reused from the missing-slot milestone with matching source/configuration and
+executable hashes, including the CLI, PDF runner and every other native runner.
+This is composite qualification, not a fresh aggregate run. The previous fresh
+aggregate and full PDF failure limits remain unchanged. Evidence is under
+`temp/view_reuse_goal/table_sizing_admission/`; all 45 original cases stay in the
+goal.
+
+
+### Shared fixed-track budgets and column-group widths (2026-10-16)
+
+Fixed layout now clamps its track budget after subtracting spacing, before
+resolving column percentages. Previously a 220px table with three 80px gaps
+produced two −10px tracks and publication misreported their invalid geometry as
+out of memory. The existing final-width calculation now widens the grid to
+240px with zero-width tracks, following
+[CSS 2.2 §17.5.2.1](https://www.w3.org/TR/CSS22/tables.html#fixed-table-layout).
+Standards-mode Chromium 152 confirms zero-width and positive-budget controls.
+The original case checks all six cells and their source bytes, visible overflow,
+exact-zero and 70px-spacing controls, real budget rollback/recovery and retained
+pixels after source-edition release. Its shared helper explicitly permits
+horizontal overflow while preserving existing caller constraints by default.
+
+The repeated-group case counts painted grids separately from wrappers and
+checks authored header rows instead of assuming publication child order. All
+original page, inset, reservation and footer positions remain. Fixed/auto source
+coverage, repeated roles, a visible color mutation and retained output are added.
+The separate forced-break spacing case retains its original failed assertions.
+
+Column-group widths now apply to each anonymous column. In auto layout a child
+column without a specified width uses its group's width; an explicit child
+width wins even when smaller. Fixed layout admits childless groups and shares
+remaining space among authored automatic columns. The width source remains
+separate from the column's min/max constraints. The existing size-declaration
+predicate is reused under a general name. Original four scenarios retain their
+expected widths; a smaller-child control and group-width mutation have independent
+Chromium evidence under
+[CSS Tables 3 §3.8.3](https://www.w3.org/TR/css-tables-3/#computing-column-measures).
+Published ranges, ignored non-column children, genuine budgets and retained
+blue/lime pixels are checked. No module API or ownership fields change
+(**D4.5.1v4 / D4.1.4v5**).
+
+Nine focused checks across the two repairs and fresh full native runs pass
+these cases: 448/490 paged-media plus 124/124 view-reuse, preserving all 614 case
+names. The remaining 42 assertion profiles are unchanged. The fresh Radiant
+gate reports 5974 cases: 5725 pass, 160 partial, 88 fail and one skip; its failed
+name set changes only by the corrected cases. Input-events still substitutes
+one timeout for its 32-case inventory, CSS-syntax retains 38 host failures and
+the seven atomic-reference disagreements remain. The full PDF runner passes
+271/309 with exactly the same 38 failure messages; original and private
+baselines are unchanged. Lint, runner contracts and diff checks pass. All 62
+tracked qualification source/build/binary hashes remain stable during the
+checks. Evidence is under `temp/view_reuse_goal/table_spacing_overflow/` and
+`temp/view_reuse_goal/table_column_groups/`. This closes the shared track repairs;
+the goal retains all 42 original cases and the earlier qualification limits.
+
+
+### Preserved note whitespace uses common retained text runs (2026-10-16)
+
+The authored-note whitespace case already paginates correctly: `A` on the first
+page, both preserved spaces on the second, and its anchored note on the third.
+An isolated glyph/source probe confirms one two-space paint run with the full
+source range and twice the font's space advance. The old assertion instead
+required two glyph-free glue nodes from the retired producer.
+
+The original case now verifies source-byte coverage, preserved text, captured
+font advances, page/role/position and the third-page anchor. A real page-budget
+failure/recovery, blue-to-red note background and retained source-edition release
+check the observable result under **D4.5.1v4 / D4.1.4v5**. The shared edition
+mutation helper is renamed from `table_edition_mutation` to
+`page_edition_mutation`; its implementation and caller defaults are unchanged.
+Metric assertions use the font captured by the glyph run, without requiring a
+redundant per-fragment computed-style snapshot.
+
+Only the paged test source/executable changes. Three focused cases pass, and a
+fresh full native run passes 449/490, with the same 41 remaining assertion
+profiles and original 614-case inventory. All other source/configuration and
+executable hashes match the completed table-column-group qualification, so its
+124-case reuse evidence and Radiant/PDF checks are retained as composite
+qualification. No new aggregate totals or global-green claim are made. Evidence:
+`temp/view_reuse_goal/note_space_material/`. Actual native whitespace policy gaps
+remain open, independently of this corrected material assertion.
+
+
+### Native whitespace reaches common measurement and retained paint (2026-10-16)
+
+Common paragraph measurement and glyph normalization now consume the selected
+view's computed native whitespace components. The paged context supplies its
+active tree independently of DOM workspace allocation. Linefeed ignore, space,
+preserve and zero-width modes, inherited collapse/wrap and independent line-edge
+treatment reach both used advances and painted text. The existing coarse CSS
+hint adapter remains for auxiliary readers; wider intrinsic sizing, recascade
+and trait combinations remain partial.
+
+Preserved linefeeds remove the measured collapsed separator, including its
+assigned pair adjustment, instead of subtracting every raw source space.
+Published source ranges retain every original byte while painted ranges omit
+suppressed hard-edge whitespace. Ordinary soft-wrap spaces keep their logical
+text. Native conditional end spaces reuse the shared trimming path. Policy
+pointers are borrowed synchronously; editions retain copied text and captured
+fonts under **D4.5.1v4 / D4.1.4v5**.
+
+The four original whitespace cases retain their modes, line positions, source
+coverage and preview independence, and now inspect glyphs inside common merged
+runs. Explicit no-kerning fixtures isolate whitespace advances; a separate normal
+kerning control checks measured trimming. Native-attribute mutation verifies real
+reflow, budget rollback/recovery and retained pixels after source-edition release.
+The first aggregate found an empty-decoration regression: lookahead linefeeds
+also represent hard element boundaries. Restoring that classification fixes the
+unchanged text-query test. Its interrupted PDF trial is recorded as cancelled.
+
+Final focused checks pass, as do all 124 general reuse cases. The fresh paged
+run passes 453/490, preserving all 614 case names and the remaining 37 assertion
+profiles. The fresh Radiant gate reports 5974 cases: 5730 pass, 160 partial,
+83 fail and one skip, with no added failures. The full PDF run passes 271/309;
+all 38 failure messages match the previous qualification exactly, and original
+and private baselines are unchanged. Strict module boundaries, integer-cast lint
+and diff checks pass; all 62 qualification hashes stayed stable through the
+checks. Input-event inventory, merged MVP host, atomic-reference and CSS inventory
+limits remain. Evidence: `temp/view_reuse_goal/native_whitespace_final/`.
+
+
+### Paragraph workspace and preview raster assertions (2026-10-16)
+
+Two isolated probes identify obsolete test assumptions without engine changes.
+The paragraph case retains its original text, sheet widths, body widths and
+exact source coverage. In accordance with §3.4 and §4.7, it checks retained
+edition material instead of requiring the shared DOM workspace to keep its
+pre-layout geometry. Font, line-height, padding and background mutation verifies
+changed output, genuine budget failure/recovery, and original captured fonts,
+source ranges, material identity and pixels after source-edition release
+(**D4.5.1v4 / D4.1.4v5**). This does not add changed-width paragraph regeneration.
+
+The preview case's visible footer digit has 13.4353 pixels of integrated ink but
+only one nearly black pixel. Its coverage assertion now integrates antialiasing.
+All five complete page crops must also match their physical-page snapshots byte
+for byte and retain the exact counter strings. Existing geometry, body ink,
+color, cache identity and PNG/PDF export assertions remain.
+
+Three focused cases and a fresh full paged run pass: 455/490, with all 614 case
+names and the remaining 35 assertion profiles unchanged. Only the paged test
+source and executable differ from the completed whitespace qualification. Its
+124-case reuse evidence and fresh Radiant/PDF checks therefore remain applicable
+as composite qualification; no new aggregate totals are claimed. Evidence:
+`temp/view_reuse_goal/retained_workspace_preview/`. The goal retains all 35
+original failures and the recorded qualification limits.
+
+
+### Body leaders use common inline pattern boxes (2026-10-16)
+
+Body `leader()` content now retains its structure through pseudo-element
+materialization and counter/reference refresh. Generated boxes reuse their
+children instead of flattening leaders into scalar text. At line completion,
+leaders share the remaining advance and tile complete pattern groups from the
+line's end edge, following [CSS Content 3 §2.5](https://www.w3.org/TR/css-content-3/#leaders).
+Ordinary text rectangles carry every copy through existing raster, SVG and
+paged publication. A transient line flag avoids traversing ordinary lines and
+survives metric rollback. The existing page-node budget and error path are
+reused under general flow names.
+
+The atomic-image control exposed two shared defects. Mixed generated text/image
+lists were classified as whole-box image replacements, suppressing adjacent
+content; classification now distinguishes a sole image and optional alternative
+text from an inline list ([CSS Content 3 §1](https://www.w3.org/TR/css-content-3/#content-property)).
+Generated image children also retain their resolved `src`, so ordinary image
+admission can revalidate them after temporary layout properties change.
+
+The three original leader cases retain their page counts, references, end-edge
+labels, baselines, colors and standalone-leader diagnostic. Glyph inspection
+uses the common visitor and captured font instead of assuming pre-positioned
+arrays or per-fragment computed styles. Space patterns reserve font advances
+without outlines. Additional image and CJK patterns pass. Width/background
+mutation, genuine page-budget failure/recovery, source coverage and retained
+pixels/fonts/PDF after source-edition release verify ownership under
+**D4.5.1v4 / D4.1.4v5**. Multiline, RTL, intrinsic leader behavior and dynamic
+pseudo-element removal remain partial; full CSS Content conformance is not claimed.
+
+Fresh native runs pass 458/490 paged-media and 124/124 reuse cases, retaining all
+614 case names and the remaining 32 assertion profiles. The fresh Radiant gate
+reports 5974 cases: 5735 pass, 160 partial, 78 fail and one skip, with no added
+failures and identical counts in all 15 layout categories. The full PDF run
+passes 271/309 with exactly the previous 38 failure messages and unchanged
+original/private baselines. Strict module boundaries, integer-cast lint and
+diff checks pass; all 63 qualification source/configuration/producer hashes
+remain stable through the gates. The earlier inventory, MVP host, atomic-reference
+and PDF evidence limits remain. Evidence:
+`temp/view_reuse_goal/inline_leaders_final/`. The goal retains all 32 original
+failures; the next isolated prototype addresses cloned table publication insets.
+
+### Table and nested block continuation decoration windows (2026-10-16)
+
+Table publication now shares the fitted reservation's cloned edges when a
+fragment has no repeated group. Previously a bare table continuation omitted
+its leading cloned edges from the body window and its closing cloned edges
+from the painted grid. Existing natural header/footer extents retain their
+reservation arithmetic. A continued child block also uses its published
+parent's content window at a real parent break when retained block-axis
+decoration consumes space. Undecorated parents, natural first/last overflow
+and passive monolithic slicing retain their existing behavior. A child-color
+mutation previously covered its parent's red continuation border; the same
+pixel now remains red while the child interior changes color.
+
+The original decoration masks, table spacing, row contents, unequal papers and
+source coverage remain. Cell widths follow the opening table run under §4.2;
+explicitly narrower new editions still assert the former narrower widths.
+Nested short blocks use the authored text's common glyph occurrence instead
+of a retired line alias. Page-budget failure/recovery, captured fonts, exact
+source coverage, geometry and retained pixels after source-edition release
+verify ownership under **D4.5.1v4 / D4.1.4v5**. Broader fragmented-table border
+conflict resolution and continuation width relayout remain partial.
+
+Fresh native runs pass 463/490 paged-media and 124/124 reuse cases, preserving
+all 614 names and the remaining 27 assertion profiles. The fresh Radiant gate
+reports 5974 cases: 5740 pass, 160 partial, 73 fail and one skip. Only the five
+intended failing cases disappear; all other component inventories and all 15
+layout-category counts remain unchanged. Full PDF passes 271/309 with exactly
+the previous 38 failure messages and unchanged original/private baselines.
+Strict boundaries, integer-cast lint and diff checks pass; all 63 frozen
+source/configuration/producer hashes remain stable. An earlier disk-interrupted
+aggregate has no qualification verdict; completed workspace logs were archived
+losslessly before this successful retry. Existing MVP host, atomic-reference,
+PDF and inventory evidence limits remain. Evidence:
+`temp/view_reuse_goal/fragment_decoration_windows/`. The next milestone keeps
+a non-repeated terminal table footer with actual body material and consumes
+the selected computed widow/orphan limits while fitting finished cells.
+
+### Natural terminal table footers and inherited line limits (2026-10-16)
+
+A non-repeated final footer now reserves its natural extent on the fragmentainer
+containing the last body's actual end. Earlier fragmentainers retain their full
+capacity. The existing row-bottom calculation includes in-progress cell growth
+and is shared by row fitting and footer reservation. Coordinate membership is
+checked directly because the fragmentainer-index lookup clamps future geometry
+to the last allocated frame. The ordinary row/line fitter and strut journal move
+the real tail; publication keeps the natural footer as its sole last occurrence.
+This follows the table-area ordering of [XSL 1.1 §6.7.3](https://www.w3.org/TR/xsl11/#fo_table)
+and omission property [§7.28.17](https://www.w3.org/TR/xsl11/#table-omit-footer-at-break).
+
+Finished-cell line fitting also reads the selected computed widow/orphan limits.
+Table workspace block properties retained their default two despite computed
+inheritance of one, causing an extra line to move with the tail. Synthetic boxes
+retain the workspace fallback. The original five-line fixture still requires
+four lines followed by one, with 48px and 24px table fragments. Ten- and
+twelve-line controls fill earlier pages, an explicit widow override retains two
+lines, and cloned table edges retain a one-line tail with a shorter footer.
+
+All four omission combinations retain their original row distribution and
+unequal papers. Width assertions use the opening run under §4.2; a narrower new
+edition still asserts 180px. Color/width mutations, actual page-budget failure
+and recovery, failure after resetting the original edition, exact source coverage
+and retained geometry/pixels after its release verify ownership under
+**D4.5.1v4 / D4.1.4v5**. This does not establish complete oversized table-furniture
+or continuation-relayout behavior.
+
+Fresh native runs pass 465/490 paged-media and 124/124 reuse cases, preserving
+614 identities and the remaining 25 assertion profiles. Fresh Radiant reports
+5974 cases: 5742 pass, 160 partial, 71 fail and one skip, with only the two intended
+failures removed and unchanged other component inventories and 15 layout-category
+counts. Full PDF passes 271/309 with exactly the previous 38 failure messages;
+original/private baselines and all 63 frozen source/configuration/producer hashes
+remain unchanged. Strict module boundaries, integer-cast lint and diff checks
+pass. Earlier global evidence limits remain. Evidence:
+`temp/view_reuse_goal/terminal_table_footer/`. Next: preserve spanning-cell painted
+extent when later rows move, honor forced boundaries inside spans, and qualify
+the common table admission cases formerly rejected by the retired engine.
+
+### Spanning table cells, forced row boundaries and common admission (2026-10-16)
+
+A spanning cell now keeps its entire painted extent when a later row moves to
+another fragmentainer. Opening a cut visits cells owned by an origin row whose
+own track has ended; its track remains unchanged while the crossing cell takes
+the existing strut. Row-span coalescing also stops at a forced row boundary,
+so [CSS Break 3 §3.1](https://www.w3.org/TR/css-break-3/#break-between) is honored
+inside a span. The original 102px span publishes 51px on each page; the original
+forced-boundary span publishes 14px on each page. Both retain every source byte.
+
+Four original fixtures now assert common layout admitted by §4.1. Their original
+DOMs, overlapping HTML grid, authored zero row span, seven repeated-group
+policies and FO validation inputs remain. Common HTML overlap paints both cells,
+consistent with the [HTML forming-a-table algorithm](https://html.spec.whatwg.org/multipage/tables.html#forming-a-table);
+an explicitly positioned native overlap still reports its original source error.
+Header/footer minimum heights and forced group policies retain their body order.
+The FO height remains 40pt, preserves its initial collapsed border model, and a
+real invalid omission policy reports both lowered source and original FO origin;
+all eight original translation diagnostics remain checked.
+
+Causal style, geometry and pixel mutations, page/node-budget rollback and
+recovery, exact source coverage, and retained painting after resetting and
+releasing the original edition check **D4.5.1v4 / D4.1.4v5** ownership. The shared
+retention snapshot helper avoids copying the same action/capture check.
+Oversized furniture-only pages and percentage-padding cell geometry remain
+separate open cases.
+
+Fresh native runs pass 469/490 paged-media and 124/124 reuse cases, preserving
+614 identities and all 21 remaining assertion profiles. Fresh Radiant reports
+5974 cases: 5746 pass, 160 partial, 67 fail and one skip; only these four failures
+are removed, and every other component and all 15 layout-category counts are
+unchanged. Full PDF passes 271/309 with exactly the previous 38 failure messages; both
+reference baselines and all 63 frozen source/configuration/producer hashes
+remain unchanged. Strict module boundaries, integer-cast lint and diff checks
+pass. Earlier global evidence limits remain. Evidence:
+`temp/view_reuse_goal/table_span_admission/`. Next: apply the user's published
+parent-first counter compatibility decision to the legacy fixture, preserving
+independent browser references and unchanged engine behavior.
+
+### Table-cell percentage padding and cascade winners (2026-10-16)
+
+Common cell layout now resolves shorthand and longhand percentage spacing at
+its finalized table inline basis. The previous shared call used the cell span,
+then a table-only correction read individual longhands without comparing them
+with a later shorthand. This produced 5.5px instead of 11px padding in a 220px
+table, and let an earlier `padding-left:3%` override a later `padding:5%`.
+The table now calls the shared cascade-candidate resolver once. Its context
+variant also resolves percentage-bearing math; existing two-argument callers
+preserve their behavior. The duplicate longhand correction is removed.
+
+The original cell-policy fixture keeps both policies and all six source cells.
+It checks 5%/10% padding, minimum row/table extents, six shorthand/longhand/math
+controls, and a relative-cell 6px/4px movement with unchanged tracks. Independent
+Chromium 152 geometry confirms these values. Source coverage, causal pixels,
+real page-budget rollback and recovery, and retained painting after resetting
+and releasing the original edition check **D4.5.1v4 / D4.1.4v5**. Relative
+positioning already worked; its former admission expectation follows §4.1.
+
+Fresh native runs pass 471/490 paged-media and 124/124 reuse cases, with all
+614 identities and the remaining 19 profiles preserved. Fresh Radiant reports
+5974 cases: 5748 pass, 160 partial, 65 fail and one skip. Only the counter and
+padding fixtures improve against the preceding full aggregate; other components
+and all 15 layout-category counts are unchanged. A protected affected-export
+selection passes 31/33, with exactly the preceding two failure messages and
+unchanged original/private baselines. The previous complete 309-case PDF audit
+remains predecessor evidence; this producer has not rerun that complete suite.
+All 64 frozen source/configuration/producer hashes remain stable, and lint,
+strict module boundaries and diff checks pass. Existing global evidence limits
+remain. Evidence: `temp/view_reuse_goal/table_cell_percentage/`.
+
+Next: note continuation publication duplicates the boundary line's source bytes;
+a probe also exposes descendant break edges inside an indivisible inline box.
+These are engine defects to resolve before migrating the two old whole-note
+rejection fixtures to the documented same-width continuation contract.
+
+### Note continuation ownership, atomic edges and repeated font initialization (2026-10-16)
+
+Note publication now assigns each glyph to one continuation window using the
+same rectangle midpoint used by the normal publisher. Testing any ink overlap
+published the boundary line's source bytes twice when its font cell crossed the
+cut. Break-edge collection also stops at inline atomic boxes and uses their end
+instead of their descendants' edges. Existing block/table-internal descent is
+preserved through the shared inline-display classification.
+
+Repeat-composition checks exposed a prerequisite in shared font initialization.
+Resetting view properties in place retains the FontProp allocation but clears
+its family. `ensure_font` restored inherited/initial families only for a new
+allocation, so later editions switched from the selected legacy Times face to
+an unspecified-family fallback, Times New Roman. This changed 24px/24px note
+pieces to 23px/25px. Missing families now initialize from the active font context
+or the selected HTML mode's initial font for reused groups as well. Existing
+resolved values are not recopied. The first prototype's layout-policy call from
+the lower IO initializer failed strict linking; it was removed, preserving
+**D7.3.3–D7.3.4** with no new boundary exception.
+
+Both original note documents, policies, paper geometry and source texts remain.
+The documented same-width continuation refinement (§9, 2026-10-15 CSS repairs)
+permits their ordinary multiline notes. They now assert two/two and five/three
+lines, complete source coverage once, call placement, piece geometry and flags.
+Wrapping the same source in an inline atomic box produces the real unplaceable
+source diagnostic and no committed pages; an ordinary block exposes legal
+edges again. Color mutation, real page limits, reset/failure/recovery, release
+of original editions, and retained text, geometry and pixels check
+**D4.5.1v4 / D4.1.4v5**. Shared helpers preserve the checks without duplicating
+snapshot/action code. Changed-width note continuation remains unsupported.
+
+Fresh native runs pass 473/490 paged-media and 124/124 reuse cases, preserving
+614 identities and the remaining 17 profiles. Fresh Radiant reports 5974 cases:
+5750 pass, 160 partial, 63 fail and one skip, removing only the two intended
+failures with unchanged other components and all 15 layout categories. Full
+PDF passes 271/309 with the exact preceding 38 failure messages; original/private
+baselines and all 65 frozen source/configuration/producer hashes stay unchanged.
+Lint, final strict boundaries and diff checks pass. Earlier global evidence
+limits remain. Evidence: `temp/view_reuse_goal/note_continuation_ownership/` and
+`temp/view_reuse_goal/note_admission_analysis/`. Completed trial binaries/objects
+were archived losslessly after hash verification; production producers remain.
+Next: correct two legacy table assertions to the opening-run width and natural
+footer contracts, keeping their original inputs and strengthening retention.
+
+### Opening cell reference areas and natural FO footer roles (2026-10-16)
+
+Two legacy table assertions now follow the existing P3 and §4.2 contracts.
+The complete FO input, three pages, repeated columns, spans and alignment stay.
+The natural header is body material on page one; footer copies precede its
+natural body occurrence on the final page. The fixture checks all source bytes,
+repeated cells, the final L, and FO nominal baselines through the existing glyph
+metric helper. Its cell helper now accepts nominal metrics explicitly, retaining
+all existing CSS bounds checks by default. Nominal font ink can extend outside
+a line box under XSL 1.1 §4.5. Retained text is collected from resolved page
+material rather than the empty instance wrapper. Footer omission removes earlier
+copies while keeping the final footer, with a visible pixel control.
+
+The original unequal papers, 12 source lines and 20px child font remain in the
+cell-indent fixture. Its parent's first 70px cell binds `10% + 1em` to 17px;
+continuations keep x27 and width53 under the opening run. A 60% mutation binds
+52px and visibly moves the painted edge. A new narrower edition binds its own
+60px cell to 16px, x26 and width44. It retains the old paper geometry and pixels
+through source-edition reset, actual page-budget failure, recovery and release
+(**D4.5.1v4 / D4.1.4v5**). The repeated page-budget/reset/recovery assertion shape
+is shared across these two cases and the previous cell-policy fixture; its
+original failure and recovery checks remain.
+
+Fresh native runs pass 475/490 paged-media and 124/124 reuse cases. All 614
+identities remain, only these two failures improve, and the other 15 profiles
+are unchanged. Three focused fixtures and diff checks pass. This is a test-only
+migration: all four engine archives and every engine/export producer are
+byte-identical to the closed note milestone, whose full Radiant and protected
+309-case PDF evidence remains applicable. No new engine-aggregate result is
+claimed. Existing qualification limits remain. Evidence:
+`temp/view_reuse_goal/table_reference_ownership/`. Next: diagnose why a terminal
+table-group break does not carry a following page float to its insertion page.
+
+### Terminal table extents and following insertion anchors (2026-10-16)
+
+A table completion now captures its completed flow extent through the same helper
+as an ordinary block. The table branch previously returned before this update:
+the original 42px table left the flow end at zero even though its group correctly
+retained `break-after: page`. Unbound terminal anchors now consume that pending
+boundary once through the existing forced-line insertion helper. If a following
+ordinary box arrives, its preceding pending break is consumed before binding the
+waiting anchors. The box and its float therefore share the destination page;
+preallocating an anchor page instead would make the box append another page.
+
+The original fixed table, group break, six table texts, Float and papers remain.
+The strengthened fixture checks table/page geometry, every source byte once,
+font-derived baselines, and blue/red pixels. Following body content and two
+terminal floats share page two; a right-side break inserts one blank and targets
+page three; removing the break returns to one page. Real page-budget failure,
+reset/recovery, source-edition release and retained original geometry/text/pixels
+exercise **D4.5.1v4 / D4.1.4v5**. No new anchor field or alternate paginator is
+introduced. Failed private hypotheses and stage traces remain in the evidence.
+
+Fresh native runs pass 476/490 paged-media and 124/124 reuse cases: all 614
+identities remain and the other 14 failure profiles are identical. Fresh Radiant
+reports 5974 cases: 5753 pass, 160 partial, 60 fail and one skip. Only this repair
+and the preceding two test-only table migrations improve against the last fresh
+aggregate; all other components and 15 layout categories are unchanged. Protected
+affected PDF checks pass 32/33 with the exact preceding failure; both baselines
+and all 65 frozen source/configuration/producer hashes remain stable. The prior
+full 309-case PDF result is predecessor evidence, not a new full run for this
+producer. Lint, strict module boundaries and diff checks pass. Existing global
+qualification limits remain. Evidence:
+`temp/view_reuse_goal/terminal_anchor_insertion/` and
+`temp/view_reuse_goal/terminal_anchor_analysis/`. Completed trial objects and
+executables are archived losslessly with verified hashes. Next: verify the two
+legacy ordinary-overflow rejection fixtures against the §4.1 slicing contract.
+
+### Finite ordinary line and cloned-padding overflow (2026-10-16)
+
+The two original ordinary-overflow rejection fixtures now follow §4.1. Their
+papers, A, 30px line allocation, 50px cloned opening padding and empty 40px child
+remain. Independent continuous editions establish their unsliced geometry.
+The line publishes 20px/10px pieces with its source byte once; changing its line
+height to 50px gives 20px/20px/10px and moves the captured glyph to page two.
+Opening padding 50px followed by the 40px child ends on page five; changing only
+the padding to 10px ends on page three. Child coverage remains 10px/20px/10px,
+with visible fills and the changed top edge checked on every physical page.
+
+Slice geometry is shared with the existing oversized-image checker; its image
+resource, clipping and original coordinate checks remain, with added role and
+total-height coverage assertions. The original page-budget recovery helper can
+also verify that an uncommitted failed edition cannot export a PDF. Real limits,
+rollback, recovery, valid exports, causal pixels, original-geometry restoration
+and release preserve retained text/geometry/pixels under
+**D4.5.1v4 / D4.1.4v5**. A private pixel oracle initially excluded the exact top
+edge of a filled child; correcting it to top-inclusive/bottom-exclusive required
+no engine change.
+
+Fresh native production runs pass 478/490 paged-media and 124/124 reuse cases,
+with three focused cases passing. All 614 identities and the other 12 assertion
+profiles are unchanged. Only the paged test source/executable differ from the
+closed terminal-anchor milestone: all four engine archives, CLI, exporter and
+other frozen sources/producers are byte-identical. That milestone's fresh
+Radiant and protected affected-PDF results therefore apply as composite engine
+qualification; no new aggregate run is claimed. Diff checks pass and existing
+global limits remain. Evidence: temp/view_reuse_goal/passive_overflow_contract/
+and temp/view_reuse_goal/passive_overflow_analysis/. Next: diagnose label/body
+descendant-area folios before correcting its obsolete continuation-width oracle.
+
+### Descendant folio areas use selected generation state (2026-10-16)
+
+Target-area capture now reads the selected source style from a fragment's
+existing generation-owned state when that fragment has no explicit style.
+Common publication deliberately captures paint instead of storing per-fragment
+source styles; consulting only the old field ignored descendant-only area
+traits. The original label cell continued across three pages while its Term
+child occupied only page one, but its last-area folio incorrectly displayed 3.
+The shared area predicate now excludes the cell's own stretched boxes. Explicit
+page/anonymous styles and pseudo-style parent handling remain. No new cache,
+public field or mutable-DOM paint lookup is introduced.
+
+The original grid, Term, all 17 definition lines, 25% distance, unequal papers and
+two citations remain. The §4.2 opening 180px run binds 45px on every continuation,
+correcting the old second-page x45 assertion to x55. Exact tracks, six/six/five
+lines, 72px/72px/60px pieces, source bytes once and font-derived baselines are
+checked. Changing the distance to 50% shifts the body and a visible blue edge.
+Selecting box areas changes the label folio to 3; selecting descendant areas and
+moving the unchanged Term with padding makes it 2. Reset, actual budget failure,
+recovery, restoration and release retain original folios, geometry and pixels
+under **D4.5.1v4 / D4.1.4v5**. The same strengthened test object fails six
+assertions against the preceding engine and passes with the repair.
+
+Fresh production checks pass 479/490 paged-media and 124/124 reuse cases, with
+all 614 identities and the other 11 failure profiles unchanged. Fresh Radiant
+reports 5974 cases: 5756 pass, 160 partial, 57 fail and one skip. Only this repair
+and the preceding two overflow test migrations improve against the preceding
+aggregate; all other components and 15 layout categories remain unchanged.
+Protected affected paged/native/FO PDF checks pass 29/31 with the exact prior two
+failure profiles. Both baselines and all 65 frozen source/configuration/producer
+hashes remain stable. Full309 remains predecessor evidence, not a new full run
+for this producer. Lint, strict module boundaries and diff checks pass. Existing
+global limits remain. Evidence: temp/view_reuse_goal/label_descendant_areas/ and
+temp/view_reuse_goal/label_descendant_analysis/. Next: finish tracing late-float
+body alignment against UA root margins and natural terminal table furniture.
+
+### Body alignment follows actual root margins and natural footer roles (2026-10-16)
+
+The original late-float alignment document retains its ten rows, header/footer,
+top/bottom floats, call, note, regions and three alignments. Its root is a p whose
+shared UA rule supplies a used 1em/16px margin (§4.6). That leaves six rows on
+page one and four on page two, with 8px/0px free space: center/after move the first
+page by 4px/8px and cannot move the full final page. The old constants silently
+assumed zero margins. An explicit margin-zero mutation, with the original input
+still checked, gives eight/two rows and the intended final-page offsets 0/12/24.
+The last footer is natural body material; its first-page copy repeats under P3.
+
+The strengthened original fixture checks all six margin/alignment combinations,
+actual used margins, every row and furniture rectangle, complete source coverage,
+font-derived baselines, and header/footer fill pixels. Top/bottom floats and notes
+stay at their independently reserved coordinates. Invalid alignment still rejects
+with the original diagnostic and zero pages. Header-color mutation, real page
+limits, reset/recovery, original-margin restoration, source-edition release and
+two retained centered editions preserve full pixels and source material under
+**D4.5.1v4 / D4.1.4v5**. No engine change was needed.
+
+Three focused checks and fresh production suites pass: 480/490 paged-media and
+124/124 reuse, all 614 identities preserved, the other ten failure profiles
+unchanged. Only the paged test source/executable differ from the closed label-area
+milestone; all four engine archives and engine/export producers are byte-identical.
+Its fresh Radiant and protected affected-PDF evidence remains applicable as
+explicit composite qualification, with no new aggregate run claimed. Diff checks
+pass; earlier global limits remain. Evidence:
+temp/view_reuse_goal/body_alignment_contract/ and
+temp/view_reuse_goal/body_alignment_analysis/. Next: trace a widow group that is
+moved into a short intermediate column and split again by line refitting.
+
+### Widow groups survive short intermediate columns (2026-10-16)
+
+Widow repair now rechecks a group when refitting its lines splits it again into a
+later fragmentainer. The original case moved two 20px lines from the lead's tail
+into a 20px intermediate column, then refitted the second line onto the next
+sheet and returned with a one-line widow. The repair iterates only when the last
+line advances beyond its selected target. A fresh short group may move when the
+next actual area can hold it; otherwise its minimum relaxes. Required group
+height excludes existing pagination struts through a shared span query. This
+uses actual fragmentainers and adds no speculative page producer or public type.
+
+The original 120px/80px and 24px/20px columns, Lead60, sixteen A words, orphan1
+and widow2 remain. Both lines now occupy the following sheet's first column.
+Controls check widow1, a three-line group with multiple moved earlier lines,
+all-short columns that must relax under a real three-page cap, and a taller
+second column. Source bytes, font-derived baselines, physical geometry, blue/red
+pixels, page-budget rollback/recovery, restoration and retained source release
+check **D4.5.1v4 / D4.1.4v5**. The same strengthened test object fails five
+assertions on the preceding engine; its impossible-minimum control exhausts the
+cap there and terminates with relaxation after the repair.
+
+Two additional automatic-width controls expose existing pagination feedback:
+widow1 uses two pages, and a 40px second column can repeat a nonconverged width
+state. Both outcomes are recorded on old and repaired engines. The final adjacent
+controls declare their widths to isolate widow placement, while the original
+automatic-width failing fixture stays unchanged. Variable-width feedback remains
+separate debt. An initial private pixel expectation assumed an empty column's
+paragraph background was white; that box already paints blue on both engines.
+
+Fresh native production checks pass 481/490 paged-media and 124/124 reuse cases,
+with four focused sheet cases passing. All 614 identities and the other nine
+failure profiles remain. Fresh Radiant reports 5974 cases: 5758 pass, 160 partial,
+55 fail and one skip. Only this repair and the preceding alignment test migration
+improve; all other components and 15 layout categories are unchanged. Protected
+affected PDF checks pass 29/31 with the exact preceding two profiles. Original
+and private baselines and all 65 frozen source/configuration/producer hashes stay
+stable. Lint, strict module boundaries and diff checks pass. Full309 remains
+predecessor evidence. Existing global limits remain. Evidence:
+temp/view_reuse_goal/widow_target_capacity/ and
+temp/view_reuse_goal/widow_capacity_analysis/. Completed prototype objects and
+executables are retained in a verified lossless archive. Next: qualify the
+remaining native forced-even admission fixture without losing its ordinary
+sheet ownership checks; diagnose terminal master selection separately.
+
+### Opening terminal master and body viewport share the same selection (2026-10-16)
+
+The opening-page helper now restores the remembered sequence terminal extent
+before both viewport measurement and condition-pass restart. Page creation
+already restored that cursor. Previously the first viewport used the ordinary
+100px body even when the selected first/last page later had a 180px body. A new
+no-force control exposed this discrepancy, so its width assertion stayed in
+place and the owning engine stage was repaired. The same test object now passes
+that assertion; no new page producer, type, API or cache is needed.
+
+The original forced-even document retains its 30px Body line and ordinary
+120px/40px and terminal 200px/100px papers. Under §4.1 its ordinary body slices
+20px/10px, with every glyph byte on the first ordinary page; terminal geometry
+does not replace that page. The slices fill their actual 100px/180px areas.
+Reducing only the line height to 10px leaves a real blank terminal padding page.
+Removing forced padding then selects one correctly measured 180px terminal body.
+Exact masters, blanks, source coverage, captured font baselines, flags, blue/red
+pixels, real padding-budget failure, reset/recovery, original restoration and
+source-edition release retain the original material under
+**D4.5.1v4 / D4.1.4v5**. The retired rejection assertion is replaced by these
+ordinary-sheet ownership checks, with all original input cases retained.
+
+Fresh production checks pass 482/490 paged-media and 124/124 reuse cases. Three
+focused native controls pass; all 614 identities and the remaining eight failure
+profiles are unchanged. Fresh Radiant reports 5974 cases: 5759 pass, 160 partial,
+54 fail and one skip. Only this fixture improves against the closed widow gate;
+all other components and 15 layout categories are unchanged. Protected affected
+PDF checks pass 29/31 with exactly the same two failure profiles. Both baselines
+and all 65 frozen source/configuration/producer hashes remain stable. Lint,
+strict boundaries and diff checks pass. Full309 remains predecessor evidence;
+existing global limits remain. Evidence:
+temp/view_reuse_goal/opening_terminal_viewport/,
+temp/view_reuse_goal/opening_terminal_viewport_analysis/ and
+temp/view_reuse_goal/native_padding_analysis/. Next: a wider first-only master
+fits the unchanged source on one page when selected directly, but the program
+keeps its ordinary three-page alternative without trying that first-only choice.
+
+### Wider first-only masters are tried before ordinary pagination expands them (2026-10-16)
+
+An ordinary matching alternative previously prevented any trial of a first-only
+master. The unchanged Greek-name paragraph produced three ordinary 60px bodies,
+while selecting its 220px only body directly fitted one page. Before a sequence
+has a remembered terminal extent, its first-page specification now asks the
+shared selector for the terminal match and uses it provisionally only when the
+selected rule is actually ONLY. If that sheet cannot hold the sequence, normal
+terminal observation selects ordinary pages on a later pass.
+
+The shared selector exposes the selected ONLY predicate through an overload; its
+existing five-argument ABI delegates to the same matching body. Rule order,
+parity, blank filtering and run limits are not duplicated. The module header
+declares the overload; no private forward declaration remains. Strict boundaries
+preserve **D7.3.3–D7.3.4** with the existing 137/165 deferment count.
+
+The original two masters, program order and all 83 source bytes remain. The
+strengthened fixture checks complete source coverage, selected physical bodies,
+folios, captured font baselines, line allocation, fragment flags and a visible
+blue edge. Even parity rejects the only master at folio one and accepts it at
+folio two; blank filtering and an earlier ANY rule select ordinary pages.
+Restoring order restores one page. A 20px-tall only body falls back to three
+ordinary pages with no ghost first sheet. A genuine one-page budget failure on
+that fallback, recovery, restoration and source-edition release preserve the
+original one-page pixels under **D4.5.1v4 / D4.1.4v5**. The same test object fails
+seven assertions on the preceding engine. A predicted tail-pinning issue did not
+occur in the fallback probe, so unrelated tail code remains untouched.
+
+Fresh native production runs pass 483/490 paged-media and 124/124 reuse cases.
+Three focused fixtures pass; all 614 identities and the other seven failure
+profiles remain unchanged. Fresh Radiant reports 5974 cases: 5760 pass, 160
+partial, 53 fail and one skip. Only this case improves, with all other components
+and 15 layout categories unchanged. Protected affected PDF checks pass 29/31
+with exactly the preceding two failure profiles. Both baselines and all 65
+frozen source/configuration/producer hashes stay stable. Lint, strict boundaries
+and diff checks pass. Full309 is predecessor evidence; earlier global limits
+remain. Evidence: temp/view_reuse_goal/first_only_master/ and
+temp/view_reuse_goal/only_master_analysis/. Completed prototypes are preserved in
+verified lossless archives. Next: trace recorded and live containing widths in
+the six-paragraph narrow-terminal case before changing pagination feedback.
+
+### CSS Text atomic no-break reference correction (2026-10-16)
+
+The seven atomic-wrap failures recorded above were Chromium compatibility
+comparisons, not regressions against the user's selected CSS Text 3 §5.5 rule.
+Current Chromium 152 and installed Firefox both wrap these fixtures against
+their WPT assertions. Radiant renders each intended 100×100 green square with
+no red. Its green mask matches the pinned WPT reference; full raster equality
+is not asserted because a fractional antialiased edge differs by one pixel row.
+
+The companion layout harness now supports explicitly labelled standards
+controls while retaining the original browser captures and comparison thresholds.
+For these seven single unbreakable groups, independent Chromium captures with
+`div { white-space: nowrap }` supply the geometry required by CSS Text 3 §5.5.
+References record the control stylesheet, specification, reason, browser and
+original HTML SHA-256; source changes or missing provenance reject the control.
+Compact references retain that provenance. The checked-in manifest and
+`utils/capture_layout_reference_controls.js` regenerate both forms together.
+The controls are macOS captures; other platforms need their own qualification.
+
+The full unchanged 980-case CSS Text selection passes with 884 successful,
+96 partial and no failures or skips. All seven corrected cases have 100%
+element, span and text scores; the other 973 result records are identical and
+all 81 original atomic browser-reference files retain their hashes. Reference
+contract checks cover source invalidation, missing metadata, compact provenance,
+platform precedence, legacy fallback and rejection of incorrect geometry.
+No engine behavior changed. This harness/fixture correction does not requalify
+the earlier paged-media or global aggregate limits. Evidence:
+`temp/css_text_failures/qualification.json` and `wpt_pixel_validation.json`.
+
+### Terminal masters and continued auxiliary flows (2026-10-18)
+
+The seven remaining paged-media failures had separate causes. Width replay kept
+the preceding master's measure after terminal selection changed; note
+continuations rejected a changed area width; terminal feedback retained a body
+paragraph even when the actual tail was a note or float. The old table rejection,
+two-pass expectation and folio-font assertion also described the retired item
+engine rather than the shared-layout contracts in §3–§4.
+
+`PagedFlowWidth` now distinguishes the current layout's input width from the next
+replay's discovered measure and owns the selected master's name in the reference
+session. A replaced master invalidates that measure; ordinary deferred boxes
+retain their first selected area. This preserves moved grids, atomic image sizes
+and first-area percentage bindings while avoiding the former eight-pass lag.
+An explicit top-level run boundary can provisionally select the last master,
+including all of its columns, before ordinary pagination expands the remaining
+material. Whole-document convergence still checks the resulting master choices.
+
+Notes reuse the same inline-width replay and geometry collection as body text.
+Their published slices retain source order and original computed indents
+while wrapping at each selected note area's measure. Terminal feedback records
+the actual auxiliary tail: a note retains its last legal content contribution,
+excluding the trailing half-leading after the final glyph; an indivisible float
+can require an empty last sheet to take its ordinary alternative first. Earlier
+columns are never restyled by that operation. The existing page budget and
+reference budget bound retries, and publication/retention keep the ownership
+required by **D4.5.1v4 / D4.1.4v5**. These implement existing page-model behavior;
+no formal ruling changes.
+
+The table fixture now verifies successful natural furniture, exactly-once text
+coverage, failed one-page admission and a retained two-page preview.
+[CSS Tables 3 §6.2](https://www.w3.org/TR/2025/WD-css-tables-3-20251216/#repeated-headers)
+does not require repeating groups taller than a quarter of the fragmentainer.
+An independent Chromium 154 PDF also succeeds with two pages and each header,
+body and footer string once; exact row allocation parity is not asserted.
+The narrow terminal fixture expects four whole-document observations (ordinary
+extent, narrower trial, retained tail, stable replay), retaining its original
+three-page geometry and one-pass-budget failure. Folio measurement uses the
+glyph run's captured font rather than the retired per-fragment CSS-style field.
+An additional note regression checks wrapping across 140px/70px areas, the
+original 14px indent and every source byte once. The following-sequence control
+also checks that the call remains on page one.
+
+Fresh final native runs pass **491/491 paged-media** and **124/124 view-reuse**
+cases. Integer-cast lint and `git diff --check` pass. The Radiant aggregate ran
+the final engine and reported 6,030 cases: 5,870 pass, 158 accepted partial, one
+skip and one failure. Its sole failure was the new source-coverage helper reading
+a generated footnote marker. Capturing the authored text node before layout
+corrected that helper; the subsequent whole 491-case run passes. Every other
+aggregate component passed, including UI, view, input events, layout, snapshots
+and render visual checks. The raw aggregate report is preserved, not rewritten.
+
+The full PDF/export suite reports **285/309**. All 24 failing cases reproduce
+with exactly the same assertion messages on an isolated CLI built with the HEAD
+pagination source and the same remaining objects and build flags. No new export
+failure profile appears; the PDF baseline hash is unchanged. These remain broader
+qualification limits rather than part of this seven-case repair. Receipts:
+`temp/paged_qualification.json`, `paged_media_final.xml`, `paged_reuse_final.xml`,
+`paged_radiant_baseline_summary.json`, `paged_pdf_visual_final.xml` and the
+`paged_pdf_base_*.xml` / `paged_pdf_import_base.xml` controls. The isolated build's
+commands and source/binary hashes are retained under the same `temp/paged_*`
+prefix.

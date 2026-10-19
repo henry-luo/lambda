@@ -51,6 +51,9 @@ const ChildRow kChildRows[] = {
                                               L(JsTemplateLiteralNode, expressions) } },
     { JS_AST_NODE_TAGGED_TEMPLATE,       2, { N(JsTaggedTemplateNode, tag),
                                               N(JsTaggedTemplateNode, quasi) } },
+    { (JsAstNodeType)TS_AST_NODE_TYPE_FACT, 0, {} },
+    { (JsAstNodeType)TS_AST_NODE_PARAMETER, 2, { N(TsParameterNode, pattern),
+                                               N(TsParameterNode, default_value) } },
 };
 
 #undef N
@@ -351,6 +354,11 @@ bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx)
 void js_ast_visit_binding_pattern_children(JsAstNode* node,
         JsAstChildVisit visit, void* ctx) {
     if (!visit) return;
+    JsAstNode* pattern = js_ast_parameter_pattern(node);
+    if (pattern != node) {
+        visit(pattern, ctx);
+        return;
+    }
     VisitContext context = {visit, ctx};
     ast_visit_binding_pattern_children((AstNode*)node, visit_binding_child,
         &context);
@@ -359,6 +367,8 @@ void js_ast_visit_binding_pattern_children(JsAstNode* node,
 bool js_ast_any_binding_pattern_child(JsAstNode* node,
         JsAstChildPredicate predicate, void* ctx) {
     if (!predicate) return false;
+    JsAstNode* pattern = js_ast_parameter_pattern(node);
+    if (pattern != node) return predicate(pattern, ctx);
     CoreVisitContext context = {NULL, predicate, ctx, false};
     return ast_any_binding_pattern_child((AstNode*)node,
         predicate_binding_child, &context);
@@ -372,14 +382,24 @@ JsAstNode* js_ast_pattern_reference_target(JsAstNode* pattern) {
         pattern->node_type == AST_NODE_INDEX_EXPR) ? pattern : NULL;
 }
 
+JsAstNode* js_ast_parameter_pattern(JsAstNode* parameter) {
+    return parameter && parameter->node_type == (int)TS_AST_NODE_PARAMETER
+        ? ((TsParameterNode*)parameter)->pattern : parameter;
+}
+
+JsAstNode* js_ast_parameter_default_value(JsAstNode* parameter) {
+    if (!parameter) return NULL;
+    if (parameter->node_type == (int)TS_AST_NODE_PARAMETER)
+        return ((TsParameterNode*)parameter)->default_value;
+    return parameter->node_type == AST_NODE_ASSIGN_PATTERN
+        ? ((JsAssignmentPatternNode*)parameter)->right : NULL;
+}
+
 JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter) {
+    parameter = js_ast_parameter_pattern(parameter);
     if (!parameter) return NULL;
     if (parameter->node_type == AST_NODE_IDENT) {
         return (JsIdentifierNode*)parameter;
-    }
-    if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
-        return js_ast_parameter_binding_identifier(
-            ((TsParameterNode*)parameter)->pattern);
     }
     if (parameter->node_type == AST_NODE_ASSIGN_PATTERN) {
         return js_ast_parameter_binding_identifier(
@@ -401,9 +421,8 @@ static bool js_ast_parameter_expression_child(JsAstNode* child, void* opaque) {
 
 static bool js_ast_parameter_has_expression(JsAstNode* parameter, bool computed_keys) {
     if (!parameter) return false;
-    if (parameter->node_type == AST_NODE_ASSIGN_PATTERN) return true;
-    if (parameter->node_type == (int)TS_AST_NODE_PARAMETER &&
-            ((TsParameterNode*)parameter)->default_value) return true;
+    if (js_ast_parameter_default_value(parameter)) return true;
+    parameter = js_ast_parameter_pattern(parameter);
     // computed binding keys execute in the parameter environment even without defaults.
     if (computed_keys && parameter->node_type == AST_NODE_MAP_PATTERN) {
         for (JsAstNode* property = ((JsObjectPatternNode*)parameter)->properties;
@@ -432,16 +451,13 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
     JsAstNode* last_parameter = NULL;
     for (JsAstNode* parameter = parameters; parameter;
             parameter = parameter->next) {
+        JsAstNode* pattern = js_ast_parameter_pattern(parameter);
+        JsAstNode* default_value = js_ast_parameter_default_value(parameter);
         facts.parameter_count++;
         if (!formal_ended) {
             bool ends_formal_length =
-                parameter->node_type == AST_NODE_REST_ELEMENT ||
-                parameter->node_type == AST_NODE_SPREAD ||
-                parameter->node_type == AST_NODE_ASSIGN_PATTERN;
-            if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
-                ends_formal_length = ends_formal_length ||
-                    ((TsParameterNode*)parameter)->default_value;
-            }
+                pattern->node_type == AST_NODE_REST_ELEMENT ||
+                pattern->node_type == AST_NODE_SPREAD || default_value;
             if (ends_formal_length) {
                 facts.formal_length = formal_count;
                 formal_ended = true;
@@ -453,13 +469,7 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
             js_ast_parameter_has_expression(parameter, false);
         facts.has_parameter_expressions = facts.has_parameter_expressions ||
             js_ast_parameter_has_expression(parameter, true);
-        if (parameter->node_type == AST_NODE_ASSIGN_PATTERN ||
-            parameter->node_type == AST_NODE_ARRAY_PATTERN ||
-            parameter->node_type == AST_NODE_MAP_PATTERN ||
-            parameter->node_type == AST_NODE_REST_ELEMENT ||
-            parameter->node_type == AST_NODE_SPREAD ||
-            (parameter->node_type != AST_NODE_IDENT &&
-             parameter->node_type != (int)TS_AST_NODE_PARAMETER)) {
+        if (default_value || pattern->node_type != AST_NODE_IDENT) {
             facts.has_non_simple_params = true;
         }
         for (JsAstNode* later = parameter->next; later;
@@ -471,7 +481,7 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
                 break;
             }
         }
-        last_parameter = parameter;
+        last_parameter = pattern;
     }
     if (last_parameter &&
             (last_parameter->node_type == AST_NODE_REST_ELEMENT ||
@@ -487,6 +497,7 @@ bool js_ast_child_catalog_complete(void) {
         JS_AST_NODE_STATIC_BLOCK, JS_AST_NODE_LABELED_STATEMENT,
         JS_AST_NODE_WITH_STATEMENT, JS_AST_NODE_TEMPLATE_LITERAL,
         JS_AST_NODE_TAGGED_TEMPLATE,
+        (JsAstNodeType)TS_AST_NODE_TYPE_FACT, (JsAstNodeType)TS_AST_NODE_PARAMETER,
     };
     const size_t row_count = sizeof(kChildRows) / sizeof(kChildRows[0]);
     if (row_count != sizeof(extension_types) / sizeof(extension_types[0])) return false;
@@ -507,28 +518,6 @@ void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
             node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_ARROW_FUNC ||
             node->node_type == AST_NODE_METHOD) {
-        return;
-    }
-
-    // AstNodeType owns the storage field while TypeScript reserves values in
-    // the same numeric domain. Compare through the shared scalar domain so
-    // the TS extension range does not mix unrelated enum types.
-    int node_type = node->node_type;
-    if (node_type >= TS_AST_NODE_TYPE_FACT &&
-            node_type < TS_AST_NODE__MAX) {
-        switch (node_type) {
-        case TS_AST_NODE_PARAMETER: {
-            TsParameterNode* parameter = (TsParameterNode*)node;
-            if (parameter->pattern) visitor((AstNode*)parameter->pattern, node,
-                ctx);
-            if (parameter->default_value) visitor(
-                (AstNode*)parameter->default_value, node, ctx);
-            break;
-        }
-        default:
-            // The remaining TS leaves use scalar metadata or a reference name.
-            break;
-        }
         return;
     }
 
@@ -609,4 +598,28 @@ bool js_ast_has_optional_chain(JsAstNode* node) {
         return c->callee && node->source_span.start_byte == c->callee->source_span.start_byte && js_ast_has_optional_chain(c->callee);
     }
     return false;
+}
+
+bool js_ast_is_proto_literal_key(JsAstNode* key) {
+    if (!key) return false;
+    if (key->node_type == AST_NODE_IDENT) {
+        JsIdentifierNode* id = (JsIdentifierNode*)key;
+        return id->name && id->name->len == 9 &&
+            memcmp(id->name->chars, "__proto__", 9) == 0;
+    }
+    if (key->node_type == AST_NODE_LITERAL) {
+        JsLiteralNode* literal = (JsLiteralNode*)key;
+        String* value = literal->literal_type == AST_LITERAL_STRING ?
+            literal->value.string_value : NULL;
+        return value && value->len == 9 &&
+            memcmp(value->chars, "__proto__", 9) == 0;
+    }
+    return false;
+}
+
+bool js_ast_property_is_proto_setter(const JsPropertyNode* property) {
+    return property && !property->computed && !property->method &&
+        !property->is_getter && !property->is_setter && !property->shorthand &&
+        property->key && property->value && property->key != property->value &&
+        js_ast_is_proto_literal_key(property->key);
 }

@@ -15,7 +15,7 @@ let beam=links[score.events[1].id][len(links[score.events[1].id])-1];
  contains(html,"data-control=\"mute\""),
  contains(midi_html,"Playback speed"),
  not contains(midi_html,"<svg"),
- (music.player({}) or "invalid")=="invalid",
+ ((music.player({}) ^ { null }) or "invalid")=="invalid",
  contains(html,"Note highlight color"),
  all([for (color in ["red","blue","yellow"]) contains(html,"data-color=\""++color++"\"")]),
  not contains(midi_html,"Note highlight color"),

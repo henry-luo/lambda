@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>System color fonts preserve CSS glyph advances without automatic tracking</title>
+<style>
+body { margin:0; }
+.row { font:16px/1.5 system-ui; width:400px; margin-bottom:8px; }
+</style>
+<body id="result">
+<div class="row" id="size-12" style="font-size:12px"><span class="glyph" id="size-12-glyph">😀</span></div>
+<div class="row" id="size-13" style="font-size:13px"><span class="glyph" id="size-13-glyph">😀</span></div>
+<div class="row" id="size-15" style="font-size:15px"><span class="glyph" id="size-15-glyph">😀</span></div>
+<div class="row" id="size-16" style="font-size:16px"><span class="glyph" id="size-16-glyph">😀</span><span id="size-16-ascii">M</span><span id="size-16-fixed" style="font-size:12px">M</span><font id="size-16-legacy" size="4">M</font><font id="size-16-invalid" size="invalid">M</font><ruby>M<rt id="size-16-ruby">m</rt></ruby></div>
+<div class="row" id="size-17" style="font-size:17px"><span class="glyph" id="size-17-glyph">😀</span></div>
+<div class="row" id="size-20" style="font-size:20px"><span class="glyph" id="size-20-glyph">😀</span><span id="size-20-ascii">M</span><span id="size-20-fixed" style="font-size:12px">M</span></div>
+<div class="row" id="size-32" style="font-size:32px"><span class="glyph" id="size-32-glyph">😀</span></div>
+<div class="row" id="size-64" style="font-size:64px"><span class="glyph" id="size-64-glyph">😀</span></div>
+<div class="row" id="family" style='font-family:"Apple Color Emoji"'><span class="glyph" id="family-glyph">😀</span></div>
+<div class="row" id="fallback" style='font-family:Arial'><span class="glyph" id="fallback-glyph">😀</span></div>
+<div class="row" id="cluster" style=''><span class="glyph" id="cluster-glyph">🐕‍🦺</span></div>
+<div class="row" id="spaced" style='letter-spacing:3px'><span class="glyph" id="spaced-first">😀</span><span class="glyph" id="spaced-second">😀</span></div>
+<div class="row" id="wrapped" style='width:45px'><span class="glyph" id="wrapped-glyph">😀 😀 😀</span></div>
+<div class="row" id="ascii" style=''><span class="glyph" id="ascii-glyph">ABC</span></div>
+</body>

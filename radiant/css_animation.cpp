@@ -23,6 +23,20 @@ extern "C" {
 #include <ctype.h>
 #include <math.h>
 
+static thread_local unsigned svg_base_queries = 0;
+
+bool css_animation_is_sampling_base() { return svg_base_queries != 0; }
+
+struct SvgAnimationBaseQuery {
+    SvgAnimationBaseQuery() { svg_base_queries++; }
+    ~SvgAnimationBaseQuery() { svg_base_queries--; }
+};
+
+struct MotionScratchPool {
+    Pool* pool = pool_create();
+    ~MotionScratchPool() { if (pool) pool_destroy(pool); }
+};
+
 // ============================================================================
 // Keyframe Content Parsing
 // ============================================================================
@@ -144,6 +158,8 @@ static bool parse_property_value(CssPropertyCode prop_id, const char* val,
                 (value->type == CSS_VALUE_TYPE_COLOR && value->data.color.type == CSS_COLOR_CURRENTCOLOR)) {
                 out->expression = value;
             } else {
+                CssComputedColor color = {};
+                if (css_property_is_svg_paint(prop_id) && !css_color_compute(value, &color)) return false;
                 LayoutContext context = {};
                 context.pool = lam::up(pool);
                 out->value.color = resolve_color_value(&context, value);
@@ -204,6 +220,79 @@ bool css_animation_parse_property_value(CssPropertyCode property,
                                         Pool* pool) {
     if (!value || !out) return false;
     return parse_property_value(property, value, out, pool);
+}
+
+static const CssAnimatedProp* css_animation_find_presentation(CssAnimState* state,
+    CssPropertyCode property) {
+    for (int index = 0; state && index < state->presentation_sample_count; index++)
+        if (state->presentation_samples[index].property_code == property)
+            return &state->presentation_samples[index];
+    return nullptr;
+}
+
+static const CssAnimatedProp* css_animation_current_presentation(DomElement* element,
+    CssPropertyCode property, bool important) {
+    if (!element || !element->doc || svg_base_queries || !dom_element_is_svg(element)) return nullptr;
+    DocState* state = (DocState*)element->doc->state;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    const CssAnimatedProp* selected = nullptr;
+    bool transition = false;
+    for (AnimationInstance* effect = scheduler ? scheduler->first : nullptr; effect; effect = effect->next) {
+        if (effect->target != element || effect->scheduler_removed || !effect->state) continue;
+        if (effect->type == ANIM_CSS_TRANSITION) {
+            CssTransitionState* sample = (CssTransitionState*)effect->state;
+            if (sample->property_code == property && sample->presentation_sample_valid) {
+                selected = &sample->presentation_sample; transition = true;
+            }
+        } else if (!important && !transition && effect->type == ANIM_CSS_ANIMATION &&
+            !(effect->play_state == ANIM_PLAY_FINISHED && effect->fill_mode == ANIM_FILL_NONE) &&
+            !(effect->active_time < 0.0 && effect->fill_mode != ANIM_FILL_BACKWARDS && effect->fill_mode != ANIM_FILL_BOTH)) {
+            const CssAnimatedProp* sample = css_animation_find_presentation((CssAnimState*)effect->state, property);
+            if (sample) selected = sample;
+        }
+    }
+    for (CssWebAnimationState* effect = !important && !transition ? element->web_animation_state() : nullptr;
+         effect; effect = effect->next) {
+        const CssAnimatedProp* sample = effect->current_time_resolved
+            ? css_animation_find_presentation(&effect->sample, property) : nullptr;
+        if (sample) selected = sample;
+    }
+    return selected;
+}
+
+String* css_animation_svg_presentation_value(Pool* pool, DomElement* element,
+    CssPropertyCode property, bool important) {
+    const CssAnimatedProp* selected = pool ? css_animation_current_presentation(element, property, important) : nullptr;
+    if (!selected) return nullptr;
+    if (selected->value_type == ANIM_VAL_TRANSFORM && property == CSS_PROPERTY_TRANSFORM) {
+        SvgLengthContext lengths = dom_svg_length_context(element);
+        float width = lengths.viewport_width, height = lengths.viewport_height;
+        char buffer[64];
+        const char* box = svg_get_dom_presentation_property(element, "transform-box", false, buffer, sizeof(buffer));
+        if (box && (!strcmp(box, "fill-box") || !strcmp(box, "stroke-box"))) {
+            float left, top, right, bottom;
+            if (dom_svg_element_geometry_bounds(element, &left, &top, &right, &bottom)) {
+                width = right - left; height = bottom - top;
+            }
+        }
+        return css_prop_serialize_transform_functions(pool, selected->value.transform, width, height);
+    }
+    CssValue value = {};
+    if (selected->value_type == ANIM_VAL_COLOR) {
+        Color color = selected->value.color;
+        CssComputedColor computed = {CSS_COLOR_RGB,
+            {color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0}};
+        CssValue* parsed = css_value_create_computed_color(pool, &computed);
+        return parsed ? css_prop_serialize_svg_value(pool, element, property, parsed) : nullptr;
+    } else if (selected->value_type == ANIM_VAL_FLOAT) {
+        value.type = CSS_VALUE_TYPE_NUMBER;
+        value.data.number.value = selected->value.f;
+    } else if (selected->value_type == ANIM_VAL_LENGTH) {
+        value.type = CSS_VALUE_TYPE_LENGTH;
+        value.data.length.value = selected->value.length.value;
+        value.data.length.unit = CSS_UNIT_PX;
+    } else return nullptr;
+    return css_prop_serialize_svg_value(pool, element, property, &value);
 }
 
 static bool parse_animation_composition(const char* value, Pool* pool,
@@ -1238,6 +1327,37 @@ static bool capture_underlying_value(DomElement* element, CssPropertyCode proper
     out->property_code = property;
     out->value_type = property_value_type(property);
     out->composite = CSS_ANIM_COMPOSITE_REPLACE;
+    if (dom_element_is_svg(element) && css_property_is_svg_presentation(property) &&
+        out->value_type != ANIM_VAL_NONE) {
+        // SVG attributes and inherited paints are the base; sampled CSS never feeds back into it.
+        SvgAnimationBaseQuery base;
+        const CssProperty* metadata = css_property_get_by_code(property);
+        char* text = nullptr;
+        svg_get_dom_presentation_property(element, metadata->name,
+            metadata->inheritance == PROP_INHERIT_YES, nullptr, 0, nullptr, &text);
+        lam::Temp<char> owned(text);
+        MotionScratchPool scratch;
+        Pool* pool = scratch.pool;
+        if (!pool) return false;
+        if (!parse_property_value(property, text ? text : metadata->initial_value, out, pool)) return false;
+        if (out->value_type == ANIM_VAL_LENGTH) {
+            SvgLengthContext lengths = dom_svg_length_context(element);
+            out->value.length.value = svg_resolve_length(text ? text : metadata->initial_value,
+                &lengths, SVG_LENGTH_DIAGONAL, NAN);
+            out->value.length.is_percent = false;
+            out->expression = nullptr;
+            return isfinite(out->value.length.value);
+        }
+        if (out->expression) {
+            LayoutContext context = {};
+            context.doc = element->doc; context.pool = lam::up(pool);
+            context.view = lam::up(static_cast<View*>(element)); context.elmt = lam::up(element);
+            if (out->value_type == ANIM_VAL_COLOR) out->value.color = resolve_color_value(&context, out->expression);
+            else out->value.f = resolve_css_opacity_value(&context, out->expression);
+            out->expression = nullptr;
+        }
+        return true;
+    }
     switch (out->value_type) {
         case ANIM_VAL_LENGTH:
             return capture_underlying_length(element, property, out);
@@ -1289,6 +1409,8 @@ static bool capture_underlying_value(DomElement* element, CssPropertyCode proper
 
 // Apply an interpolated property value to a DomElement
 static bool apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
+    // SVG paints consume the effect-owned sample, keeping ordinary layout slots and authored attributes intact.
+    if (dom_element_is_svg(element) && css_property_is_svg_presentation(prop->property_code)) return false;
     ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
     bool layout_changed = false;
 
@@ -1754,6 +1876,7 @@ static bool css_animation_update_custom_paint(DomElement* owner, const char* nam
 void css_animation_tick(AnimationInstance* anim, float t) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state || !state->keyframes || !state->element) return;
+    state->presentation_sample_count = 0;
     if (state->custom_tick_pool) pool_reset(state->custom_tick_pool);
     bool started = state->event_started;
     css_animation_dispatch_start(anim, state);
@@ -1794,6 +1917,11 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             CssAnimatedProp result = pair.to.property;
             css_animation_interpolate_property(state, &pair.from.property,
                 &pair.to.property, local_t, &result);
+            if (dom_element_is_svg(state->element) && !result.custom_name &&
+                lam::pool_grow_array(state->pool, &state->presentation_samples,
+                    &state->presentation_sample_capacity, state->presentation_sample_count + 1, 8)) {
+                state->presentation_samples[state->presentation_sample_count++] = result;
+            }
             if (result.custom_name) {
                 bool changed = false;
                 if (!result.value.custom) changed = dom_element_clear_animation_custom_properties(state->element, state, result.custom_name);
@@ -1832,6 +1960,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
         }
     }
 
+    if (dom_element_is_svg(state->element)) dom_svg_invalidate_presentation(state->element);
     // transformed dirty bounds share the client-rectangle geometry, including matrix/3D samples.
     view_get_visual_bounds(static_cast<View*>(anim->target), &anim->bounds[0],
         &anim->bounds[1], &anim->bounds[2], &anim->bounds[3]);
@@ -1884,6 +2013,8 @@ static void css_animation_restore_underlying_transform(CssAnimState* state) {
 static void css_animation_cancel(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state) return;
+    state->presentation_sample_count = 0;
+    if (dom_element_is_svg(state->element)) dom_svg_invalidate_presentation(state->element);
     if (dom_element_clear_animation_custom_properties(state->element, state)) {
         dom_invalidate_layout_subtree(state->element);
         if (!anim->suppress_cancel_event && state->element && state->element->doc)
@@ -1934,6 +2065,7 @@ static void css_animation_cancel(AnimationInstance* anim) {
     if (state->custom_underlying_pool) mem_pool_destroy(state->custom_underlying_pool);
     if (state->custom_tick_pool) mem_pool_destroy(state->custom_tick_pool);
     if (state->value_samples) pool_free(state->pool, state->value_samples);
+    if (state->presentation_samples) pool_free(state->pool, state->presentation_samples);
     if (state->important_properties) pool_free(state->pool, state->important_properties);
     pool_free(state->pool, state);
     anim->state = nullptr;
@@ -2367,11 +2499,6 @@ static CssMotionInitialCache* css_motion_initial_cache(DomDocument* doc) {
 
 // Restyle reads motion lists once; shorthand projections, var() substitution and
 // unit normalization allocate, so they must not land in retained view storage.
-struct MotionScratchPool {
-    Pool* pool = pool_create();
-    ~MotionScratchPool() { if (pool) pool_destroy(pool); }
-};
-
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property) {
     if (!pool || (css_animation_longhand_index(property) < 0 &&
@@ -2683,9 +2810,12 @@ static bool css_transition_read_used_value(DomElement* element,
                                            CssPropertyCode prop_id,
                                            CssAnimValueType* out_type,
                                            float* out_f, Color* out_color,
-                                           float* out_ratio) {
+                                           float* out_ratio, bool sampled = false) {
     CssAnimatedProp used = {};
-    if (!capture_underlying_value(element, prop_id, &used)) return false;
+    const CssAnimatedProp* current = sampled
+        ? css_animation_current_presentation(element, prop_id, false) : nullptr;
+    if (current) used = *current;
+    else if (!capture_underlying_value(element, prop_id, &used)) return false;
     switch (used.value_type) {
         case ANIM_VAL_LENGTH:
             if (used.value.length.keyword != CSS_VALUE__UNDEF) return false;
@@ -2839,7 +2969,10 @@ void css_transition_tick(AnimationInstance* anim, float t) {
             return; // unsupported — nothing to apply
     }
 
+    st->presentation_sample = interp;
+    st->presentation_sample_valid = true;
     anim->layout_changed |= apply_animated_value(st->element, &interp);
+    if (dom_element_is_svg(st->element)) dom_svg_invalidate_presentation(st->element);
 
     // update bounds from element's current absolute layout position for dirty-region marking
     View* span = static_cast<View*>(anim->target);
@@ -2990,7 +3123,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     if (existing) {
         CssAnimValueType cvt; float cf = 0; float cr = 0; Color cc; cc.c = 0;
         if (css_transition_read_used_value(element, track->property_code,
-                                           &cvt, &cf, &cc, &cr)) {
+                                           &cvt, &cf, &cc, &cr, true)) {
             if (cvt == ANIM_VAL_FLOAT || cvt == ANIM_VAL_LENGTH) from_f = cf;
             else if (cvt == ANIM_VAL_COLOR) from_c = cc;
             else if (cvt == ANIM_VAL_ASPECT_RATIO) from_ratio = cr;

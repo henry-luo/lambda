@@ -29,6 +29,7 @@ bool eval_context_transfer_thread(EvalContext* target);
 // Retained and fresh clients share owner and result-root publication (D8.1.3v10, D5.2.1v3).
 bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner);
 void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner);
+Runtime* runtime_module_state_owner(EvalContext* owner, Runtime* fallback);
 Item runtime_publish_result(EvalContext* owner, Item result);
 
 // Restore execution metadata at nested runtime boundaries (D8.1.3v10).

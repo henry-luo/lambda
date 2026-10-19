@@ -2478,6 +2478,17 @@ static const char* svg_animation_target_value(SvgAnimationRegistry* registry, El
     return nullptr;
 }
 
+void svg_animation_visit_values(DomElement* element, SvgAnimationValueVisitor visitor, void* context) {
+    SvgAnimationRegistry* registry = element ? svg_animation_registry(element->doc, false) : nullptr;
+    if (!registry || !visitor) return;
+    if (!registry->sampling) svg_animation_sample(registry);
+    SvgAnimatedTarget key = {}; key.source = dom_element_to_element(element);
+    SvgAnimatedTarget* entry = SvgAnimatedTargetMap::get(registry->targets, key);
+    if (!svg_animation_target_visible(registry, entry)) return;
+    for (SvgAnimatedValue* value = entry->values; value; value = value->next)
+        visitor(context, value->name, value->text, value->css);
+}
+
 const char* svg_animation_value(DomElement* element, const char* name, bool css_only) {
     return element ? svg_animation_target_value(svg_animation_registry(element->doc, false),
         dom_element_to_element(element), name, css_only ? 1 : 0) : nullptr;

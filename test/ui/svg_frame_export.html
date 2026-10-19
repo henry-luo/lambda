@@ -1,0 +1,10 @@
+<!doctype html><style>
+body{margin:0;background:white}svg{display:block}
+@keyframes shade{from{fill:red;transform:translateX(0px)}to{fill:blue;transform:translateX(40px)}}
+#css{animation:shade 2s linear both}
+</style>
+<svg id="drawing" xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+  <rect id="css" x="10" y="10" width="30" height="30" fill="lime"/>
+  <rect id="smil" x="10" y="60" width="30" height="20" fill="blue"><animate id="driver" attributeName="x" from="10" to="90" dur="2s" fill="freeze"/></rect>
+  <rect id="edited" x="150" y="10" width="20" height="20" fill="red"/>
+</svg>

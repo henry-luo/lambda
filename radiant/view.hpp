@@ -835,9 +835,11 @@ struct FontProp {
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
     float letter_spacing_percent;  // authored percentage, retained for inheritance
+    float letter_spacing_length;   // computed absolute term of percentage calc()
     bool letter_spacing_is_percent;
     bool letter_spacing_is_set;  // resolved zero must not be treated as missing
     float word_spacing_percent;  // authored percentage, retained for inheritance
+    float word_spacing_length;
     bool word_spacing_is_percent;
     bool word_spacing_is_set;
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
@@ -879,6 +881,15 @@ inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
     float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;
     return fp->font_size * zoom;
+}
+
+inline void font_prop_resolve_spacing(FontProp* font) {
+    float zoom = font->used_zoom > 0.0f ? font->used_zoom : 1.0f;
+    // percentages inherit intact; calc() lengths retain their declaring font's units.
+    if (font->letter_spacing_is_percent) font->letter_spacing =
+        font->letter_spacing_length * zoom + font->letter_spacing_percent * font_prop_used_size(font) / 100.0f;
+    if (font->word_spacing_is_percent) font->word_spacing =
+        font->word_spacing_length * zoom + font->word_spacing_percent * font_prop_used_size(font) / 100.0f;
 }
 
 inline void font_prop_copy(FontProp* destination, const FontProp* source) {
@@ -931,6 +942,15 @@ inline FontSlant radiant_font_slant_from_css(CssEnum style) {
     if (style == CSS_VALUE_OBLIQUE) return FONT_SLANT_OBLIQUE;
     return FONT_SLANT_NORMAL;
 }
+
+// a pass-local run in an anonymous flex/grid item's flattened text sequence.
+typedef struct LayoutAnonymousTextRun {
+    lam::Up<DomText> text;
+    bool preserve_leading_space;
+    bool preserve_trailing_space;
+    bool is_whitespace;
+    lam::Own<struct LayoutAnonymousTextRun> next;
+} LayoutAnonymousTextRun;
 
 // tier-2: view-pool, rebuilt each relayout
 struct GridItemProp {
@@ -988,6 +1008,9 @@ struct GridItemProp {
     float measured_min_height;     // Minimum content height
     float measured_max_height;     // Maximum content height
     bool has_measured_size;      // Whether measurement pass has been done
+    LayoutAnonymousTextRun* anonymous_text_runs; // scratch, only on anonymous items
+    float anonymous_text_origin_x;
+    float anonymous_text_origin_y;
 };
 
 // Intrinsic size type (shared by flex and grid layout)
@@ -997,6 +1020,10 @@ typedef struct {
     float max_content;  // Maximum content width (no wrapping)
     float first_segment_min = -1.0f;
     float remaining_min_content = 0.0f;
+    // inline parents join the edge segments without joining across internal wrap opportunities.
+    float last_segment_min = -1.0f;
+    float interior_min_content = 0.0f;
+    bool has_min_content_break = false;
     // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
     // the content spans multiple lines. These fields allow the parent's inline run
     // accumulation to split at forced break points rather than summing all lines.
@@ -1014,15 +1041,6 @@ typedef struct {
     // max-content still gets pad+border added so it represents the full border-box.
     bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
-
-// A pass-local run in an anonymous flex item's flattened text sequence.
-typedef struct FlexAnonymousTextRun {
-    lam::Up<DomText> text;
-    bool preserve_leading_space;
-    bool preserve_trailing_space;
-    bool is_whitespace;
-    lam::Own<struct FlexAnonymousTextRun> next;
-} FlexAnonymousTextRun;
 
 // tier-2: view-pool, retained across incremental relayouts. Memos of a flex
 // item's last committed measurement, hypothetical cross size and content pass;
@@ -1099,7 +1117,7 @@ typedef struct FlexItemProp {
     lam::Up<DomText> anonymous_text;
     // CSS Flexbox flattens display:contents descendants before creating
     // anonymous items; this chain retains all text runs in one item.
-    FlexAnonymousTextRun* anonymous_text_runs;
+    LayoutAnonymousTextRun* anonymous_text_runs;
     // CSS Display flattening can leave a collapsed separator at an anonymous
     // flex item's edge; retain the edge state for final text geometry.
     bool anonymous_text_preserve_leading_space;
@@ -2431,6 +2449,7 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     float justification_spacing;  // CSS-pixel expansion selected by the owning line
     int start_index, length;  // start and length of the text in the style node
+    int trailing_whitespace_bytes; // line-end suppression keeps source ownership in length
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
     int line_number;  // block-local line index assigned when this rect enters inline flow
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
@@ -2439,9 +2458,14 @@ typedef struct TextRect {
     lam::Own<TextRect> next;
 } TextRect;
 
-inline void text_rect_painted_source_range(const TextRect* rect, int* start, int* length) {
+inline void text_rect_source_range(const TextRect* rect, int* start, int* length) {
     *start = rect->start_index - rect->hyphenated_leading_bytes;
     *length = rect->length + rect->hyphenated_leading_bytes - rect->hyphenated_trailing_bytes;
+}
+
+inline void text_rect_painted_source_range(const TextRect* rect, int* start, int* length) {
+    text_rect_source_range(rect, start, length);
+    *length = *length > rect->trailing_whitespace_bytes ? *length - rect->trailing_whitespace_bytes : 0;
 }
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2632,6 +2656,13 @@ struct ViewBlock : ViewSpan {
     // PositionProp* position;
     // ViewBlock* last_child;
 };
+
+// a paint projection borrows its caller's boundary; never retain this stack-only view (D4.5.1v4).
+inline ViewBlock view_with_boundary(ViewBlock* source, BoundaryProp* boundary) {
+    ViewBlock view = *source;
+    view.bound = lam::view_prop(boundary);
+    return view;
+}
 
 // ===== view geometry =====
 
@@ -3981,6 +4012,9 @@ typedef struct CssAnimState {
     lam::OwnArr<CssAnimValueSample> value_samples;
     int value_sample_count;
     int value_sample_capacity;
+    lam::OwnArr<CssAnimatedProp> presentation_samples;
+    int presentation_sample_count;
+    int presentation_sample_capacity;
     lam::OwnArr<CssPropertyCode> important_properties;
     int important_property_count;
     int important_property_capacity;
@@ -4049,6 +4083,8 @@ typedef struct CssTransitionState {
     CssAnimValueType value_type;
     CssTransitionValue from;
     CssTransitionValue to;
+    CssAnimatedProp presentation_sample;
+    bool presentation_sample_valid;
 } CssTransitionState;
 
 // ============================================================================
@@ -4089,6 +4125,11 @@ void css_animation_finish(AnimationInstance* anim);
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
 bool css_motion_sample_existing(DomElement* element, LayoutContext* lycon);
+bool css_animation_is_sampling_base();
+String* css_animation_svg_presentation_value(Pool* pool, DomElement* element,
+    CssPropertyCode property, bool important);
+String* css_prop_serialize_transform_functions(Pool* pool, TransformFunction* functions,
+    float width, float height);
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property);
 
@@ -4374,6 +4415,9 @@ TransformFunction* resolve_transform_value(LayoutContext* context, const CssValu
     Pool* document_pool = nullptr);
 bool resolve_individual_transform_value(LayoutContext* context, CssPropertyCode property,
     const CssValue* value, TransformFunction* out);
+bool resolve_individual_transform_function_value(CssPropertyCode property,
+    const CssValue* value, TransformFunction* out, TransformLengthResolver resolve_length,
+    void* context);
 void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
     TransformLengthResolver resolve_length, void* context);
 
@@ -4638,3 +4682,6 @@ void loader_runtime_finish_document(DomDocument* doc, Runtime* loader);
 // load diagnostic; a successful load clears it.
 const char* lambda_document_load_diagnostic(void);
 void free_document(DomDocument* doc);
+// D5.4.1: detached iframe ownership is released only after dispatch frames return.
+void radiant_defer_document_destroy(DomDocument* doc);
+bool radiant_drain_document_destruction();

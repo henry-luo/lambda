@@ -19,13 +19,13 @@ let arc = content(content(circle)[0])[1];
     ["success segment",len(content(content(circle)[0])) == 3 and content(content(circle)[0])[2].class == "dtna-progress-success"],
     ["dashboard gap",contains(content(content(dashboard)[0])[0].transform,"rotate(-45 ")],
     ["custom label",content(content(custom)[1])[0] == "45/10"],
-    ["invalid progress",(ui.progress({percent:nan}) or null) == null and (ui.progress({steps:-1}) or null) == null and (ui.progress({type:'pie'}) or null) == null],
-    ["invalid stroke",(ui.progress({stroke_color:[]}) or null) == null and (ui.progress({stroke_color:"red;bad"}) or null) == null and (ui.progress({stroke_width:0}) or null) == null],
-    ["invalid nested options",(ui.progress({success:{percent:inf}}) or null) == null and (ui.progress({steps:{count:5,gap:-1}}) or null) == null and (ui.progress({steps:{count:5,bad:true}}) or null) == null],
-    ["invalid callbacks",(ui.progress({format:1}) or null) == null and (ui.progress({rounding:1}) or null) == null and (ui.progress({steps:5,rounding:(value)=>nan}) or null) == null],
-    ["invalid gap",(ui.progress({gap_degree:360}) or null) == null and (ui.progress({gap_placement:'left'}) or null) == null],
+    ["invalid progress",((ui.progress({percent:nan}) ^ { null }) or null) == null and ((ui.progress({steps:-1}) ^ { null }) or null) == null and ((ui.progress({type:'pie'}) ^ { null }) or null) == null],
+    ["invalid stroke",((ui.progress({stroke_color:[]}) ^ { null }) or null) == null and ((ui.progress({stroke_color:"red;bad"}) ^ { null }) or null) == null and ((ui.progress({stroke_width:0}) ^ { null }) or null) == null],
+    ["invalid nested options",((ui.progress({success:{percent:inf}}) ^ { null }) or null) == null and ((ui.progress({steps:{count:5,gap:-1}}) ^ { null }) or null) == null and ((ui.progress({steps:{count:5,bad:true}}) ^ { null }) or null) == null],
+    ["invalid callbacks",((ui.progress({format:1}) ^ { null }) or null) == null and ((ui.progress({rounding:1}) ^ { null }) or null) == null and ((ui.progress({steps:5,rounding:(value)=>nan}) ^ { null }) or null) == null],
+    ["invalid gap",((ui.progress({gap_degree:360}) ^ { null }) or null) == null and ((ui.progress({gap_placement:'left'}) ^ { null }) or null) == null],
     ["line gradient",contains(content(content(gradient)[0])[0].style,"linear-gradient(to right,red 0%,blue 100%)")],
     ["sorted gradient stops",contains(content(content(content(gradient_circle)[0])[2])[0].style,"red 0%,green 50%,blue 100%")],
     ["ring gradient reference",content(content(gradient_circle)[0])[2].mask == "url(#gradient-circle-gradient-conic)"],
-    ["invalid gradients",(ui.progress({stroke_color:{from:"red",to:"blue"}}) or null) == null and (ui.progress({id:"x",stroke_color:{from:"red"}}) or null) == null and (ui.progress({id:"x",stroke_color:{["bad"]:"red",["100%"]:"blue"}}) or null) == null]
+    ["invalid gradients",((ui.progress({stroke_color:{from:"red",to:"blue"}}) ^ { null }) or null) == null and ((ui.progress({id:"x",stroke_color:{from:"red"}}) ^ { null }) or null) == null and ((ui.progress({id:"x",stroke_color:{["bad"]:"red",["100%"]:"blue"}}) ^ { null }) or null) == null]
 ]

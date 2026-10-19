@@ -1,0 +1,279 @@
+{
+  "name": "SVG shape geometry units, cascade, auto radii and applicability",
+  "html": "test/ui/svg_css_geometry_cascade.html",
+  "viewport": {
+    "width": 300,
+    "height": 160
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#plain"
+      },
+      "property": "x",
+      "equals": "5px"
+    },
+    {
+      "type": "assert_script",
+      "js": "let b=document.getElementById('metric').getBBox();b.x===20 && b.y===20 && b.width===90 && b.height===20"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 10,
+      "y": 90,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "x": 150,
+      "y": 85,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "x": 205,
+      "y": 85,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "x": 5,
+      "y": 130,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('metric').style.setProperty('width','initial');document.getElementById('plain').style.setProperty('x','50px')\ntrue;"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 30,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 60,
+      "y": 90,
+      "expected_selector": "#plain"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('metric').style.removeProperty('width');document.getElementById('plain').style.removeProperty('x')\ntrue;"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 3,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 10,
+      "y": 90,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.documentElement.style.setProperty('font-size','15px');document.querySelector('svg svg').style.setProperty('font-size','30px');true;"
+    },
+    {
+      "type": "assert_script",
+      "js": "let b=document.getElementById('metric').getBBox();b.y===30 && b.height===30"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 55,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 25,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_script",
+      "js": "document.documentElement.style.removeProperty('font-size');document.querySelector('svg svg').style.removeProperty('font-size');true;"
+    },
+    {
+      "type": "assert_script",
+      "js": "let b=document.getElementById('metric').getBBox();b.y===20 && b.height===20"
+    }
+  ],
+  "pixel_oracles": {
+    "1": [
+      {
+        "type": "assert_pixel",
+        "x": 90,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 3,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 252,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 10,
+        "y": 90,
+        "min_r": 252,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 150,
+        "y": 85,
+        "min_r": 0,
+        "max_r": 3,
+        "min_g": 252,
+        "max_g": 255,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 205,
+        "y": 85,
+        "min_r": 252,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 5,
+        "y": 130,
+        "min_r": 125,
+        "max_r": 131,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 125,
+        "max_b": 131
+      }
+    ],
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 90,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 3,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 252,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 10,
+        "y": 90,
+        "min_r": 252,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 150,
+        "y": 85,
+        "min_r": 0,
+        "max_r": 3,
+        "min_g": 252,
+        "max_g": 255,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 205,
+        "y": 85,
+        "min_r": 252,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 0,
+        "max_b": 3
+      },
+      {
+        "type": "assert_pixel",
+        "x": 5,
+        "y": 130,
+        "min_r": 125,
+        "max_r": 131,
+        "min_g": 0,
+        "max_g": 3,
+        "min_b": 125,
+        "max_b": 131
+      }
+    ]
+  }
+}

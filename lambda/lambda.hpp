@@ -754,6 +754,16 @@ struct ArrayNum : Map {
     void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }
 };
 
+// D1.9: malformed shape metadata must stop at this boundary, before any
+// caller-owned fixed-rank buffer is written.
+static inline bool array_num_shape_is_valid(const ArrayNum* arr) {
+    if (!arr) return false;
+    if (!arr->is_ndim) return !arr->is_view;
+    if (!arr->extra) return false;
+    const ArrayNumShape* shape = (const ArrayNumShape*)(uintptr_t)arr->extra;
+    return shape->ndim >= 1 && shape->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM;
+}
+
 // The leading-axis rank of a packed array: a flat array or a 1-D view is rank
 // 1, an N-D array reads its shape. S11.1.1v3 preserves rank, so an array
 // contract compares with this, never with the flattened leaf lane.

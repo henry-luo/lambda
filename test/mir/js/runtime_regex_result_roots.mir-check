@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
-  "description": "D5.3.3: RegExp named-capture and indices result graphs survive allocation safepoints.",
+  "description": "D5.3/D5.4: formal RegExp results and named-capture graphs remain in rooted storage through generic property access.",
   "checks": [
     {
-      "in_func": "js_main",
+      "in_func": "mvp_lmd_program",
       "expect": [
-        "mov\t{{r}}, js_call",
-        "call\tjs_call_p_r6_n1_a6, {{r}}"
+        "call\tmvp_lmd_regexp_new",
+        "call\tmvp_lmd_property_read",
+        "call\towned_item_slot_store",
+        "mov\ti64:80(runtime),"
       ]
     }
   ]

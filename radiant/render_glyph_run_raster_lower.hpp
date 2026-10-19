@@ -9,6 +9,43 @@
 #include <math.h>
 #include <string.h>
 
+static inline void render_glyph_run_bitmap_raster_lower(const PaintGlyphRun* run,
+        DisplayList* dl, const GlyphBitmap* source, float x, float baseline_y) {
+    if (!source) { log_error("[RASTER_TEXT_CLUSTER] selected glyph bitmap is unavailable"); return; }
+    if (!source->buffer || source->width <= 0 || source->height <= 0) return;
+    FontHandle* font_handle = font_box_handle(paint_glyph_run_font(run));
+    // effect paint coordinates are CSS pixels; cached glyphs follow the font context's physical density (RSC6).
+    GlyphBitmap bitmap = *source;
+    float bitmap_scale = render_font_pixel_to_css(font_handle, &bitmap);
+    int glyph_x = (int)lroundf(x + (float)bitmap.bearing_x * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
+    int glyph_y = (int)lroundf(baseline_y - (float)bitmap.bearing_y * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
+    bool color = bitmap.pixel_mode == GLYPH_PIXEL_BGRA;
+    RdtMatrix placement;
+    const RdtMatrix* transform = run->has_transform ? &run->transform : nullptr;
+    if (color) bitmap.bitmap_scale = bitmap_scale;
+    else if (bitmap_scale != 1.0f) {
+        placement = {bitmap_scale, 0.0f, (float)glyph_x,
+            0.0f, bitmap_scale, (float)glyph_y, 0.0f, 0.0f, 1.0f};
+        if (run->has_transform) placement = rdt_matrix_multiply(&run->transform, &placement);
+        transform = &placement;
+        glyph_x = glyph_y = 0;
+    }
+    dl_draw_glyph(dl, &bitmap, glyph_x, glyph_y, run->color, color, nullptr, transform, 0);
+}
+
+struct RenderRasterTextCluster {
+    const PaintGlyphRun* run;
+    DisplayList* list;
+    float x;
+};
+
+static inline void render_raster_cluster_glyph(void* pointer,
+        const GlyphBitmap* bitmap, float x, float y) {
+    RenderRasterTextCluster* cluster = (RenderRasterTextCluster*)pointer;
+    render_glyph_run_bitmap_raster_lower(cluster->run, cluster->list, bitmap,
+        cluster->x + x, cluster->run->baseline_y + y);
+}
+
 static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
                                                  DisplayList* dl) {
     if (!run || !dl) return;
@@ -45,6 +82,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     const char* end = run->text + text_len;
     TextJustifyContext justify_context = {};
     while (cursor < end) {
+        const char* source_start = cursor;
         uint32_t codepoint = 0;
         if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) {
             x += space_width;
@@ -70,6 +108,18 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
+        RenderRasterTextCluster cluster = {run, dl, x};
+        size_t cluster_bytes = 0; float cluster_advance = 0.0f;
+        if (render_text_visit_cluster(font, (const unsigned char*)source_start,
+                (const unsigned char*)end, render_raster_cluster_glyph, &cluster,
+                &cluster_bytes, &cluster_advance)) {
+            text_justify_cluster_gap(&justify_context, (const unsigned char*)cursor,
+                (const unsigned char*)source_start + cluster_bytes, run->justify_mode);
+            cursor = source_start + cluster_bytes;
+            x += cluster_advance;
+            continue;
+        }
+
         bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
         if (cursor < end) {
             uint32_t peek_cp = 0;
@@ -91,7 +141,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             RdtPath* path = rdt_path_new();
             if (!path) return;
             rdt_path_add_rect(path, rect.x, rect.y, rect.width, rect.height, 0.0f, 0.0f);
-            dl_fill_path(dl, path, Color{0xFF0000FF}, RDT_FILL_WINDING,
+            dl_fill_path(dl, path, render_text_missing_glyph_color(), RDT_FILL_WINDING,
                 run->has_transform ? &run->transform : nullptr);
             rdt_path_free(path);
             x += space_width;
@@ -104,23 +154,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
             continue;
         }
-        // effect paint coordinates are CSS pixels; cached glyphs follow the font context's physical density (RSC6).
-        GlyphBitmap bitmap = glyph->bitmap;
-        float bitmap_scale = render_font_pixel_to_css(font_handle, &bitmap);
-        int glyph_x = (int)lroundf(x + (float)bitmap.bearing_x * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
-        int glyph_y = (int)lroundf(run->baseline_y - (float)bitmap.bearing_y * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
-        bool color = bitmap.pixel_mode == GLYPH_PIXEL_BGRA;
-        RdtMatrix placement;
-        const RdtMatrix* transform = run->has_transform ? &run->transform : nullptr;
-        if (color) bitmap.bitmap_scale = bitmap_scale;
-        else if (bitmap_scale != 1.0f) {
-            placement = {bitmap_scale, 0.0f, (float)glyph_x,
-                0.0f, bitmap_scale, (float)glyph_y, 0.0f, 0.0f, 1.0f};
-            if (run->has_transform) placement = rdt_matrix_multiply(&run->transform, &placement);
-            transform = &placement;
-            glyph_x = glyph_y = 0;
-        }
-        dl_draw_glyph(dl, &bitmap, glyph_x, glyph_y, run->color, color, nullptr, transform, 0);
+        render_glyph_run_bitmap_raster_lower(run, dl, &glyph->bitmap, x, run->baseline_y);
         x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
     }
 }

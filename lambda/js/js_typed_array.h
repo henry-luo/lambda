@@ -187,8 +187,6 @@ Item js_typed_array_construct_with_ops(int type_id, Item source, Item offset,
 Item js_typed_array_set_numeric_with_ops(Item owner, double index, bool negative_zero,
     Item value, const JsBufferViewOps* ops);
 
-Item js_arraybuffer_construct_with_ops(Item length, Item options, Item target,
-    const JsBufferViewOps* ops);
 Item js_construct_arraybuffer_target(Item length, Item options, Item target,
     bool shared, const JsBufferViewOps* ops);
 Item js_arraybuffer_resize_with_ops(Item buffer, Item length, const JsBufferViewOps* ops);
@@ -198,6 +196,7 @@ Item js_arraybuffer_slice_with_ops(Item buffer, Item begin, Item end, int argc,
     const JsBufferViewOps* ops);
 Item js_arraybuffer_slice_kernel(Item buffer, Item begin, Item end, int argc,
     bool shared, const JsBufferViewOps* ops);
+Item js_sharedarraybuffer_clone_with_ops(Item source, const JsBufferViewOps* ops);
 
 typedef enum JsAtomicsOp {
     JS_ATOMICS_OP_ADD,
@@ -225,19 +224,14 @@ LAMBDA_RT_API Item js_typed_array_get(Item ta, Item index);
 Item js_typed_array_set(Item ta, Item index, Item value);
 Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
                                 Item value);
-Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
 // Completes only a proven Number write to the selected ordinary typed-array
 // kind. A false result leaves the caller to perform the complete JS Set.
-bool js_typed_array_set_number_if_kind(Item ta, double index,
-                                       int expected_type, double value);
 LAMBDA_RT_API int  js_typed_array_length(Item ta);
 int  js_typed_array_element_type(Item ta);
 LAMBDA_RT_API int  js_typed_array_byte_length(Item ta);
 int  js_typed_array_byte_offset(Item ta);
 LAMBDA_RT_API bool js_typed_array_is_out_of_bounds_item(Item ta);
 Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int index);
-Item js_typed_array_fill(Item ta, Item value, int start, int end,
-                         bool array_semantics);
 Item js_typed_array_fill_with_ops(Item ta, Item value, int start, int end,
     bool array_semantics, const JsBufferViewOps* ops);
 LAMBDA_RT_API bool js_is_typed_array(Item val);
@@ -245,13 +239,9 @@ LAMBDA_RT_API JsTypedArray* js_get_typed_array_ptr(Map* m);
 LAMBDA_RT_API void* js_typed_array_current_data_ptr(Item ta_item);
 // Returns a current data pointer only after validating the receiver, exact
 // element kind, and live bounds for one immediate physical read.
-void* js_typed_array_data_at_if_kind(Item ta_item, int expected_type,
-                                     int64_t index);
 LAMBDA_RT_API void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, Item begin, Item end, const JsTypedArrayOps* ops);
-Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics);
-Item js_typed_array_set_from(Item ta, Item source, int offset);
 Item js_typed_array_slice_with_ops(Item ta, int start, int end,
     bool array_semantics, const JsTypedArrayOps* ops);
 Item js_typed_array_set_from_with_ops(Item ta, Item source, int offset,
@@ -282,7 +272,6 @@ Item js_arraybuffer_resize(Item val, Item new_length_item);
 Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc);
 Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc);
 Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
-Item js_arraybuffer_is_view_item(Item val);
 void js_arraybuffer_detach(Item val);
 bool js_arraybuffer_is_detached(Item val);
 
@@ -319,13 +308,6 @@ Item js_atomics_is_lock_free_with_ops(Item size, const JsBufferViewOps* ops);
 Item js_atomics_pause_with_ops(Item iterations, const JsBufferViewOps* ops);
 void js_atomics_reset_waiters(void);
 bool js_atomics_runtime_state_ensure(void);
-int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);
-bool js_atomics_report_waiter_ready(int waiter_id);
-Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string);
-void js_atomics_agent_sleep(Item ms);
-Item js_atomics_agent_monotonic_now(void);
-void js_atomics_agent_leaving(int agent_slot);
-
 // DataView operations
 typedef enum JsDataViewOperation {
     JS_DATAVIEW_GET_INT8,
@@ -370,8 +352,6 @@ Item js_typed_array_validate_constructor_argument(Item argument, int argc);
 const char* js_typed_array_type_name(Item val);
 
 // ES §22.2.4.7 TypedArraySpeciesCreate — creates result using @@species constructor
-Item js_typed_array_species_create(Item exemplar, int length);
-Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer, int byte_offset, int length, bool length_tracking);
 Item js_typed_array_species_create_with_ops(Item exemplar, Item* args, int argc,
     const JsTypedArrayOps* ops);
 

@@ -56,7 +56,7 @@ Mapping is by longest matching path prefix, so a rule can name a directory (`lam
 Two mappings are worth knowing about because the specification does not settle them:
 
 - **`lambda/lambda-data.hpp`, `lambda.h`, `lambda.hpp`** are today mixed-layer headers, not core headers — `Lambda_Design_Static_Modules.md` §4 evidence item 11 and SM13 both say so. They are counted under `lambda-data` because that is where the split is headed, not because they are clean today.
-- **`lambda/serve/`** has no ruling in either `Lambda_Formal_Design.md` or `Lambda_Design_Static_Modules.md`. It embeds every language backend (`backend_js.cpp`, `backend_python.cpp`, `backend_lambda.cpp`, …), which puts it somewhere between `lambda-rt` and the shell. It is counted under `lmd-rt` as a working assumption; change `module_rules` if the split rules it the other way.
+- **`lambda/serve/`** has no module-ownership ruling in either `Lambda_Formal_Design.md` or `Lambda_Design_Static_Modules.md`. Its remaining backend sources (`backend_js.cpp`, `backend_lambda.cpp`; [WS1](../vibe/Module_Web_Server.md#current-scope--ws1-2026-10-18-user)) put it somewhere between `lambda-rt` and the shell. It is counted under `lmd-rt` as a working assumption; change `module_rules` if the split rules it the other way.
 
 ## Outputs
 

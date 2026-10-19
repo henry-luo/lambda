@@ -45,6 +45,7 @@ struct RxClass {
     CodePointInterval* ranges;
     int range_count;
     bool negated;
+    bool sorted_ranges;
 };
 
 struct RxSeq {
@@ -207,6 +208,9 @@ static inline bool bt_is_word(uint32_t cp, bool icase, bool unicode) {
 }
 
 static bool bt_class_contains_raw(const RxClass* cls, uint32_t cp) {
+    // generated property intervals are ordered; avoid rescanning hundreds per code point.
+    if (cls->sorted_ranges)
+        return js_regex_sorted_range_contains(cls->ranges, cls->range_count, (int)cp);
     for (int i = 0; i < cls->range_count; i++) {
         if (codepoint_interval_contains(&cls->ranges[i], cp)) return true;
     }
@@ -430,6 +434,7 @@ static RxNode* property_class(Parser* ps, const char* name, int name_len, bool n
     }
     cls->negated = negated;
     mem_free(pairs);
+    cls->sorted_ranges = true;
     n->cls = cls;
     return n;
 }
@@ -515,6 +520,11 @@ static RxNode* parse_class(Parser* ps) {
         // possible range a-b
         if (ps->pos < ps->len && ps->p[ps->pos] == '-' &&
             ps->pos + 1 < ps->len && ps->p[ps->pos + 1] != ']') {
+            // Annex B unions a class escape endpoint with the literal dash and first atom.
+            if (!ps->flags.unicode && ps->pos + 2 < ps->len && ps->p[ps->pos + 1] == '\\' &&
+                    strchr("dDwWsS", ps->p[ps->pos + 2])) {
+                add_range(lo, lo); add_range('-', '-'); ps->pos++; continue;
+            }
             ps->pos++; // -
             uint32_t hi;
             if (ps->p[ps->pos] == '\\' && ps->pos + 1 < ps->len) {

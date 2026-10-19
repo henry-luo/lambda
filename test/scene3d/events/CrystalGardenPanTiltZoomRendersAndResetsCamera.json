@@ -1,0 +1,221 @@
+{
+  "name": "CrystalGardenPanTiltZoomRendersAndResetsCamera",
+  "viewport": {
+    "width": 1120,
+    "height": 950
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "threeGalleryReady===true && document.title==='Crystal garden / Scene3D'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.initialCamera=threeGallery.camera.position.clone();globalThis.initialTarget=threeGallery.controls.target.clone()"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#garden",
+      "name": "initial"
+    },
+    {
+      "type": "mouse_down",
+      "x": 350,
+      "y": 300
+    },
+    {
+      "type": "mouse_move",
+      "x": 430,
+      "y": 340
+    },
+    {
+      "type": "mouse_up",
+      "x": 430,
+      "y": 340
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.camera.position.distanceTo(initialCamera)>.1 && document.activeElement===document.getElementById('garden')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "canvas",
+      "target": "#garden",
+      "reference": "initial",
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pan-mode"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('pan-mode').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforePan=threeGallery.controls.target.clone()"
+    },
+    {
+      "type": "mouse_down",
+      "x": 350,
+      "y": 300
+    },
+    {
+      "type": "mouse_move",
+      "x": 430,
+      "y": 330
+    },
+    {
+      "type": "mouse_up",
+      "x": 430,
+      "y": 330
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.controls.target.distanceTo(beforePan)>.1"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeWheel=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+    },
+    {
+      "type": "scroll",
+      "x": 350,
+      "y": 300,
+      "dy": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-beforeWheel)>.01"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeTilt=threeGallery.controls.getPolarAngle()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tilt-up"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.controls.getPolarAngle()<beforeTilt-.01"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeZoom=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.camera.position.distanceTo(threeGallery.controls.target)<beforeZoom"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-beforeZoom)<.00001"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/crystal-garden-ptz.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.camera.position.distanceTo(initialCamera)<.00001 && threeGallery.controls.target.distanceTo(initialTarget)<.00001 && document.getElementById('orbit-mode').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#garden"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeKeyPan=threeGallery.controls.target.clone();globalThis.beforeKeyTilt=threeGallery.controls.getPolarAngle();globalThis.beforeKeyZoom=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+    },
+    {
+      "type": "key_press",
+      "key": "Right"
+    },
+    {
+      "type": "key_press",
+      "key": "Up",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.controls.target.distanceTo(beforeKeyPan)>.001 && threeGallery.controls.getPolarAngle()<beforeKeyTilt-.001"
+    },
+    {
+      "type": "key_press",
+      "key": "+"
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.camera.position.distanceTo(threeGallery.controls.target)<beforeKeyZoom"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_script",
+      "js": "threeGallery.camera.position.distanceTo(initialCamera)<.00001 && threeGallery.controls.target.distanceTo(initialTarget)<.00001"
+    },
+    {
+      "type": "script",
+      "js": "threeGallery.controls.dollyIn(.0001);threeGallery.controls.rotateUp(10)"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-4)<.00001 && threeGallery.controls.getPolarAngle()>=.07999"
+    },
+    {
+      "type": "script",
+      "js": "threeGallery.controls.dollyOut(.0001);threeGallery.controls.rotateUp(-10)"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-35)<.00001 && threeGallery.controls.getPolarAngle()<=Math.PI*.49001"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      },
+      "scroll_into_view": true
+    }
+  ]
+}

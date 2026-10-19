@@ -574,6 +574,30 @@ TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomElementBoundary) {
     source_pos_free(&pos);
 }
 
+TEST_F(SourcePosBridgeRoundTrip, ModelContainerPositionUsesChildOffsetWithoutKindField) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    MapBuilder model = builder.map();
+    model.put("kind", builder.createSymbolItem("node"));
+    Item source = model.final();
+    render_map_record(source, tref, para_item, root_item, 0);
+    int path[] = {0};
+    render_map_record_path(source, tref, path, 1);
+
+    // Lambda SourcePos omits kind even at a container boundary beside an image.
+    SourcePosC position;
+    source_path_init(&position.path);
+    position.path.indices = path;
+    position.path.depth = 1;
+    position.kind = SOURCE_POS_TEXT;
+    position.offset = 1;
+    DomBoundary result{nullptr, 0};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &position, &result));
+    EXPECT_EQ(result.node, para);
+    EXPECT_EQ(result.offset, 1u);
+}
+
 TEST_F(SourcePosBridgeRoundTrip, FullRoundTripText) {
     DomBoundary in{ (DomNode*)hello, 2 };
     SourcePosC pos;
@@ -583,6 +607,40 @@ TEST_F(SourcePosBridgeRoundTrip, FullRoundTripText) {
     EXPECT_EQ(back.node, in.node);
     EXPECT_EQ(back.offset, in.offset);
     source_pos_free(&pos);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, GeneratedBeforeContentDoesNotEnterSourceTextPaths) {
+    DomElement* before = make_element();
+    before->tag_name = lam::up("::before");
+    DomText* glyph = make_text("check", 5);
+    ASSERT_TRUE(before->append_child(glyph));
+    ASSERT_TRUE(para->insert_before(before, hello));
+
+    DomBoundary element_edge{para, 1};
+    SourcePosC edge;
+    ASSERT_TRUE(source_pos_from_dom_boundary(&element_edge, &edge));
+    EXPECT_EQ(edge.offset, 0u);
+    source_pos_free(&edge);
+
+    DomBoundary original{hello, 2};
+    SourcePosC pos;
+    ASSERT_TRUE(source_pos_from_dom_boundary(&original, &pos));
+    ASSERT_EQ(pos.path.depth, 2);
+    EXPECT_EQ(pos.path.indices[1], 0);
+    DomBoundary restored{nullptr, 0};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &pos, &restored));
+    EXPECT_EQ(restored.node, original.node);
+    EXPECT_EQ(restored.offset, original.offset);
+
+    // a text-leaf projection can record the wrapper itself at the leaf path.
+    render_map_record_path(para_item, tref, pos.path.indices, pos.path.depth);
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &pos, &restored));
+    EXPECT_EQ(restored.node, original.node);
+    EXPECT_EQ(restored.offset, original.offset);
+    source_pos_free(&pos);
+    ASSERT_TRUE(para->remove_child(before));
+    delete glyph;
+    delete before;
 }
 
 TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {

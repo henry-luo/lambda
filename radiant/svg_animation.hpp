@@ -32,6 +32,8 @@ bool svg_animation_begin_end(DomElement* element, bool end, double offset);
 uint64_t svg_animation_generation(DomDocument* document);
 bool svg_animation_is_sampling(DomDocument* document);
 uint64_t svg_animation_source_generation(DomDocument* document, Element* root, DomElement* node = nullptr);
+typedef void (*SvgAnimationValueVisitor)(void* context, const char* name, const char* value, bool css);
+void svg_animation_visit_values(DomElement* element, SvgAnimationValueVisitor visitor, void* context);
 const char* svg_animation_value(DomElement* element, const char* name, bool css_only = false);
 const char* svg_animation_attribute(DomElement* element, const char* name);
 const char* svg_animation_source_value(Element* element, const char* name);

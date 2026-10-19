@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 #include "test_lambda_tier_helpers.hpp"
+#include "test_mir_check_helpers.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -162,7 +163,7 @@ struct FixtureRun {
 // its exec-profile rows -- the same TSV -- can be pinned by the same reader.
 static FixtureRun run_fixture_script(const char* name, const char* tier,
                                      const std::string& script_path, bool profile_enabled,
-                                     bool sites_enabled = false) {
+                                     bool sites_enabled = false, const char* js_backend = NULL) {
     FixtureRun run;
     ensure_opt_dir();
     bool js = tier == NULL;
@@ -178,7 +179,7 @@ static FixtureRun run_fixture_script(const char* name, const char* tier,
     const char* run_args[] = {executable, "run", tier_arg.c_str(), script_path.c_str(), NULL};
     const char* js_args[] = {executable, "js", script_path.c_str(), NULL};
     const char** args = js ? js_args : run_args;
-    ShellEnvEntry env[] = {
+    ShellEnvEntry env[8] = {
         {"COW_EXEC_PROFILE", profile_enabled ? "1" : "0"},
         {"COW_EXEC_PROFILE_OUT", run.profile_path.c_str()},
         {"COW_EXEC_PROFILE_SITES", sites_enabled ? "1" : "0"},
@@ -188,6 +189,7 @@ static FixtureRun run_fixture_script(const char* name, const char* tier,
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
         {NULL, NULL}
     };
+    if (js) env[5] = {"JS_EXEC_BACKEND", js_backend ? js_backend : "mir"};
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 60000;
@@ -224,7 +226,7 @@ static FixtureRun run_fixture_script(const char* name, const char* tier,
 
 static FixtureRun run_fixture(const char* name, const char* tier,
                               const std::string& source, bool profile_enabled,
-                              bool sites_enabled = false) {
+                              bool sites_enabled = false, const char* js_backend = NULL) {
     ensure_opt_dir();
     std::string script_path = std::string(kOptDir) + "/" + name + (tier ? ".ls" : ".js");
     if (!write_text(script_path, source)) {
@@ -232,7 +234,7 @@ static FixtureRun run_fixture(const char* name, const char* tier,
         return {};
     }
     return run_fixture_script(name, tier, script_path, profile_enabled,
-        sites_enabled);
+        sites_enabled, js_backend);
 }
 
 // a checked-in script runs in place: its relative imports (S16.9.8) resolve
@@ -1092,10 +1094,20 @@ static const char* kJsRealmSlotsSource =
     "console.log(total);\n";
 
 TEST(LambdaOptJs, IntrinsicPrototypeLookupsReserveRealmSlotsOnce) {
-    FixtureRun run = run_fixture("js_realm_slots_once", NULL, kJsRealmSlotsSource, true);
-    ASSERT_TRUE(run.ok);
-    EXPECT_TRUE(run.profile.has("js_realm_slot_reservations"));
-    EXPECT_EQ(run.profile.get("js_realm_slot_reservations"), 1u);
+    const char* backends[] = {"mir", "ast"};
+    for (const char* backend : backends) {
+        char name[64];
+        snprintf(name, sizeof(name), "js_realm_slots_%s", backend);
+        FixtureRun run = run_fixture(name, NULL, kJsRealmSlotsSource, true, false, backend);
+        ASSERT_TRUE(run.ok) << backend;
+        EXPECT_EQ(run.std_out, "266875557\n") << backend;
+        EXPECT_TRUE(run.profile.has("js_realm_slot_reservations"));
+        // formal MIR owns library slots; the retained AST still reserves the native suffix once.
+        EXPECT_EQ(run.profile.get("js_realm_slot_reservations"), strcmp(backend, "ast") == 0 ? 1u : 0u);
+    }
+    char script[256];
+    snprintf(script, sizeof(script), "%s/js_realm_slots_mir.js", kOptDir);
+    mir_check::run_fixture(script, "test/mir/js_opt/js_realm_slots.mir-check", mir_check::LANG_JS);
 }
 
 TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {

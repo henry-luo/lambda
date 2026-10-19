@@ -65,6 +65,7 @@ struct JsSourceModuleOps {
     Runtime* (*ensure_runtime)(void* owner);
     Item (*to_string)(void* owner, Item value);
     Item (*error_value)(void* owner, Item error);
+    Item (*import_value)(void* owner, Item value);
 };
 struct JsSourceModuleRecord {
     Runtime* runtime;
@@ -88,15 +89,28 @@ struct JsSourceModuleRecord {
     uint32_t evaluation_ancestor;
     uint64_t async_evaluation_order;
     bool async_evaluation;
+    // foreign exports retain the canonical language namespace and use the
+    // same precise module cells and JS namespace exotic as source exports.
+    bool foreign_module;
+    NameEntry* foreign_entries;
+    void* foreign_module_state;
+    Item foreign_js_namespace;
+    bool foreign_namespace_registered;
 };
 
 // Existing resolution/source-cache services, promoted without a second loader.
+void jm_resolve_module_path(const char* base, const char* specifier, int length,
+    char* output, int capacity);
+bool jm_resolve_document_module_path(Runtime*, const char* reference,
+    const char* specifier, int length, char* output, int capacity);
 const char* jm_document_script_base_url(Runtime* runtime, const char* script_reference);
 void js_resolve_script_module_path(Runtime* runtime, const char* reference,
     const char* specifier, int length, char* output, int capacity);
 char* js_load_script_source_from_cache(const char* path, const char* profile,
     const char* execution_mode, bool module_mode, size_t* out_length,
     InputResourcePolicy policy = INPUT_RESOURCE_ALLOW_NETWORK);
+bool jm_path_is_lambda_source(const char* path);
+Item js_load_lambda_module(Runtime* runtime, const char* path);
 
 Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* owner,
     const char* path, const char* source, size_t length, JsSourceModuleRecord** output);
@@ -109,6 +123,8 @@ void js_module_source_complete(JsSourceModuleRecord* record, Item completion);
 JsSourceBindingStatus js_module_resolve_binding(JsSourceModuleRecord* record,
     String* name, JsResolvedModuleBinding* output);
 Item js_module_binding_get(const JsResolvedModuleBinding* binding);
+Item js_module_environment_binding(JsSourceModuleRecord* record, NameEntry* entry,
+    Item value, bool write);
 Item js_module_namespace_create(JsSourceModuleRecord* record);
 
 enum JsModuleNamespaceOperation { JS_MODULE_NAMESPACE_GET, JS_MODULE_NAMESPACE_HAS,

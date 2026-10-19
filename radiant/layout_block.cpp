@@ -709,79 +709,184 @@ static float text_wrap_balance_line_height(LayoutContext* lycon) {
     return 16.0f;
 }
 
-static int text_wrap_balance_normal_line_count(LayoutContext* lycon, ViewBlock* block,
-                                               float content_width) {
-    if (!lycon || !block || content_width <= 0.0f) return 1;
-    float line_height = text_wrap_balance_line_height(lycon);
-    float normal_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), content_width);
-    if (normal_height <= line_height + 0.5f) return 1;
-    int line_count = (int)ceilf((normal_height - 0.01f) / line_height); // INT_CAST_OK: line-count estimate for balance wrapping
-    if (line_count < 1) line_count = 1;
-    return line_count;
-}
+struct TextWrapBalanceProbe {
+    LayoutContext* lycon;
+    ViewBlock* block;
+    StrBuf* content;
+    const char* paragraph;
+    size_t length;
+    bool has_boundaries;
+    float query_y;
+    float query_left;
+    float query_width;
+    float clearance;
 
-static int text_wrap_balance_intrinsic_line_count(float max_content,
-                                                  float content_width) {
-    if (max_content <= 0.0f || content_width <= 0.0f) return 1;
-    int line_count = (int)ceilf((max_content - 0.01f) / content_width); // INT_CAST_OK: line-count estimate from intrinsic width
-    return line_count > 0 ? line_count : 1;
-}
+    TextWrapBalanceProbe(LayoutContext* context, ViewBlock* owner, int index)
+        : lycon(context), block(owner),
+          content(layout_collect_inline_text(owner->as_element(), true)),
+          paragraph(nullptr), length(0), has_boundaries(false),
+          query_y(context->block.advance_y), query_left(context->line.align_left),
+          query_width(0.0f), clearance(0.0f) {
+        if (!content) return;
+        has_boundaries = memchr(content->str, '\v', content->length) != nullptr;
+        const char* begin = content->str;
+        const char* end = begin + content->length;
+        for (int current = 0; current < index; current++) {
+            const char* boundary = (const char*)memchr(begin, '\v', (size_t)(end - begin));
+            if (!boundary) return;
+            begin = boundary + 1;
+        }
+        paragraph = begin;
+        const char* boundary = (const char*)memchr(begin, '\v', (size_t)(end - begin));
+        length = (size_t)((boundary ? boundary : end) - begin);
+    }
+    // paragraph slices borrow this buffer only until the measurement returns.
+    ~TextWrapBalanceProbe() { if (content) strbuf_free(content); }
+    TextWrapBalanceProbe(const TextWrapBalanceProbe&) = delete;
+    TextWrapBalanceProbe& operator=(const TextWrapBalanceProbe&) = delete;
+
+    static float line_width(void* context, int index, float required_width) {
+        TextWrapBalanceProbe* probe = (TextWrapBalanceProbe*)context;
+        LayoutContext* lycon = probe->lycon;
+        LayoutContextScope scope(lycon);
+        float line_height = text_wrap_balance_line_height(lycon);
+        lycon->block.advance_y = probe->query_y + index * line_height + probe->clearance;
+        lycon->line.left = probe->query_left;
+        lycon->line.right = probe->query_left + probe->query_width;
+        lycon->line.is_line_start = true;
+        update_line_for_bfc_floats(lycon);
+        float available = lycon->line.effective_right - lycon->line.effective_left;
+        if (required_width > available && lycon->line.has_float_intrusion) {
+            BlockContext* bfc = block_context_find_bfc(&lycon->block);
+            float next_y = find_line_y_for_width_with_floats(bfc, &lycon->block,
+                &lycon->line, required_width, lycon->block.advance_y, line_height);
+            probe->clearance += next_y - lycon->block.advance_y;
+            lycon->block.advance_y = next_y;
+            update_line_for_bfc_floats(lycon);
+            available = lycon->line.effective_right - lycon->line.effective_left;
+        }
+        return max(0.0f, available);
+    }
+
+    IntrinsicSizes widths() {
+        if (has_boundaries) {
+            if (!paragraph) return {};
+            TextIntrinsicWidths sizes = layout_measure_text_intrinsic_widths(
+                lycon, paragraph, length, get_element_text_transform(block),
+                get_element_font_variant(block), block->block()->white_space,
+                block->block()->overflow_wrap, block->block()->word_break);
+            return {sizes.min_content, sizes.max_content};
+        }
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, block, true);
+        float decoration = layout_box_metrics(block).pad_border_h;
+        sizes.min_content = max(0.0f, sizes.min_content - decoration);
+        sizes.max_content = max(0.0f, sizes.max_content - decoration);
+        return sizes;
+    }
+
+    int lines(float width) {
+        float line_height = text_wrap_balance_line_height(lycon);
+        BlockContext* bfc = block_context_find_bfc(&lycon->block);
+        bool query_floats = content && bfc && (bfc->left_float_count || bfc->right_float_count);
+        query_width = width;
+        clearance = 0.0f;
+        // balance uses the same shortened intervals and float clearance as rendering.
+        float height = (has_boundaries || query_floats)
+            ? (paragraph ? compute_text_height_at_width(lycon, paragraph, length,
+                width, line_height, get_element_text_transform(block),
+                get_element_font_variant(block), false,
+                query_floats ? line_width : nullptr, this) : 0.0f)
+            : calculate_max_content_height(lycon, block, width);
+        return max(1, (int)ceilf((height - 0.01f) / line_height)); // INT_CAST_OK: measured line count
+    }
+};
 
 static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
-                                       float content_width) {
-    if (!lycon || !block || !block->blk || content_width <= 0.0f) return 0.0f;
-    if (lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
+                                       float content_width, int paragraph,
+                                       bool* has_paragraph_boundaries) {
+    *has_paragraph_boundaries = false;
+    if (!block || !block->blk || content_width <= 0.0f ||
+        lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
     if (block->block()->white_space == CSS_VALUE_NOWRAP || block->block()->white_space == CSS_VALUE_PRE) return 0.0f;
     if (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) return 0.0f;
+    LayoutFontScope font_scope(lycon);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    TextWrapBalanceProbe probe(lycon, block, paragraph);
+    *has_paragraph_boundaries = probe.has_boundaries;
+    IntrinsicSizes sizes = probe.widths();
+    if (sizes.max_content <= content_width + 0.5f ||
+        sizes.min_content >= content_width - 0.5f) return 0.0f;
+    int normal_lines = probe.lines(content_width);
+    float normal_clearance = probe.clearance;
     bool clamp_active = lycon->block.line_clamp > 0;
-    float max_content = 0.0f;
-    float min_content = 0.0f;
-    IntrinsicSizes balance_sizes = measure_element_intrinsic_widths(
-        lycon, static_cast<DomElement*>(static_cast<DomNode*>(block)), true);
-    BoxMetrics balance_box = layout_box_metrics(block);
-    max_content = max(balance_sizes.max_content - balance_box.pad_border_h, 0.0f);
-    min_content = max(balance_sizes.min_content - balance_box.pad_border_h, 0.0f);
-    if (max_content <= content_width + 0.5f) return 0.0f;
-    if (min_content >= content_width - 0.5f) return 0.0f;
-    int target_lines = clamp_active ? lycon->block.line_clamp :
-        text_wrap_balance_intrinsic_line_count(max_content, content_width);
-    if (target_lines <= 1) return 0.0f;
-    // CSS Text 4 permits UAs to skip balancing above a small line-count limit.
-    if (target_lines > 5) return 0.0f;
+    int remaining_lines = clamp_active
+        ? max(0, lycon->block.line_clamp - lycon->block.balance_wrap_start_line)
+        : normal_lines;
+    // complex block/float heights do not encode a count of inline line boxes.
+    // retain the intrinsic estimate until their DOM probe can report that count.
+    int target_lines = clamp_active ? remaining_lines :
+        (probe.content ? normal_lines :
+            (int)ceilf((sizes.max_content - 0.01f) / content_width)); // INT_CAST_OK: fallback line-count estimate
+    if (clamp_active && probe.has_boundaries) target_lines = min(target_lines, normal_lines);
+    // CSS Text 4 §5.4 permits the auto fallback only above ten lines.
+    if (target_lines <= 1 || target_lines > 10) return 0.0f;
     int balance_line_limit = target_lines;
-    float content_measure = max_content;
+    float content_measure = sizes.max_content;
     if (clamp_active) {
-        // css overflow 4 §5.3: clamp the stable layout first, then balance
-        // the remaining visible lines without letting a discarded unbreakable
-        // tail prevent the balance pass from starting.
-        balance_line_limit = max(target_lines,
-            text_wrap_balance_normal_line_count(lycon, block, content_width));
-        content_measure = max(max_content - min_content, 0.0f);
+        // retain the existing clamp probe until visible-prefix measurement owns
+        // the cutoff; discarded content must not enlarge the visible line budget.
+        balance_line_limit = max(target_lines, normal_lines);
+        content_measure = max(content_measure - sizes.min_content, 0.0f);
     }
     float lower_bound = content_measure / (float)target_lines;
-    if (!clamp_active && lower_bound < min_content) {
-        lower_bound = min_content;
-    }
+    if (!clamp_active) lower_bound = max(lower_bound, sizes.min_content);
     if (lower_bound >= content_width - 0.5f) return 0.0f;
     float low = lower_bound;
     float high = content_width;
     for (int step = 0; step < 12; step++) {
         float mid = (low + high) * 0.5f;
-        float measured_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), mid);
-        int line_count = (int)ceilf((measured_height - 0.01f) / text_wrap_balance_line_height(lycon)); // INT_CAST_OK: probe result as line count
-        if (line_count <= balance_line_limit) {
-            high = mid;
-        } else {
-            low = mid;
-        }
+        // balancing chooses soft breaks within the existing float geometry;
+        // a narrower probe cannot clear a float to invent a new paragraph origin.
+        if (probe.lines(mid) <= balance_line_limit &&
+            probe.clearance <= normal_clearance + kTextLayoutSubpixelEpsilon) high = mid;
+        else low = mid;
     }
-    float balanced = ceilf(high * 2.0f) * 0.5f;
-    if (balanced < lower_bound) balanced = lower_bound;
-    if (!clamp_active && balanced < min_content) {
-        balanced = min_content;
-    }
-    if (balanced >= content_width - 0.5f) return 0.0f;
-    return balanced;
+    float balanced = max(lower_bound, ceilf(high * 2.0f) * 0.5f);
+    return balanced < content_width - 0.5f ? balanced : 0.0f;
+}
+
+static float text_wrap_balance_update(LayoutContext* lycon, ViewBlock* block,
+                                      float available_width, int paragraph) {
+    bool has_paragraph_boundaries = false;
+    float width = text_wrap_balance_measure(lycon, block, available_width,
+        paragraph, &has_paragraph_boundaries);
+    lycon->block.balance_wrap_active = width > 0.0f;
+    lycon->block.balance_wrap_width = width;
+    lycon->block.balance_wrap_owner = has_paragraph_boundaries ? lam::up(block) : nullptr;
+    return width;
+}
+
+static float text_wrap_balance_start(LayoutContext* lycon, ViewBlock* block,
+                                     float available_width) {
+    lycon->block.balance_wrap_paragraph = 0;
+    lycon->block.balance_wrap_start_line = 0;
+    lycon->block.balance_wrap_available_width = available_width;
+    return text_wrap_balance_update(lycon, block, available_width, 0);
+}
+
+void layout_advance_text_balance_paragraph(LayoutContext* lycon) {
+    ViewBlock* owner = lycon->block.balance_wrap_owner;
+    if (!owner) return;
+    lycon->block.balance_wrap_paragraph++;
+    lycon->block.balance_wrap_start_line = lycon->block.line_number;
+    float width = text_wrap_balance_update(lycon, owner,
+        lycon->block.balance_wrap_available_width,
+        lycon->block.balance_wrap_paragraph);
+    // a real forced break starts an independent paragraph; a terminal line
+    // flush must not consume a paragraph or inherit its predecessor's width.
+    lycon->line.left = lycon->line.align_left;
+    lycon->line.right = width > 0.0f
+        ? lycon->line.left + width : lycon->line.align_right;
 }
 
 static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
@@ -896,30 +1001,31 @@ static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) 
     pseudo_append_child(pseudo_elem, static_cast<DomNode*>(text_node));
 }
 
+static void pseudo_update_text(DomDocument* doc, DomText* text_node, const char* content) {
+    // unchanged generated text must not grow document-owned string storage on every layout.
+    if (text_node->text && strcmp(text_node->text, content) == 0) return;
+    String* text_string = dom_document_create_string(doc, content, strlen(content));
+    if (text_string) {
+        dom_text_adopt_document_string(text_node, doc, text_string);
+        text_node->rect = nullptr;
+    }
+}
+
 // the text of a synthetic box: its first text child takes `content`, added when missing
 static void pseudo_set_text(DomElement* pseudo_element, const char* content) {
     DomNode* first = pseudo_element->first_child;
     if (first && first->is_text()) {
-        DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
-        // unchanged generated text must not grow document-owned string storage on every layout.
-        if (text_node->text && strcmp(text_node->text, content) == 0) return;
-        size_t content_len = strlen(content);
-        String* text_string = dom_document_create_string(
-            pseudo_element->doc, content, content_len);
-        if (text_string) {
-            dom_text_adopt_document_string(
-                text_node, pseudo_element->doc, text_string);
-            text_node->rect = nullptr;
-        }
+        pseudo_update_text(pseudo_element->doc, lam::dom_as<DOM_NODE_TEXT>(first), content);
     } else if (content[0]) {
         pseudo_append_text_child(pseudo_element, content);
     }
 }
 
 static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* pseudo_elem,
-                                             const CssDeclaration* content_decl, const char* raw_url) {
+                                             const CssDeclaration* content_decl, const char* raw_url,
+                                             DomElement* retained = nullptr) {
     if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
-    DomElement* img_elem = DomElement::create(pseudo_elem->doc, "img", nullptr);
+    DomElement* img_elem = retained ? retained : DomElement::create(pseudo_elem->doc, "img", nullptr);
     if (!img_elem) return nullptr;
     if (!img_elem->embed) {
         img_elem->ensure_embed(lycon);
@@ -927,12 +1033,14 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     if (!img_elem->embed) return nullptr;
     char* resolved_url = resolve_css_resource_url(lycon, content_decl, raw_url);
     if (!resolved_url) return nullptr;
+    // intrinsic/used layout revalidates images from their source, independently of temporary embed slots.
+    if (!img_elem->set_attribute("src", resolved_url)) return nullptr;
     img_elem->embed->img = lam::up(load_document_image(lycon->doc, lycon->ui_context, resolved_url));
     return img_elem;
 }
 
 static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement* parent,
-                                                DomElement* pseudo_elem, bool is_before) {
+                                                DomElement* pseudo_elem, bool is_before, bool refresh = false) {
     if (!lycon || !parent || !pseudo_elem) return false;
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (!pseudo_styles) return false;
@@ -942,7 +1050,24 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
     StrBuf* text_buf = strbuf_new_cap(64);
     if (!text_buf) return false;
     bool appended_any = false;
+    DomNode* retained = refresh ? pseudo_elem->first_child.get() : nullptr;
+    if (refresh) { pseudo_elem->first_child = nullptr; pseudo_elem->last_child = nullptr; }
+    auto take_child = [&](const char* tag) -> DomNode* {
+        DomNode* child = retained;
+        if (child) retained = child->next_sibling;
+        bool matches = child && (tag ? child->is_element() && child->as_element()->tag_name &&
+            strcmp(child->as_element()->tag_name, tag) == 0 : child->is_text());
+        return matches ? child : nullptr;
+    };
+    auto flush_text = [&]() {
+        if (!text_buf->length) return;
+        DomNode* child = take_child(nullptr);
+        if (child) { pseudo_update_text(pseudo_elem->doc, child->as_text(), text_buf->str); pseudo_append_child(pseudo_elem, child); }
+        else pseudo_append_text_child(pseudo_elem, text_buf->str);
+        strbuf_reset(text_buf); appended_any = true;
+    };
     int open_quote_count = 0;
+    int* quote_depth = refresh && lycon->counter_context ? &lycon->counter_context->quote_depth : &open_quote_count;
     int item_count = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.count : 1;
     for (int i = 0; i < item_count; i++) {
         CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
@@ -950,29 +1075,46 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
         CssImageChoice content_image = {};
         bool has_content_image = css_content_replacement_image(item, lycon, &content_image);
         if (has_content_image) {
-            if (text_buf->length > 0) {
-                pseudo_append_text_child(pseudo_elem, text_buf->str);
-                text_buf->length = 0;
-                if (text_buf->str) text_buf->str[0] = '\0';
-                appended_any = true;
-            }
-            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url);
+            flush_text();
+            DomNode* retained_image = take_child("img");
+            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url,
+                retained_image ? retained_image->as_element() : nullptr);
             if (img_elem) {
                 img_elem->embed->content_image_resolution = layout_css_image_density(
                     img_elem->embedp()->img, content_image.resolution);
                 pseudo_append_child(pseudo_elem, static_cast<DomNode*>(img_elem));
                 appended_any = true;
             }
+        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, "leader")) {
+            flush_text();
+            const CssFunction* function = item->data.function;
+            const CssValue* argument = function->arg_count == 1 ? function->args[0] : nullptr;
+            const char* name = css_value_identifier_name(argument);
+            const char* pattern = argument && argument->type == CSS_VALUE_TYPE_STRING ? argument->data.string :
+                name && str_ieq_cstr(name, "dotted") ? "." : name && str_ieq_cstr(name, "solid") ? "_" :
+                name && str_ieq_cstr(name, "space") ? " " : nullptr;
+            if (!pattern) continue;
+            // CSS Content 3 §2.5: ignore pattern linefeeds before ordinary whitespace collapsing.
+            bool whitespace = false;
+            for (size_t at = 0; pattern[at]; at++) if (pattern[at] != '\n' && pattern[at] != '\r')
+                whitespace = strbuf_append_collapsed_ascii_whitespace(text_buf, pattern + at, 1, true, whitespace);
+            if (!text_buf->length) continue;
+            DomNode* child = take_child("::leader");
+            DomElement* leader = child ? child->as_element() : DomElement::create(pseudo_elem->doc, "::leader", nullptr);
+            if (leader) {
+                if (!child) leader->set_attribute("style", "white-space:pre");
+                leader->display = {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+                pseudo_set_text(leader, text_buf->str);
+                pseudo_append_child(pseudo_elem, leader); appended_any = true;
+            }
+            strbuf_reset(text_buf);
         } else {
             // Append into the retained builder; unscoped scratch cannot live inside an inline trial.
-            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf,
+            dom_element_append_content(parent, item, lycon->counter_context, quote_depth, text_buf,
                 lycon->paged ? paged_content_function : nullptr, lycon);
         }
     }
-    if (text_buf->length > 0) {
-        pseudo_append_text_child(pseudo_elem, text_buf->str);
-        appended_any = true;
-    }
+    flush_text();
     strbuf_free(text_buf);
     return appended_any;
 }
@@ -1271,6 +1413,17 @@ static void refresh_pseudo_element_style(DomElement* parent,
     pseudo->display = resolve_display_value(pseudo);
 }
 
+static bool pseudo_content_has_function(StyleTree* style, const char* name) {
+    const CssDeclaration* declaration = style ? style_tree_get_declaration(style, CSS_PROPERTY_CONTENT) : nullptr;
+    const CssValue* value = declaration ? declaration->value : nullptr;
+    int count = value && value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    for (int i = 0; value && i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[i] : value;
+        if (item && item->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(item->data.function, name)) return true;
+    }
+    return false;
+}
+
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before,
                                           FontProp* parent_font) {
@@ -1300,20 +1453,8 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER,
             parent_font);
     }
-    bool has_counter_content = false;
-    if (pseudo_styles) {
-        CssDeclaration* content_decl = style_tree_get_declaration(pseudo_styles, CSS_PROPERTY_CONTENT);
-        CssValue* content_value = content_decl ? content_decl->value : nullptr;
-        int item_count = (content_value && content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.count : 1;
-        for (int i = 0; content_value && i < item_count; i++) {
-            CssValue* item = (content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.values[i] : content_value;
-            if (item && item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function && item->data.function->name &&
-                (strcmp(item->data.function->name, "counter") == 0 || strcmp(item->data.function->name, "counters") == 0)) {
-                has_counter_content = true;
-                break;
-            }
-        }
-    }
+    bool has_counter_content = pseudo_content_has_function(pseudo_styles, "counter") ||
+        pseudo_content_has_function(pseudo_styles, "counters");
     bool materialized_children = has_counter_content ? false :
         pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
     if (!materialized_children && ((content && *content) || has_counter_content)) {
@@ -1401,6 +1542,11 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     DomElement* origin = lam::dom_as<DOM_NODE_ELEMENT>(pseudo_element->parent);
     StyleTree* style = origin->pseudo_style(kind);
     if (apply_counters) apply_pseudo_counter_ops(lycon, style);
+    // leaders remain inline fill boxes when counter/reference values are refreshed.
+    if (pseudo_content_has_function(style, "leader")) {
+        pseudo_materialize_content_children(lycon, origin, pseudo_element, pseudo == PSEUDO_ELEMENT_BEFORE, true);
+        return;
+    }
     const char* content = nullptr;
     if (pseudo == PSEUDO_ELEMENT_FOOTNOTE_CALL || pseudo == PSEUDO_ELEMENT_FOOTNOTE_MARKER) {
         // CSS GCPM 3 §2.3: a call or marker without content shows its note's footnote
@@ -2799,30 +2945,6 @@ static float layout_strut_below_baseline(LayoutContext* lycon) {
     return max(descender, 0.0f);
 }
 
-static void layout_middle_inline_contribution(LayoutContext* lycon,
-                                               float item_height,
-                                               float* ascender,
-                                               float* descender) {
-    if (!lycon || !ascender || !descender) return;
-    float parent_font_size = lycon->line.parent_font_size;
-    if (parent_font_size <= 0.0f && lycon->font.style) {
-        parent_font_size = lycon->font.style->font_size;
-    }
-    if (parent_font_size <= 0.0f) {
-        parent_font_size = lycon->block.init_ascender + lycon->block.init_descender;
-    }
-    float x_height_half;
-    if (font_box_handle(&lycon->font)) {
-        float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
-        float x_height_font_size = lycon->font.current_font_size > 0.0f
-            ? lycon->font.current_font_size : parent_font_size;
-        x_height_half = x_height_font_size * x_ratio / 2.0f;
-    } else {
-        x_height_half = parent_font_size * 0.25f;
-    }
-    *ascender = item_height / 2.0f + x_height_half;
-    *descender = item_height / 2.0f - x_height_half;
-}
 
 static float layout_select_listbox_baseline(LayoutContext* lycon,
                                             ViewBlock* block, float margin_top) {
@@ -4867,21 +4989,23 @@ bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
     return is_cross_origin;
 }
 
-void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                float iframe_width, float iframe_height) {
-    if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
-    DomDocument* parent_doc = lycon->ui_context->document;
-    float saved_viewport_width = lycon->ui_context->viewport_width;
-    float saved_viewport_height = lycon->ui_context->viewport_height;
-    lycon->ui_context->document = lam::up(doc);
-    lycon->ui_context->viewport_width = iframe_width;
-    lycon->ui_context->viewport_height = iframe_height;
-    process_document_font_faces(lycon->ui_context, doc);
-    layout_html_doc(lycon->ui_context, doc, false);
-    radiant_dispatch_lambda_body_load(lycon->ui_context, doc);
-    lycon->ui_context->document = lam::up(parent_doc);
-    lycon->ui_context->viewport_width = saved_viewport_width;
-    lycon->ui_context->viewport_height = saved_viewport_height;
+void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
+                                float iframe_width, float iframe_height, bool initial_load) {
+    if (!uicon || !doc || !doc->html_root) return;
+    DomDocument* parent_doc = uicon->document;
+    float saved_viewport_width = uicon->viewport_width;
+    float saved_viewport_height = uicon->viewport_height;
+    uicon->document = lam::up(doc);
+    uicon->viewport_width = iframe_width;
+    uicon->viewport_height = iframe_height;
+    process_document_font_faces(uicon, doc);
+    layout_html_doc(uicon, doc, false);
+    // resizing preserves the existing session; load handlers initialize it only once.
+    if (initial_load) radiant_dispatch_lambda_body_load(uicon, doc);
+    else radiant_queue_template_render_events(doc, doc->root);
+    uicon->document = lam::up(parent_doc);
+    uicon->viewport_width = saved_viewport_width;
+    uicon->viewport_height = saved_viewport_height;
 }
 
 struct IframeSourceSnapshot : DomDocumentResourceData {
@@ -4899,6 +5023,28 @@ static IframeSourceSnapshot* iframe_source(DomDocument* doc) {
         if (resource->destroy == iframe_source_destroy)
             return static_cast<IframeSourceSnapshot*>(resource->data.get());
     return nullptr;
+}
+bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
+                               float viewport_width, float viewport_height) {
+    if (!doc || !source_text) return false;
+    IframeSourceSnapshot* snapshot = iframe_source(doc);
+    if (!snapshot) {
+        snapshot = (IframeSourceSnapshot*)mem_calloc(1, sizeof(*snapshot), MEM_CAT_DOM);
+        if (!snapshot) return false;
+        snapshot->text = lam::own(mem_strdup(source_text, MEM_CAT_DOM));
+        if (!snapshot->text || !dom_document_add_resource(doc, snapshot, iframe_source_destroy)) {
+            iframe_source_destroy(snapshot);
+            return false;
+        }
+    } else if (strcmp(snapshot->text, source_text)) {
+        char* replacement = mem_strdup(source_text, MEM_CAT_DOM);
+        if (!replacement) return false;
+        mem_free(snapshot->text);
+        snapshot->text = lam::own(replacement);
+    }
+    snapshot->width = viewport_width;
+    snapshot->height = viewport_height;
+    return true;
 }
 struct IframeContextScope {
     UiContext* ui;
@@ -4930,8 +5076,8 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
         if (snapshot && (snapshot->width != viewport_width || snapshot->height != viewport_height)) {
             snapshot->width = viewport_width;
             snapshot->height = viewport_height;
-            layout_iframe_embedded_doc(lycon, previous,
-                viewport_width, viewport_height);
+            layout_iframe_embedded_doc(lycon->ui_context, previous,
+                viewport_width, viewport_height, false);
         }
         return previous;
     }
@@ -4947,15 +5093,10 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
         layout_load_iframe_src_doc(lycon, src,
             (int)viewport_width, (int)viewport_height); // INT_CAST_OK: loader viewport API uses integer CSS pixels
     if (doc) {
-        snapshot = (IframeSourceSnapshot*)mem_calloc(1, sizeof(*snapshot), MEM_CAT_DOM);
-        if (snapshot) snapshot->text = lam::own(mem_strdup(source_text, MEM_CAT_DOM));
-        if (!snapshot || !snapshot->text || !dom_document_add_resource(doc, snapshot, iframe_source_destroy)) {
-            if (snapshot) iframe_source_destroy(snapshot);
+        if (!layout_iframe_track_source(doc, source_text, viewport_width, viewport_height)) {
             free_document(doc);
             doc = nullptr;
         } else {
-            snapshot->width = viewport_width;
-            snapshot->height = viewport_height;
             if (previous) {
                 // Retire the old generation only after its replacement has loaded successfully.
                 clear_document_interaction_state_before_detach(previous);
@@ -4966,7 +5107,7 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
             block->embed->doc = lam::own(doc);
             dom_document_set_embedding(doc, lycon->ui_context->document, block->as_element());
             radiant_document_ensure_state(doc, "iframe source snapshot");
-            layout_iframe_embedded_doc(lycon, doc,
+            layout_iframe_embedded_doc(lycon->ui_context, doc,
                 viewport_width, viewport_height);
             if (previous) free_document(previous);
             DomDocument* parent = lycon->ui_context->document;
@@ -5953,6 +6094,10 @@ static void layout_shift_clean_block(LayoutContext* lycon, DomNode* child) {
 }
 
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
+    if (lycon->paged && paged_native_layout(lycon, block)) {
+        finalize_block_flow(lycon, block, block->display.outer);
+        return;
+    }
     if (block->position) {
         ViewBlock* abs_walker = block->positionp()->first_abs_child;
         while (abs_walker) {
@@ -6407,10 +6552,11 @@ void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsig
             layout_svg_foreign_object(lycon, element, width, height);
         return;
     }
+    // SVG leaves need cascade/motion state even though they create no CSS layout box.
+    if (depth) layout_init_display_contents_view(lycon, element);
     const char* tag = element->tag_name;
     bool is_switch = tag && strcmp(tag, "switch") == 0;
     if (!tag || (strcmp(tag, "svg") != 0 && strcmp(tag, "g") != 0 && strcmp(tag, "a") != 0 && !is_switch)) return;
-    if (depth) layout_init_display_contents_view(lycon, element);
     if (layout_display_is_none(resolve_display_value(element))) return;
     DomNode* selected = is_switch ? (DomNode*)dom_svg_switch_selected_child(element) : nullptr;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -6633,6 +6779,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         block->block()->text_wrap_style : inherited_text_wrap_style;
     lycon->block.balance_wrap_active = false;
     lycon->block.balance_wrap_width = 0.0f;
+    lycon->block.balance_wrap_owner = nullptr;
     layout_setup_text_indent(lycon, block, content_width);
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
@@ -6730,10 +6877,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.first_line_style_active =
             lycon->block.first_line_font != nullptr;
     }
-    float balance_width = text_wrap_balance_measure(lycon, block, line_content_width);
+    float balance_width = text_wrap_balance_start(lycon, block, line_content_width);
     if (balance_width > 0.0f) {
-        lycon->block.balance_wrap_active = true;
-        lycon->block.balance_wrap_width = balance_width;
         lycon->line.left = inner_left;
         lycon->line.right = inner_left + balance_width;
         lycon->line.align_left = inner_left;
@@ -7629,6 +7774,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                           Linebox *pa_line, float* out_original_margin_top,
                           bool* out_sibling_margin_collapsed_before_layout,
                           float* out_sibling_consumed_margin_top) {
+    lycon->block.flow_box = lam::up(block);
     layout_block_content_count++;
     if (layout_block_content_count % 5000 == 0) {
         log_notice("layout_block_content: count=%d", layout_block_content_count);
@@ -9284,16 +9430,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float inner_left = layout_axis_decoration_start(
                 block->bound ? block->boundary() : nullptr, LAYOUT_AXIS_X);
             float inner_right = inner_left + line_content_width;
-            float balance_width = text_wrap_balance_measure(lycon, block, block->content_width);
+            float balance_width = text_wrap_balance_start(lycon, block, block->content_width);
             if (balance_width > 0.0f) {
-                lycon->block.balance_wrap_active = true;
-                lycon->block.balance_wrap_width = balance_width;
                 line_init(lycon, inner_left, inner_left + balance_width);
                 lycon->line.align_left = inner_left;
                 lycon->line.align_right = inner_right;
             } else {
-                lycon->block.balance_wrap_active = false;
-                lycon->block.balance_wrap_width = 0.0f;
                 line_init(lycon, inner_left, inner_right);
                 if (lycon->paged) paged_line_start(lycon, block);
             }
@@ -10150,10 +10292,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     baseline_ref, item_baseline, valign_offset);
                 if (!is_broken_alt_image && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     float asc_contribution, desc_contribution;
-                    if (valign == CSS_VALUE_MIDDLE) {
+                    if (layout_is_middle_vertical_align(valign)) {
                         // CSS 2.1 §10.8.1: align the box midpoint with the parent x-height.
                         layout_middle_inline_contribution(
-                            lycon, item_height, &asc_contribution, &desc_contribution);
+                            lycon, valign, item_height, &asc_contribution, &desc_contribution);
                     } else if (valign == CSS_VALUE_TEXT_TOP) {
                         asc_contribution = lycon->line.parent_font_ascender;
                         desc_contribution = item_height - asc_contribution;
@@ -10294,7 +10436,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // CSS 2.1 §10.8.1: middle-aligned fallback glyphs expand the line
             // through the replaced inline's extents, not the text threshold.
             bool broken_alt_expands_line = is_broken_alt_image && block->in_line &&
-                block->inl()->vertical_align == CSS_VALUE_MIDDLE;
+                layout_is_middle_vertical_align(block->inl()->vertical_align);
             if (!is_broken_alt_image || broken_alt_expands_line) {
                 lycon->line.has_replaced_content = true;
                 lycon->line.atomic_inline_count++;
@@ -10325,13 +10467,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, block_flow_height);
                 }
                 else if (is_broken_alt_image &&
-                         block->inl()->vertical_align == CSS_VALUE_MIDDLE) {
+                         layout_is_middle_vertical_align(block->inl()->vertical_align)) {
                     // broken-image fallback remains an inline visual and must
                     // contribute its middle-aligned extents to the line box.
                     float asc_contribution = 0.0f;
                     float desc_contribution = 0.0f;
                     layout_middle_inline_contribution(
-                        lycon, block_flow_height, &asc_contribution, &desc_contribution);
+                        lycon, block->inl()->vertical_align, block_flow_height, &asc_contribution, &desc_contribution);
                     lycon->line.max_ascender = max(
                         lycon->line.max_ascender, asc_contribution);
                     lycon->line.max_descender = max(

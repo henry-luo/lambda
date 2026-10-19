@@ -41,7 +41,15 @@ extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
     for (bool ancestor = false;; ancestor = true) {
         TypeId kind = get_type_id(owner);
         // inspect only passive map/array links; no proxy traps or lazy function preparation.
-        if ((kind != LMD_TYPE_MAP && kind != LMD_TYPE_ARRAY) || mvp_lmd_is_proxy(owner)) return false;
+        if ((kind != LMD_TYPE_MAP && kind != LMD_TYPE_ARRAY) || mvp_lmd_is_proxy(owner) ||
+                mvp_lmd_foreign_candidate(owner, true)) return false;
+        // native ingress can allocate wrappers; it belongs to semantic lookup, not this passive proof.
+        if (kind == LMD_TYPE_MAP) {
+            // an integer-indexed exotic ancestor can suppress a write even when it has no matching own index.
+            if (owner.map->map_kind == MAP_KIND_TYPED_ARRAY) return false;
+            MvpLmdClass* cls = mvp_lmd_class_record(owner);
+            if (!cls || (cls->nominal.base && cls->nominal.base->extension != &mvp_lmd_class_extension)) return false;
+        }
         Map* map = mvp_lmd_property_map(owner, !ancestor);
         if (!map || (ancestor && kind == LMD_TYPE_ARRAY && owner.array->length)) return false;
         TypeMap* shape = (TypeMap*)map->type;

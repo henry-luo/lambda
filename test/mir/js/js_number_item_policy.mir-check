@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "description": "v5 §5.6: a native JS index converts to double before crossing the Item boundary; no int2it call may reintroduce a Lambda int Item.",
+  "description": "D8.1.3v25: for-in snapshots produce String keys; the native cursor is never boxed through the retired Lambda int2it API.",
   "checks": [
     {
-      "in_func": "js_main",
+      "in_func": "mvp_lmd_program",
       "expect": [
-        "i2d"
+        "call\tmvp_lmd_for_in_keys",
+        "call\tmvp_lmd_class_property"
       ],
       "forbid": [
         "int2it"

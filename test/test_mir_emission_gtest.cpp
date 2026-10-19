@@ -112,6 +112,73 @@ TEST(MirOptimizer, UnreachableSelfPhiKeepsItsDefinitionUntilCleanup) {
     MIR_finish(ctx);
 }
 
+TEST(MirOptimizer, Aarch64PackedMemoryAddressesStayEncodable) {
+#if defined(__aarch64__)
+    const struct { MIR_type_t type; int size; int64_t expected; } lanes[] = {
+        {MIR_T_I8, 1, -7}, {MIR_T_U8, 1, 249},
+        {MIR_T_I16, 2, -7}, {MIR_T_U16, 2, 65529},
+        {MIR_T_I32, 4, -7}, {MIR_T_U32, 4, 4294967289LL},
+        {MIR_T_I64, 8, -7}, {MIR_T_U64, 8, -7},
+        {MIR_T_F, 4, -7}, {MIR_T_D, 8, -7}
+    };
+    for (const auto& lane : lanes) for (int offset : {0, 1, 3, 6, 9, 42, 32760, 32766}) {
+        SCOPED_TRACE((int)lane.type);
+        SCOPED_TRACE(offset);
+        MIR_context_t ctx = MIR_init();
+        ASSERT_NE(ctx, nullptr);
+        MIR_gen_init(ctx);
+        MIR_gen_set_optimize_level(ctx, 2);
+        MIR_module_t module = MIR_new_module(ctx, "packed_addresses");
+        MIR_type_t result_type = MIR_T_I64;
+        MIR_item_t functions[2] = {};
+        for (int write = 0; write < 2; write++) {
+            MIR_item_t fn = functions[write] = write
+                ? MIR_new_func(ctx, "store", 1, &result_type, 2,
+                    MIR_T_I64, "base", MIR_T_I64, "input")
+                : MIR_new_func(ctx, "load", 1, &result_type, 1, MIR_T_I64, "base");
+            MIR_reg_t base = MIR_reg(ctx, "base", fn->u.func);
+            MIR_reg_t address = MIR_new_func_reg(ctx, fn->u.func, MIR_T_I64, "address");
+            MIR_reg_t output = write ? MIR_reg(ctx, "input", fn->u.func)
+                : MIR_new_func_reg(ctx, fn->u.func, MIR_T_I64, "output");
+            bool floating = lane.type == MIR_T_F || lane.type == MIR_T_D;
+            MIR_reg_t value = floating ? MIR_new_func_reg(ctx, fn->u.func, lane.type, "value") : output;
+            auto emit = [&](MIR_insn_t insn) { MIR_append_insn(ctx, fn, insn); };
+            // address folding must validate the byte displacement against the final lane.
+            emit(MIR_new_insn(ctx, MIR_ADD, MIR_new_reg_op(ctx, address),
+                MIR_new_reg_op(ctx, base), MIR_new_int_op(ctx, offset)));
+            if (write && floating) emit(MIR_new_insn(ctx,
+                lane.type == MIR_T_F ? MIR_I2F : MIR_I2D,
+                MIR_new_reg_op(ctx, value), MIR_new_reg_op(ctx, output)));
+            MIR_op_t memory = MIR_new_mem_op(ctx, lane.type, 0, address, 0, 1);
+            MIR_op_t reg = MIR_new_reg_op(ctx, value);
+            emit(MIR_new_insn(ctx, lane.type == MIR_T_F ? MIR_FMOV :
+                lane.type == MIR_T_D ? MIR_DMOV : MIR_MOV,
+                write ? memory : reg, write ? reg : memory));
+            if (!write && floating) emit(MIR_new_insn(ctx,
+                lane.type == MIR_T_F ? MIR_F2I : MIR_D2I,
+                MIR_new_reg_op(ctx, output), MIR_new_reg_op(ctx, value)));
+            MIR_op_t result = MIR_new_reg_op(ctx, output);
+            emit(MIR_new_insn_arr(ctx, MIR_RET, 1, &result));
+            MIR_finish_func(ctx);
+        }
+        MIR_finish_module(ctx);
+        MIR_load_module(ctx, module);
+        MIR_link(ctx, MIR_set_gen_interface, nullptr);
+        uint8_t bytes[32784] = {};
+        using Store = int64_t (*)(void*, int64_t);
+        using Load = int64_t (*)(void*);
+        EXPECT_EQ(((Store)functions[1]->addr)(bytes, -7), -7);
+        EXPECT_EQ(((Load)functions[0]->addr)(bytes), lane.expected);
+        if (offset > 0) EXPECT_EQ(bytes[offset-1], 0);
+        EXPECT_EQ(bytes[offset+lane.size], 0);
+        MIR_gen_finish(ctx);
+        MIR_finish(ctx);
+    }
+#else
+    GTEST_SKIP() << "ARM64 memory-operand validation";
+#endif
+}
+
 TEST(MirOptimizer, Aarch64LongConditionalBranchesAndLabelAddresses) {
 #if defined(__aarch64__)
     MIR_context_t ctx = MIR_init();

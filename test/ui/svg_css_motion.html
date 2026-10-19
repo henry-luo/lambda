@@ -1,0 +1,11 @@
+<!doctype html>
+<style>
+body { margin:0; background:white; }
+svg { display:block; }
+@keyframes paint {
+  from { fill:red; stroke:blue; fill-opacity:.2; stroke-opacity:.4; stroke-width:2px; stroke-dashoffset:0px; transform:translateX(0px); }
+  to { fill:blue; stroke:red; fill-opacity:1; stroke-opacity:1; stroke-width:6px; stroke-dashoffset:20px; transform:translateX(40px); }
+}
+#mark { animation:paint 2s linear -1s both paused; }
+</style>
+<svg width="200" height="100"><rect id="mark" x="20" y="20" width="40" height="40"/></svg>

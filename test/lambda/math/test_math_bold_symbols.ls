@@ -9,7 +9,7 @@
 import math: lambda.doc.math.math
 
 fn ast(src) => parse(src, {type: "math"}) ^ { null }
-fn svg(src) => format(math.render_inline(ast(src)) ^ { "ERR" }, 'html') or "ERR"
+fn svg(src) => (format(math.render_inline(ast(src)) ^ { "ERR" }, 'html') ^ { null }) or "ERR"
 
 // each painted glyph as "family weight style char"
 fn glyphs(src) {

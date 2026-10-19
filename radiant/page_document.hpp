@@ -94,6 +94,8 @@ uint32_t radiant_table_column_number(DomElement* element);
 uint32_t radiant_table_column_property_span(DomElement* element);
 bool radiant_whitespace_resolve(ViewTree* tree, ViewCssStyle* style);
 RadiantWhitespaceSpec radiant_whitespace_spec(const ViewCssStyle* style);
+// borrowed from the selected CSS generation; consumers use it synchronously.
+const RadiantWhitespaceSpec* radiant_text_whitespace(ViewTree* tree, DomNode* source);
 
 enum RadiantImageAxisKind : uint8_t { RADIANT_IMAGE_AUTO, RADIANT_IMAGE_LENGTH, RADIANT_IMAGE_PERCENT,
     RADIANT_IMAGE_FIT, RADIANT_IMAGE_FIT_DOWN, RADIANT_IMAGE_FIT_UP };
@@ -296,6 +298,9 @@ bool radiant_page_control_display(DomElement* element, DisplayValue* display);
 const RadiantPageSequence* radiant_page_sequence_for(const RadiantPageDocument* document, DomElement* element);
 const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,
     uint32_t ordinal, uint32_t folio, bool blank, bool terminal);
+// first-only trials share rule matching and need to know which predicate selected the master.
+const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,
+    uint32_t ordinal, uint32_t folio, bool blank, bool terminal, bool* selected_only);
 bool radiant_page_query_resolve(ViewTree* tree, ViewCssStyle* style);
 bool radiant_note_resolve(ViewTree* tree, ViewCssStyle* style);
 bool radiant_page_whitespace(DomText* text);

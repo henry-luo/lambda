@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Balanced paragraphs separated by forced breaks</title>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 8px; font: 10px/10px Ahem; }
+.pair { margin-bottom: 14px; }
+.test, .ref { display: inline-block; vertical-align: top; width: 120px; margin-right: 20px; text-wrap: balance; }
+.test { color: blue; }
+.ref { color: orange; }
+.center { text-align: center; }
+.pre-line { white-space: pre-line; }
+.short { width: 100px; }
+.float-zone { display: flow-root; width: 280px; margin-bottom: 14px; }
+.float { float: left; width: 150px; height: 30px; background: teal; }
+.float-text { width: 280px; text-wrap: balance; }
+#external-float-auto { text-wrap-style: auto; }
+</style>
+<body id="result">
+<div class="pair"><div id="groups" class="test">aa aa aa aa aa aa<br>aaaa aaaa aaaa<br>aaaaaa</div><div id="groups-ref" class="ref"><div>aa aa aa aa aa aa</div><div>aaaa aaaa aaaa</div><div>aaaaaa</div></div></div>
+<div class="pair"><div id="reverse" class="test">aaaaaa<br>aa aa aa aa aa aa</div><div id="reverse-ref" class="ref"><div>aaaaaa</div><div>aa aa aa aa aa aa</div></div></div>
+<div class="pair"><div id="nested" class="test center">aa <span>aa aa<br><span>aa aa aa aa aa aa</span></span><br>aa aa aa aa</div><div id="nested-ref" class="ref center"><div>aa aa aa</div><div>aa aa aa aa aa aa</div><div>aa aa aa aa</div></div></div>
+<div class="pair"><div id="newlines" class="test pre-line">aa aa aa aa aa aa
+
+aa aa aa aa aa aa</div><div id="newlines-ref" class="ref pre-line"><div>aa aa aa aa aa aa</div><div><br></div><div>aa aa aa aa aa aa</div></div></div>
+<div class="pair"><div id="six-lines" class="test">aaa aa aaa aaa a aaaa a aaaa a a a aaaa aa aa a a a aa aa aaa a aa</div><div id="six-lines-ref" class="ref">aaa aa aaa aaa a aaaa a aaaa a a a aaaa aa aa a a a aa aa aaa a aa</div></div>
+<div class="pair"><div id="line-count" class="test short">aa aaaa aaa aaa a a</div><div id="line-count-ref" class="ref short">aa aaaa aaa aaa a a</div></div>
+<div class="float-zone"><div class="float"></div><div id="external-float" class="float-text">Lorem ipsum dolor sit amet consectetur adipisicing elit.</div></div>
+<div class="float-zone"><div class="float"></div><div id="external-float-auto" class="float-text">Lorem ipsum dolor sit amet consectetur adipisicing elit.</div></div>
+<div class="float-zone"><div class="float"></div><div id="float-clearance" class="float-text">abcdefghijklmnop a b c d e</div></div>
+</body>

@@ -60,7 +60,7 @@ fn edge_class(assigned_classes) {
 }
 
 fn cylinder_rim_radius(node) =>
-  if (contains(["cylinder", "lin-cyl"], source_attr(node, "shape", "box"))) 12
+  if (contains(["cylinder", "lin-cyl"], source_attr(node, "shape", "box")) ^ { false }) 12
   else 0
 
 fn shape_css(node, palette) {

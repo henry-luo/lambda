@@ -81,6 +81,18 @@ static const char* dom_element_namespace_binding(DomElement* element, const char
 }
 
 const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
+    if (element && element->doc && !element->doc->xml_document &&
+        element->doc->page_kind == DOM_PAGE_KIND_HTML &&
+        (!prefix || (strcmp(prefix, "xml") && strcmp(prefix, "xmlns")))) {
+        // literal xmlns aliases in HTML do not bind QNames; only actual XMLNS attributes do.
+        for (DomNode* node = element; node; node = node->parent) {
+            if (!node->is_element()) continue;
+            const char* uri = dom_element_attribute_value_ns(node->as_element(),
+                "http://www.w3.org/2000/xmlns/", prefix && *prefix ? prefix : "xmlns");
+            if (uri) return *uri ? uri : nullptr;
+        }
+        return nullptr;
+    }
     const char* uri = dom_element_namespace_binding(element, prefix, prefix ? strlen(prefix) : 0);
     return uri && *uri ? uri : nullptr;
 }
@@ -645,13 +657,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
         document->url = lam::own(replacement);
         return true;
     }
-    // Input and the loader can retain document->url across navigation, so
-    // exchange owned fields instead of invalidating their carrier pointer.
-    Url previous = *document->url;
-    *document->url = *replacement;
-    *replacement = previous;
-    url_destroy(replacement);
-    return true;
+    return url_replace_contents(document->url, replacement);
 }
 
 extern "C" __attribute__((weak)) void dom_css_document_language_changed(void* document) {

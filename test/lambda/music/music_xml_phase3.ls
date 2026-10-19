@@ -6,7 +6,7 @@ let notes="<note><pitch><step>C</step><octave>4</octave></pitch><duration>9</dur
     "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>"
 fn partwise(body) => "<score-partwise>"++header++"<part id='P'><measure number='1'>"++body++"</measure></part></score-partwise>"
 fn timewise(body) => "<score-timewise>"++header++"<measure number='1'><part id='P'>"++body++"</part></measure></score-timewise>"
-fn rejected(xml) => (music.parse(xml) or "rejected")=="rejected"
+fn rejected(xml) => ((music.parse(xml) ^ { null }) or "rejected")=="rejected"
 let score=music.parse(partwise(attrs++notes),{strict:true})^
 let timed=music.parse(timewise(attrs++notes),{strict:true})^
 let sheet=music.layout(timed,{strict:true})^

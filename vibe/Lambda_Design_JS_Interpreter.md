@@ -21,7 +21,15 @@ tier and `JS_EXEC_BACKEND` do not change this. MIR never lowers dynamic
 source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 §11.6, §15.18, and Appendix S2.
 
-**Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The `EvalContext` bridge now serves MIR callers only, until P4 shared environment cells. See §5.6, §16 item 13, and Appendix S3.
+**Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The remaining MIR bridge described by that historical revision is retired by **D8.1.3v26** below. See §5.6, §16 item 13, and Appendix S3.
+
+**MVP alignment (2026-10-18):** **D8.1.3v26** supersedes the remaining
+MIR projection clauses below. Formal MVP callers already supply live lexical
+cells; the obsolete LJS journals and bridged-eval executor are removed. Both
+profiles validate eval context with the shared AST facts and keep escaping
+numeric receivers in GC-owned scalar homes. Explicit AST/native objects and
+callables remain a live profile; they have not all been replaced by MVP objects.
+Audit and qualification: [implementation record](impl/JS_Interpreter_MVP_Alignment.md).
 
 **Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 5 calls, the same as Lambda (D8.1.3v24; 100 in v23, 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
@@ -549,11 +557,11 @@ The dynamic-code entry is one runtime service with one semantic owner:
 | `$262.evalScript` | global Script | GlobalDeclarationInstantiation: non-configurable vars, realm lexical declarations |
 | direct eval, sloppy, global caller | eval code over the caller's script bindings | configurable global var/function bindings |
 | direct eval, sloppy, interpreted function caller | eval code linked to the caller's environments | the caller's nearest function variable environment |
-| direct eval, sloppy, MIR function caller | eval code over the caller's bridge | the activation's variable environment (its eval journal) |
+| direct eval, sloppy, MVP function caller | eval code linked to live MVP environment cells | the caller's nearest function variable environment |
 | direct eval, strict or strict caller | eval code | an eval-private variable environment |
 | `Function` family | a function expression script | none; the completion is the function |
 
-A direct eval from interpreted code links its activation to the caller frame's live environment chain (**D8.1.3v21 / JSI36**). Nothing is projected or written back:
+A direct eval from AST or MVP code links its activation to the caller's live environment chain (**D8.1.3v26 / JSI36v2**). Nothing is projected or written back:
 
 - the eval gets one boundary record. It holds the eval's lexical declarations, and a strict eval's vars, since that record is a strict eval's variable environment. Its outer record is the caller frame's current environment;
 - eval code, and every closure it creates, resolves a free name by name through that chain. Each record answers from its declarations, its materialized `arguments`, then the vars direct eval added to it. Past the last record, the name resolves as code of the outermost caller script would: that script's top-level bindings, then the realm. The record that answers also bounds the `with` probe, so a binding of the activation precedes the Object Environment Records its function captured at creation;
@@ -561,16 +569,23 @@ A direct eval from interpreted code links its activation to the caller frame's l
 - EvalDeclarationInstantiation targets the caller's nearest function variable environment, or the realm when the caller has none. A name that environment already binds is reused; otherwise it becomes a deletable binding there. A var that a record between the eval and that environment binds is an early SyntaxError, except over a catch parameter (Annex B.3.4). An Annex-B block function whose name such a record binds creates no var binding (B.3.2.3). A function declaration instantiates on the variable environment itself, even beneath a like-named catch parameter;
 - `this`, `new.target`, and the home object are the caller frame's own homes, so a SuperCall in eval code initializes the caller's `this`. A function whose body or nested arrow contains a direct eval materializes `arguments` for its eval code.
 
-A MIR caller keeps the `EvalContext` eval bridge:
+MVP supplies `JsInterpHostCaller` with rooted references to its `JsInterpEnv`,
+receiver, new target and home object. `js_interp_execute_host_eval` enters the
+same linked evaluator. Global/property/call operations use `JsInterpHostOps`
+and MVP's existing Lambda-backed storage. Explicit AST execution retains its
+native operation profile, while sharing the lexical storage and evaluator.
 
-- the caller installs the bridge before the call and projects its registers. Script top-level lexicals need no projection from function code: their realm records are linked to the script's module slots, so eval code reads and writes them live, including the TDZ;
-- the eval activation resolves a free name through the bridge before the realm global record, and it writes assignments back through the bridge. A projected caller binding outranks a global lexical of the same name;
-- an eval-created `var` or function declaration in function code lands in that activation's shared eval journal, where the caller reads it back;
-- the caller writes projected bindings back after the call and removes the bridge. It does this on every completion, including a throw.
+Both profiles derive eval early errors from `js_ast_collect_function_facts`.
+Non-computed property names and nested ordinary-function bodies are not lexical
+`arguments` observations; template substitutions and escaped identifiers are.
+Private-name identities are made available only during parsing, and closures
+retain their live private environment afterward. The old projection journals,
+const-assignment source scan, and `js_interp_execute_direct_eval_source` are
+removed. `js_builtin_eval` is the indirect/global entry and has no tier flags.
 
-On the bridge path, `this` and `new.target` come from the caller's activation and private names from the eval-private frame the caller installs. An interpreted caller installs that frame only while the eval source is parsed, for private-name early errors; eval code then resolves private names through the linked environments. Strictness is inherited from the caller on both paths.
-
-*Residual.* A projection is a copy, not a binding identity. Eval code of a MIR caller therefore still loses a caller-local binding once the eval returns, and JS05-L5–L7 persist on that tier. A MIR caller keeps the bridge until P4 gives compiled code the shared environment cells.
+The remaining full-profile migration concerns object/callable/realm operations,
+not the deleted binding journal. Its boundary and tests are recorded in
+[JS interpreter MVP alignment](impl/JS_Interpreter_MVP_Alignment.md).
 
 ---
 
@@ -627,7 +642,7 @@ The current `JsRuntimeState` fields are reassigned by semantic lifetime, not by 
 | Current responsibility/examples | Target owner | Rationale |
 |---|---|---|
 | `global_bindings`, `constructors`, `intrinsics`, `well_known`, prototypes, `globalThis`, JS namespace/wrapper identity, RegExp last-match state | `JsRealmState` | observable ECMAScript realm identity; meaningless to a Lambda-only context |
-| Promise reaction records, generator/async continuations, eval environment journals, JS module live-binding/TLA extensions | JS subcapsules reached from `JsRealmState` or the relevant common instance | language semantics remain JS-specific even when their storage/scheduling substrate is common |
+| Promise reaction records, generator/async continuations, eval private-name parse scopes, JS module live-binding/TLA extensions | JS subcapsules reached from `JsRealmState` or the relevant common instance | language semantics remain JS-specific even when their storage/scheduling substrate is common |
 | `event_loop` queues, timers, immediate/rAF task ownership, page liveness and drain state | `AsyncRuntimeState` with JS lanes | **D1.3/D5.4.4** require one event loop per context; JS microtask/`nextTick` ordering remains a lane policy |
 | `module_states`, module slab table/capacity, instantiated namespace/loading/error state | `ContextModuleState` | both languages instantiate modules in the same context and module-state ID space |
 | active JS module selector | current activation, with a temporary compatibility field in `ContextModuleState` for generated ABI | it changes across nested calls and is not realm identity |
@@ -1691,7 +1706,7 @@ These questions do not reopen the decisions above:
 10. **Scheduling-lane surface.** What is the narrow lane API by which Promise jobs/`nextTick`/timers preserve JS ordering while the common async owner performs liveness, task rooting, cancellation, and teardown?
 11. **Module instance extension.** Which current `ModuleDescriptor` TLA fields form the JS extension of `ContextModuleInstance`, and which dependency facts are immutable runtime-definition data?
 12. **Mixed stack traces.** Define the minimal boundary record needed to stitch generated MIR/native frames to alternating interpreted activations without adding a second semantic call stack.
-13. **Direct-eval environment linking.** *Resolved 2026-09-24 for interpreted callers (**D8.1.3v21 / JSI36**, §5.6).* A linked eval's `var` bindings go on the caller's function record, which a MIR caller's journal never reads, so the two protocols cannot disturb each other. MIR callers keep the bridge until P4.
+13. **Direct-eval environment linking.** *Updated 2026-10-18 (**D8.1.3v26 / JSI36v2**, §5.6).* AST and MVP callers share live environment cells. The retired MIR projection journals are removed; private-name projection remains parser-only.
 
 ---
 
@@ -1734,7 +1749,7 @@ These questions do not reopen the decisions above:
 | **JSI33** | JS call/module/`this`/`super`/arguments state belongs to the common activation chain, not realm state | proposed |
 | **JSI34** | `context` remains the only TLS execution root; the derived JS-state TLS cache is retired | proposed / D5.4.1 alignment |
 | **JSI35** | Dynamic source (eval, `Function` family, string timers, `$262.evalScript`) executes only in the AST interpreter; MIR never lowers it | ratified USER 2026-09-24 / D8.1.3v20 |
-| **JSI36** | A direct eval from interpreted code links its activation to the caller frame's live environments; the `EvalContext` bridge serves MIR callers only | ratified USER 2026-09-24 / D8.1.3v21 |
+| **JSI36v2** | Direct eval from AST and MVP callers links to live lexical environments; no value projection/write-back journal remains. Context checks use shared bound-AST facts. | updated 2026-10-18 / D8.1.3v26 |
 
 ---
 

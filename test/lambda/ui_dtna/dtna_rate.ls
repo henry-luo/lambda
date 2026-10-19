@@ -20,11 +20,11 @@ let custom = ui.render(ui.rate({count:3,character:(star) => string(star.index + 
     ["custom count",len(content(custom)) == 3],
     ["custom symbol function",content(content(content(custom)[2])[1])[0] == "3"],
     ["tooltips and labels",content(custom)[0].title == "Poor" and content(custom)[0]["aria-label"] == "Poor"],
-    ["invalid count",(ui.rate({count:0}) or null) == null and (ui.rate({count:2.5}) or null) == null],
-    ["invalid values",(ui.rate({value:-1}) or null) == null and (ui.rate({value:6}) or null) == null and (ui.rate({value:nan}) or null) == null],
-    ["controlled pair",(ui.rate({value:1,default_value:2}) or null) == null],
-    ["invalid flags",(ui.rate({allow_half:null}) or null) == null and (ui.rate({readonly:1}) or null) == null],
-    ["invalid tooltips",(ui.rate({tooltips:[1]}) or null) == null and (ui.rate({tooltips:"bad"}) or null) == null],
-    ["unknown prop",(ui.rate({unknown:true}) or null) == null],
-    ["size",contains((ui.render(ui.rate({size:'small'})^)).class,"dtna-size-small") and (ui.rate({size:'huge'}) or null) == null]
+    ["invalid count",((ui.rate({count:0}) ^ { null }) or null) == null and ((ui.rate({count:2.5}) ^ { null }) or null) == null],
+    ["invalid values",((ui.rate({value:-1}) ^ { null }) or null) == null and ((ui.rate({value:6}) ^ { null }) or null) == null and ((ui.rate({value:nan}) ^ { null }) or null) == null],
+    ["controlled pair",((ui.rate({value:1,default_value:2}) ^ { null }) or null) == null],
+    ["invalid flags",((ui.rate({allow_half:null}) ^ { null }) or null) == null and ((ui.rate({readonly:1}) ^ { null }) or null) == null],
+    ["invalid tooltips",((ui.rate({tooltips:[1]}) ^ { null }) or null) == null and ((ui.rate({tooltips:"bad"}) ^ { null }) or null) == null],
+    ["unknown prop",((ui.rate({unknown:true}) ^ { null }) or null) == null],
+    ["size",contains((ui.render(ui.rate({size:'small'})^)).class,"dtna-size-small") and ((ui.rate({size:'huge'}) ^ { null }) or null) == null]
 ]

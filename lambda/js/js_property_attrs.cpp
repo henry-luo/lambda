@@ -760,18 +760,6 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
 // can drop the result on the floor without needing a void-returning helper.
-extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
-                                          int is_setter) {
-    JS_ROOTS(roots, obj_root, obj, name_root, name, fn_root, fn);
-    // Canonicalize the property key per ES §7.1.14 ToPropertyKey: numeric/bool
-    // literal keys (e.g. `{ get [1]() {} }`) must be converted to their string
-    // form before the chokepoint stores under that name.
-    JS_ASSIGN_OR_RETURN(key_result, js_to_property_key(name_root.get()));
-    name_root.set(key_result);
-    JS_ASSIGN_OR_RETURN(accessor_result, js_define_accessor_partial(
-        obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0));
-    return obj_root.get();
-}
 
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
         NameId name_id) {

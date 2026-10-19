@@ -8,12 +8,15 @@
 
 struct NameScope;
 struct JsScript;
+struct JsSourceModuleRecord;
 
 enum JsInterpEnvironmentRole {
     JS_INTERP_ENV_ORDINARY,
     JS_INTERP_ENV_PARAMETERS,
     JS_INTERP_ENV_BODY_VARS,
     JS_INTERP_ENV_GLOBAL_OBJECT, // vars resolve through the host global property record
+    JS_INTERP_ENV_WITH_OBJECT, // interleaved with declarative records for hosted eval
+    JS_INTERP_ENV_MODULE, // live bindings are owned by the shared source-module slab
 };
 
 enum JsInterpHostCells {
@@ -30,7 +33,7 @@ typedef struct JsInterpEnv {
     // Class evaluation publishes this lexical private-name owner for member
     // bodies, field initializers, static blocks, and their nested closures.
     uint64_t private_home_class;
-    // Flat [source name, identity key] pairs exported to a direct-eval bridge.
+    // Flat [source name, identity key] pairs retained by direct eval's lexical scope.
     uint64_t private_bindings;
     // Flat [name, value] pairs declared by direct eval in this variable
     // environment. Closures retain this GC-owned record after the caller exits.
@@ -38,11 +41,14 @@ typedef struct JsInterpEnv {
     // The nearest non-arrow function's live lexical `this` binding. Derived
     // constructors initialize this cell only after their `super()` call.
     uint64_t lexical_this;
+    // retain the object binding across escaped eval closures.
+    uint64_t with_object;
     struct AstNode* function_node;
     // Set on the declarative record of a direct eval linked to an interpreted
     // caller (D8.1.3v21): its slots hold that eval Script's top-level
     // declarations, and `outer` continues into the caller frame's environments.
     struct JsScript* eval_script;
+    struct JsSourceModuleRecord* source_module; // registry-owned through heap finalization
     uint32_t slot_count;
     uint8_t arguments_are_mapped;
     uint8_t has_lexical_this;
@@ -50,8 +56,9 @@ typedef struct JsInterpEnv {
     // arguments aliases may detach; lexical and receiver cell ownership does not.
     uint8_t host_cells;
     uint8_t binding_role; // projects shared source slots into the activation record
-    // arguments is mutable and can outlive a caller-owned numeric payload.
+    // mutable metadata owns scalar payloads just like the ordinary lexical slots.
     uint64_t arguments_scalar_home;
+    uint64_t this_scalar_home;
     uint64_t slots[1];
 } JsInterpEnv;
 
@@ -60,8 +67,13 @@ static inline void js_interp_env_arguments_store(JsInterpEnv* env, Item value) {
         &env->arguments_scalar_home);
 }
 
+static inline void js_interp_env_this_store(JsInterpEnv* env, Item value) {
+    if (env) *(Item*)(void*)&env->lexical_this = lambda_item_adopt_scalar_home(value,
+        &env->this_scalar_home);
+}
+
 // JS adds lexical metadata to the common durable Item/scalar slot storage.
-// The five Item words are deliberately contiguous so the generic visitor can
+// the six Item words are deliberately contiguous so the generic visitor can
 // trace them with the same contract it uses for ordinary capture slots.
 static inline void js_interp_env_storage(JsInterpEnv* env,
         GcEnvironmentStorage* storage) {
@@ -75,7 +87,7 @@ static inline void js_interp_env_storage(JsInterpEnv* env,
     Item* slots = (Item*)(void*)env->slots;
     gc_environment_storage_init(storage, GC_ENVIRONMENT_LAYOUT_LEXICAL, slots,
         env->slots + env->slot_count, env->slot_count, env->outer,
-        (Item*)(void*)&env->arguments_object, 5);
+        (Item*)(void*)&env->arguments_object, 6);
 }
 
 static inline Item js_interp_env_slot_read(JsInterpEnv* env, uint32_t slot,

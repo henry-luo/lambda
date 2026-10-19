@@ -1,7 +1,7 @@
 #include "../runtime/emit_ast_dump.h"
 #include "../runtime/type_contract.hpp"
 #include "js_transpiler.hpp"
-#include "js_mir_internal.hpp"
+#include "js_execution_internal.hpp"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"

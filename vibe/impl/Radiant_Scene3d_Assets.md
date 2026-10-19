@@ -32,9 +32,9 @@ make -C build/premake config=debug_native test_input_model_gtest test_radiant_vi
 mkdir -p temp/scene3d-assets
 LAMBDA_SCENE3D_CAPTURE_DIR=temp/scene3d-assets ./test/test_radiant_view_gtest.exe \
   --gtest_filter='Scene3dTest.ImportedAssetGallery*'
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/asset-gallery.ls \
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/scene3d/imported-assets.ls \
   -o temp/scene3d-assets/gallery.png -vw 1280 -vh 520
-./lambda.exe view test/demo/scene3d/asset-gallery.ls
+./lambda.exe view test/scene3d/imported-assets.ls
 ```
 
 Run graphics commands with desktop graphics access on macOS. Fixture resources
@@ -99,7 +99,7 @@ powers of two while preserving aspect ratio and source pixels. Alpha-weighted
 RGB averaging avoids transparent-edge halos; mip storage uses the actual upload
 dimensions. The existing 128 MiB graphics-context limit is unchanged.
 
-`test/demo/cellscope` keeps one reduced, textured plant model locally and loads
+`test/demo/scene3d/cellscope` keeps one reduced, textured plant model locally and loads
 four pinned upstream GLBs over HTTP on selection. Its manual online fixture
 verifies each published model produces nonblank native pixels; routine UI
 fixtures exercise the bundled plant and procedural Muscle without remote

@@ -1,0 +1,14 @@
+<!doctype html><html class="reftest-wait"><body>
+<div id="result" data-cancelled="safe" style="width:10px;height:10px"></div>
+<script>
+addEventListener('load', async () => {
+    const box = document.getElementById('result');
+    await new Promise(resolve => setTimeout(resolve, 16));
+    box.style.width = '23px';
+    await new Promise(resolve => setTimeout(resolve, 32));
+    requestAnimationFrame(() => {
+        box.style.width = '41px';
+        document.documentElement.classList.remove('reftest-wait');
+    });
+});
+</script></body></html>

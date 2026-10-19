@@ -22,7 +22,7 @@ let success = ui.render(ui.result({status:'success',title:0})^);
     ["no illustration",len(content(no_image)) == 1 and content(content(no_image)[0])[0] == "0"],
     ["exception illustration",content(content(exception)[0])[0].viewBox == "0 0 252 294" and len(content(exception)) == 5],
     ["status icon",content(content(success)[0])[0].fill == "currentColor" and content(content(success)[1])[0] == "0"],
-    ["invalid card",(ui.card({actions:1}) or null) == null and (ui.card({loading:1}) or null) == null and (ui.card({type:'bad'}) or null) == null],
-    ["invalid tabs",(ui.card({tab_list:[]}) or null) == null and (ui.card({id:"x",tab_list:[{key:1,label:"One"}],active_tab:2}) or null) == null],
-    ["invalid display",(ui.empty({image_height:-1}) or null) == null and (ui.empty({locale:'bad'}) or null) == null and (ui.result({status:'bad'}) or null) == null]
+    ["invalid card",((ui.card({actions:1}) ^ { null }) or null) == null and ((ui.card({loading:1}) ^ { null }) or null) == null and ((ui.card({type:'bad'}) ^ { null }) or null) == null],
+    ["invalid tabs",((ui.card({tab_list:[]}) ^ { null }) or null) == null and ((ui.card({id:"x",tab_list:[{key:1,label:"One"}],active_tab:2}) ^ { null }) or null) == null],
+    ["invalid display",((ui.empty({image_height:-1}) ^ { null }) or null) == null and ((ui.empty({locale:'bad'}) ^ { null }) or null) == null and ((ui.result({status:'bad'}) ^ { null }) or null) == null]
 ]

@@ -1,15 +1,16 @@
 true
 false
 false
-"falsydefault value"
-42
-[1, 2, 3]
+error
+error
+error
+error
 4
 1
 true
 "hello"
-false
-true
+error
+error
 false
 "test"
 318
@@ -18,7 +19,8 @@ false
 true
 true
 true
-"finalfalsy"
+error
+error
 error
 error
 42

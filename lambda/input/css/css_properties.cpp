@@ -210,6 +210,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FILL, "fill", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_STROKE, "stroke", PROP_TYPE_COLOR, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_X, "x", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_Y, "y", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CX, "cx", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CY, "cy", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_R, "r", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_RX, "rx", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_RY, "ry", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_STROKE_WIDTH, "stroke-width", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "1px", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FILL_OPACITY, "fill-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_STROKE_OPACITY, "stroke-opacity", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "1", true, false, NULL, 0, validate_number, NULL},
@@ -1247,13 +1254,18 @@ bool css_property_is_svg_resource(CssPropertyCode id) {
         (id >= CSS_PROPERTY_MARKER_START && id <= CSS_PROPERTY_MARKER);
 }
 
+bool css_property_is_svg_geometry(CssPropertyCode id) {
+    return (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) ||
+        id == CSS_PROPERTY_WIDTH || id == CSS_PROPERTY_HEIGHT;
+}
+
 bool css_property_is_svg_presentation(CssPropertyCode id) {
-    return css_property_is_svg_paint(id) ||
+    return css_property_is_svg_paint(id) || (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) ||
         (id >= CSS_PROPERTY_FILL_OPACITY && id <= CSS_PROPERTY_TEXT_ANCHOR);
 }
 
 bool css_property_is_svg_length(CssPropertyCode id) {
-    return id == CSS_PROPERTY_STROKE_WIDTH || id == CSS_PROPERTY_STROKE_DASHARRAY ||
+    return css_property_is_svg_geometry(id) || id == CSS_PROPERTY_STROKE_WIDTH || id == CSS_PROPERTY_STROKE_DASHARRAY ||
         id == CSS_PROPERTY_STROKE_DASHOFFSET;
 }
 
@@ -2479,6 +2491,12 @@ const CssValue* css_project_shorthand_longhand(Pool* pool, const CssValue* value
         return css_grid_shorthand_longhand(pool, value, shorthand, longhand);
     if (shorthand == CSS_PROPERTY_CONTAINER)
         return css_container_shorthand_longhand(value, longhand, pool);
+    if (shorthand == CSS_PROPERTY_GAP) {
+        size_t count = css_space_list_count(value);
+        if (!count || count > 2 || (longhand != CSS_PROPERTY_ROW_GAP && longhand != CSS_PROPERTY_COLUMN_GAP)) return nullptr;
+        // a single gap value supplies both axes; two values keep row/column order.
+        return css_space_list_item(value, longhand == CSS_PROPERTY_COLUMN_GAP && count == 2 ? 1 : 0);
+    }
     if (shorthand != CSS_PROPERTY_FLEX) return value;
     const CssValue* members[3];
     if (!css_flex_components(value, members)) return nullptr;
@@ -3242,6 +3260,12 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
             value->type == CSS_VALUE_TYPE_URL ||
             (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE);
+    if (id >= CSS_PROPERTY_X && id <= CSS_PROPERTY_RY) {
+        if ((id == CSS_PROPERTY_RX || id == CSS_PROPERTY_RY) &&
+            css_value_keyword_equals(value, CSS_VALUE_AUTO)) return true;
+        // SVG geometry accepts unitless user-unit numbers in CSS as well as presentation attributes.
+        return css_value_is_svg_stroke_width(value, id >= CSS_PROPERTY_R);
+    }
     if (id == CSS_PROPERTY_STROKE_WIDTH) return css_value_is_svg_stroke_width(value);
     if (id == CSS_PROPERTY_STROKE_DASHOFFSET) return css_value_is_svg_stroke_width(value, false);
     if (id == CSS_PROPERTY_STROKE_DASHARRAY) {
@@ -3757,9 +3781,9 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             if (value->type == CSS_VALUE_TYPE_KEYWORD) return value->data.keyword == CSS_VALUE_NORMAL;
             if (value->type == CSS_VALUE_TYPE_LENGTH) return css_unit_is_length(value->data.length.unit);
             if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0;
-            // CSS Text 4 percentage tracking is already resolved against the current font size.
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return id == CSS_PROPERTY_LETTER_SPACING;
-            return css_value_is_length_expression(value, id == CSS_PROPERTY_LETTER_SPACING, false);
+            // CSS Text 4 §§8.1–8.2 accepts font-relative percentages for both spacing properties.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+            return css_value_is_length_expression(value, true, false);
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             // CSS Inline: invalid dimensions must not replace a valid inherited line-height.
