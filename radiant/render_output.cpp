@@ -448,7 +448,7 @@ static bool render_export_session_begin_internal(
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
         float device_scale, bool raster_surface, bool print_media, bool paged,
-        RenderExportDocumentLoader loader, void* request) {
+        RenderExportDocumentLoader loader, void* request, UiContext* shared_ui = nullptr) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
 
@@ -474,16 +474,23 @@ static bool render_export_session_begin_internal(
     session->auto_height = auto_height;
     session->print_media = print_media || paged;
 
-    session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+    session->ui_context = lam::up(shared_ui);
+    if (!shared_ui) {
+        session->owned_ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+        session->ui_context = session->owned_ui_context.borrow();
+    }
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
     }
-    if (ui_context_init(session->ui_context, true, session->device_scale) != 0) {
+    if (!shared_ui && ui_context_init(session->ui_context, true, session->device_scale) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
-        lam::free_owned(session->ui_context);
+        lam::free_owned(session->owned_ui_context);
+        session->ui_context = nullptr;
         return false;
     }
+    ui_context_set_device_scale(session->ui_context, session->device_scale, session->device_scale);
+    session->ui_context->render_failed = false;
     // Only documents that actually request scene pixels acquire a graphics host.
     session->ui_context->export_native_graphics=true;
     int surface_width = raster_surface
@@ -501,8 +508,7 @@ static bool render_export_session_begin_internal(
     session->base_url = lam::own(get_current_dir());
     if (!session->base_url) {
         log_error("[EXPORT_SESSION] Could not resolve the current directory");
-        ui_context_cleanup(session->ui_context);
-        lam::free_owned(session->ui_context);
+        render_export_session_end(session);
         return false;
     }
 
@@ -658,10 +664,11 @@ void render_export_session_end(RenderExportSession* session) {
         url_destroy(session->base_url);
         session->base_url = nullptr;
     }
-    if (session->ui_context) {
-        ui_context_cleanup(session->ui_context);
-        lam::free_owned(session->ui_context);
+    if (session->owned_ui_context) {
+        ui_context_cleanup(session->owned_ui_context);
+        lam::free_owned(session->owned_ui_context);
     }
+    session->ui_context = nullptr;
     session->document = nullptr;
     session->paged_view = nullptr;
 }
@@ -1488,6 +1495,35 @@ static int render_output_render_html_file_to_target(const char* html_file,
     return 1;
 }
 
+static int render_export_session_to_target(RenderExportSession* session, RenderOutputTarget* target) {
+    switch (target->kind) {
+        case RENDER_OUTPUT_PNG: return render_export_session_to_png(session, target->output_file, target->transparent_background);
+        case RENDER_OUTPUT_JPEG: return render_export_session_to_jpeg(session, target->output_file, target->jpeg_quality);
+        case RENDER_OUTPUT_SVG: return render_export_session_to_svg(session, target->output_file);
+        case RENDER_OUTPUT_PDF: return render_export_session_to_pdf(session, target->output_file);
+        default: return 1;
+    }
+}
+
+int render_batch_export(UiContext* ui, const char* source, const char* filename,
+        float viewport_width, float viewport_height, float device_scale) {
+    if (!ui || !source || !filename) return 1;
+    RenderOutputTarget target;
+    render_output_target_init(&target, render_output_kind_from_file(filename), filename);
+    bool raster = target.kind == RENDER_OUTPUT_PNG || target.kind == RENDER_OUTPUT_JPEG;
+    bool pdf = target.kind == RENDER_OUTPUT_PDF;
+    RenderExportHtmlRequest request = {source, INPUT_RESOURCE_ALLOW_NETWORK, false};
+    RenderExportSession session = {};
+    // share only the host; each job uses the ordinary format's media and layout defaults.
+    if (!render_export_session_begin_internal(&session,
+            (int)viewport_width, (int)viewport_height, // INT_CAST_OK: existing CLI viewport contract uses whole CSS pixels.
+            pdf ? 800 : 1200, pdf ? 1200 : 800, 1, device_scale, raster, pdf, false,
+            render_export_load_html_document, &request, ui)) return 1;
+    int result = render_export_session_to_target(&session, &target);
+    render_export_session_end(&session);
+    return result;
+}
+
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
         const char* base_url, bool block_remote_resources) {
     if (!html_source || !target || !target->output_file || target->kind == RENDER_OUTPUT_SCREEN) return 1;
@@ -1498,14 +1534,7 @@ int render_html_source_to_output_target(const char* html_source, RenderOutputTar
     if (!render_export_session_begin_internal(&session, target->viewport_width, target->viewport_height,
         800, 600, target->output_scale, target->device_scale, raster, target->kind == RENDER_OUTPUT_PDF,
         false, render_export_load_html_source, &request)) return 1;
-    int result = 1;
-    switch (target->kind) {
-        case RENDER_OUTPUT_PNG: result = render_export_session_to_png(&session, target->output_file, target->transparent_background); break;
-        case RENDER_OUTPUT_JPEG: result = render_export_session_to_jpeg(&session, target->output_file, target->jpeg_quality); break;
-        case RENDER_OUTPUT_SVG: result = render_export_session_to_svg(&session, target->output_file); break;
-        case RENDER_OUTPUT_PDF: result = render_export_session_to_pdf(&session, target->output_file); break;
-        default: break;
-    }
+    int result = render_export_session_to_target(&session, target);
     render_export_session_end(&session);
     return result;
 }

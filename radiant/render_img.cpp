@@ -10,7 +10,6 @@ extern "C" {
 #include "../lib/time_util.h"
 }
 #include "../lambda/input/input.hpp"
-#include "../lambda/js/js_runtime.h"
 #include "../radiant/radiant.hpp"
 #include <stdio.h>
 #include <string.h>
@@ -318,13 +317,8 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 //   FAIL\t<html_file>\t<reason>
 
 static void render_batch_cleanup_doc(UiContext* ui_context) {
-    // cache teardown consults the document scheduler; clear the binding through shared ownership cleanup first.
+    // retire the document's JS realm before caches; ambient resets erase the live loader's Lambda slots.
     ui_context->destroy_document();
-
-    js_batch_reset();
-    dom_batch_reset();
-    js_globals_batch_reset();
-    script_runner_cleanup_heap();
 
     font_context_reset_document_fonts(ui_context->font_ctx);
     font_context_reset_glyph_caches(ui_context->font_ctx);
@@ -416,10 +410,21 @@ static bool render_batch_single(
     return success;
 }
 
+static void render_batch_report(bool framed, bool ok, const char* source, const char* reason = nullptr) {
+    if (framed) fputs("\n\x01" "RENDER_RESULT\t", stdout);
+    fputs(ok ? "OK\t" : "FAIL\t", stdout);
+    fputs(source, stdout);
+    if (reason) { fputc('\t', stdout); fputs(reason, stdout); }
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
 int cmd_render_batch(int argc, char** argv) {
     // --pixel-ratio is the legacy CLI spelling for device scale.
     float default_device_scale = 1.0f;
+    bool export_formats = false;
     for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--export") == 0) export_formats = true;
         if (strcmp(argv[i], "--pixel-ratio") == 0 && i + 1 < argc) {
             default_device_scale = (float)atof(argv[i + 1]);
             if (default_device_scale <= 0) default_device_scale = 1.0f;
@@ -490,8 +495,7 @@ int cmd_render_batch(int argc, char** argv) {
         char* html_file = line;
         char* tab1 = strchr(html_file, '\t');
         if (!tab1) {
-            fprintf(stdout, "FAIL\t%s\tmalformed input line\n", html_file);
-            fflush(stdout);
+            render_batch_report(export_formats, false, html_file, "malformed input line");
             failure_count++;
             continue;
         }
@@ -500,8 +504,7 @@ int cmd_render_batch(int argc, char** argv) {
 
         char* tab2 = strchr(output_png, '\t');
         if (!tab2) {
-            fprintf(stdout, "FAIL\t%s\tmalformed input line\n", html_file);
-            fflush(stdout);
+            render_batch_report(export_formats, false, html_file, "malformed input line");
             failure_count++;
             continue;
         }
@@ -525,15 +528,17 @@ int cmd_render_batch(int argc, char** argv) {
             }
         }
 
-        bool ok = render_batch_single(&ui_context, html_file, output_png, vw, vh, device_scale, cwd);
+        bool ok = export_formats
+            ? render_batch_export(&ui_context, html_file, output_png, (float)vw, (float)vh, device_scale) == 0
+            : render_batch_single(&ui_context, html_file, output_png, vw, vh, device_scale, cwd);
+        if (export_formats) render_batch_cleanup_doc(&ui_context);
         if (ok) {
-            fprintf(stdout, "OK\t%s\n", html_file);
+            render_batch_report(export_formats, true, html_file);
             success_count++;
         } else {
-            fprintf(stdout, "FAIL\t%s\trender error\n", html_file);
+            render_batch_report(export_formats, false, html_file, "render error");
             failure_count++;
         }
-        fflush(stdout);
 
         if (rss_report) {
             struct rusage ru1;

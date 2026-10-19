@@ -18,7 +18,7 @@
  *        backdrop-filter -> opaque flattened raster (no `/SMask`); plain
  *        opacity -> isolated alpha, including overlap behavior.
  *
- * 2. PdfRenderVisual.CompareLambdaPagesAgainstPopplerReference — end-to-end
+ * 2. PdfImportVisual.CompareLambdaPagesAgainstPopplerReference/<fixture> — end-to-end
  *    fidelity of Lambda's own PDF import-and-render path. For every `*.pdf`
  *    fixture under test/pdf (up to MAX_PAGES_PER_PDF pages each), the reference
  *    page is rasterized with Poppler (`pdfinfo` + `pdftoppm`) — the most widely
@@ -42,6 +42,8 @@
 #include "../lib/mem.h"
 #include "../lib/ownership.hpp"
 #include "../lib/arraylist.hpp"
+static bool write_png_rgba(const char* path, const unsigned char* pixels, int width, int height);
+#include "pdf_reference_rasterizer.hpp"
 #include "../lib/windows_compat.h"
 
 #include <ctype.h>
@@ -55,10 +57,17 @@
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <sys/wait.h>
+#include <sys/file.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
 #else
 #include <io.h>
 #include <direct.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #define popen _popen
 #define pclose _pclose
 // windows mkdir accepts only the path; map the POSIX mode-bearing calls used by this test.
@@ -267,7 +276,83 @@ static bool write_file_all(const char* path, const char* data, size_t len) {
     return written == len;
 }
 
-static bool render_document_fixture(const char* html_path, const char* output_path,
+class RenderBatchClient {
+#ifndef _WIN32
+    FILE* input = nullptr;
+    FILE* output = nullptr;
+    pid_t child = -1;
+    bool headless_host = false;
+#endif
+public:
+    ~RenderBatchClient() { finish(); }
+    bool enabled() const {
+#ifdef _WIN32
+        return false;
+#else
+        const char* mode = getenv("LAMBDA_PDF_BATCH");
+        return !mode || strcmp(mode, "0");
+#endif
+    }
+    bool finish() {
+#ifndef _WIN32
+        if (input) { fclose(input); input = nullptr; }
+        if (output) { fclose(output); output = nullptr; }
+        if (child > 0) {
+            int status = 0;
+            pid_t waited;
+            do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+            child = -1;
+            return waited > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        }
+#endif
+        return true;
+    }
+    bool render(const char* source, const char* destination, float density, float width = 0, float height = 0) {
+#ifndef _WIN32
+        if (strpbrk(source, "\t\r\n") || strpbrk(destination, "\t\r\n")) return false;
+        bool setting = getenv("LAMBDA_HEADLESS_GLFW_WINDOW") != nullptr;
+        // GPU hosting is selected at child initialization; restart when a later fixture changes it.
+        if (input && setting != headless_host && !finish()) return false;
+        if (!input) {
+            int requests[2], replies[2];
+            if (pipe(requests) != 0) return false;
+            if (pipe(replies) != 0) { close(requests[0]); close(requests[1]); return false; }
+            headless_host = setting;
+            // other oracle subprocesses must not inherit the daemon's request pipe.
+            for (int fd : {requests[0], requests[1], replies[0], replies[1]}) fcntl(fd, F_SETFD, FD_CLOEXEC);
+            child = fork();
+            if (child == 0) {
+                dup2(requests[0], STDIN_FILENO); dup2(replies[1], STDOUT_FILENO);
+                for (int fd : {requests[0], requests[1], replies[0], replies[1]}) close(fd);
+                int errors = open("temp/render_batch.err", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                if (errors >= 0) { dup2(errors, STDERR_FILENO); close(errors); }
+                execl(LAMBDA_EXE, LAMBDA_EXE, "render-batch", "--export", "--no-log", (char*)nullptr);
+                _exit(127);
+            }
+            close(requests[0]); close(replies[1]);
+            if (child < 0) { close(requests[1]); close(replies[0]); return false; }
+            signal(SIGPIPE, SIG_IGN);
+            input = fdopen(requests[1], "w"); output = fdopen(replies[0], "r");
+            if (!input) close(requests[1]);
+            if (!output) close(replies[0]);
+            if (!input || !output) { finish(); return false; }
+        }
+        char request[PATH_MAX * 2 + 128], expected[PATH_MAX + 64], response[PATH_MAX * 2 + 128];
+        int length = snprintf(request, sizeof(request), "%s\t%s\t%g\t%g\t%g\n", source, destination, width, height, density);
+        if (length < 0 || (size_t)length >= sizeof(request) ||
+                fwrite(request, 1, (size_t)length, input) != (size_t)length || fflush(input)) return false;
+        snprintf(expected, sizeof(expected), "\x01" "RENDER_RESULT\tOK\t%s\n", source);
+        while (fgets(response, sizeof(response), output)) {
+            if (!strncmp(response, "\x01" "RENDER_RESULT\t", 15)) return !strcmp(response, expected);
+        }
+#endif
+        return false;
+    }
+};
+
+static RenderBatchClient render_batch;
+
+static bool render_document_fixture_single(const char* html_path, const char* output_path,
                                     const char* options = "") {
     char qhtml[PATH_MAX + 8];
     char qoutput[PATH_MAX + 8];
@@ -280,6 +365,35 @@ static bool render_document_fixture(const char* html_path, const char* output_pa
              qoutput, qoutput);
     int status = system(cmd);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static bool render_document_fixture(const char* html_path, const char* output_path,
+                                    const char* options = "") {
+    float density = 1, width = 0, height = 0;
+    const char* cursor = options;
+    bool plain = true;
+    // viewport-only jobs use the batch protocol's existing dimensions instead of reloading the PDF package.
+    while (*cursor && plain) {
+        while (isspace((unsigned char)*cursor)) cursor++;
+        if (!*cursor) break;
+        char option[32]; float value = 0; int consumed = 0;
+        plain = sscanf(cursor, "%31s %f%n", option, &value, &consumed) == 2 && consumed > 0 &&
+            isfinite(value) && value > 0 && (!cursor[consumed] || isspace((unsigned char)cursor[consumed]));
+        if (!plain) break;
+        if (!strcmp(option, "--pixel-ratio")) density = value;
+        else if (!strcmp(option, "-vw") || !strcmp(option, "-vh")) {
+            const char* number = cursor + strlen(option);
+            while (isspace((unsigned char)*number)) number++;
+            size_t digits = strspn(number, "0123456789");
+            // other viewport spellings retain the ordinary CLI's integer parsing contract.
+            plain = digits && (!number[digits] || isspace((unsigned char)number[digits])) && value < INT_MAX;
+            if (!strcmp(option, "-vw")) width = value; else height = value;
+        }
+        else plain = false;
+        cursor += consumed;
+    }
+    if (plain && render_batch.enabled()) return render_batch.render(html_path, output_path, density, width, height);
+    return render_document_fixture_single(html_path, output_path, options);
 }
 
 static bool render_html_fixture(const char* html_path, const char* output_path,
@@ -302,7 +416,19 @@ static CommandResult run_html_fixture_script(const char* html_path, const char* 
     return run_command_capture(command);
 }
 
-static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path, float pixel_ratio = 1.0f) {
+static PdfReferenceRasterizer& reference_rasterizer() {
+    static PdfReferenceRasterizer reader(write_png_rgba);
+    return reader;
+}
+
+static bool rasterize_fixture_svg_cli(const char* svg_path, const char* png_path, float pixel_ratio = 1.0f) {
+    char source[PATH_MAX + 8], destination[PATH_MAX + 8], command[PATH_MAX * 2 + 128];
+    shell_quote(svg_path, source, sizeof(source)); shell_quote(png_path, destination, sizeof(destination));
+    snprintf(command, sizeof(command), "rsvg-convert -z %g %s -o %s", pixel_ratio, source, destination);
+    return run_command_capture(command).exit_code == 0;
+}
+
+static bool rasterize_fixture_pdf_cli(const char* pdf_path, const char* png_path, float pixel_ratio = 1.0f) {
     if (!command_exists("pdftocairo")) return false;
     char qpdf[PATH_MAX + 8], command[PATH_MAX * 3 + 128];
     shell_quote(pdf_path, qpdf, sizeof(qpdf));
@@ -317,6 +443,18 @@ static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path, fl
              72.0f * pixel_ratio, qpdf, qprefix);
     int status = system(command);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static bool rasterize_fixture_svg(const char* path, const char* png, float density = 1.0f) {
+    return reference_rasterizer().available(false) ? reference_rasterizer().render(false, path, png, density)
+        : rasterize_fixture_svg_cli(path, png, density);
+}
+
+static bool rasterize_fixture_pdf(const char* path, const char* png, float density = 1.0f) {
+    if (!reference_rasterizer().available(true)) return rasterize_fixture_pdf_cli(path, png, density);
+    const char* enabled = getenv("LAMBDA_PDF_RASTER_CACHE");
+    return enabled && !strcmp(enabled, "0") ? reference_rasterizer().render(true, path, png, density)
+        : reference_rasterizer().render_export_pdf(path, png, density);
 }
 
 static bool run_html_fixture_view(const char* html_path, const char* events_path,
@@ -450,17 +588,34 @@ static void make_page_test_id(const PdfFileInfo* pdf, int page, char* out, size_
     snprintf(out, out_size, "%s_page_%02d", pdf->base, page);
 }
 
-static void load_pdf_baseline(BaselineData* baseline) {
+static bool lock_pdf_baseline(FILE* file, bool exclusive, bool unlock = false) {
+#ifdef _WIN32
+    HANDLE handle = (HANDLE)_get_osfhandle(_fileno(file));
+    OVERLAPPED offset = {};
+    return unlock ? UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &offset) != 0
+        : LockFileEx(handle, exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0, 0,
+            MAXDWORD, MAXDWORD, &offset) != 0;
+#else
+    int result;
+    do { result = flock(fileno(file), unlock ? LOCK_UN : exclusive ? LOCK_EX : LOCK_SH); }
+    while (result < 0 && errno == EINTR);
+    return result == 0;
+#endif
+}
+
+struct PdfBaselineFile {
+    FILE* file;
+    PdfBaselineFile(const char* path, bool write) : file(fopen(path, write ? "a+" : "r")) {
+        if (file && !lock_pdf_baseline(file, write)) { fclose(file); file = nullptr; }
+    }
+    ~PdfBaselineFile() { if (file) { lock_pdf_baseline(file, false, true); fclose(file); } }
+};
+
+static void read_pdf_baseline(FILE* fp, BaselineData* baseline) {
     baseline->count = 0;
     baseline->loaded = false;
-
-    FILE* fp = fopen(PDF_BASELINE_FILE, "r");
-    if (!fp) {
-        fprintf(stderr, "[pdf-render] No baseline file found (%s) — regression checking disabled\n",
-                PDF_BASELINE_FILE);
-        return;
-    }
-
+    if (!fp) return;
+    rewind(fp);
     char line[1024];
     while (fgets(line, sizeof(line), fp) && baseline->count < MAX_PDF_PAGE_RESULTS) {
         char* p = line;
@@ -476,10 +631,18 @@ static void load_pdf_baseline(BaselineData* baseline) {
             entry->seen = false;
         }
     }
-    fclose(fp);
-    baseline->loaded = true;
+    baseline->loaded = !ferror(fp);
+}
+
+static void load_pdf_baseline(BaselineData* baseline, const char* path = PDF_BASELINE_FILE) {
+    PdfBaselineFile held(path, false);
+    read_pdf_baseline(held.file, baseline);
+    if (!baseline->loaded) {
+        fprintf(stderr, "[pdf-render] No readable baseline file found: %s\n", path);
+        return;
+    }
     fprintf(stderr, "[pdf-render] Loaded baseline: %d page results from %s\n",
-            baseline->count, PDF_BASELINE_FILE);
+            baseline->count, path);
 }
 
 static BaselineEntry* find_baseline_entry(BaselineData* baseline, const char* test_id) {
@@ -490,23 +653,48 @@ static BaselineEntry* find_baseline_entry(BaselineData* baseline, const char* te
     return NULL;
 }
 
-static bool write_pdf_baseline(const PdfPageResult* results, int result_count) {
-    FILE* fp = fopen(PDF_BASELINE_FILE, "w");
+static bool write_pdf_baseline(const PdfPageResult* results, int result_count,
+        bool merge = false, const char* path = PDF_BASELINE_FILE) {
+    // fixture workers share the corpus baseline: read, merge and replace under one inode lock.
+    PdfBaselineFile held(path, true);
+    FILE* fp = held.file;
     if (!fp) {
-        fprintf(stderr, "[pdf-render] ERROR: cannot write baseline file: %s\n", PDF_BASELINE_FILE);
+        fprintf(stderr, "[pdf-render] ERROR: cannot lock baseline file: %s\n", path);
         return false;
     }
-
+    BaselineData baseline = {};
+    if (merge) {
+        read_pdf_baseline(fp, &baseline);
+        if (!baseline.loaded) return false;
+    } else baseline.loaded = true;
+    for (int i = 0; i < result_count; i++) {
+        BaselineEntry* entry = find_baseline_entry(&baseline, results[i].test_id);
+        if (!entry) {
+            if (baseline.count == MAX_PDF_PAGE_RESULTS) return false;
+            entry = &baseline.entries[baseline.count++];
+            snprintf(entry->test_id, sizeof(entry->test_id), "%s", results[i].test_id);
+        }
+        entry->mismatch_percent = results[i].mismatch_percent;
+    }
+    qsort(baseline.entries, baseline.count, sizeof(BaselineEntry), [](const void* a, const void* b) {
+        return strcmp(((const BaselineEntry*)a)->test_id, ((const BaselineEntry*)b)->test_id);
+    });
+    rewind(fp);
+#ifdef _WIN32
+    if (_chsize_s(_fileno(fp), 0) != 0) return false;
+#else
+    if (ftruncate(fileno(fp), 0) != 0) return false;
+#endif
     fprintf(fp, "# PDF render visual baseline (auto-updated)\n");
     fprintf(fp, "# format: <test-id> <pixel-diff-percent>\n");
     fprintf(fp, "# regression: current pixel diff must not exceed baseline by more than %.6f\n",
             BASELINE_REGRESSION_EPSILON);
-    for (int i = 0; i < result_count; i++) {
-        fprintf(fp, "%s %.8f\n", results[i].test_id, results[i].mismatch_percent);
+    for (int i = 0; i < baseline.count; i++) {
+        fprintf(fp, "%s %.8f\n", baseline.entries[i].test_id, baseline.entries[i].mismatch_percent);
     }
-    fclose(fp);
+    if (fflush(fp) != 0 || ferror(fp)) return false;
     fprintf(stderr, "[pdf-render] Wrote baseline: %d page results to %s\n",
-            result_count, PDF_BASELINE_FILE);
+            baseline.count, path);
     return true;
 }
 
@@ -558,29 +746,63 @@ static int pdf_page_count(const char* pdf_path) {
     return atoi(pages);
 }
 
-static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size,
-        bool crop_box = false, bool natural_96dpi = false, const char* reader = "pdftoppm") {
-    char prefix[PATH_MAX];
+static void reference_page_path(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size) {
+    snprintf(out_png, out_size, "%s/%s_page_%02d_ref.png", PDF_REF_DIR, pdf->base, page);
+}
+
+static bool rasterize_reference_pages(const PdfFileInfo* pdf, int first, int last,
+        const char* prefix, bool crop_box, bool natural_96dpi, const char* reader) {
     char qpdf[PATH_MAX + 8];
     char qprefix[PATH_MAX + 8];
     char cmd[PATH_MAX * 2 + 256];
-
-    snprintf(prefix, sizeof(prefix), "%s/%s_page_%02d_ref", PDF_REF_DIR, pdf->base, page);
-    snprintf(out_png, out_size, "%s.png", prefix);
-    unlink(out_png);
-
     shell_quote(pdf->path, qpdf, sizeof(qpdf));
     shell_quote(prefix, qprefix, sizeof(qprefix));
     char resolution[64];
     if (natural_96dpi) snprintf(resolution, sizeof(resolution), "-r 96");
     else snprintf(resolution, sizeof(resolution), "-scale-to-x %d -scale-to-y -1", RENDER_WIDTH);
-    snprintf(cmd, sizeof(cmd), "%s -png %s -f %d -l %d -singlefile %s %s %s %s 2>&1",
+    snprintf(cmd, sizeof(cmd), "%s -png %s -f %d -l %d %s %s %s %s %s 2>&1",
         reader, !strcmp(reader, "pdftocairo") ? "-antialias gray" : "",
-        page, page, crop_box ? "-cropbox" : "", resolution, qpdf, qprefix);
+        first, last, first == last ? "-singlefile" : "", crop_box ? "-cropbox" : "", resolution, qpdf, qprefix);
     CommandResult result = run_command_capture(cmd);
-    if (result.exit_code != 0 || !file_exists(out_png)) {
-        fprintf(stderr, "Reference render failed for %s page %d:\n%s\n", pdf->path, page, result.output);
+    if (result.exit_code != 0) {
+        fprintf(stderr, "Reference render failed for %s pages %d-%d:\n%s\n", pdf->path, first, last, result.output);
         return false;
+    }
+    return true;
+}
+
+static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size,
+        bool crop_box = false, bool natural_96dpi = false, const char* reader = "pdftoppm") {
+    char prefix[PATH_MAX];
+    reference_page_path(pdf, page, out_png, out_size);
+    snprintf(prefix, sizeof(prefix), "%s/%s_page_%02d_ref", PDF_REF_DIR, pdf->base, page);
+    unlink(out_png);
+    return rasterize_reference_pages(pdf, page, page, prefix, crop_box, natural_96dpi, reader) && file_exists(out_png);
+}
+
+static bool render_reference_document(const PdfFileInfo* pdf, int pages, int render_pages) {
+    char prefix[PATH_MAX], destination[PATH_MAX];
+    snprintf(prefix, sizeof(prefix), "%s/%s_batch", PDF_REF_DIR, pdf->base);
+    // Poppler numbers multi-page files using the width of the document's total page count.
+    int digits = 1;
+    for (int n = pages; n >= 10; n /= 10) digits++;
+    auto rendered_path = [&](int page, char* path, size_t size) {
+        if (render_pages == 1) snprintf(path, size, "%s.png", prefix);
+        else snprintf(path, size, "%s-%0*d.png", prefix, digits, page);
+    };
+    for (int page = 1; page <= render_pages; page++) {
+        reference_page_path(pdf, page, destination, sizeof(destination));
+        unlink(destination);
+        char numbered[PATH_MAX];
+        rendered_path(page, numbered, sizeof(numbered));
+        unlink(numbered);
+    }
+    if (!rasterize_reference_pages(pdf, 1, render_pages, prefix, false, false, "pdftoppm")) return false;
+    for (int page = 1; page <= render_pages; page++) {
+        char rendered[PATH_MAX];
+        rendered_path(page, rendered, sizeof(rendered));
+        reference_page_path(pdf, page, destination, sizeof(destination));
+        if (rename(rendered, destination) != 0) return false;
     }
     return true;
 }
@@ -623,6 +845,8 @@ static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int h
     unlink(out_png);
 
     if (!write_lambda_page_script(pdf, page_index, height, script_path, natural_aspect)) return false;
+    if (render_batch.enabled())
+        return render_batch.render(script_path, out_png, 1, RENDER_WIDTH, (float)height) && file_exists(out_png);
 
     shell_quote(script_path, qscript, sizeof(qscript));
     shell_quote(out_png, qpng, sizeof(qpng));
@@ -671,6 +895,9 @@ static bool write_png_rgba(const char* path, const unsigned char* pixels, int wi
     }
 
     png_init_io(png_ptr, fp);
+    // diagnostic and fixture PNGs need exact pixels, without production compression/filter search costs.
+    png_set_compression_level(png_ptr, 1);
+    png_set_filter(png_ptr, PNG_FILTER_TYPE_BASE, PNG_FILTER_SUB);
     png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_RGBA,
                  PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png_ptr, info_ptr);
@@ -689,8 +916,8 @@ static bool write_png_rgba(const char* path, const unsigned char* pixels, int wi
 
     free(rows);
     png_destroy_write_struct(&png_ptr, &info_ptr);
-    fclose(fp);
-    return true;
+    bool ok = !ferror(fp);
+    return fclose(fp) == 0 && ok;
 }
 
 static int sample_png_component(const ImageData& image, int x, int y, int channel, int radius) {
@@ -763,10 +990,17 @@ static void compare_pngs(const char* reference_path, const char* lambda_path,
 
 static void expect_pngs_exactly_equal(const char* expected_path, const char* actual_path) {
     SCOPED_TRACE(actual_path);
+    char* encoded[2] = {}; size_t sizes[2] = {};
+    bool identical = file_read_all(expected_path, MEM_CAT_TEMP, &encoded[0], &sizes[0]) &&
+        file_read_all(actual_path, MEM_CAT_TEMP, &encoded[1], &sizes[1]) &&
+        sizes[0] == sizes[1] && !memcmp(encoded[0], encoded[1], sizes[0]);
+    mem_free(encoded[0]); mem_free(encoded[1]);
     ImageData expected;
     ImageData actual;
     ASSERT_TRUE(load_png_rgba(expected_path, &expected))
         << "failed to load expected PNG: " << expected_path;
+    // identical encodings need one validity check; differing encodings still compare every decoded channel.
+    if (identical) { image_free(expected.pixels); return; }
     ASSERT_TRUE(load_png_rgba(actual_path, &actual))
         << "failed to load actual PNG: " << actual_path;
 
@@ -824,18 +1058,25 @@ static bool render_paged_parity_variant(const char* stem, const char* html,
         render_document_fixture(path, preview, preview_options);
 }
 
+static void expect_pdf_page_pair_output_parity(PdfFileInfo pdfs[2], int count) {
+    // decode each reference document once, preserving every physical-page comparison.
+    for (size_t variant = 0; variant < 2; variant++)
+        ASSERT_TRUE(render_reference_document(&pdfs[variant], count, count));
+    for (int page = 1; page <= count; page++) {
+        char pngs[2][PATH_MAX];
+        for (size_t variant = 0; variant < 2; variant++)
+            reference_page_path(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant]));
+        expect_pngs_exactly_equal(pngs[1], pngs[0]);
+    }
+}
+
 static void expect_paged_pair_output_parity(char previews[2][PATH_MAX], PdfFileInfo pdfs[2],
         int minimum_pages, int maximum_pages) {
     int count = pdf_page_count(pdfs[0].path);
     ASSERT_GE(count, minimum_pages); ASSERT_LE(count, maximum_pages);
     ASSERT_EQ(pdf_page_count(pdfs[1].path), count);
     expect_pngs_exactly_equal(previews[1], previews[0]);
-    for (int page = 1; page <= count; page++) {
-        char pngs[2][PATH_MAX];
-        for (size_t variant = 0; variant < 2; variant++)
-            ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
-        expect_pngs_exactly_equal(pngs[1], pngs[0]);
-    }
+    expect_pdf_page_pair_output_parity(pdfs, count);
 }
 
 static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference,
@@ -869,10 +1110,7 @@ static void expect_html_pair_output_parity(const char* name, const char* actual,
         char paths[2][PATH_MAX];
         for (size_t i = 0; i < 2; i++) {
             snprintf(paths[i], sizeof(paths[i]), "temp/render_output_parity/%s_%zu_svg.png", name, i);
-            char command[PATH_MAX * 2 + 64];
-            snprintf(command, sizeof(command), "rsvg-convert -z %d '%s' -o '%s'", pixel_ratio, svg_paths[i], paths[i]);
-            CommandResult result = run_command_capture(command);
-            ASSERT_EQ(result.exit_code, 0) << result.output;
+            ASSERT_TRUE(rasterize_fixture_svg(svg_paths[i], paths[i], (float)pixel_ratio));
         }
         expect_pngs_exactly_equal(paths[1], paths[0]);
         return;
@@ -986,6 +1224,125 @@ static int count_pdf_regressions(const PdfPageResult* results, int result_count)
     return count;
 }
 
+TEST(RenderOutputParity, ReferenceRasterizersMatchCommandLinePixels) {
+    if (!reference_rasterizer().available(true) || !reference_rasterizer().available(false))
+        GTEST_SKIP() << "optional shared rasterizer libraries are unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/reference_reader.html";
+    const char* documents[] = {
+        "<!doctype html><style>html,body{margin:0;width:96px;height:64px;background:white}div{font:21px Arial;color:blue}</style><div>Café αβγ</div>",
+        "<!doctype html><style>html,body{margin:0;width:96px;height:64px;background:lime}.x{width:60px;height:45px;border-radius:9px;overflow:hidden;opacity:.5;background:linear-gradient(30deg,red,blue);transform:translate(3px,2px)}</style><div class=x></div>"
+    };
+    for (size_t document = 0; document < 2; document++) for (int density : {1, 2}) {
+        ASSERT_TRUE(write_file_all(source, documents[document], strlen(documents[document])));
+        for (bool pdf : {false, true}) {
+            char exported[PATH_MAX], actual[PATH_MAX], expected[PATH_MAX], options[64];
+            snprintf(exported, sizeof(exported), "temp/render_output_parity/reader_%zu_%d.%s", document, density, pdf ? "pdf" : "svg");
+            snprintf(actual, sizeof(actual), "%s_library.png", exported);
+            snprintf(expected, sizeof(expected), "%s_cli.png", exported);
+            snprintf(options, sizeof(options), "--pixel-ratio %d", density);
+            ASSERT_TRUE(render_document_fixture(source, exported, options));
+            ASSERT_TRUE(reference_rasterizer().render(pdf, exported, actual, density));
+            ASSERT_TRUE(pdf ? rasterize_fixture_pdf_cli(exported, expected, (float)density)
+                : rasterize_fixture_svg_cli(exported, expected, (float)density));
+            expect_pngs_exactly_equal(expected, actual);
+        }
+    }
+}
+
+TEST(RenderOutputParity, PdfReferenceCacheTracksBytesAndDensity) {
+    if (!reference_rasterizer().available(true)) GTEST_SKIP() << "optional PDF reader is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    PdfReferenceRasterizer reader;
+    const char* source = "temp/render_output_parity/cache.html";
+    const char* pdf = "temp/render_output_parity/cache.pdf";
+    const char* copy = "temp/render_output_parity/cache_copy.pdf";
+    const char* actual = "temp/render_output_parity/cache.png";
+    const char* expected = "temp/render_output_parity/cache_uncached.png";
+    for (const char* color : {"red", "blue"}) {
+        char html[256]; snprintf(html, sizeof(html),
+            "<!doctype html><style>html,body{margin:0;width:32px;height:24px;background:%s}</style>", color);
+        ASSERT_TRUE(render_html_fixture(source, pdf, html));
+        char* bytes = nullptr; size_t size = 0;
+        ASSERT_TRUE(file_read_all(pdf, MEM_CAT_TEMP, &bytes, &size));
+        ASSERT_EQ(write_binary_file(copy, bytes, size), 0); mem_free(bytes);
+        for (double density : {1., 2.}) {
+            ASSERT_TRUE(reader.render_export_pdf(pdf, actual, density));
+            size_t hits = reader.cache_hits();
+            ASSERT_TRUE(reader.render_export_pdf(copy, actual, density));
+            EXPECT_EQ(reader.cache_hits(), hits + 1);
+            ASSERT_TRUE(reader.render(true, copy, expected, density));
+            expect_pngs_exactly_equal(expected, actual);
+            expect_png_channel_coverage(actual, !strcmp(color, "red") ? 0 : 2,
+                !strcmp(color, "red") ? 6 : 3, 1);
+        }
+    }
+    char* bytes = nullptr; size_t size = 0;
+    ASSERT_TRUE(file_read_all(pdf, MEM_CAT_TEMP, &bytes, &size));
+    StrBuf* changed = strbuf_new(); ASSERT_NE(changed, nullptr);
+    size_t hits = reader.cache_hits();
+    // trailing PDF comments change source identity while preserving independently readable page paint.
+    for (int variant = 0; variant < 36; variant++) {
+        strbuf_reset(changed); strbuf_append_str_n(changed, bytes, size);
+        strbuf_append_format(changed, "\n%% cache eviction %d\n", variant);
+        ASSERT_TRUE(write_file_all(copy, changed->str, changed->length));
+        ASSERT_TRUE(reader.render_export_pdf(copy, actual, 1));
+    }
+    mem_free(bytes); strbuf_free(changed);
+    EXPECT_EQ(reader.cache_entries(), 32u);
+    EXPECT_LE(reader.cache_bytes(), 32u * 1024 * 1024);
+    ASSERT_TRUE(reader.render_export_pdf(pdf, actual, 1));
+    EXPECT_EQ(reader.cache_hits(), hits) << "the oldest source must be re-read after eviction";
+    ASSERT_TRUE(reader.render(true, pdf, expected, 1));
+    expect_pngs_exactly_equal(expected, actual);
+    ASSERT_TRUE(write_file_all(copy, "invalid PDF", 11));
+    EXPECT_FALSE(reader.render_export_pdf(copy, actual, 1));
+    ASSERT_EQ(remove(copy), 0);
+    EXPECT_FALSE(reader.render_export_pdf(copy, actual, 1));
+    EXPECT_FALSE(reader.render_export_pdf(pdf, "temp/render_output_parity/missing_cache_directory/output.png", 1));
+}
+
+TEST(RenderOutputParity, BatchedExportsMatchSingleJobsAcrossDocumentAndMediaBoundaries) {
+    if (!render_batch.enabled()) GTEST_SKIP() << "persistent batch pipes are disabled or unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftocairo")); ASSERT_TRUE(command_exists("rsvg-convert"));
+    RenderBatchClient batch;
+    const char* source = "temp/render_output_parity/batch_document.html";
+    const char* documents[] = {
+        "<!doctype html><style>html,body{margin:0;width:96px;height:48px;background:red;font:20px Arial}"
+        "@media print{html,body{background:blue}}</style><div>ABC</div><script>console.log('batch noise')</script>",
+        "<!doctype html><style>html,body{margin:0;width:80px;height:60px;background:lime;font:16px monospace}</style><div>XYZ</div>"
+    };
+    for (int density : {1, 2}) for (size_t document = 0; document < 2; document++) {
+        ASSERT_TRUE(write_file_all(source, documents[document], strlen(documents[document])));
+        // replacing the same source path also checks that a prior document cannot satisfy a later job.
+        for (const char* format : {"pdf", "png", "svg"}) {
+            char paths[2][PATH_MAX], rasters[2][PATH_MAX], options[64];
+            snprintf(options, sizeof(options), "%s--pixel-ratio %d", document ? "-vw 96 -vh 80 " : "", density);
+            for (size_t variant = 0; variant < 2; variant++) {
+                snprintf(paths[variant], sizeof(paths[variant]), "temp/render_output_parity/batch_control_%zu_%d_%zu.%s", document, density, variant, format);
+                if (variant) ASSERT_TRUE(batch.render(source, paths[variant], (float)density,
+                    document ? 96 : 0, document ? 80 : 0));
+                else ASSERT_TRUE(render_document_fixture_single(source, paths[variant], options));
+                if (!strcmp(format, "png")) str_copy(rasters[variant], sizeof(rasters[variant]), paths[variant], strlen(paths[variant]));
+                else {
+                    snprintf(rasters[variant], sizeof(rasters[variant]), "%s.png", paths[variant]);
+                    ASSERT_TRUE(!strcmp(format, "pdf") ? rasterize_fixture_pdf(paths[variant], rasters[variant], (float)density)
+                        : rasterize_fixture_svg(paths[variant], rasters[variant], (float)density));
+                }
+            }
+            expect_pngs_exactly_equal(rasters[0], rasters[1]);
+            unsigned channel = document ? 1 : !strcmp(format, "pdf") ? 2 : 0;
+            expect_png_channel_coverage(rasters[1], channel, 7u & ~(1u << channel), 1);
+        }
+    }
+    ASSERT_TRUE(batch.finish());
+    RenderBatchClient failing;
+    EXPECT_FALSE(failing.render("temp/render_output_parity/missing_batch_source.html", "temp/render_output_parity/missing_batch_output.pdf", 1));
+    EXPECT_TRUE(failing.render(source, "temp/render_output_parity/recovered_batch.pdf", 1));
+    EXPECT_FALSE(failing.finish());
+}
+
 TEST(RenderOutputParity, PagedPdfUsesCssSheetsAndA4FallbackWithoutRasterScaling) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/paged_sheets.html";
@@ -1044,12 +1401,7 @@ TEST(RenderOutputParity, LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilte
         ASSERT_TRUE(render_document_fixture(html_path, previews[i], "--paged --pages 3,1 --page-grid 2x2 --page-scale .75"));
     }
     expect_pngs_exactly_equal(previews[1], previews[0]);
-    for (int page = 1; page <= 3; page++) {
-        char pngs[2][PATH_MAX];
-        for (size_t i = 0; i < 2; i++)
-            ASSERT_TRUE(render_reference_page(&pdfs[i], page, pngs[i], sizeof(pngs[i])));
-        expect_pngs_exactly_equal(pngs[1], pngs[0]);
-    }
+    expect_pdf_page_pair_output_parity(pdfs, 3);
 }
 
 TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndAdmitsEveryFormattingContext) {
@@ -1867,11 +2219,8 @@ TEST(RenderOutputParity, PagedMarkdownPaginatesCollapsedTablesAndUnbreakableCode
     EXPECT_EQ(viewed.exit_code, 0) << viewed.output;
 }
 
-TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
-    struct Fixture { const char* name; int pages; const char* media_box; };
-    const Fixture fixtures[] = {{"basic", 2, "/MediaBox [0 0 300.00 420.00]"},
+struct FoNativeExportFixture { const char* name; int pages; const char* media_box; };
+static const FoNativeExportFixture fo_native_export_fixtures[] = {{"basic", 2, "/MediaBox [0 0 300.00 420.00]"},
         {"flow_traits", 3, "/MediaBox [0 0 300.00 180.00]"},
         {"sequences", 5, "/MediaBox [0 0 150.00 60.00]"},
         {"folios", 6, "/MediaBox [0 0 225.00 75.00]"},
@@ -1924,8 +2273,14 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"decoration_expressions", 3, "/MediaBox [0 0 150.00 120.00]"},
         {"policy_bindings", 3, "/MediaBox [0 0 300.00 180.00]"},
         {"compound_flow_queries", 3, "/MediaBox [0 0 300.00 180.00]"}};
+
+class FoNativeExportTest : public ::testing::TestWithParam<FoNativeExportFixture> {};
+
+TEST_P(FoNativeExportTest, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const FoNativeExportFixture& fixture = GetParam();
     const char* extensions[] = {"fo", "rpd"};
-    for (const Fixture& fixture : fixtures) {
         SCOPED_TRACE(fixture.name);
         char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
         for (size_t i = 0; i < 2; i++) {
@@ -1938,8 +2293,11 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
             EXPECT_TRUE(pdf_contains_box(pdfs[i].path, fixture.media_box));
         }
         expect_paged_pair_output_parity(previews, pdfs, 2, fixture.pages);
-    }
 }
+
+INSTANTIATE_TEST_SUITE_P(FormattingInputs, FoNativeExportTest,
+    ::testing::ValuesIn(fo_native_export_fixtures),
+    [](const ::testing::TestParamInfo<FoNativeExportFixture>& info) { return info.param.name; });
 
 TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgAndPhysicalPdf) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
@@ -2041,13 +2399,15 @@ TEST(RenderOutputParity, PagedTableGroupBreaksAndAvoidanceMatchExplicitRowBounda
         ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_paths[0], &preview));
         EXPECT_EQ(preview.width, 360); EXPECT_EQ(preview.height, 100);
         const int header_y[] = {35, 17, 17}, body_y[] = {49, 31, 31}, footer_y[] = {77, 59, 45};
+        for (size_t variant = 0; variant < 2; variant++)
+            ASSERT_TRUE(render_reference_document(&pdfs[variant], 3, 3));
         for (int page = 0; page < 3; page++) {
             expect_preview_pixel(preview, page * 120 + 65, header_y[page], 204, 224, 255);
             expect_preview_pixel(preview, page * 120 + 45, body_y[page], 255, 255, 0);
             expect_preview_pixel(preview, page * 120 + 65, footer_y[page], 221, 255, 221);
             char pngs[2][PATH_MAX];
             for (size_t variant = 0; variant < 2; variant++)
-                ASSERT_TRUE(render_reference_page(&pdfs[variant], page + 1, pngs[variant], sizeof(pngs[variant])));
+                reference_page_path(&pdfs[variant], page + 1, pngs[variant], sizeof(pngs[variant]));
             expect_pngs_exactly_equal(pngs[1], pngs[0]);
             ImageData physical = {}; ASSERT_TRUE(load_png_rgba(pngs[0], &physical));
             EXPECT_EQ(physical.width, RENDER_WIDTH); EXPECT_EQ(physical.height, RENDER_WIDTH * 100 / 120);
@@ -2150,12 +2510,7 @@ static void check_paged_table_cell_alignment(bool split, bool baseline = false) 
             }
             image_free(preview.pixels);
         }
-        for (int page = 1; page <= 2; page++) {
-            char pngs[2][PATH_MAX];
-            for (size_t variant = 0; variant < 2; variant++)
-                ASSERT_TRUE(render_reference_page(&pdfs[variant], page, pngs[variant], sizeof(pngs[variant])));
-            expect_pngs_exactly_equal(pngs[1], pngs[0]);
-        }
+        expect_pdf_page_pair_output_parity(pdfs, 2);
     }
 }
 
@@ -3181,11 +3536,7 @@ static bool render_fixture_output_image(const char* html_path, const char* png_p
         if (strcmp(format, "pdf") == 0) {
             if (!rasterize_fixture_pdf(artifact, png_path, (float)density)) return false;
         } else {
-            char qartifact[PATH_MAX + 8], qpng[PATH_MAX + 8], command[PATH_MAX * 3];
-            shell_quote(artifact, qartifact, sizeof(qartifact));
-            shell_quote(png_path, qpng, sizeof(qpng));
-            snprintf(command, sizeof(command), "rsvg-convert -z %d %s -o %s", density, qartifact, qpng);
-            if (run_command_capture(command).exit_code != 0) return false;
+            if (!rasterize_fixture_svg(artifact, png_path, (float)density)) return false;
         }
     }
     return load_png_rgba(png_path, image);
@@ -3227,34 +3578,11 @@ TEST(RenderOutputParity, TextDecorationListPaintsBothLines) {
     }
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/text_decoration_list.html";
-    const char* svg_path = "temp/render_output_parity/text_decoration_list.svg";
     const char* png_path = "temp/render_output_parity/text_decoration_list.png";
     const char* html =
         "<!doctype html><style>html,body{margin:0}</style>"
         "<div style='font:24px/32px Arial;color:black;"
         "text-decoration:underline overline red 3px'>Decorated</div>";
-    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
-    char qhtml[PATH_MAX + 8];
-    char qsvg[PATH_MAX + 8];
-    char qpng[PATH_MAX + 8];
-    char cmd[PATH_MAX * 4 + 256];
-    shell_quote(html_path, qhtml, sizeof(qhtml));
-    shell_quote(svg_path, qsvg, sizeof(qsvg));
-    shell_quote(png_path, qpng, sizeof(qpng));
-    snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s -vw 300 > temp/render_output_parity/text_decoration_list_svg.out 2> temp/render_output_parity/text_decoration_list_svg.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
-    int status = system(cmd);
-    ASSERT_TRUE(WIFEXITED(status));
-    ASSERT_EQ(WEXITSTATUS(status), 0);
-    // portable decoration assertions use rasterized vector pixels below.
-
-    snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s -vw 300 > temp/render_output_parity/text_decoration_list_png.out 2> temp/render_output_parity/text_decoration_list_png.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpng);
-    status = system(cmd);
-    ASSERT_TRUE(WIFEXITED(status));
-    ASSERT_EQ(WEXITSTATUS(status), 0);
     for (const char* format : {"png", "svg", "pdf"}) {
         SCOPED_TRACE(format);
     ImageData image = {};
@@ -5320,7 +5648,7 @@ TEST(RenderOutputParity, InsideImageMarkersShareInlineBaselineAndStrutAcrossOutp
                 str_fmt(name, sizeof(name), "marker_baseline_%u_%s_%u_%s_%dx", font, leading,
                     size, text ? "text" : "empty", density);
                 SCOPED_TRACE(name);
-                str_fmt(prefix, sizeof(prefix), "<!doctype html><style>html,body{margin:0;background:white}"
+                str_fmt(prefix, sizeof(prefix), "<!doctype html><style>html,body{margin:0;width:160px;background:white}"
                     "ul{margin:0;padding:0}li{width:100px;font:%upx/%s Arial;image-rendering:crisp-edges;"
                     "background:rgb(240,240,240)}</style>", font, leading);
                 str_fmt(actual, sizeof(actual), "%s<ul><li style='list-style:none inside;"
@@ -5353,7 +5681,7 @@ TEST(RenderOutputParity, NestedInlineFontStrutsKeepLeadingAcrossOutputs) {
                 SCOPED_TRACE(name);
                 char* pages[] = {actual, reference};
                 for (unsigned side = 0; side < 2; side++) {
-                    str_fmt(pages[side], sizeof(actual), "<!doctype html><style>html,body{margin:0;background:white}"
+                    str_fmt(pages[side], sizeof(actual), "<!doctype html><style>html,body{margin:0;width:160px;background:white}"
                         "div{width:100px;background:rgb(240,240,240);font:%upx/%s Arial}"
                         "img{width:2px;height:2px;vertical-align:baseline;image-rendering:crisp-edges}</style>"
                         "<div><span style='font-size:%upx;white-space:pre'>%s%s</span>%s</div>",
@@ -6509,13 +6837,7 @@ TEST(RenderOutputParity, CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutp
     }
 }
 
-TEST(RenderOutputParity, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    const char* red = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP4z8BANiJf56jmUc2jmkc1U0UzADHNjoAymaoJAAAAAElFTkSuQmCC";
-    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
-        "ul{margin:0;padding:0;width:120px;height:40px}"
-        "li{height:40px;font:20px/40px monospace;list-style-position:inside;list-style-type:none}</style>";
-    const char* gradients[] = {
+static const char* marker_gradients[] = {
         "linear-gradient(red,red)", "radial-gradient(red,red)", "conic-gradient(red,red)",
         "repeating-linear-gradient(red 0px,red 5px)",
         "repeating-radial-gradient(red 0px,red 5px)",
@@ -6540,8 +6862,17 @@ TEST(RenderOutputParity, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
         "repeating-conic-gradient(rgba(0,0,255,0) 0deg,red 0deg)",
         "repeating-linear-gradient(red 0px,white .0025px,blue .01px)"
     };
+
+class GradientMarkerExportTest : public ::testing::TestWithParam<size_t> {};
+
+TEST_P(GradientMarkerExportTest, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* red = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP4z8BANiJf56jmUc2jmkc1U0UzADHNjoAymaoJAAAAAElFTkSuQmCC";
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;width:160px;background:white}"
+        "ul{margin:0;padding:0;width:120px;height:40px}"
+        "li{height:40px;font:20px/40px monospace;list-style-position:inside;list-style-type:none}</style>";
+    size_t kind = GetParam();
     const char* effects[] = {"", "transform:translate(8px,4px)", "filter:brightness(1)", "backdrop-filter:brightness(1)"};
-    for (size_t kind = 0; kind < sizeof(gradients) / sizeof(*gradients); kind++)
         for (size_t effect = 0; effect < sizeof(effects) / sizeof(*effects); effect++)
             for (int scale = 1; scale <= 2; scale++) {
                 char name[96], actual[2048], reference[2048], image[512];
@@ -6550,7 +6881,7 @@ TEST(RenderOutputParity, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
                 bool transparent = (kind >= 12 && kind < 18) || (kind >= 21 && kind < 24);
                 const char* backdrop = transparent ? "<style>html,body{background:lime}</style>" : "";
                 snprintf(actual, sizeof(actual), "%s%s<ul><li style='%s;list-style-image:%s'></li></ul>",
-                    prefix, backdrop, effects[effect], gradients[kind]);
+                    prefix, backdrop, effects[effect], marker_gradients[kind]);
                 // independent positioning controls exclude a shared omitted transform.
                 const char* reference_effect = effect == 1 ? "position:relative;left:8px;top:4px" : effects[effect];
                 if (kind >= 6) {
@@ -6585,6 +6916,9 @@ TEST(RenderOutputParity, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
                 }
             }
 }
+
+INSTANTIATE_TEST_SUITE_P(GradientKinds, GradientMarkerExportTest,
+    ::testing::Range(size_t{0}, sizeof(marker_gradients) / sizeof(*marker_gradients)));
 
 static void expect_canvas_pixels_and_effects(const char* family, const char* draw_script) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
@@ -6773,7 +7107,7 @@ TEST(RenderOutputParity, CalculatedLineClampCountsMatchLiteralCountsAcrossOutput
     };
     const char* format = "<!doctype html><meta charset='utf-8'><style>"
         "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
-        "html,body{margin:0;background:white}.owner{font:20px/24px FixtureMono;%s}"
+        "html,body{margin:0;width:160px;background:white}.owner{font:20px/24px FixtureMono;%s}"
         ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
         "display:-webkit-box;-webkit-box-orient:vertical;%s;"
         "-webkit-line-clamp:4;-webkit-line-clamp:%s}"
@@ -6834,7 +7168,7 @@ TEST(RenderOutputParity, LegacyBoxClampApplicabilityMatchesVisibleReferences) {
     };
     const char* format = "<!doctype html><meta charset='utf-8'><style>"
         "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
-        "html,body{margin:0;background:white}.owner{width:100px;font:20px/24px FixtureMono;%s}"
+        "html,body{margin:0;width:160px;background:white}.owner{width:100px;font:20px/24px FixtureMono;%s}"
         ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
         "-webkit-line-clamp:2;%s}.box>i{display:block;width:20px;height:10px;background:red;flex-shrink:0}"
         "</style><div class=owner><div class=box>%s</div></div>";
@@ -6993,7 +7327,6 @@ TEST(RenderOutputParity, TextUnderlineOffsetMovesRasterLineAndSurvivesSvg) {
     }
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/underline_offset.html";
-    const char* svg_path = "temp/render_output_parity/underline_offset.svg";
     const char* png_path = "temp/render_output_parity/underline_offset.png";
     const char* html =
         "<!doctype html><style>body{margin:0}div{position:absolute;top:0;"
@@ -7006,9 +7339,6 @@ TEST(RenderOutputParity, TextUnderlineOffsetMovesRasterLineAndSurvivesSvg) {
         "</style><div id='near'>MMMM</div><div id='far'>MMMM</div>"
         "<section id='percent-parent'><div id='percent'>MMMM</div></section>"
         "<div id='fixed'>MMMM</div>";
-    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
-    // vector placement is verified from painted geometry below.
-    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
     for (const char* format : {"png", "svg", "pdf"}) {
         SCOPED_TRACE(format);
     ImageData image = {};
@@ -7104,7 +7434,6 @@ TEST(RenderOutputParity, TextDecorationSkipInkControlsRasterGapsAndSvgStyle) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/skip_ink.html";
     const char* png_path = "temp/render_output_parity/skip_ink.png";
-    const char* svg_path = "temp/render_output_parity/skip_ink.svg";
     const char* html =
         "<!doctype html><style>body{margin:0;background:white}"
         ".txt{position:absolute;top:10px;font:70px Arial;color:black;"
@@ -7115,9 +7444,6 @@ TEST(RenderOutputParity, TextDecorationSkipInkControlsRasterGapsAndSvgStyle) {
         "<div class='txt' id='auto'>gggg</div>"
         "<div class='txt' id='none'>gggg</div>"
         "<div class='txt' id='all'>gggg</div>";
-    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
-    // vector ink skipping is verified from painted geometry below.
-    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
     for (const char* format : {"png", "svg", "pdf"}) {
         SCOPED_TRACE(format);
     ImageData image = {};
@@ -7139,7 +7465,6 @@ TEST(RenderOutputParity, TextUnderlinePositionUnderMovesStrokeAndInherits) {
     }
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/underline_position.html";
-    const char* svg_path = "temp/render_output_parity/underline_position.svg";
     const char* png_path = "temp/render_output_parity/underline_position.png";
     const char* html =
         "<!doctype html><style>body{margin:0;background:white}"
@@ -7153,9 +7478,6 @@ TEST(RenderOutputParity, TextUnderlinePositionUnderMovesStrokeAndInherits) {
         "<div class='txt' id='under'>gggg</div>"
         "<section id='inherited'><div class='txt' id='child'>gggg</div></section>"
         "<div class='txt' id='font'>gggg</div>";
-    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
-    // vector font-relative placement is verified from painted geometry below.
-    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
     for (const char* format : {"png", "svg", "pdf"}) {
         SCOPED_TRACE(format);
     ImageData image = {};
@@ -10580,44 +10902,30 @@ TEST(RenderOutputParity, TextAlignAllAndLastRespectShorthandCascade) {
     EXPECT_GT(positions[10], 150.0f);
 }
 
-TEST(RenderOutputParity, SvgExportCssFilterUsesRasterFallbackImage) {
-    if (!file_exists(LAMBDA_EXE)) {
-        GTEST_SKIP() << "lambda.exe not found; run make build first";
-    }
-    if (access(LAMBDA_EXE, X_OK) != 0) {
-        GTEST_SKIP() << "lambda.exe is not executable";
-    }
-
-    ASSERT_TRUE(ensure_dir("temp"));
+TEST(RenderOutputParity, CssFilterExportsUseRasterFallbackImages) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-
-    const char* html_path = "temp/render_output_parity/svg_filter_effect.html";
-    const char* svg_path = "temp/render_output_parity/svg_filter_effect.svg";
     const char* html =
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<style>html,body{margin:0;padding:0;background:#fff;}"
         ".box{width:40px;height:30px;background:#ef4444;"
         "filter:grayscale(1);}</style></head>"
         "<body><div class=\"box\"></div></body></html>";
-    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
-
-    char qhtml[PATH_MAX + 8];
-    char qsvg[PATH_MAX + 8];
-    char cmd[PATH_MAX * 3 + 256];
-    shell_quote(html_path, qhtml, sizeof(qhtml));
-    shell_quote(svg_path, qsvg, sizeof(qsvg));
-    snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/svg_filter_effect.out 2> temp/render_output_parity/svg_filter_effect.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
-
-    int status = system(cmd);
-    ASSERT_TRUE(WIFEXITED(status));
-    ASSERT_EQ(WEXITSTATUS(status), 0);
-    ASSERT_TRUE(file_exists(svg_path));
-    EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
-        << "SVG export should mark unsupported CSS filter groups as raster fallbacks";
-    EXPECT_TRUE(file_contains_text(svg_path, "href=\"data:image/png;base64,"))
-        << "SVG raster fallback should embed the captured filtered paint";
+    // both backends consume the same fixture; retain their independent fallback contracts.
+    for (const char* format : {"svg", "pdf"}) {
+        SCOPED_TRACE(format);
+        char source[PATH_MAX], output[PATH_MAX];
+        snprintf(source, sizeof(source), "temp/render_output_parity/%s_filter_effect.html", format);
+        snprintf(output, sizeof(output), "temp/render_output_parity/%s_filter_effect.%s", format, format);
+        ASSERT_TRUE(write_file_all(source, html, strlen(html)));
+        ASSERT_TRUE(render_document_fixture(source, output, "-vw 80"));
+        ASSERT_TRUE(file_exists(output));
+        if (!strcmp(format, "svg")) {
+            EXPECT_TRUE(file_contains_text(output, "data-radiant-fallback=\"effect-raster\""));
+            EXPECT_TRUE(file_contains_text(output, "href=\"data:image/png;base64,"));
+        } else {
+            EXPECT_TRUE(file_contains_text(output, "/Subtype /Image /Width 40 /Height 30"));
+        }
+    }
 }
 
 TEST(RenderOutputParity, PdfUnicodeTextKeepsEmbeddedFontsAndSearchableCharacters) {
@@ -10646,44 +10954,6 @@ TEST(RenderOutputParity, PdfUnicodeTextKeepsEmbeddedFontsAndSearchableCharacters
     CommandResult text = run_command_capture(cmd);
     ASSERT_EQ(text.exit_code, 0) << text.output;
     EXPECT_NE(strstr(text.output, "Café αβγ Привет"), nullptr) << text.output;
-}
-
-TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {
-    if (!file_exists(LAMBDA_EXE)) {
-        GTEST_SKIP() << "lambda.exe not found; run make build first";
-    }
-    if (access(LAMBDA_EXE, X_OK) != 0) {
-        GTEST_SKIP() << "lambda.exe is not executable";
-    }
-
-    ASSERT_TRUE(ensure_dir("temp"));
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-
-    const char* html_path = "temp/render_output_parity/pdf_filter_effect.html";
-    const char* pdf_path = "temp/render_output_parity/pdf_filter_effect.pdf";
-    const char* html =
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<style>html,body{margin:0;padding:0;background:#fff;}"
-        ".box{width:40px;height:30px;background:#ef4444;"
-        "filter:grayscale(1);}</style></head>"
-        "<body><div class=\"box\"></div></body></html>";
-    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
-
-    char qhtml[PATH_MAX + 8];
-    char qpdf[PATH_MAX + 8];
-    char cmd[PATH_MAX * 3 + 256];
-    shell_quote(html_path, qhtml, sizeof(qhtml));
-    shell_quote(pdf_path, qpdf, sizeof(qpdf));
-    snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_filter_effect.out 2> temp/render_output_parity/pdf_filter_effect.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
-
-    int status = system(cmd);
-    ASSERT_TRUE(WIFEXITED(status));
-    ASSERT_EQ(WEXITSTATUS(status), 0);
-    ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image /Width 40 /Height 30"))
-        << "PDF export should embed a raster fallback image for unsupported CSS filters";
 }
 
 TEST(RenderOutputParity, PdfExportAlphaFilterUsesSoftMaskFallbackImage) {
@@ -11068,7 +11338,7 @@ TEST(PdfRenderVisual, EmbeddedJpegKeepsIntrinsicPageGeometryAgainstCairo) {
     expect_intrinsic_pdf_page(&pdf, 1, "pdftocairo", 0);
 }
 
-TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
+static void compare_pdf_files(const PdfFileInfo* files, int file_count, bool merge_baseline) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
     }
@@ -11087,8 +11357,6 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
     ASSERT_TRUE(ensure_dir(PDF_DIFF_DIR));
 
-    PdfFileInfo files[MAX_PDFS];
-    int file_count = discover_pdfs(files, MAX_PDFS);
     if (file_count == 0) {
         GTEST_SKIP() << "no PDF fixtures found under " << PDF_DIR;
     }
@@ -11107,6 +11375,7 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
         fprintf(stderr, "[pdf-render] Comparing %s (%d page%s, rendering %d)\n",
                 files[i].path, pages, pages == 1 ? "" : "s", render_pages);
         fflush(stderr);
+        bool reference_ok = render_reference_document(&files[i], pages, render_pages);
 
         for (int page = 1; page <= render_pages; page++) {
             ASSERT_LT(result_count, MAX_PDF_PAGE_RESULTS);
@@ -11119,7 +11388,8 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
             fflush(stderr);
             snprintf(diff_png, sizeof(diff_png), "%s/%s_page_%02d_diff.png",
                      PDF_DIFF_DIR, files[i].base, page);
-            if (!render_reference_page(&files[i], page, ref_png, sizeof(ref_png))) {
+            reference_page_path(&files[i], page, ref_png, sizeof(ref_png));
+            if (!reference_ok || !file_exists(ref_png)) {
                 add_pdf_page_result(results, &result_count, test_id, &files[i], page, diff_png,
                                     100.0, 255.0, "reference render failed");
                 continue;
@@ -11177,10 +11447,10 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
         fprintf(stderr,
                 "[pdf-render] Initializing missing baseline from current results: %s\n",
                 PDF_BASELINE_FILE);
-        ASSERT_TRUE(write_pdf_baseline(results, result_count));
+        ASSERT_TRUE(write_pdf_baseline(results, result_count, merge_baseline));
     } else if (g_update_baseline || has_new_results) {
         if (regression_count == 0 && !::testing::Test::HasFailure()) {
-            ASSERT_TRUE(write_pdf_baseline(results, result_count));
+            ASSERT_TRUE(write_pdf_baseline(results, result_count, merge_baseline));
         } else {
             fprintf(stderr,
                     "[pdf-render] NOT updating baseline: failures=%d regressions=%d new_results=%s\n",
@@ -11194,14 +11464,97 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
     EXPECT_GT(compared_pages, 0);
 }
 
+class PdfImportVisualTest : public ::testing::Test {
+    PdfFileInfo fixture = {};
+public:
+    explicit PdfImportVisualTest(const PdfFileInfo* file) { if (file) fixture = *file; }
+    void TestBody() override {
+        if (fixture.path[0]) compare_pdf_files(&fixture, 1, true);
+        else {
+            PdfFileInfo files[MAX_PDFS];
+            compare_pdf_files(files, discover_pdfs(files, MAX_PDFS), false);
+        }
+    }
+};
+
+static void register_pdf_import_tests() {
+    PdfFileInfo files[MAX_PDFS];
+    int count = discover_pdfs(files, MAX_PDFS);
+    // baseline refresh keeps its corpus-wide regression check before its one write.
+    if (g_update_baseline || !count) {
+        ::testing::RegisterTest("PdfRenderVisual", "CompareLambdaPagesAgainstPopplerReference",
+            nullptr, nullptr, __FILE__, __LINE__, []() -> ::testing::Test* { return new PdfImportVisualTest(nullptr); });
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        PdfFileInfo file = files[i];
+        char name[512];
+        snprintf(name, sizeof(name), "CompareLambdaPagesAgainstPopplerReference/%02d_%s", i, file.base);
+        for (char* c = name; *c; c++) if (*c == '-') *c = '_';
+        ::testing::RegisterTest("PdfImportVisual", name, nullptr, nullptr, __FILE__, __LINE__,
+            [file] { return new PdfImportVisualTest(&file); });
+    }
+}
+
+TEST(PdfRenderVisual, ConcurrentBaselineUpdatesPreserveEveryFixture) {
+#ifdef _WIN32
+    GTEST_SKIP() << "multi-process baseline control requires POSIX fork";
+#else
+    const char* path = "temp/pdf_visual/concurrent_baseline.txt";
+    ASSERT_TRUE(ensure_dir(PDF_TEMP_DIR));
+    PdfPageResult seed = {};
+    snprintf(seed.test_id, sizeof(seed.test_id), "retained_page_01");
+    seed.mismatch_percent = 1.25;
+    ASSERT_TRUE(write_pdf_baseline(&seed, 1, false, path));
+    pid_t children[8];
+    for (int i = 0; i < 8; i++) {
+        children[i] = fork();
+        if (children[i] == 0) {
+            PdfPageResult result = {};
+            snprintf(result.test_id, sizeof(result.test_id), "fixture_%d_page_01", i);
+            result.mismatch_percent = i;
+            _exit(write_pdf_baseline(&result, 1, true, path) ? 0 : 1);
+        }
+    }
+    for (pid_t child : children) {
+        EXPECT_GT(child, 0);
+        if (child <= 0) continue;
+        int status = 0;
+        pid_t waited;
+        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+        ASSERT_EQ(waited, child);
+        EXPECT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+    BaselineData baseline;
+    load_pdf_baseline(&baseline, path);
+    ASSERT_TRUE(baseline.loaded);
+    ASSERT_EQ(baseline.count, 9);
+    BaselineEntry* kept = find_baseline_entry(&baseline, seed.test_id);
+    ASSERT_NE(kept, nullptr);
+    EXPECT_EQ(kept->mismatch_percent, seed.mismatch_percent);
+    for (int i = 0; i < 8; i++) {
+        char id[64]; snprintf(id, sizeof(id), "fixture_%d_page_01", i);
+        BaselineEntry* entry = find_baseline_entry(&baseline, id);
+        ASSERT_NE(entry, nullptr);
+        EXPECT_EQ(entry->mismatch_percent, i);
+    }
+#endif
+}
+
 int main(int argc, char** argv) {
     parse_pdf_render_args(&argc, argv);
+    // nested compiler workers share the case's CPU budget unless explicitly configured.
+    const char* budget = getenv("LAMBDA_TEST_MAX_CONCURRENT");
+    if (budget && atoi(budget) > 0 && !getenv("LAMBDA_MODULE_AST_THREADS"))
+        setenv("LAMBDA_MODULE_AST_THREADS", budget, 0);
+    register_pdf_import_tests();
     ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    int result = RUN_ALL_TESTS();
+    return render_batch.finish() ? result : 1;
 }
 
 TEST(RenderOutputParity, ExplicitRadialRadiiReachEveryImageOutput) {
-    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style>";
+    const char* prefix = "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style>";
     const struct { const char* name; const char* prelude; const char* reference; bool repeating; bool selected; } cases[] = {
         {"ellipse_px", "ellipse 24px 16px", "ellipse closest-side", false, false},
         {"ellipse_percent", "ellipse 50% 50%", "ellipse closest-side", false, false},
@@ -11233,16 +11586,16 @@ TEST(RenderOutputParity, ExplicitRadialRadiiReachEveryImageOutput) {
 
 TEST(RenderOutputParity, GradientCentersReachEveryImageOutput) {
     const struct { const char* name; const char* actual; const char* reference; } cases[] = {
-        {"radial_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right 3px bottom 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
-        {"radial_edges_swapped", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at bottom 5px right 3px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 45px 27px,red,blue)\"></div>"},
-        {"radial_percent_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at right 50% bottom 50%,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at center,red,blue)\"></div>"},
-        {"radial_math_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at calc(25% + 4px) calc(25% + 4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 16px 12px,red,blue)\"></div>"},
-        {"radial_nonlinear_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at min(25%,24px) max(25%,4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 12px 8px,red,blue)\"></div>"},
-        {"radial_owner_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 44px 24px,red,blue)\"></div>"},
-        {"conic_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at right 3px bottom 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
-        {"conic_percent_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at right 50% bottom 50%,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red,blue,red)\"></div>"},
-        {"conic_math_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at calc(25% + 4px) calc(25% + 4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 16px 12px,red,blue,red)\"></div>"},
-        {"conic_nonlinear_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at min(25%,24px) max(25%,4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 12px 8px,red,blue,red)\"></div>"},
+        {"radial_edges", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right 3px bottom 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_edges_swapped", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at bottom 5px right 3px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_percent_edges", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at right 50% bottom 50%,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at center,red,blue)\"></div>"},
+        {"radial_math_center", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at calc(25% + 4px) calc(25% + 4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 16px 12px,red,blue)\"></div>"},
+        {"radial_nonlinear_center", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at min(25%,24px) max(25%,4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 12px 8px,red,blue)\"></div>"},
+        {"radial_owner_edges", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 44px 24px,red,blue)\"></div>"},
+        {"conic_edges", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at right 3px bottom 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
+        {"conic_percent_edges", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at right 50% bottom 50%,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red,blue,red)\"></div>"},
+        {"conic_math_center", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at calc(25% + 4px) calc(25% + 4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 16px 12px,red,blue,red)\"></div>"},
+        {"conic_nonlinear_center", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at min(25%,24px) max(25%,4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 12px 8px,red,blue,red)\"></div>"},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128]; snprintf(name, sizeof(name), "gradient_center_%s_%dx", item.name, scale);
@@ -11253,12 +11606,12 @@ TEST(RenderOutputParity, GradientCentersReachEveryImageOutput) {
 
 TEST(RenderOutputParity, GradientFunctionAndPreludeCaseReachEveryOutput) {
     const struct { const char* name; const char* actual; const char* reference; } cases[] = {
-        {"linear", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:LINEAR-GRADIENT(red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,blue)\"></div>"},
-        {"linear_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-LINEAR-GRADIENT(red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(red 0%,blue 25%)\"></div>"},
-        {"radial", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:RADIAL-GRADIENT(CIRCLE 16px AT RIGHT 3px BOTTOM 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
-        {"radial_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-RADIAL-GRADIENT(ELLIPSE 24px 16px AT CENTER,red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-radial-gradient(ellipse closest-side at center,red 0%,blue 25%)\"></div>"},
-        {"conic", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:CONIC-GRADIENT(FROM 30deg AT RIGHT 3px BOTTOM 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
-        {"conic_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-CONIC-GRADIENT(AT CENTER,red 0deg,blue 90deg)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-conic-gradient(at center,red 0deg,blue 90deg)\"></div>"},
+        {"linear", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:LINEAR-GRADIENT(red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,blue)\"></div>"},
+        {"linear_repeat", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-LINEAR-GRADIENT(red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(red 0%,blue 25%)\"></div>"},
+        {"radial", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:RADIAL-GRADIENT(CIRCLE 16px AT RIGHT 3px BOTTOM 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_repeat", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-RADIAL-GRADIENT(ELLIPSE 24px 16px AT CENTER,red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-radial-gradient(ellipse closest-side at center,red 0%,blue 25%)\"></div>"},
+        {"conic", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:CONIC-GRADIENT(FROM 30deg AT RIGHT 3px BOTTOM 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
+        {"conic_repeat", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-CONIC-GRADIENT(AT CENTER,red 0deg,blue 90deg)\"></div>", "<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-conic-gradient(at center,red 0deg,blue 90deg)\"></div>"},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128]; snprintf(name, sizeof(name), "gradient_case_%s_%dx", item.name, scale);
@@ -11269,27 +11622,27 @@ TEST(RenderOutputParity, GradientFunctionAndPreludeCaseReachEveryOutput) {
 
 TEST(RenderOutputParity, GradientStopMathAndUsedFixupReachEveryImageOutput) {
     const struct { const char* name; const char* actual; const char* reference; } cases[] = {
-        {"linear_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
-        {"linear_px","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
-        {"linear_em","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(6em),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
-        {"linear_mixed","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(25% + 12px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
-        {"linear_negative","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(-24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>"},
-        {"radial_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 50%,blue 100%)\"></div>"},
-        {"radial_px","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(8px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 8px,blue 100%)\"></div>"},
-        {"conic_angle","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(180deg),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
-        {"conic_turn","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(.5turn),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
-        {"omitted_run","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),white,black,blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,white 66.6666666667%,black 83.3333333333%,blue 100%)\"></div>"},
-        {"backward_mixed","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white calc(25%),black,blue 48px)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white 40px,black 44px,blue 48px)\"></div>"},
-        {"nonlinear_min","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red min(50%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red 25%,blue 100%)\"></div>"},
-        {"nonlinear_max","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red max(25%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
-        {"angular_min","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red min(.5turn,180deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
-        {"conic_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(25%),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 90deg,blue 360deg)\"></div>"},
-        {"selected_math","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:image-set(linear-gradient(to right,red calc(6em),blue 100%) 1x)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
-        {"invalid_dimension","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(to right,red calc(30deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
-        {"invalid_selected","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:image-set(radial-gradient(circle 16px,red calc(1s),blue) 1x)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
-        {"invalid_first_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red calc(30deg),white,blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
-        {"marker_stop","<!doctype html><style>html,body{margin:0;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red calc(50%),blue 100%)\">X</li></ul>","<!doctype html><style>html,body{margin:0;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red 50%,blue 100%)\">X</li></ul>"},
-        {"border_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"linear_percent","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"linear_px","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"linear_em","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(6em),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"linear_mixed","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(25% + 12px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"linear_negative","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(-24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>"},
+        {"radial_percent","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 50%,blue 100%)\"></div>"},
+        {"radial_px","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(8px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 8px,blue 100%)\"></div>"},
+        {"conic_angle","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(180deg),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"conic_turn","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(.5turn),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"omitted_run","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),white,black,blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,white 66.6666666667%,black 83.3333333333%,blue 100%)\"></div>"},
+        {"backward_mixed","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white calc(25%),black,blue 48px)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white 40px,black 44px,blue 48px)\"></div>"},
+        {"nonlinear_min","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red min(50%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red 25%,blue 100%)\"></div>"},
+        {"nonlinear_max","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red max(25%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"angular_min","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red min(.5turn,180deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"conic_percent","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(25%),blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 90deg,blue 360deg)\"></div>"},
+        {"selected_math","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:image-set(linear-gradient(to right,red calc(6em),blue 100%) 1x)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"invalid_dimension","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(to right,red calc(30deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"invalid_selected","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:image-set(radial-gradient(circle 16px,red calc(1s),blue) 1x)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"invalid_first_stop","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red calc(30deg),white,blue)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"marker_stop","<!doctype html><style>html,body{margin:0;width:96px;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red calc(50%),blue 100%)\">X</li></ul>","<!doctype html><style>html,body{margin:0;width:96px;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red 50%,blue 100%)\">X</li></ul>"},
+        {"border_stop","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;width:96px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128]; snprintf(name, sizeof(name), "gradient_stop_math_%s_%dx", item.name, scale);
@@ -11310,8 +11663,8 @@ TEST(RenderOutputParity, GradientStopMathAndUsedFixupReachEveryImageOutput) {
 TEST(RenderOutputParity, GradientStopMathReachesRasterMasksAndText) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const struct { const char* name; const char* actual; const char* reference; bool mask; } cases[] = {
-        {"mask_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black calc(8px),transparent calc(100%))\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black 8px,transparent 100%)\"></div>",true},
-        {"text_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red calc(2em),blue calc(2em),blue 100%)\">MMMM</div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red 8px,blue 8px,blue 100%)\">MMMM</div>",false},
+        {"mask_stop","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black calc(8px),transparent calc(100%))\"></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black 8px,transparent 100%)\"></div>",true},
+        {"text_stop","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red calc(2em),blue calc(2em),blue 100%)\">MMMM</div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red 8px,blue 8px,blue 100%)\">MMMM</div>",false},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char paths[2][PATH_MAX];
@@ -11337,11 +11690,11 @@ TEST(RenderOutputParity, GradientStopMathReachesRasterMasksAndText) {
 
 TEST(RenderOutputParity, RadialMaskGroupsReachEveryImageOutput) {
     const struct { const char* name; const char* actual; const char* reference; bool transparent; bool red; } cases[] = {
-        {"transparent_subtree","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(transparent,transparent)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}</style><div style=\"width:48px;height:32px\"></div>",true,false},
-        {"stop_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
-        {"center_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at 44px 24px,black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>",false,false},
-        {"opacity_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
-        {"transformed_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+        {"transparent_subtree","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(transparent,transparent)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}</style><div style=\"width:48px;height:32px\"></div>",true,false},
+        {"stop_math","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+        {"center_math","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at 44px 24px,black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>",false,false},
+        {"opacity_math","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+        {"transformed_math","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128]; snprintf(name, sizeof(name), "radial_mask_group_%s_%dx", item.name, scale);
@@ -11398,25 +11751,25 @@ TEST(RenderOutputParity, HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcross
 
 TEST(RenderOutputParity, OutsideGradientStopsPreserveColorsAcrossOutputs) {
     const struct { const char* name; const char* actual; const char* reference; unsigned channel; } cases[] = {
-        {"linear_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:72px;height:32px;position:absolute;left:-24px;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:96px;height:32px;position:absolute;left:0;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
-        {"radial_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -8px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
-        {"linear_both", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue 200%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:144px;height:32px;position:absolute;left:-48px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_left", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to left,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:72px;height:32px;position:absolute;left:0px;top:0px;background-image:linear-gradient(to left,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_vertical", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to bottom,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:48px;height:48px;position:absolute;left:0px;top:-16px;background-image:linear-gradient(to bottom,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_transform", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,blue 150%);transform:translate(4px,4px) scale(1.25);transform-origin:0 0;\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform:translate(4px,4px) scale(1.25);transform-origin:0 0;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_hard", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,red 50%,blue 50%,blue 150%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red 0%,red 50%,blue 50%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
-        {"linear_all_before", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue -50%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
-        {"linear_all_after", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 150%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,red)\"></div>", 0},
-        {"radial_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 32px,red 0%,blue 100%)\"></div>", 2},
-        {"radial_all_before", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -200%,blue -100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
-        {"radial_hard_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,red 0%,blue 0%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
-        {"radial_alpha", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,rgba(255,0,0,0) 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgba(255,0,0,0.666666667) 0%,rgba(255,0,0,0) 100%)\"></div>", 0},
-        {"ellipse_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 32px 16px,red 0%,blue 100%)\"></div>", 2},
-        {"ellipse_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
-        {"repeat_linear_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red -50%,blue 0%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red 0%,blue 50%)\"></div>", 2},
-        {"marker_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,red -50%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", 2},
-        {"border_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+        {"linear_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:72px;height:32px;position:absolute;left:-24px;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_overshoot", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:96px;height:32px;position:absolute;left:0;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"radial_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -8px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+        {"linear_both", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue 200%);\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:144px;height:32px;position:absolute;left:-48px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_left", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to left,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:72px;height:32px;position:absolute;left:0px;top:0px;background-image:linear-gradient(to left,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_vertical", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to bottom,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:48px;height:48px;position:absolute;left:0px;top:-16px;background-image:linear-gradient(to bottom,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_transform", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,blue 150%);transform:translate(4px,4px) scale(1.25);transform-origin:0 0;\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform:translate(4px,4px) scale(1.25);transform-origin:0 0;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_hard", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,red 50%,blue 50%,blue 150%);\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red 0%,red 50%,blue 50%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_all_before", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue -50%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"linear_all_after", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 150%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,red)\"></div>", 0},
+        {"radial_overshoot", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 32px,red 0%,blue 100%)\"></div>", 2},
+        {"radial_all_before", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -200%,blue -100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"radial_hard_center", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,red 0%,blue 0%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"radial_alpha", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,rgba(255,0,0,0) 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgba(255,0,0,0.666666667) 0%,rgba(255,0,0,0) 100%)\"></div>", 0},
+        {"ellipse_overshoot", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 32px 16px,red 0%,blue 100%)\"></div>", 2},
+        {"ellipse_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+        {"repeat_linear_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red -50%,blue 0%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red 0%,blue 50%)\"></div>", 2},
+        {"marker_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,red -50%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", 2},
+        {"border_negative", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;width:128px;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
     };
     for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
         char name[128]; snprintf(name, sizeof(name), "gradient_range_%s_%dx", item.name, scale);

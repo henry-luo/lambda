@@ -4354,7 +4354,8 @@ typedef struct RenderOutputTarget {
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
-    lam::Own<UiContext> ui_context;
+    lam::Up<UiContext> ui_context;
+    lam::Own<UiContext> owned_ui_context;
     lam::Own<Url> base_url;
     lam::Up<DomDocument> document;
     lam::Up<ViewTree> paged_view;
@@ -4404,6 +4405,8 @@ int render_svg_dom_to_file(DomElement* root, const char* filename, bool freeze);
 bool render_svg_dom_snapshot(DomElement* root, StrBuf* output);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
+int render_batch_export(UiContext* ui, const char* source, const char* filename,
+    float viewport_width, float viewport_height, float device_scale);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
     const char* base_url = nullptr, bool block_remote_resources = false);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
