@@ -18,7 +18,11 @@
     X(native_lock_wait_ns) X(native_canvas_ns) X(native_canvases) \
     X(flush_clip) X(flush_cpu) X(flush_target) X(flush_end) X(flush_destroy) X(flush_boundary) \
     X(full_frame_reuses) X(basic_shape_builds) X(basic_shape_cache_hits) X(clip_segments) \
-    X(tile_lock_wait_ns) X(tile_work_ns) X(shared_array_hits) X(shared_array_retains)
+    X(tile_lock_wait_ns) X(tile_work_ns) X(shared_array_hits) X(shared_array_retains) \
+    X(fragment_references) X(fragment_commands) \
+    X(resource_command_checks) X(resource_summary_checks) X(resource_epoch_checks) \
+    X(resource_surface_checks) X(resource_child_checks) X(resource_capture_commands) \
+    X(validation_command_checks) X(glyph_command_checks) X(media_command_checks)
 
 struct RenderPipelineMetrics {
 #define RENDER_METRIC_FIELD(name) uint64_t name = 0;

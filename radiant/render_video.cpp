@@ -7,6 +7,7 @@
 // Vector graphics rendered via RdtVector (ThorVG), text via font.h glyph system.
 
 #include "render.hpp"
+#include "render_metrics.hpp"
 #include "rdt_video.h"
 #include "event.hpp"
 #include "view.hpp"
@@ -363,23 +364,28 @@ static void render_play_button_overlay(ImageSurface* surface,
     rdt_vector_destroy(&vec);
 }
 
+static void render_video_finish_placements(DocState* state, int count) {
+    if (!state) return;
+    state->video_placement_count = count;
+    doc_state_clear_video_frame_pending(state);
+}
+
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon) {
     if (!dl || !surface) {
-        if (rstate) doc_state_clear_video_frame_pending(rstate);
+        // an absent video stream must also retire placements from the previous frame.
+        render_video_finish_placements(rstate, 0);
         return;
     }
-
-    int count = dl_item_count(dl);
-    DisplayItem* items = dl->data();
 
     // cache video placements for video-only dirty optimisation
     int cached = 0;
 
-    for (int i = 0; i < count; i++) {
-        DisplayItem* item = &items[i];
+    DisplayListCursor cursor(dl);
+    while (const DisplayItem* item = cursor.next()) {
+        RENDER_METRIC_ADD(media_command_checks, 1);
         if (item->op != DL_VIDEO_PLACEHOLDER) continue;
 
-        DlVideoPlaceholder* vp = &item->video_placeholder;
+        const DlVideoPlaceholder* vp = &item->video_placeholder;
         RdtVideo* video = (RdtVideo*)vp->video;
         if (!video) continue;
 
@@ -442,10 +448,7 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstat
         }
     }
 
-    if (rstate) {
-        rstate->video_placement_count = cached;
-        doc_state_clear_video_frame_pending(rstate);
-    }
+    render_video_finish_placements(rstate, cached);
 }
 
 // ---------------------------------------------------------------------------

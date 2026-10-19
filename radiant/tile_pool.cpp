@@ -374,8 +374,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     rdt_vector_begin_batch(vec);
 
     // SVG backdrop capture replays the already recorded prefix from its isolation boundary.
-    for (int i = LMB_MAX(first_item, 0); i < dl->item_count(); i++) {
-        DisplayItem* item = &dl->data()[i];
+    DisplayListCursor cursor(dl, first_item);
+    while (const DisplayItem* item = cursor.next()) {
 
         // Cull draw work that doesn't intersect this tile; the skip path below
         // still preserves clip/backdrop stack state for ordered replay.
@@ -399,8 +399,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     // self-contained, nothing to track on skip
                     break;
                 case DL_BEGIN_ELEMENT:
-                    if (item->element_marker.matching_index > i) {
-                        i = item->element_marker.matching_index;
+                    if (item->element_marker.matching_index > cursor.index) {
+                        cursor.skip_element();
                     }
                     break;
                 default:
@@ -444,7 +444,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_FILL_SURFACE_RECT: {
             rdt_vector_flush_batch(vec);
-            DlFillSurfaceRect* r = &item->fill_surface_rect;
+            const DlFillSurfaceRect* r = &item->fill_surface_rect;
             dl_replay_fill_surface_rect_at_offset(tile_surface, scratch, r, tile_x, tile_y);
 #ifndef NDEBUG
             items_drawn++;
@@ -454,7 +454,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_BLIT_SURFACE_SCALED: {
             rdt_vector_flush_batch(vec);
-            DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
+            const DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
             dl_replay_blit_surface_scaled_at_offset(tile_surface, scratch, r, tile_x, tile_y);
 #ifndef NDEBUG
             items_drawn++;
@@ -464,14 +464,14 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_COMPOSITE_OPACITY: {
             rdt_vector_flush_batch(vec);
-            DlCompositeOpacity* r = &item->composite_opacity;
+            const DlCompositeOpacity* r = &item->composite_opacity;
             dl_replay_backdrop_composite_opacity(&backdrop_stack, tile_surface, scratch, r, tile_x, tile_y);
             break;
         }
 
         case DL_SAVE_BACKDROP: {
             rdt_vector_flush_batch(vec);
-            DlSaveBackdrop* r = &item->save_backdrop;
+            const DlSaveBackdrop* r = &item->save_backdrop;
             dl_replay_backdrop_save_at_offset(&backdrop_stack, tile_surface, scratch,
                                               r, tile_x, tile_y);
             break;
@@ -479,35 +479,35 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_APPLY_BLEND_MODE: {
             rdt_vector_flush_batch(vec);
-            DlApplyBlendMode* r = &item->apply_blend_mode;
+            const DlApplyBlendMode* r = &item->apply_blend_mode;
             dl_replay_backdrop_apply_blend_mode(&backdrop_stack, tile_surface, scratch, r);
             break;
         }
 
         case DL_APPLY_FILTER: {
             rdt_vector_flush_batch(vec);
-            DlApplyFilter* r = &item->apply_filter;
+            const DlApplyFilter* r = &item->apply_filter;
             dl_replay_apply_filter_at_offset(scratch, tile_surface, caps, r, tile_x, tile_y);
             break;
         }
 
         case DL_BOX_BLUR_REGION: {
             rdt_vector_flush_batch(vec);
-            DlBoxBlurRegion* r = &item->box_blur_region;
+            const DlBoxBlurRegion* r = &item->box_blur_region;
             dl_replay_box_blur_region_at_offset(scratch, tile_surface, r, tile_x, tile_y);
             break;
         }
 
         case DL_BOX_BLUR_INSET: {
             rdt_vector_flush_batch(vec);
-            DlBoxBlurInset* r = &item->box_blur_inset;
+            const DlBoxBlurInset* r = &item->box_blur_inset;
             dl_replay_box_blur_inset_at_offset(scratch, tile_surface, r, tile_x, tile_y);
             break;
         }
 
         case DL_SHADOW_CLIP_SAVE: {
             rdt_vector_flush_batch(vec);
-            DlShadowClipSave* r = &item->shadow_clip_save;
+            const DlShadowClipSave* r = &item->shadow_clip_save;
             dl_replay_shadow_clip_save_at_offset(&shadow_clip, tile_surface, scratch,
                                                  r, tile_x, tile_y);
             break;
@@ -515,7 +515,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_SHADOW_CLIP_RESTORE: {
             rdt_vector_flush_batch(vec);
-            DlShadowClipRestore* r = &item->shadow_clip_restore;
+            const DlShadowClipRestore* r = &item->shadow_clip_restore;
             dl_replay_shadow_clip_restore_at_offset(&shadow_clip, tile_surface,
                                                     r, tile_x, tile_y);
             break;
@@ -523,13 +523,14 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_OUTER_SHADOW: {
             rdt_vector_flush_batch(vec);
-            DlOuterShadow* o = &item->outer_shadow;
+            const DlOuterShadow* o = &item->outer_shadow;
             dl_replay_outer_shadow_at_offset(scratch, tile_surface, o, tile_x, tile_y);
             break;
         }
 
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
+        case DL_DRAW_FRAGMENT: // expanded by the read-only cursor.
             break;
 
         case DL_VIDEO_PLACEHOLDER:
@@ -538,7 +539,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_WEBVIEW_LAYER_PLACEHOLDER: {
             rdt_vector_flush_batch(vec);
-            DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
+            const DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
             dl_replay_webview_layer_placeholder_at_offset(tile_surface, r, tile_x, tile_y);
 #ifndef NDEBUG
             ImageSurface* src = (ImageSurface*)r->surface;
@@ -549,6 +550,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
     }
 
+    if (cursor.failed) log_error("[DL_REPLAY_TILE] invalid fragment graph");
     rdt_vector_end_batch(vec);
 
     int backdrop_depth = dl_replay_backdrop_depth(&backdrop_stack);

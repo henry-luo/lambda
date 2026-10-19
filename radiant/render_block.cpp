@@ -481,6 +481,8 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
 
 static bool block_should_paint_children(ViewBlock* block) {
     if (!block || view_contents_are_skipped(block)) return false;
+    // SVG owns descendant transforms/clips, including foreign HTML in background-only visits.
+    if (block->tag_id == MARKUP_NAME_SVG) return false;
     if (block->form_control() &&
         block->tag() != MARKUP_NAME_BUTTON) {
         return false;
