@@ -717,7 +717,7 @@ struct RenderNativeTextCluster {
 static void render_native_cluster_emit(RenderNativeTextCluster* cluster,
         const GlyphBitmap* source, float x, float y, bool background) {
     if (!source) { cluster->failed = true; return; }
-    if (!source->buffer || source->width <= 0 || source->height <= 0) return;
+    if (!render_glyph_bitmap_has_ink(source)) return;
     RasterRenderContext* raster = cluster->raster;
     if (background && cluster->background && cluster->parent) {
         Rect border = {raster->block.x, raster->block.y,
@@ -1369,20 +1369,23 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
 
                 float glyph_x = roundf(sx_pos + s_glyph->bitmap.bearing_x);
                 float glyph_y = roundf(y + s_ascend - s_glyph->bitmap.bearing_y);
-                if (!background_painted && parent_elem) {
-                    Rect border = {rdcon->block.x, rdcon->block.y,
-                        parent_elem->width * s, parent_elem->height * s};
-                    render_paint_text_background_glyph(rdcon, parent_elem, border, &s_glyph->bitmap, glyph_x, glyph_y);
+                // blank glyphs still advance the pen, but have no mask to record in the shadow.
+                if (render_glyph_bitmap_has_ink(&s_glyph->bitmap)) {
+                    if (!background_painted && parent_elem) {
+                        Rect border = {rdcon->block.x, rdcon->block.y,
+                            parent_elem->width * s, parent_elem->height * s};
+                        render_paint_text_background_glyph(rdcon, parent_elem, border, &s_glyph->bitmap, glyph_x, glyph_y);
+                    }
+                    float sx = glyph_x + roundf(shadow->offset_x * s);
+                    float sy = glyph_y + roundf(shadow->offset_y * s);
+                    int count = shadow_list.item_count();
+                    dl_draw_glyph(&shadow_list, &s_glyph->bitmap,
+                        (int)sx, (int)sy, opaque_shadow, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded glyph bitmap destination pixels
+                    if (shadow_list.item_count() != count + 1) decoration.failed = true;
+                    left = fminf(left, sx); top = fminf(top, sy);
+                    right = fmaxf(right, sx + (float)s_glyph->bitmap.width);
+                    bottom = fmaxf(bottom, sy + (float)s_glyph->bitmap.height);
                 }
-                float sx = glyph_x + roundf(shadow->offset_x * s);
-                float sy = glyph_y + roundf(shadow->offset_y * s);
-                int count = shadow_list.item_count();
-                dl_draw_glyph(&shadow_list, &s_glyph->bitmap,
-                    (int)sx, (int)sy, opaque_shadow, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded glyph bitmap destination pixels
-                if (shadow_list.item_count() != count + 1) decoration.failed = true;
-                left = fminf(left, sx); top = fminf(top, sy);
-                right = fmaxf(right, sx + (float)s_glyph->bitmap.width);
-                bottom = fmaxf(bottom, sy + (float)s_glyph->bitmap.height);
                 // loading the mark reuses LoadedGlyph storage; retain the text advance first (D4.5.1v4).
                 float text_advance = s_glyph->advance_x;
                 if (emphasis && emphasis->handle && text_emphasis_marks_codepoint(s_tt_cp)) {
@@ -1392,7 +1395,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                         y + s_ascend + roundf(shadow->offset_y * s),
                         text_advance, s, &mark_x, &mark_y);
                     if (!mark) decoration.failed = true;
-                    else {
+                    else if (render_glyph_bitmap_has_ink(&mark->bitmap)) {
                         int mark_count = shadow_list.item_count();
                         dl_draw_glyph(&shadow_list, &mark->bitmap,
                             (int)mark_x, (int)mark_y, opaque_shadow, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded emphasis bitmap destination pixels

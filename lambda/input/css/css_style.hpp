@@ -1431,6 +1431,9 @@ typedef struct CssRule {
     // Specificity caching for performance
     bool specificity_computed;   // Whether specificity has been calculated
     uint32_t cached_specificity; // Cached specificity value
+    uint64_t declaration_property_filter;
+    uint64_t declaration_filter_generation;
+    bool declaration_filter_valid;
 } CssRule;
 
 struct CssRuleChildList {

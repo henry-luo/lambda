@@ -287,11 +287,14 @@ public:
 };
 #endif  // !_WIN32
 
-extern "C" void script_runner_suspend_js_watchdog(void) {
+extern "C" bool script_runner_suspend_js_watchdog(void) {
 #ifndef _WIN32
-    if (!js_exec_current || !js_exec_current->guarded || !js_exec_current->started) return;
+    if (!js_exec_current || !js_exec_current->guarded || !js_exec_current->started) return false;
     js_exec_current->started = 0;
     js_exec_watchdog_disarm();
+    return true;
+#else
+    return false;
 #endif
 }
 
@@ -301,6 +304,24 @@ extern "C" void script_runner_resume_js_watchdog(void) {
             js_exec_current->started) return;
     js_exec_watchdog_begin_user_code();
 #endif
+}
+
+static thread_local bool script_runner_host_layout_pending = false;
+
+ScriptRunnerHostLayoutScope::ScriptRunnerHostLayoutScope()
+    : previous(script_runner_host_layout_pending) {
+    script_runner_host_layout_pending = true;
+}
+
+ScriptRunnerHostLayoutScope::~ScriptRunnerHostLayoutScope() {
+    script_runner_host_layout_pending = previous;
+}
+
+bool ScriptRunnerHostLayoutScope::suspend_watchdog_for_layout() {
+    if (!script_runner_host_layout_pending) return false;
+    // consume the host request before callbacks can force their own reflows.
+    script_runner_host_layout_pending = false;
+    return script_runner_suspend_js_watchdog();
 }
 
 static bool s_retain_js_state = true;

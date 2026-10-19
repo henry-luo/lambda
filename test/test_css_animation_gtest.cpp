@@ -567,6 +567,50 @@ TEST(CssPropTable, CommittedStylesIgnoreRangeDocumentWrapper) {
     EXPECT_STREQ(value, "0.3");
 }
 
+TEST(CssPropTable, UnlaidOutChildKeepsCommittedAncestorCascadeAndObservesMutations) {
+    Pool* pool = pool_create();
+    Input* input = Input::create(pool);
+    DomDocument* doc = dom_document_create(input);
+    ASSERT_NE(doc, nullptr);
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    doc->services.cached_css_engine = engine;
+    MarkBuilder builder(input);
+    DomElement* parent = DomElement::create(doc, "div", builder.element("div").final().element);
+    DomElement* child = DomElement::create(doc, "span", builder.element("span").final().element);
+    ASSERT_NE(parent, nullptr); ASSERT_NE(child, nullptr);
+    doc->root = lam::up(parent);
+    parent->link_child(child);
+    ASSERT_TRUE(parent->set_attribute("style", "color:red"));
+    parent->set_styles_resolved(true);
+    parent->set_needs_style_recompute(false);
+    uint32_t committed_version = parent->style_version;
+    char value[64];
+    ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
+    EXPECT_STREQ(value, "rgb(255, 0, 0)");
+    EXPECT_EQ(parent->style_version, committed_version);
+    EXPECT_TRUE(parent->styles_resolved());
+    EXPECT_FALSE(parent->needs_style_recompute());
+
+    ASSERT_TRUE(parent->set_attribute("style", "color:blue"));
+    doc->js.mutation_count = 1;
+    {
+        CssomCascadeQueryScope cascade;
+        ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, "rgb(0, 0, 255)");
+        uint32_t refreshed_version = parent->style_version;
+        ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
+        EXPECT_EQ(parent->style_version, refreshed_version);
+        ASSERT_TRUE(parent->set_attribute("style", "color:green"));
+        doc->mutation_epoch++;
+        ASSERT_TRUE(css_prop_serialize_computed(child, CSS_PROPERTY_COLOR, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, "rgb(0, 128, 0)");
+    }
+    dom_document_destroy(doc);
+    css_engine_destroy(engine);
+    pool_destroy(pool);
+}
+
 class MotionCascadeTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
@@ -608,6 +652,73 @@ protected:
         EXPECT_STREQ(computed, expected);
     }
 };
+
+TEST_F(MotionCascadeTest, SinglePropertyQueriesTrackShorthandsAndStylesheetEdits) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "* { margin: 1px; opacity: .25; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssStylesheet* sheets[] = {sheet};
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    ASSERT_NE(matcher, nullptr);
+    auto query = [&](const char* property, CssDeclaration* result) {
+        return css_select_element_declaration(engine, matcher, &element,
+            sheets, 1, nullptr, 0, property, result);
+    };
+    CssDeclaration selected = {};
+    ASSERT_TRUE(query("margin-left", &selected));
+    EXPECT_EQ(selected.property_code, CSS_PROPERTY_MARGIN);
+    ASSERT_TRUE(query("opacity", &selected));
+    EXPECT_EQ(selected.property_code, CSS_PROPERTY_OPACITY);
+    EXPECT_FALSE(query("fill", &selected));
+
+    CssRule* rule = sheet->rules[0];
+    const char* fill = "fill: blue";
+    rule->data.style_rule.declarations[1] = css_parse_declaration_text(fill, strlen(fill), pool);
+    ASSERT_NE(rule->data.style_rule.declarations[1], nullptr);
+    css_stylesheet_mark_changed(sheet);
+    ASSERT_TRUE(query("fill", &selected));
+    EXPECT_EQ(selected.property_code, CSS_PROPERTY_FILL);
+    EXPECT_FALSE(query("opacity", &selected));
+
+    css_rule_attach(rule, nullptr, nullptr);
+    const char* color = "color: red";
+    rule->data.style_rule.declarations[0] = css_parse_declaration_text(color, strlen(color), pool);
+    ASSERT_NE(rule->data.style_rule.declarations[0], nullptr);
+    css_rule_attach(rule, nullptr, sheet);
+    ASSERT_TRUE(query("color", &selected));
+    EXPECT_EQ(selected.property_code, CSS_PROPERTY_COLOR);
+
+    const char* reference_box = "transform-box: fill-box";
+    rule->data.style_rule.declarations[0] = css_parse_declaration_text(reference_box, strlen(reference_box), pool);
+    ASSERT_NE(rule->data.style_rule.declarations[0], nullptr);
+    css_stylesheet_mark_changed(sheet);
+    ASSERT_TRUE(query("TRANSFORM-BOX", &selected));
+    EXPECT_STREQ(selected.value_text, "fill-box");
+
+    const char* reset = "all: initial";
+    rule->data.style_rule.declarations[0] = css_parse_declaration_text(reset, strlen(reset), pool);
+    ASSERT_NE(rule->data.style_rule.declarations[0], nullptr);
+    css_stylesheet_mark_changed(sheet);
+    ASSERT_TRUE(query("color", &selected));
+    EXPECT_EQ(selected.property_code, CSS_PROPERTY_ALL);
+    selector_matcher_destroy(matcher);
+}
+
+TEST_F(MotionCascadeTest, ConditionCacheReusesDistinctConditionsBelowCapacity) {
+    auto evaluate = [&]() {
+        for (unsigned index = 0; index < CSS_CONDITION_CACHE_CAPACITY / 2; index++) {
+            char condition[96];
+            str_fmt(condition, sizeof(condition), index % 2
+                ? "(lambda-unknown-property: %upx)" : "(width: %upx)", index + 1);
+            EXPECT_EQ(css_evaluate_supports_condition(engine, condition), index % 2 == 0);
+        }
+    };
+    evaluate();
+    uint64_t warmed_evaluations = engine->condition_evaluations;
+    evaluate();
+    EXPECT_EQ(engine->condition_evaluations, warmed_evaluations);
+}
 
 TEST_F(MotionCascadeTest, InputCapabilitiesKeepPrimaryAndAggregateQueriesDistinct) {
     const CssInputCapabilities environments[] = {
@@ -2990,6 +3101,7 @@ protected:
         layout = {};
         layout.pool = lam::up(pool);
         layout.ui_context = lam::up(&ui);
+        layout.run_mode = radiant::RunMode::PerformLayout;
     }
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
@@ -3665,6 +3777,34 @@ TEST_F(AnimationTickTest, ImportantPriorityRefreshesForCssAndWebEffects) {
     setAnimationStyle(element, "opacity:.8");
     css_web_animation_resolve(element, &layout);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+}
+
+TEST_F(AnimationTickTest, MeasurementSamplesExistingTransitionWithoutRetargeting) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    setAnimationStyle(element, "opacity:.2;transition:opacity 1s linear");
+    mock.in_line.opacity = .2f;
+    layout.run_mode = radiant::RunMode::ComputeSize;
+    css_transition_resolve(element, &layout);
+    EXPECT_EQ(element->transition_state_prop(), nullptr);
+
+    layout.run_mode = radiant::RunMode::PerformLayout;
+    css_transition_resolve(element, &layout);
+    setAnimationStyle(element, "opacity:.8;transition:opacity 1s linear");
+    mock.in_line.opacity = .8f;
+    css_transition_resolve(element, &layout);
+    ASSERT_EQ(scheduler->count, 1);
+    AnimationInstance* original = scheduler->first;
+    animation_scheduler_tick(scheduler, .5, nullptr);
+
+    mock.in_line.opacity = .9f;
+    layout.run_mode = radiant::RunMode::ComputeSize;
+    css_transition_resolve(element, &layout);
+    ASSERT_EQ(scheduler->count, 1);
+    EXPECT_EQ(scheduler->first, original);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+    auto* active = static_cast<CssTransitionState*>(original->state);
+    EXPECT_FLOAT_EQ(active->to.value.f, .8f);
 }
 
 TEST_F(AnimationTickTest, TransitionsRetainPriorityAboveImportantDeclarations) {

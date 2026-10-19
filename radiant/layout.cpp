@@ -6043,6 +6043,16 @@ static bool layout_clear_dirty_visitor(DomNode* node, void*) {
     return true;
 }
 
+struct LayoutScriptBudgetScope {
+    bool paused = ScriptRunnerHostLayoutScope::suspend_watchdog_for_layout();
+    void finish() {
+        if (!paused) return;
+        paused = false;
+        script_runner_resume_js_watchdog();
+    }
+    ~LayoutScriptBudgetScope() { finish(); }
+};
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFlowState* paged) {
     uint64_t t_start = time_now_ns();
 
@@ -6050,6 +6060,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
 
     LayoutContext lycon;
     if (!doc) return;
+    // CSSOM and task checkpoints run native layout between script slices;
+    // charge the page-code watchdog again before delivering JS observers.
+    LayoutScriptBudgetScope script_budget;
     LayoutDocumentActivity layout_activity(doc);
     // Lambda and JS can replace DOM targets; discard their clocks before relayout.
     if (doc->state) {
@@ -6220,6 +6233,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     if (doc->view_tree && doc->view_tree->root) {
         view_geometry_walk_dom_tree(root_node, layout_clear_dirty_visitor, nullptr);
     }
+    script_budget.finish();
     dom_observers_post_layout();
 
     uint64_t t_end = time_now_ns();

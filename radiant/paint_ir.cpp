@@ -327,11 +327,6 @@ static bool paint_ir_validate_gradient_payload(RdtPath* path,
     return path && stops && stop_count > 0;
 }
 
-static bool paint_ir_validate_glyph_bitmap(const GlyphBitmap* bitmap) {
-    return bitmap && bitmap->buffer &&
-           bitmap->width > 0 && bitmap->height > 0 && bitmap->pitch > 0;
-}
-
 static bool paint_ir_validate_stroke_path(const PaintStrokePath* stroke) {
     return stroke && stroke->path &&
            isfinite(stroke->width) && stroke->width >= 0.0f &&
@@ -499,7 +494,7 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_DRAW_GLYPH:
-            if (!paint_ir_validate_glyph_bitmap(&cmd->draw_glyph.bitmap)) {
+            if (!render_glyph_bitmap_has_ink(&cmd->draw_glyph.bitmap)) {
                 return fail("glyph payload is invalid");
             }
             break;

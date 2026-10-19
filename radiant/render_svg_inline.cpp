@@ -487,6 +487,7 @@ struct SvgStyleProperty {
     uint64_t animation_generation;
     bool from_css;
     bool inherits;
+    bool base_value;
     DomElement* declaring_element;
     SvgStyleProperty* next;
 };
@@ -870,12 +871,44 @@ typedef struct {
     const SvgDomStyleScope* scope = nullptr;
 } SvgVariableContext;
 
+static bool svg_select_property_declaration(SvgStyleContext* style, DomElement* element,
+    const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
+    CssPropertyCode property = css_property_code_from_name(name);
+    // SVG-only names outside the native property table have no StyleTree slot.
+    if ((property > 0 || (name[0] == '-' && name[1] == '-')) &&
+        !scope && element->specified_style && element->styles_resolved() &&
+        !element->needs_style_recompute()) {
+        // host layout already selected these winners; rematching the full sheet
+        // for every SVG paint property makes large document rendering quadratic.
+        if (name[0] == '-' && name[1] == '-') {
+            const CssCustomProp* custom = dom_element_lookup_own_custom_property_entry(element, name);
+            if (!custom || !custom->value) return false;
+            if (custom->declaration) *declaration = *custom->declaration;
+            declaration->value = const_cast<CssValue*>(custom->value.get());
+            return true;
+        }
+        CssDeclaration* winner = style_tree_get_property_declaration(element->specified_style,
+            property);
+        if (winner) *declaration = *winner;
+        return winner != nullptr;
+    }
+    SvgStyleEntry* entry = svg_style_entry(style, dom_element_to_element(element));
+    size_t inline_count = entry ? entry->inline_count : 0;
+    const char* inline_text = entry ? nullptr : element->get_attribute("style");
+    CssDeclaration** inline_declarations = entry ? entry->inline_declarations : inline_text
+        ? css_parse_declaration_list_text(inline_text, strlen(inline_text), style->pool, &inline_count)
+        : nullptr;
+    DomDocument* doc = style->document;
+    return css_select_element_declaration(style->engine, style->matcher, element,
+        doc->stylesheets, (size_t)doc->stylesheet_count, inline_declarations,
+        inline_count, name, declaration);
+}
+
 static const CssValue* svg_lookup_variable(void* context, DomElement* element,
                                            const char* name, DomElement** owner) {
     if (owner) *owner = nullptr;
     SvgVariableContext* variables = (SvgVariableContext*)context;
     SvgStyleContext* style = variables->style;
-    DomDocument* doc = style->document;
     if (strncmp(name, "--", 2) != 0) {
         // the dedicated var parser omits dashes; declaration queries require the full name.
         size_t length = strlen(name);
@@ -887,17 +920,9 @@ static const CssValue* svg_lookup_variable(void* context, DomElement* element,
     }
     for (DomNode* node = element; node && node->is_element();
         node = svg_dom_style_parent(node, variables->scope)) {
-        SvgStyleEntry* entry = svg_style_entry(style, dom_element_to_element(node->as_element()));
         DomElement* current = node->as_element();
-        size_t inline_count = entry ? entry->inline_count : 0;
-        const char* inline_text = entry ? nullptr : current->get_attribute("style");
-        CssDeclaration** inline_declarations = entry ? entry->inline_declarations : inline_text
-            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), style->pool, &inline_count)
-            : nullptr;
         CssDeclaration declaration = {};
-        if (css_select_element_declaration(style->engine, style->matcher, current,
-            doc->stylesheets, (size_t)doc->stylesheet_count, inline_declarations,
-            inline_count, name, &declaration)) {
+        if (svg_select_property_declaration(style, current, name, &declaration, variables->scope)) {
             CssEnum keyword = declaration.value && declaration.value->type == CSS_VALUE_TYPE_KEYWORD
                 ? declaration.value->data.keyword : CSS_VALUE_NONE;
             if (keyword == CSS_VALUE_INITIAL) return nullptr;
@@ -1016,10 +1041,7 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     prop->name = pool_strdup(style->pool, name);
     prop->animation_generation = generation;
     CssDeclaration declaration = {};
-    DomDocument* doc = style->document;
-    bool selected = css_select_element_declaration(style->engine, style->matcher, entry->node,
-        doc->stylesheets, (size_t)doc->stylesheet_count, entry->inline_declarations,
-        entry->inline_count, name, &declaration);
+    bool selected = svg_select_property_declaration(style, entry->node, name, &declaration);
     if (selected) {
         prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration, nullptr,
             !dom_element_is_svg(entry->node));
@@ -1094,19 +1116,10 @@ DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope) {
 static const char* svg_dom_resolve_property(SvgStyleContext* query, DomElement* element,
     const char* name, bool inherits, bool* from_css, DomElement** declaring_element,
     const SvgDomStyleScope* scope) {
-    DomDocument* doc = element->doc;
     for (DomNode* node = element; query->matcher && node && node->is_element(); node = svg_dom_style_parent(node, scope)) {
         DomElement* current = node->as_element();
-        SvgStyleEntry* entry = svg_style_entry(query, dom_element_to_element(current));
-        const char* inline_text = entry ? nullptr : current->get_attribute("style");
-        size_t inline_count = entry ? entry->inline_count : 0;
-        CssDeclaration** inline_declarations = entry ? entry->inline_declarations : inline_text
-            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), query->pool, &inline_count)
-            : nullptr;
         CssDeclaration declaration = {};
-        bool selected = css_select_element_declaration((CssEngine*)doc->services.cached_css_engine,
-            query->matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
-            inline_declarations, inline_count, name, &declaration);
+        bool selected = svg_select_property_declaration(query, current, name, &declaration, scope);
         const char* value = selected ? svg_resolve_property_declaration(query, current, name, &declaration, scope)
             : dom_element_is_svg(current) &&
                 !css_property_is_identity_shorthand(css_property_code_from_name(name))
@@ -1152,13 +1165,16 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
         query->matcher = selector_matcher_create(query->pool);
         if (query->matcher) state_configure_selector_matcher((DocState*)element->doc->state, query->matcher);
     }
-    // SMIL queries base values while assembling a sample; they must neither
-    // read nor populate the cache of completed animated presentation values.
-    SvgStyleEntry* entry = shared && !svg_animation_is_sampling(element->doc) && !css_animation_is_sampling_base()
+    // CSS base queries need a separate cache key so transition snapshots never
+    // read animated paint values or repeat the host cascade during measurement.
+    // SMIL sampling still bypasses caching until its sample is complete.
+    bool base_value = css_animation_is_sampling_base();
+    SvgStyleEntry* entry = shared && !svg_animation_is_sampling(element->doc)
         ? svg_style_entry(query, dom_element_to_element(element)) : nullptr;
     uint64_t generation = svg_animation_source_generation(element->doc, dom_element_to_element(element), element);
     SvgStyleProperty* property = entry ? entry->computed_properties : nullptr;
-    while (property && (property->inherits != inherits || property->animation_generation != generation ||
+    while (property && (property->inherits != inherits || property->base_value != base_value ||
+        property->animation_generation != generation ||
         strcmp(property->name, name) != 0)) property = property->next;
     bool css = false;
     DomElement* owner = nullptr;
@@ -1172,6 +1188,7 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
             property->value = value ? pool_strdup(query->pool, value) : nullptr;
             property->animation_generation = generation;
             property->inherits = inherits;
+            property->base_value = base_value;
             property->from_css = css;
             property->declaring_element = owner;
             property->next = entry->computed_properties;

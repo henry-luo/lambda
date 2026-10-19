@@ -1729,7 +1729,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             // A static headless view is a first-render snapshot. It has no
             // later host turn, so close post-load background handles here.
             headless && sim_ctx == nullptr,
-            headless && sim_ctx != nullptr,
+            // native layout time must not advance the snapshot's timer clock.
+            headless,
             0.0,
             0.0,
             false,

@@ -620,7 +620,7 @@ TEST_F(BinarySchemaTest, LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers) {
         const char* expected;
     } fixtures[] = {
         {"test/lambda/pdf/output_resources.ls", "temp/pdf_lambda_resources.pdf", nullptr,
-            "[true, true, true, true, true, true, true, true]"},
+            "[true, true, true, true, true, true, true, true, true, true, true]"},
         {"test/lambda/pdf/output_phase6.ls", "temp/pdf_lambda_phase6.pdf", "phase6",
             "[true, true, true, true, true, true, true, true, true, true, true, true, true, true]"},
         {"test/lambda/pdf/output_pages.ls", "temp/pdf_lambda_pages.pdf", "3",

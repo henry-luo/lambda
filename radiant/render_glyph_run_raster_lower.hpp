@@ -150,7 +150,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
 
         // a glyph without ink (a preserved line feed, a blank glyph) only advances;
         // the display list rejects an empty bitmap
-        if (!glyph->bitmap.buffer || glyph->bitmap.width <= 0 || glyph->bitmap.height <= 0) {
+        if (!render_glyph_bitmap_has_ink(&glyph->bitmap)) {
             x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
             continue;
         }

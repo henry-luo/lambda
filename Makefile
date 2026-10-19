@@ -1107,7 +1107,7 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 	@for module in node-core node-fs node-net node-crypto; do \
 		if ! find "release-standard/modules/$$module" -maxdepth 1 -type f \
 			\( -name "$$module.dylib" -o -name "$$module.so" -o -name "$$module.dll" \) \
-			-print -quit | rg -q .; then \
+			-print -quit | grep -q .; then \
 			echo "missing packaged $$module image"; exit 1; \
 		fi; \
 	done
@@ -1135,7 +1135,7 @@ package-node-reduced: release-node-core
 	@cp release/modules/node-core/node-core.dylib release/modules/node-core/node-core.so release/modules/node-core/node-core.dll release-node-reduced/modules/node-core/ 2>/dev/null || true
 	@if ! find release-node-reduced/modules/node-core -maxdepth 1 -type f \
 		\( -name 'node-core.dylib' -o -name 'node-core.so' -o -name 'node-core.dll' \) \
-		-print -quit | rg -q .; then \
+		-print -quit | grep -q .; then \
 		echo "missing packaged node-core image"; exit 1; \
 	fi
 	# A cataloged but image-less leaf blocks legacy host fallback and reports the
