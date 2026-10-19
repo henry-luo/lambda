@@ -263,3 +263,5 @@ pub fn from_bytes(bytes,options) element^ {
 }
 
 pub fn histogram(raster) array^ => edit_samples(raster,"histogram")^
+
+pub fn retouch(raster,options) element^ => edit_samples(raster,"retouch",options)^

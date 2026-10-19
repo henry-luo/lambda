@@ -8,8 +8,8 @@ pub fn color(st,value=null) {
     if (st.target == "mask" and len(requested) == 4) [requested[0]*0.2126+requested[1]*0.7152+requested[2]*0.0722]
     else requested
 }
-fn extended(st,target,command,options) any^ {
-    if (command.id != "paint.stroke") target
+pub fn extended(st,target,command,options) any^ {
+    if (not (command.id in ["paint.stroke","retouch.stroke"])) target
     else {
         let radius = model.value(options.size,st.brush.size)/2
         let points = command.points
@@ -41,7 +41,7 @@ fn extended(st,target,command,options) any^ {
 pub fn run_command(st,command) any^ {
     let options = model.value(command.options,{})
     let target = extended(st,model.pixel_target(st)^,command,options)^
-    let common = {selection:st.selection,origin:target.position,color:color(st,options.color),opacity:model.value(options.opacity,st.brush.opacity)}
+    let common = {selection:st.selection,origin:target.position,color:color(st,options.color),opacity:model.value(command.opacity,model.value(options.opacity,st.brush.opacity))}
     let raster = if (command.id == "paint.stroke") img.paint_stroke(target.raster,
         {*:st.brush,*:options,*:common,points:[for (point in command.points) local(point,target.position)]})^
     else if (command.id in ["paint.fill","pixels.fill","pixels.clear"]) img.paint_fill(target.raster,

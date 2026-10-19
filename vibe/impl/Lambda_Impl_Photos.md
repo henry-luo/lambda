@@ -1,6 +1,7 @@
 # Lambda Photos — Implementation
 
-**Started:** 2026-10-19. **Status:** initial layered-editor implementation; focused qualification passed, aggregate gates have failures, on
+**Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
+retouch and actions; focused qualification is expanding and aggregate gates have failures, on
 `codex/photos-20261019`, worktree `temp/photos-worktree/`.
 
 Design: [Photos proposal](../Lambda_Demo_Photos.md). Existing contracts:
@@ -29,7 +30,7 @@ Build a worktree-local host; shared dependency links follow Developer Guide §7.
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
 | M2 tiles, selections and painting | Core implemented; focused native/package checks and 63 UI assertions pass; aggregate qualification follows the next native batch |
 | M3 transforms, reversible effects and rich persistence | Implemented core: affine, eight blends, clipping/pass-through, effects, histogram and versioned project data; focused checks below |
-| M4 retouch, type/shapes, channels and actions | Pending |
+| M4 retouch, type/shapes, channels and actions | Partial: retouch and single-layer action recording/replay implemented; typed artwork/styles, channels, tabs and batch orchestration remain |
 | M5 high depth/color and scale qualification | Pending |
 
 ## Delivered behavior
@@ -83,7 +84,7 @@ replay failed five of seven assertions before the host repair and passes all
 seven with forced GC/poisoning afterwards. Evidence:
 `temp/photos-lifecycle-before.log`, `temp/photos-lifecycle-fixed-host.log`.
 
-## Current verification
+## M1 verification (historical)
 
 - Three package/procedure golden tests pass in automatic and eager-JIT execution;
   forced GC and poisoned-free runs pass. The core and gesture scripts contain
@@ -113,7 +114,7 @@ seven with forced GC/poisoning afterwards. Evidence:
 - `make lint ARGS='--rule ^no-int-cast-radiant$'` passes. Golden pairing,
   documentation links and `git diff --check` pass.
 
-## Aggregate qualification limits
+## M1 aggregate qualification limits
 
 `make test-lambda-baseline` exits 2: input tests pass **2112/2112**, runtime
 tests pass **5775/5776**, including all **1625/1625** core script tests and
@@ -226,7 +227,7 @@ reopen. All five Photos replays pass **63/63 assertions** with forced GC and
 poisoned frees. Evidence: `temp/photos-m2-native.log`, `temp/photos-m2-targeted.log`,
 `temp/photos-m2-ui-paint.log`, `temp/photos-m2-ui-all.log`.
 
-M3–M5 remain pending: retained transforms/effects, rich-project persistence, retouch/type/shapes,
+At the M2 checkpoint, M3–M5 remained pending; subsequent entries supersede retained transforms/effects, rich-project persistence and retouch/actions status. Outstanding work includes type/shapes,
 actions/multiple documents, and high-depth/color/scale qualification. This
 checkpoint does not claim complete PhotoCraft feature parity.
 
@@ -257,13 +258,87 @@ The PSD writer now explicitly rejects retained attributes it cannot serialize.
 
 Photos provides project saving/opening, explicit PSD export, transform/blend and
 effect controls, and a histogram derived from its presented raster. Quick
-adjustments add editable effects. Focused package tests include 37 composition
+adjustments add editable effects. Focused package tests include 46 composition
 checks and project file persistence, plus existing photo/image tests; 11 cases
 pass under forced GC and poisoned frees. All 34 native ImageIO checks pass.
-The new composite UI replay passes 13 assertions, including actual gray/red
-pixels, transform undo/redo, effect toggle and editable project reopening. Full
-Photos replay and aggregate qualification are running at the next boundary.
+The composite UI replay covers gray/red pixels, transform undo/redo, effect
+toggle and editable project reopening. Its pixel checks were strengthened to
+native RGB ranges and the actual bounded preview geometry during M4 review;
+final full-replay results and aggregate qualification follow below.
 
 A native effect probe caught an iterator borrowing a temporary `MapReader`; the
 adapter now keeps that reader alive for the option scan (**D5.3.3**). The existing
 multiply-rejection fixture now asserts the newly supported rendered pixel.
+
+## M4 retouch and actions — implemented subset
+
+Shared `image_edit` brush evaluation now also computes clone, neighborhood
+color-matched heal, dodge/burn, sponge, blur and sharpen. It samples immutable
+pre-stroke data, reuses sparse coverage/tile writes and bounds neighborhood work.
+Tonal edits preserve alpha. Clone/Heal can sample a frozen merged snapshot while
+painting onto a new transparent layer; aligned offset, source and target state
+restore on undo/cancel (**S9.1.2 / S9.2.2**). Healing is explicitly a local
+color/texture match, without a Poisson/content-aware claim.
+
+The reusable action module records portable plain command data on one declared
+active layer, captures resolved brush/fill settings, rebinds same-layer selections
+on replay, validates intermediate replacements and publishes a single history
+transaction. Unsupported commands, target/history switches while recording and
+oversized/invalid actions fail explicitly. File procedures parse versioned Mark
+data and publish `.laction` files atomically, capped at 8 MiB (**S12.1.1v3**).
+The demo retains the action library across document replacement.
+
+Retouch acceptance covers exact clone/color-match/tone pixels, immutable sources,
+selection clipping, neutral neighborhood operations, aligned-source restoration,
+cancel and one-stroke history. Action acceptance covers target rebinding,
+resolved brush parameters, pointer-stroke capture, one-undo replay, failed replay
+rollback, plain-data validation and save/reload. Automatic and eager-JIT focused
+runs pass under forced GC and poisoned frees; final counts and gates follow.
+
+The retouch acceptance exposed a shared MIR index-routing bug: the dynamic/defect
+receiver guard called the one-index fallback before reaching N-D dispatch, so
+`raster.b[y,x]` could return a row. N-D routing now precedes that scalar fallback;
+`fn_index_nd` already checks boxed receivers (**S8.2.4v3 / S7.1.1v3**). A standalone
+`ndim_any_receiver` fixture and the retouch pixel checks cover the regression.
+Strict interpreter execution still rejects N-D indexing (E501); no interpreter
+workaround or harness exception was introduced.
+
+Further review adds transform gesture scale/rotate/cancel/commit and no-drag
+checks, identity-reset PSD eligibility and an effect-plus-mask apply check.
+Identity reset clears retained geometry; applying a mask keeps an editable
+effect and evaluates it once. New UI pixel checks use native RGB bounds and
+assert the bounded 3× fitted preview before sampling.
+
+M4 is not complete: editable text/shapes/basic paths/styles, a channel palette,
+multi-document tabs and file-batch orchestration remain. M5 high-depth/ICC and
+photo-scale limits remain pending. Project and retouch work retain the shared
+16-million-pixel/64-MiB raster limits; no photo-scale performance claim is made.
+
+The native replay parser also omitted modifiers for drag events. Common event
+decoding now reads the same numeric/string modifier fields for every event kind,
+replacing duplicated pointer/key decoding. The retouch replay checks Alt source
+selection, exact clone pixels, Shift-drag rotation geometry and action-file
+roundtrip. This repairs event delivery at the simulation boundary instead of
+adding a Photos-only input workaround (**S12.1.3**).
+
+## Expanded focused qualification
+
+- The 16 selected package/runtime cases pass with forced GC and poisoned frees;
+  the eager-JIT pass of the 10 Photos/new dynamic-index cases also passes.
+  Photos fixtures contain 41 core, 13 interaction, 26 paint, 46 composite,
+  21 retouch and 16 action semantic checks, with procedural PSD/project/action
+  round trips. The final composite review includes mask/effect, transform
+  gestures, identity reset and metadata-preserving flattening.
+- Seven Photos UI workflows cover **93 assertions** under forced GC/poisoning:
+  composite 14, files 10, gestures 14, lifecycle 7, painting 14, retouch/actions 16,
+  smoke 18. The full replay first exposed three Alt-source failures; after the
+  shared modifier-parser repair the retouch/action workflow passes all 16,
+  including exact clone colors and 90-degree transformed bounds. Other six
+  workflows pass the full replay. Evidence: `temp/photos-expanded-ui.log`,
+  `temp/photos-expanded-retouch-final.log`.
+- `make build-test` succeeds. `make test-library` passes **1681/1681** with native
+  test access, including all 34 ImageIO cases and runner-contract checks.
+  An earlier sandbox run passed 1675 and failed six socket/trust-store cases;
+  all seven scoped RDB tunnel/trust checks and the entire native rerun pass.
+- The Radiant integer-cast lint passes; document/fixture pairing and whitespace
+  checks are clean. Full Lambda/Radiant and optimized qualification follow.

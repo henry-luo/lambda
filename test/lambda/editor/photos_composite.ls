@@ -78,3 +78,28 @@ let isolated_doc = img.document(img.stack([img.with_properties(grouped,{isolatio
 check("isolated-blend",img.sample(img.render_frame(isolated_doc)^,0,0)^ == [255,0,0,255])
 let hist = img.histogram(translucent)^
 check("histogram",hist[0][255] == 1 and hist[2][255] == 0 and hist[3][0] == 1 and hist[3][255] == 1)
+
+fn pointer(x,y,shift=false) => {pointer:7,point:{x:x,y:y},screen:{x:x,y:y},shift:shift}
+let transform_tool = editor.exec(st,{id:"tool.configure",tool:"transform"})^
+let no_drag = gestures.finish(gestures.begin(transform_tool,pointer(4,1.5))^ )^
+check("transform-click-noop",no_drag.doc == st.doc and no_drag.hist == st.hist)
+let scale_draft = gestures.preview(gestures.begin(transform_tool,pointer(4,1.5))^,pointer(5,1.5))^
+check("transform-gesture-scale",model.active(scale_draft)^.node.transform == [2,0,0,2,-1,-0.5])
+check("transform-gesture-cancel",gestures.cancel(scale_draft).doc == st.doc)
+check("transform-gesture-commit",len(gestures.finish(scale_draft)^.hist.undo) == len(st.hist.undo)+1)
+let rotate_draft = gestures.preview(gestures.begin(transform_tool,pointer(4,1.5,true))^,pointer(3,2.5))^
+check("rotate-gesture",abs(model.active(rotate_draft)^.node.transform[1]-1)<0.000001)
+let reset = editor.exec(rotated,{id:"layer.transform",matrix:[1,0,0,1,0,0]})^
+check("transform-reset",model.active(reset)^.node.transform == null and img.encode(reset.doc,{format:'psd'})^ is binary)
+let mono_plain = editor.exec(st,{id:"effect.add",options:{saturation:0.0}})^
+let mask_plain = editor.exec(mono_plain,{id:"mask.add"})^
+let mask_applied = editor.exec(mask_plain,{id:"mask.apply"})^
+check("mask-effect-once",len(effects.items(model.active(mask_applied)^.node)) == 1 and img.render_frame(mask_applied.doc)^ == img.render_frame(mask_plain.doc)^)
+
+let metadata_doc = img.with_children(st.doc,[*content(st.doc),<metadata author:"Photos">])^
+let metadata_session = editor.open_session(metadata_doc)^
+let flattened = editor.exec(metadata_session,{id:"document.flatten"})^
+check("flatten-retains-metadata",[for (child in content(flattened.doc) where name(child) == 'metadata') child][0].author == "Photos")
+let pass_session = editor.open_session(img.document(img.stack([img.stack([img.layer(red)],
+    {id:"pass",name:"Pass",isolation:'pass_through'}),img.layer(blue,{id:"blue",name:"Blue"})]),{width:2,height:1}))^
+check("merge-pass-refusal",(editor.exec(pass_session,{id:"layer.merge"}) ^ { true }) is bool)

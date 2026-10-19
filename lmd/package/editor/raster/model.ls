@@ -53,10 +53,10 @@ pub fn replace(image,id,node) any^ {
     if (found == null) raise error("Raster: missing layer target")
     else img.replace_at(image,found.path,node)^
 }
-pub fn context(st) => {selected:st.selected,target:st.target,selection:st.selection}
+pub fn context(st) => {selected:st.selected,target:st.target,selection:st.selection,retouch:st.retouch}
 pub fn restore(st,context) => if (context == null) st else
     {*:st,selected:[for (id in context.selected where lookup(st.doc,id) != null) id],
-        target:context.target,selection:context.selection}
+        target:context.target,selection:context.selection,retouch:value(context.retouch,st.retouch)}
 pub fn select(st,ids,target="pixels") any^ {
     if (not (ids is array) or not all([for (id in ids) lookup(st.doc,id) != null]) or
         not (target in ["pixels","mask"]) or

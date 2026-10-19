@@ -26,14 +26,15 @@ pn publish(owner,st) {
 }
 pn show_file(owner,st,kind) {
     let title = if (kind == "open") "Open image or Photos project" else if (kind == "place") "Place image as layer"
+        else if (kind == "action-save") "Save action" else if (kind == "action-open") "Load action"
         else if (kind == "save") "Save Photos project" else if (kind == "psd") "Export layered PSD" else "Export PNG"
     dom.set_text_content(present.node(owner,"file-title"),title)
-    dom.set_text_content(present.node(owner,"file-help"),if (kind == "save")
-        "Use .photos to preserve all editable settings, or .psd for the supported PSD profile."
+    dom.set_text_content(present.node(owner,"file-help"),if (kind in ["action-save","action-open"]) "Actions replay recorded edits on the currently selected layer."
+        else if (kind == "save") "Use .photos to preserve all editable settings, or .psd for the supported PSD profile."
         else if (kind == "export") "Exports the current composition with transparency."
         else if (kind == "psd") "Retained transforms, blend modes and enabled effects require a project, or explicit rasterization before PSD export."
         else "Enter a local image, PSD or .photos project path.")
-    dom.set_state(present.node(owner,"file-path"),"value",if (kind == "save")
+    dom.set_state(present.node(owner,"file-path"),"value",if (kind == "action-save") "temp/photos/action.laction" else if (kind == "save")
         (if (ends_with(lower(st.path),".photos")) st.path else "temp/photos/composition.photos")
         else if (kind == "psd") "temp/photos/composition.psd"
         else if (kind == "export") "temp/photos/composition.png" else "")
@@ -44,9 +45,13 @@ pn show_file(owner,st,kind) {
 pn replace_document(st,action,path="") any^ {
     let next = if (action == "new") editor.open_session(editor.new_document()^)^ else files.open_document(path)^
     return {*:base_session(next,if (action == "new") "Untitled" else split(path,"/")[last]),
-        path:if (ends_with(lower(path),".psd") or ends_with(lower(path),".photos")) path else ""}
+        actions:st.actions,path:if (ends_with(lower(path),".psd") or ends_with(lower(path),".photos")) path else ""}
 }
 pn command(owner,st,action) any^ {
+    if (st.recording != null and action in ["new","open","place","save","export","psd","action-save","action-open"])
+        raise error("Photos: stop action recording before file operations")
+    if (action == "action-start") { return editor.exec(st,{id:"action.start",name:field(owner,"action-name")})^ }
+    if (action == "action-replay") { return editor.exec(st,{id:"action.replay",action:st.actions[last]})^ }
     if (action == "transform-apply") { return editor.exec(st,{id:"layer.transform",angle:float(field(owner,"transform-angle")),
         scale_x:float(field(owner,"transform-x")),scale_y:float(field(owner,"transform-y"))})^ }
     if (action == "transform-reset") { return editor.exec(st,{id:"layer.transform",matrix:[1,0,0,1,0,0]})^ }
@@ -81,9 +86,14 @@ pn command(owner,st,action) any^ {
         if (action == "new") { return replace_document(st,"new")^ }
         return show_file(owner,st,"open")
     }
-    if (action in ["place","save","export","psd"]) { return show_file(owner,st,action) }
+    if (action in ["place","save","export","psd","action-save","action-open"]) { return show_file(owner,st,action) }
     if (action == "file-confirm") {
         let path = field(owner,"file-path")
+        if (st.dialog == "action-open") { return {*:editor.exec(st,{id:"action.load",action:files.read_action(path)^})^,dialog:"",error:"",status:"Action loaded"} }
+        if (st.dialog == "action-save") {
+            files.write_action(st.actions[last],path)^
+            return {*:st,dialog:"",error:"",status:"Action saved"}
+        }
         if (st.dialog == "open") { return replace_document(st,"open",path)^ }
         if (st.dialog == "place") { return {*:files.place(st,path)^,dialog:"",error:"",status:"Image placed"} }
         let format = if (st.dialog == "psd") "psd" else if (st.dialog == "export") "png"
@@ -124,7 +134,7 @@ pn command(owner,st,action) any^ {
 }
 pn pointer_input(owner,evt) {
     return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},
-        point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey}
+        point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey,alt:evt.altKey}
 }
 pn cancel_preview(owner,st) {
     if (st.gesture.pointer != null) dom.release_pointer_capture(present.node(owner,"stage"),st.gesture.pointer)
@@ -191,6 +201,13 @@ on change(evt) {
         return 'handled'
     }
     var next = {*:session,error:""}
+    if (id in ["retouch-strength","retouch-radius","retouch-aligned"]) {
+        let config = if (id == "retouch-strength") {strength:float(field(owner,id))}
+            else if (id == "retouch-radius") {radius:int(field(owner,id))} else {aligned:field(owner,id) == "aligned"}
+        editor.exec(next,{id:"retouch.configure",*:config}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        session = publish(owner,next)
+        return 'handled'
+    }
     if (starts_with(id,"effect-")) {
         let key = slice(id,7,len(id))
         let current = effects.items(model.active(session)^.node)[session.effect_index]

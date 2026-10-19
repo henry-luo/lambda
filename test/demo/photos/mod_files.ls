@@ -2,6 +2,7 @@
 import img: lambda.image
 import editor: lambda.editor.raster
 import project: lambda.image.project
+import actions: lambda.editor.raster.actions
 
 pub pn open_document(path) any^ { return editor.open_session(if (ends_with(lower(path),".photos")) project.read(path)^ else img.read(path)^)^ }
 pub pn place(st,path) any^ {
@@ -24,4 +25,17 @@ pub pn write_document(st,path,format) any^ {
     // output's atomic publication protects an existing file when acquisition or writing fails.
     output(encoded.bytes,path,{atomic:true})^
     return {snapshot:snapshot,report:encoded.report}
+}
+
+pub pn read_action(path) any^ {
+    let text = input(path,'text')^
+    if (len(text)>8*1024*1024) raise error("Photos: action file exceeds 8 MiB")
+    return actions.validate(parse(text,'mark')^ )^
+}
+pub pn write_action(action,path) bool^ {
+    let checked = actions.validate(action)^
+    let text = format(checked,'mark')
+    if (not ends_with(lower(path),".laction") or len(text)>8*1024*1024) raise error("Photos: choose a .laction destination within 8 MiB")
+    output(text,path,{atomic:true})^
+    return true
 }

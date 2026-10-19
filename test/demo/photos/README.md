@@ -107,3 +107,18 @@ enabled effects rather than discarding them. Project data is parsed without
 execution, capped at 128 MiB and currently uncompressed. Pixel tools require
 rasterization of a transformed source. Full PhotoCraft parity and high-depth/ICC
 editing are still pending.
+
+Clone (S), Heal (J), Dodge (D), Burn (K), Sponge (R), Blur (U) and Sharpen (A)
+share the brush controls. Alt-click Clone/Heal to freeze a merged source, then
+paint on a pixel layer. The lower Retouch dock controls alignment, local strength
+and neighborhood radius. Healing is neighborhood color matching, not a Poisson
+or content-aware solver.
+
+The Actions dock records edits on the selected layer. Stop stores the action;
+Replay applies it to the current layer with one undo entry. Brush settings are
+captured, and image/history/target switches are guarded during recording. Save
+and load `.laction` data files to reuse actions. This is interactive single-layer
+automation; batch-file scheduling is not implemented.
+
+Retouch source selection must be recorded as a step or supplied by the replay
+session. Actions operate with that session's current selection coverage.

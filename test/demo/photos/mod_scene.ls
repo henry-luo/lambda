@@ -22,8 +22,9 @@ pub fn effect_rows(st) {
 fn histogram_channel(counts,c) {
     let bins = [for (bin in 0 to 63) sum(slice(counts[c],bin*4,bin*4+4))]
     let maximum = max(1,max(bins));
-    <g fill:["#ef7777","#6acb8b","#72a7ed"][c],opacity:0.55, *[
-        for (bin in 0 to 63) <rect x:bin*4,y:72-72*bins[bin]/maximum,width:3,height:72*bins[bin]/maximum>]>
+    // one filled path per channel bounds live histogram DOM work.
+    let outline = "M 0 72 " ++ join([for (bin in 0 to 63) "L " ++ string(bin*4) ++ " " ++ string(72-72*bins[bin]/maximum)]," ") ++ " L 256 72 Z";
+    <path fill:["#ef7777","#6acb8b","#72a7ed"][c],opacity:0.55,d:outline>
 }
 pub fn histogram_chart(counts) => <svg viewBox:"0 0 256 72",width:256,height:72,'aria-label':"RGB histogram",
     *[for (c in [0,1,2]) histogram_channel(counts,c)]>
@@ -87,6 +88,15 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <div class:"fields", *[field("transform-angle","Rotate degrees",0,"number"),field("transform-x","Scale X",1,"number"),field("transform-y","Scale Y",1,"number")]>,
                 <div class:"button-grid", *[button("transform-apply","transform-apply","Apply transform"),button("transform-reset","transform-reset","Reset transform"),
                     button("flip-x","flip-x","Flip horizontal"),button("flip-y","flip-y","Flip vertical"),button("rasterize","layer.rasterize","Rasterize layer")]>]>,
+            <section class:"actions-panel", *[<h2 "Actions">,<p id:"action-status","Record edits on one selected layer">,
+                field("action-name","Action name","My action"),
+                <div class:"button-grid", *[button("action-start","action-start","Record"),button("action-stop","action.stop","Stop"),
+                    button("action-cancel","action.cancel","Cancel recording"),button("action-replay","action-replay","Replay on layer"),
+                    button("action-save","action-save","Save action…"),button("action-open","action-open","Load action…")]>]>,
+            <section class:"retouch-panel", *[<h2 "Retouch">,<p "Clone / Heal: Alt-click a source. Brush opacity controls coverage.">,
+                <p id:"retouch-source","No source selected">,
+                <div class:"fields", *[field("retouch-strength","Tone / heal strength",0.5,"number"),field("retouch-radius","Neighborhood radius",3,"number")]>,
+                <label "Source alignment" <select id:"retouch-aligned",<option value:"aligned","Aligned"> <option value:"reset","Reset each stroke">>>]>,
             <section class:"histogram-panel",<h2 "Histogram"> <div id:"histogram">>,
             <section class:"effects-panel", *[<h2 "Editable effects">,<div id:"effects">,
                 <div class:"fields", *[for (control in effects.controls) field("effect-" ++ control.key,control.label,control.value,"number")]>,

@@ -219,6 +219,84 @@ static bool edit_stroke(RasterEdit& edit, const RasterBuffer* source, Item optio
     return true;
 }
 
+struct RetouchPaint {
+    const RasterBuffer *sample=nullptr, *context=nullptr;
+    double offset[3]={}, context_offset[3]={}, strength=0.5;
+    int radius=3;
+    const char* kind=nullptr;
+    bool sampled=false, heal=false, neighborhood=false;
+
+    bool configure(RasterEdit& edit, const RasterBuffer* source, Item options) {
+        if (source->channels!=4) return edit.fail("retouch requires RGBA samples");
+        Item name=item_attr(options,"kind");
+        if (!is_text_type_id(get_type_id(name))) return edit.fail("retouch requires a tool kind");
+        kind=name.get_chars();
+        sampled=!strcmp(kind,"clone") || !strcmp(kind,"heal"); heal=!strcmp(kind,"heal");
+        neighborhood=heal || !strcmp(kind,"blur") || !strcmp(kind,"sharpen");
+        if (!sampled && strcmp(kind,"dodge") && strcmp(kind,"burn") && strcmp(kind,"sponge") && !neighborhood)
+            return edit.fail("unknown retouch tool");
+        double requested_radius;
+        if (!edit.number(options,"strength",0.5,0,1,&strength) ||
+            !edit.number(options,"radius",3,1,32,&requested_radius) || floor(requested_radius)!=requested_radius)
+            return edit.fail("retouch radius must be an integer from 1 to 32");
+        radius=(int)requested_radius;
+        context=lambda_raster_buffer(item_attr(options,"context"));
+        if (get_type_id(item_attr(options,"context"))!=LMD_TYPE_NULL && (!context || context->channels!=4))
+            return edit.fail("retouch context requires RGBA samples");
+        if (!context) context=source;
+        if (get_type_id(item_attr(options,"context_offset"))!=LMD_TYPE_NULL &&
+            !edit.point(item_attr(options,"context_offset"),context_offset)) return false;
+        if (sampled) {
+            sample=lambda_raster_buffer(item_attr(options,"sample"));
+            if (!sample || sample->channels!=4 || !edit.point(item_attr(options,"sample_offset"),offset))
+                return edit.fail("clone/heal require an RGBA source snapshot and source offset");
+        }
+        return true;
+    }
+    void mean(const RasterBuffer* pixels, int64_t x, int64_t y, double* out) const {
+        out[0]=out[1]=out[2]=0; double total=0;
+        int64_t left=x-radius,top=y-radius,right=x+radius+1,bottom=y+radius+1;
+        if (left<0) left=0; if (top<0) top=0;
+        if (right>pixels->width) right=pixels->width; if (bottom>pixels->height) bottom=pixels->height;
+        for (int64_t yy=top;yy<bottom;yy++) for (int64_t xx=left;xx<right;xx++) {
+            const uint8_t* p=raster_buffer_pixel(pixels,(uint32_t)xx,(uint32_t)yy);
+            double a=p[3]/255.0; total+=a;
+            for (int c=0;c<3;c++) out[c]+=raster_linear_sample(p[c])*a;
+        }
+        if (total>0) for (int c=0;c<3;c++) out[c]/=total;
+    }
+    bool pixel(const RasterBuffer* source, uint32_t x, uint32_t y, uint8_t* out) const {
+        const uint8_t* original=raster_buffer_pixel(source,x,y);
+        if (sampled) {
+            int64_t sx=(int64_t)floor(x+offset[0]),sy=(int64_t)floor(y+offset[1]);
+            if (sx<0 || sy<0 || sx>=sample->width || sy>=sample->height) return false;
+            memcpy(out,raster_buffer_pixel(sample,(uint32_t)sx,(uint32_t)sy),4);
+            if (heal && out[3]) {
+                double from[3],to[3]; mean(sample,sx,sy,from);
+                mean(context,(int64_t)floor(x+context_offset[0]),(int64_t)floor(y+context_offset[1]),to);
+                // color-match source texture to the destination neighborhood; no Poisson-solver claim.
+                for (int c=0;c<3;c++) out[c]=raster_encoded_sample(raster_linear_sample(out[c])+strength*(to[c]-from[c]));
+            }
+            return out[3]>0;
+        }
+        if (!original[3]) return false;
+        memcpy(out,original,4);
+        double average[3]={}, values[3];
+        if (neighborhood) mean(source,x,y,average);
+        for (int c=0;c<3;c++) values[c]=raster_linear_sample(original[c]);
+        double luminance=values[0]*0.2126+values[1]*0.7152+values[2]*0.0722;
+        for (int c=0;c<3;c++) {
+            double value=!strcmp(kind,"dodge") ? values[c]*pow(2,strength) :
+                !strcmp(kind,"burn") ? values[c]/pow(2,strength) :
+                !strcmp(kind,"sponge") ? values[c]*(1-strength)+luminance*strength :
+                !strcmp(kind,"blur") ? values[c]*(1-strength)+average[c]*strength :
+                values[c]+strength*(values[c]-average[c]);
+            out[c]=raster_encoded_sample(value);
+        }
+        return true;
+    }
+};
+
 static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item options, const char* operation) {
     if (!source || (source->channels != 1 && source->channels != 4)) return edit.fail("paint requires gray coverage or RGBA samples");
     double opacity, origin[3] = {};
@@ -228,11 +306,14 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
     const RasterBuffer* selection = lambda_raster_buffer(item_attr(options, "selection"));
     if (get_type_id(item_attr(options, "selection")) != LMD_TYPE_NULL && (!selection || selection->channels != 1))
         return edit.fail("paint selection requires gray coverage");
-    bool stroke = !strcmp(operation, "stroke"), erase = edit_is(item_attr(options, "mode"), "erase");
+    bool retouch=!strcmp(operation,"retouch");
+    bool stroke = !strcmp(operation, "stroke") || retouch, erase = edit_is(item_attr(options, "mode"), "erase");
     if (get_type_id(item_attr(options, "mode")) != LMD_TYPE_NULL && !erase && !edit_is(item_attr(options, "mode"), "paint"))
         return edit.fail("unknown paint mode");
     uint8_t color[4] = {0, 0, 0, 255}, end_color[4] = {};
-    if (!erase && !edit.color(item_attr(options, "color"), source->channels, color)) return false;
+    if (!retouch && !erase && !edit.color(item_attr(options, "color"), source->channels, color)) return false;
+    RetouchPaint tool;
+    if (retouch && !tool.configure(edit,source,options)) return false;
     double start[3] = {}, end[3] = {}, length_squared = 0;
     bool gradient = !strcmp(operation, "gradient"), radial = edit_is(item_attr(options, "kind"), "radial");
     if (gradient) {
@@ -244,6 +325,9 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
     }
     RasterEdit coverage;
     if (stroke && !edit_stroke(coverage, source, options)) return edit.fail(coverage.error);
+    if (retouch && tool.neighborhood && coverage.right>coverage.left && coverage.bottom>coverage.top &&
+        (uint64_t)(coverage.right-coverage.left)*(coverage.bottom-coverage.top)*(2*tool.radius+1)*(2*tool.radius+1)*(tool.heal?2:1)>128000000)
+        return edit.fail("retouch neighborhood exceeds the work budget");
     edit.result = raster_buffer_fork(source);
     if (!edit.result) return edit.fail("cannot allocate paint tile index");
     uint32_t left = stroke ? coverage.left : 0, top = stroke ? coverage.top : 0;
@@ -263,7 +347,11 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
                 source->channels == 4 && c<3 ? (alpha<=0 ? 0 : (color[c]*color[3]*(1-t)+end_color[c]*end_color[3]*t)/alpha) :
                 color[c]*(1-t)+end_color[c]*t);
         }
-        raster_mix_pixel(sample, paint, source->channels, alpha, erase);
+        if (retouch && !tool.pixel(source,x,y,paint)) continue;
+        if (retouch && !tool.sampled) {
+            // tonal and neighborhood tools change color without increasing existing alpha.
+            for (int c=0;c<3;c++) sample[c]=raster_encoded_sample(raster_linear_sample(sample[c])*(1-alpha)+raster_linear_sample(paint[c])*alpha);
+        } else raster_mix_pixel(sample, paint, source->channels, alpha, erase);
         if (!edit.write(x, y, sample)) return false;
     }
     return true;
@@ -373,6 +461,7 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
     const char* allowed = !strcmp(operation, "shape") ? " op width height shape start end points " :
         !strcmp(operation, "combine") ? " op other mode " : !strcmp(operation, "feather") ? " op radius " :
         !strcmp(operation, "stroke") ? " op points size hardness spacing flow opacity color mode selection origin " :
+        !strcmp(operation,"retouch") ? " op points size hardness spacing flow opacity selection origin kind strength radius sample sample_offset context context_offset " :
         !strcmp(operation, "fill") ? " op color opacity mode selection origin " :
         !strcmp(operation, "gradient") ? " op color end_color start end kind opacity selection origin " :
         !strcmp(operation, "wand") ? " op point tolerance contiguous " :
@@ -395,7 +484,7 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
     else if (!strcmp(operation, "wand")) edit_wand(edit, source, config.get());
     else if (!strcmp(operation, "invert") || !strcmp(operation, "combine") || !strcmp(operation, "feather"))
         edit_coverage(edit, source, config.get(), operation);
-    else if (!strcmp(operation, "stroke") || !strcmp(operation, "fill") || !strcmp(operation, "gradient"))
+    else if (!strcmp(operation, "stroke") || !strcmp(operation, "fill") || !strcmp(operation, "gradient") || !strcmp(operation,"retouch"))
         edit_paint(edit, source, config.get(), operation);
     else if (!strcmp(operation,"reframe") || !strcmp(operation,"mix") || !strcmp(operation,"extract"))
         edit_map(edit,source,config.get(),operation);

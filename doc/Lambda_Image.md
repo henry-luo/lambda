@@ -1,7 +1,7 @@
 # Lambda Image Package
 
-**Verified against tree:** 2026-10-16. This describes the initial native
-`u8` editing profile. Design and remaining milestones:
+**Verified against tree:** 2026-10-19. This describes the bounded native
+`u8` editing profile and shared Photos extensions. Design and remaining milestones:
 [proposal](../vibe/Lambda_Pkg_Image.md),
 [implementation record](../vibe/impl/Lambda_Impl_Image.md).
 
@@ -79,7 +79,7 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `fill(raster,color)`, `clear(raster)`, `stamp(raster,brush,position,options={})` | Return filled, cleared or source-over stamped storage. Stamp accepts normalized `opacity`. |
 | `crop(raster,rect)`, `resize(raster,width,height)`, `adjust(raster,options)` | Return transformed samples using the shared numeric/image kernels. |
 | `transform(raster,options)`, `rotate(raster,quarter_turns)`, `flip(raster,horizontal=true,vertical=false)` | Explicitly bake geometry; image-process adjustments/transforms require RGBA8. |
-| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render linear-light source-over composition with the supported blends, or read a sample. Region rendering allocates/evaluates only the requested canvas rectangle, including isolated-group scratch and mask placement. |
+| `render_frame(image,options={})`, `render_region(image,rect,options={})`, `sample(raster,x,y)` | Render linear-light source-over composition with the supported blends, or read a sample. Region rendering limits composite/group buffers to the requested canvas rectangle. Enabled filters currently evaluate their full source extent for neighborhood correctness. |
 | `selection(width,height,options)`, `wand(raster,point,options={})` | Gray coverage from rectangle, ellipse, even-odd polygon or all; color selection with normalized tolerance and contiguous/global matching. Shape options use `start`/`end` or polygon `points`. |
 | `combine_coverage(a,b,mode)`, `invert_coverage(a)`, `feather_coverage(a,radius)`, `coverage_bounds(a)` | Replace/add/subtract/intersect, finite inversion, bounded box-filter feather and nonzero half-open bounds (`null` for empty). |
 | `paint_stroke(raster,options)`, `paint_fill(raster,options)`, `gradient(raster,options)` | Gray/RGBA painting with color, opacity and optional document-space selection/origin. Strokes accept points, size/hardness/spacing/flow and paint/erase mode; gradients accept linear/radial endpoints and endpoint colors. |
@@ -180,3 +180,20 @@ The initial format uses hexadecimal Mark binary data and has no compression or
 content deduplication. PSD export explicitly refuses retained transforms,
 non-normal blends and pass-through/clipping metadata it cannot retain. Enabled
 effects require explicit rasterization or a rich project.
+
+## Bounded retouch kernels
+
+`retouch(raster,options)` reuses brush points, size/hardness/spacing/flow/opacity,
+selection/origin and immutable tile replacement. `kind` selects `clone`, `heal`,
+`dodge`, `burn`, `sponge`, `blur` or `sharpen`. Targets and sampled/context sources
+are RGBA8. Clone/heal require `sample` and `sample_offset`; optional `context` and
+`context_offset` supply the destination neighborhood. Each stroke reads frozen
+inputs, so earlier dabs cannot feed back into sampling (**S9.1.2**).
+
+`strength` is in `[0,1]`; `radius` is an integer in `[1,32]`. Healing color-matches
+source texture with alpha-weighted linear-light neighborhood means; it is not a
+Poisson solver. Local dodge/burn apply up to one stop, sponge reduces saturation,
+and blur/sharpen use the bounded neighborhood mean. Tonal/neighborhood tools
+preserve destination alpha. Clone/heal source-over their sampled alpha. Stroke
+work and neighborhood work are bounded at admission; unsupported kinds/options
+fail without publishing a replacement (**S9.1.3**).

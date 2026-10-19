@@ -63,3 +63,25 @@ these parameters, original pixel bytes, masks, locks and tree identities in a
 versioned `.photos` data file. High depth and color conversion remain later work. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor
 locks, which its writer cannot preserve; flat export intentionally renders pixels.
+
+Retouch tools share stroke sampling, selections, history and target mapping.
+`retouch.source` freezes the current merged image at a chosen point; Clone/Heal
+use Alt-click in the demo. `retouch.configure` selects aligned/reset-per-stroke
+sampling, strength and radius. `retouch.stroke` supports clone, neighborhood
+color-matched healing, dodge/burn, sponge, blur and sharpen. Aligned source offset
+and target state restore through undo/cancel. Sampling is from immutable inputs,
+including when painting onto a new transparent layer.
+
+`action.start/stop/cancel/load/replay` record and replay plain command data on one
+declared active layer. Recording guards target switches, history operations and
+nonportable commands. Pointer strokes capture their resolved brush settings;
+replay validates every intermediate replacement and records one atomic undo.
+Selection context is supplied by the target session. The action header retains
+its initial pixel/mask facet, and recorded same-layer target steps rebind to the
+selected replay layer. `.laction` files are versioned Mark data; the demo caps
+files at 8 MiB. Actions are session/library state, separate from image dirty state,
+and persist across document replacement in the demo. Multi-document tabs, typed
+artwork/styles, a channel palette and batch-file orchestration remain pending.
+
+Retouch source selection must be recorded as a step or supplied by the replay
+session. Actions operate with that session's current selection coverage.

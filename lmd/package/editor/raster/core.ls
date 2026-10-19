@@ -9,6 +9,8 @@ import paint: .paint
 import tools: .tools
 import transforms: .transform
 import effects: .effects
+import retouch: .retouch
+import actions: .actions
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -22,9 +24,9 @@ pub fn open_session(image) any^ {
     let checked = model.validate(ready)^
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
-        target:"pixels",selection:null,tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
+        target:"pixels",selection:null,recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
-        background:[1.0,1.0,1.0,1.0],selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
+        background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
 pub fn dirty(st) => st.doc != st.saved
 pub fn record(before,after,label,group=null) {
@@ -118,7 +120,9 @@ fn edit_node(st,command) any^ {
         else img.with_properties(node,{blend:command.blend})^)
     else if (command.id == "layer.transform") (
         if (name(node) != 'layer') raise error("Raster: transform one layer")
-        else img.with_properties(node,{transform:transforms.command_matrix(node,command)^})^)
+        else (let matrix = transforms.command_matrix(node,command)^,
+            if (matrix == transforms.identity and node.transform == null) node
+            else img.with_properties(node,{transform:if (matrix == transforms.identity) null else matrix})^))
     else if (command.id == "layer.rasterize") (
         if (name(node) != 'layer') raise error("Raster: rasterize one layer") else transforms.rasterize(st,node)^)
     else if (command.id == "mask.add") (
@@ -138,6 +142,7 @@ fn edit_node(st,command) any^ {
 pub fn apply_command(st,command) any^ {
     let id = command.id;
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
+    else if (starts_with(id,"retouch.")) retouch.run_command(st,command)^
     else if (starts_with(id,"effect.")) effects.run_command(st,command)^
     else if (id == "tool.configure") tools.configure(st,command)^
     else if (starts_with(id,"selection.") or id in ["mask.from_selection","mask.invert","mask.apply"]) selection.run_command(st,command)^
@@ -210,8 +215,9 @@ pub fn apply_command(st,command) any^ {
         let last_index = siblings.rows[last].index
         let adjacent = all([for (i,child in content(siblings.node) where model.composition(child) and i>=first and i<=last_index) child.id in chosen])
         if (not adjacent) raise error("Raster: select adjacent sibling layers to merge")
-        else if (any([for (row in siblings.rows) not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true]))
-            raise error("Raster: merge requires normal, unclipped selected layers")
+        else if (any([for (row in siblings.rows) not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true or
+            row.node.isolation in ['pass_through',"pass_through"]]))
+            raise error("Raster: merge requires normal, unclipped, isolated selected layers")
         else {
             let raster = img.render_frame(img.document(img.stack([for (row in siblings.rows) row.node]),
                 {width:st.doc.width,height:st.doc.height}))^;
@@ -237,7 +243,7 @@ pub fn apply_command(st,command) any^ {
     }
     else if (id == "document.flatten") {
         let raster = img.render_frame(st.doc)^;
-        {*:st,doc:img.with_children(st.doc,[*if (img.assets(st.doc) == null) [] else [img.assets(st.doc)],
+        {*:st,doc:img.with_children(st.doc,[*[for (child in content(st.doc) where name(child) != 'stack') child],
             img.stack([img.layer(raster,{id:model.fresh_id(st.doc),name:"Flattened",position:[0,0]})])])^,
             selected:[model.fresh_id(st.doc)],target:"pixels"}
     }
@@ -249,14 +255,23 @@ pub fn apply_command(st,command) any^ {
     }
     else edit_node(st,command)^
 }
+fn checked_apply(st,command) any^ {
+    let result = apply_command(st,command)^
+    let checked = if (result.doc != st.doc) model.validate(result.doc)^ else true;
+    result
+}
 pub fn exec(st,command) any^ {
     let checked_command = registry.checked(command)^;
     if (st.gesture != null) raise error("Raster: finish or cancel the active gesture")
-    else if (command.id == "history.undo") step_history(st)
-    else if (command.id == "history.redo") step_history(st,true)
+    else if (command.id in ["action.start","action.stop","action.cancel","action.load"]) actions.control(st,command)^
     else {
-        let result = apply_command(st,command)^
-        let checked = if (result.doc != st.doc) model.validate(result.doc)^ else true;
-        record(st,result,registry.descriptor(command.id).label,command.group)
+        let allowed = actions.admit(st,command)^;
+        if (command.id == "history.undo") step_history(st)
+        else if (command.id == "history.redo") step_history(st,true)
+        else {
+            let result = if (command.id == "action.replay") actions.replay(st,command.action,checked_apply)^ else checked_apply(st,command)^
+            let recorded = record(st,result,registry.descriptor(command.id).label,command.group);
+            actions.capture(st,command,recorded)
+        }
     }
 }

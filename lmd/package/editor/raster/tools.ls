@@ -8,6 +8,10 @@ pub let catalog = [
     {id:"brush",label:"Brush",key:"b",icon:"✎"},{id:"erase",label:"Erase",key:"e",icon:"▱"},
     {id:"bucket",label:"Fill",key:"f",icon:"▣"},{id:"gradient",label:"Gradient",key:"g",icon:"▥"},
     {id:"transform",label:"Transform",key:"t",icon:"⤢"},
+    {id:"clone",label:"Clone",key:"s",icon:"♧"},{id:"heal",label:"Heal",key:"j",icon:"✚"},
+    {id:"dodge",label:"Dodge",key:"d",icon:"☀"},{id:"burn",label:"Burn",key:"k",icon:"◕"},
+    {id:"sponge",label:"Sponge",key:"r",icon:"▨"},{id:"blur",label:"Blur",key:"u",icon:"◉"},
+    {id:"sharpen",label:"Sharpen",key:"a",icon:"△"},
     {id:"eyedropper",label:"Sample",key:"i",icon:"⌖"}
 ]
 pub fn configure(st,command) any^ {

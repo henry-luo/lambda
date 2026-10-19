@@ -29567,10 +29567,6 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         return publish(result, VALUE_REP_ITEM);
     };
     MirLastIndexScope last_scope(mt, field_node->object);
-    if (mir_expr_may_carry_defect(mt, field_node->object)) {
-        // a success-only element witness cannot unbox the defect receiver arm
-        return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
-    }
     // Index paths mix direct scalar loads with generic runtime reads.  The
     // descriptor must record the actual producer carrier, not the indexed
     // expression's semantic element type (D2.4.1-D2.4.3).
@@ -29630,6 +29626,12 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf)), VALUE_REP_ITEM);
     }
 
+    // N-D dispatch above checks the boxed receiver itself; the scalar fallback
+    // would discard every key after the first for a dynamic receiver (S8.2.4v3).
+    if (mir_expr_may_carry_defect(mt, field_node->object)) {
+        // a success-only element witness cannot unbox the defect receiver arm
+        return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
+    }
     // S7.2.2: a key that uses `last` reads its container's length. A container
     // that is not a plain name is evaluated once, before the key, so `last`
     // and the read share it: re-transpiling it for `last` called a procedural

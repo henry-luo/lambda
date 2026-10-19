@@ -16,7 +16,7 @@ full target vocabulary is not a claim that all Photoshop behavior is supported.
 | Milestone | Delivered behavior | Remaining limits |
 |---|---|---|
 | 1. Working Raster | Native owned `u8`, dense inputs and shared COW tiles for region/paint edits; gray/gray-alpha/RGB/RGBA; Raster Velmt; canonical materialization; declared non-enumerable channel projections; array/channel/region snapshots; PNG/JPEG import | High-depth storage is outstanding |
-| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse; requested-region composition | One active mask per node; normal source-over only; retained transforms and enabled effects need baking |
+| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse; requested-region composition | One active mask per node; eight linear-light blends, affine layer/mask transforms, retained ordered color/filter effects, clipping chains and pass-through groups; group effects and pass-through clipping bases require isolation |
 | 3. Animation | Frame-owned stacks; GIF patch/disposal normalization; exact zero delays and total plays; frame editing; full-frame GIF output with exact local palettes | At most 255 opaque colors plus transparency; binary alpha and exact centisecond timing; no implicit quantization; other temporal formats need separate profiles |
 | 4. PSD interchange | Version-1 RGB/grayscale8 read; raw/RLE/ZIP/prediction decode; raw layered write; Unicode names, groups, empty layers, user masks; regenerated IDs/composite; export report; original-byte session passthrough; `input(...,'psd')`/automatic detection and runtime adoption | PSB, native text/smart objects/effects, pass-through groups, group masks, inverted-mask writing and opaque block reuse are not qualified; strict rendering/export rejects unsupported features |
 | 5. Photo scale/precision | Photos M2 adds shared COW tiles, native painting/coverage and true region composition | Effect halos, high-depth adapters, ICC conversion and broader blending remain work; photo-scale budgets are unqualified |
@@ -154,3 +154,17 @@ interpreter crash. The shared checkout has concurrent edits, so these totals
 are qualification evidence rather than a clean-baseline attribution. Full log:
 `temp/image_samples/view_lambda_baseline.log`. No unrelated tests or budgets
 were changed by this fix.
+
+## Photos shared-image continuation — 2026-10-19
+
+Photos extends the shared renderer with eight blends, retained affine placement,
+ordered effects, clipping and pass-through groups. Raw raster byte pack/unpack,
+histograms and `lambda.image.project` provide editable data persistence. Retouch
+kernels reuse brush coverage and immutable tile publication; clone/heal sample
+frozen inputs and local tonal edits preserve alpha (**S9.1.2 / S9.1.3 / S9.2.2**).
+Projects and action files parse data without executing source (**S12.1.1v3**).
+Detailed acceptance and remaining qualification are tracked in
+[Photos implementation](Lambda_Impl_Photos.md). The new working composition
+profile does not widen the PSD writer silently; unsupported retained metadata
+still requires a project or explicit baking. High depth and ICC conversion remain
+unimplemented.

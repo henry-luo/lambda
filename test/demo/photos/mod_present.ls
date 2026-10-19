@@ -34,6 +34,9 @@ pub pn publish(owner,st) any^ {
         'data-x':if (active == null) "" else string(model.bounds(active.node).x),
         'data-y':if (active == null) "" else string(model.bounds(active.node).y),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
+        'data-recording':if (st.recording == null) "off" else string(len(st.recording.steps)),
+        'data-actions':string(len(st.actions)),
+        'data-retouch-source':if (st.retouch.source == null) "none" else "ready",
         'data-effects':string(len(effects.items(active.node))),
         'data-effect-enabled':string(active_effect.enabled != false),
         'data-blend':string(model.value(active.node.blend,'normal')),
@@ -62,12 +65,17 @@ pub pn publish(owner,st) any^ {
         'brush-flow':st.brush.flow,'brush-opacity':st.brush.opacity,tolerance:st.tolerance,
         'selection-mode':st.selection_mode,'gradient-kind':st.gradient_kind,
         blend:model.value(active.node.blend,'normal'),
+        'retouch-strength':st.retouch.strength,'retouch-radius':st.retouch.radius,'retouch-aligned':if (st.retouch.aligned) "aligned" else "reset",
         *:reduce([{},*[for (control in effects.controls) {["effect-" ++ control.key]:model.value(active_effect.options[control.key],model.value(st.effect_draft[control.key],control.value))}]],
             (result,entry) => {*:result,*:entry})}) {
         let control = node(owner,string(id))
         if (not dom.matches(control,":focus") and dom.get_state(control,"value") != string(requested))
             dom.set_state(control,"value",string(requested))
     }
+    dom.set_text_content(node(owner,"action-status"),if (st.recording != null) "Recording · " ++ string(len(st.recording.steps)) ++ " steps"
+        else if (len(st.actions)>0) st.actions[last].name ++ " · " ++ string(len(st.actions[last].steps)) ++ " steps" else "Record edits on one selected layer")
+    dom.set_text_content(node(owner,"retouch-source"),if (st.retouch.source == null) "No source selected" else
+        "Source: " ++ string(st.retouch.source.point[0]) ++ ", " ++ string(st.retouch.source.point[1]))
     for (tool in tools.catalog) dom.set_attribute(node(owner,"tool-" ++ tool.id),"class",if (st.tool == tool.id) "active" else "")
     dom.set_text_content(node(owner,"tool-label"),[for (tool in tools.catalog where tool.id == st.tool) tool.label][0])
     for (entry in [{id:"undo",disabled:not editor.can_undo(st)^},{id:"redo",disabled:not editor.can_redo(st)^}]) {
@@ -79,7 +87,7 @@ pub pn publish(owner,st) any^ {
         dom.set_inner_html(node(owner,"history"),history_html)
         dom.set_attribute(node(owner,"history"),"data-items",history_html)
     }
-    dom.style_set_property(node(owner,"file-dialog"),"display",if (st.dialog in ["open","place","save","export","psd"]) "block" else "none")
+    dom.style_set_property(node(owner,"file-dialog"),"display",if (st.dialog in ["open","place","save","export","psd","action-save","action-open"]) "block" else "none")
     dom.style_set_property(node(owner,"discard-dialog"),"display",if (st.dialog == "discard") "block" else "none")
     if (st.dialog == "discard" and previous_dialog != "discard") dom.focus_set(node(owner,"discard-cancel"),false)
     return painted
