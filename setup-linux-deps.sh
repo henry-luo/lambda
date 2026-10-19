@@ -13,6 +13,7 @@ SYSTEM_PREFIX="/usr/local"
 ALL_LIBS=(
     "libmpdec-dev"           # mpdecimal
     "libutf8proc-dev"        # utf8proc
+    "libopenjp2-7-dev"       # JPEG 2000 image samples in PDFs
     "libssl-dev"             # ssl
     "zlib1g-dev"             # z
     "libnghttp2-dev"         # nghttp2

@@ -105,6 +105,28 @@ TEST_F(FontMathTest, CompleteEmbeddingHonorsPermissionsAndTableExtents) {
     EXPECT_EQ(exported.bytes, nullptr);
 }
 
+TEST_F(FontMathTest, LegacyEmbeddingFlagsKeepPreviewAndEditablePermissions) {
+    load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
+    FontHandle handle = {}; handle.tables = tables;
+    Os2Table* os2 = font_tables_get_os2(tables); ASSERT_NE(os2, nullptr);
+    uint32_t length = 0;
+    uint8_t* raw = (uint8_t*)font_tables_find(tables, FONT_TAG('O','S','/','2'), &length);
+    ASSERT_NE(raw, nullptr); ASSERT_GE(length, 10u);
+    os2->version = 2;
+    write_be16(raw, 2);
+    for (uint16_t permissions : {0x0006, 0x000a, 0x000e}) {
+        os2->fs_type = permissions;
+        write_be16(raw + 8, permissions);
+        FontExport exported = {}; const char* error = nullptr;
+        ASSERT_TRUE(font_export_face(&handle, &exported, &error)) << (error ? error : "");
+        FontTables* reopened = font_tables_open(exported.bytes, exported.length, pool);
+        ASSERT_NE(reopened, nullptr);
+        EXPECT_EQ(font_tables_get_os2(reopened)->fs_type, permissions);
+        font_tables_close(reopened, pool);
+        font_export_free(&exported);
+    }
+}
+
 TEST_F(FontMathTest, ExtractsCollectionFaceWithStandaloneOffsets) {
     load("test/lambda/math/fonts/NotoSansMath-Regular.ttf");
     size_t length = tables->data_len;

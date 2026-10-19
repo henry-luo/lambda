@@ -33,7 +33,8 @@ bool font_export_face(FontHandle* font, FontExport* result, const char** error) 
     NameTable* name = font_tables_get_name(tables);
     if (!head || !head->units_per_em || !hhea || !name || !name->postscript_name) return false;
     // OS/2 permissions apply to the selected face, including TTC/WOFF sources.
-    if (os2 && (os2->fs_type & 2)) {
+    // legacy OS/2 tables combine permissions; restriction applies only when bit 1 stands alone.
+    if (os2 && (os2->fs_type & 0x000e) == 0x0002) {
         *error = "selected font forbids outline font embedding"; return false;
     }
     bool cff = font_tables_has(tables, FONT_TAG('C','F','F',' '));

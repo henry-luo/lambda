@@ -36,11 +36,14 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/input/input-pdf-type1.hpp"
+#include "../lambda/input/pdf_decompress.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/strbuf.h"
+#include "../lib/base64.h"
+#include "../lib/image.h"
 
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -115,6 +118,37 @@ static MapReader find_indirect_object(ArrayReader objs, int64_t object_num) {
         return content.asMap();
     }
     return MapReader();
+}
+
+static Input* parse_image_fixture(const char* dictionary, const uint8_t* data, size_t length, const char* extra = "") {
+    StrBuf* source = strbuf_new();
+    if (!source) return nullptr;
+    strbuf_append_str(source, "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] >>\nendobj\n");
+    strbuf_append_format(source, "4 0 obj\n<< /Type /XObject /Subtype /Image %s /Length %zu >>\nstream\n", dictionary, length);
+    strbuf_append_str_n(source, (const char*)data, length);
+    strbuf_append_str(source, "\nendstream\nendobj\n6 0 obj\n[/Indexed /DeviceCMYK 1 <000000ff00ffff00>]\nendobj\n");
+    strbuf_append_str(source, extra);
+    strbuf_append_str(source, "trailer\n<< /Root 1 0 R /Size 7 >>\nstartxref\n0\n%%EOF\n");
+    Input* input = InputManager::create_input(nullptr);
+    if (input) parse_pdf(input, source->str, source->length);
+    strbuf_free(source); return input;
+}
+
+static unsigned char* image_fixture_pixels(Input* input, int* width, int* height) {
+    if (!input) return nullptr;
+    MapReader root = MapReader::fromItem(input->root);
+    MapReader stream = find_indirect_object(root.get("objects").asArray(), 4);
+    String* uri = stream.get("data_uri").asString();
+    if (!uri) return nullptr;
+    const char* encoded = strchr(uri->chars, ',');
+    if (!encoded) return nullptr;
+    size_t length = 0; uint8_t* png = base64_decode(encoded + 1, 0, &length);
+    if (!png) return nullptr;
+    int channels = 0;
+    unsigned char* pixels = image_load_from_memory(png, length, width, height, &channels);
+    mem_free(png); return pixels;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -226,6 +260,126 @@ TEST_F(InputPdfTest, HexStringPairsCanSpanWhitespace) {
     ASSERT_EQ(value->len, 2u);
     EXPECT_EQ(value->chars[0], 'A');
     EXPECT_EQ(value->chars[1], 'B');
+}
+
+TEST_F(InputPdfTest, LinearizedTrailersAndXrefStreamFootersKeepLaterObjects) {
+    const char* prefixes[] = {
+        "xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Root 1 0 R /Size 7 >>\nstartxref\n0\n%%EOF\n",
+        "7 0 obj\n<< /Type /XRef /Root 1 0 R /Length 0 >>\nstream\n\nendstream\nendobj\nstartxref\n0\n%%EOF\n"
+    };
+    for (const char* prefix : prefixes) {
+        StrBuf* source = strbuf_new(); ASSERT_NE(source, nullptr);
+        strbuf_append_str(source, "%PDF-1.7\n8 0 obj\n<< /Linearized 1 >>\nendobj\n");
+        strbuf_append_str(source, prefix);
+        strbuf_append_str(source, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] >>\nendobj\n"
+            "startxref\n0\n%%EOF\n");
+        Input* input = InputManager::create_input(nullptr); ASSERT_NE(input, nullptr);
+        parse_pdf(input, source->str, source->length); strbuf_free(source);
+        MapReader root = MapReader::fromItem(input->root);
+        EXPECT_EQ(root.get("pages").asArray().length(), 1);
+        EXPECT_STREQ(find_indirect_object(root.get("objects").asArray(), 1).get("Type").asString()->chars, "Catalog");
+    }
+}
+
+TEST_F(InputPdfTest, StreamLengthKeepsBinaryNewlinesAndEmbeddedEndstreamText) {
+    const uint8_t bytes[] = {'e','n','d','s','t','r','e','a','m','\r','\n'};
+    Input* input = parse_image_fixture("/Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB", bytes, sizeof(bytes));
+    ASSERT_NE(input, nullptr);
+    MapReader root = MapReader::fromItem(input->root);
+    String* stored = find_indirect_object(root.get("objects").asArray(), 4).get("data").asString();
+    ASSERT_NE(stored, nullptr); ASSERT_EQ(stored->len, sizeof(bytes));
+    EXPECT_EQ(memcmp(stored->chars, bytes, sizeof(bytes)), 0);
+}
+
+TEST_F(InputPdfTest, ImagePackedRowsResolveIndirectCmykPalettes) {
+    const uint8_t bytes[] = {0x80, 0x40};
+    Input* input = parse_image_fixture("/Width 2 /Height 2 /BitsPerComponent 1 /ColorSpace 6 0 R", bytes, sizeof(bytes));
+    int width = 0, height = 0; unsigned char* pixels = image_fixture_pixels(input, &width, &height);
+    ASSERT_NE(pixels, nullptr); EXPECT_EQ(width, 2); EXPECT_EQ(height, 2);
+    const uint8_t expected[] = {255,0,0,255, 0,0,0,255, 0,0,0,255, 255,0,0,255};
+    EXPECT_EQ(memcmp(pixels, expected, sizeof(expected)), 0); image_free(pixels);
+}
+
+TEST_F(InputPdfTest, ImageSixteenBitRgbAndInvertedStencilSamplesKeepTheirMeaning) {
+    const uint8_t rgb[] = {0xff, 0xff, 0x80, 0, 0, 0};
+    Input* input = parse_image_fixture("/Width 1 /Height 1 /BitsPerComponent 16 /ColorSpace /DeviceRGB", rgb, sizeof(rgb));
+    int width = 0, height = 0; unsigned char* pixels = image_fixture_pixels(input, &width, &height);
+    ASSERT_NE(pixels, nullptr);
+    const uint8_t expected[] = {255,128,0,255};
+    EXPECT_EQ(memcmp(pixels, expected, sizeof(expected)), 0); image_free(pixels);
+    const uint8_t mask[] = {0x80};
+    input = parse_image_fixture("/Width 2 /Height 1 /ImageMask true /Decode [1 0]", mask, sizeof(mask));
+    pixels = image_fixture_pixels(input, &width, &height); ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(pixels[3], 255); EXPECT_EQ(pixels[7], 0); image_free(pixels);
+}
+
+TEST_F(InputPdfTest, ImagePredictorsKeepSampleCarryRowPaddingAndPreviousRowPixels) {
+    const uint8_t tiff16[] = {0,255, 0,1, 1,35, 255,255};
+    const uint8_t tiff16_expected[] = {0,255, 1,0, 1,35, 1,34};
+    const uint8_t packed[] = {0x1f,0x2a, 0x1f,0x2b};
+    const uint8_t packed_expected[] = {0x10,0x2a, 0x10,0x2b};
+    const uint8_t png[] = {4,50,50, 4,211,0};
+    const uint8_t png_expected[] = {50,100,5,50};
+    const struct { int predictor, bits, columns; const uint8_t* encoded; size_t length;
+        const uint8_t* expected; size_t expected_length; } cases[] = {
+        {2,16,2,tiff16,sizeof(tiff16),tiff16_expected,sizeof(tiff16_expected)},
+        {2,4,3,packed,sizeof(packed),packed_expected,sizeof(packed_expected)},
+        {15,8,2,png,sizeof(png),png_expected,sizeof(png_expected)}
+    };
+    for (const auto& test : cases) {
+        PDFDecodeParams params; pdf_decode_params_init(&params);
+        params.predictor = test.predictor; params.bits = test.bits; params.columns = test.columns;
+        size_t size = 0;
+        char* decoded = apply_predictor((const char*)test.encoded, test.length, &size, &params);
+        ASSERT_NE(decoded, nullptr); ASSERT_EQ(size, test.expected_length);
+        EXPECT_EQ(memcmp(decoded, test.expected, size), 0); mem_free(decoded);
+    }
+}
+
+TEST_F(InputPdfTest, ImageDeviceNTintsUseTheAlternateColourSpaceCalculator) {
+    const uint8_t samples[] = {0, 255};
+    Input* input = parse_image_fixture("/Width 2 /Height 1 /BitsPerComponent 8 "
+        "/ColorSpace [/DeviceN [/Black] /DeviceCMYK << /FunctionType 2 /N 1 /C0 [0 0 0 0] /C1 [0 0 0 1] >>]",
+        samples, sizeof(samples));
+    int width = 0, height = 0; unsigned char* pixels = image_fixture_pixels(input, &width, &height);
+    ASSERT_NE(pixels, nullptr);
+    const uint8_t expected[] = {255,255,255,255, 0,0,0,255};
+    EXPECT_EQ(memcmp(pixels, expected, sizeof(expected)), 0); image_free(pixels);
+    const char program[] = "{ 0 0 0 4 -1 roll }";
+    StrBuf* function = strbuf_new(); ASSERT_NE(function, nullptr);
+    strbuf_append_format(function, "5 0 obj\n<< /FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1 0 1] /Length %zu >>\nstream\n%s\nendstream\nendobj\n",
+        sizeof(program) - 1, program);
+    input = parse_image_fixture("/Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace [/DeviceN [/Black] /DeviceCMYK 5 0 R]",
+        samples, sizeof(samples), function->str);
+    strbuf_free(function);
+    pixels = image_fixture_pixels(input, &width, &height); ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(memcmp(pixels, expected, sizeof(expected)), 0); image_free(pixels);
+}
+
+TEST_F(InputPdfTest, ImageFiveInkTintsKeepLabUnitsAndTheReferenceWhite) {
+    const uint8_t samples[] = {0,128,128,0,0, 255,128,128,0,0,
+        128,128,128,0,0, 138,209,198,0,0};
+    const char program[] = "{ pop pop 3 -1 roll 100 mul 3 -1 roll 255 mul -128 add "
+        "3 -1 roll 255 mul -128 add }";
+    StrBuf* function = strbuf_new(); ASSERT_NE(function, nullptr);
+    strbuf_append_format(function, "5 0 obj\n<< /FunctionType 4 /Domain [0 1 0 1 0 1 0 1 0 1] "
+        "/Range [0 100 -128 127 -128 127] /Length %zu >>\nstream\n%s\nendstream\nendobj\n",
+        sizeof(program) - 1, program);
+    Input* input = parse_image_fixture("/Width 4 /Height 1 /BitsPerComponent 8 "
+        "/ColorSpace [/DeviceN [/A /B /C /D /E] [/Lab << /WhitePoint [0.9642 1 0.8249] >>] 5 0 R]",
+        samples, sizeof(samples), function->str);
+    strbuf_free(function);
+    int width = 0, height = 0; unsigned char* pixels = image_fixture_pixels(input, &width, &height);
+    ASSERT_NE(pixels, nullptr); ASSERT_EQ(width, 4); ASSERT_EQ(height, 1);
+    for (int c = 0; c < 3; c++) {
+        EXPECT_EQ(pixels[c], 0); EXPECT_EQ(pixels[4 + c], 255);
+        EXPECT_NEAR(pixels[8 + c], 119, 1);
+    }
+    // this D50 Lab sample is near the sRGB red primary, so chroma must survive the tint transform.
+    EXPECT_NEAR(pixels[12], 255, 2); EXPECT_NEAR(pixels[13], 0, 2); EXPECT_NEAR(pixels[14], 0, 2);
+    image_free(pixels);
 }
 
 TEST_F(InputPdfTest, AdvancedFixtureHasManyIndirectObjects) {

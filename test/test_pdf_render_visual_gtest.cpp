@@ -2,7 +2,7 @@
 /**
  * GTest visual regression coverage for Radiant's SVG/PDF/PNG export backends.
  *
- * This file holds two independent groups of tests:
+ * This file holds three independent groups of tests:
  *
  * 1. RenderOutputParity.* and CanvasWebGlExportTest — export-backend correctness on small, hand-written
  *    HTML snippets rendered through `./lambda.exe render`. Two sub-themes:
@@ -32,6 +32,13 @@
  *    temp/pdf_visual/diff for inspection. New/missing baselines auto-initialize,
  *    and `--update-baseline` rewrites the baseline when there are no regressions.
  *
+ * 3. PdfOutputRoundtrip.* — discover source PDFs recursively under test/, including
+ *    linked corpora and LaTeX references. Paged intake regenerates every page through
+ *    the Lambda PDF writer (S2.6.6v3); independent checks verify page geometry, byte
+ *    offsets, streams and rasterizability. Generated output directories are excluded.
+ *    Unsupported valid documents fail; the intentionally invalid fixture must reject
+ *    without creating or replacing its destination.
+ *
  * Export comparisons require pdftocairo/rsvg-convert. The import corpus uses
  * pdfinfo/pdftoppm and skips when its tools or fixtures are absent; dedicated
  * intrinsic-geometry controls require their fixtures. See test/README.md.
@@ -42,6 +49,7 @@
 #include "../lib/mem.h"
 #include "../lib/ownership.hpp"
 #include "../lib/arraylist.hpp"
+#include "../lib/hashmap_helpers.h"
 static bool write_png_rgba(const char* path, const unsigned char* pixels, int width, int height);
 #include "pdf_reference_rasterizer.hpp"
 #include "../lib/windows_compat.h"
@@ -353,7 +361,7 @@ public:
 static RenderBatchClient render_batch;
 
 static bool render_document_fixture_single(const char* html_path, const char* output_path,
-                                    const char* options = "") {
+                                    const char* options = "", bool log_errors = false) {
     char qhtml[PATH_MAX + 8];
     char qoutput[PATH_MAX + 8];
     char cmd[PATH_MAX * 4 + 256];
@@ -361,7 +369,7 @@ static bool render_document_fixture_single(const char* html_path, const char* ou
     shell_quote(output_path, qoutput, sizeof(qoutput));
     snprintf(cmd, sizeof(cmd),
              "%s render %s%s %s -o %s > %s.out 2> %s.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, options, qoutput,
+             LAMBDA_EXE, log_errors ? "" : lambda_no_log_arg(), qhtml, options, qoutput,
              qoutput, qoutput);
     int status = system(cmd);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
@@ -569,13 +577,12 @@ static bool view_text_x(const char* path, const char* content, float* x) {
 
 
 static bool has_pdf_ext(const char* name) {
-    size_t len = strlen(name);
-    return len > 4 && strcmp(name + len - 4, ".pdf") == 0;
+    return file_path_has_ext_ci(name, ".pdf");
 }
 
 static void basename_without_pdf(const char* name, char* out, size_t out_size) {
     size_t len = strlen(name);
-    if (len > 4 && strcmp(name + len - 4, ".pdf") == 0) len -= 4;
+    if (has_pdf_ext(name)) len -= 4;
     if (len >= out_size) len = out_size - 1;
     memcpy(out, name, len);
     out[len] = '\0';
@@ -711,19 +718,62 @@ static int compare_pdf_file_info(const void* a, const void* b) {
     return strcmp(pa->path, pb->path);
 }
 
-static int discover_pdfs(PdfFileInfo* files, int max_files) {
-    DIR* dir = opendir(PDF_DIR);
-    if (!dir) return 0;
-    int count = 0;
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL && count < max_files) {
-        if (!has_pdf_ext(entry->d_name)) continue;
-        snprintf(files[count].path, sizeof(files[count].path), "%s/%s", PDF_DIR, entry->d_name);
-        basename_without_pdf(entry->d_name, files[count].base, sizeof(files[count].base));
-        count++;
+struct PdfFixtureDirectory { char* path; };
+HASHMAP_DEFINE_STRKEY(pdf_fixture_directories, PdfFixtureDirectory, path)
+
+struct PdfFixtureList {
+    lam::ArrayList<PdfFileInfo> files;
+    HashMap* directories = pdf_fixture_directories_new_with_free(16,
+        [](void* entry) { free(((PdfFixtureDirectory*)entry)->path); });
+    ~PdfFixtureList() { if (directories) hashmap_free(directories); }
+
+    bool collect(const char* path, bool recursive) {
+        char* canonical = file_realpath(path);
+        if (!canonical) return false;
+        if (!directories) { free(canonical); return false; }
+        // companion corpora are symlinks; canonical directories also break link cycles.
+        PdfFixtureDirectory directory = {canonical};
+        if (hashmap_get(directories, &directory)) { free(canonical); return true; }
+        hashmap_set(directories, &directory);
+        if (hashmap_oom(directories)) { free(canonical); return false; }
+        DIR* dir = opendir(path);
+        if (!dir) return false;
+        bool ok = true;
+        struct dirent* entry;
+        while (ok && (entry = readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+#ifdef DT_DIR
+            // most entries are unrelated scripts; avoid a stat for every file in linked corpora.
+            if (entry->d_type != DT_UNKNOWN && entry->d_type != DT_DIR && entry->d_type != DT_LNK &&
+                    !has_pdf_ext(entry->d_name)) continue;
+#endif
+            char child[PATH_MAX];
+            if (snprintf(child, sizeof(child), "%s/%s", path, entry->d_name) >= (int)sizeof(child)) {
+                ok = false; break;
+            }
+            if (path_is_dir(child)) {
+                // generated render artifacts are not source fixtures and change during test runs.
+                if (recursive && strcmp(entry->d_name, "output") && strcmp(entry->d_name, "results") &&
+                        strcmp(entry->d_name, "node_modules") && strcmp(entry->d_name, "__pycache__"))
+                    ok = collect(child, true);
+            } else if (has_pdf_ext(entry->d_name)) {
+                PdfFileInfo file = {};
+                memcpy(file.path, child, strlen(child) + 1);
+                basename_without_pdf(entry->d_name, file.base, sizeof(file.base));
+                ok = files.push_back(file);
+            }
+        }
+        closedir(dir);
+        return ok;
     }
-    closedir(dir);
-    qsort(files, count, sizeof(PdfFileInfo), compare_pdf_file_info);
+};
+
+static int discover_pdfs(PdfFileInfo* files, int max_files) {
+    PdfFixtureList fixtures;
+    if (!fixtures.collect(PDF_DIR, false)) return 0;
+    qsort(fixtures.files.data(), fixtures.files.size(), sizeof(PdfFileInfo), compare_pdf_file_info);
+    int count = fixtures.files.size() < (size_t)max_files ? (int)fixtures.files.size() : max_files;
+    if (count) memcpy(files, fixtures.files.data(), count * sizeof(PdfFileInfo));
     return count;
 }
 
@@ -11477,6 +11527,90 @@ public:
     }
 };
 
+class PdfOutputRoundtripTest : public ::testing::Test {
+    PdfFileInfo fixture;
+public:
+    explicit PdfOutputRoundtripTest(const PdfFileInfo& file) : fixture(file) {}
+    void TestBody() override {
+        SCOPED_TRACE(fixture.path);
+        ASSERT_TRUE(fixture.path[0]) << "could not enumerate PDF fixtures under test/";
+        ASSERT_TRUE(command_exists("python3"));
+        ASSERT_TRUE(command_exists("pdfinfo"));
+        ASSERT_TRUE(command_exists("pdftoppm"));
+        const char* level = getenv("LAMBDA_LOG_LEVEL");
+        char* saved_level = level ? strdup(level) : nullptr;
+        ASSERT_TRUE(!level || saved_level);
+        struct RestoreLogLevel {
+            char* saved;
+            ~RestoreLogLevel() {
+                if (saved) setenv("LAMBDA_LOG_LEVEL", saved, 1);
+                else unsetenv("LAMBDA_LOG_LEVEL");
+                free(saved);
+            }
+        } restore_level = {saved_level};
+        // retain rejection diagnostics without enabling expensive parser/layout traces.
+        ASSERT_EQ(setenv("LAMBDA_LOG_LEVEL", "ERROR", 1), 0);
+        char output[PATH_MAX], folder[PATH_MAX];
+        ASSERT_LT(snprintf(output, sizeof(output), "temp/pdf_roundtrip/%s", fixture.path + 5),
+            (int)sizeof(output));
+        memcpy(folder, output, strlen(output) + 1);
+        *strrchr(folder, '/') = '\0';
+        ASSERT_TRUE(ensure_dir(folder));
+        unlink(output);
+        ASSERT_FALSE(file_exists(output));
+        const char* options = "--paged --block-remote-resources";
+        if (!strcmp(fixture.path, "test/lambda/latex/fixtures/invalid.pdf")) {
+            EXPECT_FALSE(render_document_fixture_single(fixture.path, output, options, true));
+            EXPECT_FALSE(file_exists(output));
+            const char sentinel[] = "existing output must survive rejected PDF input";
+            ASSERT_TRUE(write_file_all(output, sentinel, sizeof(sentinel) - 1));
+            EXPECT_FALSE(render_document_fixture_single(fixture.path, output, options, true));
+            EXPECT_EQ(file_size(output), (int64_t)sizeof(sentinel) - 1);
+            EXPECT_TRUE(file_contains_text(output, sentinel));
+            char diagnostic[PATH_MAX + 8];
+            snprintf(diagnostic, sizeof(diagnostic), "%s.err", output);
+            EXPECT_TRUE(file_contains_text(diagnostic, "input: parser failed for format 'pdf'"));
+            return;
+        }
+        int pages = pdf_page_count(fixture.path);
+        ASSERT_GT(pages, 0) << "reference reader cannot load source fixture";
+        // paged intake parses and regenerates every page; unpaged PDF export is a byte copy.
+        ASSERT_TRUE(render_document_fixture_single(fixture.path, output, options, true))
+            << "see " << output << ".out and " << output << ".err";
+        char source_quoted[PATH_MAX * 4 + 3], output_quoted[PATH_MAX * 4 + 3];
+        shell_quote(fixture.path, source_quoted, sizeof(source_quoted));
+        shell_quote(output, output_quoted, sizeof(output_quoted));
+        char command[PATH_MAX * 8 + 256];
+        snprintf(command, sizeof(command), "python3 test/pdf_output_check.py %s roundtrip %s 2>&1",
+            source_quoted, output_quoted);
+        CommandResult checked = run_command_capture(command);
+        EXPECT_EQ(checked.exit_code, 0) << checked.output;
+    }
+};
+
+static void register_pdf_roundtrip_tests() {
+    PdfFixtureList fixtures;
+    bool found = fixtures.collect("test", true) && !fixtures.files.empty();
+    if (!found) {
+        PdfFileInfo missing = {};
+        ::testing::RegisterTest("PdfOutputRoundtrip", "FixtureDiscovery", nullptr, nullptr,
+            __FILE__, __LINE__, [missing] { return new PdfOutputRoundtripTest(missing); });
+        return;
+    }
+    qsort(fixtures.files.data(), fixtures.files.size(), sizeof(PdfFileInfo), compare_pdf_file_info);
+    for (size_t i = 0; i < fixtures.files.size(); i++) {
+        PdfFileInfo file = fixtures.files[i];
+        char name[PATH_MAX + 64];
+        snprintf(name, sizeof(name), "%s/%03zu_%s",
+            !strcmp(file.path, "test/lambda/latex/fixtures/invalid.pdf") ? "RejectMalformed" : "LoadAndWriteAllPages",
+            i, file.path + 5);
+        for (char* c = strchr(name, '/') + 1; *c; c++)
+            if (!isalnum((unsigned char)*c)) *c = '_';
+        ::testing::RegisterTest("PdfOutputRoundtrip", name, nullptr, nullptr, __FILE__, __LINE__,
+            [file] { return new PdfOutputRoundtripTest(file); });
+    }
+}
+
 static void register_pdf_import_tests() {
     PdfFileInfo files[MAX_PDFS];
     int count = discover_pdfs(files, MAX_PDFS);
@@ -11548,6 +11682,7 @@ int main(int argc, char** argv) {
     if (budget && atoi(budget) > 0 && !getenv("LAMBDA_MODULE_AST_THREADS"))
         setenv("LAMBDA_MODULE_AST_THREADS", budget, 0);
     register_pdf_import_tests();
+    register_pdf_roundtrip_tests();
     ::testing::InitGoogleTest(&argc, argv);
     int result = RUN_ALL_TESTS();
     return render_batch.finish() ? result : 1;
