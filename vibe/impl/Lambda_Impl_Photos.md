@@ -95,8 +95,9 @@ seven with forced GC/poisoning afterwards. Evidence:
   placement, grouping, masks, edits, undo/redo, layered save/reopen, PNG export,
   failed opens, unsaved replacement, cancellation, touch and keyboard/modal focus.
   The final allocation-tracked smoke teardown reports no leaks. Evidence:
-  `temp/photos-package-final-review.log`, `temp/photos-ui-final.log`,
-  `temp/photos-ui-baseline-final.log`, `temp/photos/teardown.log`.
+  `temp/photos-package-final-review.log`, `temp/photos-package-auto-final.log`,
+  `temp/photos-ui-final-review.log`, `temp/photos-ui-baseline-final.log`,
+  `temp/photos/teardown.log`.
 - Pillow independently opens `temp/photos/unmasked.psd` and verifies its extent,
   three layer names/order, offsets and merged pixels. The masked fixture also
   opens; Pillow does not expose its masked layer through its simple layer list,
@@ -155,27 +156,37 @@ four SVG failures, the extra editing suite exposes
 `temp/photos-ui-baseline-final.log`. This supplemental run is not a passing
 aggregate gate and does not change the earlier Lambda/Radiant verdicts.
 
+The final standalone native-view regression run passes **210/210 tests** with
+the rebuilt release host, including the existing photo editor, file loading,
+gameplay, 3D and teardown coverage. Evidence:
+`temp/photos-native-view-final.log`. The final Photos-only replay passes all
+**49 assertions** with forced GC and poisoned frees after command review;
+automatic package execution and eager-JIT forced-GC goldens both pass.
+
 ## Optimized baseline measurement
 
 `make build-release-compile` succeeds in the worktree. The benchmark refuses the
 debug-only validator trace and records binary/package/scenario SHA-256 values in
 `temp/photos/performance/results.json`. The measured host is macOS 26.3 arm64,
-10 logical CPUs, automatic execution, without forced GC. Base revision:
-`e42047f59bb7a0fdac0838d921b5fdb488a04d43` plus this worktree's implementation;
+10 logical CPUs, automatic execution, without forced GC. Measured source revision:
+`ed8df3a4f82063498276a06588420949fc54633c`;
 binary SHA-256:
-`8e3a2abf9e4a2911e7f52bba678dea1786991061a9f3562029090bbbe5d40e88`.
+`350338320190f22ae2e5a588b93d4df42677e10c7bff4c2478b35e69fcb7a54e`.
+Package source SHA-256:
+`17ce97a86a426f858b2e6701800be9bf6b5265eea2619d68c700f36aaf25ae9d`.
+This final measurement runs after the qualification subprocesses have finished.
 
 Three separate processes each construct eight 1024×768 layers sharing an input
 raster, move the active layer sixteen times, then encode a 28312680-byte PSD:
 
 | Phase | Median |
 |---|---:|
-| Construct/place | 2531 ms |
-| Sixteen moves including eager validation/composition | 8469 ms |
-| PSD encode | 658 ms |
-| Whole process | 12010 ms |
+| Construct/place | 2566 ms |
+| Sixteen moves including eager validation/composition | 8713 ms |
+| PSD encode | 683 ms |
+| Whole process | 12255 ms |
 
-Maximum child-process RSS is **162938880 bytes (155.4 MiB)**. This is process
+Maximum child-process RSS is **161988608 bytes (154.5 MiB)**. This is process
 peak memory, not unique raster residency. The first process is cold; later
 processes may use filesystem/compiler caches. No input-to-display latency is
 measured, and no M5 latency/scale target is claimed. Full-composition validation
