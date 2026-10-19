@@ -86,6 +86,15 @@ root owns a complete visit. A shared phase bitset omits the float pass when none
 inline-only sequences keep the single-pass path. The existing positioned-layer
 limits above still apply.
 
+Outermost SVG fragments and `foreignObject` establish stacking contexts under
+[SVG 2 §3.4.1](https://www.w3.org/TR/SVG2/render.html#EstablishingStackingContex).
+The host HTML walk treats the SVG fragment atomically; walking its descendants
+in a host background phase would paint foreign HTML without the SVG transform.
+`svg_draw_foreign_object_html` resets the copied local context to a complete
+paint stack, including when an external SVG image is captured during the host's
+foreground phase. The existing `svg_foreign_object*` UI cases cover backgrounds,
+clipping, transformed input, scrolling, and moving/removing/reinserting content.
+
 Boundary emission, replaced content, outlines/rules and special raster dispatch
 respect the active phase. Embedded documents own a new complete stack inside the
 frame's content layer, rather than inheriting an outer foreground-only visit.

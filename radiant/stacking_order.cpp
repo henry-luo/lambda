@@ -45,6 +45,12 @@ bool radiant_stack_is_context(View* view) {
     if (!view || !view->parent) return true;
     ViewElement* element = lam::view_as_element(view);
     if (!element) return false;
+    if (dom_element_is_svg(element)) {
+        // SVG 2 §3.4.1 isolates foreignObject and each outermost SVG fragment from its parent stack.
+        if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) return true;
+        DomElement* parent = element->parent ? element->parent->as_element() : nullptr;
+        if (element->tag() == MARKUP_NAME_SVG && (!parent || !dom_element_is_svg(parent))) return true;
+    }
     const char* clip = render_clip_css_value(element);
     if (clip && strncmp(clip, "none", 4) != 0) return true;
     const PositionProp* position = element->positionp();

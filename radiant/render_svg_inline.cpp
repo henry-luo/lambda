@@ -6614,6 +6614,8 @@ static UiContext* svg_style_layout_html(SvgInlineRenderContext* ctx, SvgStyleCon
 static void svg_draw_foreign_object_html(SvgInlineRenderContext* ctx, Element*, void* data) {
     SvgForeignObjectPaint* content = (SvgForeignObjectPaint*)data;
     RasterRenderContext html = *content->context;
+    // foreignObject owns a complete HTML paint stack, independent of the host's current phase.
+    html.paint_phase = RADIANT_PAINT_ALL;
     html.transform = rdt_matrix_identity(); html.has_transform = false;
     html.has_transform_3d = false;
     html.block = {}; html.block.clip = content->clip;

@@ -78,6 +78,8 @@ typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/l
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 const char* dom_element_namespace_uri(struct DomElement* element);
+// namespace predicates are shared data queries for layout and the public DOM adapter.
+bool dom_element_is_svg(struct DomElement* element);
 NameId dom_element_html_tag(struct DomElement* element);
 // same as dom_element_html_tag(element) == tag, without the namespace walk for other tags
 bool dom_element_is_html_tag(struct DomElement* element, NameId tag);

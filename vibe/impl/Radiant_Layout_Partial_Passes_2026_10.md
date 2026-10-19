@@ -5293,3 +5293,41 @@ and `ui-automation-final.log`. **Round31 remains unqualified.** At the user's
 wrap-up request, work is paused with the current changes preserved. Investigate
 these four failures before resuming partial-pass repairs. The read-only round32
 form-owner diagnosis is deferred; no form-owner engine edits were started.
+
+## Round 31 follow-up — SVG/HTML paint boundaries
+
+**Done behavior:** `foreignObject` captures restart a complete HTML paint stack
+in their copied local context. Outermost SVG fragments and `foreignObject`
+establish stacking contexts under
+[SVG 2 §3.4.1](https://www.w3.org/TR/SVG2/render.html#EstablishingStackingContex).
+This also prevents the host background pass from painting transformed foreign
+content in HTML coordinates. The four reported UI failures reproduce before
+the repair; after both ownership changes, all 11 existing foreignObject fixtures
+and three scheduler checks pass, including scrolling and live move/remove/
+reinsert behavior. No assertions or expectations change.
+
+**Module ownership:** the existing SVG namespace predicate moves to the shared
+CSS DOM data helpers; the public C DOM API delegates to that implementation.
+An initial full build exposed the dependency on the high-level DOM module in
+standalone layout runners. The shared helper removes that dependency under
+**D7.3.3–D7.3.4** without copying the predicate or adding test stubs. Selected
+view/style ownership remains **D4.5.1v4 /D4.1.4v5**.
+
+**Open export evidence:** 16 of 18 static fixture/scale/format combinations pass
+across PNG/SVG/PDF at 1×/2×. One 2× text sample differs in SVG and PDF; all six
+embedded SVG capture images have identical decoded RGBA to the archived round30
+renderer, including the discrepant text sample. This does not claim full export
+parity. Evidence is under `temp/ui-foreign-object-fix/`; test expectations and
+qualification declarations remain unchanged. The generated CSS inventory only
+refreshes source locations.
+
+**Verification:** module boundaries, integer-cast lint, inventory and diff
+checks pass. `make test-radiant-baseline` exits zero: **5,939 full /143 partial
+/0 failed /1 skipped** out of 6,083. The complete UI automation selection passes
+**644/644**, clearing all four reported failures. Its layout selection retains
+**3,155 full /139 partial /0 failed /0 skipped**. Source and CLI fingerprints
+remain unchanged throughout the successful gate (session18298 exit0). This
+follow-up is qualified for the reported UI regressions; the separate export
+sample limit above remains open. Verification is recorded in
+`temp/ui-foreign-object-fix/qualification.json`; the neighboring export reports
+preserve the discrepant sample and archived-image comparison.

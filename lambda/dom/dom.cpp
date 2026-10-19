@@ -2359,8 +2359,7 @@ extern "C" const char* dom_element_namespace_uri(void* element) {
 }
 
 extern "C" bool dom_element_is_svg(void* element) {
-    const char* uri = dom_element_namespace_uri(element);
-    return uri && strcmp(uri, "http://www.w3.org/2000/svg") == 0;
+    return dom_element_is_svg((DomElement*)element);
 }
 
 extern "C" const char* dom_document_preferred_languages(void* document) {
