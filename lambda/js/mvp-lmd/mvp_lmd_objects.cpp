@@ -1411,7 +1411,8 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     }
     TypeId type = get_type_id(owner);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC &&
-            !(type == LMD_TYPE_VMAP && js_promise_is(owner)) &&
+            // namespace enumeration observes descriptors, including uninitialized export bindings.
+            !(type == LMD_TYPE_VMAP && (js_promise_is(owner) || js_module_namespace_record(owner))) &&
             !(is_virtual_container_type_id(type) && js_host_object_type(owner))) return result.get();
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     bool statics = type == LMD_TYPE_FUNC;

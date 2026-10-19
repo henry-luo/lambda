@@ -544,8 +544,8 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         }
         MvpLmdHost host = {0, NULL, stdout, true};
         MvpLmdOptions options = {filename, inline_module_source, harness_source, harness_length};
-        // only inline Test262 jobs omit an assertion preamble; file batches keep their normal realm.
-        options.native_harness = js_batch_execution_mode && !inline_module_source && !harness_source;
+        // module dependencies need the same realm-global helpers as other harnessless batch entries.
+        options.native_harness = js_batch_execution_mode && !harness_source;
         MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, source_len, NULL, &host, &options);
         MvpLmdFailurePhase phase;
         const char* type = NULL;

@@ -62,6 +62,7 @@ struct MvpLmdClass {
     uint32_t field_count;
     Item* initializers;         // indexed field Functions, in registered program slots
     Item* field_keys;           // dynamic class keys, in the constructor's traced environment
+    uint32_t* private_field_slots; // passive instance keys copied from precisely rooted program slots
 };
 static inline bool mvp_lmd_class_has_constructor(const MvpLmdClass* cls) {
     // interpreted constructors own a source definition, never a synthetic MIR id.

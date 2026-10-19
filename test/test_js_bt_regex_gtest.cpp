@@ -307,6 +307,25 @@ TEST(BtNullable, EmptyGlobalLikeMatch) {
 // Unicode / surrogate handling under /u
 // ---------------------------------------------------------------------------
 
+TEST(BtUnicode, PropertyRangesRetainMembershipAndNegation) {
+    const char* letters[] = {"A", "π", "界", "\xf0\x90\x90\x80"};
+    for (const char* input : letters) {
+        SCOPED_TRACE(input);
+        EXPECT_EQ(run_bt("^\\p{Letter}$", input, Fu()).matched, JS_BT_EXEC_MATCH);
+        EXPECT_EQ(run_bt("^\\P{Letter}$", input, Fu()).matched, JS_BT_EXEC_NO_MATCH);
+    }
+    const char* nonletters[] = {"0", " ", "\xf0\x9f\x98\x80"};
+    for (const char* input : nonletters) {
+        SCOPED_TRACE(input);
+        EXPECT_EQ(run_bt("^\\p{Letter}$", input, Fu()).matched, JS_BT_EXEC_NO_MATCH);
+        EXPECT_EQ(run_bt("^\\P{Letter}$", input, Fu()).matched, JS_BT_EXEC_MATCH);
+    }
+    // bracket unions retain source ordering, unlike standalone generated property tables.
+    EXPECT_EQ(run_bt("^[z\\p{Script=Greek}a-f]$", "π", Fu()).matched, JS_BT_EXEC_MATCH);
+    EXPECT_EQ(run_bt("^[z\\p{Script=Greek}a-f]$", "b", Fu()).matched, JS_BT_EXEC_MATCH);
+    EXPECT_EQ(run_bt("^[z\\p{Script=Greek}a-f]$", "M", Fu()).matched, JS_BT_EXEC_NO_MATCH);
+}
+
 TEST(BtUnicode, BmpLiteral) {
     EXPECT_EQ(run_bt("\\x{e9}", "caf\xc3\xa9", Fu()).matched, 1); // é
 }
