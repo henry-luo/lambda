@@ -8,7 +8,7 @@ pub let controls = [
     {key:"temperature",label:"Temperature",value:0},{key:"gamma",label:"Gamma",value:1},
     {key:"shadows",label:"Shadows",value:0},{key:"highlights",label:"Highlights",value:0},
     {key:"softness",label:"Blur",value:0},{key:"sharpen",label:"Sharpen",value:0}]
-pub fn items(node) => [for (child in content(node) where name(child) == 'effect') child]
+pub fn items(node) => if (node == null) [] else [for (child in content(node) where name(child) == 'effect') child]
 fn checked(options,label) any^ {
     if (not (label is string) or len(label)<1 or len(label)>256) raise error("Raster: effect needs a name of 1 to 256 characters")
     else {

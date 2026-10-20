@@ -43,6 +43,27 @@ pub pn publish(owner,st) any^ {
         if (box != null) for (key,requested in {left:box.x,top:box.y,width:box.width,height:box.height})
             dom.style_set_property(overlay,string(key),string(requested*scale) ++ "px")
     }
+    let crop = node(owner,".raster-crop")
+    let crop_box = if (st.tool == "crop") st.crop else null
+    if (crop != null and (st.painted_doc == null or crop_box != st.painted_crop or scale != st.scale)) {
+        dom.style_set_property(crop,"display",if (crop_box == null) "none" else "block")
+        let shade = node(owner,".raster-crop-shade")
+        if (shade != null) {
+            dom.style_set_property(shade,"display",if (crop_box == null) "none" else "block")
+            // finite surrounding rectangles avoid allocating an oversized shadow surface.
+            if (crop_box != null) for (rect in [
+                {edge:"top",x:0,y:0,width:size.width,height:crop_box.y},
+                {edge:"bottom",x:0,y:crop_box.y+crop_box.height,width:size.width,height:size.height-crop_box.y-crop_box.height},
+                {edge:"left",x:0,y:crop_box.y,width:crop_box.x,height:crop_box.height},
+                {edge:"right",x:crop_box.x+crop_box.width,y:crop_box.y,width:size.width-crop_box.x-crop_box.width,height:crop_box.height}]) {
+                let panel = node(owner,"[data-crop-shade='" ++ rect.edge ++ "']")
+                for (key,value in {left:rect.x,top:rect.y,width:rect.width,height:rect.height})
+                    dom.style_set_property(panel,string(key),string(value*scale) ++ "px")
+            }
+        }
+        if (crop_box != null) for (key,value in {left:crop_box.x,top:crop_box.y,width:crop_box.width,height:crop_box.height})
+            dom.style_set_property(crop,string(key),string(value*scale) ++ "px")
+    }
     return {*:st,painted_doc:st.doc,painted_raster:rendered,painted_channel:st.channel_view,painted_selection:st.selection,
-        painted_geometry:geometry,painted_bounds:box,scale:scale}
+        painted_geometry:geometry,painted_bounds:box,painted_crop:crop_box,scale:scale}
 }

@@ -1,4 +1,5 @@
 import dom
+import tree: lambda.dom.tree
 import img: lambda.image
 import editor: lambda.editor.raster
 import model: lambda.editor.raster.model
@@ -10,6 +11,14 @@ import effects: lambda.editor.raster.effects
 import styles: lambda.editor.raster.styles
 import channels: lambda.editor.raster.channels
 
+// selects use selectedness; text/range controls use the canonical value writer.
+pub pn set_value(control,value) {
+    if (dom.matches(control,"select")) {
+        let options = tree.options_of(control)
+        let index = model.value([for (i,option in options where dom.get_attribute(option,"value") == value) i][0],-1)
+        dom.set_selected_index(control,index)
+    } else dom.set_state(control,"value",value)
+}
 pub fn node(owner,id) => dom.get_element_by_id(owner,id)
 // these nodes are non-void markup fragments; the HTML document formatter adds a shell.
 fn markup(nodes) => join([for (child in nodes) format(child,'xml')],"")
@@ -73,7 +82,7 @@ pub pn publish(owner,st) any^ {
         let chosen = dom.get_state(node(owner,"saved-channel"),"value")
         dom.set_inner_html(node(owner,"saved-channel"),channel_html)
         dom.set_attribute(node(owner,"saved-channel"),"data-items",channel_html)
-        dom.set_state(node(owner,"saved-channel"),"value",if (channels.lookup(st.doc,chosen) != null) chosen else channels.items(st.doc)[0].id)
+        set_value(node(owner,"saved-channel"),if (channels.lookup(st.doc,chosen) != null) chosen else channels.items(st.doc)[0].id)
     }
     if (primary != st.artwork_node and name(primary) in ['text','vector']) {
         for (id,requested in {'art-width':primary.width,'art-height':primary.height,'art-fill':colors.css(model.value(primary.fill,[0,0,0,1])),
@@ -81,12 +90,12 @@ pub pn publish(owner,st) any^ {
             'art-shape':model.value(primary.shape,"rectangle"),'art-radius':model.value(primary.radius,0),
             'art-text':if (name(primary) == 'text') model.value(primary[0],"") else "Hello Photos",'art-font':model.value(primary.font,"photos-font"),
             'art-size':model.value(primary.size,32),'art-leading':model.value(primary.line_height,1.2),'art-align':model.value(primary.align,"left"),
-            'art-path':if (primary.path == null) "[]" else format(primary.path,'mark')}) dom.set_state(node(owner,string(id)),"value",string(requested))
+            'art-path':if (primary.path == null) "[]" else format(primary.path,'mark')}) set_value(node(owner,string(id)),string(requested))
     }
     if (active_style != st.style_node and active_style != null) {
         for (id,requested in {'style-kind':active_style.kind,'style-color':colors.css(active_style.color),
             'style-radius':model.value(active_style.radius,0),'style-dx':model.value(active_style.dx,0),'style-dy':model.value(active_style.dy,0),
-            'style-opacity':model.value(active_style.opacity,1)}) dom.set_state(node(owner,string(id)),"value",string(requested))
+            'style-opacity':model.value(active_style.opacity,1)}) set_value(node(owner,string(id)),string(requested))
     }
     // focused fields keep native drafts until change; publication never interrupts typing.
     for (id,requested in {'layer-name':if (active == null) "" else active.node.name,
@@ -105,7 +114,7 @@ pub pn publish(owner,st) any^ {
             (result,entry) => {*:result,*:entry})}) {
         let control = node(owner,string(id))
         if (not dom.matches(control,":focus") and dom.get_state(control,"value") != string(requested))
-            dom.set_state(control,"value",string(requested))
+            set_value(control,string(requested))
     }
     dom.set_text_content(node(owner,"action-status"),if (st.recording != null) "Recording · " ++ string(len(st.recording.steps)) ++ " steps"
         else if (len(st.actions)>0) st.actions[last].name ++ " · " ++ string(len(st.actions[last].steps)) ++ " steps" else "Record edits on one selected layer")
@@ -123,6 +132,11 @@ pub pn publish(owner,st) any^ {
         dom.set_attribute(node(owner,"history"),"data-items",history_html)
     }
     dom.style_set_property(node(owner,"file-dialog"),"display",if (st.dialog in ["open","open-tab","place","save","export","psd","action-save","action-open"]) "block" else "none")
+    dom.style_set_property(node(owner,"export-options"),"display",if (st.dialog == "export") "block" else "none")
+    dom.style_set_property(node(owner,"export-quality-row"),"display",if (dom.get_state(node(owner,"export-format"),"value") == "jpeg") "flex" else "none")
+    dom.style_set_property(node(owner,"export-background-row"),"display",if (dom.get_state(node(owner,"export-alpha"),"value") == "flatten") "block" else "none")
+    dom.style_set_property(node(owner,"crop-controls"),"display",if (st.tool == "crop") "flex" else "none")
+    dom.set_attribute(owner,"data-crop",if (st.crop == null) "none" else "draft")
     dom.style_set_property(node(owner,"discard-dialog"),"display",if (st.dialog == "discard") "block" else "none")
     if (st.dialog == "discard" and previous_dialog != "discard") dom.focus_set(node(owner,"discard-cancel"),false)
     return {*:painted,artwork_node:primary,style_node:active_style,histogram_doc:st.doc}

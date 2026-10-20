@@ -1245,7 +1245,8 @@ keeping its application shell and reading existing v1–v3 files. Package owners
 
 `lambda.editor.raster` uses the shared `lambda.image` document tree. Its
 `new_document`, `open_session` and `exec` functions provide stable layer identities,
-checked commands, grouping, translation, masks, baked adjustments and undo/redo.
+checked commands, grouping, translation, alignment/distribution, masks, retained
+adjustments and undo/redo.
 `layers`, `lookup`, `commands` and `command_state` support independent inspectors.
 `lambda.editor.raster.interaction` groups pointer previews into one transaction;
 the optional `.view` module presents copied pixels in a retained native canvas.
@@ -1253,9 +1254,13 @@ Package placement follows **D7.2.4v3**, snapshots follow **S9.1.2 / S9.2.2**, an
 procedural presentation follows **S12.1.3 / D4.5.2**.
 
 The [Photos demo](../test/demo/photos/README.md) supplies the workspace and file
-dialogs. It opens the supported layered PSD profile and exports PNG. This initial
-contiguous `u8` profile has no freehand/selection tools, retained effects or rich
-project format. See the [API and support boundary](../lmd/package/editor/raster/README.md).
+dialogs. It supports tiled painting/selections, crop previews, affine transforms,
+retouch, editable artwork/styles, saved coverage, tabs and bounded action batches.
+Editable `.photos` projects preserve the supported scene; PSD interchange retains
+its qualified subset. PNG/JPEG exports derive resized pixels with explicit
+transparency/background policy and JPEG quality. Native samples remain `u8`;
+high-depth/ICC editing and background jobs are outstanding. See the
+[API and support boundary](../lmd/package/editor/raster/README.md).
 
 ### 10.3 `dom` — browser behaviour for HTML
 

@@ -2,7 +2,7 @@
 import img: lambda.image
 import model: .model
 import sequence: lambda.editor.mod_doc
-pub fn items(node) => [for (child in content(node) where name(child) == 'style') child]
+pub fn items(node) => if (node == null) [] else [for (child in content(node) where name(child) == 'style') child]
 fn checked(options) any^ {
     let config = img.checked_options(options,["kind","color","radius","dx","dy","opacity","outset"])^
     let radius = model.value(config.radius,0)

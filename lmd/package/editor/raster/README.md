@@ -33,6 +33,14 @@ painting, copy/cut/paste and selection cropping use the same command path.
 Duplication assigns fresh subtree identities. Group movement updates
 descendants once. Mask positions remain local to their layer.
 
+`layer.align` accepts `mode` (`left`, `center`, `right`, `top`, `middle`,
+`bottom`) and `relative` (`selection`, the default, or `canvas`).
+`layer.distribute` accepts `axis` (`x` or `y`), the same reference and at least
+three selected roots. Geometry uses transformed/style bounds and equal gaps;
+displacements round to integral pixels. Selected parents own descendant movement,
+and inherited/descendant locks reject the whole operation. Arrangement shares
+geometry math with Draw and records one transaction (**S9.2.2**).
+
 `tool.configure` validates tool IDs, normalized foreground/background colors,
 brush size/hardness/spacing/flow/opacity, selection mode and color tolerance.
 `interaction.begin/sample/render/preview/finish/cancel` implements pointer transactions.
@@ -57,6 +65,15 @@ Its host supplies `.raster-stage`, `.raster-surface`, `.raster-canvas`,
 `.raster-selection` and `.raster-target` nodes. The selection overlay is separate
 from saved/exported pixels. The facade and command tests need no native DOM.
 
+The Crop tool drafts `session.crop` in document coordinates, clipped to the
+canvas. `lambda.editor.raster.crop.rectangle` computes an outward-rounded pixel
+rectangle; clicks and zero-area lines produce no draft. `crop.apply_draft`
+submits the existing `document.crop` command, including layer translation and
+saved-channel cropping. Pointer completion leaves a preview without dirtying or
+history; cancellation restores the preceding draft. Changing tools, canvas extent
+or undo/redo clears obsolete drafts. Hosts may provide `.raster-crop` for its
+separate overlay (**S9.1.2 / S12.1.3**).
+
 Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
 are retained as shared backing until a touched tile detaches (**S9.2.2 /
 D4.1.4v5**). Layer affine transforms, eight blend modes, clipping chains and
@@ -71,6 +88,19 @@ these parameters, original pixel bytes, masks, locks and tree identities in a
 versioned `.photos` data file. High depth and color conversion remain later work. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor
 locks, which its writer cannot preserve; flat export intentionally renders pixels.
+
+`lambda.editor.raster.export.prepare(image,format,options={})` derives a
+PNG/JPEG composition without changing the input. `width` or `height` alone keeps
+the aspect ratio; both specify an explicit size, within the existing limit of 16 million
+pixels. PNG defaults to `alpha:"preserve"`. `alpha:"flatten"` requires an
+explicit opaque `background`; JPEG always requires flattening and accepts integer
+`quality` from 0 to 100 (default 90). Flattening uses the shared linear-light
+compositor. Unknown or incompatible settings fail explicitly. The result contains
+`image` and normalized `settings`; `destination(path,format)` derives a matching
+`.png`/`.jpg` path. `files.write_document(session,path,format,options={})` encodes
+and atomically publishes these pixels, returns the original snapshot and an
+export report, and leaves history/checkpoints to the caller
+(**S9.1.2 / S12.1.1v3**). PSD and `.photos` do not accept flat-export options.
 
 Retouch tools share stroke sampling, selections, history and target mapping.
 `retouch.source` freezes the current merged image at a chosen point; Clone/Heal

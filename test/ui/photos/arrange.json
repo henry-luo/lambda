@@ -1,0 +1,197 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos canvas alignment and distribution undo",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "100",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-y"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#align-left"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "80"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "100"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#align-top"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duplicate"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "100",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duplicate"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "400",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer='raster-1']"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer='raster-2']"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#align-relative"
+      },
+      "value": "selection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#distribute-x"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer='raster-2']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "200"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer='raster-2']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "100"
+    }
+  ]
+}

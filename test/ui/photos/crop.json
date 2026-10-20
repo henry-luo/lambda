@@ -1,0 +1,165 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos crop draft, cancellation, apply and undo",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-crop"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 620,
+        "offset_y": 420
+      },
+      "dx": 180,
+      "dy": 140,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop",
+      "equals": "draft"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#crop-cancel"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop",
+      "equals": "none"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 620,
+        "offset_y": 420
+      },
+      "dx": 180,
+      "dy": 140,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#crop-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dimensions"
+      },
+      "equals": "180 \u00d7 140 \u00b7 RGB/8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dimensions"
+      },
+      "equals": "1600 \u00d7 1064 \u00b7 RGB/8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dimensions"
+      },
+      "equals": "180 \u00d7 140 \u00b7 RGB/8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

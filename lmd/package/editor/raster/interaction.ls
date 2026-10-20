@@ -7,10 +7,11 @@ import transforms: .transform
 import retouch: .retouch
 import actions: .actions
 import paint: .paint
+import crop: .crop
 
 fn xy(input) => [input.point.x,input.point.y,model.value(input.pressure,1.0)]
 pub fn cancel(st) => if (st.gesture == null) st else
-    model.restore({*:st,doc:st.gesture.before,pan:st.gesture.pan,gesture:null},st.gesture.context)
+    model.restore({*:st,doc:st.gesture.before,pan:st.gesture.pan,crop:st.gesture.crop,gesture:null},st.gesture.context)
 pub fn begin(st,input) any^ {
     if (st.gesture != null) raise error("Raster: a gesture is already active")
     else if (st.tool in ["clone","heal"] and input.alt == true)
@@ -36,7 +37,7 @@ pub fn begin(st,input) any^ {
         let transform_target = if (st.tool == "transform") model.active(st)^ else null;
         if (st.tool == "move" and (input.shift or len(picked.selected) == 0)) picked
         else render({*:picked,gesture:{before:picked.doc,context:model.context(picked),pan:picked.pan,
-            mode:st.tool,pointer:input.pointer,start:input.point,screen:input.screen,end:input.point,
+            mode:st.tool,pointer:input.pointer,start:input.point,screen:input.screen,end:input.point,crop:st.crop,
             points:[xy(input)],rotate:input.shift,selection_mode:if (input.shift) "add" else st.selection_mode}})^
     }
 }
@@ -51,6 +52,7 @@ pub fn sample(st,input) {
 }
 pub fn render(st) any^ {
     if (st.gesture == null or st.gesture.mode == "pan") st
+    else if (st.gesture.mode == "crop") {*:st,crop:crop.rectangle(st.doc,st.gesture.start,st.gesture.end)^}
     else {
         let g = st.gesture
         let before = model.restore({*:st,doc:g.before,gesture:null},g.context)
@@ -77,7 +79,7 @@ pub fn render(st) any^ {
 pub fn preview(st,input) any^ => render(sample(st,input))^
 pub fn finish(st) any^ {
     if (st.gesture == null) st
-    else if (st.gesture.mode == "pan") {*:st,gesture:null}
+    else if (st.gesture.mode in ["pan","crop"]) {*:st,gesture:null}
     else {
         let checked = model.validate(st.doc)^
         let before = model.restore({*:st,doc:st.gesture.before,gesture:null},st.gesture.context)

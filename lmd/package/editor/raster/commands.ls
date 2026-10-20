@@ -44,6 +44,8 @@ pub let catalog = [
     {id:"layer.duplicate",label:"Duplicate layer",fields:[],target:true},
     {id:"layer.delete",label:"Delete layers",fields:[],target:true},
     {id:"layer.move",label:"Move layers",fields:["dx","dy"],target:true},
+    {id:"layer.align",label:"Align layers",fields:["mode","relative"],target:true},
+    {id:"layer.distribute",label:"Distribute layers",fields:["axis","relative"],target:true},
     {id:"layer.reorder",label:"Reorder layer",fields:["index"],target:true},
     {id:"layer.group",label:"Group layers",fields:["name"],target:true},
     {id:"layer.merge",label:"Merge layers",fields:["name"],target:true},

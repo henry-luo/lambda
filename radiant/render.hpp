@@ -3749,6 +3749,7 @@ bool render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
 void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
+void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color);
 bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
@@ -3947,7 +3948,8 @@ bool render_clip_overflow_bounds(ViewBlock* block, float origin_x, float origin_
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
     float abs_x, float abs_y, RenderClipKind kind, Bound visible,
     const RdtMatrix* transform);
-RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip,
+                                           const RdtMatrix* transform = nullptr);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
