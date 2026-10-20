@@ -60,6 +60,11 @@ DisplayListCursor::DisplayListCursor(const DisplayList* list, int first, int end
     failed = list && (list->size() > list->capacity() || (list->size() && !list->data()));
 }
 
+DisplayListCursor::DisplayListCursor(const DisplayPayloadOwner* chunk)
+    : root(nullptr), next_root(0), end_root(0) {
+    push(chunk);
+}
+
 bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
     if (!chunk || !chunk->commands || !chunk->command_spans || !chunk->span_count ||
         chunk->command_count <= 0 || depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT ||
@@ -517,37 +522,41 @@ static bool dl_retainable_surface(const void* borrowed, lam::Handle<ImageSurface
     return !borrowed || (!owner.is_null() && generation_stamped(generation));
 }
 
-bool dl_validate_range(const DisplayList* dl, int first, int end,
-    DisplayListValidationResult* result, DisplayListProperties* properties) {
+static bool dl_validate_stream(DisplayListCursor& cursor, int end,
+    DisplayListValidationResult* result, DisplayChunkValidation* validation) {
     dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
-    if (properties) *properties = {};
-    if (!dl) {
-        return dl_validation_fail(result, -1, "display list is null", NULL);
-    }
-    if (dl->size() > dl->capacity()) {
-        return dl_validation_fail(result, -1, "display list count/capacity is invalid",
-                                  NULL);
-    }
-    if (dl->size() > 0 && !dl->data()) {
-        return dl_validation_fail(result, -1, "display list has items but no storage",
-                                  NULL);
-    }
-    if (first < 0 || end < first || end > dl->item_count())
-        return dl_validation_fail(result, -1, "display list command range is invalid", NULL);
-
     DisplayListValidationStack stack = {};
-    DisplayListProperties observed = {};
+    DisplayChunkValidation observed = {};
     struct ElementScope { const DisplayPayloadOwner* owner; int begin, end; };
     ElementScope element_stack[DL_VALIDATE_ELEMENT_STACK_LIMIT];
     auto fail_at = [&](int index, const char* message) -> bool {
         return dl_validation_fail(result, index, message, &stack);
     };
 
-    DisplayListCursor cursor(dl, first, end);
     while (const DisplayItem* item = cursor.next()) {
-        RENDER_METRIC_ADD(validation_command_checks, 1);
         int i = cursor.index;
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
+        const DisplayChunkValidation* chunk = cursor.owner && i == 0
+            ? retained_dl_chunk_validation(cursor.owner) : nullptr;
+        if (chunk) {
+            RENDER_METRIC_ADD(validation_chunk_checks, 1);
+            // balanced immutable chunks preserve caller state, but their peaks still consume nesting space.
+            if (chunk->max_element_depth > DL_VALIDATE_ELEMENT_STACK_LIMIT - stack.element_depth)
+                return fail("element marker nesting is too deep");
+            if (chunk->max_fragment_depth > DL_VALIDATE_ELEMENT_STACK_LIMIT - cursor.depth + 1)
+                return fail_at(cursor.root_index, "fragment graph is invalid or cyclic");
+            if (validation) {
+                observed.properties.has_glyphs |= chunk->properties.has_glyphs;
+                observed.properties.has_video |= chunk->properties.has_video;
+                observed.max_element_depth = max(observed.max_element_depth,
+                    stack.element_depth + chunk->max_element_depth);
+                observed.max_fragment_depth = max(observed.max_fragment_depth,
+                    cursor.depth - 1 + chunk->max_fragment_depth);
+            }
+            cursor.skip_element();
+            continue;
+        }
+        RENDER_METRIC_ADD(validation_command_checks, 1);
         if (item->op < DL_FILL_RECT || item->op >= DL_OP_COUNT) {
             return fail("unknown display op");
         }
@@ -734,9 +743,11 @@ bool dl_validate_range(const DisplayList* dl, int first, int end,
                 break;
             }
         }
-        if (properties) {
-            if (!observed.has_glyphs) observed.has_glyphs = dl_item_contains_glyphs(item);
-            observed.has_video |= item->op == DL_VIDEO_PLACEHOLDER;
+        if (validation) {
+            if (!observed.properties.has_glyphs) observed.properties.has_glyphs = dl_item_contains_glyphs(item);
+            observed.properties.has_video |= item->op == DL_VIDEO_PLACEHOLDER;
+            observed.max_element_depth = max(observed.max_element_depth, stack.element_depth);
+            observed.max_fragment_depth = max(observed.max_fragment_depth, cursor.depth);
         }
     }
 
@@ -756,8 +767,33 @@ bool dl_validate_range(const DisplayList* dl, int first, int end,
     }
 
     dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
-    if (properties) *properties = observed;
+    if (validation) *validation = observed;
     return true;
+}
+
+bool dl_validate_range(const DisplayList* dl, int first, int end,
+    DisplayListValidationResult* result, DisplayListProperties* properties) {
+    dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    if (properties) *properties = {};
+    if (!dl) return dl_validation_fail(result, -1, "display list is null", nullptr);
+    if (dl->size() > dl->capacity())
+        return dl_validation_fail(result, -1, "display list count/capacity is invalid", nullptr);
+    if (dl->size() && !dl->data())
+        return dl_validation_fail(result, -1, "display list has items but no storage", nullptr);
+    if (first < 0 || end < first || end > dl->item_count())
+        return dl_validation_fail(result, -1, "display list command range is invalid", nullptr);
+    DisplayListCursor cursor(dl, first, end);
+    DisplayChunkValidation validation;
+    if (!dl_validate_stream(cursor, end, result, properties ? &validation : nullptr)) return false;
+    if (properties) *properties = validation.properties;
+    return true;
+}
+
+bool dl_validate_chunk(const DisplayPayloadOwner* chunk, DisplayListValidationResult* result,
+    DisplayChunkValidation* validation) {
+    if (validation) *validation = {};
+    DisplayListCursor cursor(chunk);
+    return dl_validate_stream(cursor, chunk ? chunk->command_count : 0, result, validation);
 }
 
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
@@ -811,6 +847,21 @@ bool dl_validate_append(DisplayList* list, ValidatedDisplayList* prefix,
     recording->count = list->item_count();
     recording->properties.has_glyphs |= suffix.has_glyphs;
     recording->properties.has_video |= suffix.has_video;
+    return true;
+}
+
+bool dl_adopt_recording(DisplayList* dst, DisplayList* source,
+    ValidatedDisplayList* recording, const char* context) {
+    if (!dst || !source || dst == source || !recording || source->arena.arena ||
+        source->arena.head || source->arena.open_scope || dst->arena.open_scope) return false;
+    ValidatedDisplayList candidate;
+    if (!dl_validate_recording(source, source->item_count(), &candidate, context)) return false;
+    // scratch nodes register their object's address; only heap command/resource storage can move.
+    dl_clear(dst);
+    dst->lam::ArrayList<DisplayItem>::operator=(static_cast<lam::ArrayList<DisplayItem>&&>(*source));
+    dst->shared_arrays = source->shared_arrays; source->shared_arrays = nullptr;
+    candidate.list = lam::up(dst); candidate.storage = lam::up(dst->data());
+    *recording = candidate;
     return true;
 }
 
