@@ -1,6 +1,0 @@
-before
-after-retrap
-trap-cleared
-term-ignored
-done
-final-cleanup

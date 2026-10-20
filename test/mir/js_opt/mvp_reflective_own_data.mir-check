@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2: reflective own data reads guard the ordinary carrier and descriptor, reuse Lambda lookup/decoding, and retain full JS Get on a miss.",
+  "description": "D8.4.1v2: reflective own data reads guard the ordinary carrier, nominal owner and descriptor, reuse Lambda lookup/decoding, and retain full JS Get on a miss. The already loaded Map shape supplies ownership without a general Item helper call.",
   "args": [
     "--runtime=mvp-lmd"
   ],
@@ -12,6 +12,7 @@
         "call\tmvp_lmd_class_property"
       ],
       "count": {
+        "call\tmvp_lmd_owns_properties": 0,
         "call\ttypemap_hash_lookup_key": 1,
         "call\tmap_shape_field_to_item": 1
       },
@@ -19,7 +20,11 @@
         "mov\t{{r:kind}}, u8:3({{r:owner}})",
         ", {{r:kind}}, 0",
         "mov\t{{r:shape}}, i64:8({{r:owner}})",
-        "call\tmvp_lmd_owns_properties",
+        "mov\t{{r:nominal}}, i64:136({{r:shape}})",
+        ", {{r:nominal}}, 0",
+        "mov\t{{r:extension}}, i64:72({{r:nominal}})",
+        {"pattern": "beq\t", "next_line": true},
+        {"pattern": "bne\t", "next_line": true},
         "call\ttypemap_hash_lookup_key",
         "mov\t{{r:flags}}, u8:57({{r:field}})",
         "and\t{{r:accessor}}, {{r:flags}}, 8",

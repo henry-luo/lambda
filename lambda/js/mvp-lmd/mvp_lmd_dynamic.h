@@ -3,6 +3,8 @@
 
 // Dynamic source executes only through the retained shared AST interpreter.
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram*);
+struct JsGlobalEnvironment;
+JsGlobalEnvironment* mvp_lmd_dynamic_global_environment(MvpLmdProgram*, bool create = true);
 Item mvp_lmd_eval_script(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_dynamic_lexical(MvpLmdProgram*, Item key, Item value, int operation, bool* found);
 Item mvp_lmd_dynamic_function(Context*, MvpLmdProgram*, Item*, uint64_t,
@@ -11,6 +13,11 @@ enum MvpLmdDynamicFunctionKind {
     LMD_DYNAMIC_FUNCTION, LMD_DYNAMIC_GENERATOR,
     LMD_DYNAMIC_ASYNC_FUNCTION, LMD_DYNAMIC_ASYNC_GENERATOR
 };
+enum MvpLmdSuspendedIntrinsic {
+    LMD_SUSPENDED_FUNCTION_PROTOTYPE, LMD_SUSPENDED_INSTANCE_PROTOTYPE,
+    LMD_SUSPENDED_CONSTRUCTOR
+};
+Item mvp_lmd_suspended_intrinsic(MvpLmdDynamicFunctionKind, MvpLmdSuspendedIntrinsic);
 // all dynamic kinds share retained-interpreter admission and source conversion.
 Item mvp_lmd_dynamic_function_kind(MvpLmdProgram*, Item*, uint64_t,
     Item new_target, MvpLmdDynamicFunctionKind);
@@ -20,9 +27,9 @@ Item mvp_lmd_dynamic_unwrap_function(Item);
 Item mvp_lmd_dynamic_call_native(MvpLmdProgram*, Item callee, Item receiver,
     Item* arguments, uint64_t count, Item new_target);
 extern "C" Item mvp_lmd_dynamic_binary(int operation, Item left, Item right);
-// preserve native descriptor identity and rebind aliases to the active global.
+// publish a native host family's lazy descriptor into the canonical global.
 Item mvp_lmd_import_host_property(MvpLmdProgram*, Item owner, Item key,
-    const JsPropertyDescriptor*, Item previous_global = ItemNull);
+    const JsPropertyDescriptor*);
 enum MvpLmdForeignOperation {
     LMD_FOREIGN_GET_PROTOTYPE = 32, LMD_FOREIGN_SET_PROTOTYPE,
     LMD_FOREIGN_EXTENSIBLE, LMD_FOREIGN_PREVENT,

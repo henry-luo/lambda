@@ -52,6 +52,8 @@ Item js_strbuf_take_item(StrBuf* sb);
 LAMBDA_RT_API Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
 LAMBDA_RT_API bool js_string_equals(Item value, const char* expected);
+// string-only, allocation-free equality; the scalar result is also the MIR ABI.
+int64_t js_string_equal(Item left, Item right);
 bool js_is_vm_context_error(Item value);
 // Returns ItemNull on every non-ASCII or semantically effectful case so the
 // MIR caller can preserve the ordinary capability call on that edge.
@@ -541,6 +543,13 @@ Item js_console_countReset_fn(Item label);
 Item js_console_time_fn(Item label);
 Item js_console_timeEnd_fn(Item label);
 Item js_console_timeLog_fn(Item label);
+Item js_console_clear_fn(void);
+Item js_console_group_fn(Item label);
+Item js_console_groupEnd_fn(void);
+Item js_console_trace_fn(Item label);
+Item js_console_dir_fn(Item object);
+Item js_console_table_fn(Item data);
+Item js_console_assert_fn(Item condition, Item message);
 
 // =============================================================================
 // Math Object Methods & Properties
@@ -567,6 +576,7 @@ void js_set_process_exec_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
 Item js_get_process_exec_argv(void);
 Item js_get_process_object_value(void);
+Item js_get_profiled_process_object(void);
 int js_is_process_object_value(Item object);
 void js_set_diagnose_enabled(int enabled);
 int js_is_diagnose_enabled(void);
@@ -639,6 +649,7 @@ typedef struct JsRegExpIndexName { const char* chars; int length, capture; } JsR
 struct JsRegexpLastMatch;
 const char* js_regexp_legacy_name(int index);
 bool js_regexp_legacy_get(struct JsRegexpLastMatch* state, const char* name, int length, Item* out);
+Item js_regexp_install_legacy_properties(Item constructor);
 Item js_regexp_update_last_match_spans(struct JsRegexpLastMatch* state, Item input,
     const int* starts, const int* ends, int count, bool utf16);
 // callers prove native exec, writable lastIndex, string replacement, no captures,
@@ -1134,9 +1145,11 @@ Item js_throw_const_assign(NameId name_id, int name_len);
 void js_runtime_set_input(void* input);
 // Binds JavaScript work to the Runtime's canonical EvalContext. MIR and the
 // AST interpreter share this owner-selection boundary.
+#ifdef __cplusplus
 bool js_prepare_eval_context(Runtime* runtime, bool initialize_thread,
                              EvalContext** out_context,
-                             bool* out_reusing_context);
+                             bool* out_reusing_context, bool initialize_js = true);
+#endif
 
 // =============================================================================
 // Module Variable Table
@@ -1239,6 +1252,7 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 Item js_get_global_this(void);
 // the writer installs a lazy own slot; each engine keeps its ordinary storage policy.
 Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors);
+bool js_host_namespace_has_name(const char* name, size_t length);
 Item js_ensure_host_global_family(const char* name);
 bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 Item js_named_native_function_source_item(const String* name);
@@ -1740,6 +1754,7 @@ double lambda_mir_bits_double(uint64_t bits);
 // Runtime entry points shared across JS translation units.
 uint64_t js_get_heap_epoch(void);
 Item js_get_typed_array_base_proto(void);
+Item js_get_typed_array_base(void);
 LAMBDA_RT_API Item js_process_emit(Item event_name, Item arg1);
 bool js_promise_vmap_is(Item value);
 bool js_proto_snapshot_is_valid(void);

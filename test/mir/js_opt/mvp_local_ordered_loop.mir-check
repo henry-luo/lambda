@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D8.4.2v2: an ordered local comparison proves Number presence beside unrelated eval. Keep the numeric index path and invalidate the fact after a conditional write. A separate function's direct eval retains live generic bindings.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f2",
+      "expect": ["ret\t", "dlt\t"],
+      "count": {
+        "call\tmvp_lmd_property_key": 1,
+        "call\tmvp_lmd_primitive_to_string": 1,
+        "call\tmvp_lmd_string_key": 0,
+        "call\tmvp_lmd_array_index_property": 1,
+        "call\tmvp_lmd_dynamic_reference": 0
+      }
+    },
+    {
+      "in_func": "mvp_lmd_f3",
+      "count": {
+        "call\tmvp_lmd_dynamic_eval": 1,
+        "call\tmvp_lmd_dynamic_reference": 17
+      }
+    }
+  ]
+}

@@ -90,7 +90,7 @@ static Item js_get_jube_crypto_namespace(void) { return js_jube_namespace("crypt
 // node-core owns Buffer, but its global must exist before node-core activates.
 static Item js_get_jube_buffer_namespace(void) { return js_jube_namespace("buffer"); }
 
-static Item js_get_profiled_process_object(void) {
+Item js_get_profiled_process_object(void) {
     if (!jube_node_core_module_enabled()) return js_get_process_object_value();
     Item process_namespace = ItemNull;
     // node-core extends the host-owned process object during its runtime attach.
@@ -180,40 +180,26 @@ static Item js_publish_lazy_global(Item object, Item key, Item value) {
         MvpLmdLibraryState* library = mvp_lmd_program_library();
         value_root.set(mvp_lmd_dynamic_import_value(library->object.program, value_root.get()));
         if (item_is_error(value_root.get())) return value_root.get();
-        // the marker has already passed declaration admission. Replace its
-        // storage directly, without recursively observing its lazy descriptor.
-        if (!map_shape_set(object_root.get().map, key_root.get().get_string(), value_root.get())) return ItemError;
-        return value_root.get();
     }
-    // publish through storage: OrdinarySet would read the marker's descriptor
-    // and recursively resolve it before the complete object is installed.
+    // the shared storage writer handles either global carrier without resolving
+    // its lazy descriptor recursively or replacing its existing attributes.
     JS_ASSIGN_OR_RETURN(stored, js_define_own_key_storage(object_root.get(),
         key_root.get(), value_root.get()));
     return value_root.get();
 }
 
-Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors) {
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> object(roots, global), key(roots, ItemNull);
-    auto install = [&](const char* name, size_t length, Item value) -> Item {
-        key.set(js_name_item(name, length));
-        return writer(object.get(), key.get(), value);
-    };
+enum JsHostSlotKind { JS_HOST_SLOT_ALIAS, JS_HOST_SLOT_UNDEFINED, JS_HOST_SLOT_LAZY };
+template<typename Visitor>
+static bool js_visit_host_namespace(bool constructors, Visitor visit) {
     const char* aliases[] = {"globalThis", "self", "window", "parent", "top", "global"};
-    for (const char* name : aliases) {
-        Item status = install(name, strlen(name), object.get());
-        if (item_is_error(status)) return status;
-    }
-    Item status = install("event", 5, make_js_undefined());
-    if (item_is_error(status)) return status;
-    Item marker = {.item = ITEM_JS_LAZY_GLOBAL_SENTINEL};
+    for (const char* name : aliases)
+        if (!visit(name, strlen(name), JS_HOST_SLOT_ALIAS)) return false;
+    if (!visit("event", 5, JS_HOST_SLOT_UNDEFINED)) return false;
     if (constructors) for (int i = 0; i < js_builtin_global_count(); i++) {
         const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
         if (!spec || (spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR && spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) ||
                 !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
-        Item status = install(spec->name, spec->len, marker);
-        if (item_is_error(status)) return status;
+        if (!visit(spec->name, spec->len, JS_HOST_SLOT_LAZY)) return false;
     }
     for (size_t i = 0;
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
@@ -222,12 +208,10 @@ Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Ite
         // retained AST calls already resolve implicit require against their source environment.
         if (spec->formal_only && !constructors) continue;
         if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
-        Item status = install(spec->name, spec->name_length, marker);
-        if (item_is_error(status)) return status;
+        if (!visit(spec->name, spec->name_length, JS_HOST_SLOT_LAZY)) return false;
     }
     if (constructors) for (const auto& spec : js_host_globals) {
-        Item status = install(spec.name, strlen(spec.name), marker);
-        if (item_is_error(status)) return status;
+        if (!visit(spec.name, strlen(spec.name), JS_HOST_SLOT_LAZY)) return false;
     }
     int module_count = jube_static_module_count();
     for (int i = 0; i < module_count; i++) {
@@ -241,11 +225,32 @@ Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Ite
             if (!name || !name[0]) continue;
             // Keep Jube globals as ordinary writable data properties while
             // deferring module activation until the property is actually read.
-            Item status = install(name, strlen(name), marker);
-            if (item_is_error(status)) return status;
+            if (!visit(name, strlen(name), JS_HOST_SLOT_LAZY)) return false;
         }
     }
-    return ItemNull;
+    return true;
+}
+
+bool js_host_namespace_has_name(const char* name, size_t length) {
+    // admission consults the installation catalog without constructing guest values.
+    return !js_visit_host_namespace(true, [&](const char* candidate, size_t size, JsHostSlotKind) {
+        return size != length || memcmp(candidate, name, length) != 0;
+    });
+}
+
+Item js_install_host_namespace_slots(Item global, Item (*writer)(Item, Item, Item), bool constructors) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, global), key(roots, ItemNull);
+    Item result = ItemNull;
+    js_visit_host_namespace(constructors, [&](const char* name, size_t length, JsHostSlotKind kind) {
+        key.set(js_name_item(name, length));
+        Item value = kind == JS_HOST_SLOT_ALIAS ? object.get() :
+            Item{.item = kind == JS_HOST_SLOT_LAZY ? ITEM_JS_LAZY_GLOBAL_SENTINEL : ITEM_JS_UNDEFINED};
+        result = writer(object.get(), key.get(), value);
+        return !item_is_error(result);
+    });
+    return item_is_error(result) ? result : ItemNull;
 }
 
 static Item js_materialize_host_global_group(Item object, Item requested, JsHostGlobalGroup group, bool read_requested = true) {
@@ -1019,7 +1024,8 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
     JsPropertyDescriptor pd;
     JS_ASSIGN_OR_RETURN(descriptor_status, js_descriptor_from_object(descriptor, &pd));
 
-    if (get_type_id(obj) == LMD_TYPE_FUNC &&
+    // lazy intrinsic data fields need materialization; accessor updates must never call their getter.
+    if (!existing_accessor && get_type_id(obj) == LMD_TYPE_FUNC &&
         ((nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) ||
          (nm_len == 4 && strncmp(nm_chars, "name", 4) == 0) ||
          (nm_len == 9 && strncmp(nm_chars, "prototype", 9) == 0)) &&
@@ -5343,6 +5349,11 @@ static Item* js_async_function_proto_cache_slot(void) {
         JS_REALM_SLOT_ASYNC_FUNCTION_PROTOTYPE);
 }
 
+static JsRealmSlotId js_suspended_constructor_slot(bool generator, bool asynchronous) {
+    return !generator ? JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR
+        : asynchronous ? JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_CONSTRUCTOR
+        : JS_REALM_SLOT_GENERATOR_FUNCTION_CONSTRUCTOR;
+}
 
 using JsFuncFlagsAccess = JsFunction;
 #define JS_FUNC_FLAG_GENERATOR_EARLY 1
@@ -5385,6 +5396,9 @@ static Item js_setup_dynamic_function_prototype(Item proto, Item ctor_fn,
 }
 
 static Item js_get_generator_function_prototype(bool is_async) {
+    Item shared = mvp_lmd_suspended_intrinsic(is_async ? LMD_DYNAMIC_ASYNC_GENERATOR
+        : LMD_DYNAMIC_GENERATOR, LMD_SUSPENDED_FUNCTION_PROTOTYPE);
+    if (shared.item != ITEM_NULL) return shared;
     Item* cache = js_generator_function_proto_cache_slot(is_async);
     if (!cache) return ItemNull;
     if (cache->item != 0) return *cache;
@@ -5423,6 +5437,11 @@ static Item js_get_generator_function_prototype(bool is_async) {
         }
     }
 
+    // retain the intrinsic constructor independently of the mutable prototype property.
+    Item* constructor_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        js_suspended_constructor_slot(true, is_async));
+    if (!constructor_slot) return ItemError;
+    *constructor_slot = ctor_root.get();
     *cache = proto_root.get();
     return proto_root.get();
 }
@@ -5430,6 +5449,8 @@ static Item js_get_generator_function_prototype(bool is_async) {
 // AsyncFunction.prototype singleton — analog of generator-function prototype but for
 // non-generator async functions. Object.getPrototypeOf(asyncFn) === this.
 static Item js_get_async_function_prototype() {
+    Item shared = mvp_lmd_suspended_intrinsic(LMD_DYNAMIC_ASYNC_FUNCTION, LMD_SUSPENDED_FUNCTION_PROTOTYPE);
+    if (shared.item != ITEM_NULL) return shared;
     Item* cache = js_async_function_proto_cache_slot();
     if (!cache) return ItemNull;
     if (cache->item != 0) return *cache;
@@ -5443,10 +5464,27 @@ static Item js_get_async_function_prototype() {
     proto_root.set(js_setup_dynamic_function_prototype(proto_root.get(),
         ctor_root.get(), "AsyncFunction"));
     if (item_is_error(proto_root.get())) return proto_root.get();
+    Item* constructor_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        js_suspended_constructor_slot(false, true));
+    if (!constructor_slot) return ItemError;
+    *constructor_slot = ctor_root.get();
     *cache = proto_root.get();
     return proto_root.get();
 }
 
+Item js_suspended_function_intrinsic(bool generator, bool asynchronous, bool constructor) {
+    auto kind = !generator ? LMD_DYNAMIC_ASYNC_FUNCTION
+        : asynchronous ? LMD_DYNAMIC_ASYNC_GENERATOR : LMD_DYNAMIC_GENERATOR;
+    Item shared = mvp_lmd_suspended_intrinsic(kind, constructor
+        ? LMD_SUSPENDED_CONSTRUCTOR : LMD_SUSPENDED_FUNCTION_PROTOTYPE);
+    if (shared.item != ITEM_NULL) return shared;
+    Item prototype = generator ? js_get_generator_function_prototype(asynchronous)
+        : js_get_async_function_prototype();
+    if (!constructor || item_is_error(prototype)) return prototype;
+    Item* slot = js_realm_slot(&js_runtime_state.realm_slots,
+        js_suspended_constructor_slot(generator, asynchronous));
+    return slot ? *slot : ItemError;
+}
 extern "C" Item js_get_prototype_of(Item object) {
     MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
     if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
@@ -6909,11 +6947,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                                                 (int)name_str->len, &pd)) {
                 return make_js_undefined();
             }
-            return js_make_data_descriptor(
-                (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined(),
-                (pd.flags & JS_PD_WRITABLE) != 0,
-                (pd.flags & JS_PD_ENUMERABLE) != 0,
-                js_pd_is_configurable(&pd));
+            // user fields in Error's side map retain their accessor/data kind.
+            return js_property_descriptor_from_pd(&pd);
         }
         if (!m || !m->type) return make_js_undefined();
 
@@ -12435,7 +12470,7 @@ extern "C" Item js_escape(Item str_item) {
 
 // Global object identity and every global binding row use the one realm-owned
 // RootVector. Their public paths remain owner-thread direct loads/stores.
-#define js_global_environment_state (js_runtime_state.global_environment)
+#define js_global_environment_state (js_global_environment_current())
 #define js_global_this_obj (js_global_environment_slot(js_global_environment_state, \
     JS_GLOBAL_ENV_GLOBAL_THIS))
 #define js_window_event_value (js_global_environment_slot(js_global_environment_state, \
@@ -12590,6 +12625,12 @@ extern "C" void js_globals_batch_reset() {
     if (generator_proto) *generator_proto = (Item){0};
     if (async_generator_proto) *async_generator_proto = (Item){0};
     if (async_proto) *async_proto = (Item){0};
+    const JsRealmSlotId constructors[] = {JS_REALM_SLOT_GENERATOR_FUNCTION_CONSTRUCTOR,
+        JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_CONSTRUCTOR, JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR};
+    for (JsRealmSlotId id : constructors) {
+        Item* slot = js_realm_slot_existing(&js_runtime_state.realm_slots, id);
+        if (slot) *slot = (Item){0};
+    }
 }
 
 // =============================================================================
@@ -13704,13 +13745,16 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         {
             extern Item js_performance_observer_new(Item callback);
             RootFrame performance_roots(5);
-            Item perf = js_new_object();
+            // complete the existing MVP namespace when its public host family is observed.
+            Item perf = mvp_lmd_realm_intrinsic("performance", 11);
+            bool shared = get_type_id(perf) == LMD_TYPE_MAP;
+            if (!shared) perf = js_new_object();
             Rooted<Item> perf_root(performance_roots, perf);
             Rooted<Item> timing_root(performance_roots, ItemNull);
             Rooted<Item> origin_root(performance_roots, ItemNull);
             Rooted<Item> observer_root(performance_roots, ItemNull);
             Rooted<Item> supported_types_root(performance_roots, ItemNull);
-            js_install_native_method(perf, "now", js_performance_now);
+            if (!shared) js_install_native_method(perf, "now", js_performance_now);
             js_install_native_method(perf, "mark", js_performance_noop_1);
             js_install_native_method(perf, "measure", js_performance_noop_3);
             js_install_native_method(perf, "getEntries",
@@ -13719,8 +13763,10 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
                 js_performance_empty_entries_2);
             js_install_native_method(perf, "getEntriesByType",
                 js_performance_entries_by_type);
-            origin_root.set(push_d(js_performance_time_origin_ms()));
-            js_set_key_cstr(perf, "timeOrigin", origin_root.get());
+            if (!shared) {
+                origin_root.set(push_d(js_performance_time_origin_ms()));
+                js_set_key_cstr(perf, "timeOrigin", origin_root.get());
+            }
             timing_root.set(js_new_object());
             js_set_key_cstr(perf, "timing", timing_root.get());
             js_set_key_cstr(global.get(), "performance", perf);
@@ -14288,27 +14334,12 @@ extern "C" int64_t js_global_lexical_binding_exists(Item key) {
     return js_global_lexical_find(key) >= 0 ? 1 : 0;
 }
 
-// A MIR script's top-level lexical lives in its module slot. The linked record
-// reads and writes that slot, so interpreted code that resolves the realm record
-// (dynamic source, later scripts) observes the live value and its TDZ (JSI35).
-static bool js_global_lexical_activate_owner(RuntimeModuleStateScope* module_state,
-        const JsGlobalBinding* binding) {
-    return binding->module_state_id == UINT32_MAX ||
-        module_state->activate(binding->module_state_id);
-}
-
 extern "C" Item js_global_lexical_get_or_fallback(Item key, Item fallback) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
     JsGlobalBinding* binding = js_global_environment_binding_at(
         js_global_environment_state, idx);
-    if (!binding) return fallback;
-    if (binding->module_index >= 0) {
-        RuntimeModuleStateScope module_state(context);
-        if (!js_global_lexical_activate_owner(&module_state, binding)) return fallback;
-        return lambda_active_module_var_at((uint32_t)binding->module_index);
-    }
-    return js_global_environment_binding_value(js_global_environment_state, binding);
+    return js_global_environment_read_binding(js_global_environment_state, binding, fallback);
 }
 
 extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
@@ -14318,18 +14349,12 @@ extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
     JsGlobalBinding* binding = js_global_environment_binding_at(
         js_global_environment_state, idx);
     if (!binding) return (Item){.item = b2it(false)};
+    if (js_global_environment_read_binding(js_global_environment_state, binding, ItemNull).item == ITEM_JS_TDZ)
+        return js_throw_binding_reference_error(key);
     if (binding->immutable) {
         return js_throw_type_error("Assignment to constant variable");
     }
-    if (binding->module_index >= 0) {
-        RuntimeModuleStateScope module_state(context);
-        if (js_global_lexical_activate_owner(&module_state, binding)) {
-            lambda_active_module_var_store((uint32_t)binding->module_index, value);
-        }
-        return (Item){.item = b2it(true)};
-    }
-    js_global_environment_set_binding_value(js_global_environment_state,
-        binding, value);
+    js_global_environment_write_binding(js_global_environment_state, binding, value);
     return (Item){.item = b2it(true)};
 }
 
@@ -14760,11 +14785,6 @@ void js_global_builtin_fn_cache_reset() {
 }
 
 extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
-    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
-    if (!global_builtin_fn_cache_init) {
-        for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) global_builtin_fn_cache_at(i) = ItemNull;
-        global_builtin_fn_cache_init = true;
-    }
     int global_id = (int)it2i(global_id_item);
     if (global_id <= JS_BUILTIN_GLOBAL_NONE || global_id >= JS_BUILTIN_GLOBAL_MAX) {
         return ItemNull;
@@ -14772,6 +14792,14 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     const JsBuiltinGlobalSpec* spec = js_builtin_global_at(global_id - 1);
     if (!spec || spec->id != global_id || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) {
         return ItemNull;
+    }
+    // the active realm's immutable callable owns identity across both execution entries.
+    Item shared = mvp_lmd_realm_intrinsic(spec->name, spec->len);
+    if (get_type_id(shared) == LMD_TYPE_FUNC) return shared;
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
+    if (!global_builtin_fn_cache_init) {
+        for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) global_builtin_fn_cache_at(i) = ItemNull;
+        global_builtin_fn_cache_init = true;
     }
     if (!js_intrinsic_cache_slot_empty(global_builtin_fn_cache_at(spec->id))) {
         return global_builtin_fn_cache_at(spec->id);
@@ -15675,6 +15703,8 @@ extern "C" void js_proto_snapshot_invalidate() {
 
 
 extern "C" Item js_get_typed_array_base() {
+    Item shared = mvp_lmd_realm_intrinsic("TypedArray", 10);
+    if (get_type_id(shared) == LMD_TYPE_FUNC) return shared;
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_base.item != 0) return js_typed_array_base;
     // Create the %TypedArray% intrinsic function object
@@ -15704,6 +15734,8 @@ extern "C" Item js_get_typed_array_base() {
 extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor);
 
 extern "C" Item js_get_typed_array_base_proto() {
+    Item shared = mvp_lmd_realm_intrinsic("TypedArray", 10);
+    if (get_type_id(shared) == LMD_TYPE_FUNC) return js_get_name_id(shared, JS_NAME_PROTOTYPE);
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
     js_typed_array_base_proto = js_new_object();
@@ -15739,10 +15771,11 @@ static void js_typed_array_base_reset() {
 // Get/create per-type prototype for a typed array element type.
 // Sets constructor → concrete constructor, BYTES_PER_ELEMENT, __proto__ → %TypedArray%.prototype
 extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
-    MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
-    if (library && library->typed_arrays && element_type >= 0 && element_type < JS_TYPED_ARRAY_TYPE_COUNT &&
-            get_type_id(library->typed_arrays[element_type].values[1]) == LMD_TYPE_MAP)
-        return library->typed_arrays[element_type].values[1];
+    if (element_type >= 0 && element_type < JS_TYPED_ARRAY_TYPE_COUNT) {
+        const JsTypedArraySpec* spec = js_typed_array_spec((JsTypedArrayType)element_type);
+        Item shared = mvp_lmd_realm_intrinsic(spec->name, strlen(spec->name));
+        if (get_type_id(shared) == LMD_TYPE_FUNC) return js_get_name_id(shared, JS_NAME_PROTOTYPE);
+    }
     if (element_type < 0 || element_type >= JS_TYPED_ARRAY_TYPE_COUNT) return js_get_typed_array_base_proto();
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_per_type_proto_at(element_type).item != 0) {
@@ -15978,6 +16011,13 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         else js_content_visibility_event_install_prototype(prototype.get());
     }
     js_populate_constructor_statics(fn_item, name, strlen(name));
+    if (ctor_id == JS_CTOR_REGEXP) {
+        Item initialized = js_regexp_install_legacy_properties(fn_item);
+        if (item_is_error(initialized)) {
+            js_intrinsic_state.initialization_depth--;
+            return initialized;
+        }
+    }
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
     if (typed_array_element_type >= 0) {
         // js_get_typed_array_per_type_proto sets fn->prototype and adds BYTES_PER_ELEMENT
@@ -16005,6 +16045,8 @@ extern "C" Item js_get_constructor(Item name_item) {
 
     const JsBuiltinGlobalSpec* spec = js_builtin_global_find(name->chars, (int)name->len);
     if (spec && spec->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR && spec->runtime_id > 0) {
+        Item shared = mvp_lmd_realm_intrinsic(name->chars, name->len);
+        if (get_type_id(shared) == LMD_TYPE_FUNC) return shared;
         return js_create_constructor(spec);
     }
     return make_js_undefined();
@@ -16018,14 +16060,15 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
     return true;
 }
 
-static Item js_get_constructor_intrinsic_prototype(Item ctor) {
+Item js_get_constructor_intrinsic_prototype(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    JsFunction* fn = (JsFunction*)ctor.function;
+    // the intrinsic owner may expose an MVP callable with no JsFunction tail.
+    JsFunction* fn = function_has_abi(ctor.function, FN_ENTRY_ABI_JS_FUNCTION)
+        ? (JsFunction*)ctor.function : NULL;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
             get_type_id(fn->prototype) == LMD_TYPE_FUNC)) return fn->prototype;
     Item proto = js_get_name_id(ctor, JS_NAME_PROTOTYPE);
-    if (get_type_id(proto) == LMD_TYPE_MAP ||
-            get_type_id(proto) == LMD_TYPE_FUNC) return proto;
+    if (js_is_object_value(proto)) return proto;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
             get_type_id(fn->prototype) == LMD_TYPE_FUNC)) return fn->prototype;
     return ItemNull;
@@ -16061,13 +16104,16 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     js_intrinsic_state_ensure_epoch();
     JsClass cls = (JsClass)class_id;
     if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
+    const char* name = NULL;
+    int len = 0;
+    if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
+    Item shared = mvp_lmd_realm_intrinsic(name, len);
+    if (get_type_id(shared) == LMD_TYPE_FUNC)
+        return js_get_constructor_intrinsic_prototype(shared);
     Item* cached_slot = js_intrinsic_prototype_slot(class_id);
     if (!cached_slot) return ItemNull;
     if (!js_intrinsic_cache_slot_empty(*cached_slot)) return *cached_slot;
     if (js_intrinsic_state.prototype_resolving[class_id]) return ItemNull;
-    const char* name = NULL;
-    int len = 0;
-    if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
     js_intrinsic_state.prototype_resolving[class_id] = true;
     Item ctor = js_get_constructor(js_name_item(name, len));
     Item proto = js_get_constructor_intrinsic_prototype(ctor);
@@ -16084,8 +16130,7 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
         }
         proto = proto_root.get();
     }
-    if (get_type_id(proto) == LMD_TYPE_MAP ||
-            get_type_id(proto) == LMD_TYPE_FUNC) {
+    if (js_is_object_value(proto)) {
         *cached_slot = proto;
     }
     js_intrinsic_state.prototype_resolving[class_id] = false;

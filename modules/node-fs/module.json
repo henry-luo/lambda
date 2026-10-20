@@ -5,6 +5,7 @@
   "hosted_api_version": 5,
   "kind": "runtime-library",
   "engine": "js",
+  "script_source": "closed",
   "provides": [
     "fs",
     "fs/promises"

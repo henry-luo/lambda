@@ -1,6 +1,7 @@
 #include "mvp_lmd_async.h"
 #include "mvp_lmd_dynamic.h"
 #include "../js_runtime.h"
+#include "../js_runtime_internal.hpp"
 #include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
@@ -124,6 +125,14 @@ static Item promise_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
 }
 
 Item mvp_lmd_promise_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (state->native_callable_values) {
+        // async completions must use the Promise identity already owned by this realm.
+        Item result = mvp_lmd_library_class_adopt(state->promise, state->promise_values,
+            js_get_constructor(js_name_item("Promise", 7)));
+        if (item_is_error(result)) return result;
+        js_promise_set_host_ops(&promise_ops, program);
+        return ItemNull;
+    }
     Item result = mvp_lmd_library_class_initialize(program, state, state->promise,
         (int)(state->promise_values - state->values), "Promise", promise_constructor, 1);
     if (item_is_error(result)) return result;
@@ -238,6 +247,18 @@ static Item async_generator_method(Context*, MvpLmdProgram*, Item* args, uint64_
     return js_async_generator_request(receiver, operation, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
 }
 
+Item mvp_lmd_suspended_intrinsic(MvpLmdDynamicFunctionKind kind, MvpLmdSuspendedIntrinsic intrinsic) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (!state || !state->intrinsics_ready || state->native_callable_values) return ItemNull;
+    Item* values = kind == LMD_DYNAMIC_GENERATOR ? state->values + LMD_LIBRARY_GENERATOR
+        : kind == LMD_DYNAMIC_ASYNC_GENERATOR ? state->async_generator_values
+        : kind == LMD_DYNAMIC_ASYNC_FUNCTION ? state->async_function_values : NULL;
+    if (!values || (kind == LMD_DYNAMIC_GENERATOR && !state->generator_function_values)) return ItemNull;
+    if (intrinsic == LMD_SUSPENDED_CONSTRUCTOR) return values[0];
+    if (intrinsic == LMD_SUSPENDED_INSTANCE_PROTOTYPE || kind == LMD_DYNAMIC_ASYNC_FUNCTION) return values[1];
+    return kind == LMD_DYNAMIC_GENERATOR ? state->generator_function_values[1] : values[4];
+}
+
 static Item suspended_function_family(MvpLmdProgram* program, MvpLmdLibraryState* state,
         MvpLmdDynamicFunctionKind kind) {
     bool asynchronous = kind != LMD_DYNAMIC_GENERATOR;
@@ -247,6 +268,24 @@ static Item suspended_function_family(MvpLmdProgram* program, MvpLmdLibraryState
     Item* values = !generator ? state->async_function_values : asynchronous ? state->async_generator_values
         : state->values + LMD_LIBRARY_GENERATOR;
     Item* extras = !generator ? NULL : asynchronous ? values + 3 : state->generator_function_values;
+    if (state->native_callable_values) {
+        // an existing realm owns these identities; do not create a second family.
+        MvpLmdRealmScope native(NULL, true);
+        family->values = values;
+        values[0] = js_suspended_function_intrinsic(generator, asynchronous, true);
+        if (item_is_error(values[0])) return values[0];
+        values[1] = generator ? js_get_generator_shared_proto(asynchronous)
+            : js_suspended_function_intrinsic(false, true, false);
+        if (item_is_error(values[1])) return values[1];
+        values[2] = values[0];
+        if (generator) {
+            extras[0] = js_get_prototype_of(values[1]);
+            if (item_is_error(extras[0])) return extras[0];
+            extras[1] = js_suspended_function_intrinsic(true, asynchronous, false);
+            if (item_is_error(extras[1])) return extras[1];
+        }
+        return ItemNull;
+    }
     // the synchronous generator's already-installed methods retain the same nominal family.
     if (asynchronous) {
         Item initialized = mvp_lmd_library_class_initialize(program, state, family,

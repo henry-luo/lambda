@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import platform
 import random
 import signal
@@ -30,8 +31,10 @@ if PROJECT_ROOT not in sys.path:
 os.chdir(PROJECT_ROOT)
 
 from run_benchmarks import (  # noqa: E402
+    JETSTREAM_LJS,
     NAVIER_STOKES_DENSITY_ORACLE_V1,
     build_benchmark_list,
+    expand_benchmark_js,
     jetstream_post_timing_oracle_marker,
     make_jetstream_ljs_wrapper,
     mir_script_variants,
@@ -209,11 +212,12 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
                 language="lambda", tier="jit", expected_stdout_text=None,
                 bootstrap_resamples=DEFAULT_BOOTSTRAP_RESAMPLES,
                 bootstrap_seed=DEFAULT_BOOTSTRAP_SEED,
-                control_js_runtime="formal", candidate_js_runtime="formal"):
+                control_js_runtime="formal", candidate_js_runtime="formal", warmups=1):
     control_samples = []
     candidate_samples = []
     pair_records = []
-    for pair_index in range(pairs):
+    warmup_records = []
+    for pair_index in range(-warmups, pairs):
         control_first = pair_index % 2 == 0
         order = "control,candidate" if control_first else "candidate,control"
         first_binary = control if control_first else candidate
@@ -224,10 +228,15 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         second_script = candidate_script if second_label == "candidate" else control_script
         runtimes = {"control": control_js_runtime, "candidate": candidate_js_runtime}
         first = run_once(first_binary, first_script, timeout_s, language, tier,
-                         expected_stdout_text, runtimes[first_label])
+                         expected_stdout_text, runtimes[first_label],
+                         strict_timing=True, capture_output=True)
         second = run_once(second_binary, second_script, timeout_s, language, tier,
-                          expected_stdout_text, runtimes[second_label])
+                          expected_stdout_text, runtimes[second_label],
+                          strict_timing=True, capture_output=True)
         samples = {first_label: first, second_label: second}
+        if pair_index < 0:
+            warmup_records.append({"order": order, **samples})
+            continue
         control_samples.append(samples["control"])
         candidate_samples.append(samples["candidate"])
         pair_records.append({
@@ -255,7 +264,8 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         ratio = candidate_median / control_median
     valid_pairs = [
         pair for pair in pair_records
-        if pair["control"]["exec_ms"] is not None and pair["candidate"]["exec_ms"] is not None
+        if pair["control"]["status"] == pair["candidate"]["status"] == "ok"
+        and pair["stdout_equal"] and pair["expected_stdout_matches"]
     ]
     candidate_wins = sum(
         pair["candidate"]["exec_ms"] < pair["control"]["exec_ms"]
@@ -280,6 +290,14 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
             if expected_stdout_text is not None else None
         ),
         "pairs": pair_records,
+        "warmups": warmup_records,
+        "warmups_valid": all(
+            pair["control"]["status"] == pair["candidate"]["status"] == "ok"
+            and pair["control"]["stdout_sha256"] == pair["candidate"]["stdout_sha256"]
+            and all(pair[lane]["stdout_contains_expected"] is not False
+                    for lane in ("control", "candidate"))
+            for pair in warmup_records
+        ),
     }
 
 
@@ -340,7 +358,9 @@ def lambda_build_source_corpus():
 
 def lambda_build_manifest():
     """Freeze build configuration and source revisions alongside binary hashes."""
-    files = ("build_lambda_config.json", "Makefile", "utils/generate_premake.py")
+    files = ("build_lambda_config.json", "Makefile", "utils/generate_premake.py",
+             "test/benchmark/run_paired_benchmarks.py",
+             "test/benchmark/run_benchmarks.py", "test/benchmark/benchmark_provenance.py")
     return {
         "files": {path: sha256_file(os.path.join(PROJECT_ROOT, path)) for path in files},
         "source_corpus": lambda_build_source_corpus(),
@@ -352,6 +372,21 @@ def lambda_build_manifest():
             or key.startswith("LAMBDA_")
         },
     }
+
+
+def native_module_manifest(control, candidate):
+    """Freeze module search roots and native images used by either host."""
+    configured = os.environ.get("JUBE_MODULE_PATH", "")
+    roots = [path for path in configured.split(os.pathsep) if path]
+    roots += [str(Path(binary).resolve().parent / "modules")
+              for binary in (control, candidate)]
+    roots.append(os.path.join(PROJECT_ROOT, "modules"))
+    roots = list(dict.fromkeys(os.path.abspath(path) for path in roots))
+    paths = {str(path) for root in roots for path in Path(root).rglob("*")
+             if path.is_file() and (path.name in ("module.json", "module-set.json")
+                                    or path.suffix in (".dylib", ".so", ".dll"))}
+    return {"configured_path": configured, "search_roots": roots,
+            "corpus": hashed_file_corpus(paths, PROJECT_ROOT)}
 
 
 def finalize_provenance(metadata, control, candidate):
@@ -377,6 +412,10 @@ def finalize_provenance(metadata, control, candidate):
     if "lambda_build_manifest" in metadata:
         metadata["lambda_build_manifest_stable"] = (
             metadata["lambda_build_manifest"] == lambda_build_manifest()
+        )
+    if "native_module_manifest" in metadata:
+        metadata["native_module_manifest_stable"] = (
+            metadata["native_module_manifest"] == native_module_manifest(control, candidate)
         )
 
 
@@ -431,6 +470,14 @@ def parse_filters(value):
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def save_artifact(path, artifact):
+    # preserve completed rows if a later workload is interrupted.
+    staging = path + ".partial"
+    with open(staging, "w") as stream:
+        json.dump(artifact, stream, indent=2)
+    os.replace(staging, path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Interleaved A/B timing for two Lambda release binaries"
@@ -460,6 +507,7 @@ def main():
                         metavar=("CONTROL_SCRIPT", "CANDIDATE_SCRIPT"),
                         help="compare two explicit source files; may be given more than once")
     parser.add_argument("-p", "--pairs", type=int, default=41, help="alternating pairs per row")
+    parser.add_argument("--warmups", type=int, default=1, help="unmeasured pairs per row")
     parser.add_argument("--bootstrap-resamples", type=int,
                         default=DEFAULT_BOOTSTRAP_RESAMPLES,
                         help="paired bootstrap resamples per row (default: 10000)")
@@ -473,6 +521,8 @@ def main():
     args = parser.parse_args()
     if args.pairs < 1:
         parser.error("--pairs must be positive")
+    if args.warmups < 0:
+        parser.error("--warmups must be nonnegative")
     if args.bootstrap_resamples < 1:
         parser.error("--bootstrap-resamples must be positive")
     if args.language != "js" and (args.control_js_runtime not in ("formal", "legacy") or
@@ -559,6 +609,7 @@ def main():
         if args.language == "js" else None,
         "tier": args.tier,
         "pairs": args.pairs,
+        "warmups": args.warmups,
         "paired_uncertainty": {
             "method": "paired_bootstrap_ratio_of_medians",
             "confidence": 0.95,
@@ -569,11 +620,12 @@ def main():
         "timeout_s": args.timeout,
         "jetstream_post_timing_oracle": args.jetstream_post_timing_oracle,
         "command": " ".join(sys.argv),
+        "lambda_build_manifest": lambda_build_manifest(),
+        "native_module_manifest": native_module_manifest(control, candidate),
     }
     if args.language == "lambda":
         metadata["lambda_source_corpus"] = lambda_source_corpus()
         metadata["c2mir_source_corpus"] = c2mir_source_corpus()
-        metadata["lambda_build_manifest"] = lambda_build_manifest()
     if args.manifest:
         metadata["manifest"] = {
             "path": manifest_path,
@@ -582,6 +634,8 @@ def main():
             "metadata": manifest.get("metadata"),
         }
     artifact = {"_metadata": metadata, "rows": []}
+    metadata["capture_complete"] = False
+    save_artifact(output, artifact)
     if explicit_rows:
         print(f"Paired A/B: {len(explicit_rows)} explicit row(s), {args.pairs} pair(s)")
         for spec in explicit_rows:
@@ -604,6 +658,7 @@ def main():
                 row["status"] = "missing_script"
                 row["status_detail"] = str(error)
                 artifact["rows"].append(row)
+                save_artifact(output, artifact)
                 print(f"\n{spec['suite']}/{spec['name']} missing script")
                 continue
             expected_sha256 = spec["manifest_entry_sha256"]
@@ -616,6 +671,7 @@ def main():
                 if not row["manifest_entry_hash_matches"]:
                     row["status"] = "source_hash_mismatch"
                     artifact["rows"].append(row)
+                    save_artifact(output, artifact)
                     print(f"\n{spec['suite']}/{spec['name']} source hash mismatch")
                     continue
             print(f"\n{spec['suite']}/{spec['name']}[{spec['variant']}] ",
@@ -624,18 +680,21 @@ def main():
                                    args.pairs, args.timeout, args.language, args.tier,
                                    spec["expected_stdout_text"],
                                    args.bootstrap_resamples, args.bootstrap_seed,
-                                   args.control_js_runtime, args.candidate_js_runtime))
+                                   args.control_js_runtime, args.candidate_js_runtime, args.warmups))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
-            if row["expected_stdout_matches_all"] is False:
+            if row["expected_stdout_matches_all"] is False or not row["stdout_equal_all"]:
                 row["status"] = "wrong_output"
+            elif not row["warmups_valid"]:
+                row["status"] = "warmup_failed"
             artifact["rows"].append(row)
+            save_artifact(output, artifact)
             ratio = row["candidate_over_control_median_ratio"]
             ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"
             print(f" ratio={ratio_text} wins={row['candidate_wins']}/{row['pairs_valid']}"
                   f" stdout_equal={row['stdout_equal_all']}")
         finalize_provenance(metadata, control, candidate)
-        with open(output, "w") as stream:
-            json.dump(artifact, stream, indent=2)
+        metadata["capture_complete"] = True
+        save_artifact(output, artifact)
         print(f"Saved paired artifact to {output}")
         return
 
@@ -644,16 +703,23 @@ def main():
         untyped, typed = mir_script_variants(benchmark)
         scripts = {"untyped": untyped, "typed": typed}
         expected_stdout_text = None
+        source_root = None
         if args.language == "js":
             script = benchmark["js_path"]
-            if benchmark["is_jetstream"] and benchmark["ref_js"]:
+            if benchmark["is_jetstream"] and JETSTREAM_LJS.get(benchmark["name"]):
+                source_root = os.path.dirname(JETSTREAM_LJS[benchmark["name"]])
                 script = make_jetstream_ljs_wrapper(
-                    benchmark["name"], benchmark["ref_js"], args.jetstream_post_timing_oracle)
+                    benchmark["name"], JETSTREAM_LJS[benchmark["name"]], args.jetstream_post_timing_oracle)
                 expected_stdout_text = oracle_expected_stdout(args.jetstream_post_timing_oracle)
             elif benchmark["suite"] == "awfy" and script:
                 bundle = script.replace("2.js", "2_bundle.js")
                 if os.path.exists(bundle):
                     script = bundle
+            if script:
+                if source_root is None:
+                    source_root = os.path.dirname(script)
+                # match the standard runner's helper expansion and LambdaJS port.
+                script = expand_benchmark_js(script)
             scripts = {"js": script}
         for variant in variants:
             script = scripts[variant]
@@ -666,26 +732,30 @@ def main():
             if script is None or not os.path.exists(script):
                 row["status"] = "missing_script"
                 artifact["rows"].append(row)
+                save_artifact(output, artifact)
                 print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] missing script")
                 continue
             print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] ", end="", flush=True)
-            row["control_source"] = source_provenance(script)
-            row["candidate_source"] = source_provenance(script)
+            row["control_source"] = source_provenance(script, source_root)
+            row["candidate_source"] = row["control_source"].copy()
             row.update(compare_row(control, candidate, script, script, args.pairs,
                                    args.timeout, args.language, args.tier, expected_stdout_text,
                                    args.bootstrap_resamples, args.bootstrap_seed,
-                                   args.control_js_runtime, args.candidate_js_runtime))
+                                   args.control_js_runtime, args.candidate_js_runtime, args.warmups))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
-            if row["expected_stdout_matches_all"] is False:
+            if row["expected_stdout_matches_all"] is False or not row["stdout_equal_all"]:
                 row["status"] = "wrong_output"
+            elif not row["warmups_valid"]:
+                row["status"] = "warmup_failed"
             artifact["rows"].append(row)
+            save_artifact(output, artifact)
             ratio = row["candidate_over_control_median_ratio"]
             ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"
             print(f" ratio={ratio_text} wins={row['candidate_wins']}/{row['pairs_valid']} stdout_equal={row['stdout_equal_all']}")
 
     finalize_provenance(metadata, control, candidate)
-    with open(output, "w") as stream:
-        json.dump(artifact, stream, indent=2)
+    metadata["capture_complete"] = True
+    save_artifact(output, artifact)
     print(f"Saved paired artifact to {output}")
 
 

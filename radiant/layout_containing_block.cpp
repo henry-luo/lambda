@@ -298,7 +298,10 @@ ViewElement* layout_create_anonymous_text_item(LayoutContext* lycon,
     item->bound = lam::view_prop(bound);
     // Borrows the text's or container's font: a scratch-lived item never
     // reaches view-tree teardown (asserted there), so the slot is never freed.
-    item->font = lam::view_prop((FontProp*)(text_view->font ? (FontProp*)text_view->font : (FontProp*)container->font));
+    FontProp* inherited_font = text_view->font ? text_view->font.get() : container->font.get();
+    // inherited defaults can live only in the active layout context, without a DOM font group.
+    if (!inherited_font) inherited_font = lycon->font.style.get();
+    item->font = lam::view_prop(inherited_font);
     return item;
 }
 

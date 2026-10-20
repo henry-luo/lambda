@@ -6,6 +6,8 @@ enum { MVP_LMD_CAPSULE_OWNER = 0x4d56504c, MVP_LMD_DYNAMIC_OWNER = 0x4d564459,
 
 struct MvpLmdProgram;
 struct MvpLmdRegExpAccessor;
+bool mvp_lmd_regexp_intrinsic(Item receiver, Item argument, int operation, Item* result,
+    Item second = Item{.item = ITEM_JS_UNDEFINED});
 struct JsRegexpLastMatch;
 struct JsArrayOps;
 struct JsBufferViewOps;
@@ -22,7 +24,7 @@ struct JsTemplateLiteralNode;
 struct JsTemplateObjectOps;
 struct MvpLmdHost;
 enum MvpLmdHostBinding { LMD_HOST_PERFORMANCE, LMD_HOST_CONSOLE, LMD_HOST_PROCESS,
-    LMD_HOST_REQUIRE, LMD_HOST_FS, LMD_HOST_PRINT, LMD_HOST_COUNT };
+    LMD_HOST_REQUIRE, LMD_HOST_PRINT, LMD_HOST_COUNT };
 enum MvpLmdTimerBinding { LMD_TIMER_TIMEOUT, LMD_TIMER_CLEAR_TIMEOUT, LMD_TIMER_INTERVAL,
     LMD_TIMER_CLEAR_INTERVAL, LMD_TIMER_MICROTASK, LMD_TIMER_COUNT };
 struct MvpLmdHostState {
@@ -31,6 +33,8 @@ struct MvpLmdHostState {
     Item* global;                // borrowed registered global receiver cell
     FILE* output;
     bool native_timers;
+    bool process_requested;
+    bool process_stdio_only;    // closed direct writes need no optional Node-core extension
 };
 Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
     TypeMap* shape, const MvpLmdHost* host);
@@ -161,7 +165,9 @@ enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE
     LMD_LIBRARY_THROW_TYPE, LMD_LIBRARY_FUNCTION_STRING, LMD_LIBRARY_GLOBAL_NAN,
     LMD_LIBRARY_GLOBAL_FINITE, LMD_LIBRARY_DECODE_URI, LMD_LIBRARY_ENCODE_URI,
     LMD_LIBRARY_DECODE_COMPONENT, LMD_LIBRARY_ENCODE_COMPONENT, LMD_LIBRARY_REGEXP_EXEC,
-    LMD_LIBRARY_ESCAPE, LMD_LIBRARY_UNESCAPE, LMD_LIBRARY_STRING_ITERATOR, LMD_LIBRARY_COUNT };
+    LMD_LIBRARY_ESCAPE, LMD_LIBRARY_UNESCAPE, LMD_LIBRARY_STRING_ITERATOR,
+    LMD_LIBRARY_PARSE_INT, LMD_LIBRARY_PARSE_FLOAT, LMD_LIBRARY_GC,
+    LMD_LIBRARY_STRUCTURED_CLONE, LMD_LIBRARY_COUNT };
 enum MvpLmdIteratorFamily { LMD_ITERATOR_MAP, LMD_ITERATOR_SET, LMD_ITERATOR_STRING, LMD_ITERATOR_COUNT };
 extern const char* const mvp_lmd_iterator_names[LMD_ITERATOR_COUNT];
 enum MvpLmdErrorKind { LMD_ERROR_BASE, LMD_ERROR_EVAL, LMD_ERROR_RANGE,
@@ -181,7 +187,9 @@ struct MvpLmdLibraryState {
     NameRef prototype_key;
     NameRef extensibility_key;
     bool mutable_prototypes;
-    bool native_callable_values; // AUTO satellites borrow the native realm's callable identities
+    bool function_prototype_observed;
+    bool native_callable_values; // native-first realms retain their existing callable identities
+    bool intrinsics_ready; // native factories may borrow identities after initialization completes
     bool date_observed;
     MvpLmdClass date;
     MvpLmdClass regexp;
@@ -257,16 +265,20 @@ public:
     Item complete(Item result, bool force_error_payload = false);
 };
 Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_realm_intrinsic(const char* name, size_t length);
 Runtime* mvp_lmd_prepare_module_realm(void* owner);
 Item mvp_lmd_structured_clone(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+Item mvp_lmd_library_class_adopt(MvpLmdClass* cls, Item* slots, Item constructor);
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
     MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity,
     bool immutable_metadata = true);
 Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_function_intrinsic(int builtin_id);
 Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_iterator_result(MvpLmdProgram* program, Item value, bool done);
-Item mvp_lmd_iterator_prototype_initialize(MvpLmdProgram* program, MvpLmdClass* cls, Item* slots, const char* tag);
+Item mvp_lmd_iterator_prototype_initialize(MvpLmdProgram* program, MvpLmdClass* cls,
+    Item* slots, const char* tag, Item existing = ItemNull);
 Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
@@ -274,6 +286,7 @@ bool mvp_lmd_typed_array_index(Item owner, Item key, double* index);
 Item mvp_lmd_typed_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
 Item mvp_lmd_typed_array_store(Item owner, double index, Item value);
 Item mvp_lmd_generator_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+Item mvp_lmd_generator_resume(MvpLmdProgram*, Item receiver, Item value, int operation);
 Item mvp_lmd_generator_create_ast(MvpLmdProgram*, Item internal, Item wrapper,
     Item arguments, Item receiver, bool is_async);
 Item mvp_lmd_function_method(Item owner, String* name);
@@ -503,4 +516,5 @@ Item mvp_lmd_throw(Item value, int64_t error_constructor);
 Item mvp_lmd_property_with_receiver(Item owner, Item name, Item value, int64_t operation, Item receiver);
 Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation);
 Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation);
+Item mvp_lmd_class_property_host(Item owner, Item name, Item value, int64_t operation);
 }

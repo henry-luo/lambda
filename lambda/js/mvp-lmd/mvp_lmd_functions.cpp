@@ -8,6 +8,7 @@
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_function.hpp"
+#include "../js_builtin_catalog.hpp"
 #include "../../input/input.hpp"
 #include "../../../lib/mem.h"
 #include <math.h>
@@ -286,13 +287,41 @@ extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t coun
     status = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(heap_create_name("callee", 6))}, &descriptor);
     return item_is_error(status) ? status : object.get();
 }
+static const struct { int id, slot; const char* name; JsBuiltinOwner owner; } function_intrinsics[] = {
+    {JS_BUILTIN_FUNC_CALL, LMD_LIBRARY_CALL, "call", JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
+    {JS_BUILTIN_FUNC_APPLY, LMD_LIBRARY_APPLY, "apply", JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
+    {JS_BUILTIN_FUNC_BIND, LMD_LIBRARY_BIND, "bind", JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
+    {JS_BUILTIN_FUNC_TO_STRING, LMD_LIBRARY_FUNCTION_STRING, "toString", JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
+    {JS_BUILTIN_FUNC_THROW_TYPE_ERROR, LMD_LIBRARY_THROW_TYPE, "ThrowTypeError", JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL}
+};
+Item mvp_lmd_function_intrinsic(int builtin_id) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (!state || !state->intrinsics_ready || state->native_callable_values) return ItemNull;
+    // immutable slots preserve intrinsic identity after guest prototype edits.
+    for (const auto& method : function_intrinsics)
+        if (method.id == builtin_id) return state->values[method.slot];
+    return ItemNull;
+}
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (state->native_callable_values) {
+        // native-first realms already own the Function family, including the strict arguments thrower.
+        state->values[LMD_LIBRARY_FUNCTION] = js_get_constructor(js_name_item("Function", 8));
+        if (item_is_error(state->values[LMD_LIBRARY_FUNCTION])) return state->values[LMD_LIBRARY_FUNCTION];
+        state->values[LMD_LIBRARY_FUNCTION_PROTOTYPE] = js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
+        if (item_is_error(state->values[LMD_LIBRARY_FUNCTION_PROTOTYPE]))
+            return state->values[LMD_LIBRARY_FUNCTION_PROTOTYPE];
+        for (const auto& method : function_intrinsics) {
+            state->values[method.slot] = js_intrinsic_binding_get(method.owner, method.name, strlen(method.name));
+            if (item_is_error(state->values[method.slot])) return state->values[method.slot];
+        }
+        return ItemNull;
+    }
     for (int i = LMD_LIBRARY_CALL; i <= LMD_LIBRARY_BIND; i++) {
         state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1,
             i == LMD_LIBRARY_APPLY ? "apply" : i == LMD_LIBRARY_BIND ? "bind" : "call");
         if (item_is_error(state->values[i])) return state->values[i];
     }
-    if (state->mutable_prototypes) {
+    if (state->mutable_prototypes || state->function_prototype_observed) {
         Item& prototype = state->values[LMD_LIBRARY_FUNCTION_PROTOTYPE];
         prototype = mvp_lmd_native_function(program, state, function_prototype, 0);
         if (item_is_error(prototype)) return prototype;

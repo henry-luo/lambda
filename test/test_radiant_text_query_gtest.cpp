@@ -21,6 +21,43 @@ ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 
+TEST(LayoutAnonymousText, BorrowsTheResolvedFontBeforeIntrinsicMeasurement) {
+    LayoutContext layout = {};
+    ViewBlock container = {};
+    container.node_type = DOM_NODE_ELEMENT;
+    container.view_type = RDT_VIEW_BLOCK;
+    DomText text = {};
+    text.node_type = DOM_NODE_TEXT;
+    text.view_type = RDT_VIEW_TEXT;
+    text.parent = lam::up(static_cast<DomNode*>(&container));
+    FontProp inherited = FONT_PROP_DEFAULT, parent_font = FONT_PROP_DEFAULT, text_font = FONT_PROP_DEFAULT;
+    inherited.font_size = 17.0f;
+    layout.font.style = lam::up(&inherited);
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    scratch_init(&layout.scratch, arena);
+    {
+        ScratchScope scope(&layout.scratch);
+        struct Case { FontProp* parent; FontProp* text; FontProp* expected; };
+        const Case cases[] = {{nullptr, nullptr, &inherited}, {&parent_font, nullptr, &parent_font},
+                              {&parent_font, &text_font, &text_font}};
+        for (const Case& entry : cases) {
+            container.font = lam::view_prop(entry.parent);
+            text.font = lam::view_ref(entry.text);
+            ViewElement* item = layout_create_anonymous_text_item(
+                &layout, &scope.mark, &container, &text);
+            EXPECT_NE(item, nullptr);
+            if (!item) continue;
+            EXPECT_TRUE(item->scratch_lived());
+            EXPECT_EQ(item->font.get(), entry.expected);
+            // the later style query must reuse the borrowed font without requesting pool storage.
+            EXPECT_EQ(item->ensure_font(&layout), entry.expected);
+        }
+    }
+    scratch_release(&layout.scratch);
+    arena_destroy(arena);
+}
+
 TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
     EXPECT_TRUE(is_space(0x000A));
     EXPECT_TRUE(is_space(0x000D));

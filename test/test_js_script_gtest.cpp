@@ -55,6 +55,69 @@ static Item js_apply_getter_collect(void) {
     return make_js_undefined();
 }
 
+TEST(JsPropertyDescriptors, WritableOnlyUpdatesConvertAccessorsWithoutCallingGetters) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        const char setup[] = R"JS(
+            let descriptorGetterCalls = 0;
+            function descriptorGetter() { descriptorGetterCalls++; return 42; }
+            const descriptorCases = [
+                [{}, 'field'], [function(){}, 'field'],
+                [function(){}, 'name'], [function(){}, 'length'],
+                [[], '0'], [[], 'field'], [new Error('marker'), 'field'],
+                [{}, Symbol('field')]
+            ];
+            for (const [object, key] of descriptorCases)
+                Object.defineProperty(object, key, {
+                    get: descriptorGetter, configurable: true, enumerable: true
+                });
+            true
+        )JS";
+        Item result = transpile_js_to_mir(&runtime, setup, "descriptor-setup.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        if (!item_is_error(result)) {
+            heap_gc_collect();
+            const char update[] = R"JS(
+                let descriptorValid = true;
+                for (const [object, key] of descriptorCases) {
+                    Object.defineProperty(object, key, {enumerable: false});
+                    const preserved = Object.getOwnPropertyDescriptor(object, key);
+                    descriptorValid = descriptorValid && preserved.get === descriptorGetter;
+                    const accepted = Reflect.defineProperty(object, key, {
+                        writable: false, configurable: false
+                    });
+                    const data = Object.getOwnPropertyDescriptor(object, key);
+                    descriptorValid = descriptorValid && accepted && !('get' in data) &&
+                        !('set' in data) && data.value === undefined &&
+                        data.writable === false && data.configurable === false &&
+                        data.enumerable === false &&
+                        !Reflect.defineProperty(object, key, {writable: true});
+                }
+                const writable = {get field() { descriptorGetterCalls++; return 42; }};
+                Object.defineProperty(writable, 'field', {writable: true});
+                const writableData = Object.getOwnPropertyDescriptor(writable, 'field');
+                const acceptedLegacy = Reflect.defineProperty(RegExp, '$1', {
+                    writable: false, configurable: false
+                });
+                const legacy = Reflect.getOwnPropertyDescriptor(RegExp, '$1');
+                descriptorValid && descriptorGetterCalls === 0 &&
+                    writableData.value === undefined && writableData.writable === true &&
+                    !('get' in writableData) && acceptedLegacy &&
+                    legacy.writable === false && legacy.configurable === false &&
+                    legacy.value === undefined && !('get' in legacy)
+            )JS";
+            result = transpile_js_to_mir(&runtime, update, "descriptor-update.js", NULL);
+            EXPECT_FALSE(item_is_error(result));
+            if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsArguments, ArrayLikeGettersRetainEarlierArgumentsAcrossCollection) {
     const char* backends[] = {"ast", "mir"};
     for (const char* backend : backends) {
@@ -1513,6 +1576,71 @@ TEST(JsInterpreter, AutoMvpPromotionsPreserveRealmBindingsAndCallableIdentity) {
         }
         runtime_cleanup(&runtime);
     }
+}
+
+TEST(JsInterpreter, AutoMvpDenseLoopsObserveNativeArrayDescriptors) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 2;
+    runtime.js_promotion_backedge_threshold = 10000;
+    // native descriptor storage must stay authoritative after the loop promotes.
+    const char source[] = R"JS(
+        let hits = 0, shouldThrow = false;
+        const marker = new Error('getter marker');
+        let array = [1, 2];
+        Object.defineProperty(array, '1', {
+            get() { hits++; if (shouldThrow) throw marker; return 3; },
+            configurable: true
+        });
+        function compare(a, b, start, end) {
+            let total = 0;
+            for (let index = start; index < end; index++) {
+                total++;
+                if (a[index] === b[index]) total += 10;
+            }
+            return total;
+        }
+        for (let call = 0; call < 8; call++)
+            if (compare(array, [1, 3], 0, 2) !== 22) throw 'dense getter';
+        if (hits !== 8) throw 'getter count';
+        gc();
+        shouldThrow = true;
+        let caught = false;
+        try { compare(array, [1, 3], 0, 2); }
+        catch (error) { caught = error === marker; }
+        if (!caught || hits !== 9) throw 'getter completion';
+        Object.defineProperty(array, '1', {value: 4, writable: true});
+        if (compare(array, [1, 4], 0, 2) !== 22 || hits !== 9)
+            throw 'converted data';
+        Object.defineProperty(array, '1', {get: undefined});
+        if (compare(array, [1, undefined], 0, 2) !== 22 || hits !== 9)
+            throw 'undefined getter';
+        let sparse = [];
+        sparse[20000] = 7;
+        Object.defineProperty(sparse, '20000', {
+            get() { hits++; return 9; }, configurable: true
+        });
+        let peer = [];
+        peer[20000] = 9;
+        if (compare(sparse, peer, 20000, 20001) !== 11 || hits !== 10)
+            throw 'sparse getter';
+        compare;
+    )JS";
+    Item value = transpile_js_to_mir(&runtime, source, "p2-native-array-descriptor.js", NULL);
+    EXPECT_FALSE(item_is_error(value));
+    EXPECT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    if (get_type_id(value) == LMD_TYPE_FUNC) {
+        auto* function = (JsFunction*)value.function;
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+        Item compiled = function->code->compiled_body;
+        EXPECT_EQ(get_type_id(compiled), LMD_TYPE_FUNC);
+        if (get_type_id(compiled) == LMD_TYPE_FUNC)
+            EXPECT_TRUE(function_has_abi(compiled.function, FN_ENTRY_ABI_MVP_LMD));
+    }
+    runtime_cleanup(&runtime);
 }
 
 TEST(JsInterpreter, AutoMvpPromotedDefinitionsShareOneNativeRealm) {

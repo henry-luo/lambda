@@ -31,6 +31,10 @@ struct MvpLmdDynamic {
     NameRef wrapper_key;
     NameRef source_key;
     JsInterpHostOps ops;
+    JsGlobalEnvironment* environment;
+    JsGlobalEnvironment child_environment;
+    bool owns_environment;
+    // retention chain only; name resolution uses the canonical realm index.
     JsInterpEnv* script_environment;
 };
 static Item dynamic_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
@@ -413,6 +417,9 @@ static bool dynamic_retain_script(void* opaque, JsScript* script) {
 }
 static void dynamic_release(void* opaque) {
     MvpLmdDynamic* state = (MvpLmdDynamic*)opaque;
+    JsRuntimeState* runtime = js_runtime_state_for((EvalContext*)state->functions.owner);
+    if (state->owns_environment || (runtime && runtime->global_environment == state->environment))
+        js_global_environment_remove_storage_bindings(state->environment);
     if (state->script_environment) heap_unregister_gc_object_root(state->script_environment);
     state->script_environment = NULL;
     root_vector_clear(&state->functions);
@@ -420,6 +427,7 @@ static void dynamic_release(void* opaque) {
 static void dynamic_destroy(void* opaque) {
     MvpLmdDynamic* state = (MvpLmdDynamic*)opaque;
     dynamic_release(state);
+    if (state->owns_environment) js_global_environment_destroy(&state->child_environment);
     root_vector_destroy(&state->functions);
     mem_free(state);
 }
@@ -449,12 +457,29 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
     state = (MvpLmdDynamic*)mem_calloc(1, sizeof(MvpLmdDynamic), MEM_CAT_EVAL);
     if (!state) return NULL;
     state->program = program;
+    root_vector_init(&state->functions, context, "MVP dynamic function identity");
+    if (mvp_lmd_program_realm_key(program)) {
+        state->owns_environment = true;
+        state->environment = &state->child_environment;
+        js_global_environment_init(state->environment, context);
+    } else {
+        if (!js_runtime_state_init((EvalContext*)context)) { dynamic_destroy(state); return NULL; }
+        state->environment = js_runtime_state.global_environment;
+    }
+    if (!js_global_environment_ensure(state->environment)) {
+        dynamic_destroy(state); return NULL;
+    }
+    Item global = mvp_lmd_dynamic_global_this(program, false);
+    if (get_type_id(global) == LMD_TYPE_MAP) {
+        js_global_environment_slot(state->environment, JS_GLOBAL_ENV_GLOBAL_THIS) = global;
+        js_global_environment_slot(state->environment, JS_GLOBAL_ENV_LEXICAL_GLOBAL) = global;
+        state->environment->lexical_epoch = js_get_heap_epoch();
+    }
     state->wrapper_key = name_pool_create_unique_private(context->name_pool,
         {"MVP [[HostWrapper]]", 19});
     state->source_key = name_pool_create_unique_private(context->name_pool,
         {"MVP [[DynamicSource]]", 21});
-    if (!state->wrapper_key || !state->source_key) { mem_free(state); return NULL; }
-    root_vector_init(&state->functions, context, "MVP dynamic function identity");
+    if (!state->wrapper_key || !state->source_key) { dynamic_destroy(state); return NULL; }
     if (!root_vector_push(&state->functions, Item{.item = ITEM_JS_UNDEFINED})) {
         dynamic_destroy(state); return NULL;
     }
@@ -489,8 +514,14 @@ Item mvp_lmd_dynamic_lexical(MvpLmdProgram* program, Item key, Item value, int o
     auto* state = (MvpLmdDynamic*)context_capsule_extension(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program));
     *found = false;
     return state && state->program == mvp_lmd_program_realm(program)
-        ? js_interp_host_global_lexical(&state->ops, state->script_environment, key, value, operation, found)
+        ? js_interp_host_global_lexical(&state->ops, state->environment, key, value, operation, found)
         : ItemNull;
+}
+JsGlobalEnvironment* mvp_lmd_dynamic_global_environment(MvpLmdProgram* program, bool create) {
+    MvpLmdDynamic* state = create ? dynamic_state(program) :
+        (MvpLmdDynamic*)context_capsule_extension(context, MVP_LMD_DYNAMIC_OWNER,
+            mvp_lmd_program_realm_key(program));
+    return state ? state->environment : NULL;
 }
 Item mvp_lmd_eval_script(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item, Item, Item) {
     RootFrame roots(1);
@@ -501,7 +532,7 @@ Item mvp_lmd_eval_script(Context*, MvpLmdProgram* program, Item* args, uint64_t 
     if (!state) return dynamic_fail(LMD_MVP_MEMORY);
     String* text = source.get().get_string();
     return js_interp_execute_host_source(&state->ops, text->chars, text->len,
-        "<$262.evalScript>", false, &state->script_environment);
+        "<$262.evalScript>", false, &state->script_environment, state->environment);
 }
 
 Item mvp_lmd_dynamic_unwrap_function(Item function) {
@@ -554,9 +585,10 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     JsPropertyLane lane = js_property_lane_for_canonical_key(name.get());
     switch (operation) {
     case LMD_PROP_GET: case LMD_PROP_CALLEE: {
-        // native Lambda VMaps and resting errors own fields outside the ordinary
-        // map payload and the JsClassMeta exotic callback table.
-        if (data_map || packed_map || js_is_resting_error(object.get())) {
+        // native globals also own live host fields (window.event and viewport
+        // metrics); ordinary own-slot reads bypass their canonical storage.
+        if (data_map || packed_map || js_is_resting_error(object.get()) ||
+                js_is_global_this_object_value(object.get())) {
             result.set(js_get_key_core(object.get(), name.get(), target.get()));
             break;
         }
@@ -682,10 +714,11 @@ Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool mo
     function = lambda_item_resolve_pending_slot(function);
     if (js_is_native_bigint_egress(function)) return js_native_bigint_to_bigint(function);
     if (get_type_id(function) != LMD_TYPE_FUNC) return function;
-    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
-    if (library && library->native_callable_values &&
-            function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION)) return function;
     bool js = function_has_abi(function.function, FN_ENTRY_ABI_JS_FUNCTION);
+    MvpLmdLibraryState* library = mvp_lmd_program_library(program);
+    // native callables already publish their ABI; wrapping them splits host identity.
+    if (js && ((library && library->native_callable_values) ||
+            js_fn_body_kind((JsFunction*)function.function) != JS_FUNCTION_BODY_AST)) return function;
     if (!js && !(module_export && !function_has_abi(function.function, FN_ENTRY_ABI_MVP_LMD) &&
             js_has_call_capability(function))) return function;
     // native jobs and array slots can enter without a property membrane. Their
@@ -766,22 +799,22 @@ Item mvp_lmd_dynamic_import_value(MvpLmdProgram* program, Item function, bool mo
     return wrapper.get();
 }
 Item mvp_lmd_import_host_property(MvpLmdProgram* program, Item owner, Item key,
-        const JsPropertyDescriptor* source, Item previous_global) {
+        const JsPropertyDescriptor* source) {
     if (get_type_id(owner) != LMD_TYPE_MAP) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    RootFrame roots(6);
+    RootFrame roots(5);
     if (!roots.valid()) return ItemError;
     uint64_t home = 0;
-    Rooted<Item> object(roots, owner), name(roots, key), previous(roots, previous_global),
+    Rooted<Item> object(roots, owner), name(roots, key),
         value(roots, lambda_item_adopt_scalar_home(source->value, &home)),
         getter(roots, source->getter), setter(roots, source->setter);
     ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)object.get().map->type, name.get().get_string());
     if (field && !(field->flags & (JSPD_IS_ACCESSOR | JSPD_DELETED)) &&
             map_shape_field_to_item(object.get().map->data, field).item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
         // descriptor validation must not resolve its own lazy marker recursively.
-        if (!map_shape_set(object.get().map, name.get().get_string(), make_js_undefined())) return ItemError;
+        Item cleared = js_define_own_key_storage(object.get(), name.get(), make_js_undefined());
+        if (item_is_error(cleared)) return cleared;
     }
-    value.set(get_type_id(previous.get()) == LMD_TYPE_MAP && value.get().item == previous.get().item
-        ? object.get() : mvp_lmd_dynamic_import_value(program, value.get()));
+    value.set(mvp_lmd_dynamic_import_value(program, value.get()));
     getter.set(mvp_lmd_dynamic_import_value(program, getter.get()));
     setter.set(mvp_lmd_dynamic_import_value(program, setter.get()));
     if (item_is_error(value.get()) || item_is_error(getter.get()) || item_is_error(setter.get())) return ItemError;
@@ -813,10 +846,15 @@ Item mvp_lmd_dynamic_call_native(MvpLmdProgram* program, Item underlying, Item r
     if (!roots.valid()) return ItemError;
     Rooted<Item> callee(roots, underlying), self(roots, mvp_lmd_dynamic_unwrap_function(receiver)),
         new_target(roots, mvp_lmd_dynamic_unwrap_function(target)), result(roots, ItemNull);
+    // direct native entry retains the home realm formerly carried by its MVP wrapper.
+    MvpLmdProgram* home = function_has_abi(callee.get().function, FN_ENTRY_ABI_JS_FUNCTION)
+        ? mvp_lmd_program_for_global(program, ((JsFunction*)callee.get().function)->home_global) : NULL;
+    MvpLmdRealmScope realm(home ? home : program);
     result.set(new_target.get().item == ITEM_JS_UNDEFINED
         ? js_call_function(callee.get(), self.get(), args, (int)count)
         : js_construct_value(callee.get(), args, (int)count, new_target.get(), NULL, true));
-    return item_is_error(result.get()) ? result.get() : mvp_lmd_dynamic_import_value(program, result.get());
+    return realm.complete(item_is_error(result.get()) ? result.get() :
+        mvp_lmd_dynamic_import_value(home ? home : program, result.get()));
 }
 
 static Item dynamic_eval(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {

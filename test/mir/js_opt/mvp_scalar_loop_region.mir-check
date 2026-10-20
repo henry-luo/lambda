@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "D8.1.3v27, D8.4.1v2: a scalar loop beside unrelated eval guards Number arguments once at its callable entry. Preserve the complete generic conversion loop for misses and avoid duplicating loops at call sites.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "count": {
+        "dadd\t": 4,
+        "dlt\t": 4,
+        "call\tmvp_lmd_to_primitive": 1,
+        "call\tmvp_lmd_primitive_to_number": 1
+      },
+      "expect_seq": [
+        "mov\t{{r:kind}}, 8",
+        ", {{r:kind}}, 8",
+        "dadd\t",
+        "dlt\t",
+        "call\tmvp_lmd_to_primitive",
+        "dlt\t"
+      ]
+    },
+    {
+      "in_func": "mvp_lmd_program",
+      "count": {
+        "dlt\t": 0,
+        "call\tmvp_lmd_dynamic_environment": 11
+      }
+    }
+  ]
+}

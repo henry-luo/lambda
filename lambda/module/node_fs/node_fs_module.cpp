@@ -3412,6 +3412,10 @@ static const JubeModuleDef node_fs_module = {
     node_fs_runtime_detach,
     node_fs_dependencies,
     1,
+    NULL,
+    0,
+    // filesystem operations invoke supplied callbacks but never load/evaluate JS source.
+    1,
 };
 
 #if !defined(LAMBDA_NODE_FS_DYNAMIC_MODULE)
