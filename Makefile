@@ -88,7 +88,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_typed \
 	test_scalar_compare_gtest \
 	test_binary_storage_gtest \
-	test_lambda_errors_gtest \
+	test_lambda_runtime_gtest \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \

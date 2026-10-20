@@ -144,15 +144,43 @@ def text_export(path, expected_pages):
     print("PDF_TEXT_CHECK: embedded fonts, Unicode extraction, affine/decorated/SVG/group text and shared page fonts verified")
 
 
-def phase6(path):
-    import subprocess
-    from PIL import Image
+def read_ppm(path):
+    """Read a binary (P6) PPM as written by pdftoppm: (width, height, rgb bytes)."""
+    data = Path(path).read_bytes()
+    fields, pos = [], 0
+    while len(fields) < 4:
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":  # a header comment runs to the end of its line
+            pos = data.index(b"\n", pos) + 1
+            continue
+        end = pos
+        while not data[end:end + 1].isspace():
+            end += 1
+        fields.append(data[pos:end])
+        pos = end
+    assert fields[0] == b"P6", "pdftoppm did not write a binary PPM"
+    width, height, maxval = (int(field) for field in fields[1:])
+    assert maxval == 255, "only 8-bit PPM samples are supported"
+    pixels = data[pos + 1:]  # one whitespace byte separates the header from the samples
+    assert len(pixels) >= width * height * 3, "truncated PPM"
+    return width, height, pixels
 
+
+def ppm_pixel(image, x, y):
+    width, _, pixels = image
+    offset = (y * width + x) * 3
+    return tuple(pixels[offset:offset + 3])
+
+
+def phase6(path):
+    """Phase 6 semantics read from the bytes: no external tool is needed."""
     objects = validate(path, 1, None)
     data = Path(path).read_bytes()
     for title in ["PDF phase 6 Ω", "Chapter Ω", "Section 中😀"]:
         encoded = (b"\xfe\xff" + title.encode("utf-16-be")).hex().upper().encode()
         assert b"<" + encoded + b">" in data, "Unicode metadata/outline encoding mismatch"
+    assert b"/Producer (Lambda PDF Renderer)" in data, "missing producer metadata"
     catalog = objects[0]
     root_id = int(re.search(rb"/Outlines ([0-9]+) 0 R", catalog)[1])
     root = objects[root_id - 1]
@@ -166,20 +194,81 @@ def phase6(path):
     content = decoded_content(objects)
     assert b"5 5 m\n80 5 l\n45 45 l\nh\nS\n" in content, "SVG stroke lost its vector geometry"
     assert b"[5 4] 1.5 d" in content, "dashed outline lost its stroke pattern"
+    print("PDF_PHASE6_CHECK: Unicode, producer, outline hierarchy, links and SVG strokes verified")
+    return objects
+
+
+def phase6_raster(path):
+    """Independent rendering by poppler; run when a phase 6 golden is accepted."""
+    import subprocess
+
     info = subprocess.run(["pdfinfo", path], check=True, capture_output=True, text=True).stdout
     assert "PDF phase 6 Ω" in info and "Lambda PDF Renderer" in info
     prefix = str(Path(path).with_suffix("")) + "_checked"
     subprocess.run(["pdftoppm", "-singlefile", "-r", "96", path, prefix], check=True, capture_output=True)
-    image = Image.open(prefix + ".ppm").convert("RGB")
+    image = read_ppm(prefix + ".ppm")
     samples = {(35, 35): (32, 64, 224), (95, 25): (232, 0, 22), (145, 25): (22, 0, 232),
                (185, 30): (255, 127, 127), (215, 30): (127, 127, 255), (265, 30): (255, 255, 255),
                (45, 160): (0, 160, 64), (45, 145): (32, 48, 224), (35, 95): (32, 176, 96),
                (202, 87): (127, 104, 0), (236, 105): (255, 208, 0), (225, 142): (255, 0, 0), (225, 160): (0, 0, 255), (240, 195): (0, 0, 0)}
     for position, expected in samples.items():
-        actual = image.getpixel(position)
+        actual = ppm_pixel(image, *position)
         assert max(abs(a - b) for a, b in zip(actual, expected)) <= 3, (position, actual, expected)
-    print("PDF_PHASE6_CHECK: Unicode, outline hierarchy, links, SVG strokes and 14 independent raster samples verified")
+    print("PDF_PHASE6_RASTER: pdfinfo metadata and 14 independent poppler raster samples verified")
 
+
+def normalized_objects(objects):
+    """Object bodies with each Flate stream inflated and its /Length dropped, so two
+    builds that differ only in zlib's compressed bytes compare equal."""
+    normalized = []
+    for body in objects:
+        stream = re.search(rb"/Length ([0-9]+) >>\nstream\n", body)
+        if not stream:
+            normalized.append(body)
+            continue
+        raw = body[stream.end():stream.end() + int(stream[1])]
+        header = body[:stream.start()]
+        decoded = zlib.decompress(raw) if b"/Filter /FlateDecode" in header else raw
+        normalized.append(header + b"/Length * >>\nstream\n" + decoded)
+    return normalized
+
+
+def structure(path, kind, quiet=False):
+    """The structural check selected by `kind`: a page count, "phase6", or None."""
+    if kind == "phase6":
+        return validate(path, 1, None, quiet=quiet)
+    return validate(path, int(kind) if kind else None, quiet=quiet)
+
+
+def check_semantics(path, kind):
+    return phase6(path) if kind == "phase6" else structure(path, kind)
+
+
+def compare_golden(path, golden, kind):
+    """Check `path`, then require the same objects as the accepted golden PDF."""
+    objects = normalized_objects(check_semantics(path, kind))
+    expected = normalized_objects(structure(golden, kind, quiet=True))
+    refresh = f"accept the new output with: python3 test/pdf_output_check.py {path} accept {golden}" + (
+        f" {kind}" if kind else "")
+    assert len(objects) == len(expected), (
+        f"object count {len(objects)} differs from golden {len(expected)}; {refresh}")
+    for identifier, (actual, wanted) in enumerate(zip(objects, expected), 1):
+        if actual != wanted:
+            at = next((i for i, (a, b) in enumerate(zip(actual, wanted)) if a != b), min(len(actual), len(wanted)))
+            raise AssertionError(f"object {identifier} differs from golden at byte {at}: "
+                                 f"{actual[max(0, at - 20):at + 40]!r} vs {wanted[max(0, at - 20):at + 40]!r}; {refresh}")
+    print(f"PDF_GOLDEN_CHECK: {len(objects)} objects match {golden}")
+
+
+def accept_golden(path, golden, kind):
+    """Verify a new output (with poppler for phase 6) and store it as the golden."""
+    import shutil
+
+    check_semantics(path, kind)
+    if kind == "phase6":
+        phase6_raster(path)
+    shutil.copyfile(path, golden)
+    print(f"PDF_GOLDEN_ACCEPTED: {path} -> {golden}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 3 and sys.argv[2] == "roundtrip":
@@ -191,7 +280,12 @@ if __name__ == "__main__":
         sys.exit(0 if needle in decoded_content(objects) else 1)
     elif len(sys.argv) > 3 and sys.argv[2] == "text":
         text_export(sys.argv[1], int(sys.argv[3]))
+    elif len(sys.argv) > 3 and sys.argv[2] in ("golden", "accept"):
+        kind = sys.argv[4] if len(sys.argv) > 4 else None
+        (compare_golden if sys.argv[2] == "golden" else accept_golden)(sys.argv[1], sys.argv[3], kind)
     elif len(sys.argv) > 2 and sys.argv[2] == "phase6":
         phase6(sys.argv[1])
+    elif len(sys.argv) > 2 and sys.argv[2] == "phase6-raster":
+        phase6_raster(sys.argv[1])
     else:
         validate(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else None)
