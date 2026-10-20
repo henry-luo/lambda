@@ -378,6 +378,8 @@ Query `?` - search attributes + all descendants:
 | `data?(int \| string)` | all int or string values |
 | `data?{name: string}` | maps with string 'name' |
 | `data?{status: "ok"}` | maps where status == "ok" |
+| `doc?\("" ... "TODO" ...)` | every text containing TODO (a pattern is a type) |
+| `el[\("ID-" "\d"+)]` | direct texts that are whole matches |
 
 Self-inclusive query `.?` — search self + attributes + all descendants:
 
@@ -395,6 +397,15 @@ Child-level query `[T]` — search direct attributes + children only:
 | `{name: "Alice", age: 30}[string]` | ["Alice"] |
 | `el[element]` | direct child elements only |
 | `el[string]` | attr values + text children |
+
+Wildcard steps — `.*` items (≡ `[any]`), `.**` self + all descendants (≡ `.?any`):
+
+| Form | Meaning |
+|---|---|
+| `users.*.name` | the name of every item, named or indexed |
+| `doc.**.id` | every `id` at any depth |
+| `html?<div>.class` | a list steps per item: every div's class |
+| `(html?<p>)[0]` | positional keys pick from the list itself |
 
 ## Control Flow
 

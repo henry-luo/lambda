@@ -2283,6 +2283,9 @@ JitImport jit_runtime_imports[] = {
     {"const_pattern_with_tl", FPTR(const_pattern_with_tl)},
     {"target_equal", FPTR(target_equal)},
     {"fn_query", FPTR(fn_query)},
+    {"fn_step_items", FPTR(fn_step_items)},
+    {"fn_step_closure", FPTR(fn_step_closure)},
+    {"fn_navigate_value", FPTR(fn_navigate_value)},
     {"fn_to", FPTR(fn_to)},
     {"fn_range_bound_error", FPTR(fn_range_bound_error)},
 

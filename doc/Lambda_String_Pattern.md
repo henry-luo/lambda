@@ -197,6 +197,45 @@ fn classify(value) => match value {
 }
 ```
 
+## Querying Documents with Patterns
+
+A pattern is a type, so it works in every query position a type does: `e?P`
+searches all descendants, `e.?P` also tests `e` itself, and `e[P]` tests only
+the direct attribute values and children (S8.2.4v3). On a document that finds
+its text: element text, attribute values, and string fields of maps and arrays.
+
+```lambda
+let page = <article
+    <h1 "Release v2.4.1">
+    <p "Fixed in v2.4.1." <a href: "https://example.com/issues/42", "issue 42">>
+    <p "Contact support@example.com">
+    "Draft">
+page?\("Release " ...)              // "Release v2.4.1"
+page?\("" ... "v2." ...)            // ("Release v2.4.1", "Fixed in v2.4.1."): text containing v2.
+page?\("https://" ...)              // "https://example.com/issues/42", an attribute value
+page[\("" ...)]                     // "Draft", the only direct text child
+"Draft".?\("D" ...)                 // "Draft", the value itself
+count(page?\("" ... "v2." ...))     // 2
+```
+
+Like `is`, a query keeps a text only when the whole text matches. With
+`type Version = \("v" "\d"+ "." "\d"+ "." "\d"+)`, `page?Version` is `null`,
+because no text is exactly a version number. Surround the pattern with `...`
+to find text that contains a match, then use `find` to extract the matching
+parts:
+
+```lambda
+type Email = \("\w"+ "@" "\w"+ "." "\a"{2,6})
+let note = <div <p "Contact support@example.com"> <p "No address here">>
+let emails = [*note?\("" ... "@" ...)] |> find(~, Email) |> ~[0].value
+emails                               // ["support@example.com"]
+```
+
+A query result follows the subscript rule: `null` for no match, the text itself
+for one, and a list for several. A string pattern finds only strings and a
+symbol pattern only symbols. Queries also combine patterns with other types,
+as in `data?(\("ID-" "\d"+) | int)`.
+
 ## Pattern-Aware String Functions
 
 `find`, `replace` and `split` search within a string and require string-domain

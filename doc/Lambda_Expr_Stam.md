@@ -599,7 +599,10 @@ data?(int | string)         // all int or string values
 html?<div class: string>    // <div> elements with a class attribute
 data?{name: string}         // maps with a string 'name' field
 data?{status: "ok"}         // maps where status == "ok"
+doc?\("" ... "TODO" ...)     // every text that contains TODO
 ```
+
+A string pattern `\(...)` is a type, so `?`, `.?` and `[...]` accept it like any other type and find the text whose whole value matches. [Querying Documents with Patterns](Lambda_String_Pattern.md#querying-documents-with-patterns) has examples.
 
 The `.?` variant is **self-inclusive** — it also tests the root value itself:
 
@@ -677,6 +680,36 @@ html?<table>[tr][td]           // all tables → their direct rows → their dir
 | Analogy | XPath `//`, CSS descendant | XPath `/`, CSS `>` child |
 | Result | The run `T*`: `null`, the match, or a list | The run `T*`: `null`, the match, or a list |
 | Match count | `count(expr?T)` | `count(expr[T])` |
+
+### Wildcard Steps: `.*` and `.**`
+
+`e.*` is the **item step**: the run of `e`'s items in the order `for (x in e)` walks them. An array, list or range gives its items, a map its values, and an element its attribute values and then its children. Named and indexed members are both items, so `.*` reads JSON-shaped data directly. `e.*` is the same as `e[any]`.
+
+`e.**` is the **closure** of `.*`: zero or more item steps, so it yields `e` itself and then every value beneath it in document order. `e.**` is the same as `e.?any`, and `e.*.**` is every proper descendant, the same as `e?any`.
+
+```lambda
+let users = [{name: "ann", age: 31}, {name: "bob", age: 42}]
+users.*.name                // ("ann", "bob")
+let doc = <div id: "x", <p b: 1> <p b: 2, <p b: 3>>>
+doc.*                       // ("x", <p b: 1>, <p b: 2 …>) — attribute values, then children
+doc.**.b                    // (1, 2, 3) — every b at any depth
+count(doc.**)               // 8 — doc itself and its seven descendants
+```
+
+Text is one value to the walk, so `"abc".*` is `null` even though `for` walks a string by character. A wildcard step always needs a base: there is no bare `*.a`, and inside a pipe or `that` body you write `~.*.a`. A quoted `'*'` is an ordinary key: `m.'*'` reads the field named `*`.
+
+### Stepping a run
+
+A query result with two or more matches is a list, and any list is stepped **set-at-a-time**: a name, a type key, a query, a wildcard, `.~~` or `./` applies to each item, the results are joined, and `null` results drop out. A stored result behaves exactly as an inline one.
+
+```lambda
+let page = <div <p class: "a"> <p class: "b"> <p>>
+page?<p>.class              // ("a", "b") — the third p has no class
+let ps = page?<p>
+ps.class                    // the same
+```
+
+Positional keys are the exception: they select from the run itself. `(page?<p>)[0]` is the first `p`, and the first child of each `p` is the pipe `page?<p> |> ~[0]`. A name that the list itself answers, such as `length`, is read from the list. An array is a container, not a run: `[{b: 1}, {b: 2}].b` is `null`, and `[{b: 1}, {b: 2}].*.b` is `(1, 2)`.
 
 ---
 

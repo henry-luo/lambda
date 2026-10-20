@@ -1,0 +1,61 @@
+"items of an element: attribute values, then childrenx"
+<p b: 1>
+<p b: 2,
+  <p b: 3>>
+"a name after the item step"
+1
+2
+"the closure includes self, in document order"
+1
+2
+3
+"two item steps splice"
+1
+2
+<p b: 3>
+"grandchildren that are p"
+<p b: 3>
+"closure then type key"
+<p b: 1>
+<p b: 2,
+  <p b: 3>>
+<p b: 3>
+"named and indexed members are both itemsannbob"
+31
+42
+{
+  b: 1
+}
+{
+  b: 2
+}
+5
+1
+2
+{
+  a: {
+    b: 1
+  },
+  c: {
+    b: 2
+  },
+  d: 5
+}
+{
+  b: 1
+}
+1
+{
+  b: 2
+}
+2
+5
+"a quoted '*' is an ordinary name"
+7
+"text is a scalar to the walkabcabsent and degenerate bases"
+5
+1
+2
+3
+3
+8

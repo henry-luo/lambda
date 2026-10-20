@@ -5876,6 +5876,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
+        // S8.2.5: `.*` and `.**` are steps over the item walk, not name reads
+        if (int wildcard = ast_member_wildcard(field)) {
+            return wildcard == 1 ? fn_step_items(obj.get()) : fn_step_closure(obj.get());
+        }
         if (field->interp_field && get_type_id(obj.get()) == LMD_TYPE_MAP &&
                 obj.get().map->type == field->interp_field->shape) {
             // the immutable shape predicts this field; misses keep shared lookup semantics
@@ -5970,12 +5974,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (!nav->object) return ItemNull;
         Item object = eval_expr(f, nav->object);
         if (interp_frame_pending(f)) return object;
+        // a path selects before any `~` relation, as the JIT's carrier check does
         if (get_type_id(object) == LMD_TYPE_PATH) {
-            Path* path = (Path*)(uintptr_t)object.item;
-            Path* result = nav->root
-                ? path_select_root(f->st->ctx->pool, path)
-                : path_select_parent(f->st->ctx->pool, path);
-            return interp_ptr_item(result);
+            return fn_navigate_value(object, nav->root ? 1 : 0);
         }
         // The contextual atom (`~`) carries the active occurrence relation in
         // the interpreter context. Keep that relation out of Lambda values;
@@ -6007,9 +6008,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return context->parent
                 ? (Item){.item = *context->parent} : ItemNull;
         }
-        // Dynamic occurrence lineage is added in the navigation phase. A
-        // non-path value without a cursor has no parent/root relation.
-        return nav->root ? object : ItemNull;
+        // Dynamic occurrence lineage is added in the navigation phase; without
+        // a cursor a path selects, a run maps, and a value is its own root.
+        Scratch obj(f);
+        obj.set(object);
+        return fn_navigate_value(obj.get(), nav->root ? 1 : 0);
     }
     case AST_NODE_QUERY_EXPR: {
         AstQueryNode* query = (AstQueryNode*)node;

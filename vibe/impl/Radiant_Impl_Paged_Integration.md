@@ -1703,9 +1703,9 @@ request with the full remaining goal preserved.
 The existing 490-case baseline is now `test_paged_media_gtest.exe`, built from
 `test/test_paged_media_gtest.cpp` and the shared font-path tests. The former
 `test/test_view_tree_model_gtest.cpp` was renamed. Its twelve standalone shared
-layout/expression units moved into `test/test_view_reuse_gtest.cpp`; the two Mac
+layout/expression units moved into `test/test_radiant_core_gtest.cpp`; the two Mac
 font-metric cases moved in the opposite direction. The extended view-reuse
-selection now has its own 124-case executable, `test_view_reuse_gtest.exe`,
+selection now has its own 124-case executable, `test_radiant_core_gtest.exe`,
 rather than a filtered alias of the paged-media executable. Test names and
 assertion bodies are preserved byte for byte. Historical evidence above retains
 the executable names used when it was captured.

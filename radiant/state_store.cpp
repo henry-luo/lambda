@@ -4386,6 +4386,8 @@ void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
     }
     if (changed) {
         state->version++;
+        // viewport synchronization changes coordinates, just like concrete pane writes.
+        state->scroll_position_bumps++;
         layout_content_visibility_invalidate(state);
     }
     state_assert_after_mutation(state, "doc_state_sync_viewport_scroll");

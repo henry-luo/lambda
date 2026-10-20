@@ -29,9 +29,11 @@ typedef enum {
     LPATH_SEG_PARENT = 4,         // parent operation (~~)
     LPATH_SEG_ROOT = 5,           // root operation (./)
     LPATH_SEG_INT = 6,            // typed non-negative integer key
+    LPATH_SEG_QUERY = 7,          // type query ?T / .?T (S2.4.7), type in query_type
 } LPathSegmentType;
 
-// Path flags (bits 0-2 for segment type, bit 7 for metadata loaded)
+// Path flags (bits 0-2 for segment type, bit 3 query self, bit 7 metadata loaded)
+#define PATH_FLAG_QUERY_SELF   0x08  // bit 3: the query is `.?T` (inclusive closure)
 #define PATH_FLAG_META_LOADED  0x80  // bit 7: metadata has been stat'd and loaded
 
 struct Path {
@@ -44,7 +46,10 @@ struct Path {
     uint8_t root_scheme;        // PathScheme root carried by every spine node
     uint8_t authority_kind;     // 0 none, 1 current machine, 2 named host
     const char* authority_name; // named file authority, owned by the path pool
-    int64_t int_value;          // value for LPATH_SEG_INT
+    union {
+        int64_t int_value;      // value for LPATH_SEG_INT
+        uint64_t query_type;    // pool-owned type value Item for LPATH_SEG_QUERY
+    };
 };
 
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Path, type_id) == 0,
@@ -109,6 +114,18 @@ Item path_get_item(Path* path, int64_t index);                    // Get item at
 // The force step uses it to split a reference into the document prefix and the
 // trailing steps it navigates in memory.
 Path* path_longest_existing_prefix(Path* path);
+bool path_is_directory(Path* path);               // PTH81: an existing local directory
+// S2.4.7: `?T` (self false) or `.?T` (self true) as a path step; type_item must
+// outlive the path (the runtime pins it into its pool before calling this)
+Path* path_query(Pool* pool, Path* base, uint64_t type_item, bool self);
+// prints a query step's type operand; registered by the runtime, which owns types
+typedef void (*PathTypePrinter)(uint64_t type_item, void* strbuf);
+void path_register_type_printer(PathTypePrinter printer);
+// resolves a path whose enumeration needs the runtime's force walk (a query
+// step, or a wildcard with steps after it) to the array of its matches
+typedef Item (*PathEnumerationResolver)(Path* path);
+void path_register_enumeration_resolver(PathEnumerationResolver resolver);
+Path* path_append_op(Pool* pool, Path* base, Path* op);  // apply one operation node
 
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration

@@ -4788,6 +4788,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             doc_context_reset();
             write_set_reset();
 
+            // Release every Input the script created (input(), parse()). They
+            // live in the InputManager's pools until reset; kept across a
+            // batch they accumulated (a math script's font loads retained
+            // ~300 MB per run) until the debug-build memory budget refused
+            // unrelated allocations in later scripts. The script cache keeps
+            // its artifacts in its own pools, so cached modules survive.
+            InputManager::reset_global_inputs();
+
             // Clean up per-run execution scripts; InputManager retains only cache artifacts.
             runtime_teardown_batch_scripts(&runtime);
         }

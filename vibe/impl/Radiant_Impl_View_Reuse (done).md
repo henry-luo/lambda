@@ -489,7 +489,7 @@ all three variants retained 46/46 identical normalized layouts:
 | Gate | Result |
 |---|---|
 | Release build | `make release` passed; final `lambda.exe` is the release build. |
-| Focused campaign suite | `test_view_reuse_gtest.exe`: 19/19 passed, covering exact prop/style collisions, cap/COW, weak/stale liveness, arena retirement, overflow, variable sizes, UI owner arena, epoch coexistence, invalidation, and value lifetime. |
+| Focused campaign suite | `test_radiant_core_gtest.exe`: 19/19 passed, covering exact prop/style collisions, cap/COW, weak/stale liveness, arena retirement, overflow, variable sizes, UI owner arena, epoch coexistence, invalidation, and value lifetime. |
 | Allocator/GC | Arena 91/91; GC 47/47; all focused memory-factory/pool/scratch suites passed. |
 | CSS/DOM/layout components | DOM CRUD 63/63; WPT CSS syntax 38 passed + 6 intentional skips; layout custom 11/11; CSS animation 18/18; StateStore 4/4. |
 | ASAN churn | 10k/overflow retained mutation churn passed; debug ASAN rich-text editor passed 27/27. |

@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-20
 
-**Status:** committed core pass and continuations through §19, with a qualified
-§20 continuation, 2026-10-20.
+**Status:** committed core pass and continuations through §20, with qualified
+continuations §21–§25, 2026-10-20.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
 chunk references, resource summaries, the SVG producer boundary, validated
@@ -19,6 +19,20 @@ fallback, with a green final aggregate. The §19 membership-group core is comple
 with a green aggregate; shared/unindexed/incomplete graphs keep their fallback.
 The §20 dirty-source hint optimization and scoped qualification are complete,
 with a green aggregate; unavailable hints keep the live-ID lookup fallback.
+The §21 bounded array-reuse implementation and scoped qualification are complete,
+with a green aggregate; default one-shot lists retain their existing clear lifetime.
+The §22 SVG scroll-dependency milestone and scoped qualification are complete,
+with a green aggregate; hosts containing embedded HTML retain full invalidation.
+The §23 measurement milestone is complete: repeat artifacts, process accounting,
+strict profiles and a refreshed bounded release matrix are reproducible. Broader
+movement/resource/backend performance qualification remains open.
+The §24 explicit translated-vector composition milestone is complete, with
+release/ASan, SVG and Radiant qualification. Automatic HTML reuse after reflow,
+pixel-effect translation and finer dependency admission remain open.
+The §25 production vector cache for visible-overflow SVG is complete, with
+release/ASan, SVG and Radiant qualification and a scoped release measurement.
+Published storage now pins its independent context beyond document teardown;
+remaining cross-cache command copying is measured and recorded as follow-up work.
 
 **Artifact retention:** an external cleanup removed `./temp/` during continuation
 qualification. The earlier temporary receipts cited in §7 and the historical
@@ -1926,3 +1940,541 @@ overlapping candidate/source pair. Placement-only composition, finer inherited/
 style/reference invalidation and full M0–M7 frame-time/peak-memory qualification
 remain open. Earlier runtime/PDF debt is unchanged. Eliminated searches do not
 establish a general frame-time or total-memory improvement.
+
+## 21. Reuse immutable gradient and dash arrays across fresh recordings
+
+**Completed core milestone, 2026-10-20:** `DisplayList::clear` previously released the
+content-indexed stop/dash buffers, so fresh recording copies unchanged vector
+values again. Give the persistent ViewTree recorder a bounded value index.
+The recorder keeps its leases between recordings; copied and published owners
+acquire independent leases. Other recorders keep their existing lifetime.
+Ownership follows **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+Acceptance: successive native frame scopes record gradients and dashed strokes
+with zero repeated array-copy bytes and identical pixels. Changed values publish
+new buffers; array kind and exact bytes remain part of equality. Captured/copy
+readers survive producer clear, budget retirement and destruction. Empty clears,
+nested frames, overlay checkpoint rewind and recording adoption preserve valid
+leases. Idle indexes have an explicit byte limit, include map overhead in their
+charge, and retire at high memory pressure or teardown. Allocation failure does
+not expose an unpinned buffer or invalidate the previous recording.
+
+Scope: one bounded index, opt-in only for the persistent recorder;
+no global interner, vendor change or placement/inherited-style admission change.
+Verification budget: release native red/green array-copy counts, focused value/
+lease/budget/rollback/adoption/pressure cases, affected native release and ASan
+suites, SVG smoke and one required Radiant aggregate after code stabilizes.
+Full frame-time and peak-memory qualification remains separate.
+
+### Implemented core
+
+The persistent recorder opts into a 1 MiB content index using the existing
+immutable stop/dash buffers and their map leases. Ordinary lists keep the zero
+reuse budget. Clear preserves an eligible index and marks its entries idle;
+exact kind/size/byte matches reactivate a value without allocation or copying.
+Changed values retain their own immutable buffers. All indexed storage, including
+map capacity, is charged. Exceeding the idle limit retires the whole index at
+clear, as does high memory pressure; active recording storage remains valid
+until that boundary. Destruction releases the index regardless of its budget.
+
+Nonzero serials identify values used in the current recording. Reactivating an
+idle value assigns a new serial so overlay rewind can retire it while preserving
+earlier prefix buffers. Rollback from a pre-index checkpoint reserves zero for
+idle state rather than assigning it to a subsequent live prefix. Adoption moves
+an incoming array owner or preserves eligible destination values if none arrives.
+Frame admission includes that possible retained index before replacing a flat
+recording with chunk references, preserving the existing 8 MiB fallback contract.
+
+The native release regression changes three warm fresh recordings from 24 array
+copy bytes each to zero, with two reuses per recording and identical nonempty
+pixels. Focused checks cover exact values and kinds, index-inclusive budget
+retirement, copied readers, destruction, idle reactivation and empty-checkpoint
+rollback, adoption, allocation failure and high pressure. Pressure runs in an
+isolated child initialized before its allocations; the ordinary stub process
+keeps tracking off. The neighboring oversized-graph frame fallback remains
+passing. Final native release/ASan, SVG and aggregate qualification follows.
+
+### Qualification
+
+The frozen release executable is
+`dd15d09ecabbc5f5db8fff6e9685207149ca780618271f04fc57e5e348808be2`
+at HEAD `294779edbbccf0e6d1cf7a0018b547a8a02cf2f4` plus this continuation.
+All 383 affected native cases pass in release and `debug_asan_native` against
+matching sources: 203 vector, 103 display-list, 49 retained and 28 state. No ASan
+memory error is reported; leak detection is disabled, vendor internals are not
+instrumented and native video uses the C++ stub backend. Eleven release products
+were restored and hash-checked before release consumers resumed.
+
+SVG smoke passes twelve scenarios and 680 assertions using the same frozen
+executable. Integer-cast lint passes. Red/green array-copy evidence, native pixels,
+ownership/pressure cases, source/binary identities and restoration receipts are
+under `temp/rendering-array-reuse/`. The required Radiant aggregate exits
+successfully after 373,793 ms: 6,043 passed, zero failed, 146 partial and two
+skipped of 6,191 cases. All 662 UI automation and 111 page-load cases pass.
+Layout retains 3,152 full passes and 142 partial results; visual comparison
+retains 207 full passes, four expected differences and one skip. View tests report
+216 passes and one skip. These are raw aggregate counts; underlying WPT fixture
+conformance claims remain unchanged. `test_summary.json`, `radiant-baseline.log`,
+`aggregate-exit.json` and `qualification.json` preserve the completed gate.
+Source, executable and all eleven restored release-product hashes match the
+frozen candidate. Document links/fences and diff checks pass. This completes
+bounded stop/dash reuse under **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+The cache can retain unused values until its index retires at a clear boundary;
+active recording data can exceed the idle-reuse limit. Hashing and exact-value
+comparison remain. Placement-only composition, finer inherited/style/reference
+invalidation and full M0–M7 frame-time/peak-memory qualification remain open.
+Earlier runtime/PDF debt is unchanged. Avoided copies and allocations do not
+establish a general frame-time or total-memory improvement.
+
+## 22. Preserve SVG layers across unrelated scrolling
+
+**Completed core milestone, 2026-10-20:** the SVG raster key used the full document content-state
+version. Consequently, scrolling outside an unchanged SVG discards its surface
+and restarts capture admission. Reuse the existing scroll-independent selector
+version for hosts without SVG `foreignObject` content. Discover that conservative
+host-wide dependency during the existing style index traversal, including
+potential cross-root `use` targets. Hosts containing embedded HTML, or unavailable
+style metadata, retain the full content-state key. Retention and lifetime remain
+under **D4.5.3v2 / D4.5.1v4**; no formal ruling changes.
+
+Acceptance: a warmed native SVG keeps its layer with zero recaptures across
+repeated unrelated scrolling and supported translation. Pixels remain visible
+at the new placement and clear at the old placement. Hover styles still expire
+the layer. Scrolling HTML inside `foreignObject` changes its visible pixels and
+expires capture admission; any host `foreignObject`, including one outside the
+painted SVG, conservatively retains this behavior. Adding embedded HTML must
+invalidate a previously scroll-independent entry.
+
+Direct viewport synchronization must advance content state, preserve selector
+state and be idempotent for unchanged coordinates. The caller audit found that
+this path omitted the existing scroll-only counter used by concrete scroll panes;
+classify both sources consistently rather than adding a second cache heuristic.
+
+Scope: scroll-only state changes; ordinary interaction/style/reference/resource
+keys and full-frame admission remain conservative. Verification budget: focused
+native red/green and counterexample cases, the complete release vector suite,
+static SVG paint checks, integer-cast lint and one required Radiant aggregate
+after stabilization. No new resource ownership or allocator behavior is planned;
+repeat sanitizer qualification only if that scope changes. Broader per-root
+dependencies and frame-time/peak-memory qualification remain open.
+
+### Implemented behavior
+
+`SvgStyleContext` records whether its existing document index encounters an SVG
+`foreignObject`, using expanded namespace/local-name identity. Layer lookup and
+post-capture publication use `doc_state_selector_version` only when this metadata
+proves the host has no embedded HTML; otherwise they retain
+`doc_state_content_version`. This adds no traversal or resource owner. Mutation
+invalidation already rebuilds the index. Surface size, inherited paint, DOM/style,
+animation, font and image keys remain unchanged.
+Local-name filtering precedes namespace resolution so ordinary HTML nodes do not
+pay for an extra ancestor walk. Direct viewport synchronization increments the
+same scroll-only counter as pane writes when coordinates change; unchanged
+coordinates remain idempotent. Full-frame keys still observe content changes.
+
+The native reproducer previously emitted direct vector paint after each of three
+unrelated scrolls, instead of an image command from the warmed raster. It now
+emits the cached image at the translated position on all three paints, with zero
+layer recordings/passes. Pixel checks cover visible red ink at the new placement
+and white at the old placement. Four counterexamples cover hover expiration and
+blue hover paint after cascade, actual foreign HTML scrolling from red to blue,
+host-wide conservative invalidation, and adding/removing embedded HTML. All five
+focused release cases pass. A sixth case covers content/selector versions,
+idempotence and raster reuse for direct viewport synchronization.
+
+### Qualification
+
+The frozen final release executable is
+`35fdc73f33d8b9c6a1d0c9a072f1820a00ea9d52df70b12509ad103b9efe3548`
+at HEAD `294779edbbccf0e6d1cf7a0018b547a8a02cf2f4` plus the §21/§22
+continuations. All 209 vector and 28 state-store release cases pass, including
+the six new scroll/dependency cases. SVG paint passes twelve scenarios and 680
+assertions at 1×/2× density in direct/eager-layer modes. Integer-cast lint,
+document links/fences and diff checks pass. This milestone adds no allocator or
+resource ownership change; sanitizer qualification was not repeated. The §21
+ownership qualification above applies to that earlier implementation only.
+
+The required Radiant aggregate exits successfully after 397,019 ms: 6,049 passed,
+zero failed, 146 partial and two skipped of 6,197 cases. All 662 UI automation
+and 111 page-load cases pass. Layout retains 3,152 full passes and 142 partial
+results; visual comparison retains 207 full passes, four expected differences
+and one skip. View tests report 216 passes and one skip. These are raw aggregate
+counts; underlying WPT fixture conformance claims remain unchanged.
+
+Receipts under `temp/rendering-svg-scroll/` include source/binary/archive hashes,
+the focused red/green evidence, native logs, SVG pixels, `test_summary.json`,
+`radiant-baseline.log`, `aggregate-exit.json` and `qualification.json`. Final
+source, HEAD and release-product hashes match the candidate. An earlier aggregate
+was deliberately stopped when review found unnecessary namespace ancestor walks
+on non-candidate HTML tags; `baseline-interrupted.log` and its receipt preserve
+that run without claiming completion. The completed gate uses the final tag-first
+check. This completes the scoped milestone under **D4.5.3v2 / D4.5.1v4**.
+
+The host-wide dependency intentionally disqualifies unrelated SVG roots when any
+SVG `foreignObject` exists. Full-frame recordings still invalidate on scroll;
+their placements may change. Placement-only vector chunk composition, finer
+inherited/style/reference dependencies and the full M0–M7 frame-time/peak-memory
+qualification remain open. Earlier runtime/PDF debt is unchanged. Avoiding SVG
+recording/rasterization in these cases does not establish a general speedup or
+total-memory improvement.
+
+## 23. Make release timing and peak-memory qualification reproducible
+
+**Completed core milestone, 2026-10-20:** the versioned benchmark recorded process wall time but
+overwrites raw runs, omits per-child peak RSS and does not summarize frame costs
+separately from encoding. Complete this bounded part of M0 before the larger
+placement refactor. Reuse existing render metrics; add no engine instrumentation.
+Measurement remains opt-in under **D4.2.5v3** and retention conclusions remain
+subject to **D4.5.3v2**.
+
+Acceptance: every measured process keeps its own stdout, PNG, event result and
+resource receipt; alternating repeated runs cannot overwrite previous evidence.
+Peak RSS is attributed to that child, including a large-then-small regression
+against accumulated `RUSAGE_CHILDREN` maxima. Timeout cleanup reaps the owned
+process and terminates its process group on POSIX. Promote the existing timeline
+wait/accounting code into a shared helper rather than creating another copy.
+Profiles validate complete frame scopes, discard an explicit warm-up prefix,
+and report frame phases separately from encode/write, tracked allocator bytes
+and process RSS. Missing/truncated profiles fail qualification. Summaries retain
+raw samples, paired ratios and timing distributions without claiming a speedup.
+
+Scope: the existing five generated workloads, 800×600, densities 1 and 2, serial
+release cold renders and warm cache-off/on sessions. Five alternating warm pairs
+plus separate profiles qualify the current binary; a frozen historical release
+may be used as an explicitly identified cold control. Fonts, binary, fixtures,
+driver/helper and dirty source identities are recorded. RSS covers the process;
+ThorVG-specific allocation and input-to-display latency remain unobserved.
+
+Verification budget: focused process-accounting/parser/provenance checks, one
+native smoke, then the bounded release matrix with pixel/event parity. Engine
+sources remain at the qualified §22 checkpoint; no engine rebuild or aggregate
+rerun is warranted for benchmark-only changes.
+
+### Implemented behavior
+
+The driver gives each process its own command/environment record, output, PNG,
+event result and measurement receipt. A nonempty output directory is rejected
+before fixtures change. Reports record binary/font/fixture hashes, the observed
+checkout revision and dirty source hashes, and the measurement implementation.
+They verify those identities again before marking the run complete. The observed
+checkout snapshot is not compilation provenance for an arbitrary supplied binary;
+this qualification separately matches the frozen §22 build receipt.
+
+The timeline benchmark now shares `utils/benchmark_process.py`. On POSIX it uses
+that child's `wait4` usage, not the parent's accumulated `RUSAGE_CHILDREN` peak.
+CPU time and RSS units are normalized; unavailable accounting remains null.
+Timeout cleanup kills the owned process group and reaps the direct child. Output
+is file-backed, so a verbose child cannot deadlock on an unread pipe. Exit polling
+uses a 1 ms interval; host scheduling remains uncontrolled.
+
+Normal samples explicitly disable logging and use `MEMTRACK_MODE=OFF`. Separate
+profiles use `STATS`, require nonzero, consistent allocator snapshots, and reject
+missing, reordered, duplicate or incomplete frame stages. Scope/stage rounding is
+accounted for. Warm profiles contain initial presentation plus twelve forced
+render events; discarding the first two scopes leaves eleven measured frames.
+Frame-work totals sum outer stages excluding encode/write; native timers can
+overlap and are not added again. These profiles include instrumentation overhead.
+Sample summaries report median/minimum/nearest-rank p95/maximum and ratios paired
+by repeat, separately for process wall time, CPU and peak RSS.
+
+### Qualification
+
+All 13 focused process/parser/receipt checks pass, including large-then-small RSS,
+timeout reaping and descendant termination, unavailable accounting, evidence
+preservation, complete frame scopes and paired ratios. The timeline consumer's
+`points-100` native release smoke passes after moving its helper. The rendering
+smoke verifies actual allocation snapshots and pixel/event parity.
+
+The matrix uses frozen release SHA-256
+`35fdc73f33d8b9c6a1d0c9a072f1820a00ea9d52df70b12509ad103b9efe3548`,
+whose eight modified engine/test source hashes still match §22. Environment:
+macOS 26.3 arm64, 800×600, pinned Liberation Sans, densities 1/2 and one renderer
+thread. No builds or other test sweeps overlap measurement. Five fresh-process
+repeats run each cold scenario; warm sessions alternate cache-off/on order for
+five pairs. Cold measurements use the current binary alone. OS caches and
+scheduling remain uncontrolled.
+
+The completed receipts contain 150 normal process samples and 30 separate
+profiles covering 270 frame scopes. All ten warm off/on comparisons and all ten
+cold scenarios retain exact PNG parity across repeats/profiles, successful event
+receipts, expected physical dimensions and nonzero per-child RSS. All 110 warmed
+cache-enabled profile frames reuse the recording and copy zero command bytes.
+Engine binaries/archives and sources remain unchanged from the qualified §22
+checkpoint; benchmark-only changes do not imply a new engine aggregate result.
+
+The following medians describe this run. Wall times include startup and PNG
+encoding. RSS is a process high-water mark in MiB; profile frame work includes
+logging/allocation tracking and excludes encode/write.
+
+| Workload | Density | Cold wall ms / RSS MiB | Warm wall off → on ms | Warm RSS off → on MiB | Profile frame work off → on ms |
+|---|---|---|---|---|---|
+| vector | 1× | 129.59 / 40.56 | 385.71 → 336.88 | 48.02 → 47.98 | 2.247 → 2.618 |
+| vector | 2× | 153.03 / 51.92 | 904.33 → 906.47 | 77.20 → 77.44 | 8.685 → 9.719 |
+| deep | 1× | 96.52 / 27.58 | 234.92 → 241.35 | 33.22 → 33.30 | 1.748 → 1.483 |
+| deep | 2× | 112.49 / 34.06 | 654.26 → 641.39 | 49.89 → 49.83 | 6.126 → 5.406 |
+| mixed | 1× | 138.14 / 43.28 | 454.20 → 445.07 | 50.94 → 50.41 | 2.758 → 2.807 |
+| mixed | 2× | 182.16 / 54.83 | 1116.27 → 1100.08 | 80.83 → 80.59 | 11.049 → 10.656 |
+| pressure-128 | 1× | 52.61 / 26.78 | 211.39 → 201.73 | 33.56 → 33.47 | 2.197 → 2.404 |
+| pressure-128 | 2× | 94.02 / 33.41 | 685.96 → 697.90 | 52.20 → 52.48 | 8.943 → 8.460 |
+| pressure-512 | 1× | 124.95 / 35.19 | 424.90 → 425.15 | 43.05 → 42.92 | 2.241 → 2.254 |
+| pressure-512 | 2× | 191.36 / 44.69 | 1017.13 → 1061.88 | 66.42 → 66.77 | 9.926 → 9.631 |
+
+Per-scenario paired median wall-time ratios (on/off) range from 0.965 to 1.052;
+paired RSS ratios range from 0.990 to 1.005. Ratios pair each repeat and need not
+equal a ratio of column medians. These mixed results establish no general speedup
+or process-memory reduction. The copy counters establish eliminated command work.
+For enabled profiles, median encode/write time is 10.096–72.786 ms, compared with
+1.483–10.656 ms for the other outer frame stages; process wall time must not be
+treated as the vector preparation cost.
+
+Raw receipts, implementation identities, unit/timeline logs and the matrix
+validator are under `temp/rendering-measurements/`; `qualification.json`,
+`warm/results.json` and `cold/results.json` preserve the completed measurements.
+To repeat with a separately frozen release executable and new output directories:
+
+```sh
+python3 utils/test_benchmark_radiant_rendering.py
+python3 utils/benchmark_radiant_rendering.py --executable path/to/release.exe --profile --out temp/rendering-warm
+python3 utils/benchmark_radiant_rendering.py --executable path/to/release.exe --mode cold --profile --out temp/rendering-cold
+```
+
+This closes the bounded measurement milestone under **D4.2.5v3 / D4.5.3v2**.
+Placement-only chunk composition and narrower inherited/style/reference
+invalidation remain implementation work. Local mutations, movement, asynchronous
+resources, mixed effects and dirty/tile/strip replay still need broader timing
+qualification. Native allocation attribution and input-to-display latency remain
+unobserved. The earlier runtime/PDF debt is unchanged.
+
+## 24. Compose translated vector fragments through the shared cursor
+
+**Milestone, 2026-10-20:** retained references currently preserve only their
+recorded placement. Add an explicit translated-reference API as the replay
+foundation for M4, without assuming that equal layout sizes prove unchanged paint.
+Retention, immutable payload leases and allocator ownership follow
+**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+Acceptance: one published vector subtree composes at multiple translated
+placements, including nested chunks and inherited/local clips, without path,
+gradient, dash, image or picture payload copies. Serial, dirty and tile replay
+match independently recorded placements. A bounded cursor scratch descriptor
+presents translated coordinates to all existing consumers; its transient copies
+are measured separately from retained command/payload copies. Untranslated reads
+continue to return original descriptors. Captured source/cache retirement leaves
+placed readers valid. Unsupported pixel effects, non-finite placement, malformed
+graphs and allocation failure reject placement atomically. Recapture must never
+publish translated descriptors under the source chunk's unchanged identity.
+
+Scope: explicit vector composition (rectangles, paths, gradients, images, native
+pictures, clips and element markers). Automatic HTML reuse after reflow and
+translation of direct-pixel effects/media remain deferred. The translation view
+is implemented once in the shared cursor rather than copied into every replay
+and export backend. A placement shell owns a child lease; it owns no copied
+geometry or paint buffers. Translation validation may walk the subtree; future
+certification must be measured before removing that check.
+
+Verification budget: focused native/stub red/green, malformed/failure/lifetime
+cases, affected native release/ASan suites, SVG paint and one required Radiant
+aggregate after stabilization. Preserve existing zero-offset behavior and frame
+budget accounting. No vendor or normative ruling changes are planned.
+
+### Implemented core
+
+`retained_dl_append_fragment_translated` appends one placement shell referencing
+the published subtree. The shell owns a source-chunk lease and conservatively
+charges its own storage plus the source graph to a frame. Its command spans
+preserve source order, chunk-local marker indices and immutable resource owners.
+Zero displacement delegates to the original reference path.
+
+The shared cursor accumulates shell offsets. Rectangle positions, marker origins
+and culling bounds move directly; paths, gradients, images, native pictures and
+clip paths receive `T * M` object transforms. Local gradient coordinates and
+gradient transforms stay unchanged. An enclosing frame clip remains fixed.
+The cursor borrows all payloads and uses one scratch `DisplayItem` for translated
+reads. That descriptor expires at the next read/skip. The separate
+`placement_command_copy_bytes` counter includes validation and replay reads;
+it does not disguise these copies as zero retained command-copy work.
+Two floats per payload owner and per cursor graph frame store placement state;
+each cursor also carries one scratch descriptor. These storage costs and the
+placement shell are explicit tradeoffs, not a total-memory reduction claim.
+
+Placement walks the subtree to validate finite coordinates/matrices, supported
+commands, graph depth/cycles, spans and balanced scopes before appending. Existing
+zero-offset certificates remain usable. Unsupported CPU effects, glyph bitmap
+draws and media reject nonzero placement. Allocation failures release acquired
+leases and preserve the destination prefix. Recapture skips translated scopes,
+so it cannot refresh the original publication or copy unshifted raw descriptors
+under the source view ID. Failed resource/frame recapture keeps its normal
+fallback. Automatic HTML reuse after reflow is still deferred: admission needs
+actual content/style/reference validity and old/new damage bounds.
+
+Five focused stub cases exercise nested multiple placements, original descriptor
+identity, zero-offset reads, storage charging, cache/source retirement, finite
+overflow, unsupported commands, allocation failure, recapture, composed/cancelled
+translations, malformed/cyclic graphs and the depth limit. The native case
+compares independently recorded scenes at three placements, including fractional
+coordinates, with inherited/local clips, affine transforms, both gradients,
+dashed strokes, images and native pictures. Payload pointer identity is preserved;
+serial, dirty and tile output remains byte-identical across repeated replays
+after retiring the cache and source. Construction of this new API had no
+pre-existing implementation to run; the source-level acceptance cases are new.
+
+### Qualification
+
+The frozen release CLI is SHA-256
+`b08a6d00ffefc58c7bff6ec2d9eeabfcd0aa461b8b50306f6743702d61b2753e`,
+at HEAD `81105648b` plus the recorded local semantic inputs. The intervening
+commit since §23 changed documentation only. Candidate source and product hashes
+are recorded in `temp/rendering-vector-placement/candidate.json`.
+
+All 395 affected cases pass in both release and `debug_asan_native`: 210 vector,
+103 display-list, 54 retained and 28 state-store. ASan leak detection is disabled;
+vendor instrumentation is not claimed. Eleven shared release products were saved
+before the sanitizer build and restored with exact hashes before final release
+qualification. The SVG paint gate passes all twelve off/eager 1×/2× scenarios
+and 680 assertions against that same CLI. Radiant integer-cast lint, scoped diff,
+document fences and local links pass.
+
+An initial aggregate was deliberately stopped when review found an uninitialized
+callback in the new ad hoc graph fixture. The fixture was zero-initialized,
+rebuilt and rechecked in release and ASan; production sources and CLI did not
+change. That interrupted run is retained under `initial-interrupted/` and is not
+used as the final aggregate result. Receipts for this milestone are under
+`temp/rendering-vector-placement/`.
+
+The final required Radiant aggregate completes in 380,464 ms: **6,055 passed,
+zero failed, 146 partial and two skipped**, of 6,203 cases. The frozen source,
+HEAD and release-product hashes match after qualification. UI automation passes
+662/662 and input events 32/32; view passes 216 with one skip. Layout retains
+3,152 fully passing and 142 partial cases. Visual comparisons retain 207 passing,
+four expected differences and one skip. `qualification.json` records the native,
+SVG and aggregate results and their limits; `aggregate-exit.json` records the
+actual successful process exit.
+
+The explicit composition scope is complete. Automatic HTML placement-only reuse,
+CPU effects/media translation, finer inherited/reference dependency admission
+and broader movement/resource/backend performance qualification remain open.
+This milestone establishes payload sharing and correct replay; it makes no
+measured frame-time or total-memory improvement claim.
+
+## 25. Reuse vector paint for inline SVG with visible overflow
+
+**Priority / outcome, 2026-10-20:** visible-overflow SVG bypasses the raster layer
+and repeats producer traversal even when only placement changes. Connect §24 to
+this production path, retaining its vector commands rather than clipping ink to
+a raster viewport. Retention and independent source/reader ownership follow
+**D4.5.3v2 / D4.5.1v4 / D4.2.4**; measurement follows **D4.2.5v3**.
+
+Acceptance: repeated and translated vector SVG paints reuse a published command
+owner, preserve overflow and caller clips, and match an uncached recording.
+Changes to SVG content, inherited paint, viewport/linear transform, selectors,
+animation, fonts, images or cross-root resources rebuild. Scroll-only changes
+may reuse when host SVG cannot paint foreign HTML. Unsupported pixel commands,
+foreign HTML, memory pressure, budget rejection and allocation failure retain
+direct recording. Cached markers must not alias HTML view IDs. Active frame
+readers survive replacement and registry teardown.
+
+Implementation: share the existing raster-layer content dependency key; retain
+visible-overflow vector recordings in one byte-bounded registry cache. Publish
+one balanced fragment using an explicit cache key while leaving its semantic
+marker ID zero. Use the existing chunk capture and placement implementations;
+do not introduce another geometry owner. Keep caller/viewport clips outside the
+cached fragment. Capture the balanced range produced by normal recording, using
+its existing scratch ownership; remember unsupported content until its key changes.
+
+Scope excludes automatic general HTML reflow reuse, CPU-effect translation and
+changing the existing raster-layer policy. Verification budget: focused
+producer/resource/clip/teardown and publication failure cases, affected native
+release/ASan suites, SVG paint and one required Radiant aggregate after stable
+implementation. No vendor changes or normative ruling changes are planned.
+
+### Implemented behavior
+
+The existing SVG registry now shares one paint-dependency stamp between raster
+and vector policies. Visible-overflow roots capture a balanced zero-ID range
+from normal recording into a 16 MiB managed command-storage cache. Lookup keys
+remain separate from semantic marker IDs. Matching content, used viewport,
+raster scale and linear transform allow a translated reference; caller clips
+remain outside that reference. `svg_vector_recordings` and `svg_vector_hits`
+identify producer work. `RADIANT_SVG_VECTOR_CACHE=off` provides a direct control.
+
+The display-op schema declares the vector-translation subset once. Unsupported
+pixel commands, and recordings that create effect/pattern/color-glyph captures,
+keep direct recording until content dependencies change. This excludes images
+that bake the original pixel grid or backdrop even when their final command is
+a vector image draw. Hosts with SVG foreign HTML bypass this cache. Allocation
+and budget rejection keep the current direct commands; pressure releases cache
+ownership. No general HTML reflow admission or pixel-effect translation is added.
+
+Two ownership assumptions required correction before qualification. Eviction now
+uses the chunk's indexed-publication back-reference: a zero marker ID cannot
+locate its distinct cache key and previously prevented reclamation from making
+progress. Chunk arenas now belong to the already reference-counted storage-budget
+owner's independent rendering context, carrying the source document ID. Source
+document/context teardown therefore cannot free an active paint reader's arena.
+The last cache/chunk lease releases that context (**D4.2.4 / D4.5.3v2**).
+
+Focused cases cover overflow ink and fractional translation against direct
+recording, changed caller clips, local/cross-root mutations, selectors, scroll,
+linear transform/used viewport changes, font/image epochs, SMIL time, unsupported
+effects/foreign HTML, keyed publication failure/budget rejection and active
+readers beyond registry/document/context teardown. The publication and lifetime
+cases reproduced an eviction stall and allocator crash before their corrections.
+
+### Scoped release measurement
+
+`temp/rendering-svg-vectors/measure.py` runs one 512-path visible-overflow SVG
+with whole-frame reuse disabled and one rendering thread. Five complete child
+process samples per variant alternate cache on/off order; separate profiles
+include logging and allocation tracking. Each process completes twelve forced
+render events. All twelve final PNGs (ten normal samples and two profiles) are
+identical. Both profiles contain thirteen complete scopes; discarding the first
+two leaves eleven steady frames. Cache-on records zero SVG producers and has
+eleven vector hits; cache-off records eleven producers. Neither reuses a whole
+frame. The fixture, events, per-process command/measurement receipts and frozen
+candidate are recorded under `temp/rendering-svg-vectors/measurement/`.
+
+| Measure | Vector cache off | Vector cache on |
+|---|---:|---:|
+| Median process wall time, 5 normal samples | 182.922 ms | 162.475 ms |
+| Median per-child peak RSS | 34,570,240 bytes | 34,652,160 bytes |
+| Median steady record/lowering, separate profile | 1.632 ms | 0.008 ms |
+| Median steady scope, separate profile | 10.555 ms | 9.203 ms |
+| Native shapes across 11 steady profiled frames | 5,665 | 5,665 |
+| Retained command-copy bytes across those frames | 1,233,144 | 1,237,896 |
+
+The observed median process ratio is 0.888; peak RSS is 1.0024. Off samples range
+167.783–829.016 ms and on samples 152.378–164.113 ms; OS caches are uncontrolled.
+This is a scoped producer-work improvement, not a general-page speedup or memory
+reduction. Native construction is unchanged. HTML frame capture still rehomes
+foreign-cache commands; the cache-on variant also copies two extra zero-ID
+markers per capture. Avoiding that copy without breaking budget ownership is
+follow-up work. Movement, asynchronous resources, mixed effects, input latency
+and native allocator attribution still need broader measurement.
+
+### Qualification
+
+The frozen `release_native` CLI is SHA-256
+`342f92ee646695a8569213ecd16eb16e9e54dcdfbcde176a2294228e6d141ba3`,
+at HEAD `81105648b` plus the recorded local semantic inputs. All 407 affected
+cases pass in release and `debug_asan_native`: 219 vector, 103 display-list,
+57 retained and 28 state-store. ASan leak detection is disabled; vendor
+instrumentation is not claimed. Eleven shared release products were saved and
+restored with verified hashes before the SVG and aggregate gates. SVG paint
+passes twelve off/eager 1×/2× scenarios and 680 assertions against that same CLI.
+Integer-cast lint, scoped diff, document fences and local links pass. Candidate,
+native, SVG, measurement and final aggregate receipts are under
+`temp/rendering-svg-vectors/`.
+
+The required Radiant aggregate completes in 376,111 ms: **6,067 passed, zero
+failed, 146 partial and two skipped**, of 6,215 cases. All source and release
+product hashes still match the frozen candidate. Documentation-only commit
+`fda32f26b` landed during qualification; `documentation-head-audit.json` records
+its thirteen Markdown deletions and preserves the original compiled checkpoint.
+No engine input or release product changed. `qualification.json` and the actual
+successful aggregate exit are recorded alongside the per-suite receipts.
+
+This milestone is complete. General HTML placement-only reuse, CPU-effect
+translation, finer inherited/reference invalidation, avoiding cross-cache
+descriptor copies while preserving budget ownership, and broader performance
+qualification remain open.

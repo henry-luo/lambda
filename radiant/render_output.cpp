@@ -734,6 +734,7 @@ struct RenderFrameCache {
 };
 
 static constexpr size_t RENDER_FRAME_RECORDING_BUDGET = (size_t)8 << 20;
+static constexpr size_t RENDER_FRAME_SHARED_ARRAY_BUDGET = (size_t)1 << 20;
 
 static bool render_frame_recording_bytes(const DisplayList* list, bool inspect_commands, size_t* bytes) {
     *bytes = list->capacity() * sizeof(DisplayItem) + arena_total_allocated(list->arena.arena) +
@@ -917,6 +918,7 @@ RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, Vie
             if (cached) {
                 new (cached) DisplayList();
                 dl_init(cached, view_tree->display_list_arena);
+                cached->shared_array_reuse_budget = RENDER_FRAME_SHARED_ARRAY_BUDGET;
                 view_tree->render_list = lam::own(cached);
             }
         }
@@ -1599,12 +1601,15 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         size_t proposed_bytes = 0;
         size_t arena_bytes = arena_total_allocated(display_list.arena.arena);
         size_t summary_bytes = dl_resource_summary_bytes(captured_resources.value);
+        size_t reusable_arrays = captured_resources.commands.shared_arrays ? 0 :
+            dl_shared_array_reuse_bytes(&display_list);
         // a shared graph can exceed frame admission even when the flat recording fits; check before retirement.
         if (!reused && resources_captured && captured_resources.commands.size() < display_list.size() &&
             render_frame_recording_bytes(&captured_resources.commands, true, &proposed_bytes) &&
             proposed_bytes <= RENDER_FRAME_RECORDING_BUDGET &&
             arena_bytes <= RENDER_FRAME_RECORDING_BUDGET - proposed_bytes &&
             summary_bytes <= RENDER_FRAME_RECORDING_BUDGET - proposed_bytes - arena_bytes &&
+            reusable_arrays <= RENDER_FRAME_RECORDING_BUDGET - proposed_bytes - arena_bytes - summary_bytes &&
             dl_adopt_recording(&display_list, &captured_resources.commands, &document_recording,
                 "render_output_shared_document")) {
             document_commands = display_list.item_count();

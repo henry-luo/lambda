@@ -1,6 +1,6 @@
 # Lambda Query: Type-Based Path Query Expressions
 
-> **Status (2026-09-26):** shipped — `?`, `.?` and `[T]` are in the C parser and both tiers, and the two breaking changes below landed long ago (`^` is propagation, `**` is power). The result kind is **ruled as S8.2.4v3 (2026-09-26)**: a type query answers as XPath does — the run `T*` — while a positional selection (`[i to j]`, a mask, an index array) answers as NumPy does — an array; §4.1 records the ruling and the argument. **Implemented on both tiers 2026-09-26** (the list step, the null-drop rule, ranges under `?`, and the index-array gather); the spec's Appendix A row for S8.2.4v3 keeps the dates, the residue, and an array reading of the type query that was ruled on 2026-09-25 and reverted the next day.
+> **Status (2026-09-26):** shipped — `?`, `.?` and `[T]` are in the C parser and both tiers, and the two breaking changes below landed long ago (`^` is propagation, `**` is power). The result kind is **ruled as S8.2.4v3 (2026-09-26)**: a type query answers as XPath does — the run `T*` — while a positional selection (`[i to j]`, a mask, an index array) answers as NumPy does — an array; §4.1 records the ruling and the argument. **Implemented on both tiers 2026-09-26** (the list step, the null-drop rule, ranges under `?`, and the index-array gather); the spec's Appendix A row for S8.2.4v3 keeps the dates, the residue, and an array reading of the type query that was ruled on 2026-09-25 and reverted the next day. **2026-10-20 (USER):** the wildcard steps `.*`/`.**` and set-at-a-time stepping of a run by every key kind except positional are ruled as **S8.2.5–S8.2.6** (§4.4); §12's deferred auto-map is thereby resolved. Implemented on both tiers the same day (Appendix A of the spec).
 
 ## Overview
 
@@ -330,6 +330,51 @@ page?<img>         // finds the <img> deep inside <body>
 page?string        // finds "Hello", "photo.jpg", "text", "main"
 page?<div>         // finds the <div class:"main"> element
 ```
+
+### 4.4 Wildcard steps and run stepping (RULED 2026-10-20, USER; S8.2.5, S8.2.6)
+
+**`.*` is the item step; `.**` is its closure.** `e.*` is the run of `e`'s items in walk order — what `for (x in e)` walks (S8.1.2v3): array, list and range items, map values, an element's attribute values then its children — so `e.*` ≡ `e[any]`, and named and indexed members are both items, which is what makes the step useful on JSON and property files (`users.*.name`). `e.**` is zero or more applications of `.*` — `e`, `e.*`, `e.*.*`, … — spliced in document order (pre-order, §5.3), so `e.**` ≡ `e.?any` and `e.*.**` ≡ `e?any`. Self-inclusion is the zero-step case, not a convention: `.*` is exactly one step and so never includes `e`, which is what keeps `a.*.b` from reading `a.b`. Prior art agrees on every point: glob `a/*/b` against `a/**/b`, XPath `a/*` against `a//b`, JSONPath `$.*` against `$..b`, jq's `.[]`.
+
+| Spelling | Steps | Meaning |
+|---|---|---|
+| `e` | 0 | self |
+| `e.*` | exactly 1 | items — `e[any]` |
+| `e.*.**` | 1 or more | proper descendants — `e?any` |
+| `e.**` | 0 or more | self and descendants — `e.?any` |
+
+So `?T`/`.?T` remain the way to say proper versus self-inclusive for a type filter, and `.*.**` is the proper-descendant wildcard; no new marker is needed. Text is a scalar to the walk, as it is to `[any]`: `"abc".*` is `null`, although `for` and `|>` walk text by code point (S2.5.8) — the alternative would make `.**` explode a document into characters. The steps have ordinary member precedence (§9.4) and chain: `e.*.b`, `e.**[<p>]`, `e.*.~~`.
+
+**Steps, not postfix operators.** A postfix `a*` would collide with the occurrence type `T*` and with multiply, and `.*`/`.**` already parse on values (the C parser shares one step set between paths and member access, S2.4.2v5), so the grammar cost is nil. The family then reads as one system: `.*` and `.**` produce runs, `[T]` steps into each item's content, and `?T` keeps the items of `e.*.**` that are `T`.
+
+**No bare `*.a`.** A wildcard step always has a base. Prefix `*` is spread (S12.3.5v2) and `**` is power; S16.8.5 bans the arithmetic family at line start and S16.2.4v3 reads a line-start `.*` as continuation; S10.1.7v2 leaves only bare names implicit and makes the pipe family always spell `~`. In a `~`-binding body the spelling is `~.*.a`. Bare `~~` is the one precedent for a bare step, and it works only because that token means nothing else.
+
+**A run is stepped set-at-a-time by every key kind except positional (S8.2.6).** §4.1's list rule, ruled for the type key, extends to every navigation step:
+
+| Kind | Spellings | On a run |
+|---|---|---|
+| Name | `.b`, `.'b'`, `["b"]` | per item |
+| Type key | `[T]` | per item (§4.1) |
+| Query | `?T`, `.?T` | per item (§4.1) |
+| Wildcard | `.*`, `.**` | per item |
+| Parent, root | `.~~`, `./` | per item |
+| Positional | `.0`, `[i]`, `[i to j]`, mask, index array | window over the run itself (§4.1) |
+
+*Per item* means: apply the step to each item in order as if it stood alone, concatenate the results into one run, drop `null` results, collapse by S2.5.5v2; a step's result is itself a run, so nesting splices flat. *Window* means the run is the subject: `(html?<p>)[0]` is the first `p`, XPath's `(//p)[1]`; the per-item reading, `//p[1]`, is the pipe `html?<p> |> ~[0]`. Being a list is the whole property, so a stored run steps exactly as an inline one.
+
+Two rules sit alongside. **Methods first:** a name on a run resolves the list type's methods before mapping (S8.2.1v4, S12.3.3v2), so `run.len()` stays the method and a field that happens to be named like a list method is reached by pipe. **An array is not a run:** `arr.b` stays `null` (S8.2.1v4), `arr[T]` walks the array's own content, and `arr.*.b` is the uniform spelling for both kinds (S2.5.1v2) — since `[for …]` yields an array, `.*` is the safe habit. Steps never deduplicate (§4.1), so `e?<p>.~~` yields a shared parent once per child.
+
+```lambda
+let e = <div id: "x", <p b: 1> <p b: 2, <p b: 3>>>
+e.*          // ("x", <p b: 1>, <p b: 2, <p b: 3>>) — attribute values, then children
+e.*.b        // (1, 2) — "x".b is null and drops
+e.**.b       // (1, 2, 3) — document order, self included
+e.*.*        // (1, 2, <p b: 3>) — each child's items, spliced
+e.*[<p>]     // <p b: 3> — grandchildren that are p
+e?<p>.b      // (1, 2, 3)
+e?<p>[0]     // <p b: 1> — a window over the run, not per item
+```
+
+This resolves §12's deferred auto-map: ruling by value kind rather than by spelling is what keeps `let d = html?<div>; d.class` equal to `html?<div>.class`, which was the deferral's strongest objection. Paths carry the same steps; what forcing a wildcard path reads is [Type_Path §6.4](Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826) (S2.4.6). The queries `?T` and `.?T` are recursive like `**` and get the same file boundary on paths (S2.4.7, PTH85): over a directory they filter path values and read no file, and only a step applied to a file match enters it, so `\.src.**?T#` searches every file while `\.src?T#` searches none.
 
 ---
 
@@ -731,7 +776,7 @@ The `?` query operator binds at the **same level as `.`** (member access) — bo
 Since `?` and `.` are at the same level, chaining works naturally:
 
 ```lambda
-html?<div>.class           // query, then member access on each result
+html?<div>.class           // query, then member access on each result (S8.2.6, §4.4)
 html?<div>?<a>             // chained query
 html?<img> | ~.src         // query binds tighter than pipe ✓
 ```
@@ -868,9 +913,9 @@ format(stats, 'json')
 
 ---
 
-## 12. Future: Auto Pipe/Map with Query (KIV)
+## 12. Auto Pipe/Map with Query — RESOLVED 2026-10-20 by S8.2.6
 
-> **Status**: Keep In View — not yet implemented. Reserved for future consideration.
+> **Status**: resolved (USER, 2026-10-20) — a run is stepped set-at-a-time by every key kind except positional (S8.2.6, §4.4), so the post-query member step maps by the rule below. The deferral and its three concerns are kept as the record; the superseded decision is in Appendix S.
 
 ### Motivation
 
@@ -925,6 +970,22 @@ The same value produces different results depending on whether it's inlined or s
 
 Lambda's current model is clean: `?` finds (returns the run), `|` transforms. Two distinct, composable operations. Merging them into one overloaded operator reduces orthogonality.
 
-### Decision
+### Resolution (2026-10-20, USER; S8.2.6)
 
-**Deferred.** The explicit pipe syntax `html?<div> | ~.class` is concise enough and avoids all ambiguity. If user demand or real-world usage patterns strongly favor the auto-map form, it can be revisited — potentially with a distinct operator or syntax to avoid the concerns above.
+The concerns are answered by ruling on the **value kind**, not the spelling: a list — any list, inline or stored — is stepped set-at-a-time by every key kind except positional (§4.4).
+
+1. *List properties.* A list has no `.length`: `len` is a function and methods live on the type (S8.2.3), and a name on a run resolves the list type's methods first (S8.2.1v4, S12.3.3v2). `html?<div>.length` is therefore not ambiguous — it is a mapped field read, and `count(html?<div>)` stays the count.
+2. *Referential transparency.* `let divs = html?<div>; divs.class` and `html?<div>.class` give the same result, because being a list is the whole property. This was the deferral's strongest objection and the rule removes it rather than evading it.
+3. *Orthogonality.* Stepping is navigation, not transformation: XPath composes steps over node-sets, and S8.2.4v3 already stepped a list set-at-a-time for the type key on 2026-09-26, after this deferral. Extending it to every navigation step is the consistent completion; `|>` remains the transform and `|:` the filter.
+
+What stays positional — `(html?<p>)[0]` is the first `p`, never the first child of each — is §4.1's window rule; the per-item reading is the pipe.
+
+The wildcard steps `.*`/`.**` (S8.2.5) were ruled the same day, and `users.*.name` is the form that needed this rule most.
+
+---
+
+## Appendix S — Superseded Rulings
+
+### S.1 Auto-map deferral — SUPERSEDED 2026-10-20 by S8.2.6
+
+~~**Deferred.** The explicit pipe syntax `html?<div> | ~.class` is concise enough and avoids all ambiguity. If user demand or real-world usage patterns strongly favor the auto-map form, it can be revisited — potentially with a distinct operator or syntax to avoid the concerns above.~~ Replaced by §12's resolution: a run is stepped set-at-a-time by every key kind except positional (S8.2.6, §4.4).

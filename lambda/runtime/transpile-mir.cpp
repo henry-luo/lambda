@@ -37463,6 +37463,15 @@ static MirValue transpile_element(MirTranspiler* mt, AstElementNode* element) {
 }
 
 static MirValue transpile_member(MirTranspiler* mt, AstFieldNode* member) {
+    // S8.2.5: `.*` and `.**` are steps over the item walk, not name reads
+    if (int wildcard = ast_member_wildcard(member)) {
+        MIR_reg_t boxed_obj = transpile_box_item(mt, member->object);
+        MIR_reg_t reg = emit_call_1(mt,
+            wildcard == 1 ? "fn_step_items" : "fn_step_closure", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj));
+        return mir_value_from_reg(mt, (AstNode*)member, reg, VALUE_REP_ITEM,
+            ((AstNode*)member)->type);
+    }
     return emit_member_value(mt, member);
 }
 
@@ -38065,10 +38074,13 @@ static MirValue transpile_path_value(MirTranspiler* mt, AstNode* node) {
                 reg = mt->pipe_parent_reg;
                 break;
             }
-            if (navigation->root) {
-                reg = em_require_rep(&mt->em, object, VALUE_REP_ITEM).reg;
-                break;
-            }
+            // no `~` cursor: the shared helper selects a dynamic path, maps a
+            // run (S8.2.6), and treats any other value as its own root
+            MIR_reg_t boxed = em_require_rep(&mt->em, object, VALUE_REP_ITEM).reg;
+            reg = emit_call_2(mt, "fn_navigate_value", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, navigation->root ? 1 : 0));
+            break;
         }
         reg = emit_null_item_reg(mt);
         break;

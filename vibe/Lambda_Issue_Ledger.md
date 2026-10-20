@@ -751,6 +751,18 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
+<a id="lr05-16"></a>**LR05-16 · Axis `sum`/`avg` of a ubyte array wrap modulo 256 · OPEN**
+Found 2026-10-20 while building the photo album demo's placeholder colours.
+For a decoded `(H,W,4)` ubyte image, `sum(img, 0)` returns per-lane sums
+reduced modulo 256: a 42-row column of alpha 255 sums to 214 (10710 mod 256),
+and `avg(img, 0)` divides that wrapped sum, giving alpha 5.1 instead of 255.
+The plain 1-D case `avg([[1,2],[3,4]], 0)` is correct, and `as_float(img)`
+first gives correct results. The axis path is `array_num_reduce_axis`
+(`lambda-vector.cpp:3974`); the result kind comes from
+`reduce_result_decision`, which appears to keep the ubyte element type for
+the collapsed lanes. Repro: load any JPEG with `load({data:..., thumbnail:64})`
+and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
+
 ---
 
 

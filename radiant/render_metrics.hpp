@@ -18,8 +18,9 @@
     X(native_lock_wait_ns) X(native_canvas_ns) X(native_canvases) \
     X(flush_clip) X(flush_cpu) X(flush_target) X(flush_end) X(flush_destroy) X(flush_boundary) \
     X(full_frame_reuses) X(frame_chunk_recordings) X(basic_shape_builds) X(basic_shape_cache_hits) X(clip_segments) \
-    X(tile_lock_wait_ns) X(tile_work_ns) X(shared_array_hits) X(shared_array_retains) \
-    X(fragment_references) X(fragment_commands) \
+    X(tile_lock_wait_ns) X(tile_work_ns) X(shared_array_hits) X(shared_array_retains) X(shared_array_reuses) \
+    X(fragment_references) X(fragment_commands) X(placement_command_copy_bytes) \
+    X(svg_vector_recordings) X(svg_vector_hits) \
     X(retained_index_publications) X(retained_index_prune_checks) \
     X(retained_membership_nodes) X(retained_membership_groups) \
     X(retained_dirty_subtree_searches) X(retained_dirty_ancestry_queries) \

@@ -1,0 +1,44 @@
+"a name maps over a query run"
+1
+2
+3
+"a stored run steps as the inline one"
+1
+2
+3
+"the dynamic name form"
+1
+2
+3
+"positional keys are a window over the run"
+<p b: 1>
+[<p b: 2,
+    <p b: 3>>, <p b: 3>]
+"the per-item positional reading is a pipe"
+[null, <p b: 3>, null]
+"a missing name drops, the run collapses"
+1
+"type key and wildcard per item"
+<p b: 3>
+1
+2
+<p b: 3>
+3
+"root and parent with no traversal context"
+<p b: 1>
+<p b: 2,
+  <p b: 3>>
+<p b: 3>
+"a run of paths selects each parent"
+\.a
+\.c
+\./
+\./
+"an array is not a run"
+1
+2
+"the list's own members first"
+3
+"a list-valued field stays one item"
+[1, 2]
+3
