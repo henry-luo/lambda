@@ -1,13 +1,21 @@
 # Radiant Rendering Optimization — Implementation Plan
 
-**Date:** 2026-10-19
+**Date:** 2026-10-20
 
-**Status:** committed core pass and continuations through §13, 2026-10-19.
+**Status:** committed core pass and continuations through §19, 2026-10-20.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
-chunk references, resource summaries, the SVG producer boundary and validated
-replay metadata, with qualification recorded for each milestone.
+chunk references, resource summaries, the SVG producer boundary, validated
+replay metadata, compositional chunk validation and frame resource snapshots,
+with qualification recorded for each milestone.
 The full original M0–M7 acceptance envelope remains open.
+The §14 aggregate failure is resolved by the phase-contract coverage in §15.
+The §16 implementation and scoped qualification are complete; its Radiant
+aggregate is green, with partial/skip results recorded below. The §17 stable-entry
+refresh and expired-prefix pruning milestone is complete, with a green aggregate.
+The §18 full-frame chunk-sharing milestone is complete, including frame-budget
+fallback, with a green final aggregate. The §19 membership-group core is complete
+with a green aggregate; shared/unindexed/incomplete graphs keep their fallback.
 
 **Artifact retention:** an external cleanup removed `./temp/` during continuation
 qualification. The earlier temporary receipts cited in §7 and the historical
@@ -1342,3 +1350,495 @@ with the aggregate timeout limit above. Placement-only composition, narrower
 inherited/style/reference invalidation, compositional chunk metadata/index
 refresh and the broader M0–M7 measured performance envelope remain open. The
 earlier runtime/PDF debt recorded in §12 also remains unresolved.
+
+## 14. Compose validation metadata for immutable chunks
+
+**Milestone, 2026-10-20:** selective frames publish retained chunks without
+descriptor copies, but validation still expands every unchanged command. Cache
+successful standalone validation with each private immutable publication and
+compose its replay properties and peak nesting into subsequent validation.
+Ownership remains governed by **D4.5.3v2 / D4.5.1v4 / D4.2.4**. The cache is
+derived metadata, not a mutable-list validation bypass.
+
+Acceptance:
+
+- A retained 12,290-command tree validates through one publication summary and
+  no command payload checks. Publication validation composes already-certified
+  children instead of repeatedly expanding descendants.
+- Glyph/video properties survive composition. Clip, backdrop, shadow and element
+  scopes balance independently before a chunk is certified. Parent state cannot
+  conceal an invalid chunk's standalone state.
+- Both element nesting and fragment-graph nesting retain their existing limits
+  when a certified chunk is inserted into another stream. Mutable commands and
+  foreign or uncertified chunks retain the shared full validator and diagnostics.
+- Active frame references keep certification alive after cache/source teardown.
+  Metadata storage is charged with its publication; command size remains unchanged.
+
+Scope: shared validation, private retained-publication metadata and its discovery
+counter. Placement, dirty-source searches, resource liveness and replay execution
+are unchanged. Verification budget: demonstrate the wide-tree scan before the
+change; focused composition/state/depth/lifetime cases; affected native release
+and ASan checks; SVG paint smoke and the required Radiant aggregate once stable.
+
+### Implemented core
+
+The shared validator now accepts either a list range or a chunk cursor.
+`DisplayChunkValidation` records replay properties and peak element/fragment
+depth. Peaks include the chunk's root element/fragment. Private publications
+retain successful results; their publisher-specific
+query exposes no summary for foreign or uncertified owners. Composition checks
+both peaks against the caller's remaining space before skipping the balanced
+chunk. Mutable commands and uncertified publications keep the same payload,
+state and graph checks; failed validation publishes no properties.
+
+Publication validates its own commands and composes certified children. This
+adds one visit per copied command during initial capture, in exchange for
+avoiding descendant visits on later validation. The metadata is embedded in the
+already-budgeted publication, needs no allocation or lease and does not enlarge
+`DisplayItem`. Existing active references pin it after cache/source retirement.
+An ad hoc chunk whose scopes rely on its caller remains uncached for validation;
+its existing capture and full-stream validation behavior are preserved.
+
+The wide-tree release regression fails before the change with 12,290 command
+checks. It now validates through one summary and zero command payload checks.
+Initial publication checks all 12,290 own commands once and composes 4,096 child
+summaries. The cursor still reads a publication's first marker to identify its
+owner; the counters measure validation work, not absence of command memory reads.
+Coverage includes both nesting limits, foreign wrappers without
+element scopes, malformed wrapper counts, invalid fresh commands, independent
+state balancing, glyph/video properties and cache/source teardown. The clip
+state fixture uses the native renderer because lightweight retained-test stubs
+deliberately cannot clone owned paths; those stubs were not weakened.
+
+### Qualification
+
+The frozen release is
+`6f64d85939aa86c058f0d53d1adfdf735f422d5c5f68f37c2dcb389871c4fbc5`
+at source HEAD `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` plus this milestone.
+Affected native checks pass 356/357 in both release and `debug_asan_native`:
+196/197 vector, 39/39 retained, 96/96 display-list and 25/25 state cases.
+All new composition cases pass. No ASan memory error is reported, with leak
+detection disabled; vendor internals are not instrumented and native video uses
+the C++ stub backend. Exact release-product hashes were restored after ASan.
+
+`PaintOwnership.SvgPhasesKeepForeignHtmlInsideItsSubscene` fails its phase-specific
+background pixels in both builds and in an isolated release run. Its original
+assertions remain intact; the SVG boundary/phase classification needs separate
+diagnosis. The case paints fresh commands with partial phases, where retained
+fragment reuse is disabled. This is a qualification limit, not a passing native
+gate. The full SVG paint smoke passes twelve scenarios and 680 assertions.
+Integer-cast lint, document links and diff checks pass. Receipts, the red/green
+work-count test, frozen source/binary identity and restoration hashes are under
+`temp/rendering-chunk-validation/`; final aggregate results follow below.
+
+The final raw Radiant aggregate takes 416,435 ms: 5,998 passed, one failed,
+146 partial and two skipped of 6,147 cases. Its only failure is the SVG phase
+assertion above. All 646 UI cases, 111 page loads and 32 input-event cases pass;
+view checks have 215 passes and one skip. Layout retains 3,152 full passes and
+142 partial results with no failures. Visual comparison has 207 full passes,
+four expected differences and one skip; its wrapper completes normally. The
+earlier UI/page-load timeouts do not recur, without being declared fixed.
+`test_summary.json`, `radiant-baseline.log` and `qualification.json` preserve the
+completed raw gate. Final source, binary and restored-product hashes match.
+
+The compositional-validation implementation and new acceptance cases are done;
+the aggregate remains failed on the preserved SVG phase case. Its classification
+needs separate diagnosis before claiming a green rendering gate. Placement-only
+composition, narrower inherited/style/reference invalidation, capture/index
+refresh and the broader measured-performance envelope remain open. This
+milestone makes no general frame-time or total ThorVG-memory claim.
+
+## 15. Reconcile SVG phase coverage after the shared stacking merge
+
+**Milestone, 2026-10-20:** diagnose the remaining §14 native failure before
+further optimization. The merged `radiant_stack_is_context` recognizes outermost
+SVG fragments; `radiant_stack_in_paint_phase` schedules them in foreground and
+`render_walk_view` enters a complete local stack. This agrees with
+[SVG 2 §3.4–3.4.1](https://www.w3.org/TR/SVG2/render.html#EstablishingStackingContex):
+the outer SVG is atomic to its parent, including its background and descendants.
+The old test asserted a split host background/foreground visit, conflicting with
+this intentional merged behavior. No renderer repair is indicated by that failure.
+
+Acceptance: assert the fixture actually creates a block SVG stacking context;
+the host background pass paints neither SVG background nor foreign HTML; the
+foreground pass paints both with the SVG transform. A direct background-only
+producer visit must still paint the blue box and never walk foreign HTML. Keep
+the separate direct foreground SVG capture regression. This preserves the
+original producer-boundary check while updating the host scheduling assertion.
+Ownership remains **D4.5.1v4 / D4.5.3v2**; no normative ruling changes.
+Verification: focused SVG phase/capture cases, then the affected native suite and
+required aggregate together with §16. Historical §14 failures remain recorded.
+
+## 16. Compose frame resource snapshots from retained metadata
+
+**Milestone, 2026-10-20:** frame resource snapshot creation still expands retained
+draw commands, despite private publications already carrying complete dependency
+summaries. Copy merged epochs and surface stamps from those summaries, traversing
+only image-bearing child summaries. Skip the corresponding immutable command
+subtree. Snapshots remain flat and independent of publication lifetimes under
+**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+Acceptance:
+
+- Snapshotting the retained 12,290-command resource-free tree performs zero
+  command payload visits and one publication metadata visit, without allocating.
+- Ordinary flat full-frame recordings collect their document snapshot during
+  chunk publication, avoiding a second command scan. Transient overlays are
+  excluded. Failed chunk/snapshot admission retains the original flat fallback.
+- A wide glyph/video tree with one image-bearing child copies two metadata
+  summaries, preserves both epochs and distinct surface stamps, and retains live
+  generation/owner checks after frame, source and cache destruction.
+- Mixed fresh commands and retained children preserve contradictory epochs and
+  multiple generations for one surface. Foreign chunks retain cursor validation.
+- Allocation failure, malformed later fragments and budget rejection publish no
+  partial snapshot and leak no storage. Cached snapshot lifetime and the combined
+  admission limit are unchanged.
+
+Scope excludes index refresh, placement-only composition, inherited/style
+invalidation and live-query/replay changes. Verification budget: release work-count
+red/green, focused resource/conflict/lifetime/fault cases, affected release and
+ASan native checks, SVG paint smoke and one completed Radiant aggregate.
+
+### Implemented core
+
+The shared epoch merger handles publication inheritance and flat snapshot
+composition. A certified private root contributes copied epochs and surface
+stamps, then visits only its filtered image-bearing child summaries. Resource-free
+publications allocate nothing. Fresh commands and foreign/uncertified chunks
+keep the command cursor. The certificate's fragment-depth peak is checked against
+remaining cursor space before skipping a subtree, preserving foreign-wrapper
+limits and later malformed-fragment detection.
+
+Snapshots retain no new leases or publication pointers; their existing flat
+storage, generation checks, failure cleanup and admission limit remain unchanged.
+`resource_capture_commands` counts fallback payload visits;
+`resource_capture_chunks` counts each copied publication summary, including a
+resource-free root. The latter measures metadata work rather than absence of
+marker reads. The release red case records 12,290 fallback visits for the wide
+tree before this change. Qualification follows after stable builds finish.
+
+The normal full-frame cache admits non-selective recordings, whose commands are
+currently flat. Its capture path therefore requests the document snapshot while
+publishing retained chunks, rather than relying on frame references to exist.
+The same epoch/surface copier consumes each completed root's metadata during
+that pass. Capture still publishes overlay chunks but excludes their dependencies
+from the document snapshot. A partial scope boundary, uncertified/rejected chunk
+or snapshot allocation failure leaves the output empty; frame admission can use
+the original flat snapshot scan. The existing 8 MiB combined admission check
+still applies, and an RAII scope releases unused snapshots on render, write or
+eligibility failure. This does not enable forced-frame chunk references or
+placement-only reuse.
+
+### Qualification
+
+The final release executable is
+`0fa98708dc7b8b4dc45e5b805198ef0a991c03b73f21c783d5c67f99f1ae7807`
+at HEAD `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` plus these continuations.
+All affected native cases pass in release and `debug_asan_native`: 199 vector,
+39 retained, 96 display-list and 25 state cases, 359/359 in each profile.
+The final ASan and release source hashes match. No ASan memory error is reported;
+leak detection is disabled, vendor internals are not instrumented and native
+video uses the C++ stub backend. Eleven release products were hash-checked on
+restoration after ASan, then the final release baseline was rebuilt and qualified.
+
+The SVG smoke passes twelve scenarios and 680 assertions at both tested scales
+and layer modes, using the same frozen executable. Integer-cast lint, document
+links/fences and diff checks pass. The red work-count regression, source/binary
+identities, native logs, fault coverage and final product hashes are under
+`temp/rendering-summary-composition/`. The completed raw aggregate exits
+successfully after 412,256 ms: 6,001 passed, zero failed, 146 partial and two skipped of 6,149 cases. Its previous SVG phase
+failure is gone. UI automation reports 646/646 passes, layout keeps 3,152 full
+passes and 142 partial results, and visual comparison keeps 207 full passes,
+four expected differences and one skip. `test_summary.json`,
+`radiant-baseline.log` and `qualification.json` preserve the completed raw gate.
+Final source, executable and release-product hashes match the frozen candidate.
+
+This milestone removes the extra resource-discovery pass; initial publication
+still copies and checks its own commands. Snapshot creation now precedes replay,
+so broader peak-memory and frame-time qualification remains open. Graph index
+refresh, forced-frame chunk references, placement-only composition, narrower
+inherited/style/reference invalidation and the full M0–M7 performance envelope
+remain follow-ups. The earlier runtime/PDF debt recorded in §12 is not closed by
+these scoped checks.
+
+## 17. Reuse stable index entries and retire expired entries directly
+
+**Milestone, 2026-10-20:** mixed-frame capture keeps immutable paint publications,
+then republishes each unchanged node through its view-ID hash lookup, lease swap
+and bounds refresh. End-of-capture pruning scans every hash entry and allocates a
+staging list before erasing expired IDs. Keep each indexed publication's stable
+fragment entry and order entries by their last paint epoch. This removes repeated
+index publication and the full prune scan from unchanged branches while retaining
+the existing graph walk and membership policy. Ownership remains
+**D4.5.3v2 / D4.5.1v4 / D4.2.4**; replay never reads mutable index bookkeeping.
+
+Acceptance:
+
+- Recapturing the retained 4,097-node tree performs zero index publications and
+  one prune-head check, preserving all IDs and the existing logical reuse count.
+- A mixed parent/edited-child/unchanged-sibling frame publishes exactly the two
+  changed nodes; the sibling keeps its publication and stable entry.
+- A native selective repaint uses the public dirty-element API for an overlapping
+  sibling. The unchanged card reuses its chunk and index entry with matching pixels.
+- Reordered surviving roots move behind expired entries. Pruning retires the
+  expired prefix without requiring a staging allocation; pinned frames remain
+  valid after retirement and cache destruction. Hash-table optional shrinking
+  retains its existing behavior.
+- Replacing the publication for a view ID invalidates its old back-reference.
+  Repeated old/new aliases retain last-writer behavior. Budget eviction and
+  later reindexing of a pinned publication cannot read a freed fragment entry.
+- Index links add no allocations or leases. Their storage is included in the
+  existing publication/fragment charge; capture failure and pressure teardown
+  retain existing ownership and recovery behavior.
+
+Scope: index refresh and stale pruning. Resource summaries, paint replay,
+placement reuse and dirty-source/style invalidation are unchanged.
+The chunk graph is still walked to refresh membership. Verification budget:
+release work-count red/green; mixed/reordered/alias/eviction/fault cases; affected
+native release and ASan checks; SVG paint smoke and one required Radiant aggregate
+once the implementation is stable. Broader frame-time/peak-memory acceptance
+remains in the M0–M7 envelope.
+
+### Implemented core
+
+Private publications keep a borrowed pointer to their stable fragment entry.
+Unchanged chunks refresh that entry's epoch and recency directly. Fresh or
+unindexed publications use the existing hash lookup and publication path.
+Replacement, failed capture, pruning, budget eviction and cache teardown all
+clear the back-reference before releasing the entry's publication lease. A
+reused old publication whose view ID was overwritten therefore republishes in
+source order, preserving the previous last-writer behavior.
+
+Fragment entries carry intrusive previous/next links. Each paint-epoch refresh
+moves an entry to the tail, leaving expired entries in a prefix. Pruning removes
+that prefix directly and stops at the first current entry. It needs no staging
+list and remains safe when hash erasure rearranges buckets or optional shrinking
+fails. Lookup-only recency updates do not count as painting an entry. Epoch wrap
+restamps idle entries before using the wrapped epoch, preserving the ordering
+invariant across whole-frame idle reuse.
+
+The new fields add no allocations or leases; the existing `sizeof`-based charge
+includes publication and fragment growth. Replay consumes only immutable paint
+fields. The shared unlink/clear helpers cover all entry retirement paths.
+The control release tests report 4,097 publications and 4,097 prune checks for
+wide recapture, and three of each for the mixed frame. The optimized retained
+cases report zero/one and two/one respectively. Graph membership still refreshes
+by walking each chunk; these counters describe index work, not a constant-time
+subtree visit. The native selective repaint also exercises this path through overlapping damage
+from the public dirty-element API, preserving the stable entry and pixels.
+Final profile and aggregate qualification follow.
+
+### Qualification
+
+The frozen release executable is
+`72b6509f96ad1d4793099b1b44db45626ca8462a67cb48ff5eca1f1e491c9d7b`
+at HEAD `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` plus these continuations.
+Affected native cases pass in both release and `debug_asan_native`: 200 vector,
+41 retained, 96 display-list and 25 state cases, 362/362 per profile. Source
+hashes match across profiles. No ASan memory error is reported, with leak
+detection disabled; vendor internals are not instrumented and native video uses
+the C++ stub backend. Eleven release products were restored and hash-checked
+before any release consumer resumed.
+
+SVG paint smoke passes twelve scenarios and 680 assertions using that executable.
+Integer-cast lint, document links/fences and diff checks pass. The red work-count
+regressions, reorder/alias/eviction/fault coverage, native selective-repaint case,
+source/binary identities and restoration hashes are under
+`temp/rendering-index-refresh/`. The completed raw Radiant aggregate exits
+successfully after 392,341 ms: 6,004 passed, zero failed, 146 partial and two
+skipped of 6,152 cases. All 646 UI automation cases and 111 page-load cases pass.
+Layout retains 3,152 full passes and 142 partial results; visual comparison has
+207 full passes, four expected differences and one skip. The view gate has
+215 passes and one skip. `test_summary.json`, `radiant-baseline.log` and
+`qualification.json` preserve the completed result. Final source, executable
+and restored release-product hashes match the frozen candidate.
+
+This completes stable-entry refresh and expired-prefix pruning. Reused chunks
+still undergo a graph walk to refresh their membership. Forced-frame chunk
+references, placement-only composition, narrower inherited/style/reference
+invalidation and the full M0–M7 frame-time/peak-memory envelope remain open.
+The earlier runtime/PDF debt is unchanged. No general frame-time or total-memory
+improvement is claimed from the work-count checks alone.
+
+
+## 18. Share captured chunks with settled full-frame recordings
+
+**Completed milestone, 2026-10-20:** a fresh full frame captures immutable chunks
+but retains its original flat document commands as well. Assemble document-root
+references during capture and adopt that recording only after replay and overlay
+retirement. This removes duplicate persistent command storage while retaining the
+existing complete frame key and resource checks. Ownership remains
+**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+Acceptance: a wide native document retains root references rather than a second
+flat command array; unchanged forced frames preserve those owners with zero
+command copies. Painter order, nested markers, glyph/video properties and the
+independent resource snapshot survive adoption. Active frames remain valid after
+index eviction. Overlays remain transient. Publication, staging or validation
+failure preserves the original recording and existing flat snapshot fallback.
+Staging cannot borrow the original scratch arena; adoption must preserve the
+registered destination scratch object's address and exclusive ownership.
+
+Scope: settled full-frame command storage. No placement reuse, narrower
+invalidation, membership-walk change or vendor change. Verify a release storage
+red/green, focused capture/adoption/fault cases, affected release/ASan native
+suites, SVG smoke and one required Radiant aggregate after code stabilizes.
+Broader frame-time and peak-memory qualification remains open.
+
+### Implemented core
+
+Eligible capture stages the document prefix alongside the existing resource
+snapshot. Each complete scope references the exact returned publication rather
+than looking it up again by view ID. Unmarked commands use `dl_copy_range`;
+payloads needing a scratch arena reject staging and keep the flat fallback.
+Publication, snapshot or staging failure clears generated outputs without
+changing the original source. Overlay chunks still follow the existing index
+capture policy but never enter the staged document prefix.
+
+`dl_adopt_recording` validates before mutation, then transfers only heap command
+and shared-array storage. It keeps the destination's registered scratch object
+in place, releasing obsolete flat metadata through the existing clear helper.
+The renderer adopts only a smaller recording after replay, saving and overlay
+retirement, with the existing stable-key/foreign-dependency admission guards.
+A common storage-charge helper checks the staged graph, destination arena and
+resource snapshot against frame admission before retiring flat commands. A graph
+above the frame budget therefore keeps the reusable flat recording, even when
+its individual chunks fit the separate retained-cache budget. The 1,536-card
+control reproduced lost frame reuse without this guard; it is an acceptance case.
+Chunk leases precede retirement of producer payloads and survive index eviction.
+`frame_chunk_recordings` distinguishes fresh adoption from idle frame reuse.
+
+The release red regression retains 2,562 commands in an 884,736-byte array for
+512 cards. The new recording stores one root reference in 216 bytes, with the
+same expanded commands and pixels. This measures the duplicate frame command
+array; retained chunks, target buffers and backend storage remain charged
+separately. Unchanged forced redraws still copy zero commands. Native release
+checks pass 201 vector, 45 retained, 96 display-list and 25 state cases (367 total).
+They cover duplicate IDs, independent glyph epochs, copied semantic metadata,
+eviction, overlays, fault rollback, invalid staging and unmarked scratch fallback.
+Final sanitizer and aggregate qualification follow.
+
+### Qualification
+
+The frozen release executable is
+`28e0aae5c9d8147bd9bfbb7f42210f27cd00c42abd155d7afaae7becf9e3132d`
+at HEAD `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` plus these continuations.
+All 367 affected native cases pass in release and `debug_asan_native` against
+matching source hashes: 201 vector, 45 retained, 96 display-list and 25 state.
+No ASan memory error is reported; leak detection is disabled, vendor internals
+are not instrumented and native video uses the C++ stub backend. Eleven release
+products were restored and hash-checked before release checks resumed.
+
+SVG smoke passes twelve scenarios and 680 assertions at the tested scales and
+layer modes using the same frozen executable. Integer-cast lint and document
+links/fences pass. Red/green storage evidence, native logs, source/binary hashes,
+restoration receipts and the smoke report are in `temp/rendering-frame-chunks/`.
+The first completed aggregate passed before the frame-budget fallback case was
+found; that candidate's receipts are archived under `pre-budget/`. The final
+admission guard and expanded native case have fresh release/ASan and SVG checks
+on the executable above. Their required aggregate exits successfully after
+409,411 ms: 6,009 passed, zero failed, 146 partial and two skipped of 6,157 cases.
+UI automation passes all 646 cases and page-load passes all 111. Layout retains
+3,152 full passes and 142 partial results; visual comparison retains 207 full
+passes, four expected differences and one skip. View tests report 215 passes
+and one skip. These are raw aggregate counts, not an expansion of conformance
+claims for the underlying WPT fixtures. `test_summary.json`,
+`radiant-baseline.log` and `qualification.json` record the completed final gate.
+Source, executable and all eleven restored release-product hashes match the
+frozen candidate after qualification. This completes the scoped milestone.
+
+The initial producer and first replay still use flat commands. Eligible settled
+frames now share captured chunks; unmarked scratch payloads and rejected captures
+retain the flat fallback. Graph-membership traversal, placement-only composition,
+finer inherited/style/reference invalidation and full M0–M7 frame-time/peak-memory
+qualification remain open. The earlier runtime/PDF debt is unchanged. The measured
+array reduction is not a claim about total retained memory or frame time.
+
+
+## 19. Refresh complete retained subtrees as membership groups
+
+**Completed core milestone, 2026-10-20:** unchanged mixed-frame branches still walk every
+chunk to refresh cache membership. Represent the index as a forest of publication
+groups. A complete group covers exactly its immutable paint subtree; refreshing
+its root can retain descendant membership without visiting commands or nodes.
+Changed bindings detach from their group and invalidate ancestor completeness;
+shared/overwritten dependencies fall back to ordered traversal and regrouping.
+Ownership remains **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+
+Acceptance: the 4,097-node recapture visits one membership node and preserves its
+logical reuse count and every indexed ID. A mixed rebuild keeps a wide unchanged
+sibling as one group. Reusing only a nested child splits the group and prunes its
+unpainted ancestors while preserving the child subtree. Repeated or overwritten
+view IDs and shared descendants keep source-order last-writer behavior. Budget
+eligibility observes inherited current epochs; splitting, eviction, pressure
+teardown and cache destruction cannot invalidate pinned frame payloads. Group
+links allocate no storage or leases beyond their budgeted entry/chunk fields.
+
+Scope: index membership only. Replay, placement reuse and paint invalidation
+remain unchanged. Verification budget: release work-count red/green, focused
+split/mixed/alias/eviction/fault coverage and a native selective repaint, affected
+native release/ASan suites, SVG smoke and one required aggregate after stabilizing
+code. Full frame-time and peak-memory qualification remains open.
+
+### Implemented core
+
+The index is a forest whose entries borrow parent/child/sibling links. Complete
+groups cover the publication's exact child bindings and their complete groups.
+Each private chunk stores a budgeted immutable logical-node count. A reused
+complete group stamps one root and advances logical reuse statistics without
+walking descendants. Entry replacement/detachment materializes inherited epoch
+and recency, then invalidates enclosing groups. Rebuilding attaches entries in
+source order and checks completeness after all attachments, because a shared
+child may invalidate an earlier branch. Incomplete groups retain ordered walking.
+
+Pruning inspects expired root groups; entry retirement promotes child groups
+before releasing the publication lease. Budget scans reject physically parented
+chunks before following inherited epochs; only physical roots can reclaim storage.
+Budget eligibility follows inherited active epochs. Epoch wrap resets every map entry, including nested members. The same
+unlink/link/detach/clear helpers serve publication, failed capture, splitting,
+pruning, budget eviction and cache destruction. Links introduce no allocations
+or leases. Ancestor-chain invalidation and fresh/expired/budget traversals remain;
+this does not make entire capture or eviction constant-time.
+
+Release red/green counts change wide recapture from 4,097 membership visits to
+one, with one group refresh and all 4,097 logical reuses. A native selective
+repaint refreshes the unchanged 257-node card as one group and preserves pixels.
+Release native checks pass 201 vector, 49 retained, 96 display-list and 25 state
+cases (371 total). Additional cases split a nested group under allocation failure,
+evict an old parent while its active wide child keeps every index entry, traverse
+a shared-descendant DAG in source order, and replace a descendant before an older
+ancestor publication reuses. Existing alias/eviction/fault cases remain passing.
+Sanitizer, SVG and final aggregate qualification follow.
+
+### Qualification
+
+The frozen release executable is
+`08ca392f76c09da499ea373547aa189796951d0241d5c95282971ca3a60f4fc5`
+at HEAD `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` plus these continuations.
+All 371 affected native cases pass in release and `debug_asan_native` against
+matching sources: 201 vector, 49 retained, 96 display-list and 25 state. No ASan
+memory error is reported; leak detection is disabled, vendor internals are not
+instrumented and native video uses the C++ stub backend. Eleven release products
+were restored and hash-checked before release consumers resumed.
+
+SVG smoke passes twelve scenarios and 680 assertions using the same frozen
+executable. Integer-cast lint, document links/fences and diff checks pass. Red/green
+work counts, split/shared/replacement/eviction/fault evidence, native repaint,
+source/binary identities and restoration receipts are under
+`temp/rendering-membership-groups/`. The required Radiant aggregate exits
+successfully after 353,200 ms: 6,013 passed, zero failed, 146 partial and two
+skipped of 6,161 cases. All 646 UI automation and 111 page-load cases pass.
+Layout retains 3,152 full passes and 142 partial results; visual comparison
+retains 207 full passes, four expected differences and one skip. View tests report
+215 passes and one skip. These are raw aggregate counts; underlying WPT fixture
+conformance claims remain unchanged. `test_summary.json`, `radiant-baseline.log`
+and `qualification.json` preserve the completed gate. Final source, executable
+and all eleven restored release-product hashes match the frozen candidate.
+This completes grouped membership refresh for complete indexed subtrees.
+
+Shared, unindexed and incomplete groups retain ordered traversal. Ancestor-chain
+invalidation, fresh capture, expired-entry retirement and budget eviction still
+have their respective work costs. Placement-only composition, finer inherited/
+style/reference invalidation and full M0–M7 frame-time/peak-memory qualification
+remain open. Earlier runtime/PDF debt is unchanged; work counts do not establish
+general frame-time or total-memory improvements.

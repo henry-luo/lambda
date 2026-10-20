@@ -2,6 +2,9 @@
 #include "../radiant/event.hpp"
 #include <string.h>
 
+// this standalone recorder target has no private retained publisher.
+const DisplayChunkValidation* retained_dl_chunk_validation(const DisplayPayloadOwner*) { return nullptr; }
+
 static const RdtPath* g_test_path = nullptr;
 static bool g_test_path_has_bounds = false;
 static float g_test_path_left = 0.0f;

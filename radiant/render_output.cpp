@@ -733,6 +733,34 @@ struct RenderFrameCache {
     bool valid;
 };
 
+static constexpr size_t RENDER_FRAME_RECORDING_BUDGET = (size_t)8 << 20;
+
+static bool render_frame_recording_bytes(const DisplayList* list, bool inspect_commands, size_t* bytes) {
+    *bytes = list->capacity() * sizeof(DisplayItem) + arena_total_allocated(list->arena.arena) +
+        dl_shared_array_bytes(list);
+    if (!inspect_commands) return true;
+    for (const DisplayItem& item : *list) {
+        if (!dl_item_is_retainable_for_fragment(&item)) {
+            if (render_pipeline_metrics) log_notice("[RENDER_RECORDING] rejected_op=%d", item.op);
+            return false;
+        }
+        if (item.op == DL_DRAW_FRAGMENT) {
+            const DisplayPayloadOwner* owner = item.draw_fragment.owner;
+            if (!owner || owner->retained_bytes > SIZE_MAX - *bytes) return false;
+            *bytes += owner->retained_bytes;
+        }
+        const DisplayOpDescriptor* descriptor = dl_op_descriptor(item.op);
+        if (descriptor && descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
+            const RdtPath* path = *(RdtPath* const*)((const char*)&item + descriptor->owned_payload_offset);
+            // shared path buffers remain conservatively charged per reference; native picture bytes are untracked.
+            size_t path_bytes = rdt_path_storage_bytes(path);
+            if (path_bytes > SIZE_MAX - *bytes) return false;
+            *bytes += path_bytes;
+        }
+    }
+    return true;
+}
+
 static void render_frame_cache_invalidate(RenderFrameCache* cache) {
     cache->valid = false;
     cache->recording = {};
@@ -1474,7 +1502,18 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
     uint64_t t_capture = time_now_ns();
     measurement.checkpoint("overlays_validate");
-    if (!reused) retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    struct CapturedResources {
+        DisplayResourceSummary* value = nullptr;
+        DisplayList commands;
+        ~CapturedResources() { dl_destroy(&commands); dl_resource_summary_destroy(value); }
+    } captured_resources;
+    bool resources_captured = false;
+    if (!reused) {
+        if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document))
+            resources_captured = retained_dl_cache_capture_resources(rdcon.retained_dl_cache,
+            &display_list, document_commands, &captured_resources.value, &captured_resources.commands);
+        else retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
+    }
     uint64_t t_captured = time_now_ns();
     measurement.checkpoint("retained_capture");
     if (render_pipeline_metrics) {
@@ -1557,32 +1596,36 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     if (can_retain && !rdcon.has_foreign_paint_dependencies && !render_svg_layers_pending(uicon->document) &&
         render_frame_key_equal(key, render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background))) {
         dl_trim_empty_arena(&display_list);
-        size_t recording_bytes = display_list.capacity() * sizeof(DisplayItem) +
-            arena_total_allocated(display_list.arena.arena) + dl_shared_array_bytes(&display_list);
-        bool retainable = true;
-        for (int i = 0; !reused && i < document_commands && retainable; i++) {
-            const DisplayItem* item = &display_list.data()[i];
-            retainable = dl_item_is_retainable_for_fragment(item);
-            if (!retainable && render_pipeline_metrics)
-                log_notice("[RENDER_RECORDING] rejected_op=%d", item->op);
-            if (item->op == DL_DRAW_FRAGMENT) {
-                const DisplayPayloadOwner* owner = item->draw_fragment.owner;
-                if (!owner || owner->retained_bytes > SIZE_MAX - recording_bytes) retainable = false;
-                else recording_bytes += owner->retained_bytes;
-            }
-            const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
-            if (descriptor && descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
-                const RdtPath* path = *(RdtPath* const*)((const char*)item + descriptor->owned_payload_offset);
-                // conservatively charge shared path buffers per reference; native picture storage remains untracked.
-                size_t bytes = rdt_path_storage_bytes(path);
-                if (bytes > SIZE_MAX - recording_bytes) retainable = false;
-                else recording_bytes += bytes;
-            }
+        size_t proposed_bytes = 0;
+        size_t arena_bytes = arena_total_allocated(display_list.arena.arena);
+        size_t summary_bytes = dl_resource_summary_bytes(captured_resources.value);
+        // a shared graph can exceed frame admission even when the flat recording fits; check before retirement.
+        if (!reused && resources_captured && captured_resources.commands.size() < display_list.size() &&
+            render_frame_recording_bytes(&captured_resources.commands, true, &proposed_bytes) &&
+            proposed_bytes <= RENDER_FRAME_RECORDING_BUDGET &&
+            arena_bytes <= RENDER_FRAME_RECORDING_BUDGET - proposed_bytes &&
+            summary_bytes <= RENDER_FRAME_RECORDING_BUDGET - proposed_bytes - arena_bytes &&
+            dl_adopt_recording(&display_list, &captured_resources.commands, &document_recording,
+                "render_output_shared_document")) {
+            document_commands = display_list.item_count();
+            dl_trim_empty_arena(&display_list);
+            RENDER_METRIC_ADD(frame_chunk_recordings, 1);
         }
-        if (!reused && retainable && recording_bytes <= ((size_t)8 << 20)) {
+        size_t recording_bytes = 0;
+        bool retainable = render_frame_recording_bytes(&display_list, !reused, &recording_bytes);
+        if (!reused && retainable && recording_bytes <= RENDER_FRAME_RECORDING_BUDGET) {
             DisplayResourceSummary* resources = nullptr;
-            retainable = dl_resource_summary_capture(&display_list, &resources,
-                ((size_t)8 << 20) - recording_bytes);
+            if (resources_captured) {
+                // capture already copied document dependencies; overlays never enter the frame snapshot.
+                resources = captured_resources.value;
+                captured_resources.value = nullptr;
+                if (dl_resource_summary_bytes(resources) > RENDER_FRAME_RECORDING_BUDGET - recording_bytes) {
+                    // flat recording order may coalesce repeated stamps into a smaller allocation.
+                    dl_resource_summary_destroy(resources); resources = nullptr; resources_captured = false;
+                }
+            }
+            if (!resources_captured) retainable = dl_resource_summary_capture(&display_list, &resources,
+                RENDER_FRAME_RECORDING_BUDGET - recording_bytes);
             cache->resources = lam::own(resources);
             recording_bytes += dl_resource_summary_bytes(resources);
         }
@@ -1590,7 +1633,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
             log_notice("[RENDER_RECORDING] bytes=%zu arena_used=%zu arena_reserved=%zu retainable=%d reused=%d",
                 recording_bytes, arena_total_used(display_list.arena.arena),
                 arena_total_allocated(display_list.arena.arena), retainable, reused);
-        if (retainable && (reused || recording_bytes <= ((size_t)8 << 20))) {
+        if (retainable && (reused || recording_bytes <= RENDER_FRAME_RECORDING_BUDGET)) {
             cache->recording = document_recording;
             cache->key = key; cache->valid = true;
             frame.preserved_commands = document_commands;

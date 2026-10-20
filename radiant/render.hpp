@@ -1028,6 +1028,7 @@ struct DisplayListCursor {
     int index = -1, root_index = -1, source_index = -1;
     bool failed = false;
     explicit DisplayListCursor(const DisplayList* list, int first = 0, int end = -1);
+    explicit DisplayListCursor(const DisplayPayloadOwner* chunk);
     const DisplayItem* next();
     void skip_element();
     int scope_size() const;
@@ -1048,6 +1049,12 @@ typedef struct DisplayListValidationResult {
 struct DisplayListProperties {
     bool has_glyphs = false;
     bool has_video = false;
+};
+
+struct DisplayChunkValidation {
+    DisplayListProperties properties{};
+    int max_element_depth = 0;
+    int max_fragment_depth = 0;
 };
 
 typedef struct DisplayOpDescriptor {
@@ -1258,6 +1265,10 @@ bool dl_validate_or_log(const DisplayList* dl, const char* context);
 // independently balanced physical command range; properties publish only after successful validation.
 bool dl_validate_range(const DisplayList* dl, int first, int end,
     DisplayListValidationResult* result, DisplayListProperties* properties = nullptr);
+bool dl_validate_chunk(const DisplayPayloadOwner* chunk, DisplayListValidationResult* result,
+    DisplayChunkValidation* validation);
+// only successfully validated private immutable publications supply a summary.
+const DisplayChunkValidation* retained_dl_chunk_validation(const DisplayPayloadOwner* chunk);
 bool dl_validate_range_or_log(const DisplayList* dl, int first, int end,
     const char* context, DisplayListProperties* properties = nullptr);
 bool dl_item_is_retainable_for_fragment(const DisplayItem* item);
@@ -1282,6 +1293,7 @@ void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint);
 class ValidatedDisplayList {
     friend bool dl_validate_recording(DisplayList*, int, ValidatedDisplayList*, const char*);
     friend bool dl_validate_append(DisplayList*, ValidatedDisplayList*, ValidatedDisplayList*, const char*);
+    friend bool dl_adopt_recording(DisplayList*, DisplayList*, ValidatedDisplayList*, const char*);
     lam::Up<DisplayList> list{};
     lam::Up<const DisplayItem> storage{};
     int count = 0;
@@ -1296,6 +1308,9 @@ public:
 // recording owners invalidate views before editing their prefix; appended storage growth is revalidated.
 bool dl_validate_recording(DisplayList* list, int end, ValidatedDisplayList* recording, const char* context);
 bool dl_validate_append(DisplayList* list, ValidatedDisplayList* prefix,
+    ValidatedDisplayList* recording, const char* context);
+// transfer a validated scratch-free recording without moving either registered scratch object.
+bool dl_adopt_recording(DisplayList* dst, DisplayList* source,
     ValidatedDisplayList* recording, const char* context);
 
 // ===== render_backend_caps.hpp =====
@@ -2062,6 +2077,10 @@ void retained_dl_cache_destroy(RetainedDisplayListCache* cache);
 
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache);
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source);
+// snapshot only the balanced document prefix; optional empty, arena-free commands share captured roots.
+// failure clears both outputs; the original source remains available for the flat fallback.
+bool retained_dl_cache_capture_resources(RetainedDisplayListCache* cache, const DisplayList* source,
+    int document_commands, DisplayResourceSummary** snapshot, DisplayList* frame_commands = nullptr);
 RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache);
 void retained_dl_cache_set_storage_budget(RetainedDisplayListCache* cache, size_t bytes);
 void retained_dl_cache_note_reuse_miss(RetainedDisplayListCache* cache);
