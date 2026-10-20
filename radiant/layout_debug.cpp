@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -215,6 +216,14 @@ void layout_profiler_report(LayoutContext* lycon) {
         (unsigned long long)p->intrinsic_cache_misses,
         (unsigned long long)p->intrinsic_reentrant,
         p->intrinsic_inclusive_ms, p->intrinsic_exclusive_ms);
+    log_notice("[LAYOUT_PROFILE] css: full=%lld measure=%lld reuse=%lld geometry=%lld",
+        (long long)g_style_resolve_full, (long long)g_style_resolve_measure,
+        (long long)g_style_resolve_incremental, (long long)g_style_geometry_evaluations);
+    for (uint8_t reason = 0; reason < CSS_STYLE_MISS_COUNT; reason++) {
+        if (css_style_misses[reason]) log_notice("[LAYOUT_PROFILE] css_miss: %s=%llu",
+            css_style_miss_name(static_cast<CssStyleMiss>(reason)),
+            (unsigned long long)css_style_misses[reason]);
+    }
     log_notice("[LAYOUT_PROFILE] shifted_reuse: %lld flex_retained: %lld",
         (long long)g_layout_shifted_reuse_count, (long long)g_layout_flex_retained_count);
 

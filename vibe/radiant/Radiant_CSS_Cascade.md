@@ -10,6 +10,7 @@ standard-host regression harness remain disabled in ordinary page loads.
 **Verified against:** `0a46bd2129c6a4f5bf444bf5deec8a767c250126`  
 **Scope:** CSS condition evaluation, matching, specified-style storage, style
 epochs, custom properties, pseudo styles, and the seam to computed view props.  
+**Extension (2026-10-20):** native incremental computed/used resolution, §3.45.
 **Related record:** [Slow Online-Page Loading](Radiant_Issue_Slow_Page_Loading.md).  
 **Spec linkage:** [Formal Design](../../doc/Lambda_Formal_Design.md)
 **D4.1.4v4** (arena versus pool reclamation), **D4.2.1v3–D4.2.5v3**
@@ -2594,3 +2595,56 @@ the ordinary sibling-collapse branch when that parent is blocked. Share the
 existing parent boundary test with the first-content search and retain the
 sibling path at root/BFC/border/padding/clearance boundaries. The failed gate and
 its individual reports remain evidence; no floors or references are changed.
+
+### 3.45 Incremental computed style and geometry resolution (P0)
+
+**Status: native sizing milestone implemented; broader reuse remains partial.**
+LLVM LangRef's baseline release profile performs four layouts and 247,169
+intrinsic width requests with no width-cache hits. Measurement repeats
+`dom_node_resolve_style → resolve_css_styles` even when only the containing size
+changes; inheritance, substitution and property dispatch repeat with it.
+
+Keep computed-style validity separate from completed layout. The per-element
+`CssResolvedStyle` cache records substituted geometry declarations, folds
+font-relative lengths once, and retains percentage dependencies on width,
+height or containing inline size. A context mismatch evaluates only affected
+bindings through the shared `css_apply_computed_property` dispatcher. Computed
+fonts, colors and fixed lengths remain reusable. Full resolution refreshes
+inherited fonts before resolving the element's relative lengths.
+
+A typed, clean geometry baseline restores CSS sizes, spacing, insets and flex
+fields after speculative sizing or margin collapse. It preserves caller-assigned
+auto sizes and excludes resource pointers and flow links. Keys cover specified
+style/version, document and parent revisions, view generation/kind/item role,
+font resources, raster scale, and root-font/viewport inputs when read. Geometry
+bindings track containing dimensions, definiteness and intrinsic policy.
+Snapshots and cloned expressions belong to the selected default-view pool:
+**D4.5.1v4 / D4.1.4v5**, with no retained GC pointers (**D4.5.2**).
+
+Probe/secondary views, table/replaced/form/SVG roles, explicit geometry
+inheritance, unsupported percentage reads, container effects and elements with
+motion use full resolution. View resets retire the cache; preserving it across those
+resets and reducing repeated intrinsic/document layouts remain separate work.
+
+Acceptance covers A→B→A sizing without full CSS work, definite zero versus
+indefinite bases, logical/physical winners, inherited fonts/variables, consumed
+margins, provisional view kinds, flex initialization and causal environment edits.
+The focused suites pass: view reuse 137, text/layout 166, animation 151. The
+Radiant baseline has zero failures with existing partial/skipped cases retained;
+all 999 selected CSS/input checks pass. The full input gate has 4502/4526 passes:
+24 Wiki/prose/PDF failures reproduce under untouched HEAD and the new host,
+including identical PDF pixel differences. No references or exclusions changed.
+
+Three interleaved release trials per build, identical local LLVM assets, against
+HEAD `55239a758`: median load **89.869 → 72.102 s** (**19.8% less time**, 1.246×).
+Median peak RSS is **705.5 → 709.0 MiB**. Raw trials, binary/source hashes and
+validation results: `temp/css-incremental-benchmark/report.json`. Full/measurement
+resolutions, incremental reuses, geometry evaluations and fallback reasons are
+available with `LAYOUT_PROFILE=1`.
+
+The final diagnostic run records 2,994,711 incremental reuses and 37,538 geometry
+evaluations. It still performs 1,179,944 full resolutions, including 828,708
+parent-key misses. Distinguishing unchanged inherited computed values from a
+parent's conservative restyle revision is deferred. The four layouts still make
+247,169 intrinsic width requests with zero hits; CSS reuse alone does not remove
+that repeated sizing work.
