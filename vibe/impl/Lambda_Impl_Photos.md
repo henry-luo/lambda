@@ -769,3 +769,51 @@ The report also identifies both demo/package snapshots. Callback timestamps matc
 native frame records explicitly, excluding activation/input-drain turns. CPU
 paint profiles include record/replay; OS input queuing and actual display refresh
 remain outside the measurement.
+
+## Master integration — 2026-10-20
+
+The integration combines Photos through `b92fa9809` with master `6ace30436`,
+then its newer `1a4e870e5` tip. Merge resolutions retain master's live form-state
+ownership and speech tests, both demo CLI entries, and the implemented Photos
+proposal checkpoint. Canvas publication and one-stroke history retain the
+existing contracts (**D4.5.2 / S12.1.3**).
+
+The first combined UI run exposed intrinsic grid minima in the Photos dock:
+`1fr 1fr` expanded its scrollable width to 337 px for a 283 px client area.
+The horizontal scrollbar intercepted the foreground input's center, leaving
+keyboard input on the previously focused button. `repeat(2,minmax(0,1fr))`
+expresses the intended equal tracks within the available width. The brush replay
+now checks the input's actual hit target before typing, retaining the original
+preview, cancellation, history and pixel assertions.
+
+Fresh qualification against `1a4e870e5` plus Photos passes:
+
+- **504 affected native checks:** 202 vector, 49 retained display-list,
+  96 display-list, 28 state, 124 view-reuse, three canvas/fake-speech and two
+  retained-form cases.
+- **13 Photos workflows / 187 assertions**, plus all three UI preflight cases.
+- **24 eager-JIT image/editor cases** with forced GC and poisoned frees.
+  The earlier combined release snapshot also passed all 24 cases in AUTO and
+  eager JIT with the same GC settings.
+
+The first combined full Radiant run reported **6,024 passed, four failed,
+146 partial and two skipped**. Three failures were the Photos dock issue above
+and pass after its correction, including after the newer master merge. The
+remaining CSS-memory failure still reproduces unchanged: jQuery UI uses 381,630
+live CSS bytes against the 373,940-byte budget. The full aggregate was not
+repeated after master advanced; its affected rendering/layout paths received
+the fresh focused checks above. This is not a fully green aggregate claim.
+
+The final Lambda baseline reports **7,912/7,914 passed**, including
+**2,112/2,112 input checks** and **319/319 MIR forced-GC cases**. The runtime
+portion passes 5,800/5,802. `math_test_math_includegraphics` retains its bulk-only
+failure and passes the focused rerun. `mermaid_scene_render` loses its batch
+record because the debug host asserts on a scratch-lived view-property owner
+at `view_prop_ensure.cpp:10` (**D4.1.4v5 / D4.5.1v4**); the focused rerun
+reproduces it. The main checkout's pre-Photos release
+`ed723ec5b4cacd998dea75ea4db2f420120b5dcbebe56fed2131aaa4a5ab91b9`
+passes that fixture, but this different-profile control does not resolve the
+debug ownership failure. It remains a qualification limit.
+
+Integration logs and the saved brush performance report are retained in the
+main checkout under `temp/photos-merge-20261020/`, outside the removable worktree.
