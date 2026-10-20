@@ -1,0 +1,5 @@
+error[E239]: repeated `where`; combine the conditions with `and`
+error[E239]: `where` after `group by` would filter groups, which is not supported; filter the result with `|:`
+error[E239]: `let` after `group by` is not supported; compute group values in the body
+error[E239]: `order by`, `limit` and `offset` go after `group by`, where they apply to groups
+error[E239]: repeated `limit`

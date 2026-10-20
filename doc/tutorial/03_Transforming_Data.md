@@ -160,7 +160,7 @@ lambda ages.ls
 
 ## Grouping
 
-`group by key into g` partitions the rows by a key and runs the body once per group. The group `g` is an **element** with the tag `group`: the key is its attribute and the rows are its children. Print one to see:
+`group by key into g` partitions the rows by a key and runs the body once per group. In the body the key has a name of its own, and `g` is the **array** of that group's rows. Print one to see:
 
 ```lambda
 // groups.ls
@@ -168,7 +168,7 @@ let sales = input("sales.csv")^
 let rows = sales |> {region: ~.region, units: int(~.units)}
 for (r in rows group by r.region into g limit 1) g;
 [for (r in rows group by r.region into g)
-    g.region ++ ": " ++ len(content(g)) ++ " orders, " ++ sum(content(g) |> ~.units) ++ " units"]
+    region ++ ": " ++ len(g) ++ " orders, " ++ sum(g |> ~.units) ++ " units"]
 ```
 
 ```bash
@@ -176,22 +176,20 @@ lambda groups.ls
 ```
 
 ```text
-<group region: "EMEA",
-  {
+[{
     region: "EMEA",
     units: 12
-  }
-  {
+  }, {
     region: "EMEA",
     units: 3
-  }>
+  }]
 ["EMEA: 2 orders, 15 units", "APAC: 2 orders, 12 units", "AMER: 2 orders, 28 units"]
 ```
 
 - `rows` first converts the CSV strings, so the groups hold numbers.
-- `g.region` reads the key attribute. The attribute is named after the key's last field; for a computed key, name it with `as`: `group by len(w) as size into g`.
-- `content(g)` is the array of the group's rows, so `len(content(g))` counts them and `content(g) |> ~.units` projects a column. Plain `len(g)` would also count the `region` attribute, as `len` does for every element.
-- Groups come out in the order their keys first appear. After `group by`, the loop variable `r` is out of scope; `order by`, `limit` and the body see only `g`.
+- `region` is the group's key, named after the key's last field. A computed key needs a name of its own: `group by len(w) as size into g`.
+- `g` holds the group's rows exactly as they came, so `len(g)` counts them and `g |> ~.units` projects a column.
+- Groups come out in the order their keys first appear. After `group by`, the loop variable `r` is out of scope; `order by`, `limit` and the body see only the key names and `g`.
 
 ## Joining Sources
 
@@ -295,9 +293,9 @@ let rows = sales |> {
     revenue: int(~.units) * float(~.price)
 }
 let totals = for (r in rows group by r.region into g)
-  {region: g.region,
-   units: sum(content(g) |> ~.units),
-   revenue: sum(content(g) |> ~.revenue)}
+  {region: region,
+   units: sum(g |> ~.units),
+   revenue: sum(g |> ~.revenue)}
 for (t in totals order by t.revenue desc) t
 {region: "all", units: sum(rows |> ~.units), revenue: sum(rows |> ~.revenue)}
 ```
@@ -336,7 +334,7 @@ The script reads as three steps: convert the CSV strings once, summarize each gr
 - `xs |> body` maps with `~` (the item) and `~key` (its index); a body without `~` receives the whole collection.
 - `xs |: cond` filters a collection; `x that cond` keeps a single value or gives `null`.
 - `for` expressions take `where`, `let`, `order by … desc`, `limit` and `offset` clauses; bracket a `for` to keep one array.
-- `group by … into g` makes one `<group>` element per key, with the key as an attribute and the rows as children; `on` joins two sources.
+- `group by … into g` runs the body once per key, with the key bound by name and `g` holding that key's rows; `on` joins two sources.
 - Arrays compute item by item; `eq ne lt le gt ge` make masks for `sum(mask)` and `arr[mask]`.
 - CSV fields are strings until you convert them.
 

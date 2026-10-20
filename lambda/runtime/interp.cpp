@@ -3471,9 +3471,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
 
     Item source = left.get();
     TypeId source_tid = get_type_id(source);
-    // Elements are maps for attribute lookup but lists for pipe traversal: a
-    // group Element's attributes describe its key while its children are the
-    // rows. Treating it as a map here discarded every grouped row (S10.1.3).
+    // Elements are maps for attribute lookup but lists for pipe traversal:
+    // treating one as a map here discarded every child row (S10.1.3).
     bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP;
     SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
 
@@ -3598,8 +3597,36 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
     return true;
 }
 
+// A key in the representation the shared runtime helpers consume -- group,
+// order and join keys alike: the value itself for one expression, an Array
+// tuple for several. Each part stays frame-rooted while a push grows the tuple.
+typedef AstNode* (*ForKeyExprOf)(AstNode* node);
+static AstNode* for_group_key_expr(AstNode* node) { return ((AstGroupKey*)node)->expr; }
+static AstNode* for_order_key_expr(AstNode* node) { return ((AstOrderSpec*)node)->expr; }
+static AstNode* for_join_prior_expr(AstNode* node) { return ((AstJoinKey*)node)->prior_expr; }
+static AstNode* for_join_new_expr(AstNode* node) { return ((AstJoinKey*)node)->new_expr; }
+
+static bool interp_eval_key_item(InterpFrame* f, AstNode* first, ForKeyExprOf expr_of,
+        Scratch& key) {
+    if (!first || !first->next) {
+        AstNode* expr = first ? expr_of(first) : NULL;
+        key.set(expr ? eval_expr(f, expr) : ItemNull);
+        return !interp_frame_pending(f);
+    }
+    key.set(interp_ptr_item(array_plain()));
+    for (AstNode* node = first; node; node = node->next) {
+        Scratch part(f);
+        AstNode* expr = expr_of(node);
+        part.set(expr ? eval_expr(f, expr) : ItemNull);
+        if (interp_frame_pending(f)) return false;
+        Array* tuple = (Array*)(uintptr_t)key.get().item;
+        if (tuple) array_push_verbatim(tuple, part.get());
+    }
+    return true;
+}
+
 // Emit an already-admitted row. Grouped for-expressions call this only after
-// `fn_group_by_keys_items` has replaced the row scope with the `into` value.
+// `interp_for_emit_groups` has replaced the row scope with the group bindings.
 static bool interp_for_emit_value(ForCtx* fc) {
     InterpFrame* f = fc->f;
     if (fc->destination) {
@@ -3612,15 +3639,17 @@ static bool interp_for_emit_value(ForCtx* fc) {
     if (fc->output) {
         // Re-read the accumulator: the body evaluation above is a safepoint.
         Array* out = (Array*)(uintptr_t)*fc->output;
-        if (out) array_push_spread(out, value);
+        // an ordered stream keeps one value per row, so a body yielding several
+        // items sorts as a unit; fn_order_rows spreads the rows afterwards
+        if (out && fc->node->order) array_push_verbatim(out, value);
+        else if (out) array_push_spread(out, value);
     }
     if (fc->node->order) {
-        AstOrderSpec* spec = (AstOrderSpec*)fc->node->order;
-        Item key = eval_expr(f, spec->expr);
-        if (interp_frame_pending(f)) return false;
+        Scratch key(f);
+        if (!interp_eval_key_item(f, fc->node->order, for_order_key_expr, key)) return false;
         if (fc->keys) {
             Array* keys = (Array*)(uintptr_t)*fc->keys;
-            if (keys) array_push_verbatim(keys, key);
+            if (keys) array_push_verbatim(keys, key.get());
         }
     }
     return true;
@@ -3704,38 +3733,49 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     return ok && !interp_frame_pending(f);
 }
 
-// Append one grouping key in the representation accepted by fn_group_by_keys:
-// a scalar for one key and an Array tuple for multiple keys. Each intermediate
-// Item is frame-rooted because pushing it may grow a GC-managed array.
+// Append one row's grouping key to the key stream fn_group_by_keys reads.
 static bool interp_for_append_group_key(ForCtx* fc, uint64_t* key_stream_home) {
     InterpFrame* f = fc->f;
     AstGroupClause* group = fc->node->group;
     if (!group || !key_stream_home) return false;
 
     Scratch group_key(f);
-    if (group->key_count <= 1) {
-        AstGroupKey* spec = group->keys;
-        group_key.set(spec && spec->expr ? eval_expr(f, spec->expr) : ItemNull);
-        if (interp_frame_pending(f)) return false;
-    } else {
-        group_key.set(interp_ptr_item(array_plain()));
-        for (AstGroupKey* spec = group->keys; spec;
-                spec = (AstGroupKey*)((AstNode*)spec)->next) {
-            Scratch key_part(f);
-            key_part.set(spec->expr ? eval_expr(f, spec->expr) : ItemNull);
-            if (interp_frame_pending(f)) return false;
-            Array* tuple = (Array*)(uintptr_t)group_key.get().item;
-            if (tuple) array_push_verbatim(tuple, key_part.get());
-        }
-    }
+    if (!interp_eval_key_item(f, (AstNode*)group->keys, for_group_key_expr, group_key)) return false;
     Array* key_stream = (Array*)(uintptr_t)*key_stream_home;
     if (key_stream) array_push_verbatim(key_stream, group_key.get());
     return true;
 }
 
-// MIR collects source rows and keys before it constructs group Elements. Do
+// S14.1.1v2: run the post-group clauses once per group record
+// `[members, key_1, ..., key_n]`, binding `into` to the members array and
+// each key name to its value. Records stay reachable through `groups_slot`.
+static bool interp_for_emit_groups(ForCtx* fc, Scratch& groups_slot) {
+    InterpFrame* f = fc->f;
+    AstGroupClause* group = fc->node->group;
+    Array* groups = (Array*)(uintptr_t)groups_slot.get().item;
+    int64_t group_count = groups ? groups->length : 0;
+    bool ok = true;
+    for (int64_t i = 0; i < group_count && ok; i++) {
+        groups = (Array*)(uintptr_t)groups_slot.get().item;
+        if (!groups || i >= groups->length) break;
+        interp_write_binding(f, group->entry, item_at(groups->items[i], 0));
+        int64_t part = 1;
+        for (AstGroupKey* key = group->keys; key;
+                key = (AstGroupKey*)((AstNode*)key)->next, part++) {
+            groups = (Array*)(uintptr_t)groups_slot.get().item;
+            if (key->entry) interp_write_binding(f, key->entry, item_at(groups->items[i], part));
+        }
+        ok = interp_for_emit_value(fc);
+        if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
+        if (f->signal == EvalSignal::CONTINUED) { interp_clear_loop_signal(f); ok = true; }
+        if (ok && i + 1 < group_count) interp_note_backedge(f);
+    }
+    return ok;
+}
+
+// MIR collects source rows and keys before it builds the group records. Do
 // that same two-stage work here; a grouped expression can therefore reuse the
-// runtime's numeric equality, null handling, key aliases, and member shape.
+// runtime's numeric equality, null handling and member order.
 static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
     InterpFrame* f = fc->f;
     AstGroupClause* group = fc->node->group;
@@ -3784,21 +3824,7 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
     }
     if (keys) symbol_key_list_free(keys);
     if (interp_frame_pending(f)) return NULL;
-
-    Scratch aliases_slot(f);
-    aliases_slot.set(interp_ptr_item(array_plain()));
-    for (AstGroupKey* spec = group->keys; spec;
-            spec = (AstGroupKey*)((AstNode*)spec)->next) {
-        // Group aliases originate in the parser's name pool; the helper reads
-        // a String-tagged Item, so a raw pointer would decode as null attrs.
-        Scratch alias_slot(f);
-        alias_slot.set((Item){.item = s2it(heap_create_name(
-            spec->alias ? spec->alias->chars : ""))});
-        Array* aliases = (Array*)(uintptr_t)aliases_slot.get().item;
-        if (aliases) array_push_verbatim(aliases, alias_slot.get());
-    }
-    return fn_group_by_keys_items(rows_slot.get(), key_stream_slot.get(),
-        aliases_slot.get());
+    return fn_group_by_keys(rows_slot.get(), key_stream_slot.get(), group->key_count);
 }
 
 // Finalize every demanded comprehension stream in the same place so plain and
@@ -3808,12 +3834,14 @@ static Item interp_for_finalize_output(InterpFrame* f, AstForNode* for_node,
     Array* out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
     if (!out) return ItemNull;
     if (for_node->order) {
-        AstOrderSpec* spec = (AstOrderSpec*)for_node->order;
-        // MIR records one key per emitted row, then delegates ordering to this
-        // shared stable helper before applying ordered windows (S6).
-        fn_sort_by_keys(interp_ptr_item(out),
+        // Both tiers record one value and one key per row, then share this
+        // stable helper before applying ordered windows (S6).
+        int64_t key_count = 0;
+        int64_t desc_mask = ast_order_desc_mask(for_node->order, &key_count);
+        out = fn_order_rows(interp_ptr_item(out),
             (Item){.item = key_stream_home ? *key_stream_home : ITEM_NULL},
-            spec->descending ? 1 : 0);
+            desc_mask, key_count);
+        *output_home = (uint64_t)(uintptr_t)out;
     }
     if (for_node->offset || for_node->limit) {
         // The window trims the raw stream in place, ordered or not, so the
@@ -3851,19 +3879,7 @@ static Item interp_eval_grouped_for(ForCtx* fc, AstLoopNode* loop,
     if (interp_frame_pending(f)) return ItemNull;
     Scratch groups_slot(f);
     groups_slot.set(interp_ptr_item(groups));
-    int64_t group_count = groups ? groups->length : 0;
-    bool ok = true;
-    for (int64_t i = 0; i < group_count && ok; i++) {
-        groups = (Array*)(uintptr_t)groups_slot.get().item;
-        if (!groups || i >= groups->length) break;
-        Scratch group_slot(f);
-        group_slot.set(groups->items[i]);
-        interp_write_binding(f, for_node->group->entry, group_slot.get());
-        ok = interp_for_emit_value(fc);
-        if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
-        if (f->signal == EvalSignal::CONTINUED) { interp_clear_loop_signal(f); ok = true; }
-        if (ok && i + 1 < group_count) interp_note_backedge(f);
-    }
+    interp_for_emit_groups(fc, groups_slot);
     if (!result_demanded) return ItemNull;
 
     return interp_for_finalize_output(f, for_node, out_slot.home(), key_slot.home());
@@ -3878,27 +3894,8 @@ static Item interp_join_name_item(String* name) {
 // frame slots before this runs, matching the two JIT key-evaluation sites.
 static bool interp_join_make_key(InterpFrame* f, AstLoopNode* loop,
         bool use_new_side, Scratch& key_slot) {
-    if (!loop || loop->join_key_count <= 0) {
-        key_slot.set(ItemNull);
-        return true;
-    }
-    if (loop->join_key_count == 1) {
-        AstJoinKey* key = loop->join_keys;
-        AstNode* expr = key ? (use_new_side ? key->new_expr : key->prior_expr) : NULL;
-        key_slot.set(expr ? eval_expr(f, expr) : ItemNull);
-        return !interp_frame_pending(f);
-    }
-    key_slot.set(interp_ptr_item(array_plain()));
-    for (AstJoinKey* key = loop->join_keys; key;
-            key = (AstJoinKey*)((AstNode*)key)->next) {
-        Scratch part_slot(f);
-        AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
-        part_slot.set(expr ? eval_expr(f, expr) : ItemNull);
-        if (interp_frame_pending(f)) return false;
-        Array* tuple = (Array*)(uintptr_t)key_slot.get().item;
-        if (tuple) array_push_verbatim(tuple, part_slot.get());
-    }
-    return true;
+    return interp_eval_key_item(f, loop ? (AstNode*)loop->join_keys : NULL,
+        use_new_side ? for_join_new_expr : for_join_prior_expr, key_slot);
 }
 
 // Collect a join source once, including its source index/key stream. The row
@@ -4069,39 +4066,10 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
         }
         if (interp_frame_pending(f)) return ItemNull;
 
-        Scratch aliases_slot(f);
-        aliases_slot.set(interp_ptr_item(array_plain()));
-        for (AstGroupKey* spec = for_node->group->keys; spec;
-                spec = (AstGroupKey*)((AstNode*)spec)->next) {
-            Scratch alias_slot(f);
-            alias_slot.set((Item){.item = s2it(heap_create_name(
-                spec->alias ? spec->alias->chars : ""))});
-            Array* aliases = (Array*)(uintptr_t)aliases_slot.get().item;
-            if (aliases) array_push_verbatim(aliases, alias_slot.get());
-        }
         Scratch groups_slot(f);
-        groups_slot.set(interp_ptr_item(fn_group_by_keys_items(
-            group_rows_slot.get(), group_keys_slot.get(), aliases_slot.get())));
-        Array* groups = (Array*)(uintptr_t)groups_slot.get().item;
-        int64_t group_count = groups ? groups->length : 0;
-        bool grouped_ok = true;
-        for (int64_t i = 0; i < group_count && grouped_ok; i++) {
-            groups = (Array*)(uintptr_t)groups_slot.get().item;
-            if (!groups || i >= groups->length) break;
-            Scratch group_slot(f);
-            group_slot.set(groups->items[i]);
-            interp_write_binding(f, for_node->group->entry, group_slot.get());
-            grouped_ok = interp_for_emit_value(fc);
-            if (f->signal == EvalSignal::BROKE) {
-                interp_clear_loop_signal(f);
-                break;
-            }
-            if (f->signal == EvalSignal::CONTINUED) {
-                interp_clear_loop_signal(f);
-                grouped_ok = true;
-            }
-            if (grouped_ok && i + 1 < group_count) interp_note_backedge(f);
-        }
+        groups_slot.set(interp_ptr_item(fn_group_by_keys(group_rows_slot.get(),
+            group_keys_slot.get(), for_node->group->key_count)));
+        interp_for_emit_groups(fc, groups_slot);
         if (!result_demanded) return ItemNull;
         return interp_for_finalize_output(f, for_node,
             out_slot.home(), key_slot.home());

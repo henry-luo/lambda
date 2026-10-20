@@ -61,7 +61,7 @@ import chart: lambda.chart.chart
 
 let sales = input("sales.csv")^
 let totals = [for (s in sales group by s.region into g)
-    {region: g.region, units: sum(content(g) |> int(~.units))}]
+    {region: region, units: sum(g |> int(~.units))}]
 let spec = {
     width: 360, height: 220,
     title: "Units sold by region",

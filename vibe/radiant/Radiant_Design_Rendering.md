@@ -329,9 +329,20 @@ or remapping chunk-local markers. Serial/dirty/tile replay, validation, media,
 resource checks and SVG capture/export consume the same read-only cursor.
 Validation rejects cycles, invalid spans and inconsistent marker/count metadata;
 subtree culling skips an immutable chunk directly. Capturing a mixed frame
-republishes matching chunks, while a different cache copies producer commands into
-its own budget ledger. Active references survive cache eviction/destruction.
+republishes matching chunks. A certified, untranslated zero-ID leaf from another
+cache can remain an immutable child reference beneath a captured parent. The
+parent reserves the child's full retained size in its own budget, conservatively
+per reference, and pins the producer's existing owner. Other foreign fragments
+keep the command-copy path. Active references survive cache eviction/destruction.
 Broad dirty-generation invalidation remains; placement-only reflow is separate.
+
+Foreign subscene references carry no HTML view bindings. Index grouping,
+membership refresh and subtree eviction remain local to each cache's budget;
+an SVG publication key cannot become an HTML marker ID. Only same-budget parent
+edges prevent root reclamation. A foreign reader pins storage and its original
+charge while allowing the producer's publication to retire independently.
+Allocation or budget failure keeps the original frame recording available
+(**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
 
 Explicit vector composition uses `retained_dl_append_fragment_translated`.
 A placement shell pins the original chunk and adds a translation without owning
@@ -531,9 +542,10 @@ scratch payloads and has no earlier arena allocations. This preserves the
 (**D4.2.4 / D4.5.1v4**).
 
 The retained budget charges managed command/span capacity, arena storage,
-shared arrays and a conservative per-reference path footprint. Shared geometry
-can be charged more than once. ThorVG internals and native picture bytes are
-untracked; image pixels and font caches retain their separate resource owners
+shared arrays, foreign subscene leases and a conservative per-reference path
+footprint. Shared geometry and cross-cache leases can be charged more than once;
+budget liability is separate from actual allocated bytes. ThorVG internals and
+native picture bytes are untracked; image pixels and font caches retain their separate resource owners
 and are outside this command-storage charge. A refcounted ledger follows chunks
 beyond cache eviction/destruction; new admission can fail while active readers
 retain the remaining charge.
@@ -621,7 +633,8 @@ dirty-source ancestry queries/subtree searches,
 resource snapshot command/metadata visits
 and standalone glyph/media discovery visits,
 native construction/duplication and phase timing,
-flush reasons, clip segments, lock waits, SVG vector recording/hit and layer recording/pass counts. Tile dispatch propagates the active measurement
+flush reasons, clip segments, lock waits, SVG vector recording/hit, foreign
+subscene capture and layer recording/pass counts. Tile dispatch propagates the active measurement
 to workers. Disabled counters take no locks. Nested layer work is included in
 its containing stage, not added again as frame wall time. Native phase timers
 can nest and worker times overlap; their sum is not a frame duration.

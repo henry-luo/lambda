@@ -150,4 +150,13 @@ for (x in [5, -3, 0, -7, 2] order by x) x;
 // Test 45: Empty result after all clauses
 for (x in [1, 2, 3, 4, 5] where x > 10 order by x limit 2 offset 1) x
 
+// Test 46: Later order keys break ties of earlier ones, each with its own direction
+let staff = [{d: "b", s: 1}, {d: "a", s: 1}, {d: "b", s: 3}, {d: "a", s: 2}];
+[for (p in staff order by p.d asc, p.s desc) p.d ++ string(p.s)];
+[for (p in staff order by p.s, p.d desc) p.d ++ string(p.s)];
+
+// Test 47: A body yielding several items sorts as one row
+[for (x in [2, 1, 3] order by x) (x, x * 10)];
+[for (x in [2, 1, 3] order by x desc) (x, x * 10)]
+
 "All for clause tests completed!"

@@ -2342,8 +2342,8 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Sort helper
     // ========================================================================
-    {"fn_sort_by_keys", FPTR(fn_sort_by_keys)},
-    {"fn_group_by_keys_items", FPTR(fn_group_by_keys_items)},
+    {"fn_order_rows", FPTR(fn_order_rows)},
+    {"fn_group_by_keys", FPTR(fn_group_by_keys)},
     {"fn_join_seed_tuples", FPTR(fn_join_seed_tuples)},
     {"fn_hash_join_tuples", FPTR(fn_hash_join_tuples)},
     {"fn_cross_join_tuples", FPTR(fn_cross_join_tuples)},
