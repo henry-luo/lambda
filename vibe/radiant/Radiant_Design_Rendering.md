@@ -315,6 +315,18 @@ republishes matching chunks, while a different cache copies producer commands in
 its own budget ledger. Active references survive cache eviction/destruction.
 Broad dirty-generation invalidation remains; placement-only reflow is separate.
 
+Element damage keeps a weak source address alongside its logical ID in the
+dirty tracker. Before reading that address, reuse validates it through the
+current document's lifecycle registry and checks its current ID. The shared
+ancestry helper then follows current parent links instead of searching the
+candidate's descendants. Missing, stale or unregistered hints use the existing
+live-ID subtree lookup. Dirty rectangles merged from different sources retain
+the conservative unknown-source rule; same-ID hints at different addresses lose
+the hint and resolve by ID. Hints add one pointer per dirty rectangle, allocate
+no index, pin no node and never enter immutable chunks. This accelerates the
+existing containment decision without adding new invalidation dependencies
+(**D4.5.3v2 / D4.5.1v4 / D4.1.4v5**).
+
 An indexed publication borrows its stable fragment entry for capture bookkeeping.
 Unchanged chunks refresh that entry directly, preserving its geometry and lease.
 Every replacement, failed capture and retirement clears this back-reference
@@ -532,6 +544,7 @@ retained descriptor copies/borrows and reserved chunk capacity, shared-array
 copies/leases, full-frame reuse and chunk adoption, fragment references/expanded command counts,
 resource command/summary/epoch/surface/child checks,
 validation command/publication checks, index publications/prune checks, membership node visits/group refreshes,
+dirty-source ancestry queries/subtree searches,
 resource snapshot command/metadata visits
 and standalone glyph/media discovery visits,
 native construction/duplication and phase timing,

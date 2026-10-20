@@ -22,6 +22,7 @@
     X(fragment_references) X(fragment_commands) \
     X(retained_index_publications) X(retained_index_prune_checks) \
     X(retained_membership_nodes) X(retained_membership_groups) \
+    X(retained_dirty_subtree_searches) X(retained_dirty_ancestry_queries) \
     X(resource_command_checks) X(resource_summary_checks) X(resource_epoch_checks) \
     X(resource_surface_checks) X(resource_child_checks) X(resource_capture_commands) X(resource_capture_chunks) \
     X(validation_command_checks) X(validation_chunk_checks) X(glyph_command_checks) X(media_command_checks)
