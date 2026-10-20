@@ -373,7 +373,7 @@ radiant::SizeF layout_measure_anonymous_text(LayoutContext* lycon,
         item->content_width = saved_content_width;
         item->content_height = saved_content_height;
         // measured baselines belong to this scratch box, like its intrinsic sizes.
-        *lycon = saved_context;
+        radiant::layout_restore_context(lycon, saved_context);
     }
     for (TextSnapshot* snapshot = snapshots; snapshot; snapshot = snapshot->next) {
         lycon->doc->view_tree->recycle_text_rects(snapshot->node->rect);
@@ -498,7 +498,7 @@ void layout_anonymous_text_runs(ViewElement* item, LayoutAnonymousTextRun* runs,
         item->blk->first_line_baseline = lycon->block.first_line_ascender - item->y;
         item->blk->last_line_baseline = lycon->block.last_line_ascender - item->y;
     }
-    *lycon = saved_context;
+    radiant::layout_restore_context(lycon, saved_context);
 }
 
 static bool layout_find_contents_text_edge(DomElement* contents, bool from_start,

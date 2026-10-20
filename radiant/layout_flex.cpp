@@ -1043,7 +1043,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                             lam::view_as_block(item), item_width, true);
                     } else {
                         if (has_flex_item_prop(item) && !item->fi->has_intrinsic_width) {
-                            calculate_item_intrinsic_sizes(item, flex_layout);
+                            calculate_item_intrinsic_sizes(item, flex_layout, true);
                         }
                         if (has_flex_item_prop(item) && item->fi->has_intrinsic_width) {
                             item_width = layout_border_size_from_content_box(
@@ -1591,6 +1591,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                                     ViewBlock* container) {
     if (!lycon || !flex_layout || !container) return 0;
 
+    radiant::LayoutProfileScope profile(lycon, radiant::LAYOUT_PROFILE_FLEX_PREPARE, container);
     log_enter();
     // Save container's font context - all flex items should inherit from this
     FontBox container_font = lycon->font;
@@ -1942,7 +1943,7 @@ static bool flex_item_intrinsic_border_bounds(ViewElement* item,
     }
     LayoutAxisRefs selected(item, horizontal);
     if (!selected.has_intrinsic()) {
-        calculate_item_intrinsic_sizes(item, flex_layout);
+        calculate_item_intrinsic_sizes(item, flex_layout, horizontal);
     }
     IntrinsicSizes* sizes = selected.intrinsic();
     *minimum = sizes->min_content;
@@ -2192,7 +2193,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 
     LayoutAxisRefs main(item, is_horizontal);
     if (item->fi && !main.has_intrinsic()) {
-            calculate_item_intrinsic_sizes(item, flex_layout);
+        calculate_item_intrinsic_sizes(item, flex_layout, is_horizontal);
     }
 
     ViewBlock* item_block = lam::view_as_block(item);
@@ -2241,7 +2242,7 @@ static float flex_resolve_auto_minimum(ViewElement* item,
 
     LayoutAxisRefs selected(item, horizontal);
     if (!selected.has_intrinsic()) {
-        calculate_item_intrinsic_sizes(item, flex_layout);
+        calculate_item_intrinsic_sizes(item, flex_layout, horizontal);
     }
     IntrinsicSizes* intrinsic = selected.intrinsic();
     float content_suggestion = intrinsic->min_content;
@@ -3745,11 +3746,11 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
                                              bool preserve_wrapping_width,
                                              bool overwrite) {
     if (!item || !flex_layout || !has_flex_item_prop(item)) return;
-    if (!item->fi->has_intrinsic_width || !item->fi->has_intrinsic_height) {
-        calculate_item_intrinsic_sizes(item, flex_layout);
+    LayoutAxisRefs selected(item, flex_cross_axis(flex_layout));
+    if (!selected.has_intrinsic()) {
+        calculate_item_intrinsic_sizes(item, flex_layout, selected.horizontal());
     }
 
-    LayoutAxisRefs selected(item, flex_cross_axis(flex_layout));
     float intrinsic = selected.intrinsic()->max_content;
     if (intrinsic <= 0.0f) return;
 
@@ -3870,6 +3871,7 @@ static float flex_finalize_hypothetical_cross(ViewElement* item,
 // CSS Flexbox §9.4: Determine hypothetical cross size of each item
 // Per the spec: "Determine the hypothetical cross size of each item by performing
 static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout) {
+    radiant::LayoutProfileScope profile(lycon, radiant::LAYOUT_PROFILE_FLEX_CROSS, nullptr);
     if (!flex_layout || flex_layout->line_count == 0) return;
 
     bool is_horizontal = is_main_axis_horizontal(flex_layout);

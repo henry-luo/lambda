@@ -12,6 +12,7 @@
 #include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "render.hpp"
+#include "render_metrics.hpp"
 #include "../lambda/runtime/ast.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
@@ -5794,7 +5795,7 @@ void state_end_batch(DocState* state) {
 
 static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
                                         float width, float height,
-                                        uint32_t source_view_id) {
+                                        View* source) {
     if (!tracker) return;
 
     if (tracker->full_repaint) return;  // already marked for full repaint
@@ -5825,8 +5826,12 @@ static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
             dr->y = new_y;
             dr->width = new_right - new_x;
             dr->height = new_bottom - new_y;
+            uint32_t source_view_id = source ? source->id : 0;
             if (dr->source_view_id != source_view_id) {
                 dr->source_view_id = 0;
+            }
+            if (!dr->source_view_id || dr->source_view_address != source) {
+                dr->source_view_address = nullptr;
             }
             return;
         }
@@ -5843,13 +5848,14 @@ static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
     new_dr->y = y;
     new_dr->width = width;
     new_dr->height = height;
-    new_dr->source_view_id = source_view_id;
+    new_dr->source_view_id = source ? source->id : 0;
+    new_dr->source_view_address = new_dr->source_view_id ? source : nullptr;
     new_dr->next = tracker->dirty_list;
     tracker->dirty_list = new_dr;
 }
 
 void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height) {
-    dirty_mark_rect_with_source(tracker, x, y, width, height, 0);
+    dirty_mark_rect_with_source(tracker, x, y, width, height, nullptr);
 }
 
 void dirty_mark_element(DocState* state, void* view_ptr) {
@@ -5861,8 +5867,23 @@ void dirty_mark_element(DocState* state, void* view_ptr) {
     RdtLogicalPoint origin = view_geometry_node_document_origin(view);
 
     dirty_mark_rect_with_source(&state->dirty_tracker, origin.x, origin.y,
-                                view->width, view->height, view->id);
+                                view->width, view->height, view);
     state->needs_repaint = true;
+}
+
+bool dirty_source_in_view_subtree(DomDocument* document, View* root, const DirtyRect* dirty) {
+    if (!dirty || !dirty->source_view_id) return true;
+    if (!root) return false;
+    // dirty regions can outlive a view-pool reset or DOM retirement; validation
+    // is address-only and must precede every read of the weak marking source.
+    DomNodeRef ref = {dirty->source_view_address, dirty->source_view_id};
+    DomNode* source = dom_node_ref_validate(document, ref);
+    if (source && source->id == dirty->source_view_id) {
+        RENDER_METRIC_ADD(retained_dirty_ancestry_queries, 1);
+        return view_geometry_dom_is_descendant(source, root);
+    }
+    RENDER_METRIC_ADD(retained_dirty_subtree_searches, 1);
+    return view_tree_find_live_id(root, dirty->source_view_id) != nullptr;
 }
 
 void dirty_clear(DirtyTracker* tracker) {

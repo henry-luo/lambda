@@ -73,9 +73,9 @@ static DirtyRect retained_test_dirty(float x, float y, float w, float h,
     return dirty;
 }
 
-static bool retained_test_contains_view_id(void* userdata, uint32_t source_view_id) {
+static bool retained_test_contains_view_id(void* userdata, const DirtyRect* dirty) {
     uint32_t* contained_id = (uint32_t*)userdata;
-    return contained_id && *contained_id == source_view_id;
+    return contained_id && *contained_id == dirty->source_view_id;
 }
 
 TEST_F(RetainedDisplayListTest, ReleasesReplacedViewsWhileKeepingCurrentFragments) {

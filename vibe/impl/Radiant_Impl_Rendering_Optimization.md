@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-20
 
-**Status:** committed core pass and continuations through §19, 2026-10-20.
+**Status:** committed core pass and continuations through §19, with a qualified
+§20 continuation, 2026-10-20.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
 chunk references, resource summaries, the SVG producer boundary, validated
@@ -16,6 +17,8 @@ refresh and expired-prefix pruning milestone is complete, with a green aggregate
 The §18 full-frame chunk-sharing milestone is complete, including frame-budget
 fallback, with a green final aggregate. The §19 membership-group core is complete
 with a green aggregate; shared/unindexed/incomplete graphs keep their fallback.
+The §20 dirty-source hint optimization and scoped qualification are complete,
+with a green aggregate; unavailable hints keep the live-ID lookup fallback.
 
 **Artifact retention:** an external cleanup removed `./temp/` during continuation
 qualification. The earlier temporary receipts cited in §7 and the historical
@@ -1842,3 +1845,84 @@ have their respective work costs. Placement-only composition, finer inherited/
 style/reference invalidation and full M0–M7 frame-time/peak-memory qualification
 remain open. Earlier runtime/PDF debt is unchanged; work counts do not establish
 general frame-time or total-memory improvements.
+
+## 20. Validate dirty-source hints before ancestry checks
+
+**Completed core milestone, 2026-10-20:** selective reuse previously scanned each overlapping
+candidate's descendants to locate a dirty source, including wide unchanged
+siblings. Keep the marking source's address as a weak hint alongside its ID.
+The document registry must validate both before reading the node; an existing
+parent-chain helper then answers containment. Missing, synthetic or stale hints
+use the existing live-ID subtree lookup. Retention and lifetime follow
+**D4.5.3v2 / D4.5.1v4 / D4.1.4v5**; hints own no node and never enter paint chunks.
+
+Acceptance: a native selective repaint reuses the unchanged 257-node sibling
+without a subtree search, with identical pixels and membership behavior. A dirty
+candidate or descendant still rejects reuse. Unknown/coalesced sources remain
+conservative. Same-source coalescing preserves a usable hint; conflicting hints
+discard the hint. Detached and reparented registered sources use current links;
+stale/unregistered addresses are never dereferenced and fall back by logical ID.
+
+Scope: accelerate the existing containment decision without changing dirty
+regions, generation keys, placement admission or inherited-style dependencies.
+Verification budget: a release red/green search counter, focused source/coalescing/
+stale-reference cases, affected native release and ASan checks, SVG smoke and one
+required Radiant aggregate after stabilization. Full frame-time and peak-memory
+qualification remains separate.
+
+### Implemented core
+
+Dirty rectangles now borrow a source address as a weak hint. Same-source
+coalescing preserves it; different addresses with the same ID discard it, and
+different IDs keep the existing unknown-source result. The shared dirty-tracker
+helper validates address/expected ID through the document registry, verifies the
+current node ID (an adoption can leave an earlier registry record), and calls
+the existing parent-chain containment helper. Failed validation uses the existing
+live-ID subtree lookup, replacing the render path's duplicate recursive search.
+The render callback receives the original dirty rectangle and borrows its current
+document/candidate context only during the append decision.
+
+No node is pinned by damage tracking and no hint enters a paint publication.
+Each dirty rectangle adds one pointer; clearing its arena retires all hints.
+The validated path costs a registry lookup and a parent walk per overlapping
+candidate/source pair. It does not remove ancestor-depth cost, region iteration,
+overflow checks or fallback subtree searches.
+
+The release red regression performs three descendant searches in the mixed frame;
+the new path performs zero and retains the unchanged 257-node card as one group.
+Native pixels confirm descendant and self damage cannot reuse stale ancestor
+paint, including the missing-hint fallback. Focused state cases cover conservative
+unknown/mixed coalescing, same-ID aliases, current detached/reparented links,
+synthetic wrappers, inaccessible hints and changed current identities. Integer-cast
+lint passes. Final release native, sanitizer, SVG and aggregate checks follow.
+
+### Qualification
+
+The frozen release executable is
+`ed723ec5b4cacd998dea75ea4db2f420120b5dcbebe56fed2131aaa4a5ab91b9`
+at HEAD `6ace304364705cd9ef4c5916a342c7ceef0e580e` plus this continuation.
+All 375 affected native cases pass in release and `debug_asan_native` against
+matching sources: 202 vector, 49 retained, 96 display-list and 28 state. No ASan
+memory error is reported; leak detection is disabled, vendor internals are not
+instrumented and native video uses the C++ stub backend. Eleven release products
+were restored and hash-checked before release consumers resumed.
+
+SVG smoke passes twelve scenarios and 680 assertions with the same frozen
+executable. Red/green search counts, native repaint, source/binary identities,
+native logs and restoration receipts are under `temp/rendering-dirty-ancestry/`.
+The required Radiant aggregate exits successfully after 435,604 ms: 6,017 passed,
+zero failed, 146 partial and two skipped of 6,165 cases. All 646 UI automation and
+111 page-load cases pass. Layout retains 3,152 full passes and 142 partial results;
+visual comparison retains 207 full passes, four expected differences and one skip.
+View tests report 215 passes and one skip. These are raw aggregate counts;
+underlying WPT fixture conformance claims remain unchanged. `test_summary.json`,
+`radiant-baseline.log`, `aggregate-exit.json` and `qualification.json` preserve
+the completed gate. Final source, executable and all eleven restored release-product
+hashes match the frozen candidate. This completes the scoped containment-check
+optimization under **D4.5.3v2 / D4.5.1v4 / D4.1.4v5**.
+
+Unavailable hints retain subtree lookup; validated sources still walk parents per
+overlapping candidate/source pair. Placement-only composition, finer inherited/
+style/reference invalidation and full M0–M7 frame-time/peak-memory qualification
+remain open. Earlier runtime/PDF debt is unchanged. Eliminated searches do not
+establish a general frame-time or total-memory improvement.

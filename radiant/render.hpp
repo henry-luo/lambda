@@ -2096,7 +2096,7 @@ int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment)
 bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
                                           uint64_t current_video_generation,
                                           uint64_t current_glyph_generation);
-typedef bool (*RetainedDisplayListContainsViewFn)(void* userdata, uint32_t source_view_id);
+typedef bool (*RetainedDisplayListContainsViewFn)(void* userdata, const DirtyRect* dirty);
 bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
                                            const RetainedDisplayListFragment* fragment,
                                            Bound current_marker_bounds,

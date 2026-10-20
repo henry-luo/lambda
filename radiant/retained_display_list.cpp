@@ -907,7 +907,7 @@ bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
             continue;
         }
         if (dirty->source_view_id == 0 || !contains_view ||
-            contains_view(contains_userdata, dirty->source_view_id)) {
+            contains_view(contains_userdata, dirty)) {
             return false;
         }
     }

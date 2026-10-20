@@ -5897,10 +5897,49 @@ TEST(PaintOwnership, SelectiveFramesRefreshUnchangedIndexEntriesWithoutRepublish
     EXPECT_EQ(counters.retained_index_prune_checks, 1u);
     EXPECT_EQ(counters.retained_membership_nodes, 1u);
     EXPECT_EQ(counters.retained_membership_groups, 1u);
+    EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
+    EXPECT_GT(counters.retained_dirty_ancestry_queries, 0u);
     EXPECT_EQ(stats.reused_captures, 257u);
     EXPECT_EQ(retained_dl_cache_get(state->retained_dl_cache, stable_view_id), entry);
     test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
     test_radiant_expect_surface_pixel(ui->surface, 30, 10, 0, 0, 255);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, SelectiveFramesRejectDirtyAncestorsWithValidatedAndMissingSourceHints) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0'><div id='parent' style='width:40px;height:40px;background:red'>"
+        "<div id='child' style='width:20px;height:20px;background:blue'></div></div></body></html>",
+        60, 50, false));
+    UiContext* ui = session.ui_context; ViewTree* tree = ui->document->view_tree;
+    DocState* state = ui->document->state;
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    doc_state_mark_dirty(state);
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    DomElement* parent = dom_find_element_by_id(ui->document->root, "parent"); ASSERT_NE(parent, nullptr);
+    DomElement* child = dom_find_element_by_id(ui->document->root, "child"); ASSERT_NE(child, nullptr);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+    for (bool hint : {true, false}) {
+        // change the producer payload directly to test selective damage independently of full-style keys.
+        child->ensure_boundary(tree)->background->color.c = hint ? 0xff00ff00u : 0xff0000ffu;
+        dirty_mark_element(state, static_cast<View*>(child));
+        if (!hint) state->dirty_tracker.dirty_list->source_view_address = nullptr;
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+        EXPECT_GT(retained_dl_cache_stats(state->retained_dl_cache).reuse_rejected_dirty, 0);
+        if (hint) {
+            EXPECT_GT(counters.retained_dirty_ancestry_queries, 0u);
+            EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
+        } else EXPECT_GT(counters.retained_dirty_subtree_searches, 0u);
+        test_radiant_expect_surface_pixel(ui->surface, 10, 10, hint ? 0 : 255, hint ? 255 : 0, 0);
+        test_radiant_expect_surface_pixel(ui->surface, 30, 30, 255, 0, 0);
+    }
+    parent->ensure_boundary(tree)->background->color.c = 0xff00ffffu;
+    dirty_mark_element(state, static_cast<View*>(parent));
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    test_radiant_expect_surface_pixel(ui->surface, 30, 30, 255, 255, 0);
     render_export_session_end(&session); rdt_engine_term();
 }
 

@@ -2599,8 +2599,8 @@ its individual reports remain evidence; no floors or references are changed.
 ### 3.45 Incremental computed style and geometry resolution (P0)
 
 **Status: native sizing milestone implemented; broader reuse remains partial.**
-LLVM LangRef's baseline release profile performs four layouts and 247,169
-intrinsic width requests with no width-cache hits. Measurement repeats
+LLVM LangRef's baseline release profile performs four layouts. The initial
+intrinsic counters undercount nested work; see the correction in §3.46. Measurement repeats
 `dom_node_resolve_style → resolve_css_styles` even when only the containing size
 changes; inheritance, substitution and property dispatch repeat with it.
 
@@ -2645,6 +2645,78 @@ available with `LAYOUT_PROFILE=1`.
 The final diagnostic run records 2,994,711 incremental reuses and 37,538 geometry
 evaluations. It still performs 1,179,944 full resolutions, including 828,708
 parent-key misses. Distinguishing unchanged inherited computed values from a
-parent's conservative restyle revision is deferred. The four layouts still make
-247,169 intrinsic width requests with zero hits; CSS reuse alone does not remove
-that repeated sizing work.
+parent's conservative restyle revision is deferred. CSS reuse alone does not
+remove repeated sizing work. The original report of 247,169 intrinsic width
+requests with zero hits was incomplete: nested context restores erased profiler
+counters, corrected in §3.46.
+
+### 3.46 Intrinsic sizing profiling and reuse (P0)
+
+**Status: sizing repairs implemented; loader handoff remains deferred.**
+**Milestone:** eliminate redundant intrinsic width/height queries. Acceptance
+covers containing-size-only changes, percentage descendants, inherited fonts,
+root-font/viewport changes, deferred flex heights and nested profiler accounting.
+Qualify with focused native tests, the Radiant baseline and three interleaved
+release trials per variant against identical local LLVM assets.
+
+The corrected release profile of `aa8ecdad6` records **1,576,692 width requests
+(67 hits)** and **2,913,577 recursive height calls** across four document layouts.
+Width self time is **36.85 s**, height self time **19.61 s**, together **81% of
+69.67 s layout time**; rendering takes **0.23 s**. Native stack samples confirm
+the intrinsic sizing paths under nested flex layout. Restoring a saved
+`LayoutContext` previously discarded nested profiler work; the shared restore
+helper now preserves counters, and nested scopes report inclusive and self
+time separately. Width/height self time includes their unscoped CSS/font/text
+work; inclusive ancestor timings and CSS/text buckets must not be added to it.
+
+Implemented repairs:
+
+- Width-cache keys treated every containing-size change as significant. Plain
+  horizontal-flow subtrees now propagate whether containing dimensions affect
+  their intrinsic width. Independent results reuse across those changes; fonts,
+  style epochs, generation, root-font size, raster scale and viewport remain
+  keyed. Dependent or unsupported descendants retain conservative context keys.
+- Flex width requests also recursively estimated heights before their wrapping
+  width was assigned. Width-only queries now leave height invalid until needed;
+  vertical writing retains the existing paired measurement.
+
+Caches remain owned by the selected view pool (**D4.5.1v4 / D4.1.4v5**), with no
+retained GC pointers (**D4.5.2**).
+
+**Remaining structural work:** the loader discards geometry produced by
+load-time CSSOM reads and initial presentation lays out the document again.
+An experimental handoff removed one pass and reached 33.2 s in a diagnostic
+run, but exposed incorrect retained geometry in dynamic anonymous-table/list
+fixtures. The extra rebuild currently masks those defects: removing a separator
+leaves separate anonymous table runs, and a changed table role retains a stale
+list contribution. The handoff change was withdrawn; fix retained mutation
+geometry before removing that pass. Evidence: `temp/layout-deep-failure-details.log`
+and `temp/layout-deep-layout-handoff-fixed.log`. Complex intrinsic contexts and
+recursive height estimation also remain; browser-level load time is not achieved.
+
+Qualification: view-reuse **141/141**, text/layout **166/166**, and the layout
+baseline has **zero regressions across 3,294 cases** (existing partial cases
+retained). The full Radiant gate reports 5,998 passed, 143 partial, two skipped
+and one failure: `PaintOwnership.SvgPhasesKeepForeignHtmlInsideItsSubscene`.
+That SVG paint-phase assertion also fails with the sizing optimizations and
+added kerning comparison reverted to HEAD behavior; no test expectations were
+changed. Lint and `git diff --check` pass. Evidence:
+`temp/layout-deep-radiant-final-baseline.log`,
+`temp/layout-deep-vector-control.log`, `temp/layout-deep-provenance.json`.
+
+Three interleaved release trials per variant against `aa8ecdad6`, with profiling
+disabled and identical local LLVM assets: baseline **73.297 / 72.758 / 73.163 s**;
+optimized **47.342 / 47.133 / 47.319 s**. Median **73.163 → 47.319 s**, **35.3%
+less time (1.546×)**. Median peak RSS **709.2 → 732.4 MiB**. This result retains
+all four document layouts. Trials and binary/input hashes:
+`temp/layout-deep-benchmark/report.json`.
+
+Final diagnostic: width requests **1,576,692 → 632,831**, misses
+**1,576,625 → 393,451**, and width self time **36.85 → 10.70 s**. Height calls
+remain **2,573,534** with **20.11 s** self time; flex content self time is
+**12.61 s**, total layout **44.07 s**, paint **0.23 s**. Full CSS resolutions
+remain **1,178,513**, including **828,676 parent-key misses**: avoiding width
+walks has not repaired conservative inherited-style invalidation. The next
+targets are constraint-keyed height reuse and stable inherited computed-style
+validity, followed by the retained-geometry defects above. Raw counters:
+`temp/layout-deep-qualified-profile-summary.json`.
