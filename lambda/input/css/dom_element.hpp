@@ -1099,7 +1099,11 @@ struct DomElement : DomNode {
         set_flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE, value);
         // A style mutation may change intrinsic contributions before the next
         // retained layout generation; do not reuse its provisional measurement.
-        if (value) set_has_cached_intrinsic_widths(false);
+        if (value) {
+            set_has_cached_intrinsic_widths(false);
+            // explicit invalidation also expires computed CSS before layout commits.
+            style_version++;
+        }
     }
     bool styles_resolved() const { return flag(ELMT_FLAG_STYLES_RESOLVED); }
     void set_styles_resolved(bool value) {
