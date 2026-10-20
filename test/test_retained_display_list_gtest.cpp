@@ -1388,6 +1388,177 @@ TEST_F(RetainedDisplayListTest, CrossCacheCaptureRehomesTheBudgetAndRepeatedRefe
     dl_destroy(&snapshot);
 }
 
+TEST_F(RetainedDisplayListTest, ForeignLeafSubscenesKeepDescriptorsAndProducerIdentityDuringParentCapture) {
+    DisplayList source, frame, assembled;
+    int begin = dl_begin_element(&source, 0, 0, 0, 128, 10);
+    for (uint32_t i = 0; i < 128; i++)
+        ASSERT_NE(retained_test_add_rect(&source, (float)i, 0, 1, 10, 0xff123456u), nullptr);
+    dl_end_element(&source, begin);
+    RetainedDisplayListCache* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    RetainedDisplayListCache* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* published = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49000);
+    ASSERT_NE(published, nullptr);
+    begin = dl_begin_element(&frame, 49000, 0, 0, 128, 10);
+    ASSERT_NE(retained_test_add_rect(&frame, 0, 0, 1, 1, 0xff000001u), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, published));
+    const DisplayPayloadOwner* original = frame.back().draw_fragment.owner;
+    const DisplayItem* descriptors[128];
+    for (size_t i = 0; i < 128; i++) descriptors[i] = &original->commands->data()[i + 1];
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, published));
+    ASSERT_NE(retained_test_add_rect(&frame, 0, 0, 1, 1, 0xff000002u), nullptr);
+    dl_end_element(&frame, begin);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayResourceSummary* resources = nullptr;
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 4u);
+    EXPECT_EQ(counters.command_copy_bytes, 4 * sizeof(DisplayItem));
+    EXPECT_EQ(counters.retained_foreign_chunks, 2u);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49000), published);
+    ASSERT_NE(retained_dl_cache_get(consumer, 49000), nullptr);
+    EXPECT_EQ(retained_dl_fragment_item_count(retained_dl_cache_get(consumer, 49000)), 264);
+    EXPECT_GE(retained_dl_cache_stats(consumer).charged_storage_bytes, 2 * original->retained_bytes);
+    counters = {};
+    retained_dl_cache_begin_frame(consumer); retained_dl_cache_capture(consumer, &assembled);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 0u);
+    EXPECT_EQ(counters.retained_membership_nodes, 1u);
+    EXPECT_EQ(counters.retained_foreign_chunks, 0u);
+    retained_dl_cache_set_storage_budget(consumer, 0); retained_dl_cache_begin_frame(consumer);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49000), nullptr);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49000), published);
+    EXPECT_EQ(retained_dl_fragment_item_count(published), 130);
+    source.data()[1].fill_rect.color.c = 0xffabcdefu;
+    ASSERT_NE(retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49000), nullptr);
+    dl_resource_summary_destroy(resources);
+    dl_destroy(&frame); dl_destroy(&source);
+    retained_dl_cache_destroy(producer); retained_dl_cache_destroy(consumer);
+    ASSERT_TRUE(dl_validate(&assembled, nullptr));
+    DisplayListCursor cursor(&assembled);
+    size_t seen = 0;
+    while (const DisplayItem* item = cursor.next()) if (item->op == DL_FILL_RECT) {
+        if (seen == 0 || seen == 257) EXPECT_EQ(item->fill_rect.color.c, seen == 0 ? 0xff000001u : 0xff000002u);
+        else {
+            EXPECT_EQ(cursor.owner, original);
+            EXPECT_EQ(item, descriptors[(seen - 1) % 128]);
+            EXPECT_EQ(item->fill_rect.color.c, 0xff123456u);
+        }
+        seen++;
+    }
+    EXPECT_FALSE(cursor.failed); EXPECT_EQ(seen, 258u);
+    dl_destroy(&assembled);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignLeafLeasesKeepBothBudgetsAndResourceDependenciesAfterEviction) {
+    ImageSurface* surface = image_surface_alloc(); ASSERT_NE(surface, nullptr);
+    surface->width = 2; surface->height = 2; surface->generation = 9;
+    DisplayList source, frame, assembled;
+    int begin = dl_begin_element(&source, 0, 0, 0, 2, 2);
+    DisplayItem* image = dl_alloc_item(&source); ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->draw_image.resource = surface->self; image->draw_image.resource_generation = surface->generation;
+    image->draw_image.src_w = image->draw_image.src_h = image->draw_image.src_stride = 2;
+    image->draw_image.dst_w = image->draw_image.dst_h = 2;
+    dl_end_element(&source, begin);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49001);
+    ASSERT_NE(leaf, nullptr);
+    size_t producer_bytes = retained_dl_cache_stats(producer).charged_storage_bytes;
+    begin = dl_begin_element(&frame, 49002, 0, 0, 2, 2);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf)); dl_end_element(&frame, begin);
+    DisplayResourceSummary* resources = nullptr;
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    ASSERT_NE(resources, nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).charged_storage_bytes, producer_bytes);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49001), nullptr);
+    EXPECT_TRUE(dl_resource_summary_current(resources, 0, 1));
+    dl_destroy(&frame); dl_destroy(&source);
+    retained_dl_cache_set_storage_budget(producer, 0); retained_dl_cache_begin_frame(producer);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49001), nullptr);
+    EXPECT_EQ(retained_dl_cache_stats(producer).evictions, 1);
+    EXPECT_EQ(retained_dl_cache_stats(producer).charged_storage_bytes, producer_bytes);
+    retained_dl_cache_set_storage_budget(consumer, 0); retained_dl_cache_begin_frame(consumer);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49002), nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).charged_storage_bytes, producer_bytes);
+    EXPECT_TRUE(dl_resources_current(&assembled, 0, 1));
+    surface->generation++;
+    EXPECT_FALSE(dl_resource_summary_current(resources, 0, 1));
+    EXPECT_FALSE(dl_resources_current(&assembled, 0, 1));
+    free_test_surface(surface);
+    EXPECT_FALSE(dl_resources_current(&assembled, 0, 1));
+    dl_destroy(&assembled);
+    EXPECT_EQ(retained_dl_cache_stats(producer).charged_storage_bytes, 0u);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).charged_storage_bytes, 0u);
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    EXPECT_FALSE(dl_resource_summary_current(resources, 0, 1));
+    dl_resource_summary_destroy(resources);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignLeafAdmissionFailurePreservesSourceAndBalancesLeases) {
+    DisplayList source, frame;
+    int begin = dl_begin_element(&source, 0, 0, 0, 2, 2);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 2, 2), nullptr); dl_end_element(&source, begin);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49003);
+    ASSERT_NE(leaf, nullptr);
+    begin = dl_begin_element(&frame, 49004, 0, 0, 2, 2);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf));
+    const auto* owner = frame.back().draw_fragment.owner.get(); dl_end_element(&frame, begin);
+    int32_t original_refs = ref_count_get(&owner->refs);
+    bool failed = false, succeeded = false;
+    for (size_t fail_at = 0; fail_at < 24; fail_at++) {
+        auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+        DisplayList assembled; DisplayResourceSummary* resources = nullptr;
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        memtrack_fault_inject(fail_at);
+        bool captured = retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled);
+        memtrack_fault_clear();
+        failed |= !captured; succeeded |= captured;
+        if (captured) { EXPECT_EQ(counters.command_copy_bytes, 2 * sizeof(DisplayItem)); EXPECT_TRUE(dl_validate(&assembled, nullptr)); }
+        else { EXPECT_TRUE(assembled.empty()); EXPECT_EQ(resources, nullptr); }
+        dl_resource_summary_destroy(resources); dl_destroy(&assembled); retained_dl_cache_destroy(consumer);
+        EXPECT_EQ(ref_count_get(&owner->refs), original_refs);
+        EXPECT_EQ(retained_dl_cache_get(producer, 49003), leaf);
+        EXPECT_TRUE(dl_validate(&frame, nullptr));
+    }
+    EXPECT_TRUE(failed); EXPECT_TRUE(succeeded);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    retained_dl_cache_set_storage_budget(consumer, owner->retained_bytes);
+    DisplayList assembled; DisplayResourceSummary* resources = nullptr;
+    EXPECT_FALSE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    EXPECT_TRUE(assembled.empty()); EXPECT_EQ(resources, nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).budget_rejections, 0);
+    EXPECT_EQ(ref_count_get(&owner->refs), original_refs);
+    retained_dl_cache_set_storage_budget(consumer, (size_t)32 << 20);
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    dl_destroy(&source); dl_destroy(&frame);
+    EXPECT_TRUE(dl_validate(&assembled, nullptr)); dl_destroy(&assembled); dl_resource_summary_destroy(resources);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignNestedSubscenesKeepLocalDescendantBindings) {
+    DisplayList source, frame;
+    int outer = dl_begin_element(&source, 0, 0, 0, 8, 8);
+    int inner = dl_begin_element(&source, 49005, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 8, 8), nullptr);
+    dl_end_element(&source, inner); dl_end_element(&source, outer);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49006);
+    ASSERT_NE(leaf, nullptr);
+    outer = dl_begin_element(&frame, 49007, 0, 0, 8, 8);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf)); dl_end_element(&frame, outer);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    retained_dl_cache_capture(consumer, &frame);
+    EXPECT_EQ(counters.retained_foreign_chunks, 0u);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 7u);
+    ASSERT_NE(retained_dl_cache_get(consumer, 49005), nullptr);
+    DisplayList pinned;
+    ASSERT_TRUE(retained_dl_append_fragment(&pinned, retained_dl_cache_get(consumer, 49005)));
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    dl_destroy(&source); dl_destroy(&frame);
+    EXPECT_TRUE(dl_validate(&pinned, nullptr)); dl_destroy(&pinned);
+}
+
 TEST_F(RetainedDisplayListTest, WideFrameAssemblyStoresOneReferenceWithoutDescriptorCopies) {
     DisplayList source; dl_init(&source, arena);
     int root = dl_begin_element(&source, 9000, 0, 0, 100, 100);

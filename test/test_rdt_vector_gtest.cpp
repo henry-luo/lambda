@@ -6593,6 +6593,50 @@ TEST_F(SvgVectorCacheTest, PublishedFrameOutlivesVectorRegistryAndDocument) {
     rdt_vector_destroy(&vector); scratch_release(&scratch); image_surface_destroy(surface); dl_destroy(&pinned);
 }
 
+TEST_F(SvgVectorCacheTest, HtmlCaptureSharesWarmSvgCommandsAcrossBothCacheTeardowns) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<defs><linearGradient id='g'><stop stop-color='blue'/><stop offset='1' stop-color='green'/></linearGradient></defs>"
+        "<rect x='15' width='90' height='30' fill='red'/><path d='M5 40h90v20H5z' fill='url(#g)'/>"
+        "</svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    DisplayList assembled;
+    uint32_t expected[160 * 120];
+    Pool* owner_pool = pool_create(); ASSERT_NE(owner_pool, nullptr);
+    auto* consumer = retained_dl_cache_create(owner_pool); ASSERT_NE(consumer, nullptr);
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        int begin = dl_begin_element(frame.list(), 49010, 0, 0, 160, 120);
+        context.block.clip = {0, 0, 70, 120};
+        render_inline_svg(&context, lam::view_require_block(svg));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        dl_end_element(frame.list(), begin);
+        memset(ui->surface->pixels, 255, sizeof(expected));
+        Bound viewport = {0, 0, 160, 120};
+        dl_replay(frame.list(), &context.vec, ui->surface, &viewport, &context.scratch, 1, nullptr);
+        test_radiant_expect_surface_pixel(ui->surface, 60, 10, 255, 0, 0);
+        test_radiant_expect_surface_pixel(ui->surface, 80, 10, 255, 255, 255);
+        memcpy(expected, ui->surface->pixels, sizeof(expected));
+        counters = {}; RenderPipelineMetricsScope probe(&counters);
+        DisplayResourceSummary* resources = nullptr;
+        ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, frame.list(), frame.list()->item_count(), &resources, &assembled));
+        EXPECT_EQ(counters.retained_foreign_chunks, 1u);
+        EXPECT_TRUE(dl_resources_current(&assembled, 0, 0));
+        dl_resource_summary_destroy(resources);
+    }
+    retained_dl_cache_destroy(consumer); pool_destroy(owner_pool);
+    render_export_session_end(&session); ui = nullptr; svg = nullptr;
+    ASSERT_TRUE(dl_validate(&assembled, nullptr));
+    ImageSurface* surface = image_surface_create(160, 120); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, sizeof(expected));
+    RdtVector vector = {}; rdt_vector_init(&vector, (uint32_t*)surface->pixels, 160, 120, surface->pitch / 4);
+    ScratchArena scratch = {}; Bound viewport = {0, 0, 160, 120};
+    dl_replay(&assembled, &vector, surface, &viewport, &scratch, 1, nullptr);
+    EXPECT_EQ(memcmp(expected, surface->pixels, sizeof(expected)), 0);
+    rdt_vector_destroy(&vector); scratch_release(&scratch); image_surface_destroy(surface); dl_destroy(&assembled);
+}
+
 TEST_F(SvgVectorCacheTest, FontAndImageEpochsInvalidateOtherwiseStablePaint) {
     ASSERT_NO_FATAL_FAILURE(open(
         "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"

@@ -54,7 +54,7 @@ struct RetainedPaintChunk : DisplayPayloadOwner {
     // cache-only bookkeeping; the fragment clears this before releasing its publication lease.
     RetainedDisplayListFragment* indexed_fragment = nullptr;
     size_t membership_nodes = 1; // logical subtree visits, including repeated child placements
-    uint32_t parent_count = 0;
+    uint32_t parent_count = 0; // same-budget edges only; foreign readers must not hide producer eviction.
     RetainedStorageBudget* budget = nullptr;
     size_t charged_bytes = 0;
 };
@@ -235,7 +235,8 @@ static void retained_chunk_destroy(DisplayPayloadOwner* owner) {
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
     for (size_t i = 0; i < chunk->spans.size(); i++) {
         RetainedPaintChunk* child = (RetainedPaintChunk*)chunk->spans[i].child;
-        if (child) __atomic_fetch_sub(&child->parent_count, 1u, __ATOMIC_RELAXED);
+        if (child && child->budget == chunk->budget)
+            __atomic_fetch_sub(&child->parent_count, 1u, __ATOMIC_RELAXED);
         dl_payload_owner_release(child);
     }
     dl_destroy(&chunk->own);
@@ -508,7 +509,9 @@ static void retained_dl_index_group(RetainedDisplayListCache* cache, RetainedPai
     auto* fragment = chunk->indexed_fragment;
     if (!fragment) return;
     for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
-        auto* child = ((RetainedPaintChunk*)chunk->spans[i].child)->indexed_fragment;
+        auto* child_chunk = (RetainedPaintChunk*)chunk->spans[i].child;
+        if (child_chunk->budget != cache->budget) continue;
+        auto* child = child_chunk->indexed_fragment;
         if (!child || child == fragment || child->parent == fragment) continue;
         retained_dl_index_detach(cache, child);
         retained_dl_index_link(cache, child, fragment, true);
@@ -516,7 +519,9 @@ static void retained_dl_index_group(RetainedDisplayListCache* cache, RetainedPai
     fragment->complete = true;
     // a later shared child can invalidate an earlier branch while groups are attached.
     for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
-        auto* child = ((RetainedPaintChunk*)chunk->spans[i].child)->indexed_fragment;
+        auto* child_chunk = (RetainedPaintChunk*)chunk->spans[i].child;
+        if (child_chunk->budget != cache->budget) continue;
+        auto* child = child_chunk->indexed_fragment;
         if (!child || child == fragment || child->parent != fragment || !child->complete)
             fragment->complete = false;
     }
@@ -524,6 +529,7 @@ static void retained_dl_index_group(RetainedDisplayListCache* cache, RetainedPai
 
 static void retained_dl_drop_old_subtree(RetainedDisplayListCache* cache, DisplayPayloadOwner* owner) {
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
+    if (chunk->budget != cache->budget) return;
     RetainedDisplayListFragment* fragment = chunk->indexed_fragment;
     // subscene cache keys need not equal semantic marker IDs; retire the actual publication.
     if (fragment && !retained_dl_index_current(cache, fragment)) {
@@ -563,6 +569,13 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
         chunk->own.capacity() * sizeof(DisplayItem) + chunk->spans.capacity() * sizeof(RetainedPaintSpan) +
         arena_total_allocated(chunk->arena) + dl_shared_array_bytes(&chunk->own);
     bytes += dl_resource_summary_bytes(chunk->resources);
+    // a foreign lease pins its whole producer graph; reserve that liability in this cache too.
+    for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
+        const auto* child = (const RetainedPaintChunk*)chunk->spans[i].child;
+        if (child->budget == cache->budget) continue;
+        if (child->retained_bytes > SIZE_MAX - bytes) return false;
+        bytes += child->retained_bytes;
+    }
     for (size_t i = 0; i < chunk->own.size(); i++) {
         const DisplayItem* item = &chunk->own[i];
         const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
@@ -573,9 +586,10 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
         bytes += path_bytes;
     }
     // charge shared resources conservatively per chunk; borrowed frames keep the ledger alive after eviction.
-    if (!retained_dl_trim(cache, bytes) || !ref_count_retain(&cache->budget->refs)) return false;
+    if (!retained_dl_trim(cache, bytes)) return false;
     chunk->retained_bytes = bytes;
     for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
+        if (((RetainedPaintChunk*)chunk->spans[i].child)->budget != cache->budget) continue;
         size_t child_bytes = chunk->spans[i].child->retained_bytes;
         chunk->retained_bytes = child_bytes > SIZE_MAX - chunk->retained_bytes ? SIZE_MAX : chunk->retained_bytes + child_bytes;
     }
@@ -585,8 +599,10 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
 }
 
 static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, DisplayPayloadOwner* owner) {
-    RENDER_METRIC_ADD(retained_membership_nodes, 1);
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
+    // foreign subscenes belong to another publication index and never refresh its membership here.
+    if (chunk->budget != cache->budget) return;
+    RENDER_METRIC_ADD(retained_membership_nodes, 1);
     if (chunk->indexed_fragment && chunk->indexed_fragment->complete) {
         retained_dl_index_touch(cache, chunk->indexed_fragment, chunk->membership_nodes);
         cache->stats.reused_captures += chunk->membership_nodes;
@@ -615,9 +631,14 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
     int end = marker.element_marker.matching_index;
     if (scope && cursor->index == 0 && scope->destroy == retained_chunk_destroy) {
         RetainedPaintChunk* existing = (RetainedPaintChunk*)scope;
-        if (existing->budget == cache->budget && ref_count_retain(&existing->refs)) {
+        bool local = existing->budget == cache->budget;
+        // zero-ID leaf subscenes expose no descendant view bindings; their parent budgets the lease.
+        bool foreign_leaf = depth > 0 && !key && existing->validation_ready &&
+            !marker.element_marker.view_id && existing->span_count == 1 && !existing->command_spans[0].child;
+        if ((local || foreign_leaf) && ref_count_retain(&existing->refs)) {
             // immutable publications keep their identity when a mixed frame is captured again.
-            retained_dl_touch_chunk(cache, existing);
+            if (local) retained_dl_touch_chunk(cache, existing);
+            else RENDER_METRIC_ADD(retained_foreign_chunks, 1);
             cursor->skip_element();
             return existing;
         }
@@ -627,7 +648,11 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         new (chunk) RetainedPaintChunk();
         ref_count_init(&chunk->refs); chunk->destroy = retained_chunk_destroy;
         chunk->commands = lam::up(&chunk->own);
-        chunk->arena = mem_arena_create(cache->budget->memory, MEM_ROLE_RENDER, "retained_dl.chunk");
+        // pin the budget before linking children so failure cleanup knows which edges are local.
+        if (ref_count_retain(&cache->budget->refs)) {
+            chunk->budget = cache->budget;
+            chunk->arena = mem_arena_create(cache->budget->memory, MEM_ROLE_RENDER, "retained_dl.chunk");
+        }
         if (!chunk->arena) { dl_payload_owner_release(chunk); chunk = nullptr; }
         else dl_init(&chunk->own, chunk->arena);
     }
@@ -642,10 +667,13 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
                 dl_payload_owner_release(child);
                 if (child) copied = false;
             } else {
-                __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
+                bool local_child = child->budget == cache->budget;
+                if (local_child) __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
                 if (!retained_resources_add_child(chunk, child)) copied = false;
-                if (child->membership_nodes > SIZE_MAX - chunk->membership_nodes) copied = false;
-                else chunk->membership_nodes += child->membership_nodes;
+                if (local_child) {
+                    if (child->membership_nodes > SIZE_MAX - chunk->membership_nodes) copied = false;
+                    else chunk->membership_nodes += child->membership_nodes;
+                }
                 if (child->command_count > INT_MAX - commands) copied = false;
                 else commands += child->command_count;
             }

@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-20
 
-**Status:** committed core pass and continuations through §20, with qualified
-continuations §21–§25, 2026-10-20.
+**Status:** committed core pass and continuations through §25; §26 complete with
+release/ASan, SVG and Radiant qualification, 2026-10-20.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
 chunk references, resource summaries, the SVG producer boundary, validated
@@ -33,6 +33,10 @@ The §25 production vector cache for visible-overflow SVG is complete, with
 release/ASan, SVG and Radiant qualification and a scoped release measurement.
 Published storage now pins its independent context beyond document teardown;
 remaining cross-cache command copying is measured and recorded as follow-up work.
+The §26 parent-capture path shares zero-ID foreign leaf subscenes with conservative
+budget charges and independent publication ownership. Release/ASan, SVG, scoped
+copy-work checks and the final Radiant aggregate pass after the paged-fixture
+teardown correction recorded below.
 
 **Artifact retention:** an external cleanup removed `./temp/` during continuation
 qualification. The earlier temporary receipts cited in §7 and the historical
@@ -2478,3 +2482,130 @@ This milestone is complete. General HTML placement-only reuse, CPU-effect
 translation, finer inherited/reference invalidation, avoiding cross-cache
 descriptor copies while preserving budget ownership, and broader performance
 qualification remain open.
+
+## 26. Share foreign SVG subscenes during HTML capture
+
+**Priority / outcome, 2026-10-20:** §25's steady vector-cache hits still copy
+every SVG command into the HTML cache. Retain a foreign immutable leaf subscene
+directly beneath its newly captured HTML parent. The parent conservatively
+charges the complete borrowed graph to its own storage budget; the producer's
+ledger and independent memory context remain pinned until the last reader
+retires (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Acceptance: warm visible-overflow SVG capture copies only surrounding HTML
+commands and preserves original SVG descriptor/payload identity, painter order,
+clips and resource invalidation. Producer cache keys never become HTML view
+IDs, and HTML capture/eviction never refreshes or erases producer publications.
+Both caches enforce their budgets while readers survive either teardown order.
+Budget/allocation rejection preserves the ordinary recording fallback.
+
+Scope: certified, untranslated zero-ID leaf subscenes inside a captured parent.
+Top-level foreign fragments, nonzero semantic IDs, nested foreign subscenes and
+translated recordings keep their existing paths. No general HTML reflow reuse
+or CPU-effect translation is added. Verification budget: focused red/green copy,
+budget, identity, resource and failure cases; affected native release/ASan,
+SVG paint, a scoped release comparison and one required Radiant aggregate once
+the implementation is stable. Broader M0–M7 qualification remains separate.
+
+### Implemented behavior
+
+Parent capture now keeps certified zero-ID foreign leaf chunks as ordered child
+leases. It copies the parent's own commands and adds each foreign child's full
+retained size to the parent's admission charge. This is conservative budget
+liability, separate from physical allocation: repeated references can reserve
+the same storage more than once. Chunk construction pins its budget before
+linking children, so failure cleanup preserves ownership on every path.
+
+Only same-budget edges contribute to parent counts and publication membership.
+Index grouping, refresh and subtree eviction skip foreign edges. Consumer
+retirement therefore cannot remove or retouch a producer publication, including
+when the SVG cache key equals an HTML view ID. Producer retirement may drop its
+publication while foreign readers keep its storage/context and original charge.
+The parent's resource summary includes foreign image/epoch dependencies through
+the existing summary composition. `retained_foreign_chunks` counts avoided
+foreign captures. Top-level/nonzero/nested foreign fragments keep local command
+copies; nonzero placement keeps its existing capture fallback.
+
+The focused descriptor-identity case reduces parent capture from 264 copied
+commands (57,024 bytes) to four (864 bytes) for two 128-rectangle subscenes.
+Original painter order and descriptors survive source replacement and both
+cache teardowns. Additional cases cover same-key consumer-first eviction,
+producer-first eviction, both budget charges, pinned readers, stale/released
+images, allocation/admission failures and local descendant bindings for nested
+foreign scopes. A production inline-SVG case preserves overflow, caller clipping
+and gradient pixels after both caches and the document retire.
+
+### Scoped release measurement
+
+The existing 512-path visible-overflow SVG fixture is replayed with whole-frame
+reuse disabled, SVG vector caching enabled and one rendering thread. Five normal
+child processes per binary alternate order, with twelve forced render events
+each; one separate profile per binary contains thirteen scopes. Discarding two
+warm-up scopes leaves eleven steady frames. Every final PNG is identical; both
+profiles record one SVG hit and no SVG producer per steady frame. Measurement
+and environment receipts are under `temp/rendering-foreign-subscenes/measurement/`;
+the source and binary identities follow **D4.2.5v3**.
+
+The previous frozen release copies 521 commands per steady frame; the candidate
+copies seven surrounding HTML commands and borrows one SVG chunk. Across eleven
+frames, command-copy bytes fall from **1,237,896 to 16,632**, eliminating the
+514-command SVG copy per frame. Native construction remains 5,665 shapes across
+those frames. Profiled median retained capture is 0.135 ms versus 0.094 ms.
+
+The normal process medians are 165.181 ms versus 164.132 ms; per-child peak RSS
+medians are 34,193,408 versus 34,013,184 bytes. These timings and memory differences
+are diagnostic: the previous frozen binary predates intervening runtime, layout
+and build merges in the current base `92b7b063c`. `control-provenance.json` records
+the exact intervening file set and prior candidate. They cannot be attributed
+solely to this optimization. The focused same-source regression independently
+establishes descriptor sharing and reduced copy work. No general frame-time or
+total-memory improvement is claimed; matched-base performance attribution remains
+part of the broader qualification backlog.
+
+### Integration prerequisite
+
+The current base merged `RadiantPdfWalkTest` into the paged runner. The walker
+passes alone, but the two-test sequence
+`SecondaryViewTest.PagedFlowPlacesPageFloatsOnTheirAnchorsPage:RadiantPdfWalkTest.*`
+fails before the walker body: PDF export creates a loader evaluator owned by the
+suite's shared UI, and that UI was never released at suite end. The next fixture
+correctly refuses to replace an existing evaluator. The suite now releases its
+own UI/loader in `TearDownTestSuite`, after its last fixture retires. This repairs
+the lifetime boundary rather than changing evaluator ownership checks
+(**D4.2.6 / D5.4.1**). It adds no renderer/runtime behavior change.
+
+The first aggregate also denied WPT's localhost bind and stalled native graphics
+cases under the sandbox. Its process tree was stopped and its artifacts preserved
+under `sandbox-interrupted/`; qualification is rerun with local HTTP/native access.
+
+### Qualification
+
+The frozen `release_native` CLI is SHA-256
+`5d62b07e1645dbb49e301d17e64be02557386a0c7e4dc3f9ac474b6a34c6cc6f`,
+at base `92b7b063c` plus the recorded local inputs. All 412 affected native cases
+pass in release and `debug_asan_native`: 220 vector, 61 retained, 103 display-list
+and 28 state-store. The paged runner passes all 502 cases in release; its formerly
+failing two-test order also passes in release and ASan. ASan leak detection is
+disabled; vendor instrumentation is not claimed. Twelve shared release products
+were restored with exact hashes before the final aggregate. SVG paint passes
+twelve off/eager 1×/2× scenarios and 680 assertions against the same CLI.
+
+The earlier aggregate's sole engine/test failure was the paged fixture order
+(6,072 passing, one failing, 146 partial and two skipped). Its receipts are under
+`before-fixture-cleanup/`. The cleanup changes only the paged test and executable;
+renderer sources, CLI and the previously qualified native binaries remain
+identical, recorded in `fixture-integration-audit.json`.
+
+The final required aggregate completes in 371,769 ms: **6,073 passed, zero failed,
+146 partial and two skipped**, of 6,221 cases. UI automation passes 662/662,
+input events 32/32, paged media 502/502 and DOM 160/160; view passes 216 with
+one skip. Layout retains 3,152 fully passing and 142 partial cases. The final
+candidate's source and release-product hashes still match. `qualification.json`
+and the successful `aggregate-exit.json` record this result alongside the native,
+SVG, integration and measurement receipts under `temp/rendering-foreign-subscenes/`.
+Integer-cast lint, scoped diff, document fences and local links pass.
+
+This bounded milestone is complete. General HTML placement-only reuse, translated
+and non-leaf foreign capture, finer inherited/reference invalidation and matched-base
+movement/resource/backend performance attribution remain open. Command sharing
+does not eliminate native shape construction or establish a general speedup.
