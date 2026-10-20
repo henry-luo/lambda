@@ -221,7 +221,7 @@ precise roots preserved [S1.4–S1.6].
 2. **Stop probing `well_known_name_id` per access**: resolve the name once at the access site
    (compile-time for static names, per-shape lookup otherwise). *(Superseded 2026-09-09:
    LC1v2/D8.4.1v2 now ban inline caches in LambdaJS too; the JS answer is a compile-predicted
-   shape guard, not a cache — `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2.)*
+   shape guard, not a cache — `vibe/jube/JS_Tune_History.md` §4.3 T10-2.)*
 3. **No hot-path `name_pool_create_strview`**: transient lookups must not intern.
 
 Beneficiaries (measured): hashmap 207x, cd 268x, havlak 444x, deltablue 82x, triangl,

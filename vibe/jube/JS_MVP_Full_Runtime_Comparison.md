@@ -35,7 +35,7 @@ independently validates all 63 rows at **5.082332x** LambdaJS/QuickJS; the
 complete fresh [candidate matrix](../../test/benchmark/js_mvp/tune12/final.json)
 is valid for all 63 rows at **3.481106x**. The proposed 0.80x full-runtime
 milestone is therefore not met. The implementation and its residuals are recorded in
-[JS Tune12](JS_Tune12.md); the raw [paired A/B](../../test/benchmark/js_mvp/tune12/final_paired.json),
+[JS Tune12](JS_Tune_History.md) (History §4.5); the raw [paired A/B](../../test/benchmark/js_mvp/tune12/final_paired.json),
 [RSS capture](../../test/benchmark/js_mvp/tune12/final_memory.json) are kept
 separately from this historical study.
 

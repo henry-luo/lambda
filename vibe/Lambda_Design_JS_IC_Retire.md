@@ -17,9 +17,8 @@ faster**, together with the integer-index lane. Result38 measures the
 consequence of shipping Tier B alone: LambdaJS is 4.35× QuickJS and 29× untyped
 Lambda, with `js_to_property_key` at 80% of `primes` and the descriptor-object
 property-add path at 25–40% of the object-heavy rows. The execution plan built
-on IR10–IR15 is [`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md)
-(T10-1 index lane, T10-2 Tier A shapes, T10-3 add kernel). Companion history:
-`vibe/jube/JS_Tune_History.md`.
+on IR10–IR15 is Tune10, recorded in [`jube/JS_Tune_History.md`](jube/JS_Tune_History.md)
+§4.3 (T10-1 index lane, T10-2 Tier A shapes, T10-3 add kernel).
 
 ### Implementation result
 

@@ -46,7 +46,7 @@ Stated in terms of *lanes and sites*, not functions:
    miss** - the same physical route untyped Lambda already uses for `map.field`
    (the T20-1c guarded member read) and `arr[i]` (int lane into `item_at`) -
    never mutable per-site cache cells, feedback vectors, or JR8-style call ICs.
-   Replacement design: [`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md)
+   Replacement design: [`jube/JS_Tune_History.md`](jube/JS_Tune_History.md) §4.3
    T10-1/T10-2. Retirement record: IC_Retire IR1-IR8.
 
 ### Original framing and the grey-area resolution
@@ -136,7 +136,7 @@ IR6). Named accesses now lower to `js_get_name_id(obj, name_id)` and
 the receiver's `TypeMap` by `NameId` (D3.4.4v2, D4.6.1v2) and falls back to the
 shared property kernel. The replacement fast route - compile-predicted shapes
 with an inline guard, kernel on miss - is specified in
-[`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md) T10-2 and is not
+[`jube/JS_Tune_History.md`](jube/JS_Tune_History.md) §4.3 T10-2 and is not
 yet implemented.
 
 ---

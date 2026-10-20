@@ -478,7 +478,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3024 | How an element pattern spells *content must be empty* |
 | SO48 | 3025 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v38.2.0 (2026-10-19)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v38.2.1 (2026-10-20)
 
 | ID | Line | Title |
 |---|---|---|

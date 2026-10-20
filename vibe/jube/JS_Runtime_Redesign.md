@@ -12,18 +12,17 @@ and JR7 carrier rulings adopted as D3.4.7 and D7.4.1v2; **JR8 RETIRED
 > document and its companions is therefore void; the replacement is
 > **compile-predicted specialization with an inline guard and the shared
 > semantic kernel on a miss** — IC_Retire Tier A (IR10–IR15), planned in
-> `JS_Tune10_Fast_Paths.md`. §JR8 below is kept as the rejected alternative.
+> `JS_Tune_History.md` §4.3 (Tune10). §JR8 below is kept as the rejected alternative.
 **Implementation anchor**: current worktree after the Tune6 object-metadata
 and exotic-operation handoff
 **Companions**: `JS_Profiling_Helpers.md` (measured evidence),
-`JS_Runtime_Review.md` (complexity findings), `JS_Tune1_Helpers.md`
-(performance phases — subsumed by this design where they overlap),
-`JS_Runtime_Name.md` / `JS_Tune3_Name.md` (adopted NameId design and
-implementation), and `JS_Runtime_Callable.md` / `JS_Tune4_Callable.md`
-(adopted Callable design and implementation plan),
-`JS_Runtime_Object_Property.md` (JOP1–JOP18 object/property design),
-`JS_Tune6_Object.md` (JR4 implementation plan), and
-`JS_Tune7_Promise.md` (JR7 implementation plan).
+`JS_Runtime_Review.md` (complexity findings),
+`JS_Runtime_Name.md` (adopted NameId design), `JS_Runtime_Callable.md`
+(adopted Callable design), `JS_Runtime_Object_Property.md` (JOP1–JOP18
+object/property design), and `JS_Tune_History.md` §4.1 (the B1–B8
+implementation records: the Tune1 helper phases — subsumed by this design
+where they overlap — and the Tune3 NameId, Tune4 Callable, Tune6 JR4 and
+Tune7 JR7 implementations).
 
 Decisions in this doc carry **JR#** ledger ids. Where a decision changes a
 formal ruling, §8 names the `D#` to revise per rule 17 — landing any such
@@ -135,7 +134,7 @@ Each subsection: evidence → design → what is deleted → interactions.
 
 **Status: implemented.** The adopted authority is **D3.4.4v2** and
 **D4.6.1v2–D4.6.2v2**; `JS_Runtime_Name.md` records decisions RN1–RN16 and
-`JS_Tune3_Name.md` records the completed migration.
+`JS_Tune_History.md` §4.1 (B3) records the completed migration.
 
 **Baseline evidence.** The name/shape lookup infrastructure cost **8.3% of
 working CPU**; `js_find_shape_entry` interned its key on *every* raw probe
@@ -178,7 +177,7 @@ does not re-intern. Cross-context Input rebinding remains the explicitly
 deferred RN-D5 issue and does not alter runtime property identity.
 
 **Design and implementation record**: `vibe/jube/JS_Runtime_Name.md`
-(RN1–RN16) and `vibe/jube/JS_Tune3_Name.md` (R0–R7). They supersede the
+(RN1–RN16) and `vibe/jube/JS_Tune_History.md` §4.1 (B3; R0–R7). They supersede the
 pointer-identity parts of `vibe/Lambda_Design_Name_Identity.md`; no
 pointer-based `JsName` or `PropertyKeyRef` compatibility ABI remains.
 
@@ -400,7 +399,7 @@ return status Items or are audited infallible.
 ### JR4 — Object metadata: shape-carried class + one exotic ops table
 
 **Status: implemented 2026-08-12.** `JS_Runtime_Object_Property.md` records
-**JOP1–JOP18**, `JS_Tune6_Object.md` records the migration evidence, and
+**JOP1–JOP18**, `JS_Tune_History.md` §4.1 (B6) records the migration evidence, and
 **D3.4.7** in formal-design version 1.15.0 is the adopted metadata ruling.
 
 **Evidence.** Five discriminators decide behavior (review §3.3); sentinel
@@ -459,7 +458,7 @@ and per-kind property/prototype/brand special cases.
 ### JR5 — Builtins are function values; one callable kernel
 
 **Status: implemented.** The adopted authority is **D6.2.2v2**;
-`JS_Runtime_Callable.md` records JC1–JC12 and `JS_Tune4_Callable.md` records
+`JS_Runtime_Callable.md` records JC1–JC12 and `JS_Tune_History.md` §4.1 (B4) records
 the completed C0–C8 migration and release evidence.
 
 **Baseline evidence.** ~930 catalog rows dispatch via `js_dispatch_builtin`
@@ -824,7 +823,7 @@ for the temporary wrapper but does not reinterpret or relocate Promise state.
 > either lane. The evidence below (four site-state shapes, IC structs addressed
 > by absolute address from JIT code) was in fact an argument for *deleting* the
 > cells, which is what IC_Retire did. Read the successor plan in
-> `JS_Tune10_Fast_Paths.md` instead.
+> `JS_Tune_History.md` §4.3 (Tune10) instead.
 
 **Evidence.** `JsLoadIC`/`JsStoreIC`/callsite caches/shape-guard sites are
 four site-state shapes (`js_runtime.h:106/114/126`); IC structs are allocated
@@ -971,11 +970,11 @@ R2 was split so the wide mechanical change and representation change could be
 verified independently. Both R2a and R2b are now landed in the Tune1
 implementation; E8 validation is complete and the remaining broad Node
 compatibility failures are outside the JR3 error-lane scope.
-**Implementation record:** `vibe/jube/JS_Tune1_Runtime.md` (E0–E8).
+**Implementation record:** `vibe/jube/JS_Tune_History.md` §4.1 (B1 Runtime, E0–E8).
 
 Tune1 mapping: P1 ⊂ R6 (superseded by construction), P2 ⊂ R1+R4, P3 ⊂ R5,
 P4's constructor-shape work lands naturally in R3/R5. P5 was not completed
-by Tune1; `JS_Tune2_Exception.md` owns the JR3 catalog lint and tag-test
+by Tune1; Tune2 (`JS_Tune_History.md` §4.1, B2) owns the JR3 catalog lint and tag-test
 ratchet. If a quick win is wanted before R6 lands, Tune1-P1a remains a valid
 stopgap.
 
@@ -1103,7 +1102,7 @@ implementation states and evidence.
    shape over struct-backed slots (no new TypeId — the D2 ripple was judged
    too costly for a cold path). Implemented; E8 validation is complete.
    The sub-ruling series continues as JR3.3–JR3.9 (catalog conformance and
-   lane-check elision) in `vibe/jube/JS_Tune2_Exception.md` §1.
+   lane-check elision) in `vibe/jube/JS_Tune_History.md` §4.1 (B2).
 2. **JR5** — *fully resolved 2026-08-12*: D6.2.2v2 fixes the semantic shape
    and Tune4 implements it. `JsFunction` is 256 bytes in GC class 6 (272-byte
    slot including the GC header), versus C0's 224-byte payload in explicit
@@ -1124,7 +1123,7 @@ implementation states and evidence.
    prototype resolver; class constructors remain `JsFunction`; and all
    Tune6-owned sentinels disappear. `__promise_idx` is explicitly confined to
    JR7. `JS_Runtime_Object_Property.md` records JOP1–JOP18 and
-   `JS_Tune6_Object.md` owns implementation evidence.
+   `JS_Tune_History.md` §4.1 (B6) owns implementation evidence.
 5. **JR7** — *resolved 2026-08-13*: use a short-lived strong candidate queue
    drained after the microtask checkpoint; handled candidates are skipped and
    released. No weak side table or permanent Promise registry is introduced.

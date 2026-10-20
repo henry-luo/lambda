@@ -207,7 +207,7 @@ The old quadratic Map order-list update has already been replaced by hash
 entries identifying stable ordered nodes. Number heads already precede generic
 root setup. The next work should extend or simplify those implementations,
 not propose them as absent features. This follows the remaining coverage and
-operation-boundary goals in [Tune16](../jube/JS_Tune16.md).
+operation-boundary goals in [Tune16](../jube/JS_Tune_History.md) (History §4.8).
 
 For each proposed change, freeze an ordinary-release control and candidate;
 preserve source/input/wrapper and binary hashes; run interleaved equal-output

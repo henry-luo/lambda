@@ -5,7 +5,7 @@
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the cross-cutting performance catalog. It records the optimizations that exist in the engine today (each grounded in code with a `file:line` anchor), summarizes the benchmark findings from the development tuning logs, and points to the sibling doc that *owns* each mechanism in full detail. It does not re-derive any mechanism — for the how, follow the link.
 >
 > **Primary sources (mechanisms):** `lambda/js/js_runtime_function.cpp` (known-code source setup), `lambda/js/js_mir_context.hpp` (argument frame-slot scopes), `lambda/js/js_runtime.cpp` (call kernel), `lambda/js/js_mir_expression_lowering.cpp` (constant folding, numeric/property plans, const-bound dispatch), `lambda/js/js_mir_calls_boxing_types.cpp` (boxing/native predicates), `lambda/js/js_mir_function_collection_class_inference.cpp` (dual-version inference), `lambda/js/js_runtime.cpp` (TypeMap object creation, string leaves, regex cursor), `lambda/js/js_runtime_state.hpp` (rooted ASCII substring cache), `lambda/runtime/mir_emitter_shared.hpp` (shared numeric/address plans), `lambda/lambda-data.hpp` (`TypeMap` hash + `slot_entries`), `lambda/js/js_mir_entrypoints_require.cpp` (interpreter-vs-JIT selection), `lambda/js/js_typed_array.cpp` (raw bulk paths), `lambda/js/js_globals.cpp` (ASCII interning), `lambda/sys_func_registry.c` (import table).
-> **Primary sources (numbers):** [JS Tune11](../../../vibe/jube/JS_Tune11.md) Result45 and paired A/B, plus the historical `vibe/jube/Transpile_Js_Tune*.md` and `Transpile_Js2{6,7,8}*.md` development logs.
+> **Primary sources (numbers):** [JS Tune History](../../../vibe/jube/JS_Tune_History.md) §4.4 (Tune11: Result45 and paired A/B) and §2 (the historical Transpile_Js_Tune rounds), plus the `Transpile_Js2{6,7,8}*.md` development logs.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -82,7 +82,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   TypeMap recipes similarly select a guarded direct own-field slot, with one
   NameId fallback. These are immutable plans, not ICs (**D1.3**, **D5.3.4**,
   **D8.4.1v2–D8.4.3v2**). *Owner:* [JS_04 §4–4.1](JS_04_MIR_Lowering.md),
-  [JS Tune11](../../../vibe/jube/JS_Tune11.md). *Measured:* the same-source
+  [JS Tune History §4.4](../../../vibe/jube/JS_Tune_History.md). *Measured:* the same-source
   11-pair A/B gives `spectralnorm` 0.5048x, `matmul` 0.5546x, and `array1`
   0.5785x candidate/control, with exact output on every pair.
 - **Tune12 bounded Number-return admission.**
@@ -104,7 +104,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   character-access, and concat record distinct ASCII/Unicode trace events.
   The 1,024-entry epoch-guarded rooted substring cache only reuses eligible
   2–32 byte ASCII substrings; Unicode remains in the existing semantic path.
-  *Owner:* [JS Tune11](../../../vibe/jube/JS_Tune11.md) T11-4. *Measured:*
+  *Owner:* [JS Tune History §4.4](../../../vibe/jube/JS_Tune_History.md) T11-4. *Measured:*
   `log_pipeline` recorded 24.66M cache hits versus 4.12M misses (85.7% hit
   rate) and a 0.9865x exact-A/B candidate/control ratio; `three_way_merge` is
   the neutral 1.0090x control (95% upper bound 1.0114x).
@@ -118,7 +118,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   predicted TypeMap; field lowering guards that exact physical layout before a
   direct slot read/store and uses the normal NameId kernel on every miss. The
   compiler neither observes runtime feedback nor patches MIR. *Owner:* [JS_04
-  §4.1](JS_04_MIR_Lowering.md), [JS Tune11](../../../vibe/jube/JS_Tune11.md)
+  §4.1](JS_04_MIR_Lowering.md), [JS Tune History §4.4](../../../vibe/jube/JS_Tune_History.md)
   T11-3. *Measured:* `log_pipeline` is 0.9865x and the `havlak` neutral
   control 0.9984x candidate/control in the same-source interleaved A/B.
 - **Iterator fast path.** Synthetic iterators use iterator metadata and typed
@@ -207,7 +207,7 @@ and LambdaJS/Node **18.728x**; the sum of LambdaJS workload medians is
 attribute a change because host and source change together.
 
 The causal record is the clean same-source interleaved 11-pair archive A/B in
-[JS Tune11](../../../vibe/jube/JS_Tune11.md) §2.4. Every pair had equal output:
+[JS Tune History](../../../vibe/jube/JS_Tune_History.md) §4.4. Every pair had equal output:
 `spectralnorm` 0.5048x, `matmul` 0.5546x, `array1` 0.5785x, and
 `log_pipeline` 0.9865x candidate/control; `havlak` (0.9984x) and
 `three_way_merge` (1.0090x) are neutral controls. No row's one-sided 95%
@@ -235,7 +235,7 @@ The pattern across all suites: **pure integer/float arithmetic in locals, and si
 Grounded in the tuning logs; these are known-open or accepted-cost, not claims of a bug.
 
 1. **Float boxing in hot loops.** Shaped float fields round-trip through boxed `Item`s on every read/write (`jm_box_float` → `push_d` — now an inline-double encode, with only the out-of-band residue taking a frame-reclaimed number-side-stack slot; the old GC-nursery allocation is retired). The remaining cost is the boxing *traffic* itself: values bounce between native registers and Item-typed storage instead of staying register-resident across iterations. This is the dominant residual on float-field-in-loop benchmarks (nbody, matmul, mandelbrot, spectralnorm) — the class-based nbody variant is ≈2× faster than the object-literal one precisely because the shaped-slot path removes some boxing, and eliminating the remaining boxing round-trips is the next target (Js27 §7.11, Js26 §6b; tracked as JO13 in `vibe/Lambda_Design_Stack_Frame_JS.md`). Native multiply also routes INT×INT through doubles to match JS semantics (JS_04 §4), so a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` rather than an integer multiply.
-2. **Observable `Get -> Call` is unspecialized.** Every ordinary method call performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` pay the full lookup. **The JR8 feedback-vector/callee-cache answer is retired**: **D8.4.1v2** and **LC1v2** ban per-site caches in LambdaJS as well as in the Lambda lane (2026-09-09). The sanctioned route is a compile-predicted shape/prototype guard emitted inline, with the shared kernel on a miss — `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2/T10-5. A process-global intrinsic cache remains separately forbidden by **D5.4**.
+2. **Observable `Get -> Call` is unspecialized.** Every ordinary method call performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` pay the full lookup. **The JR8 feedback-vector/callee-cache answer is retired**: **D8.4.1v2** and **LC1v2** ban per-site caches in LambdaJS as well as in the Lambda lane (2026-09-09). The sanctioned route is a compile-predicted shape/prototype guard emitted inline, with the shared kernel on a miss — `vibe/jube/JS_Tune_History.md` §4.3 T10-2/T10-5. A process-global intrinsic cache remains separately forbidden by **D5.4**.
 3. **Prototype method calls remain unspecialized.** Tune11 directly serves
    predicted *own data fields* with immutable TypeMap recipes, but it does not
    cache callees or skip observable prototype `Get -> Call`. The former
