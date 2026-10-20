@@ -637,6 +637,7 @@ typedef enum {
     DL_OWNED_PAYLOAD_NONE,
     DL_OWNED_PAYLOAD_PATH,
     DL_OWNED_PAYLOAD_PICTURE,
+    DL_OWNED_PAYLOAD_FRAGMENT,
 } DisplayOwnedPayloadKind;
 
 #define DISPLAY_OP_LIST(X) \
@@ -665,14 +666,15 @@ typedef enum {
     X(DL_SHADOW_CLIP_RESTORE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_OUTER_SHADOW, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0)
+    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_DRAW_FRAGMENT, DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_FRAGMENT, offsetof(DisplayItem, draw_fragment.owner))
 
 typedef enum DisplayOp {
 #define DL_OP_ENUM(name, flags, owned_kind, owned_offset) name,
     DISPLAY_OP_LIST(DL_OP_ENUM)
 #undef DL_OP_ENUM
 } DisplayOp;
-enum { DL_OP_COUNT = DL_END_ELEMENT + 1 };
+enum { DL_OP_COUNT = DL_DRAW_FRAGMENT + 1 };
 enum { DL_INITIAL_CAPACITY = 2048, DL_VALIDATE_ELEMENT_STACK_LIMIT = 1024 };
 
 // ---------------------------------------------------------------------------
@@ -943,10 +945,19 @@ typedef struct {
 // DisplayItem — tagged union of all draw commands
 // ---------------------------------------------------------------------------
 
+struct DisplayPayloadOwner;
+struct DisplayCommandSpan {
+    DisplayPayloadOwner* child;
+    int start, count;
+};
 struct DisplayPayloadOwner {
     RefCount refs;
     void (*destroy)(DisplayPayloadOwner*);
     lam::Up<const struct DisplayList> commands; // shared resource index of an immutable producer
+    const DisplayCommandSpan* command_spans = nullptr;
+    size_t span_count = 0;
+    int command_count = 0;
+    size_t retained_bytes = 0;
 };
 inline void dl_payload_owner_release(DisplayPayloadOwner* owner) {
     if (owner && ref_count_release(&owner->refs) == REF_COUNT_LAST) owner->destroy(owner);
@@ -954,7 +965,6 @@ inline void dl_payload_owner_release(DisplayPayloadOwner* owner) {
 
 typedef struct DisplayItem {
     DisplayOp op;
-    lam::Up<DisplayPayloadOwner> payload_owner; // null for owned payloads; otherwise pinned by the list
     float bounds[4];  // x, y, w, h for tile culling
 
     union {
@@ -982,6 +992,7 @@ typedef struct DisplayItem {
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
         DlElementMarker      element_marker;
+        struct { lam::Counted<DisplayPayloadOwner> owner; } draw_fragment;
     };
 } DisplayItem;
 
@@ -991,7 +1002,6 @@ typedef struct DisplayItem {
 
 struct DisplayList : lam::ArrayList<DisplayItem> {
     ScratchArena arena;      // private clip stacks, metadata and copied pixels
-    lam::ArrayList<DisplayPayloadOwner*> payload_owners{MEM_CAT_RENDER, 0};
     lam::Own<struct DlSharedArrayCache> shared_arrays{};
     DisplayList() : ArrayList(MEM_CAT_RENDER, 0), arena{} {}
 #ifdef __cplusplus
@@ -1001,6 +1011,28 @@ struct DisplayList : lam::ArrayList<DisplayItem> {
     int item_count() const;
     bool contains_glyphs() const;
 #endif
+};
+
+// reads immutable spans in painter order; marker indices remain local to their producer.
+struct DisplayListCursor {
+    struct ChunkFrame {
+        const DisplayPayloadOwner* owner;
+        size_t span;
+        int offset, logical;
+    };
+    const DisplayList* root;
+    int next_root, end_root, depth = 0;
+    ChunkFrame chunks[DL_VALIDATE_ELEMENT_STACK_LIMIT];
+    const DisplayItem* item = nullptr;
+    const DisplayPayloadOwner* owner = nullptr;
+    int index = -1, root_index = -1, source_index = -1;
+    bool failed = false;
+    explicit DisplayListCursor(const DisplayList* list, int first = 0, int end = -1);
+    const DisplayItem* next();
+    void skip_element();
+    int scope_size() const;
+private:
+    bool push(const DisplayPayloadOwner* chunk);
 };
 
 typedef struct DisplayListValidationResult {
@@ -1013,6 +1045,11 @@ typedef struct DisplayListValidationResult {
     int element_depth;
 } DisplayListValidationResult;
 
+struct DisplayListProperties {
+    bool has_glyphs = false;
+    bool has_video = false;
+};
+
 typedef struct DisplayOpDescriptor {
     DisplayOp op;
     uint32_t flags;
@@ -1023,7 +1060,7 @@ typedef struct DisplayOpDescriptor {
 const DisplayOpDescriptor* dl_op_descriptor(DisplayOp op);
 bool dl_op_has_flags(DisplayOp op, uint32_t flags);
 void dl_item_free_owned_payload(DisplayItem* item);
-bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner);
+bool dl_reference_fragment(DisplayList* list, DisplayPayloadOwner* owner, Bound bounds);
 bool dl_supports_premultiplied_capture(const DisplayList* list);
 // caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.
 bool dl_trim_empty_arena(DisplayList* list);
@@ -1218,8 +1255,21 @@ int dl_item_count(const DisplayList* dl);
 bool dl_contains_glyphs(const DisplayList* dl);
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result);
 bool dl_validate_or_log(const DisplayList* dl, const char* context);
+// independently balanced physical command range; properties publish only after successful validation.
+bool dl_validate_range(const DisplayList* dl, int first, int end,
+    DisplayListValidationResult* result, DisplayListProperties* properties = nullptr);
+bool dl_validate_range_or_log(const DisplayList* dl, int first, int end,
+    const char* context, DisplayListProperties* properties = nullptr);
 bool dl_item_is_retainable_for_fragment(const DisplayItem* item);
 bool dl_resources_current(const DisplayList* list, uint64_t video_generation, uint64_t glyph_generation);
+struct DisplayResourceSummary;
+// immutable dependency values; a successful null snapshot means no resource dependencies.
+bool dl_resource_summary_capture(const DisplayList* list, DisplayResourceSummary** snapshot,
+    size_t storage_budget = SIZE_MAX);
+void dl_resource_summary_destroy(DisplayResourceSummary* snapshot);
+size_t dl_resource_summary_bytes(const DisplayResourceSummary* snapshot);
+bool dl_resource_summary_current(const DisplayResourceSummary* snapshot,
+    uint64_t video_generation, uint64_t glyph_generation);
 size_t dl_shared_array_bytes(const DisplayList* list);
 uint64_t dl_shared_array_checkpoint(const DisplayList* list);
 void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint);
@@ -1227,6 +1277,26 @@ void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint);
 #ifdef __cplusplus
 }
 #endif
+
+// borrows an immutable command prefix; its list/payload owners must outlive this view.
+class ValidatedDisplayList {
+    friend bool dl_validate_recording(DisplayList*, int, ValidatedDisplayList*, const char*);
+    friend bool dl_validate_append(DisplayList*, ValidatedDisplayList*, ValidatedDisplayList*, const char*);
+    lam::Up<DisplayList> list{};
+    lam::Up<const DisplayItem> storage{};
+    int count = 0;
+    DisplayListProperties properties{};
+public:
+    DisplayList* get() const {
+        return list && storage == list->data() && count == list->item_count() ? list.get() : nullptr;
+    }
+    const DisplayListProperties& content() const { return properties; }
+};
+
+// recording owners invalidate views before editing their prefix; appended storage growth is revalidated.
+bool dl_validate_recording(DisplayList* list, int end, ValidatedDisplayList* recording, const char* context);
+bool dl_validate_append(DisplayList* list, ValidatedDisplayList* prefix,
+    ValidatedDisplayList* recording, const char* context);
 
 // ===== render_backend_caps.hpp =====
 typedef struct FilterProp FilterProp;
@@ -2657,6 +2727,10 @@ void dl_replay_outer_shadow_at_offset(ScratchArena* scratch,
 // surface is needed for direct-pixel operations (glyph, blit, opacity, etc.).
 // dirty_tracker clips rendering to dirty regions for selective repaint.
 void dl_replay(DisplayList* dl, RdtVector* vec,
+               ImageSurface* surface, Bound* clip,
+               ScratchArena* scratch, float scale,
+               DirtyTracker* dirty_tracker);
+void dl_replay_validated(const ValidatedDisplayList& recording, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
                ScratchArena* scratch, float scale,
                DirtyTracker* dirty_tracker);

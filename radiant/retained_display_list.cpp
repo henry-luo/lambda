@@ -9,10 +9,30 @@
 #include "../lib/arraylist.h"
 
 #include <math.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 #include "../lib/generation.h"
 
 struct RetainedPaintChunk;
+enum RetainedResourceKind { RETAINED_GLYPH_EPOCH, RETAINED_VIDEO_EPOCH, RETAINED_EPOCH_COUNT,
+    RETAINED_SURFACE = RETAINED_EPOCH_COUNT, RETAINED_NO_RESOURCE };
+struct RetainedSurfaceStamp {
+    lam::Handle<ImageSurface> resource;
+    uint64_t generation;
+};
+struct RetainedResourceStamp {
+    RetainedResourceKind kind = RETAINED_NO_RESOURCE;
+    RetainedSurfaceStamp surface{};
+};
+struct DisplayResourceSummary {
+    uint64_t epochs[RETAINED_EPOCH_COUNT]{};
+    uint8_t epoch_mask = 0;
+    bool consistent = true;
+    lam::ArrayList<RetainedSurfaceStamp> surfaces{MEM_CAT_RENDER, 0};
+    // ordered spans already pin these children; only image-bearing branches need traversal.
+    lam::ArrayList<lam::Up<RetainedPaintChunk>> surface_children{MEM_CAT_RENDER, 0};
+};
 struct RetainedStorageBudget {
     RefCount refs;
     size_t used, limit;
@@ -20,19 +40,141 @@ struct RetainedStorageBudget {
 static void retained_budget_release(RetainedStorageBudget* budget) {
     if (budget && ref_count_release(&budget->refs) == REF_COUNT_LAST) mem_free(budget);
 }
-struct RetainedPaintSpan {
-    RetainedPaintChunk* child; // owns one child reference, or a range of own commands
-    int start, count;
-};
+using RetainedPaintSpan = DisplayCommandSpan;
 struct RetainedPaintChunk : DisplayPayloadOwner {
     Arena* arena = nullptr;
     DisplayList own;
     lam::ArrayList<RetainedPaintSpan> spans{MEM_CAT_RENDER, 0};
-    int logical_count = 0;
+    lam::Own<DisplayResourceSummary> resources{};
     uint32_t parent_count = 0;
     RetainedStorageBudget* budget = nullptr;
     size_t charged_bytes = 0;
 };
+
+static RetainedResourceStamp retained_item_resource_stamp(const DisplayItem* item) {
+    RetainedResourceStamp stamp;
+    switch (item->op) {
+        case DL_DRAW_IMAGE:
+            if (!item->draw_image.resource.is_null())
+                stamp = {RETAINED_SURFACE, {item->draw_image.resource, item->draw_image.resource_generation}};
+            break;
+        case DL_BLIT_SURFACE_SCALED:
+            stamp = {RETAINED_SURFACE, {item->blit_surface_scaled.src_resource, item->blit_surface_scaled.src_generation}};
+            break;
+        case DL_WEBVIEW_LAYER_PLACEHOLDER:
+            stamp = {RETAINED_SURFACE, {item->webview_layer_placeholder.resource, item->webview_layer_placeholder.surface_generation}};
+            break;
+        case DL_DRAW_GLYPH:
+            if (item->draw_glyph.bitmap.buffer)
+                stamp = {RETAINED_GLYPH_EPOCH, {{}, item->draw_glyph.resource_generation}};
+            break;
+        case DL_VIDEO_PLACEHOLDER:
+            if (item->video_placeholder.video)
+                stamp = {RETAINED_VIDEO_EPOCH, {{}, item->video_placeholder.video_generation}};
+            break;
+        default: break;
+    }
+    return stamp;
+}
+
+static DisplayResourceSummary* retained_resources_ensure(lam::Own<DisplayResourceSummary>& owner) {
+    if (!owner) {
+        void* storage = mem_alloc(sizeof(DisplayResourceSummary), MEM_CAT_RENDER);
+        if (!storage) return nullptr;
+        owner = lam::own(new (storage) DisplayResourceSummary());
+    }
+    return owner;
+}
+
+static void retained_resources_merge_epoch(DisplayResourceSummary* summary,
+    unsigned epoch, uint64_t generation) {
+    unsigned bit = 1u << epoch;
+    if (!generation || ((summary->epoch_mask & bit) && summary->epochs[epoch] != generation))
+        summary->consistent = false;
+    summary->epoch_mask |= bit;
+    summary->epochs[epoch] = generation;
+}
+
+static bool retained_resources_add_item(lam::Own<DisplayResourceSummary>& owner, const DisplayItem* item) {
+    RetainedResourceStamp stamp = retained_item_resource_stamp(item);
+    if (stamp.kind == RETAINED_NO_RESOURCE) return true;
+    DisplayResourceSummary* summary = retained_resources_ensure(owner);
+    if (!summary) return false;
+    if (stamp.kind < RETAINED_EPOCH_COUNT) {
+        retained_resources_merge_epoch(summary, stamp.kind, stamp.surface.generation);
+        return true;
+    }
+    // adjacent repeats are common; the final sort coalesces interleaved resource uses.
+    if (!summary->surfaces.empty() && summary->surfaces.back().resource == stamp.surface.resource &&
+        summary->surfaces.back().generation == stamp.surface.generation) return true;
+    return summary->surfaces.append(stamp.surface);
+}
+
+static bool retained_resources_add_child(RetainedPaintChunk* chunk, RetainedPaintChunk* child) {
+    const DisplayResourceSummary* source = child->resources;
+    if (!source) return true;
+    DisplayResourceSummary* summary = retained_resources_ensure(chunk->resources);
+    if (!summary) return false;
+    summary->consistent &= source->consistent;
+    for (unsigned epoch = 0; epoch < RETAINED_EPOCH_COUNT; epoch++)
+        if (source->epoch_mask & (1u << epoch))
+            retained_resources_merge_epoch(summary, epoch, source->epochs[epoch]);
+    return (source->surfaces.empty() && source->surface_children.empty()) ||
+        summary->surface_children.append(lam::up(child));
+}
+
+static int retained_surface_stamp_compare(const void* left, const void* right) {
+    const auto* a = (const RetainedSurfaceStamp*)left;
+    const auto* b = (const RetainedSurfaceStamp*)right;
+    int handle_order = memcmp(&a->resource, &b->resource, sizeof(a->resource));
+    return handle_order ? handle_order : (a->generation > b->generation) - (a->generation < b->generation);
+}
+
+static void retained_resources_finish(DisplayResourceSummary* summary) {
+    if (!summary) return;
+    auto& surfaces = summary->surfaces;
+    if (surfaces.size() < 2) return;
+    qsort(surfaces.data(), surfaces.size(), sizeof(RetainedSurfaceStamp), retained_surface_stamp_compare);
+    size_t count = 1;
+    for (size_t i = 1; i < surfaces.size(); i++)
+        if (retained_surface_stamp_compare(&surfaces[count - 1], &surfaces[i]) != 0)
+            surfaces[count++] = surfaces[i];
+    surfaces.remove_range(count, surfaces.size() - count);
+}
+
+void dl_resource_summary_destroy(DisplayResourceSummary* summary) {
+    if (!summary) return;
+    summary->~DisplayResourceSummary(); mem_free(summary);
+}
+
+size_t dl_resource_summary_bytes(const DisplayResourceSummary* summary) {
+    return summary ? sizeof(*summary) + summary->surfaces.capacity() * sizeof(RetainedSurfaceStamp) +
+        summary->surface_children.capacity() * sizeof(lam::Up<RetainedPaintChunk>) : 0;
+}
+
+bool dl_resource_summary_capture(const DisplayList* list, DisplayResourceSummary** snapshot,
+    size_t storage_budget) {
+    if (!snapshot) return false;
+    *snapshot = nullptr;
+    if (!list) return false;
+    lam::Own<DisplayResourceSummary> summary{};
+    DisplayListCursor cursor(list);
+    while (const DisplayItem* item = cursor.next()) {
+        RENDER_METRIC_ADD(resource_capture_commands, 1);
+        // copy dependency values so the snapshot never borrows command or chunk storage.
+        if (!retained_resources_add_item(summary, item)) {
+            dl_resource_summary_destroy(summary);
+            return false;
+        }
+    }
+    if (cursor.failed || dl_resource_summary_bytes(summary) > storage_budget) {
+        dl_resource_summary_destroy(summary);
+        return false;
+    }
+    retained_resources_finish(summary);
+    *snapshot = summary;
+    return true;
+}
 struct RetainedDisplayListFragment {
     uint32_t view_id;
     Bound bounds;
@@ -45,11 +187,12 @@ struct RetainedDisplayListFragment {
 static void retained_chunk_destroy(DisplayPayloadOwner* owner) {
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
     for (size_t i = 0; i < chunk->spans.size(); i++) {
-        RetainedPaintChunk* child = chunk->spans[i].child;
+        RetainedPaintChunk* child = (RetainedPaintChunk*)chunk->spans[i].child;
         if (child) __atomic_fetch_sub(&child->parent_count, 1u, __ATOMIC_RELAXED);
         dl_payload_owner_release(child);
     }
     dl_destroy(&chunk->own);
+    dl_resource_summary_destroy(chunk->resources);
     if (chunk->arena) mem_arena_destroy(chunk->arena);
     if (chunk->budget) {
         __atomic_fetch_sub(&chunk->budget->used, chunk->charged_bytes, __ATOMIC_RELAXED);
@@ -232,7 +375,8 @@ static void retained_dl_publish(RetainedDisplayListCache* cache, RetainedPaintCh
     fragment->last_used = ++cache->clock;
 }
 
-static void retained_dl_drop_old_subtree(RetainedDisplayListCache* cache, RetainedPaintChunk* chunk) {
+static void retained_dl_drop_old_subtree(RetainedDisplayListCache* cache, DisplayPayloadOwner* owner) {
+    RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
     uint32_t view_id = chunk->own[0].element_marker.view_id;
     RetainedDisplayListEntry* entry = cache->map.get({view_id, nullptr});
     if (entry && entry->fragment && entry->fragment->chunk == chunk &&
@@ -271,6 +415,7 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
     size_t bytes = sizeof(*chunk) + sizeof(RetainedDisplayListFragment) +
         chunk->own.capacity() * sizeof(DisplayItem) + chunk->spans.capacity() * sizeof(RetainedPaintSpan) +
         arena_total_allocated(chunk->arena) + dl_shared_array_bytes(&chunk->own);
+    bytes += dl_resource_summary_bytes(chunk->resources);
     for (size_t i = 0; i < chunk->own.size(); i++) {
         const DisplayItem* item = &chunk->own[i];
         const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
@@ -282,12 +427,18 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
     }
     // charge shared resources conservatively per chunk; borrowed frames keep the ledger alive after eviction.
     if (!retained_dl_trim(cache, bytes) || !ref_count_retain(&cache->budget->refs)) return false;
+    chunk->retained_bytes = bytes;
+    for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
+        size_t child_bytes = chunk->spans[i].child->retained_bytes;
+        chunk->retained_bytes = child_bytes > SIZE_MAX - chunk->retained_bytes ? SIZE_MAX : chunk->retained_bytes + child_bytes;
+    }
     chunk->budget = cache->budget; chunk->charged_bytes = bytes;
     __atomic_fetch_add(&cache->budget->used, bytes, __ATOMIC_RELAXED);
     return true;
 }
 
-static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, RetainedPaintChunk* chunk) {
+static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, DisplayPayloadOwner* owner) {
+    RetainedPaintChunk* chunk = (RetainedPaintChunk*)owner;
     retained_dl_publish(cache, chunk);
     cache->stats.reused_captures++;
     for (size_t i = 0; i < chunk->spans.size(); i++)
@@ -295,17 +446,18 @@ static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, RetainedPai
 }
 
 static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* cache,
-    const DisplayList* source, int begin, int end, size_t depth) {
-    if (depth > DL_VALIDATE_ELEMENT_STACK_LIMIT) return nullptr;
-    const DisplayItem& marker = source->data()[begin];
+    DisplayListCursor* cursor, size_t depth) {
+    const DisplayItem marker = *cursor->item;
+    if (depth > DL_VALIDATE_ELEMENT_STACK_LIMIT) { cursor->skip_element(); return nullptr; }
     if (marker.element_marker.view_id) cache->stats.capture_candidates++;
-    DisplayPayloadOwner* owner = marker.payload_owner;
-    if (owner && owner->destroy == retained_chunk_destroy) {
-        RetainedPaintChunk* existing = (RetainedPaintChunk*)owner;
-        if (existing->budget == cache->budget && existing->logical_count == end - begin + 1 &&
-            source->data()[end].payload_owner == owner && ref_count_retain(&owner->refs)) {
-            // borrowed frame commands still identify their immutable producer; never recapture them.
+    const DisplayPayloadOwner* scope = cursor->owner;
+    int end = marker.element_marker.matching_index;
+    if (scope && cursor->index == 0 && scope->destroy == retained_chunk_destroy) {
+        RetainedPaintChunk* existing = (RetainedPaintChunk*)scope;
+        if (existing->budget == cache->budget && ref_count_retain(&existing->refs)) {
+            // immutable publications keep their identity when a mixed frame is captured again.
             retained_dl_touch_chunk(cache, existing);
+            cursor->skip_element();
             return existing;
         }
     }
@@ -314,43 +466,57 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         new (chunk) RetainedPaintChunk();
         ref_count_init(&chunk->refs); chunk->destroy = retained_chunk_destroy;
         chunk->commands = lam::up(&chunk->own);
-        chunk->logical_count = end - begin + 1;
         chunk->arena = mem_arena_create(
             cache->pool ? mem_node_owner((MemNode*)pool_get_mem_node(cache->pool)) : nullptr,
             MEM_ROLE_RENDER, "retained_dl.chunk");
         if (!chunk->arena) { dl_payload_owner_release(chunk); chunk = nullptr; }
         else dl_init(&chunk->own, chunk->arena);
     }
-    bool retainable = true, copied = chunk != nullptr;
-    for (int i = begin; i <= end;) {
-        const DisplayItem& item = source->data()[i];
-        if (i != begin && item.op == DL_BEGIN_ELEMENT && item.element_marker.matching_index > i &&
-            item.element_marker.matching_index < end) {
-            int child_end = item.element_marker.matching_index;
-            RetainedPaintChunk* child = retained_dl_capture_chunk(cache, source, i, child_end, depth + 1);
+    bool retainable = true, copied = chunk != nullptr, first = true, closed = false;
+    int commands = 0;
+    do {
+        const DisplayItem& item = *cursor->item;
+        if (!first && item.op == DL_BEGIN_ELEMENT) {
+            RetainedPaintChunk* child = retained_dl_capture_chunk(cache, cursor, depth + 1);
             if (!child) retainable = false;
             if (!chunk || !child || !chunk->spans.append({child, 0, 0})) {
                 dl_payload_owner_release(child);
                 if (child) copied = false;
-            } else __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
-            i = child_end + 1;
-            continue;
-        }
-        retainable = retainable && dl_item_is_retainable_for_fragment(&item);
-        if (chunk && copied && retainable) {
-            int own_index = chunk->own.item_count();
-            copied = dl_copy_range(&chunk->own, source, i, i);
-            if (copied) {
-                DisplayItem& copy = chunk->own.data()[own_index];
-                if (copy.op == DL_BEGIN_ELEMENT || copy.op == DL_END_ELEMENT)
-                    copy.element_marker.matching_index = item.element_marker.matching_index - begin;
-                if (!chunk->spans.empty() && !chunk->spans.back().child &&
-                    chunk->spans.back().start + chunk->spans.back().count == own_index)
-                    chunk->spans.back().count++;
-                else copied = chunk->spans.append({nullptr, own_index, 1});
+            } else {
+                __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
+                if (!retained_resources_add_child(chunk, child)) copied = false;
+                if (child->command_count > INT_MAX - commands) copied = false;
+                else commands += child->command_count;
+            }
+        } else {
+            retainable = retainable && dl_item_is_retainable_for_fragment(&item);
+            if (chunk && copied && retainable) {
+                int own_index = chunk->own.item_count();
+                const DisplayList* source = cursor->owner ? cursor->owner->commands.get() : cursor->root;
+                copied = dl_copy_range(&chunk->own, source, cursor->source_index, cursor->source_index);
+                if (copied) copied = retained_resources_add_item(chunk->resources, &item);
+                if (copied) {
+                    if (!chunk->spans.empty() && !chunk->spans.back().child &&
+                        chunk->spans.back().start + chunk->spans.back().count == own_index)
+                        chunk->spans.back().count++;
+                    else copied = chunk->spans.append({nullptr, own_index, 1});
+                }
+            }
+            if (commands == INT_MAX) copied = false;
+            else commands++;
+            if (!first && item.op == DL_END_ELEMENT && cursor->owner == scope && cursor->index == end) {
+                closed = true; break;
             }
         }
-        i++;
+        first = false;
+    } while (cursor->next());
+    copied = copied && closed && !cursor->failed;
+    if (chunk && copied && retainable) {
+        chunk->command_count = commands;
+        chunk->own.front().element_marker.matching_index = commands - 1;
+        chunk->own.back().element_marker.matching_index = 0;
+        chunk->command_spans = chunk->spans.data(); chunk->span_count = chunk->spans.size();
+        retained_resources_finish(chunk->resources);
     }
     bool budget_rejected = chunk && retainable && copied && !retained_dl_admit_chunk(cache, chunk);
     if (budget_rejected) { copied = false; cache->stats.budget_rejections++; }
@@ -358,7 +524,7 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         RetainedDisplayListEntry* previous = cache->map.get({marker.element_marker.view_id, nullptr});
         if (previous && previous->fragment) {
             dl_payload_owner_release(previous->fragment->chunk);
-            previous->fragment->chunk = nullptr; // failed publication invalidates the previous version, even within one epoch.
+            previous->fragment->chunk = nullptr;
         }
         if (marker.element_marker.view_id) {
             if (!retainable) cache->stats.skipped_non_retainable++;
@@ -377,14 +543,12 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source) {
     if (!cache || !source) return;
 
-    for (int i = 0; i < source->item_count(); i++) {
-        const DisplayItem& item = source->data()[i];
-        if (item.op != DL_BEGIN_ELEMENT || item.element_marker.matching_index <= i ||
-            item.element_marker.matching_index >= source->item_count()) continue;
-        int end = item.element_marker.matching_index;
-        RetainedPaintChunk* chunk = retained_dl_capture_chunk(cache, source, i, end, 0);
+    DisplayListCursor cursor(source);
+    while (const DisplayItem* item = cursor.next()) {
+        if (item->op != DL_BEGIN_ELEMENT || item->element_marker.matching_index <= cursor.index ||
+            item->element_marker.matching_index >= cursor.scope_size()) continue;
+        RetainedPaintChunk* chunk = retained_dl_capture_chunk(cache, &cursor, 0);
         dl_payload_owner_release(chunk);
-        i = end;
     }
 
     // replaced view IDs cannot be reused; release their arenas each frame
@@ -432,7 +596,7 @@ Bound retained_dl_fragment_marker_bounds(const RetainedDisplayListFragment* frag
 
 int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment) {
     if (!fragment) return 0;
-    return fragment->chunk ? fragment->chunk->logical_count : 0;
+    return fragment->chunk ? fragment->chunk->command_count : 0;
 }
 
 static bool retained_dl_bounds_match(Bound cached, Bound current) {
@@ -461,65 +625,79 @@ static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
 // detected without reading its memory.
 static bool retained_dl_surface_generation_current(lam::Handle<ImageSurface> resource,
                                                    uint64_t generation) {
+    RENDER_METRIC_ADD(resource_surface_checks, 1);
     ImageSurface* surface = image_surface_lookup(resource);
     return surface && generation_current(generation, surface->generation);
 }
 
-static bool retained_dl_generation_current(const void* resource, uint64_t generation, uint64_t current_generation) {
-    return !resource || generation_current(generation, current_generation);
+static bool retained_resource_stamp_current(const RetainedResourceStamp& stamp,
+    uint64_t current_video_generation, uint64_t current_glyph_generation) {
+    if (stamp.kind == RETAINED_NO_RESOURCE) return true;
+    if (stamp.kind == RETAINED_SURFACE) {
+        return retained_dl_surface_generation_current(stamp.surface.resource, stamp.surface.generation);
+    }
+    RENDER_METRIC_ADD(resource_epoch_checks, 1);
+    uint64_t current = stamp.kind == RETAINED_GLYPH_EPOCH ? current_glyph_generation : current_video_generation;
+    return generation_current(stamp.surface.generation, current);
 }
 
-bool dl_resources_current(const DisplayList* list,
-                                          uint64_t current_video_generation,
-                                          uint64_t current_glyph_generation) {
-    if (!list) return false;
-    // owners are read for their generation
-    ImageSurfaceReadScope read_scope;
-    for (int i = 0; i < list->item_count(); i++) {
-        const DisplayItem* item = &list->data()[i];
-        switch (item->op) {
-            case DL_DRAW_IMAGE: {
-                if (!item->draw_image.resource.is_null() && !retained_dl_surface_generation_current(
-                        item->draw_image.resource, item->draw_image.resource_generation)) return false;
-                break;
-            }
-            case DL_DRAW_GLYPH:
-                if (!retained_dl_generation_current(item->draw_glyph.bitmap.buffer,
-                        item->draw_glyph.resource_generation, current_glyph_generation)) return false;
-                break;
-            case DL_BLIT_SURFACE_SCALED: {
-                if (!retained_dl_surface_generation_current(item->blit_surface_scaled.src_resource,
-                        item->blit_surface_scaled.src_generation)) return false;
-                break;
-            }
-            case DL_VIDEO_PLACEHOLDER:
-                if (!retained_dl_generation_current(item->video_placeholder.video,
-                        item->video_placeholder.video_generation, current_video_generation)) return false;
-                break;
-            case DL_WEBVIEW_LAYER_PLACEHOLDER: {
-                if (!retained_dl_surface_generation_current(item->webview_layer_placeholder.resource,
-                        item->webview_layer_placeholder.surface_generation)) return false;
-                break;
-            }
-            default:
-                break;
-        }
+static bool retained_summary_surfaces_current(const DisplayResourceSummary* summary) {
+    if (!summary) return true;
+    for (size_t i = 0; i < summary->surfaces.size(); i++) {
+        const RetainedSurfaceStamp& stamp = summary->surfaces[i];
+        if (!retained_dl_surface_generation_current(stamp.resource, stamp.generation)) return false;
+    }
+    for (size_t i = 0; i < summary->surface_children.size(); i++) {
+        RENDER_METRIC_ADD(resource_child_checks, 1);
+        if (!retained_summary_surfaces_current(summary->surface_children[i]->resources)) return false;
     }
     return true;
 }
 
-static bool retained_chunk_resources_valid(const RetainedPaintChunk* chunk,
+static bool retained_summary_current(const DisplayResourceSummary* summary,
     uint64_t current_video_generation, uint64_t current_glyph_generation) {
-    if (!chunk || !dl_resources_current(&chunk->own, current_video_generation, current_glyph_generation)) return false;
-    for (size_t i = 0; i < chunk->spans.size(); i++)
-        if (chunk->spans[i].child && !retained_chunk_resources_valid(chunk->spans[i].child,
-            current_video_generation, current_glyph_generation)) return false;
-    return true;
+    RENDER_METRIC_ADD(resource_summary_checks, 1);
+    if (!summary) return true;
+    if (!summary->consistent) return false;
+    const uint64_t current[] = {current_glyph_generation, current_video_generation};
+    for (unsigned epoch = 0; epoch < RETAINED_EPOCH_COUNT; epoch++) if (summary->epoch_mask & (1u << epoch)) {
+        RENDER_METRIC_ADD(resource_epoch_checks, 1);
+        if (!generation_current(summary->epochs[epoch], current[epoch])) return false;
+    }
+    return retained_summary_surfaces_current(summary);
+}
+
+bool dl_resource_summary_current(const DisplayResourceSummary* summary,
+    uint64_t current_video_generation, uint64_t current_glyph_generation) {
+    ImageSurfaceReadScope read_scope;
+    return retained_summary_current(summary, current_video_generation, current_glyph_generation);
+}
+
+bool dl_resources_current(const DisplayList* list,
+    uint64_t current_video_generation, uint64_t current_glyph_generation) {
+    if (!list) return false;
+    ImageSurfaceReadScope read_scope;
+    DisplayListCursor cursor(list);
+    while (const DisplayItem* item = cursor.next()) {
+        if (cursor.owner && cursor.index == 0 && cursor.owner->destroy == retained_chunk_destroy) {
+            // published summaries cover the whole chunk, including nested resource-bearing spans.
+            if (!retained_summary_current(((const RetainedPaintChunk*)cursor.owner)->resources,
+                    current_video_generation, current_glyph_generation)) return false;
+            cursor.skip_element();
+            continue;
+        }
+        RENDER_METRIC_ADD(resource_command_checks, 1);
+        if (!retained_resource_stamp_current(retained_item_resource_stamp(item),
+                current_video_generation, current_glyph_generation)) return false;
+    }
+    return !cursor.failed;
 }
 
 bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
     uint64_t current_video_generation, uint64_t current_glyph_generation) {
-    return fragment && retained_chunk_resources_valid(fragment->chunk,
+    // one read scope pins all surface lookups until the complete dependency decision.
+    ImageSurfaceReadScope read_scope;
+    return fragment && fragment->chunk && retained_summary_current(fragment->chunk->resources,
         current_video_generation, current_glyph_generation);
 }
 
@@ -551,38 +729,8 @@ bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
     return retained_dl_append_fragment(dst, fragment);
 }
 
-static bool retained_dl_borrow_chunk(DisplayList* dst, RetainedPaintChunk* chunk) {
-    int placement = dst->item_count();
-    if (!dl_pin_payload_owner(dst, chunk)) return false;
-    for (size_t i = 0; i < chunk->spans.size(); i++) {
-        const RetainedPaintSpan& span = chunk->spans[i];
-        if (span.child) {
-            if (!retained_dl_borrow_chunk(dst, span.child)) return false;
-            continue;
-        }
-        for (int j = span.start; j < span.start + span.count; j++) {
-            DisplayItem* out = dl_alloc_item(dst);
-            if (!out) return false;
-            RENDER_METRIC_ADD(borrowed_command_bytes, sizeof(DisplayItem));
-            *out = chunk->own.data()[j];
-            out->payload_owner = lam::up<DisplayPayloadOwner>(chunk);
-            if (out->op == DL_BEGIN_ELEMENT || out->op == DL_END_ELEMENT)
-                out->element_marker.matching_index += placement;
-        }
-    }
-    return true;
-}
-
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment) {
-    if (!dst || !fragment || !fragment->chunk) return false;
-    int checkpoint = dst->item_count();
-    size_t owner_checkpoint = dst->payload_owners.size();
-    if (retained_dl_borrow_chunk(dst, fragment->chunk)) return true;
-    dl_truncate(dst, checkpoint);
-    // failed assembly retires its leases immediately, preserving the earlier frame.
-    for (size_t i = owner_checkpoint; i < dst->payload_owners.size(); i++)
-        dl_payload_owner_release(dst->payload_owners[i]);
-    dst->payload_owners.remove_range(owner_checkpoint, dst->payload_owners.size() - owner_checkpoint);
-    return false;
+    return dst && fragment && fragment->chunk &&
+        dl_reference_fragment(dst, fragment->chunk, fragment->bounds);
 }

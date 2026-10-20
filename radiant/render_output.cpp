@@ -727,12 +727,22 @@ struct RenderFrameKey {
 
 struct RenderFrameCache {
     RdtVector vector;
+    lam::Own<DisplayResourceSummary> resources{};
+    ValidatedDisplayList recording;
     RenderFrameKey key;
     bool valid;
 };
 
+static void render_frame_cache_invalidate(RenderFrameCache* cache) {
+    cache->valid = false;
+    cache->recording = {};
+    dl_resource_summary_destroy(cache->resources);
+    cache->resources = nullptr;
+}
+
 void render_frame_cache_destroy(RenderFrameCache* cache) {
     if (!cache) return;
+    render_frame_cache_invalidate(cache);
     rdt_vector_destroy(&cache->vector);
     cache->~RenderFrameCache(); mem_free(cache);
 }
@@ -866,7 +876,7 @@ RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, Vie
     }
     RenderFrameCache* cache = nested ? nullptr : view_tree->render_frame_cache.get();
     if (!reuse_recording && cache) {
-        cache->valid = false;
+        render_frame_cache_invalidate(cache);
         if (view_tree->render_list) dl_clear(view_tree->render_list);
     }
     Arena* scratch_backing = nested ? mem_arena_create(view_tree->mem_ctx, MEM_ROLE_RENDER,
@@ -921,7 +931,7 @@ RenderFrameScope::~RenderFrameScope() {
             rdt_vector_flush_batch(&rdcon->vec);
             cache->vector.impl = rdcon->vec.impl; rdcon->vec.impl = nullptr;
         }
-        if (cache && preserved_commands < 0) cache->valid = false;
+        if (cache && preserved_commands < 0) render_frame_cache_invalidate(cache);
         storage_owner->render_list_in_use = false;
     } else if (display_list_active) {
         Arena* nested_list = display_list.arena.arena;
@@ -1313,11 +1323,12 @@ bool render_secondary_view_to_svg(ViewTree* tree, const char* filename, float ou
 }
 
 static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
-                                                                  DisplayList* display_list,
+                                                                  const ValidatedDisplayList& recording,
                                                                   uint32_t canvas_bg,
                                                                   DirtyTracker* replay_dirty) {
     RenderOutputReplayResult result = {};
     result.thread_count = 1;
+    DisplayList* display_list = recording.get();
     if (!rdcon || !display_list || !rdcon->ui_context || !rdcon->ui_context->surface) {
         return result;
     }
@@ -1326,11 +1337,8 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
 
     int render_threads = render_output_thread_count();
     int item_count = dl_item_count(display_list);
-    if (!dl_validate_or_log(display_list, "render_output_replay_display_list")) {
-        return result;
-    }
-    bool has_glyphs = dl_contains_glyphs(display_list);
-    if (!replay_dirty && render_threads != 1 && item_count > 0 && !has_glyphs) {
+    // the sole caller validates document and overlay streams before this read-only replay.
+    if (!replay_dirty && render_threads != 1 && item_count > 0 && !recording.content().has_glyphs) {
         ImageSurface* surface = rdcon->ui_context->surface;
         TileGrid grid;
         tile_grid_init(&grid, surface->width, surface->height, rdcon->raster_scale);
@@ -1368,7 +1376,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
         return result;
     }
 
-    dl_replay(display_list, &rdcon->vec, rdcon->ui_context->surface,
+    dl_replay_validated(recording, &rdcon->vec, rdcon->ui_context->surface,
               &rdcon->block.clip, &rdcon->scratch, rdcon->raster_scale, replay_dirty);
     return result;
 }
@@ -1417,10 +1425,14 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     RenderFrameCache* cache = frame.storage_owner ? view_tree->render_frame_cache.get() : nullptr;
     bool can_retain = cache && !selective && render_frame_can_retain(uicon);
     RenderFrameKey key = render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background);
-    bool reused = can_retain && cache->valid && render_frame_key_equal(cache->key, key) &&
-        dl_resources_current(&display_list, key.generations[9], key.generations[4]);
+    bool reused = can_retain && cache->valid && cache->recording.get() == &display_list &&
+        render_frame_key_equal(cache->key, key) &&
+        dl_resource_summary_current(cache->resources, key.generations[9], key.generations[4]);
     if (cache) cache->valid = false; // only a completed render can publish another reusable recording.
-    if (!reused) dl_clear(&display_list);
+    if (!reused) {
+        if (cache) render_frame_cache_invalidate(cache);
+        dl_clear(&display_list);
+    }
     else RENDER_METRIC_ADD(full_frame_reuses, 1);
 
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
@@ -1447,12 +1459,17 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         uicon->surface->height, dl_item_count(&display_list));
     render_profiler_write_counters_stderr(rdcon.profiler);
 
+    ValidatedDisplayList document_recording = reused ? cache->recording : ValidatedDisplayList{};
+    if (!reused && !dl_validate_recording(&display_list, document_commands,
+            &document_recording, "render_output_document")) return 1;
+
     RenderOverlayRecordingScope overlays(&display_list);
     if (uicon->document && uicon->document->state) {
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
     }
-    if (!dl_validate_or_log(&display_list, "render_output_raster")) {
+    ValidatedDisplayList replay_recording;
+    if (!dl_validate_append(&display_list, &document_recording, &replay_recording, "render_output_overlays")) {
         return 1;
     }
     uint64_t t_capture = time_now_ns();
@@ -1471,7 +1488,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
 
     int item_count = dl_item_count(&display_list);
     RenderOutputReplayResult replay_result =
-        render_output_replay_display_list(&rdcon, &display_list, canvas_bg, clear_result.replay_dirty);
+        render_output_replay_display_list(&rdcon, replay_recording, canvas_bg, clear_result.replay_dirty);
 
     uint64_t t_replay_end = time_now_ns();
     measurement.checkpoint("replay");
@@ -1488,7 +1505,8 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
 
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
-    render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
+    render_video_frames(replay_recording.content().has_video ? &display_list : nullptr,
+        rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
     uint64_t t_sync = time_now_ns();
     measurement.checkpoint("media_trace");
@@ -1547,6 +1565,11 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
             retainable = dl_item_is_retainable_for_fragment(item);
             if (!retainable && render_pipeline_metrics)
                 log_notice("[RENDER_RECORDING] rejected_op=%d", item->op);
+            if (item->op == DL_DRAW_FRAGMENT) {
+                const DisplayPayloadOwner* owner = item->draw_fragment.owner;
+                if (!owner || owner->retained_bytes > SIZE_MAX - recording_bytes) retainable = false;
+                else recording_bytes += owner->retained_bytes;
+            }
             const DisplayOpDescriptor* descriptor = dl_op_descriptor(item->op);
             if (descriptor && descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PATH) {
                 const RdtPath* path = *(RdtPath* const*)((const char*)item + descriptor->owned_payload_offset);
@@ -1556,11 +1579,19 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
                 else recording_bytes += bytes;
             }
         }
+        if (!reused && retainable && recording_bytes <= ((size_t)8 << 20)) {
+            DisplayResourceSummary* resources = nullptr;
+            retainable = dl_resource_summary_capture(&display_list, &resources,
+                ((size_t)8 << 20) - recording_bytes);
+            cache->resources = lam::own(resources);
+            recording_bytes += dl_resource_summary_bytes(resources);
+        }
         if (render_pipeline_metrics)
             log_notice("[RENDER_RECORDING] bytes=%zu arena_used=%zu arena_reserved=%zu retainable=%d reused=%d",
                 recording_bytes, arena_total_used(display_list.arena.arena),
                 arena_total_allocated(display_list.arena.arena), retainable, reused);
         if (retainable && (reused || recording_bytes <= ((size_t)8 << 20))) {
+            cache->recording = document_recording;
             cache->key = key; cache->valid = true;
             frame.preserved_commands = document_commands;
         }

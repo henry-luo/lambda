@@ -36,13 +36,14 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags) {
 
 bool dl_supports_premultiplied_capture(const DisplayList* list) {
     if (!list) return false;
-    for (size_t i = 0; i < list->size(); i++) {
-        const DisplayItem& item = list->data()[i];
+    DisplayListCursor cursor(list);
+    while (const DisplayItem* next = cursor.next()) {
+        const DisplayItem& item = *next;
         if (!dl_op_has_flags(item.op, DL_OP_FLAG_PREMULTIPLIED_CAPTURE)) return false;
         // the color-emoji writer still forces opaque output; coverage glyphs preserve premultiplied alpha.
         if (item.op == DL_DRAW_GLYPH && item.draw_glyph.is_color_emoji) return false;
     }
-    return true;
+    return !cursor.failed;
 }
 
 DisplayItem* dl_alloc_item(DisplayList* dl) {
@@ -51,6 +52,97 @@ DisplayItem* dl_alloc_item(DisplayList* dl) {
     DisplayItem item = {};
     if (!dl->append(item)) return nullptr;
     return &dl->back();
+}
+
+DisplayListCursor::DisplayListCursor(const DisplayList* list, int first, int end)
+    : root(list), next_root(max(first, 0)), end_root(list ? list->item_count() : 0) {
+    if (end >= 0) end_root = min(end_root, end);
+    failed = list && (list->size() > list->capacity() || (list->size() && !list->data()));
+}
+
+bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
+    if (!chunk || !chunk->commands || !chunk->command_spans || !chunk->span_count ||
+        chunk->command_count <= 0 || depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT ||
+        chunk->commands->size() > chunk->commands->capacity() || !chunk->commands->data()) {
+        failed = true; return false;
+    }
+    for (int i = 0; i < depth; i++) if (chunks[i].owner == chunk) {
+        failed = true; return false;
+    }
+    chunks[depth++] = {chunk, 0, 0, 0};
+    return true;
+}
+
+const DisplayItem* DisplayListCursor::next() {
+    item = nullptr;
+    while (!failed) {
+        if (!depth) {
+            if (!root || next_root >= end_root) return nullptr;
+            source_index = index = root_index = next_root++;
+            owner = nullptr;
+            item = &root->data()[index];
+            if (item->op == DL_DRAW_FRAGMENT) {
+                if (!push(item->draw_fragment.owner)) break;
+                continue;
+            }
+            return item;
+        }
+        ChunkFrame& frame = chunks[depth - 1];
+        owner = frame.owner;
+        if (frame.span == owner->span_count) {
+            if (frame.logical != owner->command_count) { failed = true; break; }
+            depth--; continue;
+        }
+        const DisplayCommandSpan& span = owner->command_spans[frame.span];
+        if (span.child) {
+            if (span.child->command_count <= 0 || span.child->command_count > INT_MAX - frame.logical) {
+                failed = true; break;
+            }
+            frame.span++; frame.logical += span.child->command_count;
+            if (!push(span.child)) break;
+            continue;
+        }
+        if (span.start < 0 || span.count <= 0 || span.start > owner->commands->item_count() ||
+            span.count > owner->commands->item_count() - span.start) { failed = true; break; }
+        if (frame.offset == span.count) { frame.offset = 0; frame.span++; continue; }
+        if (frame.logical >= owner->command_count) { failed = true; break; }
+        source_index = span.start + frame.offset++;
+        item = &owner->commands->data()[source_index];
+        index = frame.logical++;
+        // immutable chunks express nesting through spans, never through mutable frame-reference commands.
+        if (item->op == DL_DRAW_FRAGMENT) { failed = true; break; }
+        return item;
+    }
+    item = nullptr;
+    return nullptr;
+}
+
+int DisplayListCursor::scope_size() const {
+    return owner ? owner->command_count : (root ? root->item_count() : 0);
+}
+
+void DisplayListCursor::skip_element() {
+    if (!item || item->op != DL_BEGIN_ELEMENT || item->element_marker.matching_index <= index) return;
+    int match = item->element_marker.matching_index;
+    if (match >= scope_size()) { failed = true; return; }
+    if (!owner) { next_root = match + 1; return; }
+    if (index == 0 && match == owner->command_count - 1) { depth--; return; }
+    const DisplayPayloadOwner* scope = owner;
+    while (next()) if (owner == scope && index == match) return;
+    failed = true;
+}
+
+bool dl_reference_fragment(DisplayList* list, DisplayPayloadOwner* owner, Bound bounds) {
+    if (!list || !owner || !owner->destroy || !owner->command_spans || !owner->span_count ||
+        !ref_count_retain(&owner->refs)) return false;
+    DisplayItem* item = dl_alloc_item(list);
+    if (!item) { dl_payload_owner_release(owner); return false; }
+    item->op = DL_DRAW_FRAGMENT; item->draw_fragment.owner = lam::counted(owner);
+    item->bounds[0] = bounds.left; item->bounds[1] = bounds.top;
+    item->bounds[2] = bounds.right - bounds.left; item->bounds[3] = bounds.bottom - bounds.top;
+    RENDER_METRIC_ADD(fragment_references, 1);
+    RENDER_METRIC_ADD(fragment_commands, owner->command_count);
+    return true;
 }
 
 // list indexes pin immutable value buffers; copied chunks acquire the same buffers.
@@ -263,15 +355,8 @@ void DisplayList::init(Arena* backing_arena) {
     dl_init_scratch(this, backing_arena);
 }
 
-bool dl_pin_payload_owner(DisplayList* list, DisplayPayloadOwner* owner) {
-    if (!list || !owner || !ref_count_retain(&owner->refs)) return false;
-    if (list->payload_owners.append(owner)) return true;
-    dl_payload_owner_release(owner);
-    return false;
-}
-
 void dl_item_free_owned_payload(DisplayItem* item) {
-    if (!item || item->payload_owner) return;
+    if (!item) return;
     if (item->op == DL_DRAW_IMAGE && item->draw_image.snapshot_lease) {
         image_surface_snapshot_release(item->draw_image.snapshot_lease);item->draw_image.snapshot_lease=nullptr;
     }
@@ -289,6 +374,9 @@ void dl_item_free_owned_payload(DisplayItem* item) {
     } else if (descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_PICTURE) {
         RdtPicture** picture = (RdtPicture**)field;
         if (*picture) { rdt_picture_free(*picture); *picture = nullptr; }
+    } else if (descriptor->owned_payload_kind == DL_OWNED_PAYLOAD_FRAGMENT) {
+        DisplayPayloadOwner** owner = (DisplayPayloadOwner**)field;
+        dl_payload_owner_release(*owner); *owner = nullptr;
     }
 }
 
@@ -299,8 +387,6 @@ void DisplayList::clear() {
         dl_item_free_owned_payload(&dl->data()[i]);
     }
     lam::ArrayList<DisplayItem>::clear();
-    for (size_t i = 0; i < payload_owners.size(); i++) dl_payload_owner_release(payload_owners[i]);
-    payload_owners.clear();
     if (shared_arrays) {
         shared_arrays->index.destroy(); lam::free_owned(shared_arrays);
     }
@@ -330,7 +416,6 @@ bool dl_trim_empty_arena(DisplayList* list) {
 void DisplayList::destroy() {
     clear();
     lam::ArrayList<DisplayItem>::release();
-    payload_owners.release();
     scratch_release(&arena);
 }
 
@@ -342,13 +427,17 @@ int DisplayList::item_count() const {
     return (int)size(); // INT_CAST_OK: DisplayList public count API is int.
 }
 
+static bool dl_item_contains_glyphs(const DisplayItem* item) {
+    // native text duplicates re-shape through a shared font cache, so they also require serial replay.
+    return item->op == DL_DRAW_GLYPH ||
+        (item->op == DL_DRAW_PICTURE && rdt_picture_is_text(item->draw_picture.picture));
+}
+
 bool DisplayList::contains_glyphs() const {
-    for (size_t i = 0; i < size(); i++) {
-        const DisplayItem& item = data()[i];
-        if (item.op == DL_DRAW_GLYPH) return true;
-        // ThorVG text replays by re-shaping each duplicate through its font
-        // loader's shared glyph cache, which tile workers must not race on.
-        if (item.op == DL_DRAW_PICTURE && rdt_picture_is_text(item.draw_picture.picture)) return true;
+    DisplayListCursor cursor(this);
+    while (const DisplayItem* next = cursor.next()) {
+        RENDER_METRIC_ADD(glyph_command_checks, 1);
+        if (dl_item_contains_glyphs(next)) return true;
     }
     return false;
 }
@@ -428,8 +517,10 @@ static bool dl_retainable_surface(const void* borrowed, lam::Handle<ImageSurface
     return !borrowed || (!owner.is_null() && generation_stamped(generation));
 }
 
-bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
+bool dl_validate_range(const DisplayList* dl, int first, int end,
+    DisplayListValidationResult* result, DisplayListProperties* properties) {
     dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    if (properties) *properties = {};
     if (!dl) {
         return dl_validation_fail(result, -1, "display list is null", NULL);
     }
@@ -441,21 +532,29 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
         return dl_validation_fail(result, -1, "display list has items but no storage",
                                   NULL);
     }
+    if (first < 0 || end < first || end > dl->item_count())
+        return dl_validation_fail(result, -1, "display list command range is invalid", NULL);
 
     DisplayListValidationStack stack = {};
-    int element_stack[DL_VALIDATE_ELEMENT_STACK_LIMIT];
+    DisplayListProperties observed = {};
+    struct ElementScope { const DisplayPayloadOwner* owner; int begin, end; };
+    ElementScope element_stack[DL_VALIDATE_ELEMENT_STACK_LIMIT];
     auto fail_at = [&](int index, const char* message) -> bool {
         return dl_validation_fail(result, index, message, &stack);
     };
 
-    for (int i = 0; i < dl->item_count(); i++) {
-        const DisplayItem* item = &dl->data()[i];
+    DisplayListCursor cursor(dl, first, end);
+    while (const DisplayItem* item = cursor.next()) {
+        RENDER_METRIC_ADD(validation_command_checks, 1);
+        int i = cursor.index;
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
         if (item->op < DL_FILL_RECT || item->op >= DL_OP_COUNT) {
             return fail("unknown display op");
         }
 
         switch (item->op) {
+            case DL_DRAW_FRAGMENT:
+                return fail("fragment reference was not expanded");
             case DL_FILL_RECT:
                 if (dl_has_negative_size(item->fill_rect.w, item->fill_rect.h)) {
                     return fail("fill rect has negative size");
@@ -613,51 +712,62 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
                 break;
             case DL_BEGIN_ELEMENT: {
                 int match = item->element_marker.matching_index;
-                if (match <= i || match >= dl->item_count() ||
-                    dl->data()[match].op != DL_END_ELEMENT ||
-                    dl->data()[match].element_marker.matching_index != i) {
+                int scope_end = cursor.owner ? cursor.scope_size() : end;
+                if (match <= i || match >= scope_end) {
                     return fail("element begin marker is not paired");
                 }
                 if (stack.element_depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT) {
                     return fail("element marker nesting is too deep");
                 }
-                element_stack[stack.element_depth++] = i;
+                element_stack[stack.element_depth++] = {cursor.owner, i, match};
                 break;
             }
             case DL_END_ELEMENT: {
                 int match = item->element_marker.matching_index;
                 if (stack.element_depth <= 0 || match < 0 || match >= i ||
-                    dl->data()[match].op != DL_BEGIN_ELEMENT ||
-                    dl->data()[match].element_marker.matching_index != i ||
-                    element_stack[stack.element_depth - 1] != match) {
+                    element_stack[stack.element_depth - 1].owner != cursor.owner ||
+                    element_stack[stack.element_depth - 1].begin != match ||
+                    element_stack[stack.element_depth - 1].end != i) {
                     return fail("element end marker is not paired");
                 }
                 stack.element_depth--;
                 break;
             }
         }
+        if (properties) {
+            if (!observed.has_glyphs) observed.has_glyphs = dl_item_contains_glyphs(item);
+            observed.has_video |= item->op == DL_VIDEO_PLACEHOLDER;
+        }
     }
 
+    if (cursor.failed) return fail_at(cursor.root_index, "fragment graph is invalid or cyclic");
+
     if (stack.clip_depth != 0) {
-        return fail_at(dl->item_count(), "clip stack is unbalanced");
+        return fail_at(end, "clip stack is unbalanced");
     }
     if (stack.backdrop_depth != 0) {
-        return fail_at(dl->item_count(), "backdrop stack is unbalanced");
+        return fail_at(end, "backdrop stack is unbalanced");
     }
     if (stack.shadow_clip_depth != 0) {
-        return fail_at(dl->item_count(), "shadow clip stack is unbalanced");
+        return fail_at(end, "shadow clip stack is unbalanced");
     }
     if (stack.element_depth != 0) {
-        return fail_at(dl->item_count(), "element marker stack is unbalanced");
+        return fail_at(end, "element marker stack is unbalanced");
     }
 
     dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    if (properties) *properties = observed;
     return true;
 }
 
-bool dl_validate_or_log(const DisplayList* dl, const char* context) {
+bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
+    return dl_validate_range(dl, 0, dl ? dl->item_count() : 0, result);
+}
+
+bool dl_validate_range_or_log(const DisplayList* dl, int first, int end,
+    const char* context, DisplayListProperties* properties) {
     DisplayListValidationResult result = {};
-    if (dl_validate(dl, &result)) return true;
+    if (dl_validate_range(dl, first, end, &result, properties)) return true;
     log_error("[DL_VALIDATE] %s: invalid display list at item %d: %s (clip=%d backdrop=%d shadow_clip=%d element=%d)",
               context ? context : "unknown",
               result.first_error_index,
@@ -667,6 +777,41 @@ bool dl_validate_or_log(const DisplayList* dl, const char* context) {
               result.shadow_clip_depth,
               result.element_depth);
     return false;
+}
+
+bool dl_validate_or_log(const DisplayList* dl, const char* context) {
+    return dl_validate_range_or_log(dl, 0, dl ? dl->item_count() : 0, context);
+}
+
+bool dl_validate_recording(DisplayList* list, int end, ValidatedDisplayList* recording,
+    const char* context) {
+    if (!recording) return false;
+    *recording = {};
+    DisplayListProperties properties = {};
+    if (!dl_validate_range_or_log(list, 0, end, context, &properties)) return false;
+    recording->list = lam::up(list); recording->storage = lam::up(list->data());
+    recording->count = end; recording->properties = properties;
+    return true;
+}
+
+bool dl_validate_append(DisplayList* list, ValidatedDisplayList* prefix,
+    ValidatedDisplayList* recording, const char* context) {
+    if (!recording || recording == prefix) return false;
+    *recording = {};
+    if (!list || !prefix || prefix->list != list || prefix->count > list->item_count()) {
+        log_error("[DL_VALIDATE] %s: invalid recording prefix", context ? context : "unknown");
+        return false;
+    }
+    // appending can relocate the array; validate the prefix again before exposing its new storage.
+    if (prefix->storage != list->data() && !dl_validate_recording(list, prefix->count, prefix, context))
+        return false;
+    DisplayListProperties suffix = {};
+    if (!dl_validate_range_or_log(list, prefix->count, list->item_count(), context, &suffix)) return false;
+    *recording = *prefix;
+    recording->count = list->item_count();
+    recording->properties.has_glyphs |= suffix.has_glyphs;
+    recording->properties.has_video |= suffix.has_video;
+    return true;
 }
 
 bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
@@ -939,9 +1084,12 @@ static bool dl_clone_item_payload(DisplayList* dst, const DisplayList* source,
                                            int source_start,
                                            int dest_start) {
     if (!dst || !out || !in) return false;
-    if (in->payload_owner && in->payload_owner->commands) source = in->payload_owner->commands;
-
     switch (in->op) {
+        case DL_DRAW_FRAGMENT:
+            out->draw_fragment.owner = nullptr;
+            if (!in->draw_fragment.owner || !ref_count_retain(&in->draw_fragment.owner->refs)) return false;
+            out->draw_fragment.owner = in->draw_fragment.owner;
+            break;
         case DL_DRAW_IMAGE:
             out->draw_image.snapshot_lease=lam::up(image_surface_snapshot_retain(in->draw_image.snapshot_lease));
             break;
@@ -1033,7 +1181,6 @@ bool dl_copy_range(DisplayList* dst, const DisplayList* src,
         }
         RENDER_METRIC_ADD(command_copy_bytes, sizeof(DisplayItem));
         DisplayItem copy = src->data()[i];
-        copy.payload_owner = nullptr; // deep copies acquire independent payload ownership.
         *out = copy;
         if (!dl_clone_item_payload(dst, src, out, &src->data()[i], start, dest_start)) {
             dl_truncate(dst, dest_start);

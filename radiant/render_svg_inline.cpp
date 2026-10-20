@@ -2461,8 +2461,8 @@ static bool svg_replay_capture(SvgInlineRenderContext* ctx, DisplayList* dl, Ima
     const Bound* bounds, ScratchArena* scratch, int first = 0) {
     if (ctx->filter_work) {
         if (!render_svg_filter_spend_work(ctx->filter_work, (size_t)surface->width * (size_t)surface->height)) return false;
-        for (int index = first; index < dl_item_count(dl); index++) {
-            const DisplayItem* item = &(*dl)[index];
+        DisplayListCursor cursor(dl, first);
+        while (const DisplayItem* item = cursor.next()) {
             if (item->op == DL_BEGIN_ELEMENT || item->op == DL_END_ELEMENT) continue;
             double width = fmax(0.0, fmin(bounds->right, item->bounds[0] + item->bounds[2]) - fmax(bounds->left, item->bounds[0]));
             double height = fmax(0.0, fmin(bounds->bottom, item->bounds[1] + item->bounds[3]) - fmax(bounds->top, item->bounds[1]));
@@ -2470,6 +2470,7 @@ static bool svg_replay_capture(SvgInlineRenderContext* ctx, DisplayList* dl, Ima
             // capture replay and resampling share the graph budget, including prior backdrop commands.
             if (!isfinite(work) || work >= (double)SIZE_MAX || !render_svg_filter_spend_work(ctx->filter_work, (size_t)work)) return false;
         }
+        if (cursor.failed) return false;
     }
     RdtVector vector = {};
     rdt_vector_init(&vector, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
@@ -2488,8 +2489,9 @@ static bool svg_export_copy_captured_semantics(DisplayList* target, const Displa
     int first = target->item_count();
     lam::ArrayList<int> begins;
     bool valid = true;
-    for (int i = 0; valid && i < capture->item_count(); i++) {
-        const DisplayItem& item = capture->data()[i];
+    DisplayListCursor cursor(capture);
+    while (valid && cursor.next()) {
+        const DisplayItem& item = *cursor.item;
         if (item.op == DL_BEGIN_ELEMENT) {
             RenderSemanticGroup group = {};
             valid = dl_copy_semantic_group(target, &group, &item.element_marker.semantics);
@@ -2505,7 +2507,7 @@ static bool svg_export_copy_captured_semantics(DisplayList* target, const Displa
             begins.remove_range(begins.size() - 1, 1);
         }
     }
-    valid = valid && begins.empty();
+    valid = valid && !cursor.failed && begins.empty();
     if (!valid) {
         // only value-only markers were appended; rollback leaves the enclosing paint scope intact.
         target->remove_range((size_t)first, (size_t)(target->item_count() - first));
@@ -8070,13 +8072,16 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
     ImageSurfaceReadScope read_scope;
     // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
     size_t text_index = 0;
-    for (int i = 0; valid && i < dl.item_count(); i++) {
+    DisplayListCursor cursor(&dl);
+    while (valid && cursor.next()) {
+        int i = cursor.root_index;
         while (text_index < captured.runs.size() && captured.runs[text_index].end <= i) text_index++;
-        if (text_index < captured.runs.size() && captured.runs[text_index].begin == i) {
+        // text-run ranges use physical recording indices; retained spans keep their own local indices.
+        if (!cursor.owner && text_index < captured.runs.size() && captured.runs[text_index].begin == i) {
             const SvgExportText& text = captured.runs[text_index++];
-            paint_glyph_run(&paint, &text.run); i = text.end - 1; continue;
+            paint_glyph_run(&paint, &text.run); cursor.next_root = text.end; continue;
         }
-        const DisplayItem& item = dl.data()[i];
+        const DisplayItem& item = *cursor.item;
         switch (item.op) {
         case DL_FILL_RECT: {
             const DlFillRect& p = item.fill_rect;
@@ -8134,7 +8139,7 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
         default: valid = false; break;
         }
     }
-    bool ok = valid && paint_ir_validate_or_log(&paint, "svg_export_vector_paint") && consumer(&paint, context);
+    bool ok = valid && !cursor.failed && paint_ir_validate_or_log(&paint, "svg_export_vector_paint") && consumer(&paint, context);
     if (!ok && allow_raster_fallback) {
         Bound bounds = {};
         ImageSurface* surface = render_svg_subscene_rasterize(subscene, &bounds);
@@ -8148,15 +8153,16 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
                 placed = true;
             };
             // flatten unrepresentable paint while retaining the recording's semantic tree and text.
-            for (int i = 0; i < dl.item_count(); i++) {
-                const DisplayItem& item = dl.data()[i];
+            DisplayListCursor semantics(&dl);
+            while (const DisplayItem* next = semantics.next()) {
+                const DisplayItem& item = *next;
                 if (item.op == DL_BEGIN_ELEMENT) {
                     paint_begin_semantic_group(&paint, &item.element_marker.semantics);
                     if (!placed) place_snapshot();
                 } else if (item.op == DL_END_ELEMENT) paint_end_semantic_group(&paint);
             }
             if (!placed) place_snapshot();
-            ok = paint_ir_validate_or_log(&paint, "svg_export_snapshot_paint") && consumer(&paint, context);
+            ok = !semantics.failed && paint_ir_validate_or_log(&paint, "svg_export_snapshot_paint") && consumer(&paint, context);
             paint_list_clear(&paint);
             image_surface_destroy(surface);
         }

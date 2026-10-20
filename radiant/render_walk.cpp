@@ -200,16 +200,16 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         p->stop_after_self = true;
         return false;
     }
-    if (!render_paint_phase_has_content(backend->ctx->paint_phase)) return true;
-
     if (block->tag_id == MARKUP_NAME_SVG) {
-        if (backend->render_inline_svg) {
+        // background visits may paint the SVG box, but only its producer walks descendants.
+        if (render_paint_phase_has_content(backend->ctx->paint_phase) && backend->render_inline_svg) {
             backend->render_inline_svg(backend->ctx, block, state->x, state->y,
                                        &state->font, state->color);
         }
         p->stop_after_self = true;
         return false;
     }
+    if (!render_paint_phase_has_content(backend->ctx->paint_phase)) return true;
 
     // visibility suppresses this box's paint, while visible descendants remain traversable.
     if (hidden) return true;
