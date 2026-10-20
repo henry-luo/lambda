@@ -80,8 +80,9 @@ pub fn prepare_all(spec, plan) {
 }
 
 pub fn axes(spec, models, plan) {
-    let images=[for (guide in spec.axes where guide.scale!=null and c.text(guide.scale)!=spec.time_scale and guide.position!="none",
-        let model=(models |: c.text(~.spec.value_scale)==c.text(guide.scale))[0] where model!=null)
+    let images=[for (guide in spec.axes,
+        let model=(models |: c.text(~.spec.value_scale)==c.text(guide.scale))[0]
+        where guide.scale!=null and c.text(guide.scale)!=spec.time_scale and guide.position!="none" and model!=null)
         for (side in (if (guide.position=="both") ["left","right"] else [if (guide.position=="start") "left" else "right"]),
             let prepared=axis.prepare(model.mapping,{*:c.attrs(guide),orient:side},guide.title),
             let image=axis.y_axis(model.mapping,plan.width,plan.height,prepared,guide.title))

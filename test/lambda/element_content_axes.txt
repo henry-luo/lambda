@@ -39,5 +39,3 @@
 "-- a NOMINAL element obeys the same law --"
 2
 1
-"-- a group element: attributes are the KEY, members are the content --"
-[[3, 2, 4], [2, 1, 2]]

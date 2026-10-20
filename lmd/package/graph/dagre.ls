@@ -393,20 +393,16 @@ fn score_group_key(entry, depth) =>
   if (depth < len(entry.group_keys)) entry.group_keys[depth]
   else "node:" ++ entry.node.id
 
-fn grouped_children(group) => [for (child_index, child of group) child]
-
 fn scored_group(members) {
-  let children = grouped_children(members);
   {
-    score: min([for (member in children) member.score]),
-    members: children
+    score: min([for (member in members) member.score]),
+    members: members
   }
 }
 
 fn grouped_entries_by_score(scored, depth) {
-  // Grouped values expose a computed key only when it has an explicit alias.
-  // A group is an element: its key is an attribute, so preserve only its
-  // indexed children before the recursive ordering pass consumes it.
+  // A computed group key needs an explicit name; `members` is the group's
+  // array of entries (S14.1.1v2).
   let grouped = [for (entry in scored group by score_group_key(entry, depth) as score_key into members)
     scored_group(members)];
   [for (group in sort(grouped, (entry) => entry.score),

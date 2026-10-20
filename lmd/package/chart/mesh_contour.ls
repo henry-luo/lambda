@@ -65,10 +65,10 @@ pub fn contours(prepared,field,requested,options={}) {
     else if (not mesh.positive_int(maximum) or len(thresholds)*len(prepared.faces)*3>maximum)
         error("mesh.contours: fragment limit exceeded")
     else if (options.bands==true) [for (li in 0 to (len(thresholds)-2),let lo=thresholds[li],let hi=thresholds[li+1])
-        for (f in prepared.faces where mesh.face_active(prepared,f,[field]),
+        for (f in prepared.faces,
             let triangle=[for (i in f.vertices) [*mesh.point(prepared.vertices[i]),float(prepared.vertices[i][field])]],
             let polygon=geometry.clip(geometry.clip(triangle,(p)=>p[2]-lo),(p)=>hi-p[2])
-            where len(polygon)>=3 and abs(geometry.area(polygon))>0)
+            where mesh.face_active(prepared,f,[field]) and len(polygon)>=3 and abs(geometry.area(polygon))>0)
             {id:[li,f.id],level:(lo+hi)/2,band:[lo,hi],points:polygon,face_ids:[f.id],closed:true}]
     else [for (li,level in thresholds) for (pi,path in stitch(segments(prepared,field,level)))
         {*:path,id:[li,pi],level:level}]

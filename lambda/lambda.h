@@ -1578,8 +1578,7 @@ extern "C" {
 #endif
 uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1);
 int lambda_item_compare(Item a, Item b);
-Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count);
-Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item);
+Array* fn_group_by_keys(Item rows_item, Item keys_item, int64_t key_count);  // records [members, key...] (S14.1.1v2)
 Array* fn_join_seed_tuples(Item rows_item, Item name_item, Item idx_name_item, Item idx_vals_item);
 Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item rows_item,
     Item row_keys_item, Item name_item, int64_t optional, Item idx_name_item, Item idx_vals_item);
@@ -3256,7 +3255,7 @@ extern "C" {
     void array_reverse_in_place(Array* array);
     Item fn_sort1(Item a);
     Item fn_sort2(Item a, Item dir);
-    void fn_sort_by_keys(Item values, Item keys, int64_t descending);
+    Array* fn_order_rows(Item rows, Item keys, int64_t desc_mask, int64_t key_count);  // `order by` (S6.2)
     Item fn_unique(Item a);
     Item fn_take(Item a, Item n);
     Item fn_drop(Item a, Item n);
