@@ -3,7 +3,7 @@
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
 **Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29, PTH81–PTH84
-**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3). **2026-10-20 (USER):** PTH81–PTH84 (§6.4) — a wildcard step may sit anywhere, forcing continues per match, a step applied to a file match enters the file while `**` never crosses the boundary by itself, path-domain results deduplicate, `**` is the closure of `*` and includes its base, and `#` is the line between reference and value (S2.4.6, S8.2.5, S8.2.6); not yet implemented
+**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3). **2026-10-20 (USER):** PTH81–PTH84 (§6.4) — a wildcard step may sit anywhere, forcing continues per match, a step applied to a file match enters the file while `**` never crosses the boundary by itself, path-domain results deduplicate, `**` is the closure of `*` and includes its base, and `#` is the line between reference and value (S2.4.6, S8.2.5, S8.2.6); implemented on both tiers the same day
 **Open issue IDs:** PTH-O1
 
 > **Normative anchors:** [S1.7](../doc/Lambda_Formal_Semantics.md#s1-core-principles)
@@ -580,9 +580,10 @@ extend the plan and may enter files; steps after it act on values. So
 property, mapped over the run (**S8.2.6**), touching no file, while
 `\.src.*.name#` enters each file. The two spellings differ on purpose.
 
-The shipped enumeration excludes the base, caps recursion at depth 16, and
-refuses to force a wildcard followed by further steps; all three are
-conformance gaps against this section (Appendix A of the semantics spec).
+Implementation (2026-10-20): `**` enumeration heads with its base and has no
+depth cap; a symlinked directory is listed but not entered, as globstar does,
+so a link to an ancestor cannot recurse forever. Before this, the base was
+excluded, recursion stopped at depth 16, and `#` refused any wildcard path.
 
 ## 7. Root and parent navigation on expressions
 

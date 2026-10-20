@@ -57,6 +57,7 @@ true
 \.test.input.dir.readme_link
 \.test.input.dir.'test.txt'
 "Relative path iteration with recursive wildcard (**) - list paths"
+\.test.input.dir
 \.test.input.dir.child_dir
 \.test.input.dir.child_dir.'child.txt'
 \.test.input.dir.readme_link

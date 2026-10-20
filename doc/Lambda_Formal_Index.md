@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v69.0.0 (2026-10-20)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v69.0.1 (2026-10-20)
 
 | ID | Line | Title |
 |---|---|---|
@@ -61,7 +61,7 @@ in full — including lines too long for a viewer — run
 | S2.4.3v3* | 291 | Paths, names, symbols, and member expressions use this one reference scheme but retain distinct evaluation … |
 | S2.4.4* | 311 | Each evaluation's immutable resolver deterministically maps logical `/` prefixes, namespaces, and provider … |
 | S2.4.5v2* | 318 | Paths have three root forms: rooted `/.a.b`, relative `\.a.b`, and absolute `SchemeName...` |
-| S2.4.6* | 329 | A wildcard step may sit anywhere in a path, and a force reads exactly the files that a spelled step enters |
+| S2.4.6 | 329 | A wildcard step may sit anywhere in a path, and a force reads exactly the files that a spelled step enters |
 | **§S2.5** | 355 | *Lists and blocks* |
 | S2.5.1v2 | 357 | A list spreads; an array does not |
 | S2.5.2v2 | 367 | A for-expression produces a list, whatever its clauses |
@@ -221,8 +221,8 @@ in full — including lines too long for a viewer — run
 | S8.2.2v6* | 1262 | One name space, keyed by namespace and normalized spelling |
 | S8.2.3* | 1297 | Methods are members of the type, never of the value |
 | S8.2.4v3* | 1308 | Two subscript worlds: a type key answers as XPath, a positional selection as NumPy |
-| S8.2.5* | 1310 | The item step `.*` and its closure |
-| S8.2.6* | 1327 | A run is stepped set-at-a-time by every key kind except positional |
+| S8.2.5 | 1310 | The item step `.*` and its closure |
+| S8.2.6 | 1327 | A run is stepped set-at-a-time by every key kind except positional |
 | **§S8.3** | 1349 | *`len`* |
 | S8.3.1v3 | 1351 | The law: **`len(x)` is the number of iterations `for (i in x)` performs.** Consequences, not separate rules: … |
 | S8.3.2* | 1364 | Lazy sequences: a forceable stream's `len` forces and returns the actual size; |
