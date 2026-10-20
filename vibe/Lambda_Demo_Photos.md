@@ -2,9 +2,10 @@
 
 **Date:** 2026-10-19.
 
-**Status:** proposal requested by the user; development has not started under
-this proposal. Product behavior, package APIs and milestones below are proposed,
-not ratified language rulings or claims of implemented support.
+**Status:** implementation started on 2026-10-19 in `codex/photos-20261019`.
+The [implementation record](impl/Lambda_Impl_Photos.md) distinguishes the initial
+layered editor from the remaining enhanced milestones. Product targets below
+are not ratified language rulings or claims that every feature is implemented.
 
 **Scope:** build an enhanced, multilayer photo editor at `test/demo/photos/`,
 with reusable editing code exposed as `lambda.editor.raster`. Use the common
@@ -570,3 +571,26 @@ invalidation, transform/selection coordinates, color/blend compatibility and
 editable persistence. M2 addresses the storage foundation, M3 couples richer
 editing with saving, and the workflow/independent-reader gates keep those risks
 visible before widening the feature catalogue.
+
+
+## Implementation checkpoint — 2026-10-20
+
+The worktree implementation now covers the bounded M4 workflow core: retouch,
+editable embedded-font text/shapes/basic paths, shadow/glow/color overlay,
+coverage channels, independent tabs and sequential action batches. This builds
+on M2 painting/storage and M3 composition/projects, using shared image values
+(**S9.1.2 / S9.2.2**) and explicit procedural acquisition/publication
+(**S12.1.1v3**). [Implementation and qualification](impl/Lambda_Impl_Photos.md)
+record the actual supported profiles, acceptance evidence and remaining gate
+failures. High depth/ICC, wider text/style/PSD parity, asynchronous jobs and M5
+scale/latency qualification remain outstanding; the implementation does not
+claim the full PhotoCraft catalogue or the proposed performance targets.
+
+Brush-latency tuning now resumes native coverage across preview frames and
+recomposites changed regions for scenes without effects/styles. The stage updates
+during a gesture; histograms/inspectors refresh at completion or cancellation.
+Exact pressure/spacing/flow/opacity, immutable snapshots and one-stroke history
+remain the acceptance cases (**S9.1.2 / S9.2.2 / S12.1.3**). The focused native
+replay measures edit/publication costs separately from actual display latency;
+it does not close the broader M5 scene/device matrix. Measurements and remaining
+limits are in the [implementation record](impl/Lambda_Impl_Photos.md).

@@ -3465,13 +3465,25 @@ RADIANT_C_API Item fn_radiant_set_canvas_pixels(Item node_item, Item pixels_item
     if (array->get_elem_type() != ELEM_UINT8 ||
         array_num_get_shape_strides(array, shape, strides) != 3 ||
         shape[2] != 4 || shape[0] <= 0 || shape[1] <= 0 ||
-        shape[0] > UINT32_MAX || shape[1] > UINT32_MAX ||
-        !radiant_canvas_set_pixels(element, (const uint8_t*)array->data,
-            (uint32_t)shape[1], (uint32_t)shape[0], strides)) {
+        shape[0] > UINT32_MAX || shape[1] > UINT32_MAX) {
         log_error("CANVAS_UPLOAD: rejected RGBA8 shape, context, or allocation");
         return ItemError;
     }
-    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent);
+    const char* keys[]={"width","height"};
+    bool resized=false;
+    for (unsigned axis=0;axis<2;axis++) {
+        char dimension[16];
+        str_fmt(dimension,sizeof(dimension),"%u",(uint32_t)shape[1-axis]);
+        const char* previous=element->get_attribute(keys[axis]);
+        resized |= !previous || strcmp(previous,dimension)!=0;
+    }
+    if (!radiant_canvas_set_pixels(element,(const uint8_t*)array->data,
+            (uint32_t)shape[1],(uint32_t)shape[0],strides)) {
+        log_error("CANVAS_UPLOAD: rejected RGBA8 shape, context, or allocation");
+        return ItemError;
+    }
+    // same-size uploads change only bitmap resources; attribute reconciliation would reflow the page.
+    if (resized) dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,element,element->parent);
     return (Item){.item = b2it(1)};
 }
 

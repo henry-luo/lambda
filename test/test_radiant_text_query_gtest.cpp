@@ -4246,6 +4246,24 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 
 class RadiantFormControls : public RadiantTextQuery {};
 
+TEST_F(RadiantFormControls, ScriptCreatedFormSurvivesRetainedStyleReset) {
+    DomElement* owner = load("test/html/select_retained_refresh.html");
+    ASSERT_NE(owner, nullptr);
+    DomElement* select = dom_find_element_by_id(owner, "select");
+    ASSERT_NE(select, nullptr);
+    layout_html_doc(&ui, document, false);
+    form_control_release_prop(select);
+    FormControlProp* form = tc_get_or_create_form(select);
+    ASSERT_NE(form, nullptr);
+    ASSERT_TRUE(form->heap_allocated);
+    view_pool_reset_retained_subtree(document->view_tree, owner);
+    EXPECT_EQ(select->form, form);
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(select->form, form);
+    form_control_release_prop(select);
+    EXPECT_EQ(select->form, nullptr);
+}
+
 TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRelease) {
     DomElement* owner = load("test/html/select_retained_refresh.html");
     ASSERT_NE(owner, nullptr);

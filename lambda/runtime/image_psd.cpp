@@ -135,6 +135,12 @@ struct PsdCompile {
         RootFrame roots(2);
         Rooted<Item> owner(roots, value), child(roots, ItemNull);
         if (depth > 64) return fail("PSD group nesting limit exceeded");
+        // this writer stores raw layer samples; reject metadata it cannot persist.
+        if (!lambda_image_setting(owner.get(),"blend","normal") ||
+                get_type_id(item_attr(owner.get(),"transform"))!=LMD_TYPE_NULL ||
+                !lambda_image_setting(owner.get(),"isolation","isolated") ||
+                (get_type_id(item_attr(owner.get(),"clipping"))==LMD_TYPE_BOOL && it2b(item_attr(owner.get(),"clipping"))))
+            return fail("PSD profile cannot preserve retained transforms/blends; save a Photos project or flatten explicitly");
         bool group = lambda_image_tag(owner.get(), "stack");
         if (group) {
             if (!root && !record(owner.get(), 3)) return false;
@@ -204,6 +210,9 @@ Item lambda_image_encode_psd(Item source, Item composite, int64_t frame) {
         stack.set(ItemNull); int64_t index = 0;
         for (int64_t i = 0; i < image.get().element->length; i++) {
             Item node = item_at(image.get(), i);
+            if (lambda_image_tag(node,"metadata") && get_type_id(item_attr(node,"role"))!=LMD_TYPE_NULL &&
+                lambda_image_setting(node,"role","photos_channels") && node.element->length)
+                return lambda_image_error("PSD profile cannot preserve saved channels; save a Photos project or explicitly remove channels");
             if (lambda_image_tag(node, "stack")) stack.set(node);
             else if (lambda_image_tag(node, "frame") && index++ == frame) stack.set(node);
         }

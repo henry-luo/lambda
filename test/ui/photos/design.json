@@ -1,0 +1,618 @@
+{
+  "name": "Photos editable artwork and styles project roundtrip",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "16",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "vector"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 12
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#style-kind"
+      },
+      "value": "overlay"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#style-color"
+      },
+      "text": "#0000ff",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#style-opacity"
+      },
+      "text": "1",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#style-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-styles",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 12
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#style-toggle"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 12
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#style-toggle"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 12
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/design.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/design.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "vector"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-styles",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 12
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ffffff",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-size"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Hello\nPhotos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-text"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "text"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": "Hello\nPhotos"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "vector"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "text"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Lambda",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-text"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": "Lambda"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": "Hello\nPhotos"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/design-text.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-text"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": "Hello\nPhotos"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/design-text.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-kind",
+      "equals": "text"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Hello Photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-text"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": "Hello Photos"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos/design-text.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#art-text"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos/design.png"
+    }
+  ]
+}

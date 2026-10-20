@@ -331,6 +331,17 @@ reach text entry where appropriate. Escape cancels a dialog, composition,
 or drawing gesture according to the active interaction; it must not inherit
 the viewer's unconditional window-close shortcut.
 
+Applications launched through `lambda view` can opt into the same window input
+contract by calling `dom.set_close_guard(owner, dirty)` on the presented top-level
+document. The first accepted call selects application input routing, including
+when `dirty` is false: Escape continues to reach the document after saving.
+An armed guard defers platform close to `closerequest`; the package approves with
+`dom.request_window_close`. Embedded or retired documents cannot opt in. Ordinary
+viewers that never request a guard retain their existing Escape/close behavior.
+This extends the existing package-owned interaction boundary (**D7.2.5 /
+S12.1.3**) to Photos and other view-launched editors; no format policy enters the
+native window host.
+
 ## 8. Save, history, and session lifecycle
 
 An edit session retains source identity/format/base URL, adapter and template
