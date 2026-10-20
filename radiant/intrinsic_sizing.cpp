@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_table.hpp"
+#include "css_resolved_style.hpp"
 
 static bool intrinsic_declared_css_height_is_definite(LayoutContext* lycon,
                                                       DomElement* element);
@@ -3279,6 +3280,22 @@ static float intrinsic_store_ratio_width_from_height(
     return aspect_width;
 }
 
+static bool intrinsic_width_is_context_independent(DomElement* element) {
+    if (!radiant::css_resolved_style_is_containing_block_independent(element)) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    // ordinary horizontal flow reads containing dimensions only for CSS lengths.
+    // Other formatting modes and ratio transfer keep their complete context key.
+    return (element->display.inner == CSS_VALUE_FLOW ||
+            element->display.inner == CSS_VALUE_FLOW_ROOT) &&
+        element->display.outer != CSS_VALUE_LIST_ITEM && !element->pseudo &&
+        !layout_block_inline_axis_is_vertical(view) && !is_multicol_container(view) &&
+        layout_used_preferred_aspect_ratio(view) <= 0.0f &&
+        !layout_block_has_size_containment_in_axis(view, true) &&
+        layout_intrinsic_preferred_size_keyword(view, true) == CSS_VALUE__UNDEF &&
+        layout_intrinsic_min_size_keyword(view, true) == CSS_VALUE__UNDEF &&
+        layout_intrinsic_max_size_keyword(view, true) == CSS_VALUE__UNDEF;
+}
+
 // tier-3: layout-transient, valid within one measurement generation
 struct IntrinsicWidthCacheScope {
     LayoutContext* lycon;
@@ -3288,8 +3305,22 @@ struct IntrinsicWidthCacheScope {
     int basis;
     radiant::IntrinsicWidthCacheEntry entry;
     bool cacheable = true;
+    bool children_independent = true;
+    IntrinsicWidthCacheScope* parent = active;
+    static thread_local IntrinsicWidthCacheScope* active;
+
+    void enter() { active = this; }
+
+    static void note_dependency(bool independent) {
+        if (active && !independent) active->children_independent = false;
+    }
 
     ~IntrinsicWidthCacheScope() {
+        entry.context_independent = cacheable && children_independent &&
+            intrinsic_width_is_context_independent(element);
+        active = parent;
+        // a dependent descendant makes its ancestors dependent too, including on hits.
+        note_dependency(entry.context_independent);
         if (!cacheable) return;
         radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
         if (!cache) return;
@@ -3302,6 +3333,8 @@ struct IntrinsicWidthCacheScope {
         element->set_has_cached_intrinsic_widths(true);
     }
 };
+
+thread_local IntrinsicWidthCacheScope* IntrinsicWidthCacheScope::active = nullptr;
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                 bool content_only) {
@@ -3322,31 +3355,60 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     query.block_size = {lycon->block.content_width, lycon->block.content_height};
     query.parent_size = {lycon->block.parent ? lycon->block.parent->content_width : -1.0f,
                          intrinsic_parent_definite_height(lycon)};
+    query.input_font = radiant::css_font_key(lycon->font.style);
+    query.style_epoch = element->doc ? element->doc->style_query_epoch : 0;
+    query.style_version = element->style_version;
+    query.root_font_size = lycon->root_font_size;
+    query.raster_scale = ui_context_raster_scale(lycon->ui_context);
+    query.font_generation = lycon->ui_context && lycon->ui_context->font_ctx
+        ? font_context_resource_generation(lycon->ui_context->font_ctx) : 0;
     radiant::IntrinsicWidthCacheEntry* cached = element->layout_cache
         ? &element->layout_cache->intrinsic_widths[intrinsic_basis] : nullptr;
-    if (element->has_cached_intrinsic_widths() && cached &&
+    bool inputs_match = cached && cached->context.valid &&
+        cached->style_epoch == query.style_epoch && cached->style_version == query.style_version &&
+        cached->root_font_size == query.root_font_size && cached->raster_scale == query.raster_scale &&
+        cached->font_generation == query.font_generation &&
+        radiant::css_font_keys_equal(cached->input_font, query.input_font);
+    if (element->has_cached_intrinsic_widths() && inputs_match &&
         cached->generation == measurement_generation &&
-        radiant::layout_cache_constraints_match(&cached->context,
+        ((cached->context_independent &&
+          cached->context.known_dimensions.width == query.context.known_dimensions.width &&
+          cached->context.known_dimensions.height == query.context.known_dimensions.height) ||
+        (radiant::layout_cache_constraints_match(&cached->context,
             query.context.known_dimensions, query.context.available_space, 0.0f) &&
         cached->block_size.width == query.block_size.width &&
         cached->block_size.height == query.block_size.height &&
         cached->parent_size.width == query.parent_size.width &&
-        cached->parent_size.height == query.parent_size.height) {
+        cached->parent_size.height == query.parent_size.height))) {
+        IntrinsicWidthCacheScope::note_dependency(cached->context_independent);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, true, false);
         assert(element->layout_cache);
         return cached->sizes;
     }
 
     if (element->measuring_intrinsic_width()) {
+        IntrinsicWidthCacheScope::note_dependency(false);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, true);
         return {0, 0};
     }
+    if (lycon->profiler.enabled) {
+        int reason = !cached || !cached->context.valid ? 0 :
+            !element->has_cached_intrinsic_widths() ? 1 :
+            cached->generation != measurement_generation ? 2 :
+            !inputs_match || !radiant::layout_cache_constraints_match(&cached->context,
+                query.context.known_dimensions, query.context.available_space, 0.0f) ? 3 :
+            cached->block_size.width != query.block_size.width ||
+                cached->block_size.height != query.block_size.height ? 4 : 5;
+        lycon->profiler.intrinsic_miss_reasons[reason]++;
+    }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
     LayoutMeasurementRootScope root_scope(lycon, element);
+    radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     IntrinsicMeasureScope measure_scope(lycon, element);
     IntrinsicProfileScope profile_scope(lycon, element);
     IntrinsicWidthCacheScope cache_scope = {
         lycon, element, sizes, measurement_generation, intrinsic_basis, query};
+    cache_scope.enter();
 
     uint64_t t_measure_start = time_now_ns();
 
@@ -6380,6 +6442,7 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
 
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size) {
+    radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, node);
     if (!node) return 0;
 
     // For text nodes, estimate based on line height and text width

@@ -756,6 +756,16 @@ struct CacheEntry {
     SizeF computed_size;
     bool valid;
 };
+// tier-3: computed font inputs, borrowing the view's family name.
+struct CssFontKey {
+    const char* family;
+    float size, zoom, letter_spacing, word_spacing;
+    CssEnum style, weight, variant, kerning;
+    int16_t numeric_weight;
+};
+CssFontKey css_font_key(const FontProp* font);
+bool css_font_keys_equal(const CssFontKey& a, const CssFontKey& b);
+
 // tier-3: layout-transient, valid within one measurement generation
 struct IntrinsicWidthCacheEntry {
     IntrinsicSizes sizes;
@@ -763,6 +773,12 @@ struct IntrinsicWidthCacheEntry {
     SizeF block_size;
     SizeF parent_size;
     uint32_t generation;
+    CssFontKey input_font;
+    uint64_t style_epoch;
+    uint64_t font_generation;
+    uint32_t style_version;
+    float root_font_size, raster_scale;
+    bool context_independent;
 };
 struct CssResolvedStyle;
 // tier-2: selected-view pool, with independently invalidated sizing and CSS state.
@@ -1543,6 +1559,11 @@ enum LayoutProfileBucket : uint8_t {
     LAYOUT_PROFILE_INTRINSIC,
     LAYOUT_PROFILE_STYLE,
     LAYOUT_PROFILE_IMAGE,
+    LAYOUT_PROFILE_INTRINSIC_HEIGHT,
+    LAYOUT_PROFILE_FLEX_PREPARE,
+    LAYOUT_PROFILE_FLEX_BASIS,
+    LAYOUT_PROFILE_FLEX_CROSS,
+    LAYOUT_PROFILE_FLEX_CONTENT,
     LAYOUT_PROFILE_BUCKET_COUNT
 };
 // tier-3: layout-transient, valid within pass
@@ -1570,6 +1591,10 @@ typedef struct LayoutProfiler {
     uint64_t intrinsic_reentrant;
     double intrinsic_inclusive_ms;
     double intrinsic_exclusive_ms;
+    uint64_t intrinsic_miss_reasons[6];
+    uint64_t scope_calls[LAYOUT_PROFILE_BUCKET_COUNT];
+    double scope_total_ms[LAYOUT_PROFILE_BUCKET_COUNT];
+    double scope_self_ms[LAYOUT_PROFILE_BUCKET_COUNT];
 
     bool enabled;
     LayoutProfileNode top_nodes[8];
@@ -1597,12 +1622,16 @@ void layout_profiler_note_intrinsic_request(LayoutProfiler* profiler, bool cache
 void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses);
 void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();
+void layout_restore_context(LayoutContext* context, const LayoutContext& saved);
 // tier-3: layout-transient, valid within pass
 struct LayoutProfileScope {
     lam::Up<LayoutContext> lycon;
     lam::Up<const DomNode> node;
     LayoutProfileBucket bucket;
     double start_ms;
+    double child_ms;
+    LayoutProfileScope* parent;
+    static thread_local LayoutProfileScope* active;
 
     LayoutProfileScope(LayoutContext* l, LayoutProfileBucket b, const DomNode* n);
     ~LayoutProfileScope();
@@ -3439,7 +3468,8 @@ void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
                                   FlexContainerLayout* parent_flex,
                                   float final_width, float final_height);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
-void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout,
+                                    bool width_only = false);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache(ViewTree* tree);
