@@ -28,6 +28,7 @@ void raster_buffer_destroy(RasterBuffer* buffer);
 RasterBuffer* raster_buffer_sparse(uint32_t width, uint32_t height, uint8_t channels, size_t byte_limit);
 RasterBuffer* raster_buffer_fork(const RasterBuffer* source);
 const uint8_t* raster_buffer_pixel(const RasterBuffer* buffer, uint32_t x, uint32_t y);
+bool raster_buffer_samples_equal(const RasterBuffer* a,const RasterBuffer* b);
 uint8_t* raster_buffer_edit_pixel(RasterBuffer* buffer, uint32_t x, uint32_t y);
 size_t raster_buffer_index_bytes(const RasterBuffer* buffer);
 // callbacks visit retained allocations; repeated shared stores are intentional.

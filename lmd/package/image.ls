@@ -4,7 +4,7 @@ import sequence: .editor.mod_doc
 pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^
 pub fn from_array(samples, options = {}) element^ => lambda.sys.image_raster(samples, options)^
 pub fn channel(raster, channel_name) array^ => lambda.sys.image_region(raster, null, channel_name)^
-fn checked_options(options, allowed) map^ {
+pub fn checked_options(options, allowed) map^ {
     if (not (options is map) or len([for (key, value in options where not (string(key) in allowed)) key]) > 0)
         raise error("image: unknown option or options are not a map")
     else options
@@ -21,6 +21,10 @@ pub fn materialize(raster) element =>
 
 pub fn raster_of(layer) element? => [for (child in content(layer) where name(child) == 'raster') child][0]
 pub fn layer(raster, options = {}) element => <layer kind: 'raster', *: options, raster>
+pub fn text_layer(text, options = {}, layer_options = {}) element =>
+    <layer kind:'text',*:layer_options,<text *:options,text>>
+pub fn vector_layer(options, layer_options = {}) element =>
+    <layer kind:'vector',*:layer_options,<vector *:options>>
 pub fn stack(layers, options = {}) element => <stack *: options, *layers>
 pub fn frame(composition, duration, options = {}) element =>
     <frame duration: duration, *: options, composition>

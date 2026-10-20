@@ -108,6 +108,20 @@ execution, capped at 128 MiB and currently uncompressed. Pixel tools require
 rasterization of a transformed source. Full PhotoCraft parity and high-depth/ICC
 editing are still pending.
 
+The lower Text, Shapes & Paths dock adds and edits multiline text, rounded
+rectangles, ellipses and M/L/Q/C/Z paths. Set local dimensions, fill/stroke and
+font size/alignment, then Add or Apply. Text embeds the selected font file
+(`.woff2` Computer Modern Sans by default) as a project asset. Missing glyphs
+and unsupported complex-script shaping fail explicitly. Layer styles add editable
+shadow, glow and color overlay. These features share the image compositor and
+survive `.photos` reopening; use explicit rasterization for the current PSD profile.
+
+Channels offers RGB/alpha component previews and saved selection channels.
+Save/load a selection, capture a composite component, rename/delete it, or
+replace a selected pixel layer component. Channel previews affect only the
+workspace. Saved coverage follows canvas/image resizing and cropping, and is
+preserved in projects.
+
 Clone (S), Heal (J), Dodge (D), Burn (K), Sponge (R), Blur (U) and Sharpen (A)
 share the brush controls. Alt-click Clone/Heal to freeze a merged source, then
 paint on a pixel layer. The lower Retouch dock controls alignment, local strength
@@ -117,8 +131,26 @@ or content-aware solver.
 The Actions dock records edits on the selected layer. Stop stores the action;
 Replay applies it to the current layer with one undo entry. Brush settings are
 captured, and image/history/target switches are guarded during recording. Save
-and load `.laction` data files to reuse actions. This is interactive single-layer
-automation; batch-file scheduling is not implemented.
+and load `.laction` data files to reuse actions. Batch Action runs the last action
+on an explicit Mark job list, for example:
+
+```lambda
+[{source:"photo.png",target:"temp/photos/graded.png",format:"png"}]
+```
+
+Each job selects its first leaf layer, or the explicit `layer` ID. Outcomes report
+successes and failures; stop/continue policy is selectable. Outputs publish
+atomically per file, and failed jobs leave existing outputs intact. Execution is
+sequential and bounded to 32 jobs; the UI waits for completion.
+
+New Tab and Open in Tab retain the current document. Tabs keep independent undo,
+selection, tool/camera and saved checkpoints. Close Tab uses Save/Discard/Cancel;
+closing the window protects every dirty tab, including inactive documents.
+The existing New/Open commands continue to replace the active document.
+
+Remaining larger features include high-depth/ICC editing, complex text shaping
+and rich runs, canvas pen handles, the wider layer-style catalogue, native PSD
+artwork/style interchange and asynchronous batch/large-scene qualification.
 
 Retouch source selection must be recorded as a step or supplied by the replay
 session. Actions operate with that session's current selection coverage.

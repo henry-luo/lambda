@@ -1,7 +1,7 @@
 # Lambda Photos — Implementation
 
 **Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
-retouch and actions; focused qualification is expanding and aggregate gates have failures, on
+retouch/actions, editable artwork/styles, channels, tabs and batch; aggregate gates have qualification limits, on
 `codex/photos-20261019`, worktree `temp/photos-worktree/`.
 
 Design: [Photos proposal](../Lambda_Demo_Photos.md). Existing contracts:
@@ -12,7 +12,8 @@ handlers, **D5.3.3** precise roots, **D4.5.2** owned pixel transport,
 ## Active checkpoint
 
 Current delivery includes M2 raster interaction, the M3 composition/project core
-and M4 retouch/actions. Remaining M4/M5 work is listed explicitly below. Initial
+and the bounded M4 design/retouch/channel/workspace/action workflows. Remaining
+profile extensions and M5 work are listed explicitly below. Initial
 M0/M1 acceptance covered three-image placement, grouping/masks/movement, undo/redo
 and strict layered PSD save/reopen with failed file operations preserving state.
 
@@ -31,7 +32,7 @@ Build a worktree-local host; shared dependency links follow Developer Guide §7.
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
 | M2 tiles, selections and painting | Implemented; native/package/UI and aggregate results recorded below |
 | M3 transforms, reversible effects and rich persistence | Implemented core: affine, eight blends, clipping/pass-through, effects, histogram and versioned project data; focused checks below |
-| M4 retouch, type/shapes, channels and actions | Partial: retouch and single-layer action recording/replay implemented; typed artwork/styles, channels, tabs and batch orchestration remain |
+| M4 retouch, type/shapes, channels and actions | Bounded core implemented: retouch/actions, embedded-font multiline text, shapes/basic paths, three layer styles, saved coverage channels, tabs and sequential file batches; long-tail exclusions below |
 | M5 high depth/color and scale qualification | Pending |
 
 ## Delivered behavior
@@ -228,7 +229,9 @@ reopen. All five Photos replays pass **63/63 assertions** with forced GC and
 poisoned frees. Evidence: `temp/photos-m2-native.log`, `temp/photos-m2-targeted.log`,
 `temp/photos-m2-ui-paint.log`, `temp/photos-m2-ui-all.log`.
 
-At the M2 checkpoint, M3–M5 remained pending; subsequent entries supersede retained transforms/effects, rich-project persistence and retouch/actions status. Outstanding work includes type/shapes,
+At the M2 checkpoint, M3–M5 remained pending; subsequent entries supersede
+retained transforms/effects, rich-project persistence and retouch/actions status.
+The remaining-work inventory at that checkpoint included type/shapes,
 actions/multiple documents, and high-depth/color/scale qualification. This
 checkpoint does not claim complete PhotoCraft feature parity.
 
@@ -310,7 +313,8 @@ Identity reset clears retained geometry; applying a mask keeps an editable
 effect and evaluates it once. New UI pixel checks use native RGB bounds and
 assert the bounded 3× fitted preview before sampling.
 
-M4 is not complete: editable text/shapes/basic paths/styles, a channel palette,
+At the retouch/actions checkpoint, M4 remained incomplete: editable
+text/shapes/basic paths/styles, a channel palette,
 multi-document tabs and file-batch orchestration remain. M5 high-depth/ICC and
 photo-scale limits remain pending. Project and retouch work retain the shared
 16-million-pixel/64-MiB raster limits; no photo-scale performance claim is made.
@@ -437,3 +441,176 @@ Final eager-JIT requalification also passes all 16 selected cases with forced GC
 and poisoned frees after the selection-resize repair. The final optimized UI
 subset passes all 30 assertions. The worktree retains the release host for the
 demo; generated reports and images remain under `temp/photos/`.
+
+
+## M4 authored artwork and workspace workflows — 2026-10-20
+
+This checkpoint closes the selected M4 core workflow, while retaining explicit
+profile limits. Shared image values remain authoritative (**S9.1.2 / S9.2.2**),
+font acquisition/file publication are procedural (**S12.1.1v3**), and native
+helpers use rooted callers and owned native buffers (**D5.3.3 / D4.5.2**).
+There are no formal ruling or virtual-carrier ABI changes.
+
+The finite delivery covers editable design above a photo, reusable coverage,
+independent document sessions, and file action replay. Acceptance checks use
+specified pixels and bounds, edit/undo/reopen behavior, retained font/path/style
+parameters, failure rollback, per-tab histories and protected closes. Focused
+package/native tests and native event replays precede the required Lambda and
+library gates; qualification is recorded below.
+
+### Authored image content
+
+`lambda.image` now constructs and evaluates text/vector layers directly. Native
+artwork uses Lambda's existing embedded-font outline API and ThorVG backend;
+preview, region rendering, explicit rasterization and flat export consume the
+same authored content. Font data comes from image-scoped assets, with errors for
+missing fonts/glyphs and unsupported contextual/RTL text. The bounded text profile
+supports explicit newlines, kerning, font size, line height and left/center/right
+alignment. It does not perform implicit file reads or system substitution.
+
+Vectors retain rectangle/rounded-corner/ellipse parameters or absolute M/L/Q/C/Z
+path arrays, with fill/stroke and optional linear gradient. Numeric dimensions
+and source clipping are explicit. Masks, blends, effects and affine transforms
+work on authored layers; image resizing composes an affine rather than replacing
+authored geometry with pixels. Selection-to-mask and mask-to-selection work on
+untransformed artwork. Source painting and applying a mask into artwork pixels
+require explicit rasterization.
+
+Ordered shadow, glow and color-overlay styles evaluate after adjustments/source
+masking and before affine placement. Shadow/glow use a bounded box blur; their
+explicit local filter outset contributes to selection/rasterization bounds.
+Disabled styles retain validated parameters without changing mask evaluation.
+Applying a raster mask excludes retained effects/styles from the bake so each
+runs once afterward. Group styles require rasterization. Rich projects retain
+all authored data and font bytes; this PSD profile refuses artwork, all retained
+styles (including disabled ones) and saved coverage channels.
+
+The dock provides Add/Apply Text, shapes/path commands, fill/stroke and embedded
+font controls, and add/edit/toggle/remove style controls. Automatic font capture
+and Add Text share the existing history group so one Undo removes both. The
+explicit Embed Font command remains independently undoable.
+
+### Channels, tabs and batch
+
+Component previews and up to 64 named coverage channels share the Raster API.
+Selection save/load, composite-component capture, rename/delete and checked
+component replacement use the common command registry. Saved coverage lives in
+project metadata and follows crop/image/canvas resizing. Preview changes do not
+dirty image content; undoing away a viewed saved channel returns to composite.
+
+`lambda.editor.raster.workspace` retains up to 16 independent sessions with
+stable tab IDs, camera/selection/tool state, history and saved checkpoints.
+New/Open retain their existing guarded replacement behavior; New Tab/Open in Tab
+preserve the current document. Close Tab protects its document; window close
+visits every dirty document, including inactive tabs. Save/Discard handles one
+such document at a time, and Cancel retains remaining tabs. Action libraries
+remain available across tab changes.
+
+Reusable file procedures moved from the demo to `lambda.editor.raster.files`.
+`lambda.editor.raster.batch` runs 1–32 explicit source/target jobs with the same
+checked action replay and atomic file publication. Jobs select an explicit layer
+ID or the first leaf. Preflight rejects invalid job data, duplicate normalized
+URL destinations and destinations matching any input. Lexical URL checks do not
+resolve filesystem link identity. Each job returns success/error details; the
+caller chooses continuation or stop at first failure. Earlier successful files
+remain published if a later job fails. The demo exposes that same data-driven
+batch path and outcome report. It is synchronous, without background scheduling.
+
+### Shared repairs found by workflow checks
+
+Native Raster equality previously materialized two complete u8 pixel arrays for
+structural dirty/history comparisons. A sampled GC stress replay identified
+those allocations in `element_semantic_eq → raster_field → raster_snapshot`.
+Native-to-native sample comparison now reads immutable owned storage directly;
+tag/namespace/other attributes retain their normal checks (**S5.4.3**).
+Materialized/native comparison keeps the general relation, hidden RGB remains
+significant, and ordinary container NaN/error behavior is unchanged
+(**S5.1.5**). Dense/sparse/shared-tile and canonical-materialization cases qualify
+this exact specialization; no generic container identity shortcut was added.
+
+The first design replay exposed a procedural empty-map branch parsed as a block;
+explicit map expressions repair the actual inspector request construction. Add
+Style also passed an edit-only index to the strict add-command schema; the UI
+now builds the matching request. Neither command validation nor assertions were
+weakened. Empty text is accepted as zero normalized children under **S2.6.2**,
+with an empty inspector value; clearing, reopening and undoing preserve that
+canonical content rather than requiring a string node that element construction
+necessarily omits.
+
+Tab dirty-marker font metrics initially changed the bar height during pointer
+input. This shifted the canvas between pointer samples and introduced unwanted
+move history in the existing gesture/close tests. A stable bar/button height and
+line height keep canvas geometry fixed. Existing gesture cancellation and close
+assertions pass after the repair. Subsequent dirty-tab close dialogs focus Cancel
+when activation changes the document.
+
+### Remaining profile work
+
+This is not full PhotoCraft parity. Complex text shaping/bidirectional layout,
+rich text runs, paragraph wrapping, on-canvas pen handles, the wider style
+catalogue and native PSD text/vector/style interchange remain outside this core.
+Tabs are an in-memory workspace, not serialized workspace restoration. Batches
+block the UI while their bounded list runs. High depth, ICC conversion,
+background jobs, larger scenes and input-to-present latency qualification remain
+M5 work. Existing 16-million-pixel/native raster budgets are unchanged. Earlier
+release measurements above identify older revisions and do not qualify this new
+package's performance.
+
+
+### M4 qualification record
+
+The final optimized host SHA-256 is
+`3b1500b3024c14140531cc67ac8561928d3a30ce61e3c340225f9d0dc55b2d43`; the debug validator marker is absent.
+`make build-test` and `make build-release-compile JOBS=4` succeed. The latter
+uses the worktree-safe release path from Developer Guide §7, without `make release`.
+
+| Check | Result |
+|---|---|
+| Focused package/runtime selection, automatic tier | **23/23**, final optimized host, forced GC and freed-memory poisoning |
+| Same selection, eager JIT | **23/23**, final optimized host, forced GC and poisoning |
+| Native ImageIO | **35/35**, including dense/sparse/shared-tile/hidden-RGB sample equality |
+| Full library runner after rebuilding tests | **1682/1682**, native access for loopback/trust-store fixtures |
+| Input baseline | **2112/2112** |
+| Full MIR GC stress suite | **315/315** |
+| Lambda runtime baseline | **5790/5792**, with the two previously recorded failures below |
+| Core script corpus within that gate | **1640/1641**; every Photos case passed |
+| Native Photos UI | All **11** workflows qualified; current inventory **168** assertions, as detailed below |
+
+The optimized full UI run passes **164/164** assertions. The final design replay
+adds ordinary-space text and its undo checks, passing **31/31** on the final host;
+these replace that fixture's 27 earlier assertions, giving the 168-assertion
+current inventory. Other ten fixture paths are unchanged by the last localized
+font-index correction. Earlier forced-GC UI runs cover painting, masks, retouch,
+projects, channels and workspace workflows; the tab geometry regressions were
+repaired and their original 21 assertions pass again.
+
+The final text script has 16 semantic checks: multiline ink, embedded bytes,
+authored update/undo, rasterization/project pixels, missing-font/script refusal,
+canonical empty content, empty-project reopening, whitespace and ordinary words.
+Empty/no-outline bodies produce a transparent owned Raster. Known cmap glyphs
+use `font_visit_glyph_index_path`, whose contract accepts valid empty outlines;
+the codepoint outline API intentionally reports no visited contours for spaces.
+This fixes the caller rather than special-casing a particular whitespace character.
+
+The aggregate runtime failures remain:
+
+- `BinarySchemaTest.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`, missing
+  the expected result from `test/lambda/pdf/output_resources.ls` in both tiers.
+- `math_test_math_includegraphics`, failing in the corpus batch. Its isolated
+  rerun passes on the optimized host, consistent with the previously recorded
+  sequence-sensitive failure. It is not claimed fixed.
+
+The broad gate precedes the last localized empty-body/font-index corrections;
+the final auto/JIT forced-GC selection and design replay qualify those changes.
+No test inventory, golden expectation, assertion or budget was weakened. No
+Radiant engine source changed in this continuation; earlier Radiant aggregate
+limits remain historical observations, while the Photos replay was rerun.
+
+Logs and reports are kept under `temp/`: `photos-m4-lambda-baseline.log`,
+`photos-m4-lambda-summary.json`, `photos-m4-library/`,
+`photos-m4-qualified-auto.log`, `photos-m4-qualified-focused.log`,
+`photos-m4-final-ui.log`, `photos-m4-qualified-design.log`,
+`photos-m4-math-isolated.log`, and `photos-final-native.log`. The library gate is
+the exact `test-library` runner (`node test/test_run.js --target=library --raw`),
+with separate output artifacts so it can run while the runtime stress gate finishes.
+The final UI capture is `temp/photos/design-text.png`.

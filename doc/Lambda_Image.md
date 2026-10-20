@@ -1,6 +1,6 @@
 # Lambda Image Package
 
-**Verified against tree:** 2026-10-19. This describes the bounded native
+**Verified against tree:** 2026-10-20. This describes the bounded native
 `u8` editing profile and shared Photos extensions. Design and remaining milestones:
 [proposal](../vibe/Lambda_Pkg_Image.md),
 [implementation record](../vibe/impl/Lambda_Impl_Image.md).
@@ -90,6 +90,49 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `decode(binary,options={})`, `encode(image,options={})`, `encode_report(image,options={})` | Interchange captured bytes. Reports identify regenerated/rasterized/omitted content. |
 | `read(target,options={})`, `write(image,target,options={})` | Read binary input or write encoded bytes through existing target I/O. Specify output `format`; the default is PNG. |
 | `capabilities()` | Query actual codec availability and declared editing/animation profiles. |
+| `checked_options(options,allowed)` | Shared validation of option maps and allowed field names (**S17.8.1**). |
+
+### Editable artwork and styles
+
+`text_layer(text,options,layer_options={})` and
+`vector_layer(options,layer_options={})` construct primary authored content.
+Both require integral local `width`/`height` within the 16-million-pixel limit.
+The shared compositor evaluates that content for preview, region rendering and
+flat export; a cached raster never replaces its editable source (**S9.1.2**).
+Layer masks, effects, opacity, blends and affine transforms apply normally.
+
+Text options include `font` (an image-scoped asset ID), `size` (1–1024 pixels),
+`line_height` (0.5–8 times the size), `align` (`left`, `center`, `right`) and
+normalized RGBA `fill`. Embed the captured font as
+`<assets <font id:"heading",data:font_bytes>>`; rendering performs no implicit
+file/network acquisition or system-font substitution (**S12.1.1v3**). Missing
+fonts, missing glyphs and unsupported outlines raise errors. This initial profile
+supports explicit newlines and horizontal glyph placement with kerning, without
+automatic wrapping, rich runs, shaping, bidirectional layout or color emoji.
+U+0300–U+036F combining diacritics and contextual/RTL scripts are refused.
+Text is capped at 16,384 UTF-8 bytes and 262,144 outline commands.
+
+Vector options include `shape` (`rectangle`, `ellipse`, `path`), rectangle
+`radius`, RGBA `fill`/`stroke`, and `stroke_width`. Paths are arrays such as
+`[["M",0,0],["L",40,0],["Q",60,20,40,40],["Z"]]`; supported absolute operators
+are M/L/Q/C/Z, with even-odd filling, round joins/caps and at most 4096 commands.
+Local dimensions clip the artwork, including strokes extending outside its box.
+Optional `gradient` supplies a linear `start`/`end`, `color`/`end_color` pair.
+
+Layer children may contain ordered `<style>` descriptions with `kind` of
+`shadow`, `glow` or `overlay`, normalized RGBA `color`, `opacity`, and `enabled`.
+Shadow/glow use a bounded integer box-blur `radius` (0–128); shadow also accepts
+integral `dx`/`dy` (±256). `outset` (0–512) explicitly extends and clips the local
+filter region on each side. Overlay preserves source alpha and interpolates RGB
+in linear light. Styles evaluate after adjustments and source masks, before the
+retained affine. Style order is significant: each consumes the preceding result.
+Group styles require explicit rasterization. The editor chooses a sufficient
+outset by default and includes it in target/rasterization bounds.
+
+`.photos` projects preserve artwork, embedded fonts and enabled/disabled style
+parameters. This PSD profile refuses native text/vector/style export. Explicit
+layer rasterization or document flattening makes the appearance a pixel source;
+neither operation promises native Photoshop editability.
 
 `render_frame` options are `frame`, `width`, `height` and `rect`; dimensions describe
 the output viewport. Decode options are `page_index` and

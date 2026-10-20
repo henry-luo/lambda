@@ -11,6 +11,9 @@ import transforms: .transform
 import effects: .effects
 import retouch: .retouch
 import actions: .actions
+import artwork: .artwork
+import styles: .styles
+import channels: .channels
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -24,7 +27,7 @@ pub fn open_session(image) any^ {
     let checked = model.validate(ready)^
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
-        target:"pixels",selection:null,recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
+        target:"pixels",selection:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
         background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
@@ -81,6 +84,12 @@ fn replace_selected(st,siblings,replacement) any^ {
         selected:[replacement.id],target:"pixels"}
 }
 fn scaled(node,sx,sy) any^ {
+    if (name(node) == 'layer' and name(model.primary(node)) in ['text','vector']) {
+        let m = transforms.matrix(node);
+        // artwork and local masks retain authored units; canvas scaling composes an affine.
+        img.with_properties(node,{position:[int(round(model.position(node)[0]*sx)),int(round(model.position(node)[1]*sy))],
+            transform:[sx*m[0],sy*m[1],sx*m[2],sy*m[3],sx*m[4],sy*m[5]]})^
+    } else {
     let changed = if (name(node) in ['layer','mask']) img.with_properties(node,
         {position:[int(round(model.position(node)[0]*sx)),int(round(model.position(node)[1]*sy))]})^ else node;
     let geometry = if (name(node) == 'layer' and node.transform != null) (
@@ -89,6 +98,7 @@ fn scaled(node,sx,sy) any^ {
     img.with_children(geometry,[for (child in content(node))
         if (name(child) == 'raster') img.resize(child,max(1,int(round(child.width*sx))),max(1,int(round(child.height*sy))))^
         else if (name(child) in ['stack','layer','mask']) scaled(child,sx,sy)^ else child])^
+    }
 }
 fn edit_node(st,command) any^ {
     let row = model.active(st)^
@@ -126,10 +136,10 @@ fn edit_node(st,command) any^ {
     else if (command.id == "layer.rasterize") (
         if (name(node) != 'layer') raise error("Raster: rasterize one layer") else transforms.rasterize(st,node)^)
     else if (command.id == "mask.add") (
-        if (name(node) != 'layer' or model.mask(node) != null or img.raster_of(node) == null)
-            raise error("Raster: add a mask to an unmasked raster layer")
-        else img.with_children(node,[*content(node),img.mask(img.blank({width:img.raster_of(node).width,
-            height:img.raster_of(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
+        if (name(node) != 'layer' or model.mask(node) != null or model.primary(node) == null)
+            raise error("Raster: add a mask to an unmasked layer")
+        else img.with_children(node,[*content(node),img.mask(img.blank({width:model.primary(node).width,
+            height:model.primary(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
             {position:[0,0],default:1.0,enabled:true,invert:false})])^)
     else if (command.id == "mask.remove") img.with_children(node,[for (child in content(node) where name(child) != 'mask') child])^
     else if (command.id == "mask.toggle") (
@@ -144,7 +154,12 @@ pub fn apply_command(st,command) any^ {
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
     else if (starts_with(id,"retouch.")) retouch.run_command(st,command)^
     else if (starts_with(id,"effect.")) effects.run_command(st,command)^
+    else if (starts_with(id,"style.")) styles.run_command(st,command)^
+    else if (starts_with(id,"channel.")) channels.run_command(st,command)^
     else if (id == "tool.configure") tools.configure(st,command)^
+    else if (id == "font.embed") artwork.embed_font(st,command)^
+    else if (id in ["text.insert","vector.insert"]) insert(st,artwork.layer_for(st,command)^,command.parent)^
+    else if (id in ["text.update","vector.update"]) artwork.update(st,command)^
     else if (starts_with(id,"selection.") or id in ["mask.from_selection","mask.invert","mask.apply"]) selection.run_command(st,command)^
     else if (starts_with(id,"paint.") or id in ["pixels.fill","pixels.clear","pixels.adjust"]) paint.run_command(st,command)^
     else if (id in ["clipboard.copy","clipboard.copy_merged","clipboard.cut"]) {
@@ -161,7 +176,8 @@ pub fn apply_command(st,command) any^ {
             raise error("Raster: crop requires a nonempty rectangle inside the canvas")
         else {
             let moved = img.replace_at(st.doc,model.root_path(st.doc),model.translated(img.composition(st.doc),-rect[0],-rect[1])^)^;
-            {*:st,doc:img.with_properties(moved,{width:rect[2]-rect[0],height:rect[3]-rect[1]})^,selection:null}
+            {*:st,doc:channels.resized(img.with_properties(moved,{width:rect[2]-rect[0],height:rect[3]-rect[1]})^,
+                rect[2]-rect[0],rect[3]-rect[1],false,[rect[0],rect[1]])^,selection:null}
         }
     }
     else if (id == "layer.insert" or id == "layer.new") {
@@ -219,8 +235,7 @@ pub fn apply_command(st,command) any^ {
             row.node.isolation in ['pass_through',"pass_through"]]))
             raise error("Raster: merge requires normal, unclipped, isolated selected layers")
         else {
-            let raster = img.render_frame(img.document(img.stack([for (row in siblings.rows) row.node]),
-                {width:st.doc.width,height:st.doc.height}))^;
+            let raster = model.render_layers(st.doc,[for (row in siblings.rows) row.node])^;
             replace_selected(st,siblings,img.layer(raster,{id:model.fresh_id(st.doc),name:model.value(command.name,"Merged"),position:[0,0]}))^
         }
     }
@@ -231,7 +246,7 @@ pub fn apply_command(st,command) any^ {
             not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or
             (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in model.rows(row.node))
                 not (model.value(descendant.node.blend,'normal') in ['normal',"normal"]) or descendant.node.clipping == true])) or
-            model.mask(row.node) != null or any([for (c in content(row.node)) name(c) == 'effect']))
+            model.mask(row.node) != null or any([for (c in content(row.node)) name(c) in ['effect','style']]))
             raise error("Raster: ungroup requires a visible, unmasked, full-opacity group")
         else {
             let path = sequence.parent_path(row.path)
@@ -255,7 +270,8 @@ pub fn apply_command(st,command) any^ {
         let coverage = if (st.selection == null) null else if (id == "document.resize_image")
             img.resize(st.selection,dimensions.width,dimensions.height)^
             else img.reframe(st.selection,[0,0,dimensions.width,dimensions.height])^;
-        {*:st,doc:img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,selection:coverage}
+        {*:st,doc:channels.resized(img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,
+            dimensions.width,dimensions.height,id == "document.resize_image")^,selection:coverage}
     }
     else edit_node(st,command)^
 }

@@ -115,6 +115,12 @@ const RasterBuffer* lambda_raster_buffer(Item value) {
     return get_type_id(value) == LMD_TYPE_VELMT && value.velmt->vtable == &raster_vtable
         ? ((RasterValue*)value.velmt->data)->buffer : nullptr;
 }
+bool lambda_raster_compare_samples(Item a,Item b,Item key,bool* equal) {
+    const RasterBuffer* left=lambda_raster_buffer(a), *right=lambda_raster_buffer(b);
+    if (!left || !right || !raster_plain_name(key) || key.get_len()!=6 || memcmp(key.get_chars(),"pixels",6)) return false;
+    *equal=raster_buffer_samples_equal(left,right);
+    return true;
+}
 
 static int raster_component(Item receiver, const char* name, Item* out) {
     RootFrame roots(1);

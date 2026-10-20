@@ -1094,6 +1094,26 @@ TEST(ImageIO, AnimatedGifExactPaletteAndTransparentDisposal) {
     raster_buffer_destroy(first); raster_buffer_destroy(second);
 }
 
+TEST(ImageIO, RasterSampleEqualityPreservesShapeHiddenColorAndSnapshots) {
+    RasterOwner dense,sparse,changed,gray;
+    dense.result=raster_buffer_create(520,2,4,4160);
+    sparse.result=raster_buffer_sparse(520,2,4,4160);
+    ASSERT_NE(dense.result,nullptr); ASSERT_NE(sparse.result,nullptr);
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    uint8_t* sample=raster_buffer_edit_pixel(sparse.result,256,1);
+    ASSERT_NE(sample,nullptr); sample[0]=91; // hidden RGB is part of structural sample equality.
+    EXPECT_FALSE(raster_buffer_samples_equal(dense.result,sparse.result));
+    dense.result->pixels[(520+256)*4]=91;
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    changed.result=raster_buffer_fork(sparse.result); ASSERT_NE(changed.result,nullptr);
+    EXPECT_TRUE(raster_buffer_samples_equal(changed.result,sparse.result));
+    sample=raster_buffer_edit_pixel(changed.result,519,1); ASSERT_NE(sample,nullptr); sample[3]=128;
+    EXPECT_FALSE(raster_buffer_samples_equal(changed.result,sparse.result));
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    gray.result=raster_buffer_sparse(520,2,1,1040); ASSERT_NE(gray.result,nullptr);
+    EXPECT_FALSE(raster_buffer_samples_equal(gray.result,sparse.result));
+}
+
 TEST(ImageIO, PsdGroupMaskCannotSilentlyBecomeAnUnmaskedGroup) {
     PsdDocument* source = psd_document_create(); ASSERT_NE(source, nullptr);
     source->width = source->height = 1;

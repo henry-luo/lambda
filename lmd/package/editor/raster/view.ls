@@ -3,6 +3,7 @@ import dom
 import img: lambda.image
 import model: .model
 import viewport: lambda.editor.draw.viewport
+import channels: .channels
 
 pub fn node(owner,selector) => dom.query_selector(owner,selector)
 pub pn point(owner,x,y) {
@@ -25,8 +26,9 @@ pub pn publish(owner,st) any^ {
     if (st.painted_doc == null or st.painted_doc != st.doc) {
         let pixels = img.render_frame(st.doc)^
         rendered = pixels
-        dom.set_canvas_pixels(node(owner,".raster-canvas"),pixels.pixels)^
     }
+    if (st.painted_doc == null or st.painted_doc != st.doc or st.painted_channel != st.channel_view)
+        dom.set_canvas_pixels(node(owner,".raster-canvas"),channels.preview(st,rendered)^.pixels)^
     let selection = node(owner,".raster-selection")
     dom.style_set_property(selection,"display",if (st.selection == null) "none" else "block")
     if (st.selection != null and st.painted_selection != st.selection)
@@ -39,5 +41,5 @@ pub pn publish(owner,st) any^ {
         for (key,requested in {left:box.x,top:box.y,width:box.width,height:box.height})
             dom.style_set_property(overlay,string(key),string(requested*scale) ++ "px")
     }
-    return {*:st,painted_doc:st.doc,painted_raster:rendered,painted_selection:st.selection,scale:scale}
+    return {*:st,painted_doc:st.doc,painted_raster:rendered,painted_channel:st.channel_view,painted_selection:st.selection,scale:scale}
 }

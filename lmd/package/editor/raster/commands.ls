@@ -3,6 +3,22 @@ import model: .model
 import history: lambda.editor.mod_history
 
 pub let catalog = [
+    {id:"channel.view",label:"View channel",fields:["channel"],target:false},
+    {id:"channel.save",label:"Save selection channel",fields:["name"],target:false},
+    {id:"channel.capture",label:"Capture component channel",fields:["channel","name"],target:false},
+    {id:"channel.load",label:"Load channel selection",fields:["channel"],target:false},
+    {id:"channel.rename",label:"Rename saved channel",fields:["channel","name"],target:false},
+    {id:"channel.delete",label:"Delete saved channel",fields:["channel"],target:false},
+    {id:"channel.replace",label:"Replace pixel component",fields:["channel","component"],target:true},
+    {id:"style.add",label:"Add layer style",fields:["options"],target:true},
+    {id:"style.update",label:"Edit layer style",fields:["index","options"],target:true},
+    {id:"style.toggle",label:"Toggle layer style",fields:["index"],target:true},
+    {id:"style.remove",label:"Remove layer style",fields:["index"],target:true},
+    {id:"font.embed",label:"Embed font",fields:["font","bytes","family"],target:false},
+    {id:"text.insert",label:"Add text",fields:["options","name","position","parent"],target:false},
+    {id:"text.update",label:"Edit text",fields:["options"],target:true},
+    {id:"vector.insert",label:"Add shape or path",fields:["options","name","position","parent"],target:false},
+    {id:"vector.update",label:"Edit shape or path",fields:["options"],target:true},
     {id:"action.start",label:"Record action",fields:["name"],target:true},
     {id:"action.stop",label:"Save recorded action",fields:[],target:false},
     {id:"action.cancel",label:"Cancel recording",fields:[],target:false},

@@ -2,6 +2,7 @@ import model: lambda.editor.raster.model
 import editor: lambda.editor.raster
 import tools: lambda.editor.raster.tools
 import effects: lambda.editor.raster.effects
+import styles: lambda.editor.raster.styles
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -9,7 +10,8 @@ pub fn layer_rows(st) => [for (row in editor.layers(st.doc))
     <div class:if (row.id in st.selected) "layer-row selected" else "layer-row",style:("padding-left:" ++ string(8+row.depth*16) ++ "px"),
         <button class:"visibility",'data-visibility':row.id,title:"Toggle visibility",if (row.node.visible == false) "○" else "●">
         <button class:"layer-name",'data-layer':row.id,title:row.node.name,
-            <span class:"layer-kind",if (name(row.node) == 'stack') "▤" else "▧"> <span (row.node.name)>>
+            <span class:"layer-kind",if (name(row.node) == 'stack') "▤" else if (name(model.primary(row.node)) == 'text') "T"
+                else if (name(model.primary(row.node)) == 'vector') "◇" else "▧"> <span (row.node.name)>>
         if (model.mask(row.node) != null) <button class:if (st.target == "mask" and row.id in st.selected) "mask selected" else "mask",
             'data-mask':row.id,title:"Edit layer mask","M">
         if (row.node.locked == true) <span title:"Locked","L">
@@ -18,6 +20,11 @@ pub fn effect_rows(st) {
     let row = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null;
     [for (i,effect in effects.items(row.node)) <div class:if (i == st.effect_index) "effect-row selected" else "effect-row",
         <button 'data-select-effect':string(i),if (effect.enabled == false) "○ " ++ effect.name else "● " ++ effect.name>>]
+}
+pub fn style_rows(st) {
+    let row = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null;
+    [for (i,style in styles.items(row.node)) <button 'data-select-style':string(i),
+        class:if (i == st.style_index) "selected" else "",(if (style.enabled == false) "○ " else "● ") ++ string(style.kind)>]
 }
 fn histogram_channel(counts,c) {
     let bins = [for (bin in 0 to 63) sum(slice(counts[c],bin*4,bin*4+4))]
@@ -32,6 +39,8 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
     <header class:"menubar",<strong "λ Photos"> <nav 'aria-label':"Document commands", *[
         button("new","new","New"),button("open","open","Open…"),button("place","place","Place image…"),
         button("save","save","Save project…"),button("save-psd","psd","Export PSD…"),button("export","export","Export PNG…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,
+    <nav class:"document-tabs",'aria-label':"Open documents",*[<div id:"tabs",role:"tablist">,<span class:"spacer">,
+        button("new-tab","new-tab","New tab"),button("open-tab","open-tab","Open in tab…"),button("close-tab","tab-close","Close tab")]>,
     <section class:"options", *[button("undo","history.undo","Undo"),button("redo","history.redo","Redo"),
         <span class:"separator">,button("add-layer","layer.new","New layer"),button("duplicate","layer.duplicate","Duplicate"),
         button("group","layer.group","Group"),button("ungroup","layer.ungroup","Ungroup"),
@@ -93,11 +102,42 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <div class:"button-grid", *[button("action-start","action-start","Record"),button("action-stop","action.stop","Stop"),
                     button("action-cancel","action.cancel","Cancel recording"),button("action-replay","action-replay","Replay on layer"),
                     button("action-save","action-save","Save action…"),button("action-open","action-open","Load action…")]>]>,
+            <section class:"batch-panel", *[<h2 "Batch action">,
+                <p "Run the last action on explicit source/target jobs. Maximum 32 jobs; each output publishes atomically.">,
+                <label "Jobs (Mark data)" <textarea id:"batch-jobs",rows:5,"[]">>,
+                <label "On failure" <select id:"batch-policy",<option value:"continue","Continue remaining jobs"> <option value:"stop","Stop at first failure">>>,
+                button("batch-run","batch-run","Run last action"),<output id:"batch-status",role:"status">]>,
             <section class:"retouch-panel", *[<h2 "Retouch">,<p "Clone / Heal: Alt-click a source. Brush opacity controls coverage.">,
                 <p id:"retouch-source","No source selected">,
                 <div class:"fields", *[field("retouch-strength","Tone / heal strength",0.5,"number"),field("retouch-radius","Neighborhood radius",3,"number")]>,
                 <label "Source alignment" <select id:"retouch-aligned",<option value:"aligned","Aligned"> <option value:"reset","Reset each stroke">>>]>,
             <section class:"histogram-panel",<h2 "Histogram"> <div id:"histogram">>,
+            <section class:"channels-panel", *[<h2 "Channels">,
+                <label "Preview" <select id:"channel-view",<option value:"composite","RGB composite"> <option value:"r","Red"> <option value:"g","Green"> <option value:"b","Blue"> <option value:"a","Alpha">>>,
+                <label "Saved coverage" <select id:"saved-channel">>,field("channel-name","Channel name","Saved selection"),
+                <label "Replace component" <select id:"channel-component",*[for (component in ["r","g","b","a","gray"]) <option value:component,component>]>>,
+                <div class:"button-grid", *[button("channel-save","channel-save","Save selection"),button("channel-capture","channel-capture","Capture component"),
+                    button("channel-load","channel-load","Load selection"),button("channel-preview","channel-preview","Preview saved"),
+                    button("channel-replace","channel-replace","Replace component"),button("channel-rename","channel-rename","Rename channel"),button("channel-delete","channel-delete","Delete channel")]>]>,
+            <section class:"artwork-panel", *[<h2 "Text, shapes & paths">,
+                <p "Artwork stays editable. Use Rasterize before painting its pixels.">,
+                <div class:"fields", *[field("art-width","Local width",200,"number"),field("art-height","Local height",100,"number"),
+                    field("art-fill","Fill","#ffffff"),field("art-stroke","Stroke","transparent"),field("art-stroke-width","Stroke width",0,"number")]>,
+                <label "Shape" <select id:"art-shape",*[for (kind in ["rectangle","ellipse","path"]) <option value:kind,kind>]>>,
+                field("art-radius","Corner radius",0,"number"),
+                <label "Path commands (Mark arrays: M, L, Q, C, Z)" <textarea id:"art-path",rows:3,"[[\"M\",0,0],[\"L\",100,0],[\"L\",0,100],[\"Z\"]]">>,
+                <label "Text" <textarea id:"art-text",rows:3,"Hello Photos">>,
+                <div class:"fields", *[field("art-font","Font asset ID","photos-font"),field("art-size","Font size",32,"number"),field("art-leading","Line height",1.2,"number")]>,
+                <label "Text alignment" <select id:"art-align",*[for (align in ["left","center","right"]) <option value:align,align>]>>,
+                field("art-font-path","Embed font file","lmd/package/doc/latex/fonts/Sans/cmunss.woff2"),
+                <div class:"button-grid", *[button("add-text","text-add","Add text"),button("edit-text","text-edit","Apply text"),
+                    button("add-shape","vector-add","Add shape"),button("edit-shape","vector-edit","Apply shape"),button("embed-font","font-embed","Embed font")]>]>,
+            <section class:"styles-panel", *[<h2 "Layer styles">,<div id:"styles">,
+                <label "Style" <select id:"style-kind",*[for (kind in ["shadow","glow","overlay"]) <option value:kind,kind>]>>,
+                <div class:"fields", *[field("style-color","Color","#000000"),field("style-opacity","Opacity",0.7,"number"),
+                    field("style-radius","Blur radius",4,"number"),field("style-dx","Offset X",4,"number"),field("style-dy","Offset Y",4,"number")]>,
+                <div class:"button-grid", *[button("style-add","style-add","Add style"),button("style-edit","style-edit","Apply style"),
+                    button("style-toggle","style.toggle","Toggle style"),button("style-remove","style.remove","Remove style")]>]>,
             <section class:"effects-panel", *[<h2 "Editable effects">,<div id:"effects">,
                 <div class:"fields", *[for (control in effects.controls) field("effect-" ++ control.key,control.label,control.value,"number")]>,
                 <div class:"button-grid", *[button("effect-add","effect-add","Add effect"),button("effect-toggle","effect.toggle","Toggle effect"),

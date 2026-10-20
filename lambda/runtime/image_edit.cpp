@@ -27,15 +27,7 @@ struct RasterEdit : RasterOwner {
     }
     bool point(Item value, double* out) { return point(ItemReader(value.to_const()), out); }
     bool color(Item value, uint8_t channels, uint8_t* out) {
-        ItemReader reader(value.to_const());
-        if (!reader.isArray() || reader.asArray().length() != channels) return fail("paint color must match target channels");
-        for (uint8_t c = 0; c < channels; c++) {
-            double n;
-            if (!item_try_to_double(reader.asArray().get(c).item(), &n) || !isfinite(n) || n < 0 || n > 1)
-                return fail("paint color samples must be in [0,1]");
-            out[c] = (uint8_t)lround(n * 255);
-        }
-        return true;
+        return lambda_image_color(value,channels,out) || fail("paint color must match target channels with samples in [0,1]");
     }
     bool write(uint32_t x, uint32_t y, const uint8_t* samples) {
         if (!memcmp(raster_buffer_pixel(result, x, y), samples, result->channels)) return true;

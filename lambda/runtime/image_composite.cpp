@@ -44,6 +44,16 @@ bool lambda_image_setting(Item owner, const char* key, const char* expected) {
         (is_text_type_id(get_type_id(value)) && value.get_len() == strlen(expected) &&
             !memcmp(value.get_chars(), expected, value.get_len()));
 }
+bool lambda_image_color(Item value,uint8_t channels,uint8_t* samples) {
+    ItemReader reader(value.to_const());
+    if (!reader.isArray() || reader.asArray().length()!=channels) return false;
+    for (uint8_t c=0;c<channels;c++) {
+        double n;
+        if (!item_try_to_double(reader.asArray().get(c).item(),&n) || !isfinite(n) || n<0 || n>1) return false;
+        samples[c]=(uint8_t)lround(n*255);
+    }
+    return true;
+}
 
 static bool image_blend(Item owner, RasterBlend* mode) {
     Item value=item_attr(owner,"blend");
@@ -62,6 +72,9 @@ static bool image_affine(Item owner, double* matrix) {
     for (int i=0;i<6;i++) if (!item_try_to_double(reader.asArray().get(i).item(),matrix+i) ||
         !isfinite(matrix[i]) || fabs(matrix[i])>(i<4 ? 4096 : 1000000000)) return false;
     return fabs(matrix[0]*matrix[3]-matrix[1]*matrix[2])>=1e-12;
+}
+static bool image_decoration(Item node) {
+    return lambda_image_tag(node,"mask") || lambda_image_tag(node,"effect") || lambda_image_tag(node,"style");
 }
 
 // effects preserve extent; geometry belongs to the retained affine transform.
@@ -84,6 +97,7 @@ static bool image_effect_options(Item effect, ImageProcessOptions* out) {
 
 struct ImageComposite {
     const char* failure = nullptr;
+    Item assets = ItemNull;
     size_t scratch = 0;
     int64_t origin_x = 0, origin_y = 0;
     bool fail(const char* message) { failure = message; return false; }
@@ -124,12 +138,11 @@ struct ImageComposite {
         RootFrame roots(2); Rooted<Item> parent(roots,owner), child(roots,ItemNull);
         for (int64_t i=parent.get().element->length;i-- >0;) {
             child.set(item_at(parent.get(),i));
-            if (lambda_image_tag(child.get(),"mask") || lambda_image_tag(child.get(),"effect")) continue;
+            if (image_decoration(child.get())) continue;
             Item clipping=item_attr(child.get(),"clipping");
             if (get_type_id(clipping)==LMD_TYPE_BOOL && it2b(clipping)) return fail("clipping layer requires a lower base sibling");
             int64_t above=i-1;
-            while (above>=0 && (lambda_image_tag(item_at(parent.get(),above),"effect") ||
-                lambda_image_tag(item_at(parent.get(),above),"mask"))) above--;
+            while (above>=0 && image_decoration(item_at(parent.get(),above))) above--;
             bool chain=above>=0 && get_type_id(item_attr(item_at(parent.get(),above),"clipping"))==LMD_TYPE_BOOL &&
                 it2b(item_attr(item_at(parent.get(),above),"clipping"));
             if (!chain) { if (!render(target,child.get(),depth+1)) return false; continue; }
@@ -143,7 +156,7 @@ struct ImageComposite {
             bool valid=image_blend(child.get(),&blend) && render(clipped.result,child.get(),depth+1);
             while (valid && above>=0) {
                 child.set(item_at(parent.get(),above));
-                if (lambda_image_tag(child.get(),"mask") || lambda_image_tag(child.get(),"effect")) { above--; continue; }
+                if (image_decoration(child.get())) { above--; continue; }
                 clipping=item_attr(child.get(),"clipping");
                 if (get_type_id(clipping)!=LMD_TYPE_BOOL || !it2b(clipping)) break;
                 valid=render(clipped.result,child.get(),depth+1,true); above--;
@@ -229,6 +242,8 @@ struct ImageComposite {
             }
         }
         if (group) {
+            for (int64_t i=0;i<owner.get().element->length;i++) if (lambda_image_tag(item_at(owner.get(),i),"style"))
+                return fail("layer styles on groups require explicit rasterization");
             if (left || top || get_type_id(item_attr(owner.get(),"transform"))!=LMD_TYPE_NULL)
                 return fail("stack geometry must be expressed on descendant layers");
             // bound aggregate isolated-group scratch, not only each individual buffer.
@@ -262,35 +277,73 @@ struct ImageComposite {
         }
         Item kind = item_attr(owner.get(), "kind");
         bool empty = is_text_type_id(get_type_id(kind)) && !strcmp(kind.get_chars(), "empty");
-        if (!empty && get_type_id(kind) != LMD_TYPE_NULL &&
+        bool artwork=lambda_image_setting(owner.get(),"kind","text") || lambda_image_setting(owner.get(),"kind","vector");
+        // a missing kind retains the original raster default.
+        artwork=artwork && get_type_id(kind)!=LMD_TYPE_NULL;
+        if (!empty && !artwork && get_type_id(kind) != LMD_TYPE_NULL &&
                 (!is_text_type_id(get_type_id(kind)) || strcmp(kind.get_chars(), "raster")))
             return fail("specialized layer content is preserved but cannot be rendered by this profile");
         pixels = nullptr;
+        RasterOwner primary;
         for (int64_t i = 0; i < owner.get().element->length; i++) {
             child.set(item_at(owner.get(), i));
             const RasterBuffer* candidate = lambda_raster_buffer(child.get());
-            if (candidate) {
+            if (candidate || lambda_image_tag(child.get(),"text") || lambda_image_tag(child.get(),"vector")) {
                 if (empty) return fail("empty layer cannot have primary raster content");
                 if (pixels) return fail("raster layer has multiple primary rasters");
-                pixels = candidate;
+                if (artwork) {
+                    if (!lambda_image_tag(child.get(),kind.get_chars())) return fail("artwork layer kind and content disagree");
+                    if (!lambda_image_artwork(child.get(),assets,primary,256*1024*1024-scratch,&failure)) return false;
+                    pixels=primary.result;
+                } else if (!candidate) return fail("raster layer requires Raster content");
+                else pixels = candidate;
                 if (!lambda_image_setting(child.get(), "color", "srgb")) return fail("unsupported raster working color space");
-            } else if (!lambda_image_tag(child.get(), "mask") && !lambda_image_tag(child.get(), "effect"))
+            } else if (!image_decoration(child.get()))
                 return fail("unsupported layer content");
         }
         if (!pixels) return empty || fail("raster layer has no primary raster");
+        if (primary.result) {
+            if (primary.result->size>256*1024*1024-scratch) return fail("artwork scratch budget exceeded");
+            scratch+=primary.result->size;
+        }
         RasterOwner filtered;
         if (!effects(owner.get(),&pixels,filtered)) return false;
+        bool has_styles=false, styled=false;
+        for (int64_t i=0;i<owner.get().element->length;i++) {
+            Item style=item_at(owner.get(),i);
+            if (lambda_image_tag(style,"style")) {
+                has_styles=true; Item enabled=item_attr(style,"enabled");
+                if (get_type_id(enabled)!=LMD_TYPE_BOOL || it2b(enabled)) styled=true;
+            }
+        }
+        RasterOwner masked,styles; int offset=0;
+        if (has_styles) {
+            if (styled && mask) {
+                size_t bytes=(size_t)pixels->width*pixels->height*4;
+                if (bytes>256*1024*1024-scratch) return fail("style mask scratch budget exceeded");
+                masked.result=raster_buffer_create(pixels->width,pixels->height,4,bytes);
+                if (!masked.result) return fail("cannot allocate style mask input");
+                raster_buffer_blend(masked.result,pixels,0,0,nullptr,RASTER_NORMAL,1,mask,mask_left-left,mask_top-top,outside,inverse,false);
+                scratch+=bytes; pixels=masked.result; mask=nullptr;
+            }
+            if (!lambda_image_styles(owner.get(),&pixels,styles,&offset,256*1024*1024-scratch,&failure)) return false;
+            // style padding is local to the primary; it follows the retained affine.
+            transform[4]+=transform[0]*offset+transform[2]*offset;
+            transform[5]+=transform[1]*offset+transform[3]*offset;
+        }
         bool valid=raster_buffer_blend(target,pixels,left-origin_x,top-origin_y,transform,blend,opacity,
             mask,mask_left-left,mask_top-top,outside,inverse,atop);
+        if (masked.result) scratch-=masked.result->size;
         if (filtered.result) scratch-=filtered.result->size;
+        if (primary.result) scratch-=primary.result->size;
         return valid || fail("cannot composite affine layer");
     }
 };
 
 extern "C" Item fn_image_render(Item source, Item options) {
     GUARD_ERROR2(source, options);
-    RootFrame roots(3);
-    Rooted<Item> owner(roots, source), settings(roots, options), composition(roots, ItemNull);
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, source), settings(roots, options), composition(roots, ItemNull), assets(roots,ItemNull);
     if (get_type_id(settings.get()) != LMD_TYPE_MAP) return lambda_image_error("render options must be a map");
     MapReader config = MapReader::fromItem(settings.get());
     auto entries = config.entries(); const char* key; ItemReader value;
@@ -326,6 +379,7 @@ extern "C" Item fn_image_render(Item source, Item options) {
             Item child = item_at(owner.get(), i);
             if (lambda_image_tag(child, "stack")) { stack_count++; if (!frame) composition.set(child); }
             else if (lambda_image_tag(child, "frame")) { if (frame_count++ == frame) composition.set(child); }
+            else if (lambda_image_tag(child,"assets")) assets.set(child);
             else if (!lambda_image_tag(child, "assets") && !lambda_image_tag(child, "metadata") && !lambda_image_tag(child, "preview"))
                 return lambda_image_error("unexpected image child");
         }
@@ -338,6 +392,7 @@ extern "C" Item fn_image_render(Item source, Item options) {
         composition.set(item_at(composition.get(), 0));
     }
     ImageComposite renderer;
+    renderer.assets=assets.get();
     if (!config.get("rect").isNull()) {
         int64_t rect[4];
         if (!lambda_image_rect(config.get("rect").item(),rect)) return lambda_image_error("render region requires four integer bounds");

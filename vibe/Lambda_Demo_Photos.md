@@ -571,3 +571,17 @@ invalidation, transform/selection coordinates, color/blend compatibility and
 editable persistence. M2 addresses the storage foundation, M3 couples richer
 editing with saving, and the workflow/independent-reader gates keep those risks
 visible before widening the feature catalogue.
+
+
+## Implementation checkpoint — 2026-10-20
+
+The worktree implementation now covers the bounded M4 workflow core: retouch,
+editable embedded-font text/shapes/basic paths, shadow/glow/color overlay,
+coverage channels, independent tabs and sequential action batches. This builds
+on M2 painting/storage and M3 composition/projects, using shared image values
+(**S9.1.2 / S9.2.2**) and explicit procedural acquisition/publication
+(**S12.1.1v3**). [Implementation and qualification](impl/Lambda_Impl_Photos.md)
+record the actual supported profiles, acceptance evidence and remaining gate
+failures. High depth/ICC, wider text/style/PSD parity, asynchronous jobs and M5
+scale/latency qualification remain outstanding; the implementation does not
+claim the full PhotoCraft catalogue or the proposed performance targets.

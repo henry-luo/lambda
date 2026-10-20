@@ -12,3 +12,6 @@ button,input,select{font:inherit;color:inherit}button{background:#393c42;border:
 .effects-panel input{min-height:28px}.effects-panel label{font-size:11px}.effect-row button{width:100%;text-align:left;margin-bottom:4px}.effect-row.selected button{border-color:var(--accent);background:#435575}
 
 select{background:#24262a;color:var(--text);padding:5px;border:1px solid var(--line);min-height:28px}
+textarea{font:inherit;color:inherit;background:#24262a;border:1px solid var(--line);padding:6px;resize:vertical;min-width:0;width:100%}.styles-panel button{margin:3px}.styles-panel button.selected{border-color:var(--accent)}
+/* dirty-marker font metrics must not move the canvas during a pointer gesture. */
+.document-tabs{display:flex;gap:5px;align-items:center;flex-shrink:0;height:39px;min-height:39px;padding:4px 10px;background:#292c30;border-bottom:1px solid var(--line)}#tabs{display:flex;gap:4px;overflow-x:auto}#tabs button.active{border-color:var(--accent);background:#435575}#tabs button{white-space:nowrap;height:30px;line-height:16px}.document-tabs>button{font-size:11px;padding:4px 7px}.batch-panel output{display:block;margin-top:8px;white-space:pre-wrap}

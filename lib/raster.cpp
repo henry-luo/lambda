@@ -99,6 +99,16 @@ uint8_t* raster_buffer_edit_pixel(RasterBuffer* buffer, uint32_t x, uint32_t y) 
     return tile.storage->data + (y - top) * tile.stride + (x - left) * buffer->channels;
 }
 
+bool raster_buffer_samples_equal(const RasterBuffer* a,const RasterBuffer* b) {
+    if (!a || !b || a->width!=b->width || a->height!=b->height || a->channels!=b->channels) return false;
+    if (a==b) return true;
+    for (uint32_t y=0;y<a->height;y++) for (uint32_t x=0;x<a->width;x++) {
+        const uint8_t* left=raster_buffer_pixel(a,x,y), *right=raster_buffer_pixel(b,x,y);
+        if (left!=right && memcmp(left,right,a->channels)) return false;
+    }
+    return true;
+}
+
 size_t raster_buffer_index_bytes(const RasterBuffer* buffer) {
     return sizeof(RasterBuffer) + (buffer->tiles ? (size_t)buffer->columns * buffer->rows * sizeof(RasterTile) : 0);
 }

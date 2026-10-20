@@ -168,3 +168,23 @@ Detailed acceptance and remaining qualification are tracked in
 profile does not widen the PSD writer silently; unsupported retained metadata
 still requires a project or explicit baking. High depth and ICC conversion remain
 unimplemented.
+
+## Photos authored content and sample comparison — 2026-10-20
+
+The shared compositor now evaluates primary text/vector content through the
+existing embedded-font outline API and ThorVG vector backend. It performs no
+font-file acquisition or system substitution inside pure rendering
+(**S12.1.1v3**). Ordered shadow/glow/color-overlay styles consume adjusted,
+masked source pixels before retained affine placement. Explicit local filter
+outsets contribute to bounds; groups require rasterization for this style profile.
+Projects preserve the authored content and font bytes; PSD refuses unsupported
+artwork/styles and saved editor channels instead of dropping them.
+
+Native-to-native Raster equality compares canonical u8 samples directly while
+the surrounding tag/namespace/attributes retain their normal structural checks
+(**S5.4.3 / S9.2.2**). The old path allocated both full pixel projections during
+dirty/history comparisons, causing repeated large allocations under forced GC.
+Materialized/virtual comparisons keep the general element relation, and ordinary
+container NaN/error semantics are unchanged. Dense/sparse/shared-tile and hidden-RGB
+checks qualify the storage comparison. Detailed workflow results and limitations
+are recorded in [Photos implementation](Lambda_Impl_Photos.md).

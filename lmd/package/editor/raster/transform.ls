@@ -47,7 +47,7 @@ pub fn rasterize(st,node) any^ {
     let width = max(1,int(ceil(box.x+box.width))-x)
     let height = max(1,int(ceil(box.y+box.height))-y)
     let normalized = img.with_properties(node,{opacity:1,blend:'normal',clipping:false,position:[model.position(node)[0]-x,model.position(node)[1]-y]})^
-    let pixels = img.render_frame(img.document(img.stack([normalized]),{width:width,height:height}))^
+    let pixels = model.render_layers(st.doc,[normalized],width,height)^
     let changed = img.with_properties(node,{kind:'raster',transform:null,position:[x,y]})^;
     img.with_children(changed,[pixels])^
 }

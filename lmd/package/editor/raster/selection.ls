@@ -25,7 +25,7 @@ pub fn run_command(st,command) any^ {
         combine(st,coverage,model.value(command.mode,"replace"))^
     }
     else if (id == "mask.from_selection") {
-        let target = model.pixel_target({*:st,target:"pixels"})^
+        let target = model.source_target({*:st,target:"pixels"})^
         if (st.selection == null) raise error("Raster: create a selection for the layer mask")
         else {
             let p = model.position(target.row.node)
@@ -35,7 +35,7 @@ pub fn run_command(st,command) any^ {
         }
     }
     else if (id == "selection.from_mask" or id == "mask.invert" or id == "mask.apply") {
-        let target = model.pixel_target({*:st,target:"pixels"},id != "selection.from_mask")^
+        let target = model.source_target({*:st,target:"pixels"},id != "selection.from_mask")^
         let mask = model.mask(target.row.node)
         if (mask == null) raise error("Raster: layer has no mask")
         else if (id == "selection.from_mask") {
@@ -51,9 +51,10 @@ pub fn run_command(st,command) any^ {
             {*:st,doc:model.replace(st.doc,target.row.id,img.with_children(target.row.node,
                 [for (child in content(target.row.node)) if (name(child) == 'mask') inverted else child])^)^}
         }
+        else if (name(target.raster) != 'raster') raise error("Raster: rasterize artwork before applying its mask to source pixels")
         else {
             // apply only alpha; retained effects must not be evaluated a second time afterward.
-            let unfiltered = img.with_children(target.row.node,[for (child in content(target.row.node) where name(child) != 'effect') child])^
+            let unfiltered = img.with_children(target.row.node,[for (child in content(target.row.node) where not (name(child) in ['effect','style'])) child])^
             let source = img.with_properties(unfiltered,{position:[0,0],opacity:1.0,visible:true,blend:'normal',clipping:false})^
             let pixels = img.render_frame(img.document(img.stack([source]),{width:target.raster.width,height:target.raster.height}))^
             let node = img.with_children(target.row.node,[for (child in content(target.row.node) where name(child) != 'mask')

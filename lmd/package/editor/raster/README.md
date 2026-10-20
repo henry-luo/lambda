@@ -80,8 +80,58 @@ Selection context is supplied by the target session. The action header retains
 its initial pixel/mask facet, and recorded same-layer target steps rebind to the
 selected replay layer. `.laction` files are versioned Mark data; the demo caps
 files at 8 MiB. Actions are session/library state, separate from image dirty state,
-and persist across document replacement in the demo. Multi-document tabs, typed
-artwork/styles, a channel palette and batch-file orchestration remain pending.
+and persist across document replacement and tab activation in the demo.
+
+`text.insert/update`, `vector.insert/update` and `font.embed` retain editable
+primary content. Insert takes `options`, optional `name`/`position`/`parent`;
+update patches authored options on the selected matching layer. Font embedding
+takes an asset ID (`font`), captured `bytes` and optional `family`. It does not
+read a path inside a pure command (**S12.1.1v3**). Text supports multiline,
+horizontal kerning/alignment with embedded outlines; complex shaping, rich runs,
+automatic wrapping and font substitution are outside this first profile.
+Shapes include rectangles, rounded corners, ellipses and absolute M/L/Q/C/Z
+paths with fill/stroke and optional linear gradients. The shared image renderer
+owns rasterization. Pixel painting requires explicit artwork rasterization;
+mask painting remains separate. Image resizing composes an affine so authored
+geometry and its local masks retain their units.
+
+`style.add/update/toggle/remove` manage ordered shadow/glow/color-overlay layer
+styles. Their explicit local `outset` contributes to bounds and survives project
+persistence; masks apply before styles, and transforms after styles. Native PSD
+export refuses this metadata, including disabled styles.
+
+`channel.view` selects composite, r/g/b/a or saved-channel previews without
+changing image content/history. `channel.save` captures active selection;
+`channel.capture` snapshots a composite component. `channel.load`, `rename` and
+`delete` manage up to 64 saved coverage channels. `channel.replace` writes a saved
+channel into a selected pixel/mask component through checked native channel
+replacement. Saved coverage lives in `metadata role:photos_channels` and follows
+crop/image/canvas resizing. Projects retain it; PSD refuses silent omission.
+Undo restores coverage and falls back to composite view if a viewed channel no
+longer exists. Component views and selection overlays never alter exports.
+
+`lambda.editor.raster.workspace` owns up to 16 independent session snapshots.
+`create/add/capture/activate/close/rows/any_dirty` provide stable tab identities,
+independent history/checkpoints/cameras and guarded dirty closes. Active gestures
+and action recording must finish before changing tabs. The demo's New/Open still
+replace the active document through their existing save/discard guard; New Tab
+and Open in Tab retain it. Closing the window visits every dirty tab and requests
+Save/Discard/Cancel individually. Action libraries remain available across tabs.
+
+`lambda.editor.raster.files` is the reusable procedural acquisition/publication
+boundary. `lambda.editor.raster.batch.run(action,jobs,options={})` uses it to
+process 1–32 jobs sequentially. Each job specifies `source`, `target`, `format`
+(`photos`, `png`, `psd`) and optional target-layer ID (`layer`); otherwise the
+first leaf layer is selected. Every action starts in a fresh session, with no
+external selection/retouch source. Declare needed context in recorded commands.
+Preflight normalizes path URLs, rejects repeated destinations and destinations
+matching any input, before the first job. These are lexical URL checks; filesystem
+link identity is not resolved. A failed job publishes no partial output; earlier
+successful files remain. `continue_on_error:false` stops at the first error.
+The result contains requested/completed/succeeded/failed counts and per-job
+outcomes. The demo's Batch Action panel parses the explicit job list as Mark data
+and reports the same outcomes. Batch execution currently blocks the UI until the
+bounded list completes; asynchronous scheduling remains later work.
 
 Retouch source selection must be recorded as a step or supplied by the replay
 session. Actions operate with that session's current selection coverage.
