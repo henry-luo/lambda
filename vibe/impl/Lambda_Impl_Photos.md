@@ -1,8 +1,10 @@
 # Lambda Photos — Implementation
 
 **Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
-retouch/actions, editable artwork/styles, channels, tabs, batch and incremental brush previews; aggregate gates have qualification limits, on
-`codex/photos-20261019`, worktree `temp/photos-worktree/`.
+retouch/actions, editable artwork/styles, channels, tabs, batch, incremental brush
+previews, export options, arrangement and crop drafts. The original worktree was
+merged and removed; subsequent work takes place in the main checkout. Aggregate
+gates retain the qualification limits recorded below.
 
 Design: [Photos proposal](../Lambda_Demo_Photos.md). Existing contracts:
 **S9.1.2 / S9.2.2** immutable snapshots, **S12.1.3** pure views and procedural
@@ -24,7 +26,8 @@ The demo owns shell/file dialogs; generic commands and gestures live under
 Verification budget: focused package goldens across execution tiers, PSD data
 round trips and independent reader checks, one native event replay covering
 retained controls/canvas and file failure, then required package baseline.
-Build a worktree-local host; shared dependency links follow Developer Guide §7.
+This package/demo increment uses the current checkout and existing host; native
+rendering edits already present in the checkout are outside its scope.
 
 | Milestone | State |
 |---|---|
@@ -817,3 +820,113 @@ debug ownership failure. It remains a qualification limit.
 
 Integration logs and the saved brush performance report are retained in the
 main checkout under `temp/photos-merge-20261020/`, outside the removable worktree.
+
+## Export, arrangement and crop usability increment — 2026-10-20
+
+This increment is implemented directly in the main checkout. It adds three
+bounded workflows while retaining the existing native image and command paths:
+
+- PNG/JPEG export supports explicit output dimensions, an aspect lock in the
+  dialog, PNG transparency or opaque flattening, and JPEG quality. The reusable
+  `raster.export` module validates settings before rendering. Flattening reuses
+  the shared linear-light compositor; `raster.files.write_document` publishes
+  atomically and reports normalized settings. The original snapshot, history,
+  path and saved checkpoint remain intact (**S9.1.2 / S12.1.1v3**).
+- `layer.align` and `layer.distribute` arrange selected roots against the canvas
+  or selection bounds. Equal-gap geometry is extracted from Draw into
+  `editor.mod_alignment`; both editors call it. Raster displacements round to
+  integral pixels. Parent/child selection moves each root once, inherited and
+  descendant locks reject the entire operation, and one transaction supports
+  undo/redo (**S9.2.2**).
+- Crop (C) drafts a bounded pixel rectangle without editing the document. Apply
+  or Enter submits the existing `document.crop` command, preserving its layer
+  translation/channel behavior and one-edit history. Cancel/Escape discards the
+  draft; tool changes, extent changes and history navigation clear stale drafts.
+  Clicks and zero-area lines produce no crop. Four finite shaded regions and a
+  separate border overlay leave saved/exported pixels untouched
+  (**S9.1.2 / S12.1.3 / D4.5.2**).
+
+Inspector dropdown publication now uses the existing `set_selected_index`
+writer, with `dom.tree.options_of` for option lookup. Text/range controls retain
+their canonical value writer. Empty/multiple selections return empty inspector
+content instead of passing null to `content()`. The export dialog's Tab cycle
+includes its visible fields and handles reverse navigation.
+
+Acceptance covers exact export dimensions/alpha/matte, quality reaching the
+codec, invalid options preserving existing files, immutable input snapshots,
+arrangement locks/ancestry and undo, crop clipping/cancellation/pixel preservation,
+and UI output reopen with unchanged dirty/history state. New script goldens live
+under `test/lambda/editor/photos_{arrange,crop,export}` and
+`test/lambda/proc/photos_export_files`; native workflows are
+`test/ui/photos/{arrange,crop,export}.json`.
+
+Transform handles/straighten, guides/rulers/navigator, curves/levels and dedicated
+adjustment layers, richer artwork/styles/PSD interchange, workspace restoration,
+asynchronous work, high depth/ICC and larger-scene/display-latency qualification
+remain outstanding. The existing raster budgets and synchronous batch profile
+are unchanged. No formal semantics or design ruling changes.
+
+### Native transform repair discovered during visual acceptance
+
+The export modal uses an ancestor CSS translation. Its native select arrows
+painted in the untransformed plane, while transformed caption glyphs were
+discarded by a clip rectangle left in that plane. This also affected native
+control faces/selection/caret rectangles. The defect is in primitive painting
+and clip coordinates, not export state or dropdown selectedness.
+
+`render_painter_fill_context_rect` promotes the existing transformed decoration
+rectangle path into the shared painter; decorations and native controls call
+the same helper. Checkbox/radio paths receive the current transform.
+`render_clip_push_rect_scope` optionally owns a transformed rectangle clip,
+used by selected-option text. Existing callers retain their prior screen-space
+contract. Paths and clips use the existing owned recording machinery
+(**D4.5.1v4 / D4.5.2**). No vendor changes or modal-positioning workaround is used.
+
+`test/ui/test_form_transform.{html,json}` checks translated and rotated captions
+and arrows plus translated checkbox/radio faces. The initial four caption/arrow
+pixel assertions failed on the prior optimized host and pass after the repair;
+the final six assertions pass. The Photos export capture now displays its
+format, aspect and transparency captions/arrows in the correct control boxes.
+
+### Qualification for this increment
+
+Logs, screenshots and build records are under `temp/photos-continuation/`.
+Before native form repair, the complete Photos UI set passed **16 workflows /
+229 assertions** on the optimized host. Package/Draw focused checks passed
+**37/37** normally and **37/37** in eager JIT with forced collection and poisoned
+frees; Photos alone passed **20/20** in AUTO with the same GC settings.
+
+The Lambda baseline entry ran with existing native test executables and its
+standard debug host refresh: input **2,112/2,112**, MIR forced GC **319/319**,
+script runner **1,645/1,647**. The combined report was **7,045/7,051**, with six
+failure entries. Three entries were stale executables expecting the removed C++
+`node_trace_events_init(JubeHostAPI const*)` symbol from the current Node DSO.
+Rebuilding those executables resolves the loader aborts: JS MVP **815/815**,
+terminal **10/10**, item representation **40/40** pass. This is a focused recovery,
+not a second aggregate pass. The PDF resource/offset assertion remains failing;
+math includegraphics and Mermaid pass together on the restored optimized host,
+while their debug/bulk failures remain recorded above. No fixture or expectation
+was changed to hide those failures. The baseline's debug host was replaced with
+an optimized build before final UI/native rendering qualification.
+
+Final native repair checks pass: Photos **16/16 workflows, 229/229 assertions**;
+the translated/rotated control regression **6/6 pixel assertions**; Radiant UI
+automation **662/662** (659 fixtures and three harness checks). The Radiant
+integer-cast lint and `git diff --check` pass. The final optimized host SHA-256 is
+`ceba8cc407af195e2073b3b06da7bb1056ec7f9b746b7f52eb2915e845977d51`;
+the debug validator marker is absent. Existing unrelated rendering changes in
+the checkout are preserved, including the earlier `render.hpp` additions. No
+push or worktree operation is part of this increment.
+
+`make build-radiant-baseline JOBS=4 TEST_JOBS=4` and
+`make run-radiant-baseline RADIANT_RENDER_JOBS=4` complete successfully:
+**6,043 passed, 146 partial, two skipped, no unexpected failures**. The visual
+lane retains four expected failures and one skip. This gate includes all 32 WPT
+input-event files; the 662 UI checks include the final Photos workflows. Partial
+conformance and expected visual failures remain explicit limits.
+
+A final reuse review shares aspect-ratio rounding between the export settings
+and dialog draft through `export.proportional_extent`; the two export script
+fixtures pass again in AUTO and in eager JIT (the latter with forced GC and
+poisoned frees), and the export UI workflow passes again after that extraction.
+No aggregate was repeated for this localized package refactor.

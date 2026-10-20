@@ -631,6 +631,7 @@ enum {
     DL_OP_FLAG_FLUSHES_VECTOR_BATCH = 1u << 3,
     DL_OP_FLAG_OWNED_PAYLOAD = 1u << 4,
     DL_OP_FLAG_PREMULTIPLIED_CAPTURE = 1u << 5,
+    DL_OP_FLAG_VECTOR_TRANSLATION = 1u << 6,
 };
 
 typedef enum {
@@ -641,17 +642,17 @@ typedef enum {
 } DisplayOwnedPayloadKind;
 
 #define DISPLAY_OP_LIST(X) \
-    X(DL_FILL_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_FILL_PATH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
-    X(DL_STROKE_PATH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
-    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
-    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
-    X(DL_DRAW_IMAGE, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_RECT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_ROUNDED_RECT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_FILL_PATH, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_path.path)) \
+    X(DL_STROKE_PATH, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, stroke_path.path)) \
+    X(DL_FILL_LINEAR_GRADIENT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_linear_gradient.path)) \
+    X(DL_FILL_RADIAL_GRADIENT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, fill_radial_gradient.path)) \
+    X(DL_DRAW_IMAGE, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_DRAW_GLYPH, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_DRAW_PICTURE, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PICTURE, offsetof(DisplayItem, draw_picture.picture)) \
-    X(DL_PUSH_CLIP, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
-    X(DL_POP_CLIP, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_DRAW_PICTURE, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PICTURE, offsetof(DisplayItem, draw_picture.picture)) \
+    X(DL_PUSH_CLIP, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR | DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_PATH, offsetof(DisplayItem, push_clip.path)) \
+    X(DL_POP_CLIP, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_FILL_SURFACE_RECT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_BLIT_SURFACE_SCALED, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_COMPOSITE_OPACITY, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
@@ -665,8 +666,8 @@ typedef enum {
     X(DL_SHADOW_CLIP_SAVE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_SHADOW_CLIP_RESTORE, DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_OUTER_SHADOW, DL_OP_FLAG_DIRTY_SKIPPABLE | DL_OP_FLAG_FLUSHES_VECTOR_BATCH, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
-    X(DL_END_ELEMENT, DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_BEGIN_ELEMENT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
+    X(DL_END_ELEMENT, DL_OP_FLAG_VECTOR_TRANSLATION | DL_OP_FLAG_PREMULTIPLIED_CAPTURE | DL_OP_FLAG_PRESERVES_REPLAY_STATE | DL_OP_FLAG_REPLAY_NOOP_AFTER_VECTOR, DL_OWNED_PAYLOAD_NONE, 0) \
     X(DL_DRAW_FRAGMENT, DL_OP_FLAG_OWNED_PAYLOAD, DL_OWNED_PAYLOAD_FRAGMENT, offsetof(DisplayItem, draw_fragment.owner))
 
 typedef enum DisplayOp {
@@ -958,6 +959,7 @@ struct DisplayPayloadOwner {
     size_t span_count = 0;
     int command_count = 0;
     size_t retained_bytes = 0;
+    float translate_x = 0, translate_y = 0; // immutable placement shell; source commands remain unchanged
 };
 inline void dl_payload_owner_release(DisplayPayloadOwner* owner) {
     if (owner && ref_count_release(&owner->refs) == REF_COUNT_LAST) owner->destroy(owner);
@@ -1003,6 +1005,7 @@ typedef struct DisplayItem {
 struct DisplayList : lam::ArrayList<DisplayItem> {
     ScratchArena arena;      // private clip stacks, metadata and copied pixels
     lam::Own<struct DlSharedArrayCache> shared_arrays{};
+    size_t shared_array_reuse_budget = 0; // opt-in idle value storage; enforced at clear boundaries
     DisplayList() : ArrayList(MEM_CAT_RENDER, 0), arena{} {}
 #ifdef __cplusplus
     void init(Arena* backing_arena);
@@ -1013,12 +1016,14 @@ struct DisplayList : lam::ArrayList<DisplayItem> {
 #endif
 };
 
-// reads immutable spans in painter order; marker indices remain local to their producer.
+// reads immutable spans in painter order; translated scratch items last until next()/skip_element().
+// marker indices remain local to their producer, including translated placements.
 struct DisplayListCursor {
     struct ChunkFrame {
         const DisplayPayloadOwner* owner;
         size_t span;
         int offset, logical;
+        float translate_x, translate_y;
     };
     const DisplayList* root;
     int next_root, end_root, depth = 0;
@@ -1027,12 +1032,15 @@ struct DisplayListCursor {
     const DisplayPayloadOwner* owner = nullptr;
     int index = -1, root_index = -1, source_index = -1;
     bool failed = false;
+    float translate_x = 0, translate_y = 0;
     explicit DisplayListCursor(const DisplayList* list, int first = 0, int end = -1);
     explicit DisplayListCursor(const DisplayPayloadOwner* chunk);
     const DisplayItem* next();
     void skip_element();
     int scope_size() const;
 private:
+    DisplayItem translated;
+    const DisplayItem* placed_item(const DisplayItem* source);
     bool push(const DisplayPayloadOwner* chunk);
 };
 
@@ -1069,6 +1077,7 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags);
 void dl_item_free_owned_payload(DisplayItem* item);
 bool dl_reference_fragment(DisplayList* list, DisplayPayloadOwner* owner, Bound bounds);
 bool dl_supports_premultiplied_capture(const DisplayList* list);
+bool dl_supports_vector_translation(const DisplayList* list, int first = 0, int end = -1);
 // caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.
 bool dl_trim_empty_arena(DisplayList* list);
 
@@ -1282,6 +1291,8 @@ size_t dl_resource_summary_bytes(const DisplayResourceSummary* snapshot);
 bool dl_resource_summary_current(const DisplayResourceSummary* snapshot,
     uint64_t video_generation, uint64_t glyph_generation);
 size_t dl_shared_array_bytes(const DisplayList* list);
+// conservative charge for array storage that can survive the next clear.
+size_t dl_shared_array_reuse_bytes(const DisplayList* list);
 uint64_t dl_shared_array_checkpoint(const DisplayList* list);
 void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint);
 
@@ -2077,6 +2088,9 @@ void retained_dl_cache_destroy(RetainedDisplayListCache* cache);
 
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache);
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source);
+// publish one balanced zero-ID subscene range [first,end), preserving unrelated cache entries.
+const RetainedDisplayListFragment* retained_dl_cache_capture_fragment(RetainedDisplayListCache* cache,
+    const DisplayList* source, int first, int end, uint32_t key);
 // snapshot only the balanced document prefix; optional empty, arena-free commands share captured roots.
 // failure clears both outputs; the original source remains available for the flat fallback.
 bool retained_dl_cache_capture_resources(RetainedDisplayListCache* cache, const DisplayList* source,
@@ -2106,6 +2120,9 @@ bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
                                            void* contains_userdata);
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment);
+// explicit placement for vector-only chunks; unsupported commands reject without appending.
+bool retained_dl_append_fragment_translated(DisplayList* dst,
+    const RetainedDisplayListFragment* fragment, float translate_x, float translate_y);
 
 // ===== render.hpp =====
 // format to SDL_PIXELFORMAT_ARGB8888
@@ -3749,6 +3766,7 @@ bool render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
 void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
+void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color);
 bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
@@ -3947,7 +3965,8 @@ bool render_clip_overflow_bounds(ViewBlock* block, float origin_x, float origin_
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
     float abs_x, float abs_y, RenderClipKind kind, Bound visible,
     const RdtMatrix* transform);
-RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip,
+                                           const RdtMatrix* transform = nullptr);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);

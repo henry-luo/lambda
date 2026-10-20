@@ -4,7 +4,7 @@
 roadmap; no code changed
 **Tree anchor**: master `b9b30f4ac`
 **Companion docs**: `vibe/jube/JS_Profiling_Helpers.md` (measured time/call
-data), `vibe/jube/JS_Tune1_Helpers.md` (performance proposal; overlaps §6 here)
+data), `vibe/jube/JS_Tune_History.md` §4.1 (B1 Helpers performance proposal; overlaps §6 here)
 
 **Method and limits.** LJS numbers are measured on this tree (`wc`, greps,
 declaration-gap function lengths — marked ≈ where approximate, since C++

@@ -1184,15 +1184,7 @@ static void decoration_fill_rect(TextDecorationPaintContext* context, Rect* rect
     if (context->raster) {
         RasterRenderContext* raster = context->raster;
         int count = raster->dl ? raster->dl->item_count() : 0;
-        const RdtMatrix* transform = render_state_current_transform(raster);
-        if (transform) {
-            RdtPath* path = rdt_path_new();
-            if (!path) { context->failed = true; return; }
-            rdt_path_add_rect(path, rect->x, rect->y, rect->width, rect->height, 0, 0);
-            rc_fill_path(raster, path, Color{color}, RDT_FILL_WINDING, transform);
-            rdt_path_free(path);
-        } else rc_fill_surface_rect(raster, raster->ui_context->surface, rect, color,
-            &raster->block.clip, raster->clip_shapes, raster->clip_shape_depth);
+        render_painter_fill_context_rect(raster, rect, color);
         if (!raster->dl || raster->dl->item_count() != count + 1) context->failed = true;
     } else if (context->display) {
         int count = context->display->item_count();

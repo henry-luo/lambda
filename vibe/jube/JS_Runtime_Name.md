@@ -32,10 +32,10 @@ remains explicitly deferred under RN-D5.
 generated catalogs, name classifier, NamePool hierarchy, unique-key
 allocation, `PropertyKeySpec`, and per-module key table. It supersedes that
 document's pointer-identity decisions NI1, NI7, NI10, and the pointer-specific
-parts of NI11–NI15. It also replaces the pointer-based plan in
-`JS_Tune3_Name.md`.
+parts of NI11–NI15. It also replaces the earlier pointer-based Tune3 plan (now consolidated into
+`JS_Tune_History.md` §4.1, B3).
 
-The implementation is recorded in [`JS_Tune3_Name.md`](JS_Tune3_Name.md). The
+The implementation is recorded in [`JS_Tune_History.md`](JS_Tune_History.md) §4.1 (B3, N0–N8). The
 canonical LOC gate is measured by `./utils/count_loc.sh`: R0 `lambda/js` was
 227,778 lines and the implemented tree is 225,711 lines, a 2,067-line
 reduction. The implementation deletes the pointer-key and shaped-constructor
@@ -1329,7 +1329,8 @@ may bridge callers, but they must delegate to the same NamePool operation.
 ### R0 — Formal adoption and refreshed census
 
 1. Accept or amend the proposed formal text in §14.
-2. Update `Lambda_Design_Name_Identity.md`, `JS_Tune3_Name.md`, and
+2. Update `Lambda_Design_Name_Identity.md`, `JS_Tune3_Name.md` (since consolidated
+   into `JS_Tune_History.md`), and
    `JS_Runtime_Redesign.md` in the same change as the formal ruling.
 3. Freeze the tree anchor and capture current counts for pointer-bearing key
    APIs, emitted `String*` constants, `PropertyKeyRef` comparisons,

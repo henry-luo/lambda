@@ -91,8 +91,7 @@ static float form_text_align_offset(ViewBlock* block, float content_w,
 // Helper to draw a filled rectangle
 static void fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
-    rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
-                      rdcon->clip_shapes, rdcon->clip_shape_depth);
+    render_painter_fill_context_rect(rdcon, &rect, color.c);
 }
 
 struct TextControlSelectionPaint {
@@ -128,7 +127,7 @@ static void paint_text_control_selection_rect(float x, float y, float w, float h
 static void fill_circle(RasterRenderContext* rdcon, float cx, float cy, float radius, Color color) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
-    rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
+    rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, render_state_current_transform(rdcon));
     rdt_path_free(p);
 }
 
@@ -136,7 +135,7 @@ static void fill_circle(RasterRenderContext* rdcon, float cx, float cy, float ra
 static void stroke_circle(RasterRenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
-    rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+    rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, render_state_current_transform(rdcon));
     rdt_path_free(p);
 }
 
@@ -837,7 +836,7 @@ static void render_checkbox(RasterRenderContext* rdcon, ViewBlock* block, FormCo
         // checked checkboxes fill the native face with accent-color;
         // painting only the tick left the box visually unselected.
         rdt_path_add_rect(face, x, y, size, size, 2.0f * s, 2.0f * s);
-        rc_fill_path(rdcon, face, accent, RDT_FILL_WINDING, NULL);
+        rc_fill_path(rdcon, face, accent, RDT_FILL_WINDING, render_state_current_transform(rdcon));
         rdt_path_free(face);
     } else {
         Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
@@ -847,7 +846,7 @@ static void render_checkbox(RasterRenderContext* rdcon, ViewBlock* block, FormCo
         float inset = border_w * 0.5f;
         rdt_path_add_rect(box, x + inset, y + inset, size - border_w, size - border_w,
                           1.5f * s, 1.5f * s);
-        rc_stroke_path(rdcon, box, border_color, border_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rc_stroke_path(rdcon, box, border_color, border_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, render_state_current_transform(rdcon));
         rdt_path_free(box);
     }
 
@@ -867,7 +866,7 @@ static void render_checkbox(RasterRenderContext* rdcon, ViewBlock* block, FormCo
 
         Color check_color = disabled ? make_color(245, 245, 245) : make_color(255, 255, 255);
         rc_stroke_path(rdcon, p, check_color, fmaxf(1.6f * s, 1.0f),
-                       RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+                       RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, render_state_current_transform(rdcon));
         rdt_path_free(p);
     }
 
@@ -1233,9 +1232,18 @@ static void render_select(RasterRenderContext* rdcon, ViewBlock* block, FormCont
             // the right-padding area where the author chevron / UA arrow lives.
             if (content_w > 0) {
                 Bound saved_clip = rdcon->block.clip;
-                if (text_x > rdcon->block.clip.left) rdcon->block.clip.left = text_x;
-                if (content_right < rdcon->block.clip.right) rdcon->block.clip.right = content_right;
+                RenderClipScope clip_scope = {};
+                const RdtMatrix* transform = render_state_current_transform(rdcon);
+                if (transform) {
+                    // text and its content clip must occupy the same transformed space.
+                    Bound text_clip = {text_x, y, content_right, y + h};
+                    clip_scope = render_clip_push_rect_scope(rdcon, &text_clip, transform);
+                } else {
+                    if (text_x > rdcon->block.clip.left) rdcon->block.clip.left = text_x;
+                    if (content_right < rdcon->block.clip.right) rdcon->block.clip.right = content_right;
+                }
                 render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+                render_clip_pop_scope(rdcon, &clip_scope);
                 rdcon->block.clip = saved_clip;
             } else {
                 render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);

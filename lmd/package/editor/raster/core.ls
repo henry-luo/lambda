@@ -14,6 +14,7 @@ import actions: .actions
 import artwork: .artwork
 import styles: .styles
 import channels: .channels
+import arrange: .arrange
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -27,7 +28,7 @@ pub fn open_session(image) any^ {
     let checked = model.validate(ready)^
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
-        target:"pixels",selection:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
+        target:"pixels",selection:null,crop:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
         background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
@@ -38,20 +39,16 @@ pub fn record(before,after,label,group=null) {
         let tx = {doc_before:before.doc,doc_after:after.doc,steps:[],
             sel_before:model.context(before),sel_after:model.context(after),
             meta:[{name:"label",value:label},*if (group == null) [] else [{name:"historyGroup",value:group}]]}
-        {*:after,hist:history.history_push(before.hist,tx)}
+        // geometry drafts cannot survive a canvas extent change.
+        {*:after,crop:if (before.doc.width != after.doc.width or before.doc.height != after.doc.height) null else after.crop,
+            hist:history.history_push(before.hist,tx)}
     }
 }
 pub fn step_history(st,redo=false) {
     let result = if (redo) history.history_redo(st.hist,st.doc) else history.history_undo(st.hist,st.doc)
-    model.restore({*:st,doc:result.doc,hist:result.hist,gesture:null},result.sel)
+    model.restore({*:st,doc:result.doc,hist:result.hist,gesture:null,crop:null},result.sel)
 }
 pub fn mark_saved(st,snapshot) => {*:st,saved:snapshot}
-fn unlocked(st) any^ {
-    let roots = model.selected_roots(st)^
-    if (model.locked(st.doc,[for (row in roots) row.path],true))
-        raise error("Raster: target layer is locked")
-    else roots
-}
 fn insert(st,node,parent=null) any^ {
     let dest = model.destination(st,parent)^
     // inserting changes the owning group, including when the target itself is new.
@@ -69,7 +66,7 @@ fn duplicated(node,prefix) any^ {
     else renamed
 }
 fn same_parent(st) any^ {
-    let rows = unlocked(st)^
+    let rows = model.unlocked_roots(st)^
     let parent = sequence.parent_path(rows[0].path)
     if (not all([for (row in rows) sequence.parent_path(row.path) == parent]))
         raise error("Raster: select sibling layers for this operation")
@@ -102,7 +99,7 @@ fn scaled(node,sx,sy) any^ {
 }
 fn edit_node(st,command) any^ {
     let row = model.active(st)^
-    let checked = if (command.id != "layer.lock") unlocked(st)^ else []
+    let checked = if (command.id != "layer.lock") model.unlocked_roots(st)^ else []
     let node = row.node
     let changed = if (command.id == "layer.rename") (
         if (not (command.name is string) or len(command.name)<1 or len(command.name)>256)
@@ -191,7 +188,7 @@ pub fn apply_command(st,command) any^ {
         insert(st,duplicated(row.node,model.fresh_id(st.doc))^ )^
     }
     else if (id == "layer.delete") {
-        let selected = unlocked(st)^
+        let selected = model.unlocked_roots(st)^
         // remove deepest/rightmost siblings first so each remaining content path stays valid.
         let ordered = reverse(selected)
         let changed = reduce([st.doc,*ordered],(image,row) => (
@@ -200,14 +197,14 @@ pub fn apply_command(st,command) any^ {
         {*:st,doc:changed,selected:[],target:"pixels"}
     }
     else if (id == "layer.move") {
-        let rows = unlocked(st)^
+        let rows = model.unlocked_roots(st)^
         if (not (command.dx is int) or not (command.dy is int)) raise error("Raster: movement requires integral pixel offsets")
         else if (command.dx == 0 and command.dy == 0) st
         else {*:st,doc:reduce([st.doc,*rows],(image,row) => model.replace(image,row.id,model.translated(row.node,command.dx,command.dy)^)^)}
     }
     else if (id == "layer.reorder") {
         let row = model.active(st)^
-        let checked = unlocked(st)^
+        let checked = model.unlocked_roots(st)^
         let path = sequence.parent_path(row.path)
         let container = img.node_at(st.doc,path)^
         let entries = [for (i,child in content(container) where model.composition(child)) i]
@@ -241,7 +238,7 @@ pub fn apply_command(st,command) any^ {
     }
     else if (id == "layer.ungroup") {
         let row = model.active(st)^
-        let checked = unlocked(st)^
+        let checked = model.unlocked_roots(st)^
         if (name(row.node) != 'stack' or model.value(row.node.opacity,1)!=1 or row.node.visible == false or
             not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or
             (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in model.rows(row.node))
@@ -273,6 +270,7 @@ pub fn apply_command(st,command) any^ {
         {*:st,doc:channels.resized(img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,
             dimensions.width,dimensions.height,id == "document.resize_image")^,selection:coverage}
     }
+    else if (id in ["layer.align","layer.distribute"]) arrange.run_command(st,command)^
     else edit_node(st,command)^
 }
 fn checked_apply(st,command) any^ {

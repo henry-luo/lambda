@@ -1,0 +1,324 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos resized PNG and JPEG export preserves editable session",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#export-format"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#export-aspect"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#export-width"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#export-aspect"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#export-format"
+      },
+      "equals": "png"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-height"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#export-height"
+      },
+      "equals": "43"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/ui-sized.png",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#export-format"
+      },
+      "value": "jpeg"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#file-path"
+      },
+      "equals": "temp/photos/composition.jpg"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#export-alpha"
+      },
+      "equals": "flatten"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-width"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-height"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#export-height"
+      },
+      "equals": "53"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-quality"
+      },
+      "text": "73",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-background"
+      },
+      "text": "transparent",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/ui-sized.jpg",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": "export"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-background"
+      },
+      "text": "#ffffff",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open-tab"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/ui-sized.jpg",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dimensions"
+      },
+      "equals": "80 \u00d7 53 \u00b7 RGB/8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

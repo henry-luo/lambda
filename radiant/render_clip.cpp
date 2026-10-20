@@ -614,7 +614,8 @@ bool render_clip_push_vector(PaintList* paint, ViewElement* element,
     return paint_list_count(paint) > before;
 }
 
-RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip) {
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip,
+                                           const RdtMatrix* transform) {
     RenderClipScope scope = {};
     if (!rdcon || !clip) {
         return scope;
@@ -630,7 +631,7 @@ RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bo
     inline_shape.inset = {clip->left, clip->top, w, h, 0, 0};
     ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
     ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &mem, &inline_shape);
-    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem)) return scope;
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem, transform)) return scope;
     log_debug("[CLIP] pushed rect clip: (%.0f,%.0f) %.0fx%.0f",
         clip->left, clip->top, w, h);
     return scope;

@@ -53,6 +53,12 @@ static const int SVG_RESOURCE_STACK_MAX = 32;
 static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
 static thread_local int g_svg_resource_stack_depth = 0;
 static thread_local RasterRenderContext* g_svg_active_rdcon = nullptr;
+static thread_local bool* g_svg_vector_cacheable = nullptr;
+
+static void svg_vector_require_raster() {
+    // effect captures can bake the original pixel grid or backdrop into an image command.
+    if (g_svg_vector_cacheable) *g_svg_vector_cacheable = false;
+}
 
 struct SvgExportText {
     int begin, end;
@@ -523,6 +529,7 @@ struct SvgStyleContext {
     SvgResourceDocument* resources;
     lam::Own<UiContext> isolated_ui;   // headless shell for isolated HTML layout
     ImageSurface* isolated_surface;
+    bool has_foreign_object;         // host-wide: cross-root references can paint embedded HTML
 };
 
 struct SvgResourceDocument {
@@ -564,6 +571,8 @@ static const char* get_direct_text_content(Element* elem);
 
 static void svg_style_index_tree(SvgStyleContext* style, DomElement* node) {
     if (!node) return;
+    if (strcmp(node->local_name(), "foreignObject") == 0 && dom_element_is_svg(node))
+        style->has_foreign_object = true;
     if (style->isolated_document && node->tag_name) {
         const char* prefix = strchr(node->tag_name, ':');
         const char* uri = prefix ? dom_element_namespace_uri(node) : nullptr;
@@ -2519,6 +2528,7 @@ static bool svg_export_copy_captured_semantics(DisplayList* target, const Displa
 static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* content,
     SvgElementDrawFn draw, void* data, ImageSurface** surface, Bound* bounds, float padding = 0.0f,
     bool allow_empty = false, bool retain_semantics = false) {
+    svg_vector_require_raster();
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.svg.capture", "render.svg.capture.list_arena",
         "render.svg.capture.scratch_arena")) return false;
@@ -2566,6 +2576,7 @@ static bool svg_rasterize_resource_children(SvgInlineRenderContext* source, Elem
 }
 
 static ImageSurface* svg_create_paint_surface(float width, float height) {
+    svg_vector_require_raster();
     DomDocument* document = g_svg_active_rdcon && g_svg_active_rdcon->ui_context ?
         g_svg_active_rdcon->ui_context->document : nullptr;
     return render_surface_create_budgeted(document ? (MemContext*)document->services.mem_ctx : nullptr, width, height);
@@ -5711,6 +5722,7 @@ static bool svg_text_draw_bitmap_glyph(SvgTextLayout* layout, SvgTextRun* run,
         (native_text && bitmap->bitmap_scale > 0.0f && fabsf(bitmap->bitmap_scale - 1.0f) > 0.00001f)) {
         font_handle_release(font); return false;
     }
+    svg_vector_require_raster();
     ImageSurface* image = image_surface_create(bitmap->width, bitmap->height);
     if (!image) { font_handle_release(font); return false; }
     if (native_text) {
@@ -8362,19 +8374,27 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 // captured only on the second consecutive paint of identical content, so an
 // SVG that changes every frame never pays for a capture it would not reuse.
 
-struct SvgLayerEntry {
-    DomNodeRef element;             // the node id guards against a recycled element address
+struct SvgPaintStamp {
     uint32_t generation;            // svg_layer_generation last painted
     uint64_t document_epoch;        // host styles and cross-root resource mutations
-    uint64_t interaction_generation; // live HTML control values, focus and foreignObject scrolling
+    uint64_t interaction_generation; // selector state, plus scrolling when embedded HTML may be painted
     uint64_t animation_generation;  // SMIL samples change paint without changing DOM base attributes
     uint64_t font_generation;       // glyph cache lifetime changes
     uint64_t font_resource_generation; // descriptors and resolved font sources
     uint64_t image_resource_generation; // decoded/promoted pixels, GIF frames and ready network resources
+    SvgInitialPaint paint;          // inherited paint is part of the rendered content
+};
+
+enum SvgVectorState { SVG_VECTOR_UNTRIED, SVG_VECTOR_UNSUPPORTED, SVG_VECTOR_READY };
+struct SvgLayerEntry : SvgPaintStamp {
+    DomNodeRef element;             // the node id guards against a recycled element address
     int pixel_width, pixel_height;  // layer size in physical pixels
     float scale;
-    SvgInitialPaint paint;          // inherited paint is part of the rendered content
     ImageSurface* surface;          // null until the content was painted twice unchanged
+    bool vector_content;
+    SvgVectorState vector_state;
+    float viewport_width, viewport_height;
+    RdtMatrix vector_transform;     // original device placement; translations reuse its commands
     lam::Own<SvgLayerEntry> next;
 };
 
@@ -8383,19 +8403,21 @@ struct SvgLayerEntry {
 struct SvgLayerRegistry : DomDocumentResourceData {
     lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
+    RetainedDisplayListCache* vectors; // one bounded command cache for visible-overflow roots
     lam::Own<Pool> pool;  // holds this registry and its entries
     lam::Up<DomDocument> document;
 };
 
 static const size_t SVG_LAYER_MAX_BYTES = (size_t)48 << 20;         // one layer
 static const size_t SVG_LAYER_TOTAL_MAX_BYTES = (size_t)256 << 20;  // per document
+static const size_t SVG_VECTOR_TOTAL_MAX_BYTES = (size_t)16 << 20; // managed command storage
 
 bool render_svg_layers_pending(DomDocument* document) {
     SvgLayerRegistry* registry = document ? (SvgLayerRegistry*)document->services.svg_layer_registry : nullptr;
     if (!registry) return false;
     for (SvgLayerEntry* entry = registry->entries.get(); entry; entry = entry->next.get()) {
         size_t bytes = (size_t)entry->pixel_width * (size_t)entry->pixel_height * 4;
-        if (!entry->surface && bytes && bytes <= SVG_LAYER_MAX_BYTES &&
+        if (!entry->vector_content && !entry->surface && bytes && bytes <= SVG_LAYER_MAX_BYTES &&
             bytes <= SVG_LAYER_TOTAL_MAX_BYTES - registry->cached_bytes) return true;
     }
     return false;
@@ -8430,6 +8452,7 @@ static void svg_layer_registry_destroy(DomDocumentResourceData* data) {
     for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
         svg_layer_entry_release_surface(registry, entry);
     }
+    retained_dl_cache_destroy(registry->vectors);
     // later resource destructors must not reach the freed registry (teardown audit F5)
     registry->document->services.svg_layer_registry = nullptr;
     // the registry itself lives in this pool
@@ -8653,6 +8676,31 @@ static bool svg_layer_device_transform(const RasterRenderContext* rdcon, float* 
     return true;
 }
 
+static uint64_t svg_layer_interaction_generation(DomDocument* document) {
+    SvgPaintHostStyle* host = svg_host_style(document);
+    // scrolling only changes raster placement unless host HTML can be painted;
+    // include all host roots because <use> may reference a foreignObject elsewhere.
+    return host && !host->style.has_foreign_object
+        ? doc_state_selector_version(document->state) : doc_state_content_version(document->state);
+}
+
+static SvgPaintStamp svg_paint_stamp(RasterRenderContext* rdcon, DomElement* element,
+    const SvgInitialPaint* paint) {
+    DomDocument* document = rdcon->ui_context->document;
+    return {element->svg_layer_generation, document->style_content_epoch,
+        svg_layer_interaction_generation(document), svg_animation_generation(document),
+        font_context_glyph_cache_generation(rdcon->ui_context->font_ctx),
+        font_context_resource_generation(rdcon->ui_context->font_ctx),
+        image_cache_resource_generation(rdcon->ui_context), *paint};
+}
+
+static bool svg_paint_stamp_equal(const SvgPaintStamp& a, const SvgPaintStamp& b) {
+    return a.generation == b.generation && a.document_epoch == b.document_epoch &&
+        a.interaction_generation == b.interaction_generation && a.animation_generation == b.animation_generation &&
+        a.font_generation == b.font_generation && a.font_resource_generation == b.font_resource_generation &&
+        a.image_resource_generation == b.image_resource_generation && svg_layer_paint_equal(&a.paint, &b.paint);
+}
+
 // Paint the SVG from its cached layer when its content is unchanged. Returns
 // false when the caller must record the SVG directly: the first paint of new
 // content (which also arms the capture), a layer that is too large, or a
@@ -8677,37 +8725,19 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     SvgLayerEntry* entry = registry ? svg_layer_entry_for_element(registry, dom_elem) : nullptr;
     if (!entry) return false;
 
-    uint32_t generation = dom_elem->svg_layer_generation;
-    // presentation writes of non-inherited values elsewhere cannot change this raster
-    uint64_t document_epoch = rdcon->ui_context->document->style_content_epoch;
-    DocState* state = rdcon->ui_context->document->state;
-    // repaint/reflow bookkeeping is not an interaction change
-    uint64_t interaction_generation = doc_state_content_version(state);
-    uint64_t animation_generation = svg_animation_generation(rdcon->ui_context->document);
-    uint64_t font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
-    uint64_t font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
-    uint64_t image_generation = image_cache_resource_generation(rdcon->ui_context);
-    bool unchanged = entry->image_resource_generation == image_generation && entry->element.expected_id == dom_elem->DomNode::id && entry->generation == generation &&
-                     entry->document_epoch == document_epoch && entry->interaction_generation == interaction_generation &&
-                     entry->animation_generation == animation_generation &&
-                     entry->font_generation == font_generation &&
-                     entry->font_resource_generation == font_resource_generation &&
+    SvgPaintStamp stamp = svg_paint_stamp(rdcon, dom_elem, paint);
+    bool unchanged = !entry->vector_content && entry->element.expected_id == dom_elem->DomNode::id &&
+                     svg_paint_stamp_equal(*entry, stamp) &&
                      entry->pixel_width == width && entry->pixel_height == height &&
                      entry->scale == layer_scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
         svg_layer_entry_release_surface(registry, entry);
         entry->element = dom_node_ref(dom_elem);
-        entry->generation = generation;
-        entry->document_epoch = document_epoch;
-        entry->interaction_generation = interaction_generation;
-        entry->animation_generation = animation_generation;
-        entry->font_generation = font_generation;
-        entry->font_resource_generation = font_resource_generation;
-        entry->image_resource_generation = image_generation;
+        *static_cast<SvgPaintStamp*>(entry) = stamp;
+        entry->vector_content = false;
         entry->pixel_width = width;
         entry->pixel_height = height;
         entry->scale = layer_scale;
-        entry->paint = *paint;
         if (mode != SVG_LAYER_MODE_EAGER) return false;
     }
     if (!entry->surface &&
@@ -8716,10 +8746,7 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
         return false;
     }
     // capture can resolve a font source; key the resulting paint by that resource.
-    entry->interaction_generation = doc_state_content_version(state);
-    entry->font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
-    entry->font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
-    entry->image_resource_generation = image_cache_resource_generation(rdcon->ui_context);
+    *static_cast<SvgPaintStamp*>(entry) = svg_paint_stamp(rdcon, dom_elem, paint);
     ImageSurface* surface = entry->surface;
     // whole device pixels, so the blit copies samples instead of resampling
     Rect dst = { roundf(content_rect->x * device_scale + offset_x),
@@ -8735,6 +8762,72 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
                                        rdcon->clip_shape_depth, 255);
     rdcon->has_transform = saved_has_transform;
     return true;
+}
+
+static SvgLayerEntry* svg_vector_prepare(RasterRenderContext* rdcon, DomElement* element,
+    float width, float height, const RdtMatrix& matrix, const SvgInitialPaint* paint,
+    Bound* marker, bool* painted) {
+    const char* mode = getenv("RADIANT_SVG_VECTOR_CACHE");
+    if ((mode && strcmp(mode, "off") == 0) || !rdcon->dl || !rdcon->ui_context ||
+        !rdcon->ui_context->document || rdcon->css3d_context ||
+        matrix.e31 != 0 || matrix.e32 != 0 || matrix.e33 != 1 ||
+        !rdt_matrix_project_rect_bounds(&matrix, 0, 0, width, height,
+            &marker->left, &marker->top, &marker->right, &marker->bottom)) return nullptr;
+    DomDocument* document = rdcon->ui_context->document;
+    auto* registry = (SvgLayerRegistry*)document->services.svg_layer_registry;
+    if (memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) {
+        if (registry) { retained_dl_cache_destroy(registry->vectors); registry->vectors = nullptr; }
+        return nullptr;
+    }
+    SvgPaintHostStyle* host = svg_host_style(document);
+    // cross-root <use> can paint host HTML; its layout dependencies exceed this vector contract.
+    if (!host || host->style.has_foreign_object) return nullptr;
+    registry = svg_layer_registry_for_document(document);
+    SvgLayerEntry* entry = registry ? svg_layer_entry_for_element(registry, element) : nullptr;
+    if (!entry) return nullptr;
+    if (!registry->vectors) {
+        registry->vectors = retained_dl_cache_create(registry->pool);
+        if (!registry->vectors) return nullptr;
+        retained_dl_cache_set_storage_budget(registry->vectors, SVG_VECTOR_TOTAL_MAX_BYTES);
+    }
+    SvgPaintStamp stamp = svg_paint_stamp(rdcon, element, paint);
+    const RdtMatrix& original = entry->vector_transform;
+    bool unchanged = entry->vector_content && entry->element.expected_id == element->DomNode::id &&
+        svg_paint_stamp_equal(*entry, stamp) && entry->viewport_width == width &&
+        entry->viewport_height == height && entry->scale == rdcon->raster_scale &&
+        original.e11 == matrix.e11 && original.e12 == matrix.e12 &&
+        original.e21 == matrix.e21 && original.e22 == matrix.e22;
+    if (unchanged && entry->vector_state == SVG_VECTOR_UNSUPPORTED) return nullptr;
+    if (unchanged && entry->vector_state == SVG_VECTOR_READY) {
+        const auto* fragment = retained_dl_cache_get(registry->vectors, element->DomNode::id);
+        if (fragment && retained_dl_fragment_resources_valid(fragment, 0, stamp.font_generation) &&
+            retained_dl_append_fragment_translated(rdcon->dl, fragment,
+                matrix.e13 - original.e13, matrix.e23 - original.e23)) {
+            RENDER_METRIC_ADD(svg_vector_hits, 1);
+            *painted = true;
+            return nullptr;
+        }
+    }
+    svg_layer_entry_release_surface(registry, entry);
+    entry->element = dom_node_ref(element);
+    *static_cast<SvgPaintStamp*>(entry) = stamp;
+    entry->vector_content = true; entry->vector_state = SVG_VECTOR_UNTRIED;
+    entry->viewport_width = width; entry->viewport_height = height;
+    entry->scale = rdcon->raster_scale; entry->vector_transform = matrix;
+    return entry;
+}
+
+static void svg_vector_publish(RasterRenderContext* rdcon, DomElement* element,
+    SvgLayerEntry* entry, const SvgInitialPaint* paint, int first, bool cacheable) {
+    int end = rdcon->dl->item_count();
+    *static_cast<SvgPaintStamp*>(entry) = svg_paint_stamp(rdcon, element, paint);
+    if (!cacheable || !dl_supports_vector_translation(rdcon->dl, first, end)) {
+        entry->vector_state = SVG_VECTOR_UNSUPPORTED;
+        return;
+    }
+    auto* registry = (SvgLayerRegistry*)rdcon->ui_context->document->services.svg_layer_registry;
+    if (!rdcon->paint_failed && retained_dl_cache_capture_fragment(registry->vectors,
+        rdcon->dl, first, end, element->DomNode::id)) entry->vector_state = SVG_VECTOR_READY;
 }
 
 // ============================================================================
@@ -8817,9 +8910,18 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
     render_svg_initial_paint(view, rdcon->color, &initial_paint);
     RasterRenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
-    // unchanged content comes from its cached raster layer; otherwise record directly
-    if (!viewport_clip || !svg_layer_paint(rdcon, dom_elem, svg_elem, &content_rect, viewport_width,
-                         viewport_height, scale, &initial_paint)) {
+    bool painted = viewport_clip && svg_layer_paint(rdcon, dom_elem, svg_elem, &content_rect,
+        viewport_width, viewport_height, scale, &initial_paint);
+    Bound vector_marker = {};
+    SvgLayerEntry* vector_entry = !viewport_clip ? svg_vector_prepare(rdcon, dom_elem,
+        viewport_width, viewport_height, base_transform, &initial_paint, &vector_marker, &painted) : nullptr;
+    if (!painted) {
+        int first = vector_entry ? dl_begin_element(rdcon->dl, 0, vector_marker.left, vector_marker.top,
+            vector_marker.right - vector_marker.left, vector_marker.bottom - vector_marker.top) : -1;
+        if (!viewport_clip) RENDER_METRIC_ADD(svg_vector_recordings, 1);
+        bool cacheable = true;
+        bool* previous_cacheable = g_svg_vector_cacheable;
+        if (vector_entry) g_svg_vector_cacheable = &cacheable;
         render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
                                    rdcon->ui_context->document->document_pool, scale,
                                    font_ctx, &base_transform, rdcon->dl,
@@ -8830,6 +8932,13 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
                                    initial_paint.stroke_none, initial_paint.stroke_width,
                                    rdcon->paint_list, &rdcon->scratch,
                                    render_svg_reference_scope(dom_elem));
+        g_svg_vector_cacheable = previous_cacheable;
+        if (!cacheable && previous_cacheable) *previous_cacheable = false;
+        if (first >= 0) {
+            PaintRecordTarget target = rc_record_target(rdcon); paint_record_lower_pending(&target);
+            dl_end_element(rdcon->dl, first);
+            svg_vector_publish(rdcon, dom_elem, vector_entry, &initial_paint, first, cacheable);
+        }
     }
     g_svg_active_rdcon = saved_svg_rdcon;
 

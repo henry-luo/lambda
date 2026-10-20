@@ -575,7 +575,7 @@ visible before widening the feature catalogue.
 
 ## Implementation checkpoint — 2026-10-20
 
-The worktree implementation now covers the bounded M4 workflow core: retouch,
+The current editor covers the bounded M4 workflow core: retouch,
 editable embedded-font text/shapes/basic paths, shadow/glow/color overlay,
 coverage channels, independent tabs and sequential action batches. This builds
 on M2 painting/storage and M3 composition/projects, using shared image values
@@ -594,3 +594,12 @@ remain the acceptance cases (**S9.1.2 / S9.2.2 / S12.1.3**). The focused native
 replay measures edit/publication costs separately from actual display latency;
 it does not close the broader M5 scene/device matrix. Measurements and remaining
 limits are in the [implementation record](impl/Lambda_Impl_Photos.md).
+
+The next usability increment adds explicit canvas crop drafts with Apply/Cancel,
+layer alignment and equal-gap distribution, and configurable PNG/JPEG output
+size, transparency/background and JPEG quality. Crop previews and export
+settings remain outside authored history; applying a crop or arranging layers
+commits through the shared command history (**S9.1.2 / S9.2.2 / S12.1.3**).
+Export derives pixels from the original snapshot and publishes atomically
+(**S12.1.1v3**). Transform handles, straighten, guides/rulers, curves/levels,
+dedicated adjustment layers and the larger M5 items remain outstanding.

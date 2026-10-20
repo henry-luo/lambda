@@ -17,6 +17,8 @@ import styles: lambda.editor.raster.styles
 import channels: lambda.editor.raster.channels
 import workspaces: lambda.editor.raster.workspace
 import batch: lambda.editor.raster.batch
+import exports: lambda.editor.raster.export
+import crop: lambda.editor.raster.crop
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
@@ -48,17 +50,22 @@ pn publish(owner,st,workspace=null) {
 pn show_file(owner,st,kind) {
     let title = if (kind in ["open","open-tab"]) "Open image or Photos project" else if (kind == "place") "Place image as layer"
         else if (kind == "action-save") "Save action" else if (kind == "action-open") "Load action"
-        else if (kind == "save") "Save Photos project" else if (kind == "psd") "Export layered PSD" else "Export PNG"
+        else if (kind == "save") "Save Photos project" else if (kind == "psd") "Export layered PSD" else "Export image"
     dom.set_text_content(present.node(owner,"file-title"),title)
     dom.set_text_content(present.node(owner,"file-help"),if (kind in ["action-save","action-open"]) "Actions replay recorded edits on the currently selected layer."
         else if (kind == "save") "Use .photos to preserve all editable settings, or .psd for the supported PSD profile."
-        else if (kind == "export") "Exports the current composition with transparency."
+        else if (kind == "export") "Exports a resized copy. JPEG requires an opaque background. Your project stays editable."
         else if (kind == "psd") "Use .photos to keep transforms, blend modes and editable effects. Flatten the image for the supported PSD raster profile."
         else "Enter a local image, PSD or .photos project path.")
     dom.set_state(present.node(owner,"file-path"),"value",if (kind == "action-save") "temp/photos/action.laction" else if (kind == "save")
         (if (ends_with(lower(st.path),".photos")) st.path else "temp/photos/composition.photos")
         else if (kind == "psd") "temp/photos/composition.psd"
         else if (kind == "export") "temp/photos/composition.png" else "")
+    if (kind == "export") {
+        for (id,value in {'export-format':"png",'export-aspect':"locked",'export-width':st.doc.width,
+            'export-height':st.doc.height,'export-quality':90,'export-alpha':"preserve",'export-background':"#ffffff"})
+            present.set_value(present.node(owner,string(id)),string(value))
+    }
     let next = publish(owner,{*:st,dialog:kind,error:""})
     dom.focus_set(present.node(owner,"file-path"),false)
     return next
@@ -76,6 +83,13 @@ pn embed_font(owner,st,group=null) any^ {
 pn command(owner,st,action) any^ {
     if (st.recording != null and action in ["new","open","new-tab","open-tab","tab-close","batch-run","place","save","export","psd","action-save","action-open"])
         raise error("Photos: stop action recording before file operations")
+    if (action == "crop-cancel") { return {*:st,crop:null} }
+    if (action == "crop-apply") { return crop.apply_draft(st)^ }
+    if (starts_with(action,"align-") or starts_with(action,"distribute-")) {
+        return editor.exec(st,{id:if (starts_with(action,"align-")) "layer.align" else "layer.distribute",
+            *:if (starts_with(action,"align-")) ({mode:slice(action,6,len(action))}) else ({axis:slice(action,11,len(action))}),
+            relative:field(owner,"align-relative")})^
+    }
     if (action == "action-start") { return editor.exec(st,{id:"action.start",name:field(owner,"action-name")})^ }
     if (action == "batch-run") {
         let jobs = parse(field(owner,"batch-jobs"),'mark')^
@@ -176,9 +190,13 @@ pn command(owner,st,action) any^ {
         if (st.dialog == "open") { return replace_document(st,"open",path)^ }
         if (st.dialog == "open-tab") { return {*:replace_document(st,"open",path)^,tab_request:"add"} }
         if (st.dialog == "place") { return {*:files.place(st,path)^,dialog:"",error:"",status:"Image placed"} }
-        let format = if (st.dialog == "psd") "psd" else if (st.dialog == "export") "png"
+        let format = if (st.dialog == "psd") "psd" else if (st.dialog == "export") field(owner,"export-format")
             else if (ends_with(lower(path),".psd")) "psd" else "photos"
-        let saved = files.write_document(st,path,format)^
+        let options = if (st.dialog == "export") ({width:int(field(owner,"export-width")),height:int(field(owner,"export-height")),
+            alpha:field(owner,"export-alpha"),
+            *:if (field(owner,"export-alpha") == "flatten") ({background:field(owner,"export-background")}) else ({}),
+            *:if (format == "jpeg") ({quality:int(field(owner,"export-quality"))}) else ({})}) else ({})
+        let saved = files.write_document(st,path,format,options)^
         let next = if (st.dialog == "save") editor.mark_saved(st,saved.snapshot) else st
         let result = {*:next,dialog:"",path:if (st.dialog == "save") path else st.path,error:"",status:"Saved · " ++ path,pending:""}
         if (st.pending in ["close","tab-close"]) { return {*:result,tab_request:if (st.pending == "close") "close-window" else "close-tab"} }
@@ -325,6 +343,21 @@ on change(evt) {
         session = {*:session,size_draft:{*:session.size_draft,[key]:int(field(owner,id))}}
         return 'handled'
     }
+    if (starts_with(id,"export-")) {
+        if (id == "export-format") {
+            let format = field(owner,id)
+            present.set_value(present.node(owner,"file-path"),exports.destination(field(owner,"file-path"),format)^)
+            present.set_value(present.node(owner,"export-alpha"),if (format == "jpeg") "flatten" else "preserve")
+        }
+        if (id in ["export-width","export-height"] and field(owner,"export-aspect") == "locked") {
+            let width = id == "export-width"
+            let value = float(field(owner,id))
+            if (model.finite(value) and value>0) present.set_value(present.node(owner,if (width) "export-height" else "export-width"),
+                string(exports.proportional_extent(session.doc,value,width)))
+        }
+        session = publish(owner,session,documents)
+        return 'handled'
+    }
     var next = {*:session,error:""}
     if (id == "channel-view") {
         editor.exec(next,{id:"channel.view",channel:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
@@ -365,7 +398,7 @@ on change(evt) {
 }
 on pointerdown(evt) {
     let owner = owner_of(evt)
-    if (evt.button != 0 or session.dialog != "" or dom.closest(evt.target,"#stage") == null) { return 'pass' }
+    if (evt.button != 0 or session.dialog != "" or dom.closest(evt.target,"#stage") == null or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
     dom.focus_set(present.node(owner,"stage"),false)
     var next = session
     interaction.begin(session,pointer_input(owner,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
@@ -411,19 +444,24 @@ on keydown(evt) {
     var action = ""
     if (evt.key == "Escape") {
         let trigger = if (session.dialog in ["open","place","save","export"]) session.dialog else "stage"
-        session = publish(owner,{*:cancel_preview(owner,session),dialog:"",pending:""},documents)
+        session = publish(owner,{*:cancel_preview(owner,session),dialog:"",pending:"",crop:null},documents)
         dom.focus_set(present.node(owner,trigger),false)
         return 'prevent-default'
     }
     if (session.dialog != "" and evt.key == "Tab") {
-        let controls = if (session.dialog == "discard") ["discard-cancel","discard-save","discard-confirm"] else ["file-path","file-cancel","file-confirm"]
+        let controls = if (session.dialog == "discard") ["discard-cancel","discard-save","discard-confirm"]
+            else if (session.dialog == "export") ["file-path","export-format","export-aspect","export-width","export-height",
+                *if (field(owner,"export-format") == "jpeg") ["export-quality"] else [],"export-alpha",
+                *if (field(owner,"export-alpha") == "flatten") ["export-background"] else [],"file-cancel","file-confirm"]
+            else ["file-path","file-cancel","file-confirm"]
         let current = model.value([for (i,id in controls where id == dom.get_attribute(evt.target,"id")) i][0],0)
-        dom.focus_set(present.node(owner,controls[(current+(if (evt.shiftKey) 2 else 1))%3]),false)
+        dom.focus_set(present.node(owner,controls[(current+(if (evt.shiftKey) len(controls)-1 else 1))%len(controls)]),false)
         return 'prevent-default'
     }
     if (session.dialog != "") { return 'pass' }
     if (typing) { return 'pass' }
-    if (modifier and lower(evt.key) == "z") { action = if (evt.shiftKey) "history.redo" else "history.undo" }
+    if (evt.key == "Enter" and session.tool == "crop") { action = "crop-apply" }
+    else if (modifier and lower(evt.key) == "z") { action = if (evt.shiftKey) "history.redo" else "history.undo" }
     else if (modifier and lower(evt.key) == "s") { action = "save" }
     else if (modifier and lower(evt.key) == "a") { action = "selection.all" }
     else if (modifier and lower(evt.key) == "d") { action = "selection.clear" }
