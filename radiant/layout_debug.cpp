@@ -55,6 +55,11 @@ static const char* bucket_name(LayoutProfileBucket bucket) {
         case LAYOUT_PROFILE_INTRINSIC: return "intrinsic";
         case LAYOUT_PROFILE_STYLE: return "style";
         case LAYOUT_PROFILE_IMAGE: return "image";
+        case LAYOUT_PROFILE_INTRINSIC_HEIGHT: return "intrinsic-height";
+        case LAYOUT_PROFILE_FLEX_PREPARE: return "flex-prepare";
+        case LAYOUT_PROFILE_FLEX_BASIS: return "flex-basis";
+        case LAYOUT_PROFILE_FLEX_CROSS: return "flex-cross";
+        case LAYOUT_PROFILE_FLEX_CONTENT: return "flex-content";
         default: return "unknown";
     }
 }
@@ -206,6 +211,21 @@ void layout_profiler_report(LayoutContext* lycon) {
     if (!lycon || !lycon->profiler.enabled) return;
     LayoutProfiler* p = &lycon->profiler;
 
+    for (uint8_t bucket = 0; bucket < LAYOUT_PROFILE_BUCKET_COUNT; bucket++) {
+        if (!p->scope_calls[bucket]) continue;
+        log_notice("[LAYOUT_PROFILE] scope: %s calls=%llu inclusive=%.1fms self=%.1fms",
+            bucket_name(static_cast<LayoutProfileBucket>(bucket)),
+            (unsigned long long)p->scope_calls[bucket], p->scope_total_ms[bucket],
+            p->scope_self_ms[bucket]);
+    }
+    log_notice("[LAYOUT_PROFILE] intrinsic_miss: cold=%llu invalidated=%llu generation=%llu query=%llu block=%llu parent=%llu",
+        (unsigned long long)p->intrinsic_miss_reasons[0],
+        (unsigned long long)p->intrinsic_miss_reasons[1],
+        (unsigned long long)p->intrinsic_miss_reasons[2],
+        (unsigned long long)p->intrinsic_miss_reasons[3],
+        (unsigned long long)p->intrinsic_miss_reasons[4],
+        (unsigned long long)p->intrinsic_miss_reasons[5]);
+
     log_notice("[LAYOUT_PROFILE] buckets: block=%.1fms inline=%.1fms text=%.1fms flex=%.1fms grid=%.1fms table=%.1fms intrinsic=%.1fms style=%.1fms image=%.1fms cache=%lld/%lld",
         p->block_ms, p->inline_ms, p->text_ms, p->flex_ms, p->grid_ms, p->table_ms,
         p->intrinsic_ms, p->style_ms, p->image_ms,
@@ -235,9 +255,21 @@ void layout_profiler_report(LayoutContext* lycon) {
     }
 }
 
+void layout_restore_context(LayoutContext* context, const LayoutContext& saved) {
+    // restoring geometry must not erase the work performed by nested layout.
+    LayoutProfiler profiler = context->profiler;
+    *context = saved;
+    context->profiler = profiler;
+}
+
+thread_local LayoutProfileScope* LayoutProfileScope::active = nullptr;
+
 LayoutProfileScope::LayoutProfileScope(LayoutContext* l, LayoutProfileBucket b, const DomNode* n)
-    : lycon(l), node(n), bucket(b), start_ms(0.0) {
+    : lycon(l), node(n), bucket(b), start_ms(0.0), child_ms(0.0), parent(nullptr) {
     if (lycon && lycon->profiler.enabled) {
+        parent = active;
+        active = this;
+        lycon->profiler.scope_calls[bucket]++;
         start_ms = layout_profiler_now_ms();
     }
 }
@@ -245,8 +277,16 @@ LayoutProfileScope::LayoutProfileScope(LayoutContext* l, LayoutProfileBucket b, 
 LayoutProfileScope::~LayoutProfileScope() {
     if (!lycon || !lycon->profiler.enabled || start_ms <= 0.0) return;
     double elapsed = layout_profiler_now_ms() - start_ms;
+    if (parent) parent->child_ms += elapsed;
+    active = parent;
+    lycon->profiler.scope_total_ms[bucket] += elapsed;
+    lycon->profiler.scope_self_ms[bucket] += elapsed - child_ms;
     layout_profiler_add_bucket(&lycon->profiler, bucket, elapsed);
     layout_profiler_record_node(&lycon->profiler, bucket, node, elapsed);
+    if (elapsed >= 100.0 && node) {
+        log_notice("[LAYOUT_PROFILE] subtree: %s %.1fms self=%.1fms %s",
+            bucket_name(bucket), elapsed, elapsed - child_ms, node->source_loc());
+    }
 }
 
 } // namespace radiant

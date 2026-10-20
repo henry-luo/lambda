@@ -16,6 +16,7 @@ CssStyleMiss css_resolved_style_last_miss(DomElement* element);
 
 // selected-view computed state; size-query caches have a separate lifetime.
 bool css_resolved_style_apply(LayoutContext* context, DomElement* element);
+bool css_resolved_style_is_containing_block_independent(DomElement* element);
 void css_resolved_style_release(LayoutCache* cache, Pool* pool);
 void css_resolved_style_record(LayoutContext* context, CssPropertyCode property,
     const CssDeclaration* declaration, const CssValue* value, int64_t priority);

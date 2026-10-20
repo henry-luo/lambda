@@ -32,10 +32,11 @@ static TextIntrinsicWidths flex_measure_text_widths(LayoutContext* lycon,
 }
 
 static void flex_store_intrinsic_sizes(ViewElement* item, float min_width, float max_width,
-                                       float min_height, float max_height) {
+                                       float min_height, float max_height, bool width_only = false) {
     item->fi->intrinsic_width.min_content = min_width;
     item->fi->intrinsic_width.max_content = max_width;
     item->fi->has_intrinsic_width = true;
+    if (width_only) return;
     item->fi->intrinsic_height.min_content = min_height;
     item->fi->intrinsic_height.max_content = max_height;
     item->fi->has_intrinsic_height = true;
@@ -839,7 +840,8 @@ static bool flex_measure_pseudo_contents(LayoutContext* lycon, DomElement* item,
     return found;
 }
 
-void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout) {
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout,
+                                    bool width_only) {
     if (!item) {
         return;
     }
@@ -852,9 +854,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     if (!has_flex_item_prop(item)) {
         return;
     }
-    // Skip if BOTH intrinsic sizes are already calculated
-    // We need both because cross-axis alignment may need the cross-axis intrinsic size
-    if (item->fi->has_intrinsic_width && item->fi->has_intrinsic_height) {
+    radiant::LayoutProfileScope profile(flex_layout ? flex_layout->lycon : nullptr,
+        radiant::LAYOUT_PROFILE_FLEX_BASIS, item);
+    // main-axis width does not need a speculative height before flexing assigns a wrap width.
+    if (flex_measure_item_uses_vertical_writing_mode(item)) width_only = false;
+    if (item->fi->has_intrinsic_width && (width_only || item->fi->has_intrinsic_height)) {
         return;
     }
     // CRITICAL FIX: Set up font for the flex item BEFORE measuring text
@@ -1054,10 +1058,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             max_width = item_sizes.max_content;
             min_width = layout_content_size_from_border_box(lam::view_as_block(item), min_width, true);
             max_width = layout_content_size_from_border_box(lam::view_as_block(item), max_width, true);
-            // Always use calculate_max_content_height for accurate height measurement.
-            // The cached heights from measure_flex_child_content use inaccurate
-            // hardcoded tag-based estimates (e.g. p=36px, h1=32px + artificial margins).
-            {
+            // height queries use their actual wrapping constraint, when that axis is requested.
+            if (!width_only) {
                 float available_width = 10000.0f;
                 float percentage_containing_width = -1.0f;
                 // A stretched column-flex item uses the container cross size. A
@@ -1204,36 +1206,38 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         } else if (layout_form_control_has_native_intrinsic_size(child_view)) {
                             child_min_width = child_max_width = child_view->form->intrinsic_width;
                         }
-                        // Get child height - explicit (from View or DOM) or intrinsic
-                        if (child_explicit.has_height) {
-                            child_height = child_explicit.height;
-                        } else if (is_row_flex_container && lycon && flex_layout &&
-                                   !is_main_axis_horizontal(flex_layout) &&
-                                   flex_layout->cross_axis_size > 0) {
-                            child_height = flex_measure_row_child_height_at_estimated_share(
-                                lycon, c, item, child_view, flex_layout);
-                        } else if (child_view->form_control()) {
-                            child_height = layout_form_control_has_native_intrinsic_size(child_view)
-                                ? child_view->form->intrinsic_height : 0.0f;
-                            if (child_height <= 0.0f && lycon) {
-                                child_height = flex_measure_intrinsic_max_height(lycon, c, child_max_width);
+                        if (!width_only) {
+                            // Get child height - explicit (from View or DOM) or intrinsic
+                            if (child_explicit.has_height) {
+                                child_height = child_explicit.height;
+                            } else if (is_row_flex_container && lycon && flex_layout &&
+                                       !is_main_axis_horizontal(flex_layout) &&
+                                       flex_layout->cross_axis_size > 0) {
+                                child_height = flex_measure_row_child_height_at_estimated_share(
+                                    lycon, c, item, child_view, flex_layout);
+                            } else if (child_view->form_control()) {
+                                child_height = layout_form_control_has_native_intrinsic_size(child_view)
+                                    ? child_view->form->intrinsic_height : 0.0f;
+                                if (child_height <= 0.0f && lycon) {
+                                    child_height = flex_measure_intrinsic_max_height(lycon, c, child_max_width);
+                                }
+                            } else if (child_display.inner == CSS_VALUE_FLEX && lycon) {
+                                float available_width = flex_child_height_fallback_available_width(
+                                    lycon, item, child_view, flex_layout, is_row_flex_container, true);
+                                // nested flex children may be measured before their own
+                                // stretched width is assigned; use the parent's constrained
+                                // content width so auto-min height sees wrapped text.
+                                child_height = flex_measure_intrinsic_max_height(
+                                    lycon, c, available_width);
                             }
-                        } else if (child_display.inner == CSS_VALUE_FLEX && lycon) {
-                            float available_width = flex_child_height_fallback_available_width(
-                                lycon, item, child_view, flex_layout, is_row_flex_container, true);
-                            // nested flex children may be measured before their own
-                            // stretched width is assigned; use the parent's constrained
-                            // content width so auto-min height sees wrapped text.
-                            child_height = flex_measure_intrinsic_max_height(
-                                lycon, c, available_width);
-                        }
-                        // A retained child FlexItemProp height is skipped for the
-                        // same reason as its width; the fallback below measures it.
-                        // CRITICAL: If child height is still 0 without explicit height,
-                        // try to measure content-based height from the DOM tree
-                        if (child_height == 0.0f && !child_explicit.has_height) {
-                            child_height = flex_measure_zero_child_height_fallback(
-                                c, lycon, item, child_view, flex_layout, is_row_flex_container);
+                            // A retained child FlexItemProp height is skipped for the
+                            // same reason as its width; the fallback below measures it.
+                            // CRITICAL: If child height is still 0 without explicit height,
+                            // try to measure content-based height from the DOM tree
+                            if (child_height == 0.0f && !child_explicit.has_height) {
+                                child_height = flex_measure_zero_child_height_fallback(
+                                    c, lycon, item, child_view, flex_layout, is_row_flex_container);
+                            }
                         }
                         // CSS Flexbox §9.9.1: Each flex item's contribution to the container's
                         // intrinsic size is its outer size (content + padding + border + margin).
@@ -1313,5 +1317,5 @@ store_results:
         }
     }
 
-    flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
+    flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height, width_only);
 }

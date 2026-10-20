@@ -65,13 +65,6 @@ struct CssGeometryContext {
     bool has_parent, intrinsic_width, intrinsic_height, vertical_inline;
 };
 
-struct CssFontKey {
-    const char* family;
-    float size, zoom, letter_spacing, word_spacing;
-    CssEnum style, weight, variant;
-    int16_t numeric_weight;
-};
-
 struct CssResolvedStyle {
     DomElement* element;
     StyleTree* specified;
@@ -108,18 +101,26 @@ static void css_style_unsupported(CssResolvedStyle* style, CssStyleMiss reason) 
     style->last_miss = reason;
 }
 
-static CssFontKey css_font_key(const FontProp* font) {
+CssFontKey css_font_key(const FontProp* font) {
     if (!font) return {};
     return {font->family, font->font_size, font->used_zoom,
         font->letter_spacing, font->word_spacing, font->font_style,
-        font->font_weight, font->font_variant, font->font_weight_numeric};
+        font->font_weight, font->font_variant, font->font_kerning, font->font_weight_numeric};
 }
 
-static bool css_font_keys_equal(const CssFontKey& a, const CssFontKey& b) {
+bool css_font_keys_equal(const CssFontKey& a, const CssFontKey& b) {
     return a.family == b.family && a.size == b.size && a.zoom == b.zoom &&
         a.letter_spacing == b.letter_spacing && a.word_spacing == b.word_spacing &&
         a.style == b.style && a.weight == b.weight && a.variant == b.variant &&
-        a.numeric_weight == b.numeric_weight;
+        a.kerning == b.kerning && a.numeric_weight == b.numeric_weight;
+}
+
+bool css_resolved_style_is_containing_block_independent(DomElement* element) {
+    CssResolvedStyle* style = element && element->layout_cache
+        ? element->layout_cache->resolved_style.get() : nullptr;
+    // unknown consumers retain the complete measurement context as their key.
+    // viewport/root-font inputs stay in the intrinsic query's key, independently of boxes.
+    return style && style->valid && style->dependencies == 0;
 }
 
 static DomElement* css_style_parent(DomElement* element) {

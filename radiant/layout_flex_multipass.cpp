@@ -1022,6 +1022,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 }
 
 static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item) {
+    radiant::LayoutProfileScope profile(lycon, radiant::LAYOUT_PROFILE_FLEX_CONTENT, flex_item);
     log_enter();
 
     LayoutContext saved_context = *lycon;
@@ -1092,7 +1093,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         flex_item->content_width = math_width;
         flex_item->content_height = math_height;
         if (flex_item->blk) flex_item->block_mut()->first_line_baseline = math_baseline;
-        *lycon = saved_context;
+        radiant::layout_restore_context(lycon, saved_context);
         log_leave();
         return;
     }
@@ -1257,7 +1258,7 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     int current_depth = lycon->depth;
     int current_flex_depth = lycon->flex_depth;
     int current_node_count = lycon->node_count;
-    *lycon = saved_context;
+    radiant::layout_restore_context(lycon, saved_context);
     lycon->depth = current_depth;
     lycon->flex_depth = current_flex_depth;
     lycon->node_count = current_node_count;
