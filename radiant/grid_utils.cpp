@@ -556,22 +556,20 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             available = AvailableSpace::make_max_content();
         }
 
-        // Use unified API to measure all sizes. Grid item percentage margins and
-        // paddings resolve against the grid container inline size, so preserve that
-        // parent width for any style re-resolution triggered during measurement.
+        // grid track queries consume one axis; measuring the other can recursively
+        // enter nested grids and repeat the entire subtree for an unused result.
         bool override_parent = is_row_axis && lycon->grid_container &&
                                lycon->grid_container->content_width > 0;
-        IntrinsicSizesBidirectional all_sizes;
-        if (override_parent) {
-            LayoutContainingBlockScope grid_parent_scope(
-                lycon, LAYOUT_AXIS_X, lycon->grid_container->content_width);
-            all_sizes = measure_intrinsic_sizes(lycon, item, available);
-        } else {
-            all_sizes = measure_intrinsic_sizes(lycon, item, available);
+        {
+            LayoutContainingBlockScope grid_parent_scope(lycon, LAYOUT_AXIS_X,
+                override_parent ? lycon->grid_container->content_width : 0.0f, override_parent);
+            if (is_row_axis) {
+                float height = calculate_max_content_height(lycon, item, available.width.value);
+                sizes = {height, height};
+            } else {
+                sizes = calculate_node_intrinsic_widths(lycon, item);
+            }
         }
-
-        // Extract the axis we need
-        sizes = intrinsic_sizes_for_axis(all_sizes, !is_row_axis);
 
         // Ensure max >= min
         if (sizes.max_content < sizes.min_content) {

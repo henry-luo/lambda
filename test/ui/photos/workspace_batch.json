@@ -1,0 +1,487 @@
+{
+  "name": "Photos independent document tabs and batch action outcomes",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/tab-source.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#00ff00",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-1\"]"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-2\"]"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-1\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tab",
+      "equals": "document-2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tab",
+      "equals": "document-2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": "discard"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#discard-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-tab"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#discard-save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/tab-green.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tab",
+      "equals": "document-3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open-tab"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/tab-source.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#0000ff",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-start"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-stop"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-actions",
+      "equals": "1"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#batch-jobs"
+      },
+      "text": "[{\"source\": \"temp/photos/tab-source.photos\", \"target\": \"temp/photos/tab-batch.png\", \"format\": \"png\"}, {\"source\": \"temp/photos/not-present.photos\", \"target\": \"temp/photos/tab-failure.png\", \"format\": \"png\"}]",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#batch-run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-batch-succeeded",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-batch-failed",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

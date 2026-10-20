@@ -1,6 +1,14 @@
 #pragma once
 #include <gtest/gtest.h>
 #include "../radiant/view.hpp"
+#include "../radiant/render.hpp"
+
+inline DisplayItem test_radiant_command(const DisplayList* list, int ordinal) {
+    DisplayListCursor cursor(list);
+    while (cursor.next()) if (ordinal-- == 0) return *cursor.item;
+    ADD_FAILURE() << "missing expanded display command";
+    return {};
+}
 
 inline void test_radiant_expect_surface_pixel(const ImageSurface* surface,
         unsigned x, unsigned y, unsigned r, unsigned g, unsigned b, unsigned tolerance = 2) {

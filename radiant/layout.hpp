@@ -342,6 +342,7 @@ struct IntrinsicFontScope {
     ~IntrinsicFontScope();
 };
 
+IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
@@ -717,6 +718,9 @@ bool layout_can_retain_geometry(LayoutContext* lycon);
 // Normal-flow collapse consumed this element's used boundary, so its next
 // committed style pass resolves it afresh (dom_node_resolve_style).
 bool layout_boundary_consumed_by_flow(DomElement* element);
+void dom_node_resolve_style(DomNode* node, LayoutContext* context);
+void layout_reset_boundary_flow_state(BoundaryProp* boundary);
+void layout_reset_position_style(LayoutContext* context, ViewSpan* view);
 
 namespace radiant {
 
@@ -752,6 +756,16 @@ struct CacheEntry {
     SizeF computed_size;
     bool valid;
 };
+// tier-3: computed font inputs, borrowing the view's family name.
+struct CssFontKey {
+    const char* family;
+    float size, zoom, letter_spacing, word_spacing;
+    CssEnum style, weight, variant, kerning;
+    int16_t numeric_weight;
+};
+CssFontKey css_font_key(const FontProp* font);
+bool css_font_keys_equal(const CssFontKey& a, const CssFontKey& b);
+
 // tier-3: layout-transient, valid within one measurement generation
 struct IntrinsicWidthCacheEntry {
     IntrinsicSizes sizes;
@@ -759,19 +773,34 @@ struct IntrinsicWidthCacheEntry {
     SizeF block_size;
     SizeF parent_size;
     uint32_t generation;
+    CssFontKey input_font;
+    uint64_t style_epoch;
+    uint64_t font_generation;
+    uint32_t style_version;
+    float root_font_size, raster_scale;
+    bool context_independent;
 };
-// tier-3: layout-transient, valid within pass
+struct CssResolvedStyle;
+// tier-2: selected-view pool, with independently invalidated sizing and CSS state.
 struct LayoutCache {
+    // computed CSS outlives individual measurement contexts, unlike size results.
+    lam::Own<CssResolvedStyle> resolved_style;
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
     // Percentage terms and content-only requests each need a distinct result;
     // retain all four contributions within the current layout pass.
     IntrinsicWidthCacheEntry intrinsic_widths[4];
+    // conservative ancestry declarations for negative inheritance queries.
+    uint64_t inherited_declaration_mask;
+    uint64_t inherited_style_epoch;
+    uint64_t inherited_mutation_epoch;
+    uint32_t inherited_generation;
     bool is_empty;
     uint32_t generation;
 };
 
 inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
+    cache->resolved_style = nullptr;
     cache->final_layout.valid = false;
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
@@ -781,11 +810,15 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
         cache->intrinsic_widths[i].generation = 0;
     }
     cache->is_empty = true;
+    cache->inherited_generation = 0;
     cache->generation = generation;
 }
 
 inline void layout_cache_clear(LayoutCache* cache) {
+    // size-query invalidation does not retire the separately owned computed CSS.
+    CssResolvedStyle* resolved = cache->resolved_style;
     layout_cache_init(cache, cache ? cache->generation : 0);
+    cache->resolved_style = lam::own(resolved);
 }
 
 inline int layout_cache_compute_slot(
@@ -1526,6 +1559,11 @@ enum LayoutProfileBucket : uint8_t {
     LAYOUT_PROFILE_INTRINSIC,
     LAYOUT_PROFILE_STYLE,
     LAYOUT_PROFILE_IMAGE,
+    LAYOUT_PROFILE_INTRINSIC_HEIGHT,
+    LAYOUT_PROFILE_FLEX_PREPARE,
+    LAYOUT_PROFILE_FLEX_BASIS,
+    LAYOUT_PROFILE_FLEX_CROSS,
+    LAYOUT_PROFILE_FLEX_CONTENT,
     LAYOUT_PROFILE_BUCKET_COUNT
 };
 // tier-3: layout-transient, valid within pass
@@ -1553,6 +1591,10 @@ typedef struct LayoutProfiler {
     uint64_t intrinsic_reentrant;
     double intrinsic_inclusive_ms;
     double intrinsic_exclusive_ms;
+    uint64_t intrinsic_miss_reasons[6];
+    uint64_t scope_calls[LAYOUT_PROFILE_BUCKET_COUNT];
+    double scope_total_ms[LAYOUT_PROFILE_BUCKET_COUNT];
+    double scope_self_ms[LAYOUT_PROFILE_BUCKET_COUNT];
 
     bool enabled;
     LayoutProfileNode top_nodes[8];
@@ -1580,12 +1622,16 @@ void layout_profiler_note_intrinsic_request(LayoutProfiler* profiler, bool cache
 void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses);
 void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();
+void layout_restore_context(LayoutContext* context, const LayoutContext& saved);
 // tier-3: layout-transient, valid within pass
 struct LayoutProfileScope {
     lam::Up<LayoutContext> lycon;
     lam::Up<const DomNode> node;
     LayoutProfileBucket bucket;
     double start_ms;
+    double child_ms;
+    LayoutProfileScope* parent;
+    static thread_local LayoutProfileScope* active;
 
     LayoutProfileScope(LayoutContext* l, LayoutProfileBucket b, const DomNode* n);
     ~LayoutProfileScope();
@@ -3422,7 +3468,8 @@ void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
                                   FlexContainerLayout* parent_flex,
                                   float final_width, float final_height);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
-void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout,
+                                    bool width_only = false);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache(ViewTree* tree);
@@ -3745,7 +3792,8 @@ int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
 int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
 void determine_grid_size(GridContainerLayout* grid_layout);
 void initialize_track_sizes(GridContainerLayout* grid_layout);
-void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container,
+    bool columns_only = false);
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
@@ -3754,7 +3802,8 @@ void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const CssValue
 bool copy_grid_template_areas(Pool* pool, GridProp* target, const GridProp* source);
 bool grid_serialize_used_tracks(StringBuf* output, const GridContainerLayout* grid, bool columns);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
-void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container,
+    bool intrinsic_width_only = false);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
 void init_grid_item_view(LayoutContext* lycon, DomNode* child);
@@ -3763,9 +3812,7 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
 IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container);
 void layout_apply_grid_item_min_content_floor(
     LayoutContext* lycon, DomElement* item, IntrinsicSizes* sizes);
-void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
-                                  float* min_width, float* max_width,
-                                  float* min_height, float* max_height);
+
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 // tier-3: layout-transient, valid within pass
@@ -3775,6 +3822,7 @@ typedef struct LayoutContext {
     lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
     lam::Up<struct ViewCssStyle> selected_style;
     bool css_query_probe; // resolve geometry without committing new motion timelines/snapshots
+    lam::Up<radiant::CssResolvedStyle> css_style_recording;
     // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
     lam::Up<DomElement> measurement_root;
 
@@ -3869,6 +3917,7 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
 bool layout_css_value_has_nonzero_percentage(const CssValue* value);
+float layout_containing_inline_percentage_base(LayoutContext* context);
 bool layout_css_value_has_percentage(const CssValue* value);
 CssMathResult layout_evaluate_css_math(LayoutContext* context, uintptr_t property,
     const CssValue* value, bool computed_units = false, bool preserve_percentages = false);
@@ -3876,7 +3925,7 @@ void layout_resolve_font_spacing(LayoutContext* context, FontProp* font,
     CssPropertyCode property, const CssValue* value);
 // compute length terms at their owner while retaining percentage terms for the used box.
 void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
-    CssPropertyCode property = CSS_PROPERTY_TRANSFORM);
+    CssPropertyCode property = CSS_PROPERTY_TRANSFORM, bool computed_units = false);
 CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* value,
     CssPropertyCode property, Pool* pool);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
@@ -5730,6 +5779,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 // Pass-local layout structs live on the Stack: their fields borrow (Up) or
 // hold scope-owned arrays (OwnArr); they may point at any Heap level.
 LAM_NODE_OF(radiant::LayoutCache, NodeViewTree);
+LAM_NODE_OF(radiant::CssResolvedStyle, NodeViewTree);
 LAM_NODE_OF(IntrinsicFontScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlock, NodeStack);
 LAM_NODE_OF(radiant::LayoutProfileScope, NodeStack);

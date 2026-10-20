@@ -694,6 +694,19 @@ behavior rather than a file-by-file implementation plan.
   `lambda/io/mark_builder.*`. Exact implementation placement follows provider
   ownership; filenames listed here are starting points, not duplicate APIs.
 
+### Incremental brush preview continuation — 2026-10-20
+
+The bounded native profile adds pure
+`paint_stroke_step(source,points,options={},previous=null)`. Returned state retains
+immutable source, cumulative coverage and preview Raster snapshots, distance to
+the next dab, the last pressure sample and cumulative work. New batches fork only
+touched tiles and recompute changed coverage against the original source; opacity
+does not compound once per presentation frame (**S9.1.2 / S9.2.2**). Source/settings
+bindings use value equality (**S5.4.3**); the editor restarts from full points when
+source extent or settings change. This shares the existing whole-stroke kernel.
+See [the public surface](../doc/Lambda_Image.md#incremental-strokes) and
+[Photos qualification](impl/Lambda_Impl_Photos.md) for bounds and measured scope.
+
 ## Appendix B. Delivery milestones and acceptance
 
 These are finite delivery boundaries. A full implementation plan and
@@ -743,3 +756,24 @@ the current contracts are in §§1 and 4.
 - ~~`resources` names the shared image-level container.~~ The user selected
   `assets`; PSD's original Image Resources Section retains its format name
   when discussing on-disk PSD data.
+
+
+## Implementation checkpoint — 2026-10-20
+
+The working composition profile now evaluates editable primary text/vector
+content and ordered shadow/glow/color-overlay styles, alongside the earlier
+raster/blend/affine/effect profile. Embedded fonts remain image-scoped captured
+assets; pure rendering neither reads font files nor substitutes system fonts
+(**S12.1.1v3**). Empty text uses the normalized zero-child form (**S2.6.2**).
+All paths still publish immutable owned Raster results (**S9.1.2 / S9.2.2**).
+Native sample comparison preserves the element relation (**S5.4.3**) without
+materializing pixel projections for two native u8 rasters.
+
+The rich project format retains authored content, font bytes and editor coverage
+channels. The strict PSD profile refuses these unsupported editable extensions;
+no new native PSD text/vector/style preservation is implied. Text shaping/rich
+runs, additional style families, high depth/ICC and larger-scene/background-job
+qualification remain later profiles. The actual supported surface and acceptance
+results are in [Lambda Image](../doc/Lambda_Image.md),
+[image implementation](impl/Lambda_Impl_Image.md), and
+[Photos implementation](impl/Lambda_Impl_Photos.md).

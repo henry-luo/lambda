@@ -792,7 +792,9 @@ static bool window_hosts_document(DomDocument* doc) {
 }
 
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed) {
-    if (!window_hosts_document(doc) || ui_context.app_mode != UI_APP_MODE_EDIT) return false;
+    if (!window_hosts_document(doc)) return false;
+    // an explicit document guard opts a view-launched application into edit input routing.
+    ui_context.app_mode = UI_APP_MODE_EDIT;
     ui_context.close_guard_armed = armed;
     return true;
 }

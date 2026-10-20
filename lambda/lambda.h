@@ -726,6 +726,8 @@ typedef enum SysFunc {
     SYSFUNC_IMAGE_WRITE_REGION,
     SYSFUNC_IMAGE_PATCH,
     SYSFUNC_IMAGE_CAPABILITIES,
+    SYSFUNC_IMAGE_EDIT,
+    SYSPROC_IMAGE_STORAGE,
 } SysFunc;
 
 typedef struct Type {
@@ -3296,6 +3298,8 @@ extern "C" {
     Item fn_image_encode(Item source, Item composite, Item options);
     Item fn_image_write_region(Item raster, Item samples, Item options);
     Item fn_image_patch(Item source, Item attributes, Item children);
+    Item fn_image_edit(Item raster, Item options);
+    Item pn_image_storage(Item raster);
     Item fn_image_capabilities(void);
     Item fn_erode(Item img, Item ksize);           // morphological min
     Item fn_dilate(Item img, Item ksize);          // morphological max

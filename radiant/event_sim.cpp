@@ -1180,9 +1180,6 @@ static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
     ev->x = sim_number_as_float(reader.get("x"));
     ev->y = sim_number_as_float(reader.get("y"));
     ev->button = reader.get("button").asInt32();
-    ev->mods = reader.get("mods").asInt32();
-    const char* mods = reader.get("mods_str").cstring();
-    if (mods) ev->mods = parse_mods_string(mods);
     parse_target(reader, ev);
 }
 
@@ -1320,6 +1317,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     if (!type_str) {
         return parse_sim_event_fail(ev);
     }
+    // modifiers are common input data; per-kind decoding had omitted drag events.
+    ev->mods = reader.get("mods").asInt32();
+    const char* modifiers = reader.get("mods_str").cstring();
+    if (modifiers) ev->mods = parse_mods_string(modifiers);
     ev->scroll_into_view = reader.has("scroll_into_view") &&
         reader.get("scroll_into_view").asBool();
 
@@ -1436,9 +1437,6 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->type = SIM_EVENT_KEY_PRESS;
         const char* key_str = reader.get("key").cstring();
         ev->key = key_name_to_glfw(key_str);
-        ev->mods = reader.get("mods").asInt32();
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
     }
     else if (strcmp(type_str, "key_down") == 0) {
         ev->type = SIM_EVENT_KEY_DOWN;
@@ -1454,8 +1452,6 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->type = SIM_EVENT_KEY_COMBO;
         const char* key_str = reader.get("key").cstring();
         ev->key = key_name_to_glfw(key_str);
-        const char* mods_str = reader.get("mods_str").cstring();
-        if (mods_str) ev->mods = parse_mods_string(mods_str);
     }
     else if (strcmp(type_str, "scroll") == 0) {
         ev->type = SIM_EVENT_SCROLL;

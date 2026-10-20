@@ -2,6 +2,7 @@
 
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/css_resolved_style.hpp"
 #include "../radiant/grid_placement.hpp"
 #include "../radiant/grid_sizing_algorithm.hpp"
 #include "../radiant/layout_table.hpp"
@@ -23,6 +24,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/strbuf.h"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
@@ -912,9 +914,649 @@ TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes
     EXPECT_FLOAT_EQ(repeated.max_content, 120.0f);
     EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
 
+    // a flex height query with a known wrapping width must not measure widths again.
+    set_property("height", "24px");
+    set_property("padding-top", "10%");
+    uint64_t requests = context.profiler.intrinsic_requests;
+    EXPECT_FLOAT_EQ(flex_measure_intrinsic_max_height(&context, block, 40.0f, 100.0f), 34.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests);
+    IntrinsicSizes row = calculate_grid_item_intrinsic_sizes(&context,
+        lam::view_require_block(block), true);
+    EXPECT_FLOAT_EQ(row.min_content, 44.0f);
+    EXPECT_FLOAT_EQ(row.max_content, 44.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests);
+
+    // source ancestors above the selected root outlive its view-prop generation.
+    DomElement* outside = element();
+    outside->tag_id = MARKUP_NAME_DIV;
+    outside->doc = lam::up(&doc);
+    outside->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    doc.root = lam::up(block);
+    ASSERT_TRUE(outside->DomNode::append_child(block));
+    block->set_needs_style_recompute(true);
+    calculate_max_content_height(&context, block, 40.0f);
+    EXPECT_EQ(outside->layout_cache, nullptr);
+
     scratch_release(&context.scratch);
     arena_destroy(scratch);
     doc.view_tree = nullptr;
+}
+
+class IncrementalCssTest : public ViewReuseTest {
+protected:
+    DomDocument document;
+    LayoutContext context = {};
+    BlockContext containing = {};
+    FontProp initial_font = FONT_PROP_DEFAULT;
+    DomElement* target = nullptr;
+    Arena* scratch = nullptr;
+
+    void SetUp() override {
+        ViewReuseTest::SetUp();
+        ASSERT_TRUE(css_property_system_init(tree.prop_pool));
+        target = element();
+        target->tag_id = MARKUP_NAME_DIV;
+        target->view_type = RDT_VIEW_BLOCK;
+        target->doc = lam::up(&document);
+        target->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+        document.root = lam::up(target);
+        document.view_tree = lam::own(&tree);
+        document.document_pool = lam::own(tree.prop_pool.get());
+        context.doc = lam::up(&document);
+        context.pool = lam::up(tree.prop_pool.get());
+        context.view = lam::up(static_cast<View*>(target));
+        context.elmt = lam::up(static_cast<DomNode*>(target));
+        context.selected_view_tree = lam::up(&tree);
+        context.run_mode = radiant::RunMode::ComputeSize;
+        context.font.style = lam::up(&initial_font);
+        context.font.current_font_size = initial_font.font_size;
+        context.width = 1200.0f;
+        context.height = 800.0f;
+        context.block.parent = lam::up(&containing);
+        containing.content_width = containing.given_width = 200.0f;
+        containing.content_height = containing.given_height = 100.0f;
+        scratch = arena_create_default();
+        ASSERT_NE(scratch, nullptr);
+        scratch_init(&context.scratch, scratch);
+    }
+
+    void TearDown() override {
+        // snapshots own cloned expressions, but never own their applied view props.
+        radiant::css_resolved_style_release(target->layout_cache, tree.prop_pool);
+        scratch_release(&context.scratch);
+        arena_destroy(scratch);
+        document.view_tree = nullptr;
+        document.document_pool = nullptr;
+        css_property_system_cleanup();
+        ViewReuseTest::TearDown();
+    }
+
+    void set_property(DomElement* element, const char* name, const char* value) {
+        CssDeclaration* declaration = css_parse_property_declaration(
+            name, strlen(name), value, strlen(value), tree.prop_pool);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_TRUE(style_tree_apply_declaration(element->specified_style, declaration));
+        element->advance_style_version();
+        element->set_needs_style_recompute(true);
+    }
+
+    void set_property(const char* name, const char* value) { set_property(target, name, value); }
+
+    void resolve() { dom_node_resolve_style(target, &context); }
+
+    DomElement* append_intrinsic_child() {
+        DomElement* child = element();
+        child->tag_id = MARKUP_NAME_DIV;
+        child->view_type = RDT_VIEW_BLOCK;
+        child->doc = lam::up(&document);
+        child->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+        EXPECT_TRUE(target->DomNode::append_child(child));
+        return child;
+    }
+
+    void expect_intrinsic_query(float width, bool hit) {
+        uint64_t hits = context.profiler.intrinsic_cache_hits;
+        uint64_t misses = context.profiler.intrinsic_cache_misses;
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, target);
+        EXPECT_FLOAT_EQ(sizes.min_content, width);
+        EXPECT_FLOAT_EQ(sizes.max_content, width);
+        EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + (hit ? 1u : 0u));
+        EXPECT_EQ(context.profiler.intrinsic_cache_misses, misses + (hit ? 0u : 1u));
+    }
+
+    void expect_intrinsic_refresh(float width, const char* reason) {
+        SCOPED_TRACE(reason);
+        expect_intrinsic_query(width, false);
+        expect_intrinsic_query(width, true);
+    }
+};
+
+TEST_F(IncrementalCssTest, IntrinsicFlowReusesOnlyGeometryIndependentSubtrees) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "80px");
+    set_property("padding", "2px");
+    context.block.content_width = 200.0f;
+    context.available_space = AvailableSpace::make_definite(200.0f, 100.0f);
+    IntrinsicSizes first = measure_element_intrinsic_widths(&context, target);
+    EXPECT_FLOAT_EQ(first.max_content, 84.0f);
+    uint64_t hits = context.profiler.intrinsic_cache_hits;
+    uint64_t requests = context.profiler.intrinsic_requests;
+
+    // flex sizing changes provisional boxes without changing fixed/text contributions.
+    containing.content_width = 400.0f;
+    containing.content_height = 300.0f;
+    context.block.content_width = 400.0f;
+    context.block.content_height = 300.0f;
+    context.available_space = AvailableSpace::make_definite(400.0f, 300.0f);
+    IntrinsicSizes repeated = measure_element_intrinsic_widths(&context, target);
+    EXPECT_FLOAT_EQ(repeated.max_content, first.max_content);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests + 1);
+
+    // a changed inherited font remains a distinct query even for a fixed-width result.
+    initial_font.font_size += 2.0f;
+    requests = context.profiler.intrinsic_requests;
+    measure_element_intrinsic_widths(&context, target);
+    EXPECT_GT(context.profiler.intrinsic_requests, requests + 1);
+
+    set_property(child, "width", "50%");
+    target->set_needs_style_recompute(true);
+    context.block.content_width = containing.content_width = 200.0f;
+    context.available_space = AvailableSpace::make_definite(200.0f, 100.0f);
+    first = measure_element_intrinsic_widths(&context, target);
+    EXPECT_FLOAT_EQ(first.max_content, 104.0f);
+    context.block.content_width = containing.content_width = 400.0f;
+    context.available_space = AvailableSpace::make_definite(400.0f, 300.0f);
+    repeated = measure_element_intrinsic_widths(&context, target);
+    EXPECT_FLOAT_EQ(repeated.max_content, 204.0f);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, CachedDescendantPropagatesContainingSizeDependency) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "50%");
+    set_property("padding", "2px");
+    context.block.content_width = 200.0f;
+    context.available_space = AvailableSpace::make_definite(200.0f, 100.0f);
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 104.0f);
+    ASSERT_TRUE(child->has_cached_intrinsic_widths());
+
+    // rebuilding only the parent must propagate dependencies from child cache hits.
+    target->set_has_cached_intrinsic_widths(false);
+    uint64_t hits = context.profiler.intrinsic_cache_hits;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 104.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+    context.block.content_width = containing.content_width = 400.0f;
+    context.available_space = AvailableSpace::make_definite(400.0f, 100.0f);
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 204.0f);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, CommittingProvisionalStyleRetainsIntrinsicResultUntilMutation) {
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+    EXPECT_FALSE(target->styles_resolved());
+    context.run_mode = radiant::RunMode::PerformLayout;
+    {
+        LayoutFontScope font_scope(&context);
+        resolve();
+    }
+    EXPECT_TRUE(target->styles_resolved());
+    expect_intrinsic_query(80.0f, true);
+
+    set_property("width", "120px");
+    {
+        LayoutFontScope font_scope(&context);
+        resolve();
+    }
+    expect_intrinsic_refresh(120.0f, "authored width changed after commit");
+}
+
+TEST_F(IncrementalCssTest, IntrinsicCacheInvalidatesKerningStyleEpochAndMeasurementGeneration) {
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+    initial_font.font_kerning = CSS_VALUE_NONE;
+    expect_intrinsic_refresh(80.0f, "inherited kerning changed");
+    document.style_query_epoch++;
+    expect_intrinsic_refresh(80.0f, "document style epoch changed");
+    advance_measurement_cache_generation(&tree);
+    expect_intrinsic_refresh(80.0f, "measurement generation changed");
+}
+
+TEST_F(IncrementalCssTest, IntrinsicCacheInvalidatesFontResourcesAndRasterScale) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    ui.document = lam::up(&document);
+    ui.default_font = initial_font;
+    ui.default_font.family = lam::up(const_cast<char*>("Arial"));
+    context.ui_context = lam::up(&ui);
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+
+    // publishing a font descriptor invalidates sizes even when box constraints match.
+    uint64_t generation = font_context_resource_generation(fonts);
+    FontFaceDesc descriptor = {};
+    descriptor.family = "IntrinsicCacheResource";
+    descriptor.weight = FONT_WEIGHT_NORMAL;
+    descriptor.slant = FONT_SLANT_NORMAL;
+    EXPECT_TRUE(font_face_register(fonts, &descriptor));
+    EXPECT_GT(font_context_resource_generation(fonts), generation);
+    expect_intrinsic_refresh(80.0f, "font resource changed");
+    document.viewport.raster_scale = 2.0f;
+    expect_intrinsic_refresh(80.0f, "raster scale changed");
+
+    font_prop_release_handle(target->font);
+    font_context_destroy(fonts);
+    context.ui_context = nullptr;
+}
+
+TEST_F(IncrementalCssTest, FlexWidthQueryDefersHeightUntilRequested) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "80px");
+    set_property(child, "height", "30px");
+    resolve();
+    ViewElement* item = lam::view_as_element(static_cast<DomNode*>(target));
+    ASSERT_NE(item, nullptr);
+    alloc_flex_item_prop(&context, item);
+    FlexContainerLayout flex = {};
+    flex.lycon = lam::up(&context);
+    flex.direction = CSS_VALUE_ROW;
+    context.profiler.enabled = true;
+    calculate_item_intrinsic_sizes(item, &flex, true);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_width.max_content, 80.0f);
+    EXPECT_TRUE(target->fi->has_intrinsic_width);
+    EXPECT_FALSE(target->fi->has_intrinsic_height);
+    EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    uint64_t width_queries = context.profiler.intrinsic_requests;
+    calculate_item_intrinsic_sizes(item, &flex, true);
+    EXPECT_EQ(context.profiler.intrinsic_requests, width_queries);
+    EXPECT_FALSE(target->fi->has_intrinsic_height);
+    EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    calculate_item_intrinsic_sizes(item, &flex);
+    EXPECT_TRUE(target->fi->has_intrinsic_height);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_height.max_content, 30.0f);
+    EXPECT_GT(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, VerticalFlexWidthQueryKeepsPairedIntrinsicMeasurement) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "80px");
+    set_property(child, "height", "30px");
+    set_property("writing-mode", "vertical-rl");
+    resolve();
+    ViewElement* item = lam::view_as_element(static_cast<DomNode*>(target));
+    ASSERT_NE(item, nullptr);
+    alloc_flex_item_prop(&context, item);
+    FlexContainerLayout flex = {};
+    flex.lycon = lam::up(&context);
+    flex.direction = CSS_VALUE_ROW;
+    context.profiler.enabled = true;
+    calculate_item_intrinsic_sizes(item, &flex, true);
+    EXPECT_TRUE(target->fi->has_intrinsic_width);
+    EXPECT_TRUE(target->fi->has_intrinsic_height);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_width.max_content, 30.0f);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_height.max_content, 80.0f);
+    EXPECT_GT(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, IntrinsicFlowKeepsGlobalLengthInputsInItsKey) {
+    DomElement* child = append_intrinsic_child();
+    context.root_font_size = 10.0f;
+    set_property(child, "width", "20rem");
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 200.0f);
+    uint64_t requests = context.profiler.intrinsic_requests;
+    context.block.content_width = containing.content_width = 400.0f;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 200.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, requests + 1);
+    context.root_font_size = 15.0f;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 300.0f);
+
+    set_property(child, "width", "10vw");
+    target->set_needs_style_recompute(true);
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 120.0f);
+    context.width = 1600.0f;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 160.0f);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST(LayoutProfiling, ContextRestoreRetainsNestedWork) {
+    LayoutContext context = {};
+    context.block.content_width = 200.0f;
+    LayoutContext saved = context;
+    context.block.content_width = 400.0f;
+    context.profiler.intrinsic_requests = 12;
+    context.profiler.intrinsic_cache_hits = 4;
+    context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT] = 8;
+    radiant::layout_restore_context(&context, saved);
+    EXPECT_FLOAT_EQ(context.block.content_width, 200.0f);
+    EXPECT_EQ(context.profiler.intrinsic_requests, 12u);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, 4u);
+    EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 8u);
+}
+
+TEST(LayoutProfiling, NestedScopesRetainCountersAndExclusiveTimeAcrossContextRestore) {
+    LayoutContext context = {};
+    context.profiler.enabled = true;
+    {
+        radiant::LayoutProfileScope width(&context, radiant::LAYOUT_PROFILE_INTRINSIC, nullptr);
+        LayoutContext saved = context;
+        {
+            radiant::LayoutProfileScope height(&context, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, nullptr);
+            radiant::layout_profiler_note_intrinsic_request(&context.profiler, false, false);
+            radiant::layout_profiler_note_intrinsic_request(&context.profiler, true, false);
+        }
+        radiant::layout_restore_context(&context, saved);
+    }
+    const radiant::LayoutProfiler& profile = context.profiler;
+    EXPECT_EQ(profile.intrinsic_requests, 2u);
+    EXPECT_EQ(profile.intrinsic_cache_hits, 1u);
+    EXPECT_EQ(profile.intrinsic_cache_misses, 1u);
+    EXPECT_EQ(profile.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC], 1u);
+    EXPECT_EQ(profile.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 1u);
+    // parent self time excludes its child, while the height leaf has no nested work.
+    EXPECT_NEAR(profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC],
+        profile.scope_self_ms[radiant::LAYOUT_PROFILE_INTRINSIC] +
+        profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0.0001);
+    EXPECT_DOUBLE_EQ(profile.scope_self_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT],
+        profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT]);
+}
+
+TEST_F(IncrementalCssTest, RebindsOnlyChangedGeometryAndRestoresAuthoredValues) {
+    set_property("font-size", "20px");
+    set_property("color", "blue");
+    set_property("width", "calc(50% - 10px)");
+    set_property("height", "25%");
+    set_property("min-width", "calc(5% + 5px)");
+    set_property("max-height", "75%");
+    set_property("padding-top", "calc(1em + 5%)");
+    set_property("padding-inline-start", "5%");
+    set_property("margin", "12px 10%");
+    set_property("left", "20%");
+    resolve();
+    ASSERT_NE(target->layout_cache, nullptr);
+    ASSERT_NE(target->layout_cache->resolved_style, nullptr);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 90.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 30.0f);
+    SCOPED_TRACE(radiant::css_style_miss_name(radiant::css_resolved_style_last_miss(target)));
+    int64_t full = g_style_resolve_measure;
+    int64_t reused = g_style_resolve_incremental;
+    int64_t evaluated = g_style_geometry_evaluations;
+
+    // flow consumes margins and sizing; neither mutation changes computed CSS.
+    target->boundary_mut()->flow_margin = target->boundary()->margin;
+    target->boundary_mut()->has_flow_margin = true;
+    target->boundary_mut()->margin.top = 0.0f;
+    target->blk->given_width = 777.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_EQ(g_style_resolve_incremental, reused + 1);
+    EXPECT_EQ(g_style_geometry_evaluations, evaluated);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 90.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->margin.top, 12.0f);
+    EXPECT_FALSE(target->boundary()->has_flow_margin);
+
+    containing.content_width = containing.given_width = 400.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 190.0f);
+    EXPECT_FLOAT_EQ(target->block()->given_min_width, 25.0f);
+    EXPECT_FLOAT_EQ(target->block()->given_height, 25.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 40.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.left, 20.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->margin.right, 40.0f);
+    EXPECT_FLOAT_EQ(target->position->left, 80.0f);
+    EXPECT_FLOAT_EQ(target->font->font_size, 20.0f);
+    EXPECT_EQ(target->in_line->color.b, 255);
+    EXPECT_EQ(target->in_line->color.r, 0);
+
+    containing.content_height = containing.given_height = 200.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_height, 50.0f);
+    EXPECT_FLOAT_EQ(target->block()->given_max_height, 150.0f);
+    containing.content_width = containing.given_width = 200.0f;
+    containing.content_height = containing.given_height = 100.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 90.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 30.0f);
+
+    // committing layout can reuse provisional computed CSS without claiming an earlier commit.
+    EXPECT_FALSE(target->styles_resolved());
+    context.run_mode = radiant::RunMode::PerformLayout;
+    int64_t committed = g_style_resolve_full;
+    resolve();
+    EXPECT_TRUE(target->styles_resolved());
+    EXPECT_EQ(g_style_resolve_full, committed);
+}
+
+TEST_F(IncrementalCssTest, InvalidatesVariablesAndExplicitDirtyNotifications) {
+    set_property("--width", "30%");
+    set_property("width", "var(--width)");
+    resolve();
+    EXPECT_FLOAT_EQ(target->block()->given_width, 60.0f);
+    int64_t full = g_style_resolve_measure;
+    containing.content_width = containing.given_width = 400.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 120.0f);
+    set_property("--width", "40%");
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 160.0f);
+    full = g_style_resolve_measure;
+    target->set_needs_style_recompute(true);
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+}
+
+TEST_F(IncrementalCssTest, TracksDefinitenessAndZeroWithoutReusingOldInsets) {
+    set_property("width", "50%");
+    set_property("top", "50%");
+    set_property("padding", "10%");
+    resolve();
+    int64_t full = g_style_resolve_measure;
+    EXPECT_TRUE(target->position->has_top);
+    EXPECT_FLOAT_EQ(target->position->top, 50.0f);
+    containing.given_height = -1.0f;
+    resolve();
+    // the native inset keeps its deferred percentage while its current used basis is indefinite.
+    EXPECT_TRUE(target->position->has_top);
+    EXPECT_FLOAT_EQ(target->position->top, 0.0f);
+    EXPECT_EQ(g_style_resolve_measure, full);
+    containing.content_width = containing.given_width = 0.0f;
+    resolve();
+    EXPECT_FLOAT_EQ(target->block()->given_width, 0.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 0.0f);
+    containing.content_width = containing.given_width = 200.0f;
+    containing.given_height = 100.0f;
+    resolve();
+    EXPECT_FLOAT_EQ(target->block()->given_width, 100.0f);
+    EXPECT_TRUE(target->position->has_top);
+    EXPECT_FLOAT_EQ(target->position->top, 50.0f);
+    EXPECT_EQ(g_style_resolve_measure, full);
+}
+
+TEST_F(IncrementalCssTest, ParentFontEditsInvalidateInheritedComputedLengths) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    ui.default_font = initial_font;
+    ui.default_font.family = lam::up(const_cast<char*>("Arial"));
+    context.ui_context = lam::up(&ui);
+    DomElement* parent = element();
+    parent->tag_id = MARKUP_NAME_DIV;
+    parent->view_type = RDT_VIEW_BLOCK;
+    parent->doc = lam::up(&document);
+    parent->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    document.root = lam::up(parent);
+    ASSERT_TRUE(parent->DomNode::append_child(target));
+    auto resolve_parent = [&]() {
+        context.view = lam::up(static_cast<View*>(parent));
+        context.elmt = lam::up(static_cast<DomNode*>(parent));
+        context.font.style = lam::up(&initial_font);
+        dom_node_resolve_style(parent, &context);
+        context.view = lam::up(static_cast<View*>(target));
+        context.elmt = lam::up(static_cast<DomNode*>(target));
+        context.font.style = lam::up(parent->font.get());
+    };
+    set_property(parent, "font-size", "20px");
+    set_property(parent, "--gap", "calc(1em + 10%)");
+    set_property("padding-top", "var(--gap)");
+    resolve_parent();
+    resolve();
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 40.0f);
+    int64_t full = g_style_resolve_measure;
+    containing.content_width = containing.given_width = 400.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 60.0f);
+    set_property(parent, "font-size", "30px");
+    resolve_parent();
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.top, 70.0f);
+    radiant::css_resolved_style_release(parent->layout_cache, tree.prop_pool);
+    font_prop_release_handle(target->font);
+    font_prop_release_handle(parent->font);
+    font_context_destroy(fonts);
+    context.ui_context = nullptr;
+}
+
+TEST_F(IncrementalCssTest, RetainedResetReleasesOwnedComputedBindings) {
+    set_property("width", "calc(2em + 50%)");
+    resolve();
+    ASSERT_NE(target->layout_cache->resolved_style, nullptr);
+    int64_t full = g_style_resolve_measure;
+    view_pool_reset_retained_subtree(&tree, target);
+    ASSERT_NE(target->layout_cache, nullptr);
+    EXPECT_EQ(target->layout_cache->resolved_style, nullptr);
+    // layout recreates the view kind before invoking CSS after a retained reset.
+    target->view_type = RDT_VIEW_BLOCK;
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 132.0f);
+}
+
+TEST_F(IncrementalCssTest, KeepsStaticPhysicalAndLogicalWinnersOverPercentageShorthands) {
+    set_property("margin", "10%");
+    set_property("margin-left", "7px");
+    set_property("padding", "5%");
+    set_property("padding-inline-start", "3px");
+    resolve();
+    EXPECT_FLOAT_EQ(target->boundary()->margin.left, 7.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.left, 3.0f);
+    int64_t full = g_style_resolve_measure;
+    containing.content_width = containing.given_width = 400.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->boundary()->margin.right, 40.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.right, 20.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->margin.left, 7.0f);
+    EXPECT_FLOAT_EQ(target->boundary()->padding.left, 3.0f);
+}
+
+TEST_F(IncrementalCssTest, PreservesAlgorithmAssignedSizesWhenCssDoesNotWriteThem) {
+    set_property("min-width", "0");
+    context.block.given_width = 317.0f;
+    context.block.given_height = 211.0f;
+    resolve();
+    EXPECT_FLOAT_EQ(context.block.given_width, 317.0f);
+    int64_t full = g_style_resolve_measure;
+    context.block.given_width = 421.0f;
+    context.block.given_height = 299.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(context.block.given_width, 421.0f);
+    EXPECT_FLOAT_EQ(context.block.given_height, 299.0f);
+    // an explicit CSS auto declaration does write the context and must still replace it.
+    set_property("height", "auto");
+    resolve();
+    EXPECT_FLOAT_EQ(context.block.given_height, -1.0f);
+    context.block.given_height = 499.0f;
+    resolve();
+    EXPECT_FLOAT_EQ(context.block.given_height, -1.0f);
+}
+
+TEST_F(IncrementalCssTest, ViewKindChangesRequireApplicableBoxProperties) {
+    target->view_type = RDT_VIEW_INLINE;
+    target->ensure_block(&context);
+    set_property("width", "60px");
+    set_property("height", "40px");
+    resolve();
+    EXPECT_FLOAT_EQ(target->block()->given_width, -1.0f);
+    EXPECT_FLOAT_EQ(context.block.given_width, 60.0f);
+    int64_t full = g_style_resolve_measure;
+    context.block.given_width = 999.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(context.block.given_width, 60.0f);
+    target->view_type = RDT_VIEW_BLOCK;
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 60.0f);
+    EXPECT_FLOAT_EQ(target->block()->given_height, 40.0f);
+}
+
+TEST_F(IncrementalCssTest, RestoresComputedFlexPropertiesAfterItemInitialization) {
+    set_property("flex", "2 3 40%");
+    set_property("order", "5");
+    set_property("align-self", "center");
+    set_property("aspect-ratio", "2");
+    resolve();
+    ASSERT_NE(target->flex_item(), nullptr);
+    ASSERT_FLOAT_EQ(target->fi->flex_grow, 2.0f);
+    ASSERT_FLOAT_EQ(target->fi->flex_basis, 40.0f);
+    int64_t full = g_style_resolve_measure;
+    reset_flex_item_prop_for_style(&context,
+        lam::view_require_element(static_cast<View*>(target)));
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->fi->flex_grow, 2.0f);
+    EXPECT_FLOAT_EQ(target->fi->flex_shrink, 3.0f);
+    EXPECT_FLOAT_EQ(target->fi->flex_basis, 40.0f);
+    EXPECT_TRUE(target->fi->flex_basis_is_percent);
+    EXPECT_FLOAT_EQ(target->fi->aspect_ratio, 2.0f);
+    EXPECT_EQ(target->fi->align_self, CSS_VALUE_CENTER);
+    EXPECT_EQ(target->fi->order, 5);
+}
+
+TEST_F(IncrementalCssTest, RasterScaleInvalidatesComputedMath) {
+    UiContext ui = {};
+    ui.device_scale = 1.0f;
+    context.ui_context = lam::up(&ui);
+    set_property("width", "round(line-width, 1.3px)");
+    resolve();
+    ASSERT_FLOAT_EQ(target->block()->given_width, 1.0f);
+    int64_t full = g_style_resolve_measure;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    ui.device_scale = 2.0f;
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 1.5f);
+    context.ui_context = nullptr;
+}
+
+TEST_F(IncrementalCssTest, RootFontChangesInvalidateNormalizedRemBindings) {
+    context.root_font_size = 16.0f;
+    set_property("width", "calc(1rem + 10%)");
+    resolve();
+    ASSERT_FLOAT_EQ(target->block()->given_width, 36.0f);
+    int64_t full = g_style_resolve_measure;
+    containing.content_width = containing.given_width = 400.0f;
+    resolve();
+    EXPECT_EQ(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 56.0f);
+    context.root_font_size = 20.0f;
+    resolve();
+    EXPECT_GT(g_style_resolve_measure, full);
+    EXPECT_FLOAT_EQ(target->block()->given_width, 60.0f);
 }
 
 TEST_F(ViewReuseTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwner) {

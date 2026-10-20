@@ -756,6 +756,82 @@ TEST_F(DisplayListTest, ValidateRejectsUnclosedElementMarker) {
     EXPECT_EQ(result.first_error_index, 0);
 }
 
+TEST_F(DisplayListTest, ValidationRangesRejectInvalidBoundsAndUseGlobalIndices) {
+    dl_fill_rect(&dl, 0, 0, 2, 2, test_color(0xff000000u));
+    dl_pop_clip(&dl);
+    DisplayListValidationResult result = {};
+    DisplayListProperties properties = {true, true};
+    const struct { int first, end; } invalid[] = {{-1, 1}, {1, 0}, {0, 3}};
+    for (const auto& range : invalid) {
+        EXPECT_FALSE(dl_validate_range(&dl, range.first, range.end, &result, &properties));
+        EXPECT_FALSE(properties.has_glyphs); EXPECT_FALSE(properties.has_video);
+    }
+    EXPECT_TRUE(dl_validate_range(&dl, 0, 1, &result, &properties));
+    EXPECT_FALSE(dl_validate_range(&dl, 1, 2, &result, &properties));
+    EXPECT_EQ(result.first_error_index, 1);
+    EXPECT_TRUE(dl_validate_range(&dl, 1, 1, &result, &properties));
+    EXPECT_FALSE(dl_validate(&dl, &result));
+}
+
+TEST_F(DisplayListTest, ValidationRangesCannotShareReplayStateAcrossBoundary) {
+    const struct { DisplayOp begin, end; } pairs[] = {
+        {DL_PUSH_CLIP, DL_POP_CLIP}, {DL_SAVE_BACKDROP, DL_COMPOSITE_OPACITY},
+        {DL_SHADOW_CLIP_SAVE, DL_SHADOW_CLIP_RESTORE}, {DL_BEGIN_ELEMENT, DL_END_ELEMENT}
+    };
+    char path_token;
+    for (const auto& pair : pairs) {
+        SCOPED_TRACE(pair.begin); dl_clear(&dl);
+        DisplayItem* begin = dl_alloc_item(&dl); ASSERT_NE(begin, nullptr); begin->op = pair.begin;
+        if (pair.begin == DL_PUSH_CLIP) begin->push_clip.path = lam::own((RdtPath*)&path_token);
+        if (pair.begin == DL_BEGIN_ELEMENT) begin->element_marker.matching_index = 1;
+        DisplayItem* end = dl_alloc_item(&dl); ASSERT_NE(end, nullptr); end->op = pair.end;
+        ASSERT_TRUE(dl_validate(&dl, nullptr));
+        EXPECT_FALSE(dl_validate_range(&dl, 0, 1, nullptr));
+        EXPECT_FALSE(dl_validate_range(&dl, 1, 2, nullptr));
+    }
+}
+
+TEST_F(DisplayListTest, ValidatedAppendKeepsOverlayPropertiesOutOfDocumentAndRejectsInvalidSuffix) {
+    dl_fill_rect(&dl, 0, 0, 2, 2, test_color(0xff000000u));
+    ValidatedDisplayList document, replay;
+    EXPECT_EQ(replay.get(), nullptr);
+    ASSERT_TRUE(dl_validate_recording(&dl, 1, &document, "test document"));
+    EXPECT_EQ(document.get(), &dl); EXPECT_FALSE(document.content().has_glyphs);
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    Bound clip = {0, 0, 4, 4};
+    dl_draw_glyph(&dl, &bitmap, 0, 0, test_color(0xff000000u), false, &clip, nullptr, 1);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(dl_validate_append(&dl, &document, &replay, "test overlay"));
+    EXPECT_EQ(counters.validation_command_checks, 1u);
+    EXPECT_TRUE(replay.content().has_glyphs); EXPECT_FALSE(document.content().has_glyphs);
+    EXPECT_EQ(replay.get(), &dl); EXPECT_EQ(document.get(), nullptr);
+    dl_truncate(&dl, 1);
+    EXPECT_EQ(replay.get(), nullptr); EXPECT_EQ(document.get(), &dl);
+    dl_draw_glyph(&dl, &bitmap, 0, 0, test_color(0xff000000u), false, &clip, nullptr, 1);
+    dl_pop_clip(&dl);
+    EXPECT_FALSE(dl_validate_append(&dl, &document, &replay, "test invalid overlay"));
+    EXPECT_EQ(replay.get(), nullptr);
+    DisplayListProperties properties = {true, true};
+    EXPECT_FALSE(dl_validate_range(&dl, 1, 3, nullptr, &properties));
+    EXPECT_FALSE(properties.has_glyphs); EXPECT_FALSE(properties.has_video);
+}
+
+TEST_F(DisplayListTest, ValidatedAppendRechecksRelocatedPrefixAndRetiresStaleViews) {
+    dl_fill_rect(&dl, 0, 0, 2, 2, test_color(0xff000000u));
+    ValidatedDisplayList document, replay;
+    ASSERT_TRUE(dl_validate_recording(&dl, 1, &document, "test document"));
+    ASSERT_TRUE(dl.reserve(dl.capacity() * 2));
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(dl_validate_append(&dl, &document, &replay, "test moved document"));
+    EXPECT_EQ(counters.validation_command_checks, 1u);
+    EXPECT_EQ(document.get(), &dl); EXPECT_EQ(replay.get(), &dl);
+    dl_clear(&dl);
+    EXPECT_EQ(replay.get(), nullptr);
+    EXPECT_FALSE(dl_validate_append(&dl, &document, &replay, "test retired document"));
+    EXPECT_EQ(replay.get(), nullptr);
+}
+
 // ─── PaintIR -> DisplayList parity ──────────────────────────────────────────
 //
 // Phase C gate (see vibe/radiant/Radiant_Design_Render_Paths.md): raster must
@@ -2557,4 +2633,58 @@ TEST_F(DisplayListTest, ComputedCornerExpressionsResolveAgainstEachPaintBoxWitho
     constrain_corner_radii(&radius, 50.0f, 100.0f);
     EXPECT_FLOAT_EQ(radius.horizontal[0], 25.0f); EXPECT_FLOAT_EQ(radius.vertical[0], 37.5f);
     EXPECT_EQ(radius.expressions.get(), &expressions);
+}
+
+struct TestDisplayFragment : DisplayPayloadOwner {
+    DisplayList own;
+    DisplayCommandSpan span;
+    unsigned retired = 0;
+    TestDisplayFragment() {
+        ref_count_init(&refs);
+        destroy = [](DisplayPayloadOwner* owner) { ((TestDisplayFragment*)owner)->retired++; };
+        int begin = dl_begin_element(&own, 0, 0, 0, 3, 3);
+        dl_fill_rect(&own, 0, 0, 3, 3, Color{0xff123456u}); dl_end_element(&own, begin);
+        commands = lam::up(&own); span = {nullptr, 0, own.item_count()};
+        command_spans = &span; span_count = 1; command_count = own.item_count();
+    }
+    ~TestDisplayFragment() { dl_destroy(&own); }
+};
+
+TEST(DisplayListStorageTest, FragmentCopiesAndTruncationReleaseExactlyOnePublicationLease) {
+    TestDisplayFragment fragment;
+    DisplayList first, copy;
+    ASSERT_TRUE(dl_reference_fragment(&first, &fragment, {0, 0, 3, 3}));
+    dl_payload_owner_release(&fragment); // subsequent lifetime belongs solely to commands.
+    ASSERT_TRUE(dl_copy_range(&copy, &first, 0, 0));
+    EXPECT_EQ(first.size(), 1u); EXPECT_EQ(copy.size(), 1u);
+    EXPECT_EQ(copy.front().draw_fragment.owner.get(), &fragment);
+    dl_destroy(&first); EXPECT_EQ(fragment.retired, 0u);
+    ASSERT_TRUE(dl_validate(&copy, nullptr));
+    DisplayListCursor cursor(&copy);
+    ASSERT_NE(cursor.next(), nullptr); EXPECT_EQ(cursor.item->op, DL_BEGIN_ELEMENT);
+    ASSERT_NE(cursor.next(), nullptr); EXPECT_EQ(cursor.item->fill_rect.color.c, 0xff123456u);
+    ASSERT_NE(cursor.next(), nullptr); EXPECT_EQ(cursor.item->op, DL_END_ELEMENT);
+    EXPECT_EQ(cursor.next(), nullptr); EXPECT_FALSE(cursor.failed);
+    dl_truncate(&copy, 0); EXPECT_EQ(fragment.retired, 1u);
+    dl_destroy(&copy); EXPECT_EQ(fragment.retired, 1u);
+}
+
+TEST(DisplayListStorageTest, FragmentCursorRejectsCyclesRangesAndInconsistentCommandCounts) {
+    TestDisplayFragment fragment;
+    DisplayList list;
+    ASSERT_TRUE(dl_reference_fragment(&list, &fragment, {0, 0, 3, 3}));
+    ASSERT_TRUE(dl_validate(&list, nullptr));
+    fragment.span.child = &fragment;
+    EXPECT_FALSE(dl_validate(&list, nullptr));
+    fragment.span.child = nullptr; fragment.span.start = -1;
+    EXPECT_FALSE(dl_validate(&list, nullptr));
+    fragment.span.start = 0; fragment.span.count++;
+    EXPECT_FALSE(dl_validate(&list, nullptr));
+    fragment.span.count--; fragment.command_count--;
+    EXPECT_FALSE(dl_validate(&list, nullptr));
+    fragment.command_count++; fragment.command_spans = nullptr;
+    EXPECT_FALSE(dl_validate(&list, nullptr));
+    fragment.command_spans = &fragment.span;
+    EXPECT_TRUE(dl_validate(&list, nullptr));
+    dl_destroy(&list); dl_payload_owner_release(&fragment); EXPECT_EQ(fragment.retired, 1u);
 }

@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 #include "view.hpp"
 #include "view_tree_css.hpp"
 #include "page_document.hpp"
@@ -448,22 +449,25 @@ static float resolve_layout_transform_numeric(void* context, const CssValue* val
     return angle ? math_degrees_to_radians(result) : result;
 }
 
+static float resolve_length_value_mode(LayoutContext* context, uintptr_t property,
+    const CssValue* value, bool computed_units);
+
 void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
-    CssPropertyCode property) {
+    CssPropertyCode property, bool computed_units) {
     if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         float degrees;
         if (!resolve_css_angle_degrees(value, &degrees)) {
-            value->data.length.value = context ? resolve_length_value(context, property, value)
+            value->data.length.value = context ? resolve_length_value_mode(context, property, value, computed_units)
                 : resolve_layout_transform_length(nullptr, value);
             value->data.length.unit = CSS_UNIT_PX;
         }
     } else if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int index = 0; index < value->data.list.count; index++)
-            layout_compute_math_lengths(context, value->data.list.values[index], property);
+            layout_compute_math_lengths(context, value->data.list.values[index], property, computed_units);
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         for (int index = 0; index < value->data.function->arg_count; index++)
-            layout_compute_math_lengths(context, value->data.function->args[index], property);
+            layout_compute_math_lengths(context, value->data.function->args[index], property, computed_units);
     }
 }
 
@@ -3334,7 +3338,7 @@ static bool css_percentage_uses_containing_inline_size(uintptr_t property) {
         (code >= CSS_PROPERTY_PADDING_BLOCK && code <= CSS_PROPERTY_PADDING_INLINE_END);
 }
 
-static float css_containing_inline_percentage_base(LayoutContext* lycon) {
+float layout_containing_inline_percentage_base(LayoutContext* lycon) {
     if (!lycon) return -1.0f;
     // independent views supply their containing extent without a mutable default-view parent.
     if (!lycon->block.parent) return lycon->selected_view_tree ? lycon->width : -1.0f;
@@ -3394,6 +3398,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     // In raw mode, NUMBER values are not multiplied by font-size for line-height
     bool raw_number_mode = (intptr_t)property < 0;
     uintptr_t effective_property = raw_number_mode ? (uintptr_t)(-(intptr_t)property) : property;
+    radiant::css_resolved_style_note_length(lycon, effective_property, value);
     float result = 0.0f;
     switch (value->type) {
     case CSS_VALUE_TYPE_NUMBER:
@@ -3548,7 +3553,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
             }
         } else if (css_percentage_uses_containing_inline_size(effective_property)) {
             // CSS Box resolves margin and padding percentages against the
-            float inline_base = css_containing_inline_percentage_base(lycon);
+            float inline_base = layout_containing_inline_percentage_base(lycon);
             if (inline_base > 0.0f) {
                 result = percentage * inline_base / 100.0;
             } else {
@@ -5318,204 +5323,61 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
     }
 }
 
-void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
-    assert(dom_elem);
-    if (dom_elem->blk) {
-        css_value_destroy_owned(dom_elem->blk->container_names, layout_prop_pool(lycon));
-        dom_elem->blk->container_names = nullptr;
-        dom_elem->blk->container_axes = 0;
-        dom_elem->blk->contain_size = false;
-        dom_elem->blk->contain_inline_size = false;
-        dom_elem->blk->contain_positioning = false;
-        dom_elem->blk->contain_paint = false;
-        dom_elem->blk->computed_containment = 0;
-        dom_elem->blk->content_visibility_skipped = false;
-        dom_elem->blk->content_visibility = CSS_VALUE_VISIBLE;
-        dom_elem->blk->contain_intrinsic_width = dom_elem->blk->contain_intrinsic_height = -1.0f;
-        dom_elem->blk->contain_intrinsic_width_auto = dom_elem->blk->contain_intrinsic_height_auto = false;
+static bool collect_inherited_declaration_mask(StyleNode* node, void* context) {
+    uint64_t* mask = (uint64_t*)context;
+    CssPropertyCode property = node->property_code;
+    if (property == CSS_PROPERTY_ALL) {
+        *mask = UINT64_MAX;
+        return false;
     }
-
-    // rebuild retained leading before shorthand/inheritance resolution, while
-    // preserving the UA normal value installed by HTML control defaults.
-    {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        if (span && span->blk &&
-                span->block()->line_height.get() != css_line_height_normal_value()) {
-            span->blk->line_height = nullptr;
-        }
-    }
-    // iterate through specified_style AVL tree
-    StyleTree* style_tree = dom_elem->specified_style;
-    if (!style_tree || !style_tree->tree) {
-        resolve_selection_pseudo_style(dom_elem, lycon);
-        return;
-    }
-    ScratchScope cascade_scope(&lycon->scratch);
-    CssDeclaration** saved_cascade_decls = lycon->cascade_priority_decls;
-    int saved_cascade_count = lycon->cascade_priority_count;
-    lycon->cascade_priority_decls = nullptr;
-    lycon->cascade_priority_count = 0;
-    CascadeLayerScan layer_scan = {style_tree, false};
-    avl_tree_foreach_inorder(style_tree->tree, scan_cascade_layer_decl, &layer_scan);
-    int declaration_capacity = layer_scan.has_layer
-        ? avl_tree_size(style_tree->tree) : 0;
-    if (declaration_capacity > 0) {
-        CssDeclaration** declarations = cascade_scope.array<CssDeclaration*>(
-            (size_t)declaration_capacity);
-        if (declarations) {
-            CascadePriorityCollector collector = {
-                style_tree, declarations, 0, declaration_capacity};
-            avl_tree_foreach_inorder(style_tree->tree,
-                collect_cascade_priority_decl, &collector);
-            qsort(declarations, (size_t)collector.count,
-                  sizeof(CssDeclaration*), compare_cascade_priority_decls);
-            lycon->cascade_priority_decls = lam::up(declarations);
-            lycon->cascade_priority_count = collector.count;
-        }
-    }
-    ViewBlock* existing_multicol_view = lam::view_as_block(lycon->view);
-    if (existing_multicol_view && existing_multicol_view->multicol_prop()) {
-        // Retained recascade must recompute currentColor after color changes.
-        existing_multicol_view->multicol_prop()->rule_color_is_current = true;
-    }
-    // Font5 §4.4: skip first-pass AVL traversal if no font properties exist.
-    // Most elements (especially in markdown) inherit all font properties from
-    // their parent and have zero font-related CSS declarations.
-    bool has_any_font_prop = css_style_tree_has_font_property(style_tree, true);
-    FontProp* parent_font_style = lycon->font.style;
-    FontBox parent_font = lycon->font;
-    ViewSpan* default_font_span = lam::view_require_element(lycon->view);
-    bool default_family_is_monospace = default_font_span && default_font_span->font &&
-        layout_tag_has_monospace_family_default(dom_elem->tag()) &&
-        default_font_span->fontp()->family &&
-        str_ieq_cstr(default_font_span->fontp()->family, "monospace");
-    CssEnum all_reset_keyword = layout_element_css_all_reset_keyword(dom_elem);
-    bool all_initial = all_reset_keyword == CSS_VALUE_INITIAL;
-    if (all_initial) {
-        // CSS Cascade: all:initial establishes the element's initial font before
-        // relative units and non-inherited declarations are resolved.
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        if (span && span->font) {
-            lycon->font.style = lam::up(span->font);
-            lycon->font.current_font_size = span->fontp()->font_size;
-        }
-    }
-    if (all_reset_keyword == CSS_VALUE_INHERIT || all_reset_keyword == CSS_VALUE_UNSET) {
-        CssDeclaration* font_all = style_tree_get_declaration(
-            style_tree, CSS_PROPERTY_FONT);
-        if (font_all && font_all->property_code == CSS_PROPERTY_ALL) {
-            // Font shorthand inheritance copies the parent's computed face and
-            // size before explicit font declarations resolve relative units;
-            // all: unset inherits the font as well, its longhands being inherited.
-            resolve_css_property(CSS_PROPERTY_FONT, font_all, lycon);
-        }
-    }
-    if (has_any_font_prop) {
-        avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
-    }
-    if (has_any_font_prop) {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        apply_chromium_monospace_font_size_quirk(
-            style_tree, parent_font_style, span, dom_elem,
-            default_family_is_monospace);
-        if (span && span->font && span->fontp()->font_size > 0) {
-            lycon->font.style = lam::up(span->font);
-            lycon->font.current_font_size = span->fontp()->font_size;
-        }
-    } else if (dom_elem->tag() == MARKUP_NAME_TEXTAREA) {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        if (span && span->font && span->fontp()->font_size > 0) {
-            lycon->font.style = lam::up(span->font);
-            lycon->font.current_font_size = span->fontp()->font_size;
-            if (span->fontp()->family && lycon->ui_context) {
-                setup_font(lycon->ui_context, &lycon->font, span->font);
-            }
-        }
-    }
-    // Set up font face if a font-family was specified for this element
-    if (has_any_font_prop) {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        // when only font-size changes and the family is inherited.
-        bool has_font = css_style_tree_has_font_property(style_tree, false);
-        if (has_font && span && span->font && span->fontp()->family && lycon->ui_context) {
-            setup_font(lycon->ui_context, &lycon->font, span->font);
-        }
-    }
-    {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        if (span && span->font && span->fontp()->font_size > 0.0f) {
-            lycon->font.style = lam::up(span->font);
-            lycon->font.current_font_size = span->fontp()->font_size;
-        }
-    }
-    if (all_reset_keyword == CSS_VALUE_INHERIT) {
-        // `all` is a virtual declaration for every property except direction,
-        // unicode-bidi and custom properties. Apply its non-inherited values
-        // before explicit declarations, so a winning shorthand still replaces
-        // the inherited longhand state through the usual resolver.
-        for (int property_code = CSS_PROPERTY_DISPLAY;
-             property_code < CSS_PROPERTY_COUNT; property_code++) {
-            CssPropertyCode property = (CssPropertyCode)property_code;
-            if (property == CSS_PROPERTY_ALL || property == CSS_PROPERTY_DISPLAY ||
-                property == CSS_PROPERTY_DIRECTION ||
-                property == CSS_PROPERTY_UNICODE_BIDI ||
-                property == CSS_PROPERTY_CUSTOM || property == CSS_PROPERTY_FONT ||
-                css_property_runtime_inherited(property)) continue;
-            CssDeclaration* winner = style_tree_get_declaration(style_tree, property);
-            if (winner && winner->property_code == CSS_PROPERTY_ALL) {
-                resolve_css_property(property, winner, lycon);
-            }
-        }
-    }
-    // the current element instead of falling back to a parent or UA default.
-    {
-        AvlNode* color_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_COLOR);
-        if (color_node) {
-            StyleNode* style_node = (StyleNode*)color_node->declaration;
-            CssDeclaration* decl = style_node
-                ? style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR) : NULL;
-            if (decl && decl->property_code != CSS_PROPERTY_ALL) {
-                resolve_css_property(CSS_PROPERTY_COLOR, decl, lycon);
-            }
-        }
-    }
-    avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
-    // intrinsic measurement and used sizing share the winner across shorthand and logical aliases.
-    const CssPropertyCode intrinsic_parts[] = {CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT};
-    for (CssPropertyCode property : intrinsic_parts) {
-        CssDeclaration* winner = layout_cascaded_physical_declaration(dom_elem, property);
-        if (winner) resolve_css_property(property, winner, lycon);
-    }
-    // query eligibility and names use the same shorthand/longhand rollback winner.
-    const CssPropertyCode container_parts[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
-    for (CssPropertyCode part : container_parts) {
-        CssDeclaration* winner = style_tree_get_declaration(style_tree, part);
-        if (winner) resolve_css_property(part, winner, lycon);
-    }
-    if (dom_elem->blk) {
-        // visibility containment persists while auto contents are relevant; skipping adds size containment.
-        bool visibility_applies = view_size_containment_applies(dom_elem->display);
-        if (!visibility_applies) dom_elem->blk->content_visibility_skipped = false;
-        if (visibility_applies && dom_elem->blk->content_visibility != CSS_VALUE_VISIBLE) {
-            dom_elem->blk->contain_positioning = true;
-            dom_elem->blk->contain_paint = true;
-        }
-        dom_elem->blk->contain_size |= dom_elem->blk->content_visibility_skipped;
-        dom_elem->blk->contain_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_BLOCK) != 0;
-        dom_elem->blk->contain_inline_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_INLINE) != 0;
-    }
-    // A shorthand can supply a longhand even when that longhand has no AVL node.
-    const CssPropertyCode border_image_parts[] = {
-        CSS_PROPERTY_BORDER_IMAGE_SOURCE, CSS_PROPERTY_BORDER_IMAGE_SLICE,
-        CSS_PROPERTY_BORDER_IMAGE_WIDTH, CSS_PROPERTY_BORDER_IMAGE_OUTSET,
-        CSS_PROPERTY_BORDER_IMAGE_REPEAT
+    auto include = [&](CssPropertyCode code) {
+        if (css_property_runtime_inherited(code)) *mask |= UINT64_C(1) << ((unsigned)code % 64);
     };
-    for (CssPropertyCode part : border_image_parts) {
-        if (avl_tree_search(style_tree->tree, part)) continue;
-        CssDeclaration* winner = style_tree_get_declaration(style_tree, part);
-        if (winner && winner->property_code == CSS_PROPERTY_BORDER_IMAGE)
-            resolve_css_property(part, winner, lycon);
+    include(property);
+    const CssProperty* definition = css_property_get_by_code(property);
+    if (definition && definition->shorthand) {
+        for (int i = 0; i < definition->longhand_count; i++) include(definition->longhand_props[i]);
     }
+    return true;
+}
+
+// ancestry, cascade edits and DOM moves invalidate this selected-view cache (D4.5.1v4).
+static uint64_t inherited_declaration_mask(LayoutContext* context, DomElement* element) {
+    DomDocument* doc = context->doc;
+    uint32_t generation = doc && doc->view_tree ? doc->view_tree->measurement_cache_generation : 0;
+    if (!generation || context->css_query_probe || !element || element->doc != doc ||
+        (context->selected_view_tree && context->selected_view_tree != doc->view_tree) ||
+        !dom_element_is_connected(element)) return UINT64_MAX;
+    // wrappers above the root survive view-prop retirement and cannot retain a cache (D4.5.1v4).
+    radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(context, element);
+    uint64_t mask = 0;
+    bool within_root = true;
+    for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor)) {
+        if (ancestor->doc != doc) return UINT64_MAX;
+        radiant::LayoutCache* inherited = within_root ? ancestor->layout_cache.get() : nullptr;
+        if (inherited && inherited->inherited_generation == generation &&
+            inherited->inherited_style_epoch == doc->style_query_epoch &&
+            inherited->inherited_mutation_epoch == doc->mutation_epoch) {
+            mask |= inherited->inherited_declaration_mask;
+            break;
+        }
+        style_tree_foreach(ancestor->specified_style, collect_inherited_declaration_mask, &mask);
+        if (mask == UINT64_MAX) break;
+        if (ancestor == doc->root) within_root = false;
+    }
+    if (cache) {
+        cache->inherited_declaration_mask = mask;
+        cache->inherited_style_epoch = doc->style_query_epoch;
+        cache->inherited_mutation_epoch = doc->mutation_epoch;
+        cache->inherited_generation = generation;
+    }
+    return mask;
+}
+
+static void resolve_css_inherited_properties(DomElement* dom_elem,
+    LayoutContext* lycon, bool font_phase) {
+    StyleTree* style_tree = dom_elem->specified_style;
+    bool all_initial = layout_element_css_all_reset_keyword(dom_elem) == CSS_VALUE_INITIAL;
     DomElement* parent = dom_parent_element(dom_elem);
     StyleTree* parent_tree = (parent && parent->specified_style)
                              ? parent->specified_style : NULL;
@@ -5523,12 +5385,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // This handles anonymous table elements that have font but no specified_style
     if (parent_tree || (parent && parent->font)) {
         ViewSpan* inheritance_span = lam::view_require_element(lycon->view);
+        uint64_t inherited_candidates = inherited_declaration_mask(lycon, parent);
         // The CSS property database is the sole source of default inheritance
         // metadata; resolver-specific exceptions below retain their policy.
-        for (int property_code = CSS_PROPERTY_DISPLAY;
-             property_code < CSS_PROPERTY_COUNT; property_code++) {
-            CssPropertyCode prop_id = (CssPropertyCode)property_code;
-            if (!css_property_runtime_inherited(prop_id)) continue;
+        size_t inherited_count = 0;
+        const CssPropertyCode* inherited_properties = css_property_runtime_inherited_list(&inherited_count);
+        for (size_t property_index = 0; property_index < inherited_count; property_index++) {
+            CssPropertyCode prop_id = inherited_properties[property_index];
+            if (css_property_is_font(prop_id) != font_phase) continue;
             CssDeclaration* existing = style_tree_get_declaration(style_tree, prop_id);
             if (existing && existing->property_code != CSS_PROPERTY_ALL) {
                 continue;
@@ -5728,6 +5592,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->blk->text_align = inherited_align;
                 continue;
             }
+            // collisions retain the full walk; absent bits prove no ancestor declares this property.
+            if (!(inherited_candidates & (UINT64_C(1) << ((unsigned)prop_id % 64)))) continue;
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
@@ -5773,6 +5639,209 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+}
+
+void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
+    assert(dom_elem);
+    if (dom_elem->blk) {
+        css_value_destroy_owned(dom_elem->blk->container_names, layout_prop_pool(lycon));
+        dom_elem->blk->container_names = nullptr;
+        dom_elem->blk->container_axes = 0;
+        dom_elem->blk->contain_size = false;
+        dom_elem->blk->contain_inline_size = false;
+        dom_elem->blk->contain_positioning = false;
+        dom_elem->blk->contain_paint = false;
+        dom_elem->blk->computed_containment = 0;
+        dom_elem->blk->content_visibility_skipped = false;
+        dom_elem->blk->content_visibility = CSS_VALUE_VISIBLE;
+        dom_elem->blk->contain_intrinsic_width = dom_elem->blk->contain_intrinsic_height = -1.0f;
+        dom_elem->blk->contain_intrinsic_width_auto = dom_elem->blk->contain_intrinsic_height_auto = false;
+    }
+
+    // rebuild retained leading before shorthand/inheritance resolution, while
+    // preserving the UA normal value installed by HTML control defaults.
+    {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->blk &&
+                span->block()->line_height.get() != css_line_height_normal_value()) {
+            span->blk->line_height = nullptr;
+        }
+    }
+    // iterate through specified_style AVL tree
+    StyleTree* style_tree = dom_elem->specified_style;
+    if (!style_tree || !style_tree->tree) {
+        resolve_selection_pseudo_style(dom_elem, lycon);
+        return;
+    }
+    ScratchScope cascade_scope(&lycon->scratch);
+    CssDeclaration** saved_cascade_decls = lycon->cascade_priority_decls;
+    int saved_cascade_count = lycon->cascade_priority_count;
+    lycon->cascade_priority_decls = nullptr;
+    lycon->cascade_priority_count = 0;
+    CascadeLayerScan layer_scan = {style_tree, false};
+    avl_tree_foreach_inorder(style_tree->tree, scan_cascade_layer_decl, &layer_scan);
+    int declaration_capacity = layer_scan.has_layer
+        ? avl_tree_size(style_tree->tree) : 0;
+    if (declaration_capacity > 0) {
+        CssDeclaration** declarations = cascade_scope.array<CssDeclaration*>(
+            (size_t)declaration_capacity);
+        if (declarations) {
+            CascadePriorityCollector collector = {
+                style_tree, declarations, 0, declaration_capacity};
+            avl_tree_foreach_inorder(style_tree->tree,
+                collect_cascade_priority_decl, &collector);
+            qsort(declarations, (size_t)collector.count,
+                  sizeof(CssDeclaration*), compare_cascade_priority_decls);
+            lycon->cascade_priority_decls = lam::up(declarations);
+            lycon->cascade_priority_count = collector.count;
+        }
+    }
+    ViewBlock* existing_multicol_view = lam::view_as_block(lycon->view);
+    if (existing_multicol_view && existing_multicol_view->multicol_prop()) {
+        // Retained recascade must recompute currentColor after color changes.
+        existing_multicol_view->multicol_prop()->rule_color_is_current = true;
+    }
+    // Font5 §4.4: skip first-pass AVL traversal if no font properties exist.
+    // Most elements (especially in markdown) inherit all font properties from
+    // their parent and have zero font-related CSS declarations.
+    bool has_any_font_prop = css_style_tree_has_font_property(style_tree, true);
+    FontProp* parent_font_style = lycon->font.style;
+    FontBox parent_font = lycon->font;
+    ViewSpan* default_font_span = lam::view_require_element(lycon->view);
+    bool default_family_is_monospace = default_font_span && default_font_span->font &&
+        layout_tag_has_monospace_family_default(dom_elem->tag()) &&
+        default_font_span->fontp()->family &&
+        str_ieq_cstr(default_font_span->fontp()->family, "monospace");
+    CssEnum all_reset_keyword = layout_element_css_all_reset_keyword(dom_elem);
+    bool all_initial = all_reset_keyword == CSS_VALUE_INITIAL;
+    if (all_initial) {
+        // CSS Cascade: all:initial establishes the element's initial font before
+        // relative units and non-inherited declarations are resolved.
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+        }
+    }
+    if (all_reset_keyword == CSS_VALUE_INHERIT || all_reset_keyword == CSS_VALUE_UNSET) {
+        CssDeclaration* font_all = style_tree_get_declaration(
+            style_tree, CSS_PROPERTY_FONT);
+        if (font_all && font_all->property_code == CSS_PROPERTY_ALL) {
+            // Font shorthand inheritance copies the parent's computed face and
+            // size before explicit font declarations resolve relative units;
+            // all: unset inherits the font as well, its longhands being inherited.
+            resolve_css_property(CSS_PROPERTY_FONT, font_all, lycon);
+        }
+    }
+    if (has_any_font_prop) {
+        avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+    }
+    if (has_any_font_prop) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        apply_chromium_monospace_font_size_quirk(
+            style_tree, parent_font_style, span, dom_elem,
+            default_family_is_monospace);
+        if (span && span->font && span->fontp()->font_size > 0) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+        }
+    } else if (dom_elem->tag() == MARKUP_NAME_TEXTAREA) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->fontp()->font_size > 0) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+            if (span->fontp()->family && lycon->ui_context) {
+                setup_font(lycon->ui_context, &lycon->font, span->font);
+            }
+        }
+    }
+    // inherited fonts must precede em/calc geometry, including retained parent-font edits.
+    resolve_css_inherited_properties(dom_elem, lycon, true);
+    // Set up font face if a font-family was specified for this element
+    if (has_any_font_prop) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        // when only font-size changes and the family is inherited.
+        bool has_font = css_style_tree_has_font_property(style_tree, false);
+        if (has_font && span && span->font && span->fontp()->family && lycon->ui_context) {
+            setup_font(lycon->ui_context, &lycon->font, span->font);
+        }
+    }
+    {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->fontp()->font_size > 0.0f) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+        }
+    }
+    if (all_reset_keyword == CSS_VALUE_INHERIT) {
+        // `all` is a virtual declaration for every property except direction,
+        // unicode-bidi and custom properties. Apply its non-inherited values
+        // before explicit declarations, so a winning shorthand still replaces
+        // the inherited longhand state through the usual resolver.
+        for (int property_code = CSS_PROPERTY_DISPLAY;
+             property_code < CSS_PROPERTY_COUNT; property_code++) {
+            CssPropertyCode property = (CssPropertyCode)property_code;
+            if (property == CSS_PROPERTY_ALL || property == CSS_PROPERTY_DISPLAY ||
+                property == CSS_PROPERTY_DIRECTION ||
+                property == CSS_PROPERTY_UNICODE_BIDI ||
+                property == CSS_PROPERTY_CUSTOM || property == CSS_PROPERTY_FONT ||
+                css_property_runtime_inherited(property)) continue;
+            CssDeclaration* winner = style_tree_get_declaration(style_tree, property);
+            if (winner && winner->property_code == CSS_PROPERTY_ALL) {
+                resolve_css_property(property, winner, lycon);
+            }
+        }
+    }
+    // the current element instead of falling back to a parent or UA default.
+    {
+        AvlNode* color_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_COLOR);
+        if (color_node) {
+            StyleNode* style_node = (StyleNode*)color_node->declaration;
+            CssDeclaration* decl = style_node
+                ? style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR) : NULL;
+            if (decl && decl->property_code != CSS_PROPERTY_ALL) {
+                resolve_css_property(CSS_PROPERTY_COLOR, decl, lycon);
+            }
+        }
+    }
+    avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+    // intrinsic measurement and used sizing share the winner across shorthand and logical aliases.
+    const CssPropertyCode intrinsic_parts[] = {CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT};
+    for (CssPropertyCode property : intrinsic_parts) {
+        CssDeclaration* winner = layout_cascaded_physical_declaration(dom_elem, property);
+        if (winner) resolve_css_property(property, winner, lycon);
+    }
+    // query eligibility and names use the same shorthand/longhand rollback winner.
+    const CssPropertyCode container_parts[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
+    for (CssPropertyCode part : container_parts) {
+        CssDeclaration* winner = style_tree_get_declaration(style_tree, part);
+        if (winner) resolve_css_property(part, winner, lycon);
+    }
+    if (dom_elem->blk) {
+        // visibility containment persists while auto contents are relevant; skipping adds size containment.
+        bool visibility_applies = view_size_containment_applies(dom_elem->display);
+        if (!visibility_applies) dom_elem->blk->content_visibility_skipped = false;
+        if (visibility_applies && dom_elem->blk->content_visibility != CSS_VALUE_VISIBLE) {
+            dom_elem->blk->contain_positioning = true;
+            dom_elem->blk->contain_paint = true;
+        }
+        dom_elem->blk->contain_size |= dom_elem->blk->content_visibility_skipped;
+        dom_elem->blk->contain_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_BLOCK) != 0;
+        dom_elem->blk->contain_inline_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_INLINE) != 0;
+    }
+    // A shorthand can supply a longhand even when that longhand has no AVL node.
+    const CssPropertyCode border_image_parts[] = {
+        CSS_PROPERTY_BORDER_IMAGE_SOURCE, CSS_PROPERTY_BORDER_IMAGE_SLICE,
+        CSS_PROPERTY_BORDER_IMAGE_WIDTH, CSS_PROPERTY_BORDER_IMAGE_OUTSET,
+        CSS_PROPERTY_BORDER_IMAGE_REPEAT
+    };
+    for (CssPropertyCode part : border_image_parts) {
+        if (avl_tree_search(style_tree->tree, part)) continue;
+        CssDeclaration* winner = style_tree_get_declaration(style_tree, part);
+        if (winner && winner->property_code == CSS_PROPERTY_BORDER_IMAGE)
+            resolve_css_property(part, winner, lycon);
+    }
+    resolve_css_inherited_properties(dom_elem, lycon, false);
     radiant_compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
     resolve_background_style(dom_elem, lycon);
     resolve_grid_components(dom_elem, lycon);
@@ -6296,6 +6365,7 @@ void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
     }
     LayoutAxisRefs context(&lycon->block, axis);
     if (context.given) *context.given = size;
+    radiant::css_resolved_style_note_axis(lycon, axis);
     if (!block) return;
     block->ensure_block(lycon);
     LayoutAxisRefs refs(block->block_mut(), axis);
@@ -8608,8 +8678,6 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     DomElement* current_element = lycon->view && lycon->view->is_element()
         ? lycon->view->as_element() : nullptr;
     bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
-    WritingMode current_writing_mode = layout_element_writing_mode(current_element);
-    bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
     bool grid_projection = grid_mask && (css_grid_property_mask(decl->property_code) & grid_mask) && decl->property_code != prop_id;
     bool flex_projection = decl->property_code == CSS_PROPERTY_FLEX && prop_id != CSS_PROPERTY_FLEX;
@@ -8633,12 +8701,22 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             value = substituted;
         }
     }
-    ViewSpan* span = lam::view_require_element(lycon->view);
     if (decl->pending_shorthand_code > 0 || grid_projection || flex_projection ||
         value_property == CSS_PROPERTY_CONTAINER) {
         value = css_project_shorthand_longhand(value_pool, value, value_property, prop_id);
         if (!value) return;
     }
+    radiant::css_resolved_style_record(lycon, prop_id, decl, value, specificity);
+    css_apply_computed_property(prop_id, decl, value, specificity, lycon);
+}
+
+void css_apply_computed_property(CssPropertyCode prop_id,
+    const CssDeclaration* decl, const CssValue* value, int64_t specificity,
+    LayoutContext* lycon) {
+    DomElement* current_element = lycon->view->as_element();
+    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
+    bool vertical_block_start_is_right = layout_element_writing_mode(current_element) == WM_VERTICAL_RL;
+    ViewSpan* span = lam::view_require_element(lycon->view);
     ViewBlock* block = lam::view_as_block(span);
     CssEnum specified_direction = layout_specified_keyword(
         current_element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);

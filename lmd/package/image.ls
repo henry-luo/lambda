@@ -4,7 +4,7 @@ import sequence: .editor.mod_doc
 pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^
 pub fn from_array(samples, options = {}) element^ => lambda.sys.image_raster(samples, options)^
 pub fn channel(raster, channel_name) array^ => lambda.sys.image_region(raster, null, channel_name)^
-fn checked_options(options, allowed) map^ {
+pub fn checked_options(options, allowed) map^ {
     if (not (options is map) or len([for (key, value in options where not (string(key) in allowed)) key]) > 0)
         raise error("image: unknown option or options are not a map")
     else options
@@ -21,6 +21,10 @@ pub fn materialize(raster) element =>
 
 pub fn raster_of(layer) element? => [for (child in content(layer) where name(child) == 'raster') child][0]
 pub fn layer(raster, options = {}) element => <layer kind: 'raster', *: options, raster>
+pub fn text_layer(text, options = {}, layer_options = {}) element =>
+    <layer kind:'text',*:layer_options,<text *:options,text>>
+pub fn vector_layer(options, layer_options = {}) element =>
+    <layer kind:'vector',*:layer_options,<vector *:options>>
 pub fn stack(layers, options = {}) element => <stack *: options, *layers>
 pub fn frame(composition, duration, options = {}) element =>
     <frame duration: duration, *: options, composition>
@@ -221,10 +225,51 @@ pub fn encode_report(image, options = {}) map^ {
         notes: if (format in ['psd', "psd"]) ["opacity and mask default round to 8 bits",
             "source blocks are rewritten; opaque source metadata is not copied"] else []}}
 }
-pub fn render_region(image, rect, options = {}) element^ => crop(render_frame(image, options)^, rect)^
+pub fn render_region(image, rect, options = {}) element^ =>
+    render_frame(image,{*:checked_options(options,["frame"])^,rect:rect})^
 pub fn sample(raster, x, y) array^ => read_region(raster, [x, y, x + 1, y + 1])^[0, 0]
 
 pub fn transform(raster, options) element^ => adjust(raster, options)^
 pub fn rotate(raster, quarter_turns) element^ => transform(raster, {turns: quarter_turns})^
 pub fn flip(raster, horizontal = true, vertical = false) element^ =>
     transform(raster, {flip_x: horizontal, flip_y: vertical})^
+
+// S9.2.2: coverage and paint return immutable rasters with shared untouched tiles.
+fn edit_samples(raster,operation,options={}) any^ {
+    if (not (options is map) or any([for (key,value in options) string(key) == "op"]))
+        raise error("image: edit options must be a map without an op override")
+    else lambda.sys.image_edit(raster,{op:operation,*:options})^
+}
+pub fn selection(width,height,options) element^ =>
+    edit_samples(null,"shape",{*:checked_options(options,["shape","start","end","points"])^,width:width,height:height})^
+pub fn combine_coverage(coverage,other,mode="replace") element^ => edit_samples(coverage,"combine",{other:other,mode:mode})^
+pub fn invert_coverage(coverage) element^ => edit_samples(coverage,"invert")^
+pub fn feather_coverage(coverage,radius) element^ => edit_samples(coverage,"feather",{radius:radius})^
+pub fn coverage_bounds(coverage) any^ => edit_samples(coverage,"bounds")^
+pub fn coverage_overlay(coverage) element^ => edit_samples(coverage,"overlay")^
+pub fn paint_stroke(raster,options) element^ => edit_samples(raster,"stroke",options)^
+// S9.2.2: a continuation retains immutable coverage and the frozen pre-stroke source.
+pub fn paint_stroke_step(raster,points,options={},previous=null) map^ =>
+    edit_samples(raster,"stroke_step",{points:points,settings:{*:checked_options(options,
+        ["size","hardness","spacing","flow","opacity","color","mode","selection","origin"])^},previous:previous})^
+pub fn paint_fill(raster,options) element^ => edit_samples(raster,"fill",options)^
+pub fn gradient(raster,options) element^ => edit_samples(raster,"gradient",options)^
+pub fn wand(raster,point,options={}) element^ =>
+    edit_samples(raster,"wand",{*:checked_options(options,["tolerance","contiguous"])^,point:point})^
+pub pn storage_info(raster) map^ { return lambda.sys.image_storage(raster)^ }
+pub fn reframe(raster,rect,options={}) element^ =>
+    edit_samples(raster,"reframe",{*:checked_options(options,["fill"])^,rect:rect})^
+pub fn mix_samples(raster,other,options={}) element^ =>
+    edit_samples(raster,"mix",{*:checked_options(options,["selection","origin"])^,other:other})^
+pub fn extract_samples(raster,options={}) element^ => edit_samples(raster,"extract",options)^
+
+// raw bytes preserve channel shape and hidden RGB across data-only project serialization.
+pub fn to_bytes(raster) binary^ => edit_samples(raster,"pack")^
+pub fn from_bytes(bytes,options) element^ {
+    if (not (bytes is binary)) raise error("image.from_bytes: expected binary samples")
+    else lambda.sys.image_raster(bytes,options)^
+}
+
+pub fn histogram(raster) array^ => edit_samples(raster,"histogram")^
+
+pub fn retouch(raster,options) element^ => edit_samples(raster,"retouch",options)^

@@ -723,7 +723,8 @@ inline void run_enhanced_track_sizing(
     float* out_col_intrinsic_width = nullptr,
     float* out_row_intrinsic_height = nullptr,
     bool column_min_content_constraint = false,
-    bool column_max_content_constraint = false)
+    bool column_max_content_constraint = false,
+    bool columns_only = false)
 {
     if (!grid_layout) return;
 
@@ -972,8 +973,9 @@ inline void run_enhanced_track_sizing(
         compute_track_offsets(col_tracks, grid_layout->column_gap);
     }
 
+    // pure inline contributions must not recursively measure unused row heights.
     // === Run track sizing for rows ===
-    if (!row_tracks.empty()) {
+    if (!columns_only && !row_tracks.empty()) {
         size_t pct_row_count = row_percentage_base < 0.0f ? defer_grid_percentage_tracks(row_tracks) : 0;
         bool needs_row_second_pass = pct_row_count > 0;
 

@@ -15,11 +15,11 @@ full target vocabulary is not a claim that all Photoshop behavior is supported.
 
 | Milestone | Delivered behavior | Remaining limits |
 |---|---|---|
-| 1. Working Raster | Native owned contiguous `u8`, gray/gray-alpha/RGB/RGBA; Raster Velmt; canonical materialization; declared non-enumerable channel projections; array/channel/region snapshots; PNG/JPEG import | Channel/region writes copy the contiguous owner; high-depth storage is outstanding |
-| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse | One active mask per node; normal source-over only; retained transforms and enabled effects need baking; region rendering is eager |
+| 1. Working Raster | Native owned `u8`, dense inputs and shared COW tiles for region/paint edits; gray/gray-alpha/RGB/RGBA; Raster Velmt; canonical materialization; declared non-enumerable channel projections; array/channel/region snapshots; PNG/JPEG import | High-depth storage is outstanding |
+| 2. Editable composition | Foreground-first layers; isolated nested stacks; integral placement; visibility/opacity; gray alpha masks with independent extents/default/inversion; crop/resize/adjust/rotate/flip/fill/stamp; tree replacement/reordering; editor snapshot history reuse; requested-region composition | One active mask per node; eight linear-light blends, affine layer/mask transforms, retained ordered color/filter effects, clipping chains and pass-through groups; group effects and pass-through clipping bases require isolation |
 | 3. Animation | Frame-owned stacks; GIF patch/disposal normalization; exact zero delays and total plays; frame editing; full-frame GIF output with exact local palettes | At most 255 opaque colors plus transparency; binary alpha and exact centisecond timing; no implicit quantization; other temporal formats need separate profiles |
 | 4. PSD interchange | Version-1 RGB/grayscale8 read; raw/RLE/ZIP/prediction decode; raw layered write; Unicode names, groups, empty layers, user masks; regenerated IDs/composite; export report; original-byte session passthrough; `input(...,'psd')`/automatic detection and runtime adoption | PSB, native text/smart objects/effects, pass-through groups, group masks, inverted-mask writing and opaque block reuse are not qualified; strict rendering/export rejects unsupported features |
-| 5. Photo scale/precision | Not delivered | Sparse tiled COW, demand/halo evaluation, high-depth adapters, ICC conversion and broader blending remain work |
+| 5. Photo scale/precision | Photos M2 adds shared COW tiles, native painting/coverage and true region composition | Effect halos, high-depth adapters, ICC conversion and broader blending remain work; photo-scale budgets are unqualified |
 
 ## Implementation map
 
@@ -154,3 +154,54 @@ interpreter crash. The shared checkout has concurrent edits, so these totals
 are qualification evidence rather than a clean-baseline attribution. Full log:
 `temp/image_samples/view_lambda_baseline.log`. No unrelated tests or budgets
 were changed by this fix.
+
+## Photos shared-image continuation — 2026-10-19
+
+Photos extends the shared renderer with eight blends, retained affine placement,
+ordered effects, clipping and pass-through groups. Raw raster byte pack/unpack,
+histograms and `lambda.image.project` provide editable data persistence. Retouch
+kernels reuse brush coverage and immutable tile publication; clone/heal sample
+frozen inputs and local tonal edits preserve alpha (**S9.1.2 / S9.1.3 / S9.2.2**).
+Projects and action files parse data without executing source (**S12.1.1v3**).
+Detailed acceptance and remaining qualification are tracked in
+[Photos implementation](Lambda_Impl_Photos.md). The new working composition
+profile does not widen the PSD writer silently; unsupported retained metadata
+still requires a project or explicit baking. High depth and ICC conversion remain
+unimplemented.
+
+## Photos authored content and sample comparison — 2026-10-20
+
+The shared compositor now evaluates primary text/vector content through the
+existing embedded-font outline API and ThorVG vector backend. It performs no
+font-file acquisition or system substitution inside pure rendering
+(**S12.1.1v3**). Ordered shadow/glow/color-overlay styles consume adjusted,
+masked source pixels before retained affine placement. Explicit local filter
+outsets contribute to bounds; groups require rasterization for this style profile.
+Projects preserve the authored content and font bytes; PSD refuses unsupported
+artwork/styles and saved editor channels instead of dropping them.
+
+Native-to-native Raster equality compares canonical u8 samples directly while
+the surrounding tag/namespace/attributes retain their normal structural checks
+(**S5.4.3 / S9.2.2**). The old path allocated both full pixel projections during
+dirty/history comparisons, causing repeated large allocations under forced GC.
+Materialized/virtual comparisons keep the general element relation, and ordinary
+container NaN/error semantics are unchanged. Dense/sparse/shared-tile and hidden-RGB
+checks qualify the storage comparison. Detailed workflow results and limitations
+are recorded in [Photos implementation](Lambda_Impl_Photos.md).
+
+Incremental brush/eraser previews share the whole-stroke dab and pixel kernels.
+`paint_stroke_step` carries immutable coverage, spacing/pressure and work across
+batches, applying cumulative opacity against the frozen source (**S9.2.2**).
+Continuation source/settings bindings preserve value equality (**S5.4.3**), and
+native allocation paths use precise roots (**D5.3.3**). Earlier source, coverage
+and preview snapshots remain independently readable. The editor combines this
+with existing `render_region` / `with_region` to refresh bounded dirty regions;
+neighborhood effects/styles retain full-composition previews. Performance and
+regression evidence belongs to the Photos qualification record.
+
+The canvas upload bridge now treats same-size bitmap updates as repaint work.
+Only changed width/height attributes enter DOM reconciliation; the shared canvas
+generation helper requests repaint directly. Repeated frame uploads retain owned
+pixels without relayout, while resize-dependent CSS still reflows. This preserves
+the native pixel-ownership boundary (**D4.5.2**) and removes a per-stroke-frame
+layout cost exposed by the native frame profiler.

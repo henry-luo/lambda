@@ -241,7 +241,8 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
     if (element->layout_cache->generation != generation) {
         // A retained prop block may survive reflow, but its measurements may
         // only be consumed by the generation that produced them.
-        layout_cache_init(element->layout_cache, generation);
+        layout_cache_clear(element->layout_cache);
+        element->layout_cache->generation = generation;
         return false;
     }
 

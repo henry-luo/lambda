@@ -1024,6 +1024,48 @@ TEST(ImageIO, PsdCompressionAndBounds) {
     }
 }
 
+TEST(ImageIO, RasterTilesShareUntouchedBackingAndDetachAcrossBoundaries) {
+    RasterBuffer* original = raster_buffer_create(768, 8, 4, 768 * 8 * 4);
+    ASSERT_NE(original, nullptr);
+    memset(original->pixels, 37, original->size);
+    int64_t allocations = byte_storage_allocation_count();
+    RasterBuffer* first = raster_buffer_fork(original);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(byte_storage_allocation_count(), allocations);
+    raster_buffer_edit_pixel(first, 255, 3)[0] = 100;
+    raster_buffer_edit_pixel(first, 256, 3)[0] = 200;
+    EXPECT_EQ(byte_storage_allocation_count(), allocations + 2);
+    EXPECT_EQ(raster_buffer_pixel(original, 255, 3)[0], 37);
+    EXPECT_EQ(raster_buffer_pixel(first, 255, 3)[0], 100);
+    EXPECT_EQ(first->tiles[2].storage, original->storage);
+    RasterBuffer* second = raster_buffer_fork(first);
+    ASSERT_NE(second, nullptr);
+    raster_buffer_edit_pixel(second, 255, 3)[0] = 50;
+    EXPECT_EQ(byte_storage_allocation_count(), allocations + 3);
+    EXPECT_EQ(raster_buffer_pixel(first, 255, 3)[0], 100);
+    EXPECT_EQ(raster_buffer_pixel(second, 256, 3)[0], 200);
+    raster_buffer_destroy(original);
+    EXPECT_EQ(raster_buffer_pixel(second, 767, 7)[3], 37);
+    uint8_t samples[8];
+    ASSERT_TRUE(raster_buffer_copy_region(second, 255, 3, 2, 1, -1, samples, sizeof(samples)));
+    EXPECT_EQ(samples[0], 50); EXPECT_EQ(samples[4], 200);
+    raster_buffer_destroy(first); raster_buffer_destroy(second);
+}
+
+TEST(ImageIO, SparseRasterTileFailurePreservesTheSource) {
+    int64_t allocations = byte_storage_allocation_count();
+    RasterBuffer* original = raster_buffer_sparse(2048, 2048, 4, 16 * 1024 * 1024);
+    ASSERT_NE(original, nullptr);
+    EXPECT_EQ(byte_storage_allocation_count(), allocations);
+    RasterBuffer* edit = raster_buffer_fork(original);
+    ASSERT_NE(edit, nullptr);
+    byte_storage_fail_next_allocation_for_test();
+    EXPECT_EQ(raster_buffer_edit_pixel(edit, 256, 256), nullptr);
+    EXPECT_EQ(raster_buffer_pixel(original, 256, 256)[3], 0);
+    EXPECT_EQ(raster_buffer_pixel(edit, 256, 256)[3], 0);
+    raster_buffer_destroy(edit); raster_buffer_destroy(original);
+}
+
 TEST(ImageIO, AnimatedGifExactPaletteAndTransparentDisposal) {
     RasterBuffer* first = raster_buffer_create(2, 1, 4, 8);
     RasterBuffer* second = raster_buffer_create(2, 1, 4, 8);
@@ -1050,6 +1092,26 @@ TEST(ImageIO, AnimatedGifExactPaletteAndTransparentDisposal) {
     ImageContext context; image_context_init(&context); context.limits.max_encoded_bytes = 32;
     EXPECT_EQ(image_encode_gif_frames(&context, frames, delays, 2, 1, &encoded, &error), IMAGE_LIMIT_EXCEEDED);
     raster_buffer_destroy(first); raster_buffer_destroy(second);
+}
+
+TEST(ImageIO, RasterSampleEqualityPreservesShapeHiddenColorAndSnapshots) {
+    RasterOwner dense,sparse,changed,gray;
+    dense.result=raster_buffer_create(520,2,4,4160);
+    sparse.result=raster_buffer_sparse(520,2,4,4160);
+    ASSERT_NE(dense.result,nullptr); ASSERT_NE(sparse.result,nullptr);
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    uint8_t* sample=raster_buffer_edit_pixel(sparse.result,256,1);
+    ASSERT_NE(sample,nullptr); sample[0]=91; // hidden RGB is part of structural sample equality.
+    EXPECT_FALSE(raster_buffer_samples_equal(dense.result,sparse.result));
+    dense.result->pixels[(520+256)*4]=91;
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    changed.result=raster_buffer_fork(sparse.result); ASSERT_NE(changed.result,nullptr);
+    EXPECT_TRUE(raster_buffer_samples_equal(changed.result,sparse.result));
+    sample=raster_buffer_edit_pixel(changed.result,519,1); ASSERT_NE(sample,nullptr); sample[3]=128;
+    EXPECT_FALSE(raster_buffer_samples_equal(changed.result,sparse.result));
+    EXPECT_TRUE(raster_buffer_samples_equal(dense.result,sparse.result));
+    gray.result=raster_buffer_sparse(520,2,1,1040); ASSERT_NE(gray.result,nullptr);
+    EXPECT_FALSE(raster_buffer_samples_equal(gray.result,sparse.result));
 }
 
 TEST(ImageIO, PsdGroupMaskCannotSilentlyBecomeAnUnmaskedGroup) {

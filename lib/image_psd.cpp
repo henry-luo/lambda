@@ -357,7 +357,7 @@ static void psd_write_plane(PsdWriter* writer, const RasterBuffer* buffer, unsig
     if (!buffer) return;
     size_t pixels = (size_t)buffer->width * buffer->height;
     for (size_t p = 0; p < pixels; p++) {
-        const uint8_t* sample = buffer->pixels + p * buffer->channels;
+        const uint8_t* sample = raster_buffer_pixel(buffer, (uint32_t)(p % buffer->width), (uint32_t)(p / buffer->width));
         uint8_t n;
         if (channel == 3) n = buffer->channels == 2 || buffer->channels == 4 ? sample[buffer->channels - 1] : 255;
         else n = sample[buffer->channels <= 2 ? 0 : channel];

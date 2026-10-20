@@ -1,3 +1,4 @@
+#include "radiant_render_test_utils.hpp"
 #include "../lambda/io/image_io.h"
 #include <gtest/gtest.h>
 
@@ -1819,15 +1820,15 @@ TEST(SvgExportTest, SmallRetainedFragmentsLeaveRoomForPngEncoding) {
         dl_clear(&replay);
         bool appended = retained_dl_append_fragment(&replay, fragment);
         EXPECT_TRUE(appended);
-        EXPECT_EQ(replay.size(), 3u);
-        if (!appended || replay.size() != 3) continue;
-        EXPECT_EQ(replay.data()[0].op, DL_BEGIN_ELEMENT);
-        EXPECT_EQ(replay.data()[0].element_marker.view_id, view_id);
-        EXPECT_EQ(replay.data()[0].element_marker.matching_index, 2);
-        EXPECT_EQ(replay.data()[1].op, DL_FILL_RECT);
-        EXPECT_EQ(replay.data()[1].fill_rect.color.c, 0x80000080u);
-        EXPECT_EQ(replay.data()[2].op, DL_END_ELEMENT);
-        EXPECT_EQ(replay.data()[2].element_marker.matching_index, 0);
+        EXPECT_EQ(replay.size(), 1u);
+        if (!appended || replay.size() != 1) continue;
+        EXPECT_EQ(test_radiant_command(&replay, 0).op, DL_BEGIN_ELEMENT);
+        EXPECT_EQ(test_radiant_command(&replay, 0).element_marker.view_id, view_id);
+        EXPECT_EQ(test_radiant_command(&replay, 0).element_marker.matching_index, 2);
+        EXPECT_EQ(test_radiant_command(&replay, 1).op, DL_FILL_RECT);
+        EXPECT_EQ(test_radiant_command(&replay, 1).fill_rect.color.c, 0x80000080u);
+        EXPECT_EQ(test_radiant_command(&replay, 2).op, DL_END_ELEMENT);
+        EXPECT_EQ(test_radiant_command(&replay, 2).element_marker.matching_index, 0);
     }
     dl_destroy(&replay); retained_dl_cache_destroy(cache);
     dl_destroy(&source); arena_destroy(arena); arena_destroy(replay_arena); pool_destroy(pool);
@@ -3127,13 +3128,14 @@ TEST(SvgGradientTest, RetainedFragmentOwnsStrokeFactsAfterRecordingArenaDies) {
     arena = arena_create_default(); DisplayList replay = {}; dl_init(&replay, arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_TRUE(dl_validate(&replay, nullptr));
-    const DlFillLinearGradient* gradient = &replay.data()[1].fill_linear_gradient;
+    const DisplayItem command = test_radiant_command(&replay, 1);
+    const DlFillLinearGradient* gradient = &command.fill_linear_gradient;
     EXPECT_EQ(gradient->options.spread, RDT_GRADIENT_REPEAT);
     EXPECT_FLOAT_EQ(gradient->options.miter_limit, 6.0f);
     EXPECT_FLOAT_EQ(gradient->options.dash_array[0], 10.0f);
     uint32_t pixels[80 * 50] = {}; RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 80, 50, 80);
-    EXPECT_EQ(dl_replay_vector_item(&vector, &replay.data()[1]), DL_REPLAY_VECTOR_DREW);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &command), DL_REPLAY_VECTOR_DREW);
     EXPECT_EQ(pixels[10 * 80 + 15], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 35], 0xff0000ffu);
     EXPECT_EQ(pixels[10 * 80 + 25], 0u);
@@ -5620,10 +5622,10 @@ TEST(PaintOwnership, CopiedBorrowedChunksPinSharedPaintArraysAfterAllSourceOwner
     ASSERT_TRUE(retained_dl_append_fragment(&borrowed, fragment));
     RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
     ASSERT_TRUE(dl_copy_range(&copied, &borrowed, 0, borrowed.item_count() - 1));
-    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_EQ(counters.shared_array_retains, 1u);
-    EXPECT_EQ(copied[1].fill_linear_gradient.stops, borrowed[1].fill_linear_gradient.stops);
+    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_EQ(counters.shared_array_retains, 0u);
+    EXPECT_EQ(test_radiant_command(&copied, 1).fill_linear_gradient.stops, test_radiant_command(&borrowed, 1).fill_linear_gradient.stops);
     retained_dl_cache_destroy(cache); dl_destroy(&source); dl_destroy(&borrowed);
-    EXPECT_EQ(copied[1].fill_linear_gradient.stops[0].r, 220);
+    EXPECT_EQ(test_radiant_command(&copied, 1).fill_linear_gradient.stops[0].r, 220);
     EXPECT_TRUE(dl_validate(&copied, nullptr));
     dl_destroy(&copied); pool_destroy(pool);
 }
@@ -5768,14 +5770,36 @@ TEST(PaintOwnership, ForcedFramesReuseSettledRecordingAndInvalidateChangedSvgPai
     for (int i = 0; i < 4; i++) ASSERT_EQ(render(), 0);
     EXPECT_GT(counters.layer_recordings, 0u); // frame reuse must allow default layer admission to warm.
     EXPECT_GT(counters.full_frame_reuses, 0u);
+    EXPECT_GT(counters.resource_capture_chunks, 0u);
     EXPECT_EQ(((uint32_t*)ui->surface->pixels)[10 * ui->surface->width + 10], 0xff0000ffu);
     DisplayItem* storage = tree->render_list->data();
     ASSERT_FALSE(tree->render_list->empty());
     counters = {};
     ASSERT_EQ(render(), 0);
     EXPECT_EQ(counters.full_frame_reuses, 1u); EXPECT_EQ(counters.command_copy_bytes, 0u);
+    EXPECT_EQ(counters.resource_command_checks, 0u);
+    EXPECT_EQ(counters.resource_summary_checks, 1u);
+    EXPECT_EQ(counters.resource_capture_commands, 0u);
+    EXPECT_EQ(counters.validation_command_checks, 0u);
+    EXPECT_EQ(counters.glyph_command_checks, 0u);
+    EXPECT_EQ(counters.media_command_checks, 0u);
     EXPECT_EQ(counters.path_parses, 0u); EXPECT_EQ(counters.native_canvases, 0u);
     EXPECT_EQ(tree->render_list->data(), storage);
+    ImageSurface* layer = nullptr;
+    DisplayListCursor layers(tree->render_list);
+    while (const DisplayItem* item = layers.next())
+        if (item->op == DL_DRAW_IMAGE && !item->draw_image.resource.is_null()) {
+            layer = image_surface_lookup(item->draw_image.resource); break;
+        }
+    ASSERT_NE(layer, nullptr);
+    image_surface_bump_generation(layer); // no document key change accompanies a surface edit.
+    retained_dl_cache_set_storage_budget(state->retained_dl_cache, 0);
+    counters = {};
+    ASSERT_EQ(render(), 0);
+    EXPECT_EQ(counters.full_frame_reuses, 0u);
+    EXPECT_GT(counters.resource_surface_checks, 0u);
+    EXPECT_GT(counters.resource_capture_commands, 0u); // failed chunk admission keeps the flat snapshot fallback.
+    EXPECT_EQ(((uint32_t*)ui->surface->pixels)[10 * ui->surface->width + 10], 0xff0000ffu);
     DomElement* ink = dom_find_element_by_id(ui->document->root, "ink"); ASSERT_NE(ink, nullptr);
     ASSERT_TRUE(ink->set_attribute("fill", "blue"));
     dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, ink, ink->parent, "fill", "red");
@@ -5788,6 +5812,203 @@ TEST(PaintOwnership, ForcedFramesReuseSettledRecordingAndInvalidateChangedSvgPai
     ASSERT_EQ(render(), 0); // background changes cannot reuse backdrop-dependent commands.
     EXPECT_EQ(counters.full_frame_reuses, 0u);
     render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ForcedFramesShareCapturedChunksAndKeepThemAfterIndexEviction) {
+    rdt_engine_init(0);
+    for (unsigned cards : {512u, 1536u}) {
+        SCOPED_TRACE(cards);
+        StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_str(html, "<html><body style='margin:0;font-size:0'>");
+        for (unsigned child = 0; child < cards; child++)
+            strbuf_append_str(html, "<div style='display:inline-block;width:4px;height:4px;background:red'></div>");
+        strbuf_append_str(html, "</body></html>");
+        RenderExportSession session = {};
+        ASSERT_TRUE(render_export_session_begin_source(&session, html->str, 512, 60, false));
+        strbuf_free(html);
+        UiContext* ui = session.ui_context; ViewTree* tree = ui->document->view_tree;
+        DocState* state = ui->document->state;
+        RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+        auto render = [&]() {
+            doc_state_mark_dirty(state);
+            return render_output_render_view_tree_to_target(ui, tree, &target);
+        };
+        ASSERT_EQ(render(), 0);
+        size_t expanded = 0, references = 0;
+        DisplayListCursor cursor(tree->render_list);
+        while (cursor.next()) expanded++;
+        EXPECT_FALSE(cursor.failed);
+        EXPECT_GT(expanded, 1500u);
+        for (const DisplayItem& item : *tree->render_list) references += item.op == DL_DRAW_FRAGMENT;
+        if (cards == 512u) {
+            EXPECT_LT(tree->render_list->size(), 16u);
+            EXPECT_LT(tree->render_list->capacity() * sizeof(DisplayItem), 16384u);
+            EXPECT_GT(references, 0u);
+        } else {
+            // the shared graph exceeds frame admission; the smaller flat recording must still reuse.
+            EXPECT_EQ(references, 0u);
+        }
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        ASSERT_EQ(render(), 0);
+        EXPECT_EQ(counters.full_frame_reuses, 1u); EXPECT_EQ(counters.command_copy_bytes, 0u);
+        // dropping cache publications must not retire the full frame's independent chunk leases.
+        retained_dl_cache_set_storage_budget(state->retained_dl_cache, 0);
+        retained_dl_cache_begin_frame(state->retained_dl_cache);
+        counters = {};
+        ASSERT_EQ(render(), 0);
+        EXPECT_EQ(counters.full_frame_reuses, 1u); EXPECT_EQ(counters.command_copy_bytes, 0u);
+        EXPECT_TRUE(dl_validate(tree->render_list, nullptr));
+        test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+        render_export_session_end(&session);
+    }
+    rdt_engine_term();
+}
+
+TEST(PaintOwnership, SelectiveFramesRefreshUnchangedIndexEntriesWithoutRepublishingThem) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    // child lines change the inline-block baseline; align tops to preserve overlapping sibling damage.
+    StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+    strbuf_append_str(html, "<html><body style='margin:0;font-size:0'>"
+        "<div id='stable-card' style='display:inline-block;vertical-align:top;width:40px;height:40px;background:red'>");
+    for (unsigned child = 0; child < 256; child++)
+        strbuf_append_str(html, "<div style='display:inline-block;width:1px;height:1px;background:red'></div>");
+    strbuf_append_str(html, "</div><div id='damaged-card' style='display:inline-block;vertical-align:top;position:relative;left:-20px;"
+        "width:40px;height:40px;background:blue'></div></body></html>");
+    ASSERT_TRUE(render_export_session_begin_source(&session, html->str, 80, 50, false));
+    strbuf_free(html);
+    UiContext* ui = session.ui_context;
+    DocState* state = ui->document->state;
+    ViewTree* tree = ui->document->view_tree;
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    doc_state_mark_dirty(state);
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    DomElement* stable = dom_find_element_by_id(ui->document->root, "stable-card"); ASSERT_NE(stable, nullptr);
+    uint32_t stable_view_id = static_cast<View*>(stable)->id;
+    const auto* entry = retained_dl_cache_get(state->retained_dl_cache, stable_view_id); ASSERT_NE(entry, nullptr);
+    DomElement* damaged = dom_find_element_by_id(ui->document->root, "damaged-card"); ASSERT_NE(damaged, nullptr);
+    test_radiant_expect_surface_pixel(ui->surface, 30, 10, 0, 0, 255);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    dirty_mark_element(state, static_cast<View*>(damaged));
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    auto stats = retained_dl_cache_stats(state->retained_dl_cache);
+    EXPECT_GT(counters.fragment_references, 0u); EXPECT_GT(stats.reused_captures, 0u);
+    EXPECT_LT(counters.retained_index_publications, (size_t)stats.captured + stats.reused_captures);
+    EXPECT_EQ(counters.retained_index_prune_checks, 1u);
+    EXPECT_EQ(counters.retained_membership_nodes, 1u);
+    EXPECT_EQ(counters.retained_membership_groups, 1u);
+    EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
+    EXPECT_GT(counters.retained_dirty_ancestry_queries, 0u);
+    EXPECT_EQ(stats.reused_captures, 257u);
+    EXPECT_EQ(retained_dl_cache_get(state->retained_dl_cache, stable_view_id), entry);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+    test_radiant_expect_surface_pixel(ui->surface, 30, 10, 0, 0, 255);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, SelectiveFramesRejectDirtyAncestorsWithValidatedAndMissingSourceHints) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0'><div id='parent' style='width:40px;height:40px;background:red'>"
+        "<div id='child' style='width:20px;height:20px;background:blue'></div></div></body></html>",
+        60, 50, false));
+    UiContext* ui = session.ui_context; ViewTree* tree = ui->document->view_tree;
+    DocState* state = ui->document->state;
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    doc_state_mark_dirty(state);
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    DomElement* parent = dom_find_element_by_id(ui->document->root, "parent"); ASSERT_NE(parent, nullptr);
+    DomElement* child = dom_find_element_by_id(ui->document->root, "child"); ASSERT_NE(child, nullptr);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+    for (bool hint : {true, false}) {
+        // change the producer payload directly to test selective damage independently of full-style keys.
+        child->ensure_boundary(tree)->background->color.c = hint ? 0xff00ff00u : 0xff0000ffu;
+        dirty_mark_element(state, static_cast<View*>(child));
+        if (!hint) state->dirty_tracker.dirty_list->source_view_address = nullptr;
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+        EXPECT_GT(retained_dl_cache_stats(state->retained_dl_cache).reuse_rejected_dirty, 0);
+        if (hint) {
+            EXPECT_GT(counters.retained_dirty_ancestry_queries, 0u);
+            EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
+        } else EXPECT_GT(counters.retained_dirty_subtree_searches, 0u);
+        test_radiant_expect_surface_pixel(ui->surface, 10, 10, hint ? 0 : 255, hint ? 255 : 0, 0);
+        test_radiant_expect_surface_pixel(ui->surface, 30, 30, 255, 0, 0);
+    }
+    parent->ensure_boundary(tree)->background->color.c = 0xff00ffffu;
+    dirty_mark_element(state, static_cast<View*>(parent));
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    test_radiant_expect_surface_pixel(ui->surface, 30, 30, 255, 255, 0);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, TextOverlayUsesSerialReplayWithATextFreeRetainedDocument) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0;background:#404040'><input id='target' value='' "
+        "style='width:20px;height:20px;background:red;font:16px Arial;border:0;padding:0'></body></html>", 240, 180, false));
+    UiContext* ui = session.ui_context; ViewTree* tree = ui->document->view_tree;
+    DocState* state = ui->document->state;
+    DomElement* target = dom_find_element_by_id(ui->document->root, "target"); ASSERT_NE(target, nullptr);
+    ASSERT_NE(lam::view_require_block(target)->font, nullptr);
+    context_menu_open(state, static_cast<View*>(target), 20, 20);
+    RenderOutputTarget output = {}; render_output_target_init(&output, RENDER_OUTPUT_SCREEN, nullptr);
+    auto render = [&]() { doc_state_mark_dirty(state); return render_output_render_view_tree_to_target(ui, tree, &output); };
+    for (unsigned i = 0; i < 4; i++) ASSERT_EQ(render(), 0);
+    ASSERT_FALSE(dl_contains_glyphs(tree->render_list));
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_EQ(render(), 0);
+    EXPECT_EQ(counters.full_frame_reuses, 1u);
+    EXPECT_GT(counters.validation_command_checks, 0u);
+    EXPECT_EQ(counters.glyph_command_checks, 0u); EXPECT_EQ(counters.media_command_checks, 0u);
+    EXPECT_EQ(counters.tile_work_ns, 0u);
+    test_radiant_expect_surface_pixel(ui->surface, 24, 24, 255, 255, 255);
+    EXPECT_FALSE(dl_contains_glyphs(tree->render_list));
+    context_menu_close(state);
+    ASSERT_EQ(render(), 0);
+    test_radiant_expect_surface_pixel(ui->surface, 24, 24, 64, 64, 64);
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, VideoPostCompositeKeepsPlacementsAndRetiresAbsentStreamsWithoutScanning) {
+    rdt_engine_init(0);
+    ImageSurface* surface = image_surface_create(32, 32); ASSERT_NE(surface, nullptr);
+    RdtVideo* video = rdt_video_create(nullptr, nullptr); ASSERT_NE(video, nullptr);
+    DocState state = {};
+    DisplayList list;
+    Bound clip = {0, 0, 32, 32};
+    dl_video_placeholder(&list, video, 0, 0, 32, 32, 0, &clip, 1);
+    ValidatedDisplayList recording;
+    ASSERT_TRUE(dl_validate_recording(&list, list.item_count(), &recording, "test video"));
+    EXPECT_TRUE(recording.content().has_video);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    doc_state_mark_video_frame_pending(&state);
+    render_video_frames(recording.get(), surface, &state, nullptr);
+    EXPECT_EQ(state.video_placement_count, 1); EXPECT_FALSE(state.video_frame_pending);
+    EXPECT_EQ(counters.media_command_checks, 1u);
+    dl_clear(&list); EXPECT_EQ(recording.get(), nullptr);
+    doc_state_mark_video_frame_pending(&state); counters = {};
+    render_video_frames(nullptr, surface, &state, nullptr);
+    EXPECT_EQ(state.video_placement_count, 0); EXPECT_FALSE(state.video_frame_pending);
+    EXPECT_EQ(counters.media_command_checks, 0u);
+    dl_destroy(&list); rdt_video_destroy(video); image_surface_destroy(surface); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ReplayMetadataRecognizesNativeTextPictures) {
+    rdt_engine_init(0);
+    for (bool text : {false, true}) {
+        Tvg_Paint paint = text ? tvg_text_new() : tvg_shape_new(); ASSERT_NE(paint, nullptr);
+        RdtPicture* picture = rdt_picture_take_tvg_paint(paint, 12, 12); ASSERT_NE(picture, nullptr);
+        DisplayList list; dl_draw_picture(&list, picture, 255, nullptr);
+        ValidatedDisplayList recording;
+        ASSERT_TRUE(dl_validate_recording(&list, list.item_count(), &recording, "test native picture"));
+        EXPECT_EQ(recording.content().has_glyphs, text); EXPECT_FALSE(recording.content().has_video);
+        EXPECT_EQ(dl_contains_glyphs(&list), text);
+        dl_destroy(&list);
+    }
+    rdt_engine_term();
 }
 
 TEST(PaintOwnership, ClipSegmentsDeferNativeDrawingAndPreserveCpuPainterOrder) {
@@ -5838,4 +6059,506 @@ TEST(PaintOwnership, ClipSegmentsDeferNativeDrawingAndPreserveCpuPainterOrder) {
     }
     EXPECT_EQ(memcmp(actual, expected, sizeof(actual)), 0);
     dl_destroy(&list); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ReferencedSubtreesMatchFlatReplayAcrossClipsEffectsTilesAndDirtyRegions) {
+    rdt_engine_init(0);
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    DisplayList source, flat, referenced;
+    int root = dl_begin_element(&source, 8300, 0, 0, 32, 32);
+    RdtPath* clip = rdt_path_new(); ASSERT_NE(clip, nullptr);
+    rdt_path_add_circle(clip, 16, 16, 14, 12); dl_push_clip(&source, clip, nullptr); rdt_path_free(clip);
+    dl_fill_rounded_rect(&source, 1, 1, 30, 30, 5, 5, Color{0xa03020e0u});
+    int child = dl_begin_element(&source, 8301, 4, 4, 24, 24);
+    dl_save_backdrop(&source, 4, 4, 24, 24);
+    Bound bounds = {4, 4, 28, 28};
+    dl_fill_surface_rect(&source, 6, 6, 20, 20, 0xffe04030u, &bounds, nullptr, 0);
+    dl_composite_opacity(&source, 4, 4, 24, 24, 0.625f);
+    dl_end_element(&source, child); dl_pop_clip(&source); dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    dl_fill_rect(&flat, 0, 0, 3, 3, Color{0xff000000u});
+    ASSERT_TRUE(dl_copy_range(&flat, &source, 0, source.item_count() - 1));
+    dl_fill_rect(&flat, 28, 28, 4, 4, Color{0xff00ff00u});
+    dl_fill_rect(&referenced, 0, 0, 3, 3, Color{0xff000000u});
+    ASSERT_TRUE(retained_dl_append_fragment(&referenced, retained_dl_cache_get(cache, 8300)));
+    dl_fill_rect(&referenced, 28, 28, 4, 4, Color{0xff00ff00u});
+    ASSERT_EQ(referenced.size(), 3u);
+    ASSERT_TRUE(dl_validate(&referenced, nullptr));
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    auto replay = [](DisplayList* list, uint32_t* pixels, unsigned mode) {
+        for (size_t i = 0; i < 32 * 32; i++) pixels[i] = 0xffd0c0b0u;
+        ImageSurface surface = {}; surface.pixels = pixels; surface.width = surface.height = 32; surface.pitch = 32 * 4;
+        Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+        RdtVector vector = {}; rdt_vector_init(&vector, pixels, 32, 32, 32);
+        Bound viewport = {0, 0, 32, 32};
+        DirtyRect rect = {}; rect.x = rect.y = 8; rect.width = rect.height = 16;
+        DirtyTracker dirty = {}; dirty.dirty_list = &rect;
+        if (mode == 1) dl_replay_tile(list, &vector, &surface, &scratch, 4, 4, 32, 32, 1);
+        else dl_replay(list, &vector, &surface, &viewport, &scratch, 1, mode == 2 ? &dirty : nullptr);
+        rdt_vector_destroy(&vector); scratch_release(&scratch); arena_destroy(arena);
+    };
+    for (unsigned mode = 0; mode < 3; mode++) {
+        SCOPED_TRACE(mode);
+        uint32_t expected[32 * 32], actual[32 * 32];
+        replay(&flat, expected, mode); replay(&referenced, actual, mode);
+        EXPECT_EQ(memcmp(actual, expected, sizeof(actual)), 0);
+        EXPECT_NE(actual[12 * 32 + 12], 0xffd0c0b0u);
+    }
+    dl_destroy(&flat); dl_destroy(&referenced); pool_destroy(pool); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ForeignHtmlCaptureRestartsPaintingInsideForegroundSvg) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0;background:#808080'><svg id='foreign-svg' style='display:block' width='64' height='48'>"
+        "<foreignObject width='64' height='48'><div xmlns='http://www.w3.org/1999/xhtml' "
+        "style='width:64px;height:48px;background:red'></div></foreignObject></svg></body></html>",
+        80, 60, false));
+    UiContext* ui = session.ui_context;
+    DomElement* node = dom_find_element_by_id(ui->document->root, "foreign-svg"); ASSERT_NE(node, nullptr);
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        context.paint_phase = RADIANT_PAINT_FOREGROUND;
+        for (size_t i = 0; i < (size_t)ui->surface->width * ui->surface->height; i++)
+            ((uint32_t*)ui->surface->pixels)[i] = 0xff808080u;
+        render_inline_svg(&context, lam::view_as_block(node));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        ASSERT_TRUE(dl_validate(frame.list(), nullptr));
+        dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip, &context.scratch, 1, nullptr);
+        EXPECT_EQ(((uint32_t*)ui->surface->pixels)[20 * ui->surface->width + 20], 0xff0000ffu);
+    }
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, SvgPhasesKeepForeignHtmlInsideItsSubscene) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session,
+        "<html><body style='margin:0'><svg id='scene' width='220' height='190' "
+        "style='display:block;background:blue'><g transform='translate(20 20) scale(1.5)'>"
+        "<foreignObject x='30' y='10' width='80' height='120'>"
+        "<div xmlns='http://www.w3.org/1999/xhtml' style='width:100%;height:100%;background:yellow'>"
+        "<div style='width:80px;height:30px;background:red'></div></div>"
+        "</foreignObject></g></svg></body></html>", 220, 190, false));
+    UiContext* ui = session.ui_context;
+    DomElement* node = dom_find_element_by_id(ui->document->root, "scene"); ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(radiant_stack_is_context(node));
+    ASSERT_TRUE(node->is_block());
+    const struct { RadiantPaintPhase phase; bool host_schedule, blue_boundary, red_content; } visits[] = {
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, true, false, false},
+        {RADIANT_PAINT_FOREGROUND, true, true, true},
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, false, true, false}
+    };
+    for (const auto& visit : visits) {
+        SCOPED_TRACE(visit.host_schedule);
+        SCOPED_TRACE(visit.phase);
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        context.paint_phase = visit.phase;
+        for (size_t i = 0; i < (size_t)ui->surface->width * ui->surface->height; i++)
+            ((uint32_t*)ui->surface->pixels)[i] = 0xffffffffu;
+        // the host schedules a complete SVG atom; direct producer visits still honor partial phases.
+        if (visit.host_schedule) render_children(&context, static_cast<View*>(node));
+        else render_block_view(&context, lam::view_require_block(node));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        ASSERT_TRUE(dl_validate(frame.list(), nullptr));
+        dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip, &context.scratch, 1, nullptr);
+        test_radiant_expect_surface_pixel(ui->surface, 40, 45,
+            visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
+        if (!visit.red_content) {
+            test_radiant_expect_surface_pixel(ui->surface, 80, 45,
+                visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
+        } else test_radiant_expect_surface_pixel(ui->surface, 80, 45, 255, 0, 0);
+    }
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+// native recorders keep the dependency fixtures on the same resource ownership path as production.
+class RetainedResourceSummaryTest : public ::testing::Test {
+protected:
+    Pool* pool = nullptr;
+    void SetUp() override { pool = pool_create(); ASSERT_NE(pool, nullptr); }
+    void TearDown() override { pool_destroy(pool); }
+};
+
+template<class Capture>
+static void test_resource_summary_allocation_failures(Capture capture, uint64_t glyph_generation = 0) {
+    bool failed = false, succeeded = false;
+    for (size_t fail_at = 0; fail_at < 8; fail_at++) {
+        size_t before = memtrack_get_current_usage();
+        DisplayResourceSummary* snapshot = nullptr;
+        memtrack_fault_inject(fail_at);
+        bool captured = capture(&snapshot);
+        memtrack_fault_clear();
+        if (!captured) { failed = true; EXPECT_EQ(snapshot, nullptr); }
+        else { succeeded = true; EXPECT_TRUE(dl_resource_summary_current(snapshot, 0, glyph_generation)); }
+        dl_resource_summary_destroy(snapshot);
+        EXPECT_EQ(memtrack_get_current_usage(), before);
+    }
+    EXPECT_TRUE(failed); EXPECT_TRUE(succeeded);
+}
+
+TEST_F(RetainedResourceSummaryTest, ReplayMetadataIncludesReferencedGlyphAndVideoCommands) {
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    RdtVideo* video = rdt_video_create(nullptr, nullptr); ASSERT_NE(video, nullptr);
+    DisplayList source; Bound clip = {0, 0, 20, 20};
+    int root = dl_begin_element(&source, 34000, 0, 0, 20, 20);
+    int child = dl_begin_element(&source, 34001, 0, 0, 20, 20);
+    dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 11);
+    dl_video_placeholder(&source, video, 0, 0, 2, 2, 0, &clip, 7);
+    dl_end_element(&source, child); dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    retained_dl_cache_capture(cache, &source);
+    EXPECT_EQ(counters.validation_command_checks, source.size()); EXPECT_EQ(counters.validation_chunk_checks, 1u);
+    DisplayList frame;
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, retained_dl_cache_get(cache, 34000)));
+    dl_destroy(&source); retained_dl_cache_destroy(cache);
+    ValidatedDisplayList recording;
+    counters = {};
+    ASSERT_TRUE(dl_validate_recording(&frame, frame.item_count(), &recording, "test referenced recording"));
+    EXPECT_TRUE(recording.content().has_glyphs); EXPECT_TRUE(recording.content().has_video);
+    EXPECT_EQ(counters.validation_command_checks, 0u); EXPECT_EQ(counters.validation_chunk_checks, 1u);
+    dl_destroy(&frame); rdt_video_destroy(video);
+}
+
+TEST_F(RetainedResourceSummaryTest, StandaloneStateFailuresRemainUncertifiedAndUseFullValidation) {
+    const DisplayOp operations[][2] = {
+        {DL_POP_CLIP, DL_PUSH_CLIP},
+        {DL_COMPOSITE_OPACITY, DL_SAVE_BACKDROP},
+        {DL_SHADOW_CLIP_RESTORE, DL_SHADOW_CLIP_SAVE}
+    };
+    for (const auto& pair : operations) {
+        DisplayList source;
+        const RdtPath* clip_path = nullptr;
+        int marker = dl_begin_element(&source, 35100, 0, 0, 3, 3);
+        for (DisplayOp op : pair) {
+            DisplayItem* item = dl_alloc_item(&source); ASSERT_NE(item, nullptr);
+            item->op = op;
+            if (op == DL_PUSH_CLIP) {
+                item->push_clip.path = lam::own(rdt_path_new());
+                ASSERT_NE(item->push_clip.path, nullptr); clip_path = item->push_clip.path;
+            }
+        }
+        dl_end_element(&source, marker);
+        RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+        retained_dl_cache_capture(cache, &source);
+        DisplayList frame;
+        DisplayItem* push = dl_alloc_item(&frame); ASSERT_NE(push, nullptr);
+        push->op = pair[1];
+        if (push->op == DL_PUSH_CLIP) {
+            push->push_clip.path = lam::own(rdt_path_clone(clip_path));
+            ASSERT_NE(push->push_clip.path, nullptr);
+        }
+        ASSERT_TRUE(retained_dl_append_fragment(&frame, retained_dl_cache_get(cache, 35100)));
+        EXPECT_EQ(retained_dl_chunk_validation(frame.back().draw_fragment.owner), nullptr);
+        DisplayItem* pop = dl_alloc_item(&frame); ASSERT_NE(pop, nullptr); pop->op = pair[0];
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        // caller state makes the complete stream valid, but cannot certify the child alone.
+        EXPECT_TRUE(dl_validate(&frame, nullptr));
+        EXPECT_EQ(counters.validation_chunk_checks, 0u);
+        EXPECT_EQ(counters.validation_command_checks, 6u);
+        DisplayResourceSummary* snapshot = nullptr;
+        EXPECT_TRUE(dl_resource_summary_capture(&frame, &snapshot));
+        EXPECT_EQ(snapshot, nullptr);
+        EXPECT_EQ(counters.resource_capture_commands, 6u);
+        EXPECT_EQ(counters.resource_capture_chunks, 0u);
+        dl_resource_summary_destroy(snapshot);
+        dl_truncate(&frame, 2); // removing the final pop leaves caller state unbalanced.
+        EXPECT_FALSE(dl_validate(&frame, nullptr));
+        dl_destroy(&frame); retained_dl_cache_destroy(cache); dl_destroy(&source);
+    }
+}
+
+TEST_F(RetainedResourceSummaryTest, ResourceSummaryCoalescesEpochsAndSkipsSurfaceFreeSiblings) {
+    ImageSurface* surfaces[] = {image_surface_create(2, 2), image_surface_create(2, 2)};
+    ASSERT_NE(surfaces[0], nullptr); ASSERT_NE(surfaces[1], nullptr);
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    Bound clip = {0, 0, 20, 20};
+    DisplayList source;
+    int root = dl_begin_element(&source, 30000, 0, 0, 20, 20);
+    for (uint32_t i = 0; i < 512; i++) {
+        int child = dl_begin_element(&source, 30001 + i, 0, 0, 20, 20);
+        dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 11);
+        if (i == 0) dl_video_placeholder(&source, (RdtVideo*)&source, 0, 0, 2, 2, 0, &clip, 7);
+        if (i == 1) {
+            for (ImageSurface* surface : surfaces)
+                dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+                    surface, surface->generation);
+            dl_blit_surface_scaled(&source, surfaces[0], 0, 0, 2, 2, SCALE_MODE_LINEAR, &clip,
+                nullptr, 0, 255, surfaces[0]->generation);
+            dl_webview_layer_placeholder(&source, surfaces[0], 0, 0, 2, 2, &clip, surfaces[0]->generation);
+        }
+        dl_end_element(&source, child);
+    }
+    dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const auto* fragment = retained_dl_cache_get(cache, 30000); ASSERT_NE(fragment, nullptr);
+    DisplayList frame;
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, fragment));
+    ASSERT_TRUE(dl_validate(&frame, nullptr));
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    EXPECT_TRUE(dl_resources_current(&frame, 7, 11));
+    EXPECT_EQ(counters.resource_command_checks, 0u); EXPECT_EQ(counters.resource_summary_checks, 1u);
+    EXPECT_EQ(counters.resource_epoch_checks, 2u); EXPECT_EQ(counters.resource_child_checks, 1u);
+    EXPECT_EQ(counters.resource_surface_checks, 2u);
+    DisplayResourceSummary* snapshot = nullptr;
+    counters = {};
+    ASSERT_TRUE(dl_resource_summary_capture(&frame, &snapshot)); ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(counters.resource_capture_commands, 0u);
+    EXPECT_EQ(counters.resource_capture_chunks, 2u);
+    EXPECT_GT(dl_resource_summary_bytes(snapshot), 0u);
+    counters = {};
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 7, 11));
+    EXPECT_EQ(counters.resource_command_checks, 0u); EXPECT_EQ(counters.resource_summary_checks, 1u);
+    EXPECT_EQ(counters.resource_capture_commands, 0u);
+    EXPECT_EQ(counters.resource_epoch_checks, 2u); EXPECT_EQ(counters.resource_child_checks, 0u);
+    EXPECT_EQ(counters.resource_surface_checks, 2u);
+    EXPECT_TRUE(dl_resources_current(&source, 7, 11));
+    const struct { uint64_t video, glyph; } invalid_epochs[] = {{7, 12}, {8, 11}};
+    for (const auto& epochs : invalid_epochs) {
+        EXPECT_FALSE(dl_resources_current(&frame, epochs.video, epochs.glyph));
+        EXPECT_FALSE(dl_resources_current(&source, epochs.video, epochs.glyph));
+        EXPECT_FALSE(dl_resource_summary_current(snapshot, epochs.video, epochs.glyph));
+    }
+    dl_destroy(&source); retained_dl_cache_destroy(cache);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 7, 11));
+    image_surface_bump_generation(surfaces[0]);
+    EXPECT_FALSE(dl_resources_current(&frame, 7, 11));
+    EXPECT_FALSE(dl_resource_summary_current(snapshot, 7, 11));
+    image_surface_destroy(surfaces[0]); image_surface_destroy(surfaces[1]);
+    EXPECT_FALSE(dl_resources_current(&frame, 7, 11));
+    dl_destroy(&frame);
+    EXPECT_FALSE(dl_resource_summary_current(snapshot, 7, 11));
+    dl_resource_summary_destroy(snapshot);
+}
+
+TEST_F(RetainedResourceSummaryTest, MixedSnapshotOutlivesPublicationsWithoutLosingConflictsOrFreshResources) {
+    ImageSurface* surface = image_surface_create(2, 2); ASSERT_NE(surface, nullptr);
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    Bound clip = {0, 0, 20, 20};
+    DisplayList source;
+    int root = dl_begin_element(&source, 35000, 0, 0, 20, 20);
+    dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 11);
+    dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+        surface, surface->generation);
+    dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    DisplayList frame;
+    dl_video_placeholder(&frame, (RdtVideo*)&source, 0, 0, 2, 2, 0, &clip, 7);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, retained_dl_cache_get(cache, 35000)));
+    DisplayResourceSummary* snapshot = nullptr;
+    ASSERT_TRUE(dl_resource_summary_capture(&frame, &snapshot)); ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 7, 11));
+    // fresh dependencies after a composed chunk cannot be hidden by the retained metadata.
+    dl_draw_glyph(&frame, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 12);
+    DisplayResourceSummary* conflict = nullptr;
+    ASSERT_TRUE(dl_resource_summary_capture(&frame, &conflict)); ASSERT_NE(conflict, nullptr);
+    EXPECT_FALSE(dl_resource_summary_current(conflict, 7, 11));
+    EXPECT_FALSE(dl_resource_summary_current(conflict, 7, 12));
+    dl_resource_summary_destroy(conflict); dl_truncate(&frame, 2);
+    dl_draw_image(&frame, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+        surface, surface->generation + 1);
+    ASSERT_TRUE(dl_resource_summary_capture(&frame, &conflict)); ASSERT_NE(conflict, nullptr);
+    EXPECT_FALSE(dl_resource_summary_current(conflict, 7, 11));
+    dl_resource_summary_destroy(conflict);
+    dl_destroy(&frame); dl_destroy(&source); retained_dl_cache_destroy(cache);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 7, 11));
+    image_surface_bump_generation(surface);
+    EXPECT_FALSE(dl_resource_summary_current(snapshot, 7, 11));
+    image_surface_destroy(surface);
+    EXPECT_FALSE(dl_resource_summary_current(snapshot, 7, 11));
+    dl_resource_summary_destroy(snapshot);
+}
+
+TEST_F(RetainedResourceSummaryTest, CaptureSnapshotsExcludeOverlaysAndAllowFlatFallbackAfterChunkRejection) {
+    ImageSurface* surface = image_surface_create(2, 2); ASSERT_NE(surface, nullptr);
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    Bound clip = {0, 0, 20, 20};
+    DisplayList source;
+    int root = dl_begin_element(&source, 37000, 0, 0, 20, 20);
+    dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 11);
+    dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+        surface, surface->generation);
+    dl_end_element(&source, root);
+    int document_commands = source.item_count();
+    int overlay = dl_begin_element(&source, 37001, 0, 0, 20, 20);
+    dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 12);
+    dl_end_element(&source, overlay);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    DisplayResourceSummary* snapshot = nullptr;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(retained_dl_cache_capture_resources(cache, &source, document_commands, &snapshot));
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(counters.resource_capture_commands, 0u); EXPECT_EQ(counters.resource_capture_chunks, 1u);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 0, 11));
+    EXPECT_NE(retained_dl_cache_get(cache, 37001), nullptr);
+    DisplayList referenced;
+    ASSERT_TRUE(retained_dl_append_fragment(&referenced, retained_dl_cache_get(cache, 37000)));
+    test_resource_summary_allocation_failures([&](DisplayResourceSummary** trial) {
+        return retained_dl_cache_capture_resources(cache, &referenced, referenced.item_count(), trial);
+    }, 11);
+    dl_destroy(&referenced);
+    DisplayResourceSummary* fallback = nullptr;
+    EXPECT_FALSE(retained_dl_cache_capture_resources(cache, &source, document_commands - 1, &fallback));
+    EXPECT_EQ(fallback, nullptr);
+    retained_dl_cache_set_storage_budget(cache, 0); retained_dl_cache_begin_frame(cache);
+    EXPECT_FALSE(retained_dl_cache_capture_resources(cache, &source, document_commands, &fallback));
+    EXPECT_EQ(fallback, nullptr);
+    dl_truncate(&source, document_commands);
+    ASSERT_TRUE(dl_resource_summary_capture(&source, &fallback));
+    EXPECT_TRUE(dl_resource_summary_current(fallback, 0, 11));
+    dl_destroy(&source); retained_dl_cache_destroy(cache);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 0, 11));
+    EXPECT_TRUE(dl_resource_summary_current(fallback, 0, 11));
+    dl_resource_summary_destroy(snapshot); dl_resource_summary_destroy(fallback); image_surface_destroy(surface);
+}
+
+TEST_F(RetainedResourceSummaryTest, ConflictingEpochsInvalidateAncestorsWithoutInvalidatingSiblings) {
+    uint8_t coverage = 255;
+    GlyphBitmap bitmap = {}; bitmap.buffer = &coverage; bitmap.width = bitmap.height = bitmap.pitch = 1;
+    Bound clip = {0, 0, 20, 20};
+    for (bool video : {false, true}) {
+        DisplayList source;
+        int root = dl_begin_element(&source, 31000, 0, 0, 20, 20);
+        for (uint32_t i = 0; i < 2; i++) {
+            int child = dl_begin_element(&source, 31001 + i, 0, 0, 20, 20);
+            if (video) dl_video_placeholder(&source, (RdtVideo*)&source, 0, 0, 2, 2, 0, &clip, 11 + i);
+            else dl_draw_glyph(&source, &bitmap, 0, 0, Color{0xff000000u}, false, &clip, nullptr, 11 + i);
+            dl_end_element(&source, child);
+        }
+        dl_end_element(&source, root);
+        RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+        retained_dl_cache_capture(cache, &source);
+        const auto* parent = retained_dl_cache_get(cache, 31000); ASSERT_NE(parent, nullptr);
+        DisplayList frame;
+        ASSERT_TRUE(retained_dl_append_fragment(&frame, parent));
+        DisplayResourceSummary* snapshot = nullptr;
+        ASSERT_TRUE(dl_resource_summary_capture(&frame, &snapshot)); ASSERT_NE(snapshot, nullptr);
+        for (uint64_t epoch : {uint64_t(11), uint64_t(12)}) {
+            EXPECT_FALSE(dl_resource_summary_current(snapshot, epoch, epoch));
+            EXPECT_FALSE(retained_dl_fragment_resources_valid(parent, epoch, epoch));
+            EXPECT_FALSE(dl_resources_current(&frame, epoch, epoch));
+            EXPECT_FALSE(dl_resources_current(&source, epoch, epoch));
+            EXPECT_TRUE(retained_dl_fragment_resources_valid(retained_dl_cache_get(cache, 31001 + (uint32_t)(epoch - 11)), epoch, epoch));
+        }
+        dl_resource_summary_destroy(snapshot);
+        dl_destroy(&frame); retained_dl_cache_destroy(cache); dl_destroy(&source);
+    }
+}
+
+TEST_F(RetainedResourceSummaryTest, DependencyAllocationFailureCannotPublishOrLeakBudgetCharges) {
+    ImageSurface* surface = image_surface_create(2, 2); ASSERT_NE(surface, nullptr);
+    DisplayList source;
+    int root = dl_begin_element(&source, 32000, 0, 0, 20, 20);
+    dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+        surface, surface->generation);
+    dl_end_element(&source, root);
+    bool failed = false, succeeded = false;
+    for (size_t fail_at = 0; fail_at < 32; fail_at++) {
+        RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+        memtrack_fault_inject(fail_at);
+        retained_dl_cache_capture(cache, &source);
+        memtrack_fault_clear();
+        const auto* fragment = retained_dl_cache_get(cache, 32000);
+        if (!fragment) {
+            failed = true;
+            EXPECT_EQ(retained_dl_cache_stats(cache).charged_storage_bytes, 0u);
+            retained_dl_cache_capture(cache, &source);
+            fragment = retained_dl_cache_get(cache, 32000); ASSERT_NE(fragment, nullptr);
+        } else succeeded = true;
+        EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 0));
+        DisplayList frame;
+        ASSERT_TRUE(retained_dl_append_fragment(&frame, fragment));
+        size_t pinned_bytes = retained_dl_cache_stats(cache).charged_storage_bytes;
+        EXPECT_GT(pinned_bytes, 0u);
+        retained_dl_cache_set_storage_budget(cache, 0); retained_dl_cache_begin_frame(cache);
+        EXPECT_EQ(retained_dl_cache_stats(cache).charged_storage_bytes, pinned_bytes);
+        dl_destroy(&frame);
+        EXPECT_EQ(retained_dl_cache_stats(cache).charged_storage_bytes, 0u);
+        retained_dl_cache_destroy(cache);
+    }
+    EXPECT_TRUE(failed); EXPECT_TRUE(succeeded);
+    dl_destroy(&source); image_surface_destroy(surface);
+}
+
+TEST_F(RetainedResourceSummaryTest, SurfaceUseWithAnOlderStampCannotBeCoalescedAway) {
+    ImageSurface* surface = image_surface_create(2, 2); ASSERT_NE(surface, nullptr);
+    uint64_t old_generation = surface->generation;
+    image_surface_bump_generation(surface);
+    DisplayList source;
+    int root = dl_begin_element(&source, 33000, 0, 0, 20, 20);
+    for (uint64_t stamp : {surface->generation, old_generation})
+        dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr, surface, stamp);
+    dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const auto* fragment = retained_dl_cache_get(cache, 33000); ASSERT_NE(fragment, nullptr);
+    DisplayList frame;
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, fragment));
+    EXPECT_FALSE(dl_resources_current(&source, 0, 0));
+    EXPECT_FALSE(dl_resources_current(&frame, 0, 0));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 0));
+    DisplayResourceSummary* snapshot = nullptr;
+    ASSERT_TRUE(dl_resource_summary_capture(&frame, &snapshot)); ASSERT_NE(snapshot, nullptr);
+    EXPECT_FALSE(dl_resource_summary_current(snapshot, 0, 0));
+    dl_resource_summary_destroy(snapshot);
+    dl_destroy(&frame); dl_destroy(&source); retained_dl_cache_destroy(cache); image_surface_destroy(surface);
+}
+
+TEST_F(RetainedResourceSummaryTest, FlatSummaryFailureIsAtomicAndResourceFreeSnapshotsAllocateNothing) {
+    DisplayList source;
+    dl_fill_rect(&source, 0, 0, 2, 2, Color{0xff000000u});
+    DisplayResourceSummary* snapshot = nullptr;
+    memtrack_fault_inject(0);
+    bool captured = dl_resource_summary_capture(&source, &snapshot, 0);
+    memtrack_fault_clear();
+    EXPECT_TRUE(captured); EXPECT_EQ(snapshot, nullptr);
+    EXPECT_EQ(dl_resource_summary_bytes(snapshot), 0u);
+    EXPECT_TRUE(dl_resource_summary_current(snapshot, 0, 0));
+    EXPECT_FALSE(dl_resource_summary_capture(nullptr, &snapshot));
+    EXPECT_FALSE(dl_resource_summary_capture(&source, nullptr));
+    int root = dl_begin_element(&source, 36000, 0, 0, 20, 20);
+    ImageSurface* surfaces[] = {image_surface_create(2, 2), image_surface_create(2, 2)};
+    for (ImageSurface* surface : surfaces) {
+        ASSERT_NE(surface, nullptr);
+        dl_draw_image(&source, (uint32_t*)surface->pixels, 2, 2, 2, 0, 0, 2, 2, 255, nullptr,
+            surface, surface->generation);
+    }
+    dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    DisplayList referenced;
+    ASSERT_TRUE(retained_dl_append_fragment(&referenced, retained_dl_cache_get(cache, 36000)));
+    for (DisplayList* capture_source : {&source, &referenced}) {
+        SCOPED_TRACE(capture_source == &referenced);
+        test_resource_summary_allocation_failures([&](DisplayResourceSummary** trial) {
+            return dl_resource_summary_capture(capture_source, trial);
+        });
+        ASSERT_TRUE(dl_resource_summary_capture(capture_source, &snapshot));
+        size_t required_bytes = dl_resource_summary_bytes(snapshot);
+        ASSERT_GT(required_bytes, 0u);
+        dl_resource_summary_destroy(snapshot); snapshot = nullptr;
+        EXPECT_FALSE(dl_resource_summary_capture(capture_source, &snapshot, required_bytes - 1));
+        EXPECT_EQ(snapshot, nullptr);
+        ASSERT_TRUE(dl_resource_summary_capture(capture_source, &snapshot, required_bytes));
+        EXPECT_EQ(dl_resource_summary_bytes(snapshot), required_bytes);
+        dl_resource_summary_destroy(snapshot); snapshot = nullptr;
+        DisplayItem invalid = {}; invalid.op = DL_DRAW_FRAGMENT;
+        ASSERT_TRUE(capture_source->append(invalid));
+        EXPECT_FALSE(dl_resource_summary_capture(capture_source, &snapshot));
+        EXPECT_EQ(snapshot, nullptr);
+    }
+    dl_destroy(&referenced); retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+    for (ImageSurface* surface : surfaces) image_surface_destroy(surface);
 }

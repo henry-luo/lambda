@@ -67,6 +67,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
+| `editor.raster` | `lambda.editor.raster`, `lambda.editor.raster.view` | Library, initial layered profile | Raster layer/group commands, masks, translation, shared history and retained canvas presentation | `lambda demo photos`; see [raster API](../lmd/package/editor/raster/README.md) |
 | `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
 
@@ -1217,7 +1218,7 @@ openapi.validate_params(spec, "/pets", "get", {}).errors[0].message    // "requi
 
 ## 10. Engine Packages: edit, editor, dom, doc
 
-These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their internal APIs follow the engine. The `lambda.editor.draw` facade in §10.2.1 is available to applications; other internal interfaces remain unstable.
+These packages implement parts of the engine in Lambda. They load automatically when a command needs them, and their internal APIs follow the engine. The `lambda.editor.draw` and `lambda.editor.raster` facades in §10.2.1–§10.2.2 are available to applications; other internal interfaces remain unstable.
 
 ### 10.1 `edit` — the `lambda edit` application
 
@@ -1239,6 +1240,22 @@ provides an independent retained canvas. The Draw demo reuses the package while
 keeping its application shell and reading existing v1–v3 files. Package ownership follows
 **D7.2.4v3**, with pure model edits and procedural presentation under
 **S1.4, S12.1.3**. See the [API and support boundary](../lmd/package/editor/draw/README.md).
+
+### 10.2.2 `editor.raster` — layered raster editing
+
+`lambda.editor.raster` uses the shared `lambda.image` document tree. Its
+`new_document`, `open_session` and `exec` functions provide stable layer identities,
+checked commands, grouping, translation, masks, baked adjustments and undo/redo.
+`layers`, `lookup`, `commands` and `command_state` support independent inspectors.
+`lambda.editor.raster.interaction` groups pointer previews into one transaction;
+the optional `.view` module presents copied pixels in a retained native canvas.
+Package placement follows **D7.2.4v3**, snapshots follow **S9.1.2 / S9.2.2**, and
+procedural presentation follows **S12.1.3 / D4.5.2**.
+
+The [Photos demo](../test/demo/photos/README.md) supplies the workspace and file
+dialogs. It opens the supported layered PSD profile and exports PNG. This initial
+contiguous `u8` profile has no freehand/selection tools, retained effects or rich
+project format. See the [API and support boundary](../lmd/package/editor/raster/README.md).
 
 ### 10.3 `dom` — browser behaviour for HTML
 

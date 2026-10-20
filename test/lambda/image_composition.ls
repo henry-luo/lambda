@@ -38,5 +38,5 @@ let animation = <image width: 2, height: 1,
    img.render_frame(animation, {frame: 5}) ^ { true }]
 let hidden = <image width: 1, height: 1, <stack <layer visible: false, red>>>
 ; img.render_frame(hidden)^.a[0, 0]
-let unsupported = <image width: 1, height: 1, <stack <layer blend: 'multiply', red>>>
-; img.render_frame(unsupported) ^ { true }
+let multiply = <image width: 1, height: 1, <stack <layer blend: 'multiply', red>>>
+; img.sample(img.render_frame(multiply)^,0,0)^ == [255,0,0,255]

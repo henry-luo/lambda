@@ -1,0 +1,175 @@
+# Photos
+
+A native Lambda/Radiant layered raster editor. The initial implementation uses
+the shared image/PSD package and reusable `lambda.editor.raster` commands.
+Design and later milestones: [proposal](../../../vibe/Lambda_Demo_Photos.md),
+[implementation record](../../../vibe/impl/Lambda_Impl_Photos.md).
+
+Run from this checkout:
+
+```sh
+mkdir -p temp/photos
+make build
+./lambda.exe view test/demo/photos/photos.ls
+# After rebuilding the CLI, the catalog also accepts:
+./lambda.exe demo photos
+PHOTOS_SOURCE=path/to/image.psd ./lambda.exe view test/demo/photos/photos.ls
+```
+
+The coast sample is shared with the existing photo demo and keeps its original
+[attribution](../photo/assets/ATTRIBUTION.md). Open accepts PNG/JPEG and supported
+layered PSD. Place Image flattens a supported still input into a new raster layer.
+Paths resolve from the launch directory; bundled assets resolve from the entry.
+
+- Add, duplicate, rename, reorder, hide, change opacity and delete raster layers.
+- Shift-click layer rows to select siblings; group/ungroup or merge adjacent
+  layers. Nested groups retain foreground-first order and document coordinates.
+- Select a mask thumbnail to target mask samples. Add/remove/toggle a raster
+  mask, fill it white or clear it; pixel and mask histories remain independent
+  snapshots of the same image tree.
+- Drag to move the chosen layer/group, or use X/Y fields and arrow keys.
+  Shift+arrows moves ten pixels. Escape cancels a drag. V selects Move, H selects
+  Hand; Fit, 100% and zoom buttons control the retained canvas.
+- Apply baked exposure, monochrome and sharpening to the active pixel layer.
+  Resize image samples or change canvas bounds; flattening is explicit.
+- Undo/redo through buttons or Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z. A completed drag
+  records one edit. Camera and layer selection do not dirty image content.
+- Save the qualified layered PSD profile, or export the composite as PNG.
+  Save/reopen preserves supported hierarchy, names, masks, offsets and current
+  pixels. Writes publish atomically. Failed reads/writes retain the active edits.
+- New/Open/Close protect unsaved edits with Save/Discard/Cancel. File dialogs
+  support Tab/Shift+Tab and Escape.
+- Paint with Brush (B) or Eraser (E); configure size, hardness, spacing, flow
+  and stroke opacity in the paint dock. Brackets change brush size. Cancel a
+  preview with Escape; one completed stroke creates one undo item.
+- Rectangle (M), Ellipse (O), Lasso (L) and Wand (W) create selections. Choose
+  replace/add/subtract/intersect, invert or feather them, convert them to masks,
+  or crop the canvas to their bounds. Selection edits have history without
+  marking image pixels unsaved. Ctrl/Cmd+A selects all; Ctrl/Cmd+D deselects.
+- Bucket (F), Gradient (G) and Eyedropper (I) share foreground/background colors.
+  Gradients support linear and radial ramps. Painting, filling and baked
+  adjustments honor selection coverage and the current pixel/mask target.
+- Ctrl/Cmd+C / Shift+C copies the active layer / merged composition, X cuts,
+  and V pastes a new layer with its document-space origin. The current clipboard
+  is internal to the document session. X without a modifier swaps colors.
+
+Use the dock scrollbar to reach image sizing and history on shorter windows.
+The current workspace has one document and a fixed tool rail/dock; the richer
+responsive dock and multiple document tabs remain later work. Native file
+pickers, blend modes, affine transforms,
+retained effects, text/shapes and rich-project persistence are not delivered yet.
+Imported unsupported visual content fails strict opening instead of disappearing.
+Masks/groups use the current shared package's qualified PSD subset; inverted/group
+mask writing is not yet available. Unlock layers before PSD saving because the
+current writer cannot retain editor lock metadata.
+
+The package's 16-million-pixel/64-MiB per-raster and aggregate PSD budgets apply;
+this demo makes no photo-scale performance claim. The host receives copied pixels,
+never borrowed GC pointers (**D4.5.2 / D5.3.3**), and views retain their canvas and
+focus owners while procedures publish edits (**S12.1.3**).
+
+Focused verification:
+
+```sh
+./test/test_lambda_gtest.exe --gtest_filter='*photos_*'
+./test/test_ui_automation_gtest.exe --suite photos --jobs 1
+```
+
+Package tests pass with automatic and `LAMBDA_EXEC_BACKEND=jit` execution;
+strict `interp` currently encounters the shared image package's unsupported
+multidimensional indexing (E501), also reproduced by its existing composition test.
+Ownership checks use `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+Native view callbacks use the host's supported UI execution path. Generated files/captures stay under
+`temp/photos/`. The baseline UI suite includes the Photos replay.
+
+Measure the bounded headless layered scenario with an optimized host:
+
+```sh
+make build-release-compile
+python3 test/demo/photos/benchmark.py
+```
+
+The report identifies the binary, source package, scenario, phase timings and
+maximum child-process RSS. It measures construction, repeated moves (including
+current eager validation/composition), and PSD encoding; it does not establish
+interactive display latency. Do not run `make release` in a worktree.
+
+Transforms and editable effects are available in the lower property dock. Drag
+with Transform (T) to scale radially; hold Shift at pointer-down to rotate. Numeric
+controls apply relative angle/X/Y scale; reset/flip and explicit rasterization
+are available. Blend modes, clipping, group isolation and ordered effect controls
+share the headless command registry. The histogram reuses the presented raster.
+
+Save defaults to `.photos`, preserving original samples and editable settings.
+A `.psd` destination remains supported for the qualified PSD subset; Export PSD
+is explicit. PSD refuses retained transforms/blends/clipping/pass-through and
+editable effects, including disabled ones, rather than discarding them. Project data is parsed without
+execution, capped at 128 MiB and currently uncompressed. Pixel tools require
+rasterization of a transformed source. Full PhotoCraft parity and high-depth/ICC
+editing are still pending.
+
+The lower Text, Shapes & Paths dock adds and edits multiline text, rounded
+rectangles, ellipses and M/L/Q/C/Z paths. Set local dimensions, fill/stroke and
+font size/alignment, then Add or Apply. Text embeds the selected font file
+(`.woff2` Computer Modern Sans by default) as a project asset. Missing glyphs
+and unsupported complex-script shaping fail explicitly. Layer styles add editable
+shadow, glow and color overlay. These features share the image compositor and
+survive `.photos` reopening; use explicit rasterization for the current PSD profile.
+
+Channels offers RGB/alpha component previews and saved selection channels.
+Save/load a selection, capture a composite component, rename/delete it, or
+replace a selected pixel layer component. Channel previews affect only the
+workspace. Saved coverage follows canvas/image resizing and cropping, and is
+preserved in projects.
+
+Clone (S), Heal (J), Dodge (D), Burn (K), Sponge (R), Blur (U) and Sharpen (A)
+share the brush controls. Alt-click Clone/Heal to freeze a merged source, then
+paint on a pixel layer. The lower Retouch dock controls alignment, local strength
+and neighborhood radius. Healing is neighborhood color matching, not a Poisson
+or content-aware solver.
+
+The Actions dock records edits on the selected layer. Stop stores the action;
+Replay applies it to the current layer with one undo entry. Brush settings are
+captured, and image/history/target switches are guarded during recording. Save
+and load `.laction` data files to reuse actions. Batch Action runs the last action
+on an explicit Mark job list, for example:
+
+```lambda
+[{source:"photo.png",target:"temp/photos/graded.png",format:"png"}]
+```
+
+Each job selects its first leaf layer, or the explicit `layer` ID. Outcomes report
+successes and failures; stop/continue policy is selectable. Outputs publish
+atomically per file, and failed jobs leave existing outputs intact. Execution is
+sequential and bounded to 32 jobs; the UI waits for completion.
+
+New Tab and Open in Tab retain the current document. Tabs keep independent undo,
+selection, tool/camera and saved checkpoints. Close Tab uses Save/Discard/Cancel;
+closing the window protects every dirty tab, including inactive documents.
+The existing New/Open commands continue to replace the active document.
+
+Remaining larger features include high-depth/ICC editing, complex text shaping
+and rich runs, canvas pen handles, the wider layer-style catalogue, native PSD
+artwork/style interchange and asynchronous batch/large-scene qualification.
+
+Retouch source selection must be recorded as a step or supplied by the replay
+session. Actions operate with that session's current selection coverage.
+
+Brush and eraser previews process new samples incrementally and recomposite only
+the changed region when the scene has no effects/styles. Histograms and inspector
+panels refresh when the gesture completes or is cancelled. Undo remains one edit
+per stroke. Effect/style scenes retain full-composition previews; canvas upload,
+final validation and retouch kernels still have larger-scene costs.
+
+Measure native preview-handler editing/publication on an optimized host with:
+
+```sh
+python3 test/demo/photos/benchmark_brush.py --paint --repetitions 3
+```
+
+This writes disposable instrumented app copies and reports under
+`temp/photos/performance/brush/`. Pair `--reference-dir` and `--reference-home`
+to compare saved demo/package sources on the same host. Reports separate edit
+and publication times. `--paint` verifies each preview and adds native frame,
+layout and CPU paint timings. Display refresh and hardware input queuing remain
+outside these measurements. See the implementation record for measured cases.

@@ -3216,6 +3216,30 @@ TEST(RadiantViewTest, SpeechSmokeSpeaksWithBoundaries) {
 #endif
 }
 
+TEST(RadiantViewTest, SameSizeCanvasFramesRepaintWithoutLayout) {
+    const ShellEnvEntry env[] = {
+        {"RADIANT_FRAME_PROFILE","1"}, {"LAMBDA_LOG_LEVEL","NOTICE"},
+        {"LAMBDA_GC_FORCE_EVERY","1"}, {"LAMBDA_GC_POISON_FREED","1"}, {nullptr,nullptr},
+    };
+    ShellResult result=test_radiant_view_run_logged_headless(
+        "test/demo/photo/tests/_canvas_bridge.ls","test/demo/photo/tests/canvas_bridge.json",env);
+    const char* output=result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code,0) << output;
+    int frames=0;
+    for (const char* frame=strstr(output,"[FRAME_PROFILE]");frame;) {
+        const char* end=strchr(frame,'\n');
+        const char* layout=strstr(frame,"layout_ms=0.000");
+        const char* mutations=strstr(frame,"mutations=0 commits=0");
+        // pixels must reach the retained canvas without entering DOM/style reconciliation.
+        EXPECT_TRUE(layout && (!end || layout<end)) << frame;
+        EXPECT_TRUE(mutations && (!end || mutations<end)) << frame;
+        frames++;
+        frame=end ? strstr(end+1,"[FRAME_PROFILE]") : nullptr;
+    }
+    EXPECT_EQ(frames,3) << output;
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
     test_radiant_view_expect_replay("test/demo/photo/tests/_image_jobs.ls",
         "test/demo/photo/tests/image_jobs.json",RADIANT_IMAGE_GC_ENV,true);

@@ -1,0 +1,112 @@
+{
+  "name": "Photos window close guards every dirty document tab",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "2"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": "discard"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#discard-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tabs",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-tab",
+      "equals": "document-1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": "discard"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#discard-cancel"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#discard-confirm"
+      }
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

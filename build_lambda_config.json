@@ -4841,7 +4841,7 @@
             "icon": "\ud83d\uddb1\ufe0f",
             "runner_args": [
               "--suite",
-              "baseline,dtna,timeline,wired,clay,blade"
+              "baseline,dtna,timeline,wired,clay,blade,photos"
             ]
           },
           {

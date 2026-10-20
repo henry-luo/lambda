@@ -15,6 +15,7 @@
 #include "interp.hpp"
 #include "output_demand.hpp"
 #include "doc_context.hpp"
+#include "image_raster.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
@@ -3452,6 +3453,13 @@ static Bool element_semantic_eq(Item a_item, Item b_item, int depth,
         key_root.set(key);
         if (key_status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
         if (key_status != VIRTUAL_OP_OK) return BOOL_FALSE;
+
+        // S5.4.3: native u8 samples have the same structural relation without allocating projections.
+        bool samples_equal;
+        if (lambda_raster_compare_samples(a_root.get(),b_root.get(),key_root.get(),&samples_equal)) {
+            if (!samples_equal) return BOOL_FALSE;
+            continue;
+        }
 
         Item value_a = ItemNull;
         VirtualOpStatus value_a_status = element_attr_value_at_for(a_root.get(), i, &value_a);
@@ -8821,6 +8829,12 @@ Item fn_chr(Item cp_item) {
         log_debug("fn_chr: code point %lld out of range (0..0x10FFFF)", (long long)codepoint);
         String* empty = heap_strcpy("", 0);
         return {.item = s2it(empty)};
+    }
+
+    // immutable ASCII characters share the same storage as string indexing and JS.
+    if (codepoint < 128) {
+        String* shared = get_ascii_char_string((unsigned char)codepoint);
+        if (shared) return {.item = s2it(shared)};
     }
 
     char buf[4];

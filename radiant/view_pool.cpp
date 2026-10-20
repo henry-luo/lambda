@@ -1,6 +1,7 @@
 #include "scene3d.hpp"
 #include "geomap.hpp"
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 #include "view.hpp"
 #include "../lambda/dom/dom_engine.h"
 #include "render.hpp"
@@ -563,7 +564,13 @@ static const VectorPathProp VECTOR_PATH_PROP_DEFAULT = {};
 
 static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->layout_cache) return;
+    radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
+}
+
+static void free_layout_cache_payload(DomElement* elem, ViewTree* tree) {
+    if (elem && elem->layout_cache)
+        radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
 }
 
 static void reset_marker_prop(DomElement*, ViewTree*) {
@@ -654,7 +661,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "pseudo", nullptr, nullptr, view_prop_get_pseudo, view_prop_clear_pseudo, view_prop_free_pseudo, nullptr, nullptr, &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path", nullptr, free_vector_path_payload, view_prop_get_vpath, view_prop_clear_vpath, view_prop_free_vpath, nullptr, nullptr, &VECTOR_PATH_PROP_DEFAULT, sizeof(VectorPathProp), nullptr },
     { "layout-fragments", nullptr, nullptr, view_prop_get_layout_fragments, view_prop_clear_layout_fragments, nullptr, nullptr, free_layout_fragments, nullptr, 0, free_layout_fragments },
-    { "layout-cache", nullptr, nullptr, view_prop_get_layout_cache, view_prop_clear_layout_cache, view_prop_free_layout_cache, nullptr, nullptr, nullptr, sizeof(radiant::LayoutCache), reset_layout_cache },
+    { "layout-cache", nullptr, free_layout_cache_payload, view_prop_get_layout_cache, view_prop_clear_layout_cache, view_prop_free_layout_cache, nullptr, nullptr, nullptr, sizeof(radiant::LayoutCache), reset_layout_cache },
 };
 
 // Every element view slot (DOM_ELEMENT_VIEW_SLOTS) has its teardown row. The

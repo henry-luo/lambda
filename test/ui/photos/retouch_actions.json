@@ -1,0 +1,414 @@
+{
+  "name": "Photos frozen clone source and portable action replay",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#preview"
+      },
+      "width": 192,
+      "height": 144,
+      "tolerance": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#336699",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-clone"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 30
+      },
+      "dx": 0,
+      "dy": 0,
+      "steps": 1,
+      "mods_str": "alt"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-retouch-source",
+      "equals": "ready"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#00ff00",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#brush-size"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#brush-hardness"
+      },
+      "text": "1",
+      "clear": true
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 80
+      },
+      "dx": 30,
+      "dy": 0,
+      "steps": 4
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 80
+      },
+      "min_r": 50,
+      "max_r": 52,
+      "min_g": 101,
+      "max_g": 103,
+      "min_b": 152,
+      "max_b": 154
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 20,
+        "offset_y": 20
+      },
+      "min_r": 0,
+      "max_r": 1,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 80
+      },
+      "min_r": 0,
+      "max_r": 1,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 80
+      },
+      "min_r": 50,
+      "max_r": 52,
+      "min_g": 101,
+      "max_g": 103,
+      "min_b": 152,
+      "max_b": 154
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-transform"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 144,
+        "offset_y": 72
+      },
+      "dx": -48,
+      "dy": 48,
+      "steps": 4,
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-transform",
+      "equals": "active"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".raster-target"
+      },
+      "width": 144,
+      "height": 192,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-transform",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-start"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mono"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-recording",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-stop"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-actions",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-replay"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 80
+      },
+      "min_r": 75,
+      "max_r": 77,
+      "min_g": 75,
+      "max_g": 77,
+      "min_b": 75,
+      "max_b": 77
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/ui-action.laction",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/ui-action.laction",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-actions",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos/retouch-actions.png"
+    }
+  ]
+}
