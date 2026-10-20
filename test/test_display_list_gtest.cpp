@@ -371,10 +371,150 @@ TEST_F(DisplayListTest, GradientAndDashBuffersShareAcrossCopiesAndSurviveSourceR
     EXPECT_EQ(copied[2].stroke_path.dash_array, dl[2].stroke_path.dash_array);
     stops[0].r = 0; dashes[0] = 99;
     dl_clear(&dl);
+    EXPECT_EQ(dl_shared_array_bytes(&dl), 0u);
     EXPECT_EQ(copied[0].fill_linear_gradient.stops[0].r, 255);
     EXPECT_FLOAT_EQ(copied[2].stroke_path.dash_array[0], 2);
     EXPECT_TRUE(dl_validate(&copied, nullptr));
     dl_destroy(&copied);
+}
+
+TEST_F(DisplayListTest, ReusableArraysKeepExactValuesAcrossClearsAndSeparateArrayKinds) {
+    dl.shared_array_reuse_budget = 64 * 1024;
+    RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+    float dashes[] = {2, 3};
+    const auto* first_stops = dl_copy_stops(&dl, stops, 2); ASSERT_NE(first_stops, nullptr);
+    const float* first_dashes = dl_copy_dashes(&dl, dashes, 2); ASSERT_NE(first_dashes, nullptr);
+    size_t charged = dl_shared_array_bytes(&dl);
+    dl_clear(&dl); dl_clear(&dl);
+    EXPECT_EQ(dl_shared_array_bytes(&dl), charged);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    EXPECT_EQ(dl_copy_stops(&dl, stops, 2), first_stops);
+    EXPECT_EQ(dl_copy_dashes(&dl, dashes, 2), first_dashes);
+    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_EQ(counters.shared_array_reuses, 2u);
+    stops[0].r = 99; dashes[0] = 7;
+    EXPECT_NE(dl_copy_stops(&dl, stops, 2), first_stops);
+    EXPECT_NE(dl_copy_dashes(&dl, dashes, 2), first_dashes);
+    EXPECT_EQ(first_stops[0].r, 255); EXPECT_FLOAT_EQ(first_dashes[0], 2);
+    EXPECT_EQ(counters.payload_copy_bytes, sizeof(stops) + sizeof(dashes));
+    RdtGradientStop zero = {}; float zeros[] = {0, 0};
+    static_assert(sizeof(zero) == sizeof(zeros), "kind check needs identical-sized zero bytes");
+    const void* zero_stops = dl_copy_stops(&dl, &zero, 1);
+    const void* zero_dashes = dl_copy_dashes(&dl, zeros, 2);
+    ASSERT_NE(zero_stops, nullptr); ASSERT_NE(zero_dashes, nullptr);
+    EXPECT_NE(zero_stops, zero_dashes);
+}
+
+TEST_F(DisplayListTest, ReusableArrayBudgetChargesTheIndexAndCopiesSurviveRetirement) {
+    char token = 0; RdtPath* path = (RdtPath*)&token;
+    test_display_list_stub_set_path_bounds(path, true, 0, 0, 20, 20);
+    dl.shared_array_reuse_budget = 64 * 1024;
+    RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+    dl_fill_linear_gradient(&dl, path, 0, 0, 20, 20, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    DisplayList copied;
+    ASSERT_TRUE(dl_copy_range(&copied, &dl, 0, 0));
+    size_t charge = dl_shared_array_bytes(&dl); ASSERT_GT(charge, sizeof(stops));
+    dl.shared_array_reuse_budget = charge;
+    EXPECT_EQ(dl_shared_array_reuse_bytes(&dl), charge);
+    dl_clear(&dl); EXPECT_EQ(dl_shared_array_bytes(&dl), charge);
+    dl.shared_array_reuse_budget = charge - 1;
+    EXPECT_EQ(dl_shared_array_reuse_bytes(&dl), 0u);
+    dl_clear(&dl); EXPECT_EQ(dl_shared_array_bytes(&dl), 0u);
+    EXPECT_EQ(copied[0].fill_linear_gradient.stops[0].r, 255);
+    EXPECT_TRUE(dl_validate(&copied, nullptr));
+    ASSERT_NE(dl_copy_stops(&dl, stops, 2), nullptr);
+    dl_destroy(&dl); EXPECT_EQ(dl_shared_array_bytes(&dl), 0u);
+    EXPECT_EQ(dl.shared_array_reuse_budget, 0u);
+    EXPECT_EQ(copied[0].fill_linear_gradient.stops[1].b, 255);
+    dl_destroy(&copied);
+}
+
+TEST_F(DisplayListTest, ReusableArrayOverlayRewindPreservesPrefixAndRetiresReactivatedValues) {
+    dl.shared_array_reuse_budget = 64 * 1024;
+    float prefix[] = {1, 2}, idle[] = {3, 4}, overlay[] = {5, 6};
+    const float* first = dl_copy_dashes(&dl, prefix, 2); ASSERT_NE(first, nullptr);
+    ASSERT_NE(dl_copy_dashes(&dl, idle, 2), nullptr);
+    dl_clear(&dl);
+    EXPECT_EQ(dl_copy_dashes(&dl, prefix, 2), first);
+    uint64_t checkpoint = dl_shared_array_checkpoint(&dl);
+    ASSERT_NE(dl_copy_dashes(&dl, idle, 2), nullptr);
+    ASSERT_NE(dl_copy_dashes(&dl, overlay, 2), nullptr);
+    dl_shared_array_rewind(&dl, checkpoint);
+    EXPECT_EQ(dl_copy_dashes(&dl, prefix, 2), first);
+    EXPECT_FLOAT_EQ(first[1], 2);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_NE(dl_copy_dashes(&dl, idle, 2), nullptr);
+    EXPECT_EQ(counters.payload_copy_bytes, sizeof(idle));
+}
+
+TEST_F(DisplayListTest, RecordingAdoptionKeepsReusableArraysOrTransfersTheIncomingIndex) {
+    char token = 0; RdtPath* path = (RdtPath*)&token;
+    test_display_list_stub_set_path_bounds(path, true, 0, 0, 20, 20);
+    for (bool incoming_arrays : {false, true}) {
+        DisplayList adopted, source;
+        adopted.shared_array_reuse_budget = 64 * 1024;
+        RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+        const auto* old = dl_copy_stops(&adopted, stops, 2); ASSERT_NE(old, nullptr);
+        if (incoming_arrays) dl_fill_linear_gradient(&source, path, 0, 0, 20, 20,
+            stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+        else dl_fill_rect(&source, 0, 0, 20, 20, Color{0xff0000ffu});
+        const auto* expected = incoming_arrays ? source[0].fill_linear_gradient.stops.get() : old;
+        ValidatedDisplayList recording;
+        ASSERT_TRUE(dl_adopt_recording(&adopted, &source, &recording, "array reuse adoption"));
+        EXPECT_EQ(recording.get(), &adopted); EXPECT_EQ(source.shared_arrays, nullptr);
+        EXPECT_EQ(adopted.shared_array_reuse_budget, 64u * 1024);
+        EXPECT_GT(dl_shared_array_bytes(&adopted), 0u);
+        dl_clear(&adopted);
+        EXPECT_EQ(dl_copy_stops(&adopted, stops, 2), expected);
+        dl_destroy(&source); dl_destroy(&adopted);
+    }
+}
+
+TEST_F(DisplayListTest, EmptyArrayCheckpointRollbackCannotReactivateALivePrefixAsIdle) {
+    dl.shared_array_reuse_budget = 64 * 1024;
+    float prefix[] = {1, 2}, overlay[] = {3, 4};
+    uint64_t empty = dl_shared_array_checkpoint(&dl); EXPECT_EQ(empty, 0u);
+    ASSERT_NE(dl_copy_dashes(&dl, overlay, 2), nullptr);
+    dl_shared_array_rewind(&dl, empty);
+    const float* first = dl_copy_dashes(&dl, prefix, 2); ASSERT_NE(first, nullptr);
+    uint64_t checkpoint = dl_shared_array_checkpoint(&dl);
+    EXPECT_EQ(dl_copy_dashes(&dl, prefix, 2), first);
+    ASSERT_NE(dl_copy_dashes(&dl, overlay, 2), nullptr);
+    dl_shared_array_rewind(&dl, checkpoint);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    EXPECT_EQ(dl_copy_dashes(&dl, prefix, 2), first);
+    EXPECT_EQ(counters.payload_copy_bytes, 0u); EXPECT_FLOAT_EQ(first[1], 2);
+}
+
+TEST_F(DisplayListTest, ReusableArrayHitsNeedNoAllocationAndSurviveAMissedValueFailure) {
+    dl.shared_array_reuse_budget = 64 * 1024;
+    float original[] = {1, 2}, changed[] = {3, 4};
+    const float* first = dl_copy_dashes(&dl, original, 2); ASSERT_NE(first, nullptr);
+    dl_clear(&dl);
+    memtrack_fault_inject(0);
+    const float* reused = dl_copy_dashes(&dl, original, 2);
+    const float* failed = dl_copy_dashes(&dl, changed, 2);
+    memtrack_fault_clear();
+    EXPECT_EQ(reused, first); EXPECT_EQ(failed, nullptr); EXPECT_FLOAT_EQ(first[0], 1);
+    ASSERT_NE(dl_copy_dashes(&dl, changed, 2), nullptr);
+}
+
+TEST(DisplayListPressureTest, ReusableArrayIndexRetiresAtHighPressure) {
+    // the ordinary stub process keeps tracking off; initialize it before the
+    // child allocates and exit without changing the parent's allocation mode.
+    ASSERT_EXIT({
+        if (!memtrack_init(MEMTRACK_MODE_STATS)) _Exit(1);
+        DisplayList recording;
+        recording.shared_array_reuse_budget = 64 * 1024;
+        float values[2]; values[0] = 1; values[1] = 2;
+        bool ok = dl_copy_dashes(&recording, values, 2) != nullptr;
+        ok &= dl_shared_array_bytes(&recording) > 0;
+        memtrack_set_limits(1, 1, SIZE_MAX);
+        ok &= memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH;
+        dl_clear(&recording);
+        ok &= dl_shared_array_bytes(&recording) == 0;
+        dl_destroy(&recording);
+        _Exit(ok ? 0 : 1);
+    }, ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(DisplayListTest, ArrayCheckpointsReleaseTransientValuesAndPreserveEarlierBuffers) {

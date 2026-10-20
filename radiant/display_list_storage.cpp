@@ -46,6 +46,15 @@ bool dl_supports_premultiplied_capture(const DisplayList* list) {
     return !cursor.failed;
 }
 
+bool dl_supports_vector_translation(const DisplayList* list, int first, int end) {
+    if (!list || first < 0 || first > list->item_count() || end < -1 ||
+        (end >= 0 && (end < first || end > list->item_count()))) return false;
+    DisplayListCursor cursor(list, first, end);
+    while (const DisplayItem* item = cursor.next())
+        if (!dl_op_has_flags(item->op, DL_OP_FLAG_VECTOR_TRANSLATION)) return false;
+    return !cursor.failed;
+}
+
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
     if (dl->capacity() == 0 && !dl->reserve(DL_INITIAL_CAPACITY)) return nullptr;
@@ -65,6 +74,60 @@ DisplayListCursor::DisplayListCursor(const DisplayPayloadOwner* chunk)
     push(chunk);
 }
 
+static bool dl_translate_point(float* x, float* y, float dx, float dy) {
+    *x += dx; *y += dy;
+    return isfinite(*x) && isfinite(*y);
+}
+
+static bool dl_translate_transform(RdtMatrix* matrix, bool* has_transform, float dx, float dy) {
+    RdtMatrix offset = rdt_matrix_translate(dx, dy);
+    *matrix = *has_transform ? rdt_matrix_multiply(&offset, matrix) : offset;
+    *has_transform = true;
+    const float values[] = {matrix->e11, matrix->e12, matrix->e13, matrix->e21, matrix->e22,
+        matrix->e23, matrix->e31, matrix->e32, matrix->e33};
+    for (float value : values) if (!isfinite(value)) return false;
+    return true;
+}
+
+const DisplayItem* DisplayListCursor::placed_item(const DisplayItem* source) {
+    if (translate_x == 0 && translate_y == 0) return source;
+    if (!dl_op_has_flags(source->op, DL_OP_FLAG_VECTOR_TRANSLATION)) { failed = true; return nullptr; }
+    // one cursor-local descriptor changes placement; every payload remains borrowed from its pinned owner.
+    translated = *source;
+    RENDER_METRIC_ADD(placement_command_copy_bytes, sizeof(DisplayItem));
+    bool valid = dl_translate_point(&translated.bounds[0], &translated.bounds[1], translate_x, translate_y) &&
+        isfinite(translated.bounds[2]) && isfinite(translated.bounds[3]) &&
+        isfinite(translated.bounds[0] + translated.bounds[2]) &&
+        isfinite(translated.bounds[1] + translated.bounds[3]);
+    auto transform = [&](auto& payload) {
+        return dl_translate_transform(&payload.transform, &payload.has_transform, translate_x, translate_y);
+    };
+    if (valid) switch (translated.op) {
+        case DL_FILL_RECT:
+            valid = dl_translate_point(&translated.fill_rect.x, &translated.fill_rect.y, translate_x, translate_y);
+            break;
+        case DL_FILL_ROUNDED_RECT:
+            valid = dl_translate_point(&translated.fill_rounded_rect.x, &translated.fill_rounded_rect.y, translate_x, translate_y);
+            break;
+        case DL_FILL_PATH: valid = transform(translated.fill_path); break;
+        case DL_STROKE_PATH: valid = transform(translated.stroke_path); break;
+        case DL_FILL_LINEAR_GRADIENT: valid = transform(translated.fill_linear_gradient); break;
+        case DL_FILL_RADIAL_GRADIENT: valid = transform(translated.fill_radial_gradient); break;
+        case DL_DRAW_IMAGE: valid = transform(translated.draw_image); break;
+        case DL_DRAW_PICTURE: valid = transform(translated.draw_picture); break;
+        case DL_PUSH_CLIP: valid = transform(translated.push_clip); break;
+        case DL_BEGIN_ELEMENT:
+        case DL_END_ELEMENT:
+            valid = dl_translate_point(&translated.element_marker.marker_x,
+                &translated.element_marker.marker_y, translate_x, translate_y);
+            break;
+        case DL_POP_CLIP: break;
+        default: valid = false; break;
+    }
+    if (!valid) { failed = true; return nullptr; }
+    return &translated;
+}
+
 bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
     if (!chunk || !chunk->commands || !chunk->command_spans || !chunk->span_count ||
         chunk->command_count <= 0 || depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT ||
@@ -74,7 +137,10 @@ bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
     for (int i = 0; i < depth; i++) if (chunks[i].owner == chunk) {
         failed = true; return false;
     }
-    chunks[depth++] = {chunk, 0, 0, 0};
+    float dx = chunk->translate_x + (depth ? chunks[depth - 1].translate_x : 0);
+    float dy = chunk->translate_y + (depth ? chunks[depth - 1].translate_y : 0);
+    if (!isfinite(dx) || !isfinite(dy)) { failed = true; return false; }
+    chunks[depth++] = {chunk, 0, 0, 0, dx, dy};
     return true;
 }
 
@@ -85,6 +151,7 @@ const DisplayItem* DisplayListCursor::next() {
             if (!root || next_root >= end_root) return nullptr;
             source_index = index = root_index = next_root++;
             owner = nullptr;
+            translate_x = translate_y = 0;
             item = &root->data()[index];
             if (item->op == DL_DRAW_FRAGMENT) {
                 if (!push(item->draw_fragment.owner)) break;
@@ -94,6 +161,7 @@ const DisplayItem* DisplayListCursor::next() {
         }
         ChunkFrame& frame = chunks[depth - 1];
         owner = frame.owner;
+        translate_x = frame.translate_x; translate_y = frame.translate_y;
         if (frame.span == owner->span_count) {
             if (frame.logical != owner->command_count) { failed = true; break; }
             depth--; continue;
@@ -116,6 +184,7 @@ const DisplayItem* DisplayListCursor::next() {
         index = frame.logical++;
         // immutable chunks express nesting through spans, never through mutable frame-reference commands.
         if (item->op == DL_DRAW_FRAGMENT) { failed = true; break; }
+        item = placed_item(item);
         return item;
     }
     item = nullptr;
@@ -158,7 +227,7 @@ struct DlSharedArray {
     unsigned kind;
     const void* data;
 };
-struct DlSharedArrayEntry { DlSharedArray* value; uint64_t serial = 0; };
+struct DlSharedArrayEntry { DlSharedArray* value; uint64_t serial = 0; }; // zero marks idle cached values
 struct DlSharedArrayKeyOps {
     static uint64_t hash(const DlSharedArrayEntry& entry, uint64_t first, uint64_t second) {
         return hashmap_hash_bytes(&entry.value->hash, sizeof(entry.value->hash), first, second);
@@ -184,6 +253,18 @@ size_t dl_shared_array_bytes(const DisplayList* list) {
     return cache->bytes + sizeof(*cache) + sizeof(*map) + (map->nbuckets + 2) * map->bucketsz;
 }
 
+size_t dl_shared_array_reuse_bytes(const DisplayList* list) {
+    if (!list || !list->shared_array_reuse_budget || !list->shared_arrays ||
+        !list->shared_arrays->index.count()) return 0;
+    size_t bytes = dl_shared_array_bytes(list);
+    return bytes <= list->shared_array_reuse_budget ? bytes : 0;
+}
+
+static void dl_shared_array_cache_destroy(lam::Own<DlSharedArrayCache>& cache) {
+    if (!cache) return;
+    cache->index.destroy(); lam::free_owned(cache);
+}
+
 uint64_t dl_shared_array_checkpoint(const DisplayList* list) {
     return list && list->shared_arrays ? list->shared_arrays->next_serial : 0;
 }
@@ -200,7 +281,7 @@ void dl_shared_array_rewind(DisplayList* list, uint64_t checkpoint) {
         dl_shared_array_release(&removed);
         cursor = 0; // erasure relocates buckets; overlay additions are bounded to one frame.
     }
-    cache->next_serial = checkpoint;
+    cache->next_serial = checkpoint ? checkpoint : 1;
 }
 
 template<typename T>
@@ -213,6 +294,7 @@ static const T* dl_share_array(DisplayList* dst, const DisplayList* source, cons
         DlSharedArrayCache* cache = (DlSharedArrayCache*)mem_calloc(1, sizeof(DlSharedArrayCache), MEM_CAT_RENDER);
         if (!cache) return nullptr;
         if (!cache->index.init(8)) { mem_free(cache); return nullptr; }
+        cache->next_serial = 1;
         dst->shared_arrays = lam::own(cache);
     }
     DlSharedArray query = {}; query.bytes = bytes; query.kind = kind; query.data = data;
@@ -220,7 +302,16 @@ static const T* dl_share_array(DisplayList* dst, const DisplayList* source, cons
     DlSharedArrayCache* cache = dst->shared_arrays;
     if (cache->next_serial == UINT64_MAX) return nullptr;
     DlSharedArrayEntry* existing = cache->index.get({&query});
-    if (existing) { RENDER_METRIC_ADD(shared_array_hits, 1); return (T*)existing->value->data; }
+    if (existing) {
+        if (!existing->serial) {
+            // reactivation belongs after the overlay checkpoint; rollback can
+            // retire its lease only when no earlier command borrowed the value.
+            existing->serial = cache->next_serial++;
+            RENDER_METRIC_ADD(shared_array_reuses, 1);
+        }
+        RENDER_METRIC_ADD(shared_array_hits, 1);
+        return (T*)existing->value->data;
+    }
     const DlSharedArrayEntry* from = source && source->shared_arrays ? source->shared_arrays->index.get({&query}) : nullptr;
     DlSharedArray* value;
     if (from) {
@@ -392,9 +483,13 @@ void DisplayList::clear() {
         dl_item_free_owned_payload(&dl->data()[i]);
     }
     lam::ArrayList<DisplayItem>::clear();
-    if (shared_arrays) {
-        shared_arrays->index.destroy(); lam::free_owned(shared_arrays);
-    }
+    if (dl_shared_array_reuse_bytes(this) && memtrack_get_pressure_level() < MEM_PRESSURE_HIGH) {
+        // the map keeps the leases while commands retire; independent copies
+        // already pin their buffers. Idle values remain bounded by the full index charge.
+        size_t cursor = 0; DlSharedArrayEntry* entry;
+        while (shared_arrays->index.next(&cursor, &entry)) entry->serial = 0;
+        shared_arrays->next_serial = 1;
+    } else dl_shared_array_cache_destroy(shared_arrays);
     Arena* backing_arena = dl->arena.arena;
     scratch_release(&dl->arena);
     if (backing_arena) {
@@ -420,6 +515,8 @@ bool dl_trim_empty_arena(DisplayList* list) {
 
 void DisplayList::destroy() {
     clear();
+    dl_shared_array_cache_destroy(shared_arrays);
+    shared_array_reuse_budget = 0;
     lam::ArrayList<DisplayItem>::release();
     scratch_release(&arena);
 }
@@ -536,7 +633,8 @@ static bool dl_validate_stream(DisplayListCursor& cursor, int end,
     while (const DisplayItem* item = cursor.next()) {
         int i = cursor.index;
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
-        const DisplayChunkValidation* chunk = cursor.owner && i == 0
+        const DisplayChunkValidation* chunk = cursor.owner && i == 0 &&
+            cursor.translate_x == 0 && cursor.translate_y == 0
             ? retained_dl_chunk_validation(cursor.owner) : nullptr;
         if (chunk) {
             RENDER_METRIC_ADD(validation_chunk_checks, 1);
@@ -859,7 +957,10 @@ bool dl_adopt_recording(DisplayList* dst, DisplayList* source,
     // scratch nodes register their object's address; only heap command/resource storage can move.
     dl_clear(dst);
     dst->lam::ArrayList<DisplayItem>::operator=(static_cast<lam::ArrayList<DisplayItem>&&>(*source));
-    dst->shared_arrays = source->shared_arrays; source->shared_arrays = nullptr;
+    if (source->shared_arrays) {
+        dl_shared_array_cache_destroy(dst->shared_arrays);
+        dst->shared_arrays = source->shared_arrays; source->shared_arrays = nullptr;
+    }
     candidate.list = lam::up(dst); candidate.storage = lam::up(dst->data());
     *recording = candidate;
     return true;
