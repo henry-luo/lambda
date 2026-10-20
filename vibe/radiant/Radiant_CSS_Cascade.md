@@ -1770,7 +1770,7 @@ Line references identify the reviewed revision; symbols are the durable anchors.
 | `radiant/event.cpp:6016, 6214, 6269, 6545` | Existing mutation cascade-root selection, incremental eligibility, subtree recascade, event integration. |
 | `radiant/view_memory_profile.cpp:110` | `view_memory_profile_write`; reusable reporting infrastructure and selected-owner limitations. |
 | `radiant/view_reuse.cpp:104` | `canonical_inline_find_or_create`; existing exact computed-prop interning and cap. |
-| `test/test_view_reuse_gtest.cpp:309` | `StyleEpochTest`; collisions, COW, epoch coexistence, environment changes, and snapshot lifetime. |
+| `test/test_radiant_core_gtest.cpp:309` | `StyleEpochTest`; collisions, COW, epoch coexistence, environment changes, and snapshot lifetime. |
 | `test/test_css_cascade_memory_gtest.cpp` and `test/css_cascade_memory_baseline.tsv` | Standard page-load and forced-recascade memory baseline; exact recipe/binding ceiling plus byte budgets. |
 
 The first implementation should concentrate on the measured condition and

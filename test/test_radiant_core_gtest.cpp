@@ -31,7 +31,7 @@ DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 HashMap* element_dom_map_create(void);
 DomElement* element_dom_map_lookup(HashMap*, Element*);
 
-class ViewReuseTest : public ::testing::Test {
+class RadiantCoreTest : public ::testing::Test {
 protected:
     ViewTree tree = {};
 
@@ -55,7 +55,7 @@ protected:
     }
 };
 
-TEST_F(ViewReuseTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
+TEST_F(RadiantCoreTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
     DomElement* owner = element();
     FormControlProp forms[2] = {};
     NameId tags[] = {MARKUP_NAME_IMG, MARKUP_NAME_OBJECT};
@@ -78,7 +78,7 @@ TEST_F(ViewReuseTest, TeardownReleasesFormPayloadBelowNonRenderingParents) {
     }
 }
 
-TEST_F(ViewReuseTest, RetainedResetPreservesScriptCreatedFormProperties) {
+TEST_F(RadiantCoreTest, RetainedResetPreservesScriptCreatedFormProperties) {
     DomElement* control = element();
     FormControlProp form = {};
     form.control_type = FORM_CONTROL_TEXT;
@@ -144,7 +144,7 @@ TEST(TextIntrinsicWrap, BreakAllKeepsShapedMaxContentAdvance) {
     font_context_destroy(fonts);
 }
 
-TEST_F(ViewReuseTest, ExplicitHashAndEqualityCoverEveryInlineField) {
+TEST_F(RadiantCoreTest, ExplicitHashAndEqualityCoverEveryInlineField) {
     InlineProp left = INLINE_PROP_DEFAULT;
     InlineProp right = left;
     EXPECT_TRUE(inline_prop_equal(&left, &right));
@@ -156,7 +156,7 @@ TEST_F(ViewReuseTest, ExplicitHashAndEqualityCoverEveryInlineField) {
     EXPECT_NE(inline_prop_hash(&left), inline_prop_hash(&right));
 }
 
-TEST_F(ViewReuseTest, EqualParentAndChildPromoteThenCowAtEnsureGate) {
+TEST_F(RadiantCoreTest, EqualParentAndChildPromoteThenCowAtEnsureGate) {
     DomElement* parent = element();
     DomElement* child = element();
     parent->ensure_inline(&tree)->color.c = 0xff123456u;
@@ -180,7 +180,7 @@ TEST_F(ViewReuseTest, EqualParentAndChildPromoteThenCowAtEnsureGate) {
     EXPECT_EQ(tree.canonical_stats.inline_cows, 1u);
 }
 
-TEST_F(ViewReuseTest, CanonicalIndexReusesAnExistingExactValue) {
+TEST_F(RadiantCoreTest, CanonicalIndexReusesAnExistingExactValue) {
     DomElement* parent1 = element();
     DomElement* child1 = element();
     DomElement* parent2 = element();
@@ -199,7 +199,7 @@ TEST_F(ViewReuseTest, CanonicalIndexReusesAnExistingExactValue) {
     EXPECT_EQ(tree.canonical_stats.inline_hits, 1u);
 }
 
-TEST_F(ViewReuseTest, LengthMathSubstitutesVariablesBeforeResolvingLeaves) {
+TEST_F(RadiantCoreTest, LengthMathSubstitutesVariablesBeforeResolvingLeaves) {
     UiContext ui = {};
     LayoutContext context = {};
     context.pool = lam::up(tree.prop_pool.get());
@@ -222,7 +222,7 @@ TEST_F(ViewReuseTest, LengthMathSubstitutesVariablesBeforeResolvingLeaves) {
     }
 }
 
-TEST_F(ViewReuseTest, RetainedLeadingRecomputesFromTheCurrentParentCascade) {
+TEST_F(RadiantCoreTest, RetainedLeadingRecomputesFromTheCurrentParentCascade) {
     DomElement* parent = element();
     DomElement* child = element();
     child->parent = lam::up(parent);
@@ -263,7 +263,7 @@ TEST_F(ViewReuseTest, RetainedLeadingRecomputesFromTheCurrentParentCascade) {
     EXPECT_EQ(child->block()->line_height->data.keyword, CSS_VALUE_NORMAL);
 }
 
-TEST_F(ViewReuseTest, AnonymousTableRepairPreservesSourceInheritance) {
+TEST_F(RadiantCoreTest, AnonymousTableRepairPreservesSourceInheritance) {
     DomDocument doc;
     doc.view_tree = lam::own(&tree);
     LayoutContext context = {};
@@ -312,7 +312,7 @@ TEST_F(ViewReuseTest, AnonymousTableRepairPreservesSourceInheritance) {
     doc.view_tree = nullptr;
 }
 
-TEST_F(ViewReuseTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames) {
+TEST_F(RadiantCoreTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames) {
     DomElement* grid_element = element();
     grid_element->view_type = RDT_VIEW_BLOCK;
     grid_element->display.outer = CSS_VALUE_BLOCK;
@@ -751,7 +751,7 @@ TEST(GridStorage, AllocationFailureRetainsExistingEntriesAndPropagatesToSizingOw
     EXPECT_EQ(matrix.rows(), 10000u);
 }
 
-TEST_F(ViewReuseTest, GridAreasRetainLongNamesAndFullDimensions) {
+TEST_F(RadiantCoreTest, GridAreasRetainLongNamesAndFullDimensions) {
     GridProp grid = {};
     auto project = [&](const char* text) {
         CssDeclaration* declaration = css_parse_property_declaration("grid-template-areas", 19,
@@ -795,7 +795,7 @@ TEST_F(ViewReuseTest, GridAreasRetainLongNamesAndFullDimensions) {
     lam::free_owned(tree.prop_pool, grid.grid_areas);
 }
 
-TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAndNamesAfterSourcePoolRetirement) {
+TEST_F(RadiantCoreTest, GridTrackCloneOwnsMathAndNamesAfterSourcePoolRetirement) {
     Pool* source_pool = pool_create();
     ASSERT_NE(source_pool, nullptr);
     const char* text = "calc(10px + 25%)";
@@ -844,7 +844,7 @@ TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAndNamesAfterSourcePoolRetirement) {
     destroy_grid_track_list(tree.prop_pool, clone);
 }
 
-TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes) {
+TEST_F(RadiantCoreTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes) {
     DomElement* block = element();
     block->tag_id = MARKUP_NAME_DIV;
     block->view_type = RDT_VIEW_BLOCK;
@@ -942,7 +942,7 @@ TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes
     doc.view_tree = nullptr;
 }
 
-class IncrementalCssTest : public ViewReuseTest {
+class IncrementalCssTest : public RadiantCoreTest {
 protected:
     DomDocument document;
     LayoutContext context = {};
@@ -952,7 +952,7 @@ protected:
     Arena* scratch = nullptr;
 
     void SetUp() override {
-        ViewReuseTest::SetUp();
+        RadiantCoreTest::SetUp();
         ASSERT_TRUE(css_property_system_init(tree.prop_pool));
         target = element();
         target->tag_id = MARKUP_NAME_DIV;
@@ -988,7 +988,7 @@ protected:
         document.view_tree = nullptr;
         document.document_pool = nullptr;
         css_property_system_cleanup();
-        ViewReuseTest::TearDown();
+        RadiantCoreTest::TearDown();
     }
 
     void set_property(DomElement* element, const char* name, const char* value) {
@@ -1559,7 +1559,7 @@ TEST_F(IncrementalCssTest, RootFontChangesInvalidateNormalizedRemBindings) {
     EXPECT_FLOAT_EQ(target->block()->given_width, 60.0f);
 }
 
-TEST_F(ViewReuseTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwner) {
+TEST_F(RadiantCoreTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwner) {
     auto append_view = [&](ViewType view_type, DomElement* parent) {
         DomElement* child = element();
         child->view_type = view_type;
@@ -1600,7 +1600,7 @@ TEST_F(ViewReuseTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwn
     EXPECT_EQ(first->next_cell(foreign_cell), nullptr);
 }
 
-TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
+TEST_F(RadiantCoreTest, ComputedFamilyListsShareOneTreeLifetimeString) {
     CssValue* parts[] = {
         css_value_create_string(tree.prop_pool, "Arial"),
         css_value_create_keyword(tree.prop_pool, "sans-serif"),
@@ -1642,7 +1642,7 @@ TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
     EXPECT_EQ(tree.canonical_stats.font_family_misses, 2u);
 }
 
-TEST_F(ViewReuseTest, SingleFontFamiliesOutliveComputedValueScratch) {
+TEST_F(RadiantCoreTest, SingleFontFamiliesOutliveComputedValueScratch) {
     LayoutContext lycon = {};
     lycon.selected_view_tree = lam::up(&tree);
     Pool* scratch = pool_create();
@@ -1660,7 +1660,7 @@ TEST_F(ViewReuseTest, SingleFontFamiliesOutliveComputedValueScratch) {
     EXPECT_STREQ(selected, "Arial");
 }
 
-TEST_F(ViewReuseTest, CanonicalCapFallsBackToOwnedStorage) {
+TEST_F(RadiantCoreTest, CanonicalCapFallsBackToOwnedStorage) {
     tree.canonical_prop_cap_bytes = 0;
     DomElement* parent = element();
     DomElement* child = element();
