@@ -378,6 +378,8 @@ Query `?` - search attributes + all descendants:
 | `data?(int \| string)` | all int or string values |
 | `data?{name: string}` | maps with string 'name' |
 | `data?{status: "ok"}` | maps where status == "ok" |
+| `doc?\("" ... "TODO" ...)` | every text containing TODO (a pattern is a type) |
+| `el[\("ID-" "\d"+)]` | direct texts that are whole matches |
 
 Self-inclusive query `.?` — search self + attributes + all descendants:
 

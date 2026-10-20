@@ -599,7 +599,10 @@ data?(int | string)         // all int or string values
 html?<div class: string>    // <div> elements with a class attribute
 data?{name: string}         // maps with a string 'name' field
 data?{status: "ok"}         // maps where status == "ok"
+doc?\("" ... "TODO" ...)     // every text that contains TODO
 ```
+
+A string pattern `\(...)` is a type, so `?`, `.?` and `[...]` accept it like any other type and find the text whose whole value matches. [Querying Documents with Patterns](Lambda_String_Pattern.md#querying-documents-with-patterns) has examples.
 
 The `.?` variant is **self-inclusive** — it also tests the root value itself:
 
