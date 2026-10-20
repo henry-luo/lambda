@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29
-**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3)
+**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29, PTH81–PTH84
+**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3). **2026-10-20 (USER):** PTH81–PTH84 (§6.4) — a wildcard step may sit anywhere, forcing continues per match, a step applied to a file match enters the file while `**` never crosses the boundary by itself, path-domain results deduplicate, `**` is the closure of `*` and includes its base, and `#` is the line between reference and value (S2.4.6, S8.2.5, S8.2.6); implemented on both tiers the same day
 **Open issue IDs:** PTH-O1
 
 > **Normative anchors:** [S1.7](../doc/Lambda_Formal_Semantics.md#s1-core-principles)
@@ -532,6 +532,59 @@ projected through that provider instead. Platform conversion happens only at
 the target boundary. Windows drive and separator handling remain target-layer
 concerns and do not alter Lambda source syntax.
 
+### 6.4 Wildcard steps and forcing (PTH81–PTH84; S2.4.6, S8.2.5, S8.2.6)
+
+`*` and `**` are steps like any other (**S2.4.2v5**), so a wildcard may sit
+anywhere: `\.src.*.name`, `/.*.b`, `\.src.**.**`. Building such a path reads
+nothing (§2.6); it is a lazy reference with a query in it, and `#` forces it
+like any path (PTH32).
+
+**Per-match continuation (PTH81).** Forcing a wildcard enumerates the key
+domain the step lands in and applies the remaining steps to each match,
+set-at-a-time (**S8.2.6**). In the file-system domain `*` yields one level of
+directory entries; `**` is the closure of `*` (**S8.2.5**) — the base itself,
+then every entry beneath it, files and directories alike, in pre-order, to
+any depth. A match that does not exist forces to `null` under **S7.1.1v3**
+and drops.
+
+**The file boundary (PTH82).** A step applied to a file match enters the
+file — the longest-prefix rule of PTH34, applied per match — so once a step
+has entered a file the same spellings enumerate the parsed document
+(**S8.2.5**). `**` never crosses the boundary by itself. Hence a force reads
+exactly the files that a spelled step enters:
+
+| Spelling | Reads | Yields |
+|---|---|---|
+| `\.src.**#` | nothing | the base and every path beneath it |
+| `\.src.**.name#` | every file beneath src | each file's `name` member; a directory's `name` child when it exists |
+| `\.src.**.*#` | every file | the top-level items of every file |
+| `\.src.**.**#` | every file | every value in every file — the explicit full-content search |
+
+*Why:* a single `**` that read every file beneath a tree would be an
+unbounded implicit read (**S2.4.4**, PTH19, PTH38) and would hit the
+performance wall on every recursive listing; the crossing must be spelled,
+and then its cost is visible in the spelling.
+
+**Path-domain results are sets (PTH83).** Paths have structural identity
+(**S2.4.2v5**), unlike document values (SI13, [Expr_Query
+§4.1](Lambda_Expr_Query.md#41-return-value--the-run-t-two-subscript-worlds-ruled-2026-09-26-user-s824v3)),
+so a wildcard result in the path domain is deduplicated by path equality in
+first-appearance order. Without this, `\.src.**.**` would list every file
+once per matched ancestor; with it, `**.**` is idempotent on the directory
+side, as XPath's `a//b//c` is on node-sets. Results inside a document stay
+runs and never deduplicate.
+
+**`#` is the line between reference and value (PTH84).** Steps before `#`
+extend the plan and may enter files; steps after it act on values. So
+`\.src.*#.name` forces the enumeration and reads each path value's `name`
+property, mapped over the run (**S8.2.6**), touching no file, while
+`\.src.*.name#` enters each file. The two spellings differ on purpose.
+
+Implementation (2026-10-20): `**` enumeration heads with its base and has no
+depth cap; a symlinked directory is listed but not entered, as globstar does,
+so a link to an ancestor cannot recurse forever. Before this, the base was
+excluded, recursion stopped at depth 16, and `#` refused any wildcard path.
+
 ## 7. Root and parent navigation on expressions
 
 ### 7.1 Postfix root step
@@ -831,6 +884,10 @@ At minimum, implementation tests must cover:
     generic resolution.
 19. Address resolution performing no I/O; external target forcing retaining
     its ordinary effect/error contract.
+20. Wildcard steps before further steps: per-match continuation, a step
+    entering a file match while `**` alone stops at files, path-domain
+    deduplication, `**` including its base, and `#` as the line between
+    reference and value (§6.4).
 
 ## 13. Decision ledger
 
@@ -838,7 +895,7 @@ At minimum, implementation tests must cover:
 > force step and fragment sugar, `&expr` address-of, `===`, document-node
 > identity, the three-tier update model with `put`/`del` + `before`/`after`/`into`, `commit`/`rollback`, `open`; `temp.` documents; the `~key` respell of `~#`) are proposed in
 > [`Lambda_Design_Reference.md`](Lambda_Design_Reference.md) §9; PTH-O2–PTH-O18
-> live in its §10.
+> live in its §10. PTH81–PTH84 (wildcard steps, §6.4) are below.
 
 | ID | Decision |
 |---|---|
@@ -873,6 +930,10 @@ At minimum, implementation tests must cover:
 | **PTH27** | File absolutes spell the current machine as `file./` and a named machine as `file.hostname`; following operations address data beneath that filesystem root. |
 | **PTH28v2** | A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `\./`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH29** | Dynamic root navigation is occurrence-based and uses a navigation path or zipper; it never adds observable root/parent pointers to Lambda values. |
+| **PTH81** | A wildcard step may sit anywhere in a path and the path stays a lazy reference until `#`. Forcing enumerates the key domain the step lands in and continues the remaining steps per match, set-at-a-time (S8.2.6); `*` is one level, `**` the closure of `*` (S8.2.5) — the base, then every entry beneath it, files and directories alike, pre-order, any depth. *(USER, 2026-10-20; S2.4.6.)* |
+| **PTH82** | A step applied to a file match enters the file (PTH34 per match); `**` never crosses the file boundary by itself. A force reads exactly the files that a spelled step enters: `\.src.**#` reads nothing, `\.src.**.name#` reads every file, `\.src.**.**#` is the explicit full-content search. *(USER, 2026-10-20; S2.4.6.)* |
+| **PTH83** | A wildcard result in the path domain is a set, deduplicated by path equality in first-appearance order, so `**.**` is idempotent on the directory side; results inside a document stay runs and never deduplicate. *(USER, 2026-10-20; S2.4.6.)* |
+| **PTH84** | `#` is the line between reference and value: steps before it extend the plan and may enter files, steps after it act on values — `\.src.*#.name` reads each path's `name` property and no file; `\.src.*.name#` enters each file. *(USER, 2026-10-20; S2.4.6.)* |
 
 ## 14. Open issues and non-decided options
 

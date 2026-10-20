@@ -54,8 +54,9 @@ steps:
 
 The empty rooted and relative paths are `/` and `\`. A segment that is not a
 simple name is quoted; for example, `/.var.log.'app.log'` and
-`http.'api.example'.v1`. `*` selects one path segment and `**` selects a
-recursive path sequence.
+`http.'api.example'.v1`. `*` selects one path segment and `**` is its
+closure — the base and every segment beneath it (S8.2.5); either may sit
+anywhere in a path (S2.4.6).
 
 The following pre-ratification spellings are retired and have no compatibility
 meaning: `/a`, `.a`, `..a`, `value ..`, and `value .._..`. In particular, `.`
@@ -136,8 +137,11 @@ For local filesystem targets, the forcing model is:
 - a directory yields child **path values**, rather than eagerly loaded child
   contents;
 - a file yields the value produced by the appropriate input/content loader;
-- `*` and `**` force directory enumeration into one-level or recursive child
-  path sequences; and
+- `*` and `**` force directory enumeration — one level, or the closure
+  including the base — into child path values, deduplicated by path
+  equality; the remaining steps continue per match, and a step applied to a
+  file match enters that file, so `**` never crosses the file boundary by
+  itself (S2.4.6, [Type_Path §6.4](Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826)); and
 - provider failure follows that provider's declared error/effect contract;
   it never changes the chosen path root or triggers provider fallback.
 

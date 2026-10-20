@@ -1,0 +1,45 @@
+"a wildcard path is a reference"
+\.test.input.wild_tree.*.name
+"one level, nothing read"
+\.test.input.wild_tree.'a.json'
+\.test.input.wild_tree.sub
+"the closure includes its base, nothing read"
+\.test.input.wild_tree
+\.test.input.wild_tree.'a.json'
+\.test.input.wild_tree.sub
+\.test.input.wild_tree.sub.'b.json'
+\.test.input.wild_tree.sub.deep
+\.test.input.wild_tree.sub.deep.'c.json'
+"a step after the wildcard enters each fileabcaafter # the steps act on path values: metadata, no file reada.jsonsubtwo item steps: a file's top-level items, a directory's entriesa"
+[1, 2]
+\.test.input.wild_tree.sub.'b.json'
+\.test.input.wild_tree.sub.deep
+"** twice: directories deduplicated, files searched"
+\.test.input.wild_tree.sub
+\.test.input.wild_tree.sub.'b.json'
+\.test.input.wild_tree.sub.deep
+\.test.input.wild_tree.sub.deep.'c.json'
+{
+  name: "b",
+  items: [3]
+}
+"b"
+[3]
+3
+{
+  name: "c"
+}
+"ca wildcard inside a document enumerates the parsed valuea"
+[1, 2]
+1
+2
+{
+  name: "a",
+  items: [1, 2]
+}
+"a"
+[1, 2]
+1
+2
+"iteration enumerates the same closure"
+[\.test.input.wild_tree, \.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json']

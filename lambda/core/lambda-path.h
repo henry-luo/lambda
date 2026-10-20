@@ -109,6 +109,8 @@ Item path_get_item(Path* path, int64_t index);                    // Get item at
 // The force step uses it to split a reference into the document prefix and the
 // trailing steps it navigates in memory.
 Path* path_longest_existing_prefix(Path* path);
+bool path_is_directory(Path* path);               // PTH81: an existing local directory
+Path* path_append_op(Pool* pool, Path* base, Path* op);  // apply one operation node
 
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration

@@ -6948,9 +6948,9 @@
             "icon": "\ud83c\udf10"
           },
           {
-            "source": "test/test_view_reuse_gtest.cpp",
+            "source": "test/test_radiant_core_gtest.cpp",
             "additional_sources": [],
-            "name": "View Reuse Tests",
+            "name": "Radiant Core Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -6981,7 +6981,7 @@
                 "WebKit"
               ]
             },
-            "binary": "test_view_reuse_gtest.exe",
+            "binary": "test_radiant_core_gtest.exe",
             "icon": "\u267b\ufe0f",
             "parallel": false
           },

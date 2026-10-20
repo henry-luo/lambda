@@ -628,15 +628,20 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
     }
     Path* result = base;
     for (int i = ops->length - 1; i >= 0; i--) {
-        Path* op = (Path*)arraylist_get(ops, i);
-        LPathSegmentType type = PATH_GET_SEG_TYPE(op);
-        if (type == LPATH_SEG_PARENT) result = path_select_parent(pool, result);
-        else if (type == LPATH_SEG_ROOT) result = path_select_root(pool, result);
-        else if (type == LPATH_SEG_INT) result = path_extend_int(pool, result, op->int_value);
-        else result = path_append_segment_typed(pool, result, op->name, type);
+        result = path_append_op(pool, result, (Path*)arraylist_get(ops, i));
     }
     arraylist_free(ops);
     return result;
+}
+
+// Apply one operation node of another path to `base`, normalizing parent and
+// root steps as S2.4.2v5 requires.
+Path* path_append_op(Pool* pool, Path* base, Path* op) {
+    LPathSegmentType type = PATH_GET_SEG_TYPE(op);
+    if (type == LPATH_SEG_PARENT) return path_select_parent(pool, base);
+    if (type == LPATH_SEG_ROOT) return path_select_root(pool, base);
+    if (type == LPATH_SEG_INT) return path_extend_int(pool, base, op->int_value);
+    return path_append_segment_typed(pool, base, op->name, type);
 }
 
 // Qualify the logical resolver root through the default local-file mount.
@@ -752,6 +757,28 @@ bool path_ends_with_wildcard(Path* path) {
 //
 // Returns the deepest ancestor (`path` included) that exists in the store, or
 // NULL when no prefix does. A scheme with no cheap existence probe (http) has
+// PTH81: whether a wildcard-free path names an existing local directory, the
+// one domain a wildcard step enumerates without reading a file.
+bool path_is_directory(Path* path) {
+    if (!path) return false;
+    PathScheme scheme = path_get_scheme(path);
+    if (scheme != PATH_SCHEME_FILE && scheme != PATH_SCHEME_REL &&
+            scheme != PATH_SCHEME_PARENT && scheme != PATH_SCHEME_LOGICAL) {
+        return false;
+    }
+#ifdef LAMBDA_NO_FILE_IO
+    return false;
+#else
+    Pool* pool = path_get_pool();
+    if (!pool) return false;
+    StrBuf* buf = strbuf_new();
+    path_to_os_path(path_qualify_default(pool, path), buf);
+    FileStat fs = file_stat(buf->str);
+    strbuf_free(buf);
+    return fs.exists && fs.is_dir;
+#endif
+}
+
 // no prefix to find: the whole path is the document and the caller forces it.
 Path* path_longest_existing_prefix(Path* path) {
     if (!path) return NULL;
@@ -994,9 +1021,8 @@ static Item resolve_file_content(Path* path, const char* file_path) {
  * For * : matches files/dirs in the directory
  * For **: recursively matches all files/dirs
  */
-static void expand_wildcard_recursive(Path* base, const char* dir_path, 
-                                       bool recursive, List* matches,
-                                       int depth, int max_depth);
+static void expand_wildcard_recursive(Path* base, const char* dir_path,
+                                       bool recursive, List* matches);
 
 static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive) {
     if (!path_get_pool()) {
@@ -1008,16 +1034,16 @@ static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursiv
     List* matches = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
     matches->type_id = LMD_TYPE_ARRAY;
     
-    expand_wildcard_recursive(base_path, dir_path, recursive, matches, 0, 16);
+    // S8.2.5/PTH81: `**` is the closure of `*`, zero steps included, so the
+    // base heads its own enumeration
+    if (recursive) array_push_verbatim((Array*)matches, (Item)(uint64_t)base_path);
+    expand_wildcard_recursive(base_path, dir_path, recursive, matches);
     
     return (Item)(uint64_t)matches;
 }
 
-static void expand_wildcard_recursive(Path* base, const char* dir_path, 
-                                       bool recursive, List* matches,
-                                       int depth, int max_depth) {
-    if (depth > max_depth) return;
-    
+static void expand_wildcard_recursive(Path* base, const char* dir_path,
+                                       bool recursive, List* matches) {
     ArrayList* entries = dir_list(dir_path);
     if (!entries) return;
     
@@ -1053,9 +1079,11 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
         // the matches are a sequence, so the verbatim append
         array_push_verbatim((Array*)matches, (Item)(uint64_t)child);
         
-        // Recurse into subdirectories for **
-        if (recursive && fs.is_dir) {
-            expand_wildcard_recursive(child, full_path, true, matches, depth + 1, max_depth);
+        // Recurse into subdirectories for ** at any depth (PTH81). A symlinked
+        // directory is listed but not entered, as globstar does, so a link
+        // back to an ancestor cannot recurse forever.
+        if (recursive && fs.is_dir && !fs.is_symlink) {
+            expand_wildcard_recursive(child, full_path, true, matches);
         }
 
         dir_entry_free(entry);

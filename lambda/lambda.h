@@ -3118,6 +3118,9 @@ extern "C" {
 
     // query operations: search data for items matching a type
     Item fn_query(Item data, Item type_val, int direct);
+    Item fn_step_items(Item data);    // S8.2.5: `e.*`, the run of e's items
+    Item fn_step_closure(Item data);  // S8.2.5: `e.**`, the closure of `.*`
+    Item fn_navigate_value(Item object, int root);  // `.~~`/`./` with no `~` context
 
     // vector arithmetic operations (element-wise)
     Item vec_add(Item a, Item b);

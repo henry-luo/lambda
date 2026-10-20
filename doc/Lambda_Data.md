@@ -537,8 +537,21 @@ Paths support glob-style wildcards for pattern matching:
 |------|---------|
 | `\.src.*` | Single-level `*` — all items directly in `./src` |
 | `/.var.log.*` | Single-level `*` — all items in `/var/log` |
-| `\.test.**` | Recursive `**` — all items under `./test` |
-| `/.home.user.documents.**` | Recursive `**` — all files under the directory |
+| `\.test.**` | Recursive `**` — `./test` itself, then everything under it |
+| `/.home.user.documents.**` | Recursive `**` — the directory and everything beneath it |
+
+A wildcard may sit anywhere in a path, and the path stays a reference until `#` forces it. Forcing enumerates directory entries without reading any file. A step written after the wildcard is applied to each match, and a step applied to a file match reads that file. `**` on its own never reads a file. Results that are paths are listed once each, in first-appearance order.
+
+| Form | Reads | Yields |
+|------|-------|--------|
+| `\.src.*#` | nothing | each entry directly in `./src` |
+| `\.src.**#` | nothing | `./src` and every path beneath it |
+| `\.src.**.name#` | every file under `./src` | each file's `name` member, and any `name` entry of a directory |
+| `\.src.**.**#` | every file under `./src` | every value inside every file |
+| `\.src.*#.name` | nothing | each entry's `name` property, since steps after `#` act on the path values |
+| `\.data.'x.json'.*#` | `x.json` | the top-level items of the document |
+
+Symbolic links to directories are listed but not entered, so a link back to an ancestor cannot recurse forever.
 
 ### Path Concatenation
 

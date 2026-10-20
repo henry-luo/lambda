@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 68.0.1 (2026-10-16)
+**Spec version:** 69.0.1 (2026-10-20)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -325,6 +325,32 @@ harnesses.
   absolute path values retain distinct root kinds even when they resolve to
   the same qualified target. All three forms use the same typed operations.
   [S5.1.4v2, PTH21–PTH28]
+
+- **S2.4.6** **A wildcard step may sit anywhere in a path, and a force
+  reads exactly the files that a spelled step enters.** `*` and `**` are
+  steps (S2.4.2v5), so `\.src.*.name` and `/.*.b` are ordinary lazy
+  references (S2.4.3v3): nothing is read until `#` (PTH32). Forcing a
+  wildcard enumerates the key domain the step lands in and continues the
+  remaining steps per match, set-at-a-time (S8.2.6). In the file-system
+  domain `*` is one level of directory entries and `**` the closure of `*`
+  (S8.2.5) — the base, then every entry beneath it, files and directories
+  alike, in pre-order and to any depth; a match that does not exist forces
+  to `null` (S7.1.1v3) and drops. A step applied to a file match enters that
+  file, exactly as `\.data.'x.json'.users` does (PTH34), and once a step has
+  entered a file the same spellings enumerate the parsed document. So
+  `\.src.**#` reads nothing, `\.src.**.name#` reads every file beneath src,
+  and `\.src.**.**#` is the explicit full-content search: `**` never crosses
+  the file boundary by itself. A wildcard result in the path domain is a
+  set, deduplicated by path equality (S2.4.2v5) in first-appearance order,
+  which makes `**.**` idempotent on the directory side; results inside a
+  document stay runs, which never deduplicate (S8.2.4v3). `#` is the line
+  between reference and value: steps before it extend the plan and may
+  enter files, steps after it act on values — `\.src.*#.name` is each path
+  value's `name` property, mapped over the run, and reads no file. *Why: a
+  single `**` that read every file beneath a tree would be an unbounded
+  implicit read (S2.4.4); the crossing must be spelled, and then its cost is
+  visible in the spelling.* (Ruled 2026-10-20, USER.) [PTH81–PTH84,
+  Type_Path §6.4]
 
 ### S2.5 Lists and blocks
 
@@ -1280,6 +1306,45 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   iteration do not. [OB4, OB5]
 
 - **S8.2.4v3*** **Two subscript worlds: a type key answers as XPath, a positional selection as NumPy.** `e[T]` walks `e`'s content as `for (x in e)` does — a list, range, array, map (its values) or element (attribute values, then children) — and keeps each `x` that is `T` and is not `null`; it answers as a subscript does: the match itself for one, `null` for none, a list for two or more — the run `T*` (S11.1.6v2), collapsing by S2.5.5v2 — so a lone match needs no unwrapping (`doc[<title>]`) and `if (e?T)` is the absence idiom; `count(e?T)` is the match count (S8.3.3v3), `len` is not. A list is stepped set-at-a-time: `e[T]` on a list applies the step to each item and splices, so `html[table][tr][td]` reads as XPath's `//table/tr/td` at any number of tables; a scalar item has no content, so `(1, "a", 2)[int]` is `null` where the array `[1, "a", 2][int]` is `(1, 2)` (an array is a container, a list a sequence: S2.5.1v2). `e?T` / `e.?T` (S7.6.4) is `e[T]` applied recursively in document order, the root excluded / included — on a list, each item's descendants, so `html?<div>?<div>` is the divs nested in divs. A `null` value never matches, even under `T | null` or `null`. The result is a value, never an item-position producer: `[e?T, 9]` with no match is `[null, 9]`; `*e?T` splices whatever there is. **Positional selections are NumPy's**: a range `[i to j]` (S7.1.2), a boolean mask, and an index array `[[1, 3, 5]]` yield an array whatever the count — a range clamps and is `[]` when empty; an index array keeps its own length, and an out-of-range or negative position contributes `null` (S7.1.1v3, S7.2.1) — and they compose with a type key: `e[T][1 to 3]` slices the run, on a lone match that value's own content. *Why two worlds: a type key names members, and the one expected match must not need `[0]`; a positional key names a window, whose shape must follow the key, not the data (R's `drop = TRUE`). Aligning them breaks one or the other — ruled 2026-09-26 after an array reading of the type key was tried and reverted.* [Expr_Query §4.1]
+
+- **S8.2.5** **The item step `.*` and its closure.** `e.*` is the
+  run (S8.2.4v3) of `e`'s items in walk order — what `for (x in e)` walks
+  (S8.1.2v3): an array, list or range by item, a map by value, an element by
+  attribute values then children — so `e.*` ≡ `e[any]`, and named and
+  indexed members are both items (`users.*.name` reads JSON). `e.**` is zero
+  or more applications of `.*` — `e`, then `e.*`, then `e.*.*`, … — spliced
+  in document order (pre-order), so `e.**` ≡ `e.?any`, `e.*.**` ≡ `e?any`,
+  and `e.*` never includes `e`: glob's `a/*/b` against `a/**/b`, XPath's
+  `a/*` against `a//b`. Text is a scalar to the walk, as it is to `[any]`:
+  `"abc".*` is `null`, although `for` and `|>` walk text by code point
+  (S2.5.8). The steps have ordinary member precedence and chain: `e.*.b`,
+  `e.**[<p>]`, `e.*.~~`. A wildcard step always has a base: bare `*.a` and
+  `**.b` do not exist (`*` is spread, S12.3.5v2; `**` is power), and in a
+  body that binds `~` the spelling is `~.*.a` (S10.1.7v2 leaves only bare
+  names implicit). *Why closure: self-inclusion is the zero-step case, not a
+  convention, which is what keeps `a.*.b` from reading `a.b`.* (Ruled
+  2026-10-20, USER.) [Expr_Query §4.4, S16.8.6v4]
+- **S8.2.6** **A run is stepped set-at-a-time by every key kind except
+  positional.** S8.2.4v3's list rule extends from the type key to every
+  navigation step: a name step (`.b`, `.'b'`, `["b"]`), the type key `[T]`,
+  the queries `?T`/`.?T`, the wildcards `.*`/`.**`, the parent `.~~` and the
+  root `./` apply to each item of a list in order as if it stood alone; the
+  results splice into one run, `null` results drop, and the run collapses by
+  S2.5.5v2 — so `html?<div>.class` is the classes, `(e?<p>).b` the `b` of
+  every `p`, and a stored run steps as an inline one, since being a list is
+  the whole property. Positional keys — an integer, a range `[i to j]`, a
+  mask, an index array — select a window over the run itself (S8.2.4v3):
+  `(html?<p>)[0]` is the first `p`, XPath's `(//p)[1]`; the per-item reading
+  `//p[1]` is the pipe `html?<p> |> ~[0]`. Methods first: a name on a run
+  resolves the list type's methods before mapping (S8.2.1v4, S12.3.3v2), so
+  `run.len()` is the method and a field spelled like one is reached by pipe.
+  An array is not a run: `arr.b` stays `null` under S8.2.1v4, `arr[T]` walks
+  the array's own content, and `arr.*.b` is the uniform spelling for both
+  kinds (S2.5.1v2). Steps never deduplicate (Expr_Query §4.1): `e?<p>.~~`
+  yields a shared parent once per child. *This supersedes the deferral of the
+  auto-mapped member step (Expr_Query §12): ruling by value kind, not by
+  spelling, is what keeps `let d = html?<div>; d.class` equal to
+  `html?<div>.class`.* (Ruled 2026-10-20, USER.) [Expr_Query §4.4, §12]
 
 ### S8.3 `len`
 
@@ -2537,15 +2602,18 @@ below by its section.
 - **S16.8.5** **Unary `+` is kept** (identity, plus string→number
   coercion), and `+` stays banned at line start: the arithmetic family
   `- + * /` is banned as a class, not per token. [Design_Syntax §7.12]
-- **S16.8.6v3** **`*` is spread; `*` and `...` are two wildcard families,
-  not one.** `*` is the unit wildcard (path segment, any-key, `T*`
-  repetition, spread); `T{n,m}` is the counted repetition — `T{n}` exactly,
+- **S16.8.6v4** **`*` is spread; `*` and `...` are two wildcard families,
+  not one.** `*` is the unit wildcard (path segment, the item step `.*` and
+  its closure `.**` on any value — S8.2.5 — any-key, `T*` repetition,
+  spread); a wildcard step always has a base, so bare `*.a` and `**.b` do
+  not exist (S8.2.5); `T{n,m}` is the counted repetition — `T{n}` exactly,
   `T{n+}` at least (S11.1.6v2) — which retires `T[n+]`, `T[n, m]`, and
   regex's `T{n,}`: braces carry the count, and `+` inside them means "or
   more" exactly as the bare suffix does;
   `...` is the elided run (pattern gap, rest parameters), with the normative
   equivalence `...` ≡ `any*`. Paths keep `*`/`**` — an ellipsis would
-  collide with path dots. [Design_Syntax §7.10, §7.28]
+  collide with path dots. (Revised 2026-10-20, v4: the value steps.)
+  [Design_Syntax §7.10, §7.28]
 - **S16.8.7** **A single-quoted literal is a symbol, not a string**, and
   comma decomposition (`let a, b = expr`) is by design; bracket destructuring
   patterns are rejected. [Design_Syntax §7.8]
@@ -2896,6 +2964,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S12.3.5v2 | **Ruled 2026-09-22; conformant since P4 of the list fixes (2026-09-23, both tiers).** `*x` builds the list of x's items instead of marking x, so spreading never modifies its operand and the JIT no longer rewrites a pooled literal (`fn g() => [1, "y"]` returned a list on every later call — the tier divergence is pinned on all three tiers by `test/lambda/spread_star.ls`). A range is materialized (`[*(1 to 3), 9]` is `[1, 2, 3, 9]`), `*null` splices nothing, and a non-sequence — text included — is one item, so `[*xs]` packages any value as an array. Because it is a value, `*x` also finishes by position (S2.5.5v2): `let b = *[2, 3]` is the list `(2, 3)`. |
 | S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), including the string and null members of group elements (S14.1.1). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
 | S17.8.1 | **Ruled 2026-10-04 (USER); partially implemented.** `io.grep` conforms on both arms (2026-10-04): the AST builder checks a literal options map against the registry table `sys_func_option_names` (`lambda/runtime/sys_func_registry.c`), and the function warns about an unknown name in an options value; registering another function's option names extends the compile-time arm to it. `start` already conforms to the compile-time arm: an unknown name in its options literal is an error. `find` and `replace` look up `limit`, `last` and `ignore_case` and ignore any other name silently in both cases — no error for a literal, no warning for a value. Other system functions with an options map (`input`, `output`, `fetch`, `cmd`) are not yet audited. Existing implementations are to be migrated. [Lambda_Lib_Grep.md Appendix C](../vibe/Lambda_Lib_Grep.md#appendix-c-unknown-option-names-current-state) |
+| S2.4.6, S8.2.5, S8.2.6 | **Implemented 2026-10-20 on interp and jit.** `.*`/`.**` lower to `fn_step_items`/`fn_step_closure`, which reuse the `[T]`/`.?T` walks with a wildcard key. A name step on a list maps per item inside `fn_member`, and `.~~`/`./` without a `~` cursor go through `fn_navigate_value`, which also lets the JIT select a dynamically typed path as the interpreter did. `#` on a wildcard path splits at the first wildcard: over a directory it enumerates and continues per match, deduplicating paths by canonical spelling; anywhere else it forces the prefix and enumerates the parsed value. `**` enumeration now heads with its base, has no depth cap, and lists but does not enter symlinked directories; `path.ls` goldens gained the base line. Fixtures: `wildcard_steps.ls`, `run_stepping.ls`, `path_wildcard_force.ls` (tree `test/input/wild_tree`). Design: [Expr_Query §4.4](../vibe/Lambda_Expr_Query.md#44-wildcard-steps-and-run-stepping-ruled-2026-10-20-user-s825-s826), [Type_Path §6.4](../vibe/Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826). |
 
 **S2.6.6v2 — MVP with dictionaries, 2026-10-02.** Raw strings/binaries, null/empty dropping,
 list spreading, computed selectors, empty files, and byte output are implemented
@@ -3033,14 +3102,14 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
+| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |

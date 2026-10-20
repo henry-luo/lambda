@@ -396,6 +396,15 @@ Child-level query `[T]` — search direct attributes + children only:
 | `el[element]` | direct child elements only |
 | `el[string]` | attr values + text children |
 
+Wildcard steps — `.*` items (≡ `[any]`), `.**` self + all descendants (≡ `.?any`):
+
+| Form | Meaning |
+|---|---|
+| `users.*.name` | the name of every item, named or indexed |
+| `doc.**.id` | every `id` at any depth |
+| `html?<div>.class` | a list steps per item: every div's class |
+| `(html?<p>)[0]` | positional keys pick from the list itself |
+
 ## Control Flow
 
 If Expressions / Statements (else optional):

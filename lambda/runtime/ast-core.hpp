@@ -1199,6 +1199,19 @@ static inline AstNode* ast_unwrap_primary(AstNode* node) {
     return node;
 }
 
+// S8.2.5: 1 for the item step `.*`, 2 for its closure `.**`, else 0. The
+// parser spells a wildcard step as an identifier named `*`/`**`, which no
+// ordinary identifier can be; a quoted `'*'` is a symbol literal instead.
+static inline int ast_member_wildcard(AstFieldNode* member) {
+    if (!member || member->node_type != AST_NODE_MEMBER_EXPR) return 0;
+    AstNode* field = ast_unwrap_primary(member->field);
+    if (!field || field->node_type != AST_NODE_IDENT) return 0;
+    String* name = ((AstIdentNode*)field)->name;
+    if (!name || name->chars[0] != '*') return 0;
+    if (name->len == 1) return 1;
+    return name->len == 2 && name->chars[1] == '*' ? 2 : 0;
+}
+
 // Like ast_unwrap_primary, but a primary that carries its value itself (a
 // literal: `expr` is NULL) is returned instead of NULL.
 static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
