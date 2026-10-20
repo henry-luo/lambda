@@ -5,7 +5,7 @@ import model: .mod_model
 import files: .mod_io
 import ui: .mod_ui
 import thumbs: .mod_thumbnails
-import updates: .mod_dom
+import updates: ~~.mod_publish
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CWD = sys.proc.self.cwd#
@@ -22,18 +22,6 @@ let INITIAL = model.listing(model.initial(START),START,files.read_folder(START)^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"finder")
 fn node(owner,id) => dom.get_element_by_id(owner,id)
 fn modal_id(st) => if (st.operation != null) "operation-dialog" else if (st.dialog) "go-dialog" else if (st.look) "quick-look" else ""
-pn text(owner,id,value) {
-    let target = node(owner,id)
-    if (dom.text_content(target) != value) dom.set_text_content(target,value)
-}
-pn attr(target,key,value) {
-    updates.attr(target,key,value)
-}
-pn show(owner,id,visible,display="block") {
-    let target = node(owner,id)
-    let requested = if (visible) display else "none"
-    if (dom.style_get_property(target,"display") != requested) dom.style_set_property(target,"display",requested)
-}
 pn region(owner,id,markup) {
     let target = node(owner,id)
     // avoid retiring the clicked row between the first and second click of a double-click.
@@ -59,7 +47,7 @@ pn resize_preview(owner,st,width) {
     if (changed)
         dom.style_set_property(node(owner,"preview-pane"),"width",requested)
     for (key,value in {valuemin:limits.min,valuemax:limits.max,valuenow:round(size)})
-        attr(node(owner,"preview-divider"),"aria-" ++ string(key),value)
+        updates.attr(node(owner,"preview-divider"),"aria-" ++ string(key),value)
     // panel changes also rewrap icon columns; measure the resulting layout on the next frame.
     return {*:st,preview_width:size,measure_frame:if (changed and st.measure_frame==0) dom.request_frame(owner,"finder_measure") else st.measure_frame}
 }
@@ -68,7 +56,7 @@ pn finish_preview_resize(owner,st,cancel=false) {
     let gesture = st.preview_drag
     var next = {*:st,preview_drag:null}
     if (cancel) { next = resize_preview(owner,next,gesture.width) }
-    attr(owner,"data-preview-resizing",false)
+    updates.attr(owner,"data-preview-resizing",false)
     let divider = node(owner,"preview-divider")
     if (dom.has_pointer_capture(divider,gesture.pointer)) dom.release_pointer_capture(divider,gesture.pointer)
     return {*:next,thumbnails:thumbs.schedule(owner,next.thumbnails)}
@@ -103,9 +91,9 @@ pn publish(owner,st) {
         next = {*:next,preview_data:data}
     }
     for (key,value in {path:next.path,mode:next.mode,selected:len(next.selected),hidden:next.hidden,dialog:next.dialog,look:next.look,
-        menu:next.menu != null,operation:next.operation.action or "",dragging:next.drag != null,readonly:model.read_only(next)}) attr(owner,"data-" ++ string(key),value)
-    text(owner,"folder-title",if (next.path == START) "Demo Files" else model.basename(next.path))
-    text(owner,"status",model.status(next))
+        menu:next.menu != null,operation:next.operation.action or "",dragging:next.drag != null,readonly:model.read_only(next)}) updates.attr(owner,"data-" ++ string(key),value)
+    updates.text(owner,"folder-title",if (next.path == START) "Demo Files" else model.basename(next.path))
+    updates.text(owner,"status",model.status(next))
     region(owner,"breadcrumbs",format(ui.breadcrumb(next),'html'))
     let listing = {*:listing_key(next),columns:if (next.mode == "columns") [for (i,c in next.columns) listing_key(model.column(next,i))] else null}
     // selection and dialogs reuse the published listing instead of rebuilding every SVG and row.
@@ -116,35 +104,35 @@ pn publish(owner,st) {
         let path = dom.get_attribute(row,"data-path")
         let index = if (next.mode == "columns") int(dom.get_attribute(row,"data-column")) else -1
         let column = if (index>=0) model.column(next,index) else next
-        attr(row,"aria-selected",contains(column.selected,path))
-        attr(row,"data-focused",path == column.focus)
-        if (index>=0) attr(row,"data-trail",index<len(next.columns)-1 and contains(column.selected,path))
+        updates.attr(row,"aria-selected",contains(column.selected,path))
+        updates.attr(row,"data-focused",path == column.focus)
+        if (index>=0) updates.attr(row,"data-trail",index<len(next.columns)-1 and contains(column.selected,path))
     }
     if (next.mode == "columns" and (next.published == null or next.published.mode != "columns" or next.published.path != next.path))
         dom.scroll_into_view_options(node(owner,"column-" ++ string(len(next.columns)-1)),{block:"nearest",inline:"end"})
     let focused = dom.query_selector(node(owner,"files"),"[data-focused='true']")
     if (next.reveal and focused != null) dom.scroll_into_view_options(focused,{block:"nearest",inline:"nearest"})
-    if (focused != null) attr(node(owner,"files"),"aria-activedescendant",dom.get_attribute(focused,"id"))
+    if (focused != null) updates.attr(node(owner,"files"),"aria-activedescendant",dom.get_attribute(focused,"id"))
     else if (dom.get_attribute(node(owner,"files"),"aria-activedescendant") != null) dom.remove_attribute(node(owner,"files"),"aria-activedescendant")
-    for (place in dom.query_selector_all(owner,".place")) attr(place,"aria-current",if (dom.get_attribute(place,"data-location") == next.path) "page" else "false")
-    for (id,pressed in {icons:next.mode == "icons",list:next.mode == "list",columns:next.mode == "columns",preview:next.preview,hidden:next.hidden}) attr(node(owner,string(id)),"aria-pressed",pressed)
+    for (place in dom.query_selector_all(owner,".place")) updates.attr(place,"aria-current",if (dom.get_attribute(place,"data-location") == next.path) "page" else "false")
+    for (id,pressed in {icons:next.mode == "icons",list:next.mode == "list",columns:next.mode == "columns",preview:next.preview,hidden:next.hidden}) updates.attr(node(owner,string(id)),"aria-pressed",pressed)
     disabled(owner,"back",next.cursor == 0)
     disabled(owner,"forward",next.cursor >= len(next.history)-1)
     disabled(owner,"direction",len(next.entries)==0)
     disabled(owner,"new-folder",not model.writable(next,"new-folder"))
-    text(owner,"direction",if (next.descending) "↓" else "↑")
-    text(owner,"hidden",if (next.hidden) "Hide hidden files" else "Show hidden files")
-    show(owner,"list-heading",next.mode == "list","grid")
-    show(owner,"preview-pane",next.preview)
-    show(owner,"preview-divider",next.preview)
+    updates.text(owner,"direction",if (next.descending) "↓" else "↑")
+    updates.text(owner,"hidden",if (next.hidden) "Hide hidden files" else "Show hidden files")
+    updates.show(owner,"list-heading",next.mode == "list","grid")
+    updates.show(owner,"preview-pane",next.preview)
+    updates.show(owner,"preview-divider",next.preview)
     if (next.preview_width != null) { next = resize_preview(owner,next,next.preview_width) }
-    show(owner,"error",next.error != "" and not next.dialog and next.operation == null,"flex")
-    text(owner,"error-text",next.error)
-    text(owner,"go-error",next.error)
-    show(owner,"go-dialog",next.dialog,"flex")
-    show(owner,"quick-look",next.look,"flex")
-    show(owner,"context-menu",next.menu != null)
-    attr(node(owner,"actions"),"aria-expanded",next.menu != null)
+    updates.show(owner,"error",next.error != "" and not next.dialog and next.operation == null,"flex")
+    updates.text(owner,"error-text",next.error)
+    updates.text(owner,"go-error",next.error)
+    updates.show(owner,"go-dialog",next.dialog,"flex")
+    updates.show(owner,"quick-look",next.look,"flex")
+    updates.show(owner,"context-menu",next.menu != null)
+    updates.attr(node(owner,"actions"),"aria-expanded",next.menu != null)
     if (next.menu != null) {
         for (action in ["open","look"]) disabled(owner,"menu-" ++ action,len(next.selected)==0)
         for (action in ["rename","move","delete","new-file","new-folder"]) {
@@ -154,22 +142,22 @@ pn publish(owner,st) {
         dom.style_set_property(node(owner,"context-menu"),"left",string(next.menu.x) ++ "px")
         dom.style_set_property(node(owner,"context-menu"),"top",string(next.menu.y) ++ "px")
     }
-    show(owner,"operation-dialog",next.operation != null,"flex")
-    show(owner,"move-picker",next.operation.action == "move")
+    updates.show(owner,"operation-dialog",next.operation != null,"flex")
+    updates.show(owner,"move-picker",next.operation.action == "move")
     if (next.operation != null) {
         let action = next.operation.action
         let titles = {'new-file':"New File",'new-folder':"New Folder",rename:"Rename",move:"Move to Folder",delete:"Delete Permanently"}
-        text(owner,"operation-title",titles[action])
-        text(owner,"operation-description",if (action == "delete") "Permanently delete " ++ string(len(next.operation.paths)) ++
+        updates.text(owner,"operation-title",titles[action])
+        updates.text(owner,"operation-description",if (action == "delete") "Permanently delete " ++ string(len(next.operation.paths)) ++
             " selected item(s), including any folder contents? This cannot be undone."
             else if (action == "rename") "Rename “" ++ model.basename(next.operation.paths[0]) ++ "”."
             else if (action == "move") "Choose a destination folder for the selected items."
             else "Create an empty " ++ (if (action == "new-folder") "folder" else "file") ++ " in “" ++ model.basename(next.operation.folder) ++ "”.")
-        text(owner,"operation-label",if (action == "move") "Destination folder" else "Name")
-        text(owner,"operation-error",next.error)
-        text(owner,"operation-confirm",if (action == "delete") "Delete Permanently" else if (action == "rename") "Rename" else if (action == "move") "Move" else "Create")
-        attr(node(owner,"operation-confirm"),"class",if (action == "delete") "danger" else "primary")
-        show(owner,"operation-field",action != "delete")
+        updates.text(owner,"operation-label",if (action == "move") "Destination folder" else "Name")
+        updates.text(owner,"operation-error",next.error)
+        updates.text(owner,"operation-confirm",if (action == "delete") "Delete Permanently" else if (action == "rename") "Rename" else if (action == "move") "Move" else "Create")
+        updates.attr(node(owner,"operation-confirm"),"class",if (action == "delete") "danger" else "primary")
+        updates.show(owner,"operation-field",action != "delete")
         if (action == "move") {
             let picker = next.operation.picker
             region(owner,"destination-breadcrumbs",if (picker == null) "" else format(ui.breadcrumb(picker,true),'html'))
@@ -180,7 +168,7 @@ pn publish(owner,st) {
     // retaining the same frame keeps its browsing context and scroll position during panel resizing.
     region(owner,"preview-body",if (next.preview) format(ui.preview(next),'html') else "")
     if (next.look) {
-        text(owner,"look-title",model.focused(next).name)
+        updates.text(owner,"look-title",model.focused(next).name)
         region(owner,"look-body",format(ui.preview(next,true),'html'))
     } else region(owner,"look-body","")
     if (dom.get_state(node(owner,"search"),"value") != next.query) dom.set_state(node(owner,"search"),"value",next.query)
@@ -365,10 +353,10 @@ on finder_drag_start(evt) {
     if (model.read_only(active)) { return 'pass' }
     // keep the native source row alive throughout the drag; selection context is captured without navigating.
     session = {*:session,menu:null,drag:{folder:active.path,paths:if (contains(active.selected,path)) active.selected else [path]}}
-    attr(evt.target,"data-dragging",true)
-    attr(evt.target,"data-menu",false)
-    attr(node(evt.target,"actions"),"aria-expanded",false)
-    show(evt.target,"context-menu",false)
+    updates.attr(evt.target,"data-dragging",true)
+    updates.attr(evt.target,"data-menu",false)
+    updates.attr(node(evt.target,"actions"),"aria-expanded",false)
+    updates.show(evt.target,"context-menu",false)
     return 'handled'
 }
 on finder_drop(evt) {
@@ -384,7 +372,7 @@ on finder_drop(evt) {
 on finder_drag_end(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     session = {*:session,drag:null}
-    attr(evt.target,"data-dragging",false)
+    updates.attr(evt.target,"data-dragging",false)
     return 'handled'
 }
 on contextmenu(evt) {
@@ -441,7 +429,7 @@ on pointerdown(evt) {
     if (divider == null or evt.button != 0 or modal_id(session) != "") { return 'pass' }
     let owner = owner_of(evt)
     session = {*:session,preview_drag:{x:evt.clientX,width:dom.bounding_box(node(owner,"preview-pane")).width,pointer:evt.pointerId}}
-    attr(owner,"data-preview-resizing",true)
+    updates.attr(owner,"data-preview-resizing",true)
     dom.focus_set(divider,false)
     dom.set_pointer_capture(divider,evt.pointerId)
     return 'prevent-default'

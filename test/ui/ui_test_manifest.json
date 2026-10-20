@@ -79,6 +79,11 @@
       "tags": ["photos", "baseline"]
     },
     {
+      "name": "photo_album",
+      "globs": ["test/ui/photo_album/*.json"],
+      "tags": ["photo_album", "baseline"]
+    },
+    {
       "name": "note",
       "globs": ["test/ui/note/*.json"],
       "tags": ["note"]
