@@ -1013,6 +1013,22 @@ protected:
         EXPECT_TRUE(target->DomNode::append_child(child));
         return child;
     }
+
+    void expect_intrinsic_query(float width, bool hit) {
+        uint64_t hits = context.profiler.intrinsic_cache_hits;
+        uint64_t misses = context.profiler.intrinsic_cache_misses;
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, target);
+        EXPECT_FLOAT_EQ(sizes.min_content, width);
+        EXPECT_FLOAT_EQ(sizes.max_content, width);
+        EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + (hit ? 1u : 0u));
+        EXPECT_EQ(context.profiler.intrinsic_cache_misses, misses + (hit ? 0u : 1u));
+    }
+
+    void expect_intrinsic_refresh(float width, const char* reason) {
+        SCOPED_TRACE(reason);
+        expect_intrinsic_query(width, false);
+        expect_intrinsic_query(width, true);
+    }
 };
 
 TEST_F(IncrementalCssTest, IntrinsicFlowReusesOnlyGeometryIndependentSubtrees) {
@@ -1056,6 +1072,86 @@ TEST_F(IncrementalCssTest, IntrinsicFlowReusesOnlyGeometryIndependentSubtrees) {
     radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
 }
 
+TEST_F(IncrementalCssTest, CachedDescendantPropagatesContainingSizeDependency) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "50%");
+    set_property("padding", "2px");
+    context.block.content_width = 200.0f;
+    context.available_space = AvailableSpace::make_definite(200.0f, 100.0f);
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 104.0f);
+    ASSERT_TRUE(child->has_cached_intrinsic_widths());
+
+    // rebuilding only the parent must propagate dependencies from child cache hits.
+    target->set_has_cached_intrinsic_widths(false);
+    uint64_t hits = context.profiler.intrinsic_cache_hits;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 104.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+    context.block.content_width = containing.content_width = 400.0f;
+    context.available_space = AvailableSpace::make_definite(400.0f, 100.0f);
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, target).max_content, 204.0f);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, CommittingProvisionalStyleRetainsIntrinsicResultUntilMutation) {
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+    EXPECT_FALSE(target->styles_resolved());
+    context.run_mode = radiant::RunMode::PerformLayout;
+    {
+        LayoutFontScope font_scope(&context);
+        resolve();
+    }
+    EXPECT_TRUE(target->styles_resolved());
+    expect_intrinsic_query(80.0f, true);
+
+    set_property("width", "120px");
+    {
+        LayoutFontScope font_scope(&context);
+        resolve();
+    }
+    expect_intrinsic_refresh(120.0f, "authored width changed after commit");
+}
+
+TEST_F(IncrementalCssTest, IntrinsicCacheInvalidatesKerningStyleEpochAndMeasurementGeneration) {
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+    initial_font.font_kerning = CSS_VALUE_NONE;
+    expect_intrinsic_refresh(80.0f, "inherited kerning changed");
+    document.style_query_epoch++;
+    expect_intrinsic_refresh(80.0f, "document style epoch changed");
+    advance_measurement_cache_generation(&tree);
+    expect_intrinsic_refresh(80.0f, "measurement generation changed");
+}
+
+TEST_F(IncrementalCssTest, IntrinsicCacheInvalidatesFontResourcesAndRasterScale) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    ui.document = lam::up(&document);
+    ui.default_font = initial_font;
+    ui.default_font.family = lam::up(const_cast<char*>("Arial"));
+    context.ui_context = lam::up(&ui);
+    set_property("width", "80px");
+    expect_intrinsic_refresh(80.0f, "initial measurement");
+
+    // publishing a font descriptor invalidates sizes even when box constraints match.
+    uint64_t generation = font_context_resource_generation(fonts);
+    FontFaceDesc descriptor = {};
+    descriptor.family = "IntrinsicCacheResource";
+    descriptor.weight = FONT_WEIGHT_NORMAL;
+    descriptor.slant = FONT_SLANT_NORMAL;
+    EXPECT_TRUE(font_face_register(fonts, &descriptor));
+    EXPECT_GT(font_context_resource_generation(fonts), generation);
+    expect_intrinsic_refresh(80.0f, "font resource changed");
+    document.viewport.raster_scale = 2.0f;
+    expect_intrinsic_refresh(80.0f, "raster scale changed");
+
+    font_prop_release_handle(target->font);
+    font_context_destroy(fonts);
+    context.ui_context = nullptr;
+}
+
 TEST_F(IncrementalCssTest, FlexWidthQueryDefersHeightUntilRequested) {
     DomElement* child = append_intrinsic_child();
     set_property(child, "width", "80px");
@@ -1073,9 +1169,36 @@ TEST_F(IncrementalCssTest, FlexWidthQueryDefersHeightUntilRequested) {
     EXPECT_TRUE(target->fi->has_intrinsic_width);
     EXPECT_FALSE(target->fi->has_intrinsic_height);
     EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    uint64_t width_queries = context.profiler.intrinsic_requests;
+    calculate_item_intrinsic_sizes(item, &flex, true);
+    EXPECT_EQ(context.profiler.intrinsic_requests, width_queries);
+    EXPECT_FALSE(target->fi->has_intrinsic_height);
+    EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
     calculate_item_intrinsic_sizes(item, &flex);
     EXPECT_TRUE(target->fi->has_intrinsic_height);
     EXPECT_FLOAT_EQ(target->fi->intrinsic_height.max_content, 30.0f);
+    EXPECT_GT(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, VerticalFlexWidthQueryKeepsPairedIntrinsicMeasurement) {
+    DomElement* child = append_intrinsic_child();
+    set_property(child, "width", "80px");
+    set_property(child, "height", "30px");
+    set_property("writing-mode", "vertical-rl");
+    resolve();
+    ViewElement* item = lam::view_as_element(static_cast<DomNode*>(target));
+    ASSERT_NE(item, nullptr);
+    alloc_flex_item_prop(&context, item);
+    FlexContainerLayout flex = {};
+    flex.lycon = lam::up(&context);
+    flex.direction = CSS_VALUE_ROW;
+    context.profiler.enabled = true;
+    calculate_item_intrinsic_sizes(item, &flex, true);
+    EXPECT_TRUE(target->fi->has_intrinsic_width);
+    EXPECT_TRUE(target->fi->has_intrinsic_height);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_width.max_content, 30.0f);
+    EXPECT_FLOAT_EQ(target->fi->intrinsic_height.max_content, 80.0f);
     EXPECT_GT(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0u);
     radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
 }
@@ -1113,6 +1236,33 @@ TEST(LayoutProfiling, ContextRestoreRetainsNestedWork) {
     EXPECT_EQ(context.profiler.intrinsic_requests, 12u);
     EXPECT_EQ(context.profiler.intrinsic_cache_hits, 4u);
     EXPECT_EQ(context.profiler.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 8u);
+}
+
+TEST(LayoutProfiling, NestedScopesRetainCountersAndExclusiveTimeAcrossContextRestore) {
+    LayoutContext context = {};
+    context.profiler.enabled = true;
+    {
+        radiant::LayoutProfileScope width(&context, radiant::LAYOUT_PROFILE_INTRINSIC, nullptr);
+        LayoutContext saved = context;
+        {
+            radiant::LayoutProfileScope height(&context, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, nullptr);
+            radiant::layout_profiler_note_intrinsic_request(&context.profiler, false, false);
+            radiant::layout_profiler_note_intrinsic_request(&context.profiler, true, false);
+        }
+        radiant::layout_restore_context(&context, saved);
+    }
+    const radiant::LayoutProfiler& profile = context.profiler;
+    EXPECT_EQ(profile.intrinsic_requests, 2u);
+    EXPECT_EQ(profile.intrinsic_cache_hits, 1u);
+    EXPECT_EQ(profile.intrinsic_cache_misses, 1u);
+    EXPECT_EQ(profile.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC], 1u);
+    EXPECT_EQ(profile.scope_calls[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 1u);
+    // parent self time excludes its child, while the height leaf has no nested work.
+    EXPECT_NEAR(profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC],
+        profile.scope_self_ms[radiant::LAYOUT_PROFILE_INTRINSIC] +
+        profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT], 0.0001);
+    EXPECT_DOUBLE_EQ(profile.scope_self_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT],
+        profile.scope_total_ms[radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT]);
 }
 
 TEST_F(IncrementalCssTest, RebindsOnlyChangedGeometryAndRestoresAuthoredValues) {
