@@ -13,7 +13,7 @@ pub fn extended(st,target,command,options) any^ {
     else {
         let radius = model.value(options.size,st.brush.size)/2
         let points = command.points
-        if (not (points is array) or len(points)==0 or not model.finite(radius) or radius<=0 or radius>2048 or
+        if (not (points is array) or len(points)==0 or len(points)>65536 or not model.finite(radius) or radius<=0 or radius>2048 or
             not all([for (p in points) p is array and len(p)>=2 and model.finite(p[0]) and model.finite(p[1])]))
             raise error("Raster: invalid stroke points or size")
         else {
@@ -38,10 +38,26 @@ pub fn extended(st,target,command,options) any^ {
         }
     }
 }
+fn settings(st,target,options,opacity=null) => {selection:st.selection,origin:target.position,color:color(st,options.color),
+    opacity:model.value(opacity,model.value(options.opacity,st.brush.opacity))}
+pub fn preview(st,command,previous=null) any^ {
+    let options = model.value(command.options,{})
+    let target = extended(st,model.pixel_target(st)^,command,options)^
+    let config = {*:st.brush,*:options,*:settings(st,target,options,command.opacity)}
+    let resumable = previous != null and previous.position == target.position and previous.count<=len(command.points) and
+        previous.step.source.width == target.raster.width and previous.step.source.height == target.raster.height and previous.step.settings == config
+    let prior = if (resumable) previous.step else null
+    let points = [for (point in if (prior == null) command.points else slice(command.points,previous.count)) local(point,target.position)]
+    // extending a small layer changes its source coordinates and restarts the exact stroke.
+    let step = if (len(points)==0) prior else img.paint_stroke_step(if (prior == null) target.raster else prior.source,points,config,prior)^;
+    {state:model.replace_pixels(st,target,step.raster)^,rect:if (len(points)==0 or step.rect == null) null else
+        [step.rect[0]+target.position[0],step.rect[1]+target.position[1],step.rect[2]+target.position[0],step.rect[3]+target.position[1]],
+        continuation:{step:step,count:len(command.points),position:target.position}}
+}
 pub fn run_command(st,command) any^ {
     let options = model.value(command.options,{})
     let target = extended(st,model.pixel_target(st)^,command,options)^
-    let common = {selection:st.selection,origin:target.position,color:color(st,options.color),opacity:model.value(command.opacity,model.value(options.opacity,st.brush.opacity))}
+    let common = settings(st,target,options,command.opacity)
     let raster = if (command.id == "paint.stroke") img.paint_stroke(target.raster,
         {*:st.brush,*:options,*:common,points:[for (point in command.points) local(point,target.position)]})^
     else if (command.id in ["paint.fill","pixels.fill","pixels.clear"]) img.paint_fill(target.raster,

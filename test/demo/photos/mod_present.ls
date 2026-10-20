@@ -17,7 +17,7 @@ pub pn publish(owner,st) any^ {
     let previous_dialog = dom.get_attribute(owner,"data-dialog")
     let painted = surface.publish(owner,st)^
     dom.set_close_guard(owner,editor.dirty(st))
-    if (st.painted_doc != st.doc) {
+    if (st.painted_doc == null or st.histogram_doc != st.doc) {
         dom.set_inner_html(node(owner,"histogram"),format(scene.histogram_chart(img.histogram(painted.painted_raster)^),'xml'))
     }
     let rows = editor.layers(st.doc)
@@ -125,5 +125,5 @@ pub pn publish(owner,st) any^ {
     dom.style_set_property(node(owner,"file-dialog"),"display",if (st.dialog in ["open","open-tab","place","save","export","psd","action-save","action-open"]) "block" else "none")
     dom.style_set_property(node(owner,"discard-dialog"),"display",if (st.dialog == "discard") "block" else "none")
     if (st.dialog == "discard" and previous_dialog != "discard") dom.focus_set(node(owner,"discard-cancel"),false)
-    return {*:painted,artwork_node:primary,style_node:active_style}
+    return {*:painted,artwork_node:primary,style_node:active_style,histogram_doc:st.doc}
 }

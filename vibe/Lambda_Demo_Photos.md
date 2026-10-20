@@ -585,3 +585,12 @@ record the actual supported profiles, acceptance evidence and remaining gate
 failures. High depth/ICC, wider text/style/PSD parity, asynchronous jobs and M5
 scale/latency qualification remain outstanding; the implementation does not
 claim the full PhotoCraft catalogue or the proposed performance targets.
+
+Brush-latency tuning now resumes native coverage across preview frames and
+recomposites changed regions for scenes without effects/styles. The stage updates
+during a gesture; histograms/inspectors refresh at completion or cancellation.
+Exact pressure/spacing/flow/opacity, immutable snapshots and one-stroke history
+remain the acceptance cases (**S9.1.2 / S9.2.2 / S12.1.3**). The focused native
+replay measures edit/publication costs separately from actual display latency;
+it does not close the broader M5 scene/device matrix. Measurements and remaining
+limits are in the [implementation record](impl/Lambda_Impl_Photos.md).

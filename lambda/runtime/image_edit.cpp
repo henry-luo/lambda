@@ -184,30 +184,49 @@ static bool edit_dab(RasterEdit& edit, double px, double py, double radius, doub
     return true;
 }
 
-static bool edit_stroke(RasterEdit& edit, const RasterBuffer* source, Item options) {
+struct StrokeProgress {
+    double point[3] = {}, distance = 0;
+    size_t work = 0;
+};
+
+static bool edit_stroke(RasterEdit& edit, const RasterBuffer* source, Item options,
+        Item previous, StrokeProgress& progress) {
     double size, hardness, spacing, flow;
     if (!edit.number(options, "size", 20, 0.5, 4096, &size) || !edit.number(options, "hardness", 0.8, 0, 1, &hardness) ||
         !edit.number(options, "spacing", 0.2, 0.01, 2, &spacing) || !edit.number(options, "flow", 1, 0, 1, &flow)) return false;
     ItemReader points(item_attr(options, "points").to_const());
     if (!points.isArray() || !points.asArray().length() || points.asArray().length() > 65536)
         return edit.fail("stroke requires 1 to 65536 points");
-    if (!edit.create(source->width, source->height, 1)) return false;
-    double a[3], b[3], distance_to_next = fmax(0.25, size * spacing);
-    if (!edit.point(points.asArray().get(0), a)) return false;
-    size_t work = 0;
-    if (!edit_dab(edit, a[0], a[1], size / 2, hardness, flow * a[2], &work)) return false;
+    double a[3], b[3], step = fmax(0.25, size * spacing), distance_to_next = step;
+    int64_t first = 1, work = 0;
+    if (get_type_id(previous) != LMD_TYPE_NULL) {
+        const RasterBuffer* coverage = lambda_raster_buffer(item_attr(previous,"coverage"));
+        if (!coverage || coverage->width!=source->width || coverage->height!=source->height || coverage->channels!=1 ||
+            !edit.point(item_attr(previous,"point"),a) ||
+            !edit.number(previous,"distance",-1,0,step,&distance_to_next) ||
+            !lambda_item_to_int64_exact(item_attr(previous,"work"),&work) || work<0 || work>128000000)
+            return edit.fail("invalid stroke continuation");
+        edit.result = raster_buffer_fork(coverage);
+        if (!edit.result) return edit.fail("cannot allocate stroke coverage index");
+        first = 0;
+    } else {
+        if (!edit.create(source->width, source->height, 1) || !edit.point(points.asArray().get(0), a)) return false;
+        if (!edit_dab(edit, a[0], a[1], size / 2, hardness, flow * a[2], &progress.work)) return false;
+    }
+    progress.work += (size_t)work;
     // carry spacing across segments so event subdivision cannot change dab placement.
-    for (int64_t i = 1; i < points.asArray().length(); i++) {
+    for (int64_t i = first; i < points.asArray().length(); i++) {
         if (!edit.point(points.asArray().get(i), b)) return false;
         double length = hypot(b[0] - a[0], b[1] - a[1]), at = distance_to_next;
         while (at <= length && length > 0) {
             double t = at / length;
             if (!edit_dab(edit, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
-                size / 2, hardness, flow * (a[2] + (b[2] - a[2]) * t), &work)) return false;
-            at += fmax(0.25, size * spacing);
+                size / 2, hardness, flow * (a[2] + (b[2] - a[2]) * t), &progress.work)) return false;
+            at += step;
         }
         distance_to_next = at - length; memcpy(a, b, sizeof(a));
     }
+    memcpy(progress.point,a,sizeof(a)); progress.distance=distance_to_next;
     return true;
 }
 
@@ -289,7 +308,8 @@ struct RetouchPaint {
     }
 };
 
-static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item options, const char* operation) {
+static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item options, const char* operation,
+        Item previous = ItemNull, RasterEdit* accumulated = nullptr, StrokeProgress* progress = nullptr) {
     if (!source || (source->channels != 1 && source->channels != 4)) return edit.fail("paint requires gray coverage or RGBA samples");
     double opacity, origin[3] = {};
     if (!edit.number(options, "opacity", 1, 0, 1, &opacity)) return false;
@@ -315,12 +335,17 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
         length_squared = (end[0] - start[0]) * (end[0] - start[0]) + (end[1] - start[1]) * (end[1] - start[1]);
         if (length_squared <= 0) return edit.fail("gradient endpoints must differ");
     }
-    RasterEdit coverage;
-    if (stroke && !edit_stroke(coverage, source, options)) return edit.fail(coverage.error);
+    RasterEdit local_coverage; StrokeProgress local_progress;
+    RasterEdit& coverage = accumulated ? *accumulated : local_coverage;
+    if (stroke && !edit_stroke(coverage, source, options,previous,progress ? *progress : local_progress)) return edit.fail(coverage.error);
     if (retouch && tool.neighborhood && coverage.right>coverage.left && coverage.bottom>coverage.top &&
         (uint64_t)(coverage.right-coverage.left)*(coverage.bottom-coverage.top)*(2*tool.radius+1)*(2*tool.radius+1)*(tool.heal?2:1)>128000000)
         return edit.fail("retouch neighborhood exceeds the work budget");
-    edit.result = raster_buffer_fork(source);
+    const RasterBuffer* base = get_type_id(previous)==LMD_TYPE_NULL ? source : lambda_raster_buffer(item_attr(previous,"raster"));
+    if (!base || base->width!=source->width || base->height!=source->height || base->channels!=source->channels)
+        return edit.fail("invalid stroke preview raster");
+    // coverage accumulates across batches; opacity is always applied to the frozen source.
+    edit.result = raster_buffer_fork(base);
     if (!edit.result) return edit.fail("cannot allocate paint tile index");
     uint32_t left = stroke ? coverage.left : 0, top = stroke ? coverage.top : 0;
     uint32_t right = stroke ? coverage.right : source->width, bottom = stroke ? coverage.bottom : source->height;
@@ -441,6 +466,60 @@ static bool edit_wand(RasterEdit& edit, const RasterBuffer* source, Item options
     byte_storage_release(queue); return valid;
 }
 
+static bool edit_parameters(Item options, const char* allowed) {
+    if (get_type_id(options)!=LMD_TYPE_MAP) return false;
+    MapReader opts = MapReader::fromItem(options);
+    auto entries = opts.entries(); const char* key; ItemReader field;
+    while (entries.next(&key, &field)) {
+        char token[96];
+        if (strlen(key)>sizeof(token)-3) return false;
+        token[0]=' '; memcpy(token+1,key,strlen(key)); token[strlen(key)+1]=' '; token[strlen(key)+2]=0;
+        if (!strstr(allowed,token)) return false;
+    }
+    return true;
+}
+
+static Item edit_stroke_step(Item source, Item config) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots,source), settings(roots,item_attr(config,"settings")), previous(roots,item_attr(config,"previous"));
+    if (!edit_parameters(settings.get()," size hardness spacing flow opacity color mode selection origin "))
+        return lambda_image_error("unknown stroke setting");
+    const RasterBuffer* pixels=lambda_raster_buffer(owner.get());
+    // S5.4.3: equal source snapshots remain interchangeable across continuation batches.
+    if (!pixels || (get_type_id(previous.get())!=LMD_TYPE_NULL &&
+        (!is_map_family_type_id(get_type_id(previous.get())) || fn_eq(item_attr(previous.get(),"source"),owner.get())!=BOOL_TRUE ||
+            fn_eq(item_attr(previous.get(),"settings"),settings.get())!=BOOL_TRUE)))
+        return lambda_image_error("stroke continuation requires the same source and settings");
+    RootedValueBuilder options;
+    MapReader opts=MapReader::fromItem(settings.get());
+    auto entries=opts.entries(); const char* key; ItemReader field;
+    while (entries.next(&key,&field)) options.put(key,field.item());
+    options.put("points",item_attr(config,"points"));
+    RasterEdit edit,coverage; StrokeProgress progress;
+    if (!edit_paint(edit,pixels,options.value.get(),"stroke",previous.get(),&coverage,&progress))
+        return lambda_image_error(edit.error ? edit.error : "stroke continuation failed");
+    RootedValueBuilder result,point(true),rect(true);
+    result.put("source",owner.get()); result.put("settings",settings.get());
+    RasterBuffer* output=edit.result; edit.result=nullptr;
+    Item wrapped=lambda_raster_wrap(output,item_attr(owner.get(),"color"));
+    if (item_is_error(wrapped)) return wrapped;
+    result.put("raster",wrapped);
+    output=coverage.result; coverage.result=nullptr;
+    wrapped=lambda_raster_wrap(output,ItemNull);
+    if (item_is_error(wrapped)) return wrapped;
+    result.put("coverage",wrapped);
+    for (int i=0;i<3;i++) point.append(push_d(progress.point[i]));
+    result.put("point",point.value.get()); result.put("distance",push_d(progress.distance));
+    result.put("work",{.item=i2it(progress.work)});
+    // selection clipping and zero opacity may accumulate coverage without changing any samples.
+    if (edit.right>edit.left && edit.bottom>edit.top) {
+        uint32_t bounds[]={edit.left,edit.top,edit.right,edit.bottom};
+        for (int i=0;i<4;i++) rect.append({.item=i2it(bounds[i])});
+        result.put("rect",rect.value.get());
+    } else result.put("rect",ItemNull);
+    return result.value.get();
+}
+
 extern "C" Item fn_image_edit(Item raster, Item options) {
     GUARD_ERROR2(raster, options);
     RootFrame roots(2);
@@ -453,6 +532,7 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
     const char* allowed = !strcmp(operation, "shape") ? " op width height shape start end points " :
         !strcmp(operation, "combine") ? " op other mode " : !strcmp(operation, "feather") ? " op radius " :
         !strcmp(operation, "stroke") ? " op points size hardness spacing flow opacity color mode selection origin " :
+        !strcmp(operation, "stroke_step") ? " op points settings previous " :
         !strcmp(operation,"retouch") ? " op points size hardness spacing flow opacity selection origin kind strength radius sample sample_offset context context_offset " :
         !strcmp(operation, "fill") ? " op color opacity mode selection origin " :
         !strcmp(operation, "gradient") ? " op color end_color start end kind opacity selection origin " :
@@ -462,14 +542,8 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
         !strcmp(operation, "extract") ? " op selection origin " :
         (!strcmp(operation, "invert") || !strcmp(operation, "bounds") || !strcmp(operation, "overlay") || !strcmp(operation,"pack") || !strcmp(operation,"histogram")) ? " op " : nullptr;
     if (!allowed) return lambda_image_error("unknown image edit operation");
-    MapReader opts = MapReader::fromItem(config.get());
-    auto entries = opts.entries(); const char* key; ItemReader field;
-    while (entries.next(&key, &field)) {
-        char token[96];
-        if (strlen(key) > sizeof(token) - 3) return lambda_image_error("unknown image edit parameter");
-        token[0] = ' '; memcpy(token + 1, key, strlen(key)); token[strlen(key) + 1] = ' '; token[strlen(key) + 2] = 0;
-        if (!strstr(allowed, token)) return lambda_image_error("unknown image edit parameter");
-    }
+    if (!edit_parameters(config.get(),allowed)) return lambda_image_error("unknown image edit parameter");
+    if (!strcmp(operation,"stroke_step")) return edit_stroke_step(owner.get(),config.get());
     const RasterBuffer* source = lambda_raster_buffer(owner.get());
     RasterEdit edit;
     if (!strcmp(operation, "shape")) edit_shape(edit, config.get());

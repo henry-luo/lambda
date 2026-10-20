@@ -38,13 +38,21 @@ brush size/hardness/spacing/flow/opacity, selection mode and color tolerance.
 `interaction.begin/sample/render/preview/finish/cancel` implements pointer transactions.
 Drafts retain the original image and history; a completed move records one edit.
 Stroke sampling carries distance across event segments, and pointer drafts render
-at the host's frame rate. Selection coverage has undo history without dirtying
+at the host's frame rate. Brush/eraser previews resume cumulative native coverage
+and apply only new dabs against the frozen source. Source expansion or changed
+settings restart the exact stroke; completion still records its complete point
+sequence as one transaction. Selection coverage has undo history without dirtying
 document pixels. Panning has no image history. `mark_saved(session,snapshot)` tracks a content
 checkpoint independently of selection/camera state. History reuses
 `lambda.editor.mod_history`, including target restoration (**S9.2.2**).
 
 The optional `lambda.editor.raster.view` module copies rendered pixels into a
 retained native canvas and computes camera/target presentation (**D4.5.2**).
+`lambda.editor.raster.render.frame` reuses a preceding composite and recomposites
+the changed brush region. It falls back to full composition for stale caches,
+effects/styles or other gestures. These caches are derived preview data; exports
+and validation use the authored document. The demo updates the stage during a
+gesture and refreshes histograms/inspectors on completion or cancellation.
 Its host supplies `.raster-stage`, `.raster-surface`, `.raster-canvas`,
 `.raster-selection` and `.raster-target` nodes. The selection overlay is separate
 from saved/exported pixels. The facade and command tests need no native DOM.

@@ -694,6 +694,19 @@ behavior rather than a file-by-file implementation plan.
   `lambda/io/mark_builder.*`. Exact implementation placement follows provider
   ownership; filenames listed here are starting points, not duplicate APIs.
 
+### Incremental brush preview continuation — 2026-10-20
+
+The bounded native profile adds pure
+`paint_stroke_step(source,points,options={},previous=null)`. Returned state retains
+immutable source, cumulative coverage and preview Raster snapshots, distance to
+the next dab, the last pressure sample and cumulative work. New batches fork only
+touched tiles and recompute changed coverage against the original source; opacity
+does not compound once per presentation frame (**S9.1.2 / S9.2.2**). Source/settings
+bindings use value equality (**S5.4.3**); the editor restarts from full points when
+source extent or settings change. This shares the existing whole-stroke kernel.
+See [the public surface](../doc/Lambda_Image.md#incremental-strokes) and
+[Photos qualification](impl/Lambda_Impl_Photos.md) for bounds and measured scope.
+
 ## Appendix B. Delivery milestones and acceptance
 
 These are finite delivery boundaries. A full implementation plan and

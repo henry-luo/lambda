@@ -6,6 +6,7 @@ import registry: .commands
 import transforms: .transform
 import retouch: .retouch
 import actions: .actions
+import paint: .paint
 
 fn xy(input) => [input.point.x,input.point.y,model.value(input.pressure,1.0)]
 pub fn cancel(st) => if (st.gesture == null) st else
@@ -66,8 +67,11 @@ pub fn render(st) any^ {
             else if (g.mode == "lasso" and len(g.points)>=3) {id:"selection.shape",mode:g.selection_mode,
                 options:{shape:"polygon",points:g.points}} else null
         let admitted = if (command == null) true else actions.admit(before,command)^
-        let changed = if (command == null) before else core.apply_command(before,command)^;
-        {*:st,doc:changed.doc,selection:changed.selection,retouch:changed.retouch,gesture:{*:g,command:command}}
+        let stroke = if (g.mode in ["brush","erase"]) paint.preview(before,command,g.stroke)^ else null
+        let changed = if (stroke != null) stroke.state else if (command == null) before else core.apply_command(before,command)^;
+        {*:st,doc:changed.doc,selection:changed.selection,retouch:changed.retouch,
+            gesture:{*:g,command:command,stroke:stroke.continuation,
+                repaint:if (stroke == null) null else {before:st.doc,rect:stroke.rect}}}
     }
 }
 pub fn preview(st,input) any^ => render(sample(st,input))^

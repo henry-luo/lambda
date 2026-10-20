@@ -248,6 +248,10 @@ pub fn feather_coverage(coverage,radius) element^ => edit_samples(coverage,"feat
 pub fn coverage_bounds(coverage) any^ => edit_samples(coverage,"bounds")^
 pub fn coverage_overlay(coverage) element^ => edit_samples(coverage,"overlay")^
 pub fn paint_stroke(raster,options) element^ => edit_samples(raster,"stroke",options)^
+// S9.2.2: a continuation retains immutable coverage and the frozen pre-stroke source.
+pub fn paint_stroke_step(raster,points,options={},previous=null) map^ =>
+    edit_samples(raster,"stroke_step",{points:points,settings:{*:checked_options(options,
+        ["size","hardness","spacing","flow","opacity","color","mode","selection","origin"])^},previous:previous})^
 pub fn paint_fill(raster,options) element^ => edit_samples(raster,"fill",options)^
 pub fn gradient(raster,options) element^ => edit_samples(raster,"gradient",options)^
 pub fn wand(raster,point,options={}) element^ =>

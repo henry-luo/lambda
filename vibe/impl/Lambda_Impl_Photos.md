@@ -1,7 +1,7 @@
 # Lambda Photos — Implementation
 
 **Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
-retouch/actions, editable artwork/styles, channels, tabs and batch; aggregate gates have qualification limits, on
+retouch/actions, editable artwork/styles, channels, tabs, batch and incremental brush previews; aggregate gates have qualification limits, on
 `codex/photos-20261019`, worktree `temp/photos-worktree/`.
 
 Design: [Photos proposal](../Lambda_Demo_Photos.md). Existing contracts:
@@ -614,3 +614,158 @@ Logs and reports are kept under `temp/`: `photos-m4-lambda-baseline.log`,
 the exact `test-library` runner (`node test/test_run.js --target=library --raw`),
 with separate output artifacts so it can run while the runtime stress gate finishes.
 The final UI capture is `temp/photos/design-text.png`.
+
+## Brush preview performance — 2026-10-20
+
+The selected milestone addresses mouse strokes falling behind on ordinary
+photo-sized canvases. Acceptance is exact whole-stroke equivalence for pressure,
+spacing, flow, opacity, selection clipping, masks, branching/cancellation and
+source expansion; one history transaction per stroke; and native previews that
+avoid repeatedly recompositing a complete unaffected scene. The verification
+budget is focused AUTO/JIT tests with forced collection/poison, the complete
+Photos UI suite, the Lambda baseline and optimized native A/B replays. Larger
+canvas/device qualification and nonlocal filter optimization remain separate.
+
+The original path rebuilt coverage from the first point on every frame,
+composited the whole document, uploaded it, then rebuilt the histogram and
+inspector/tab presentation. An optimized headless phase probe at 1024×768 found
+raster editing increasing from about 0.3 to 5.3 ms over a 120-point stroke; native
+publication added substantially more work than the raster-only probe. This
+established presentation and cumulative replay as the causes to address.
+
+Implemented behavior:
+
+- `image_edit.cpp` shares one dab/pixel kernel between whole strokes and
+  `image.paint_stroke_step`. Continuations carry owned cumulative coverage,
+  previous preview, last pressure point, spacing remainder and cumulative work.
+  New coverage recomputes only changed bounds against the frozen source;
+  frame subdivision does not compound stroke opacity. Snapshots remain immutable
+  (**S9.1.2 / S9.2.2**), source bindings use value equality (**S5.4.3**), and native
+  wrappers use precise roots (**D5.3.3**).
+- Brush/erase interaction resumes this state. Changed settings or growing source
+  coordinates restart from the original source and complete point sequence.
+  Actions continue to capture that ordinary command; preview state does not enter
+  authored image content or stroke history.
+- `raster.render.frame` checks the exact preceding scene before updating a cached
+  composite through existing `image.render_region` and `image.with_region`.
+  Effects/styles, stale caches and other tools use full composition. Region
+  changes preserve clipping/blend dependencies at each affected pixel.
+- The native view avoids rewriting unchanged surface/target geometry. During
+  frame callbacks the demo updates stage pixels/overlays, then refreshes the
+  histogram, inspectors and workspace shell at gesture completion/cancellation
+  (**S12.1.3 / D4.5.2**). Pending callbacks are cancelled at pointer-up.
+- `test/demo/photos/benchmark_brush.py` instruments disposable copies under
+  `temp/`, identifies the optimized binary/package, alternates saved/current
+  sources and separates edit/publication timing. The application has no profiling
+  output in its normal event handlers.
+
+Qualification and final measurements follow at the completed checkpoint.
+Remaining costs include full canvas projection/upload, final document validation,
+retouch replay and full previews for effect/style scenes. These measurements do
+not establish hardware input-to-display latency or the full M5 budget.
+
+The native frame profile exposed a second, larger cost outside the Lambda
+handler: same-size bitmap uploads and repeated diagnostic attributes entered
+DOM reconciliation, spending about 256 ms in layout per frame. Fixing the
+handler alone would have left that visible lag in place. The canvas upload
+adapter now reconciles attributes only when width/height attributes actually
+change. The common canvas pixel-generation path requests repaint directly;
+bitmap ownership and intrinsic-size updates retain their existing contracts
+(**D4.5.2 / D5.3.3**). Preview frames and initial brush/eraser/retouch publication
+update only the stage, leaving inspector diagnostics until the transaction
+boundary. A native trace then recorded 40 brush callbacks with zero DOM
+mutations, zero commits and zero layout time, with stable retained view storage.
+
+The canvas bridge regression now checks repeated frame uploads under forced GC,
+retained colors and resize-dependent CSS geometry. Its native companion asserts
+zero reconciliation/layout for the three bitmap-only callbacks, without using a
+machine-dependent time threshold. The broader verification budget consequently
+includes the Radiant baseline as well as the Lambda baseline. Forced full-
+viewport CPU paint remains measurable separately from these callback results;
+the benchmark's `--paint` mode verifies every frame's pixels and records both.
+
+### Qualification checkpoint
+
+`make build-radiant-baseline JOBS=4 TEST_JOBS=4` followed by
+`make run-radiant-baseline` completed: **5,964 passed, 5 failed, 146 partial,
+1 skipped**. The five failures reproduce previously recorded limits: CSS cascade
+live bytes **381,630 vs 373,940** and the four SVG foreign-object UI variants.
+The page-load lane passed **111/111**, including its previously flaky case.
+This is a qualified aggregate result, not an all-green baseline.
+
+The Photos workflow suite passed **12 workflows / 181 assertions** after the
+native canvas change. An additional proportional-fit resize check passed
+**5 assertions**: identical displayed width/height must still update the input
+scale when document dimensions change. These 13 workflows also passed within
+the broad UI aggregate. The native canvas regressions passed **2/2**, including
+three bitmap-only callbacks with zero reconciliation/layout and a real resize
+that updates selector-dependent geometry. Radiant integer-cast lint passed.
+
+Changed output-sample bounds now gate region updates after opacity and selection
+clipping. A fully transparent or fully clipped stroke still advances cumulative
+coverage/work, but does not composite or upload unchanged pixels. Focused image
+and editor tests include these no-change cases alongside the source-value,
+pressure, mask, expansion, clipping/blend and filter/style-fallback cases.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` completed: **7,904/7,906 passed**,
+including **2,112/2,112 input tests** and **315/315 forced-GC stress cases**.
+The script runner passed **1,642/1,643**; its sequence-sensitive
+`math_test_math_includegraphics` failure and the separate
+`BinarySchemaTest.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers` failure
+match the prior checkpoint. No new aggregate failure was introduced or masked.
+Logs/reports are under `temp/photos/performance/{radiant-gate,lambda-gate}`.
+
+After restoring the optimized host, the focused image/Photos set passed
+**23/23 in AUTO and 23/23 in eager JIT**, with both
+`LAMBDA_GC_FORCE_EVERY=1` and `LAMBDA_GC_POISON_FREED=1`. This includes the final
+changed-sample bounds implementation. Logs: `qualified-auto.log` and
+`qualified-jit.log` in the same performance directory. The release binary is
+identified by the final replay report; a debug host is rejected by the benchmark.
+
+### Optimized replay results
+
+Final command:
+
+```sh
+python3 test/demo/photos/benchmark_brush.py --paint --samples 24 --repetitions 3 \
+  --layers 1 8 --reference-dir temp/photos/performance/reference/app \
+  --reference-home temp/photos/performance/native-before/lmd \
+  --output-dir temp/photos/performance/paint-final
+```
+
+Report: `temp/photos/performance/paint-final/results.json`. The saved demo/package
+sources are from `ed4238cfc`; both versions use the same optimized host. Each
+1024×768 case runs three alternating processes per version, 24 brush callbacks
+per process, in a 1280×820 viewport. The single layer is opaque; the eight-layer
+case uses full-canvas RGBA layers with alpha 0.7. All **288 per-preview pixel
+checks** passed, along with each run's error/history assertions.
+
+Numbers below are medians of the three process medians, in milliseconds.
+Combined CPU cost is computed per callback/paint pair before aggregation.
+
+| Case | Previous callback + CPU paint | Current callback + CPU paint | Reduction |
+|---|---:|---:|---:|
+| One opaque layer | 295.927 | 72.076 | 4.1× |
+| Eight translucent layers | 807.482 | 28.366 | 28.5× |
+
+For the eight-layer case, the current callback median is **4.127 ms**, with
+**0 ms layout** and **0 DOM mutations** in every measured brush callback. Native
+editing accounts for **0.182 ms**, publication **3.623 ms**, and CPU paint
+**24.194 ms**. These component medians need not sum to the paired median.
+
+Absolute times varied with concurrent system load. Single-layer process medians
+ranged from 284.550–984.863 ms previously and 28.761–271.159 ms currently.
+The eight-layer medians were steadier: 802.625–817.655 ms previously and
+26.970–28.494 ms currently. All repetitions remain in the report; these are
+comparative CPU workload measurements, not a hardware input/display or universal
+60 Hz claim. Forced full-viewport paint remains a substantial residual cost.
+
+Host: macOS 26.3, arm64, 10 logical CPUs; AUTO execution backend, without forced-GC
+benchmark knobs. Release SHA-256:
+`97eec0421e3dffd31f6d22efc64d163961fea2469ea582e8a7d93b1afe18d462`.
+Current package SHA-256:
+`9c92830e917e41eff1ea1bbab4fa29ad2acec33b911a6d75f9c04e14d7bb7902`.
+The report also identifies both demo/package snapshots. Callback timestamps match
+native frame records explicitly, excluding activation/input-drain turns. CPU
+paint profiles include record/replay; OS input queuing and actual display refresh
+remain outside the measurement.

@@ -188,3 +188,20 @@ Materialized/virtual comparisons keep the general element relation, and ordinary
 container NaN/error semantics are unchanged. Dense/sparse/shared-tile and hidden-RGB
 checks qualify the storage comparison. Detailed workflow results and limitations
 are recorded in [Photos implementation](Lambda_Impl_Photos.md).
+
+Incremental brush/eraser previews share the whole-stroke dab and pixel kernels.
+`paint_stroke_step` carries immutable coverage, spacing/pressure and work across
+batches, applying cumulative opacity against the frozen source (**S9.2.2**).
+Continuation source/settings bindings preserve value equality (**S5.4.3**), and
+native allocation paths use precise roots (**D5.3.3**). Earlier source, coverage
+and preview snapshots remain independently readable. The editor combines this
+with existing `render_region` / `with_region` to refresh bounded dirty regions;
+neighborhood effects/styles retain full-composition previews. Performance and
+regression evidence belongs to the Photos qualification record.
+
+The canvas upload bridge now treats same-size bitmap updates as repaint work.
+Only changed width/height attributes enter DOM reconciliation; the shared canvas
+generation helper requests repaint directly. Repeated frame uploads retain owned
+pixels without relayout, while resize-dependent CSS still reflows. This preserves
+the native pixel-ownership boundary (**D4.5.2**) and removes a per-stroke-frame
+layout cost exposed by the native frame profiler.

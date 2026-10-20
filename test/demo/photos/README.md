@@ -154,3 +154,22 @@ artwork/style interchange and asynchronous batch/large-scene qualification.
 
 Retouch source selection must be recorded as a step or supplied by the replay
 session. Actions operate with that session's current selection coverage.
+
+Brush and eraser previews process new samples incrementally and recomposite only
+the changed region when the scene has no effects/styles. Histograms and inspector
+panels refresh when the gesture completes or is cancelled. Undo remains one edit
+per stroke. Effect/style scenes retain full-composition previews; canvas upload,
+final validation and retouch kernels still have larger-scene costs.
+
+Measure native preview-handler editing/publication on an optimized host with:
+
+```sh
+python3 test/demo/photos/benchmark_brush.py --paint --repetitions 3
+```
+
+This writes disposable instrumented app copies and reports under
+`temp/photos/performance/brush/`. Pair `--reference-dir` and `--reference-home`
+to compare saved demo/package sources on the same host. Reports separate edit
+and publication times. `--paint` verifies each preview and adds native frame,
+layout and CPU paint timings. Display refresh and hardware input queuing remain
+outside these measurements. See the implementation record for measured cases.

@@ -10,6 +10,7 @@ import files: .mod_files
 import scene: .mod_scene
 import present: .mod_present
 import tools: lambda.editor.raster.tools
+import retouch: lambda.editor.raster.retouch
 import effects: lambda.editor.raster.effects
 import colors: lambda.slide.color
 import styles: lambda.editor.raster.styles
@@ -220,6 +221,12 @@ pn cancel_preview(owner,st) {
     if (st.token > 0) dom.cancel_frame(owner,st.token)
     return {*:interaction.cancel(st),token:0}
 }
+pn publish_preview(owner,st,workspace) {
+    var next = st
+    // pixel drafts must not invalidate the inspector subtree before the next input sample.
+    surface.publish(owner,st) ^ { next = publish(owner,{*:cancel_preview(owner,st),error:^.message,status:^.message},workspace) } ~ { next = ~ }
+    return next
+}
 fn tab_session(session,actions) => {*:session,actions:actions,painted_doc:null,painted_selection:null,
     artwork_node:null,style_node:null,token:0,tab_request:"",dialog:"",pending:""}
 fn tab_transition(workspace,before,after) any^ {
@@ -256,7 +263,11 @@ on photos_frame(evt) {
     if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
     var next = {*:session,token:0}
     interaction.render(next) ^ { next = {*:cancel_preview(evt.target,next),error:^.message,status:^.message} } ~ { next = ~ }
-    session = publish(evt.target,next,documents)
+    if (next.gesture == null) {
+        session = publish(evt.target,next,documents)
+        return 'handled'
+    }
+    session = publish_preview(evt.target,next,documents)
     return 'handled'
 }
 on click(evt) {
@@ -359,7 +370,8 @@ on pointerdown(evt) {
     var next = session
     interaction.begin(session,pointer_input(owner,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
     if (next.gesture != null) dom.set_pointer_capture(present.node(owner,"stage"),evt.pointerId)
-    session = publish(owner,next,documents)
+    if (next.gesture.mode in ["brush","erase",*retouch.kinds]) { session = publish_preview(owner,next,documents) }
+    else { session = publish(owner,next,documents) }
     return 'prevent-default'
 }
 on mousedown(evt) {
@@ -379,10 +391,11 @@ on pointermove(evt) {
 on pointerup(evt) {
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
+    if (session.token > 0) dom.cancel_frame(owner,session.token)
     var next = session
     interaction.finish(interaction.preview(session,pointer_input(owner,evt))^) ^ { next = {*:interaction.cancel(session),error:^.message,status:^.message} } ~ { next = ~ }
     dom.release_pointer_capture(present.node(owner,"stage"),evt.pointerId)
-    session = publish(owner,next,documents)
+    session = publish(owner,{*:next,token:0},documents)
     return 'prevent-default'
 }
 on pointercancel(evt) {

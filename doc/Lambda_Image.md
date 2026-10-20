@@ -83,6 +83,7 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `selection(width,height,options)`, `wand(raster,point,options={})` | Gray coverage from rectangle, ellipse, even-odd polygon or all; color selection with normalized tolerance and contiguous/global matching. Shape options use `start`/`end` or polygon `points`. |
 | `combine_coverage(a,b,mode)`, `invert_coverage(a)`, `feather_coverage(a,radius)`, `coverage_bounds(a)` | Replace/add/subtract/intersect, finite inversion, bounded box-filter feather and nonzero half-open bounds (`null` for empty). |
 | `paint_stroke(raster,options)`, `paint_fill(raster,options)`, `gradient(raster,options)` | Gray/RGBA painting with color, opacity and optional document-space selection/origin. Strokes accept points, size/hardness/spacing/flow and paint/erase mode; gradients accept linear/radial endpoints and endpoint colors. |
+| `paint_stroke_step(source,points,options={},previous=null)` | Incremental brush/eraser preview. Returns immutable continuation state with `raster`, cumulative gray `coverage`, and half-open changed-sample bounds `rect` (`null` for no change after selection/opacity). Pass only new points, the same source value/settings, and the preceding state. |
 | `reframe(raster,rect,options={})`, `mix_samples(a,b,options={})`, `extract_samples(raster,options={})` | Extend/crop samples with optional fill; interpolate through coverage; retain selected alpha. Unchanged snapshots remain intact. |
 | `coverage_overlay(coverage)` | Produce a separate translucent blue RGBA preview; overlays are not authored image content. |
 | `pn storage_info(raster)` | Observe logical/index bytes, resident/shared backing references and currently private payload bytes. Shared references are counted as references, not summed as unique resident bytes. |
@@ -91,6 +92,24 @@ strict error behavior. The same document route supports `layout` and `render`.
 | `read(target,options={})`, `write(image,target,options={})` | Read binary input or write encoded bytes through existing target I/O. Specify output `format`; the default is PNG. |
 | `capabilities()` | Query actual codec availability and declared editing/animation profiles. |
 | `checked_options(options,allowed)` | Shared validation of option maps and allowed field names (**S17.8.1**). |
+
+### Incremental strokes
+
+`paint_stroke_step` retains the original source and cumulative coverage, carrying
+dab spacing, interpolated pressure and the work budget across batches. Stroke
+opacity applies against the original samples, so splitting input across frames
+produces the same pixels as `paint_stroke` (**S9.1.2 / S9.2.2**). Each batch has
+1–65,536 points. The cumulative dab work limit remains 128 million candidate
+pixels. Source/settings changes require starting a new continuation; equal
+source snapshots are interchangeable under **S5.4.3**. Pass returned state
+unchanged. Retaining an earlier state permits a separate preview branch.
+
+```lambda
+let settings = {size:20,flow:0.5,opacity:0.6,color:[1,0,0,1]}
+let first = img.paint_stroke_step(source,[[10,10,0.5]],settings)^
+let next = img.paint_stroke_step(source,[[20,15,0.8]],settings,first)^
+// next.raster is the preview; source and first.raster remain unchanged.
+```
 
 ### Editable artwork and styles
 
