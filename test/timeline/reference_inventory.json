@@ -3839,7 +3839,7 @@
             "test/ui/timeline/story_timing.json",
             "test/ui/timeline/story_motion.ls",
             "test/ui/timeline/story_motion.json",
-            "test/test_view_reuse_gtest.cpp",
+            "test/test_radiant_core_gtest.cpp",
             "test/ui/timeline/keyed_motion.ls",
             "test/ui/timeline/keyed_motion.json"
           ],

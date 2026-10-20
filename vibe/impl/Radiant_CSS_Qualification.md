@@ -346,7 +346,7 @@ readiness candidate results: `temp/css_plan_delivery/intake_frames.json`.
 
 ## Other required-gate debt (Q0.3–Q0.4)
 
-- `test_view_reuse_gtest` crashes at
+- `test_radiant_core_gtest` crashes at
   `SecondaryViewTest.CaptionInheritanceAndGeneratedCountersPreserveSourceOrderWhenReordered`.
   This prevents an all-green Radiant claim and leaves native cases unexecuted.
   Owner: [paged integration §9](Radiant_Impl_Paged_Integration.md#9-progress-record).
