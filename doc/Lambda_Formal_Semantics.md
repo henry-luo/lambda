@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 69.0.1 (2026-10-20)
+**Spec version:** 69.1.1 (2026-10-20)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -351,6 +351,28 @@ harnesses.
   implicit read (S2.4.4); the crossing must be spelled, and then its cost is
   visible in the spelling.* (Ruled 2026-10-20, USER.) [PTH81–PTH84,
   Type_Path §6.4]
+- **S2.4.7** **A query step on a path follows the wildcard rule: it never
+  crosses the file boundary by itself.** `?T` and `.?T` applied to a path
+  are path operations like `*` and `**` (S2.4.2v5, S2.4.6): `p?T` is a
+  reference until `#`, and its type operand is part of the path's identity.
+  Forcing applies the query to each match. Over a directory, `p?T` is the
+  proper closure `p.*.**` and `p.?T` the inclusive closure `p.**`
+  (S8.2.5), each kept where the path value is `T`; no file is read, so
+  `\.src?<div>#` is `null` and `\.src?path#` is every path beneath `src`.
+  Over a file the query is the step that enters it (PTH82), and is
+  S8.2.4v3's query on the parsed value: `\.data.'x.json'?int#` is every
+  `int` in `x.json`. So a query or wildcard applied to the matches of
+  another crosses the boundary, because each file match is entered by the
+  step applied to it: `\.src.**?T#` and `\.src.**.?T#` search the content
+  of every file beneath `src`, and `\.src?T.**#` and `\.src.?T.**#`
+  enumerate the content of every file the first query keeps.
+  `\.src.*?T#` searches the files directly in `src` and no deeper file.
+  Path-domain results deduplicate by path equality and document results
+  stay runs (S2.4.6). After `#` a query acts on values: `\.src.**#?T`
+  tests the path values and reads no file. *Why: `?T` and `.?T` are
+  recursive like `**`; a query that opened every file beneath a directory
+  would be the same unbounded implicit read S2.4.6 rules out.* (Ruled
+  2026-10-20, USER.) [PTH85, Type_Path §6.4]
 
 ### S2.5 Lists and blocks
 
@@ -2965,6 +2987,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), including the string and null members of group elements (S14.1.1). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
 | S17.8.1 | **Ruled 2026-10-04 (USER); partially implemented.** `io.grep` conforms on both arms (2026-10-04): the AST builder checks a literal options map against the registry table `sys_func_option_names` (`lambda/runtime/sys_func_registry.c`), and the function warns about an unknown name in an options value; registering another function's option names extends the compile-time arm to it. `start` already conforms to the compile-time arm: an unknown name in its options literal is an error. `find` and `replace` look up `limit`, `last` and `ignore_case` and ignore any other name silently in both cases — no error for a literal, no warning for a value. Other system functions with an options map (`input`, `output`, `fetch`, `cmd`) are not yet audited. Existing implementations are to be migrated. [Lambda_Lib_Grep.md Appendix C](../vibe/Lambda_Lib_Grep.md#appendix-c-unknown-option-names-current-state) |
 | S2.4.6, S8.2.5, S8.2.6 | **Implemented 2026-10-20 on interp and jit.** `.*`/`.**` lower to `fn_step_items`/`fn_step_closure`, which reuse the `[T]`/`.?T` walks with a wildcard key. A name step on a list maps per item inside `fn_member`, and `.~~`/`./` without a `~` cursor go through `fn_navigate_value`, which also lets the JIT select a dynamically typed path as the interpreter did. `#` on a wildcard path splits at the first wildcard: over a directory it enumerates and continues per match, deduplicating paths by canonical spelling; anywhere else it forces the prefix and enumerates the parsed value. `**` enumeration now heads with its base, has no depth cap, and lists but does not enter symlinked directories; `path.ls` goldens gained the base line. Fixtures: `wildcard_steps.ls`, `run_stepping.ls`, `path_wildcard_force.ls` (tree `test/input/wild_tree`). Design: [Expr_Query §4.4](../vibe/Lambda_Expr_Query.md#44-wildcard-steps-and-run-stepping-ruled-2026-10-20-user-s825-s826), [Type_Path §6.4](../vibe/Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826). |
+| S2.4.7 | **Implemented 2026-10-20 on interp and jit.** `fn_query` on a path returns a new path step (kind `LPATH_SEG_QUERY`, `.?` flagged) holding the type pinned into the runtime pool; the path prints it through a runtime type printer, so equality and hashing compare the type's canonical spelling. `#` treats the step like a wildcard: over a directory it enumerates the closure of `**` (base kept for `.?T`) filtered by `fn_is`, over anything else it forces the prefix and queries the value. `.*`/`.**` on a path held in a variable now extend the path instead of walking the reference as a value. `for`, `len` and printing reach such paths through an enumeration hook the runtime registers with the path layer, so a query path, or a wildcard with steps after it, iterates exactly what `#` yields. Fixture: `path_query_force.ls`. Design: [Type_Path §6.4](../vibe/Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826). |
 
 **S2.6.6v2 — MVP with dictionaries, 2026-10-02.** Raw strings/binaries, null/empty dropping,
 list spreading, computed selectors, empty files, and byte output are implemented
@@ -3102,7 +3125,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |

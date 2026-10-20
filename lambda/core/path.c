@@ -31,6 +31,18 @@ extern void target_free(Target* target);
 
 static PathPoolProvider path_pool_provider = NULL;
 
+static PathTypePrinter path_type_printer = NULL;
+// shared with the runtime-only iteration build of this file below
+PathEnumerationResolver g_path_enumeration_resolver = NULL;
+
+void path_register_enumeration_resolver(PathEnumerationResolver resolver) {
+    g_path_enumeration_resolver = resolver;
+}
+
+void path_register_type_printer(PathTypePrinter printer) {
+    path_type_printer = printer;
+}
+
 void path_register_pool_provider(PathPoolProvider provider) {
     // Keep runtime TLS ownership above lambda-io; allocation always asks the
     // registered current-runtime provider rather than retaining a stale pool.
@@ -279,6 +291,14 @@ static void path_print_name(StrBuf* out, const char* seg) {
 }
 
 static void path_print_op(StrBuf* out, Path* op) {
+    if (PATH_GET_SEG_TYPE(op) == LPATH_SEG_QUERY) {
+        // S2.4.7: `?T` takes no dot and `.?T` does; equality and hashing use
+        // this spelling, so the type's canonical print is its identity
+        strbuf_append_str(out, (op->flags & PATH_FLAG_QUERY_SELF) ? ".?" : "?");
+        if (path_type_printer) path_type_printer(op->query_type, out);
+        else strbuf_append_str(out, "<type>");
+        return;
+    }
     strbuf_append_char(out, '.');
     switch (PATH_GET_SEG_TYPE(op)) {
         case LPATH_SEG_WILDCARD: strbuf_append_char(out, '*'); break;
@@ -638,6 +658,9 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
 // root steps as S2.4.2v5 requires.
 Path* path_append_op(Pool* pool, Path* base, Path* op) {
     LPathSegmentType type = PATH_GET_SEG_TYPE(op);
+    if (type == LPATH_SEG_QUERY) {
+        return path_query(pool, base, op->query_type, (op->flags & PATH_FLAG_QUERY_SELF) != 0);
+    }
     if (type == LPATH_SEG_PARENT) return path_select_parent(pool, base);
     if (type == LPATH_SEG_ROOT) return path_select_root(pool, base);
     if (type == LPATH_SEG_INT) return path_extend_int(pool, base, op->int_value);
@@ -694,14 +717,25 @@ bool path_is_wildcard_recursive(Path* path) {
     return PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
 }
 
+Path* path_query(Pool* pool, Path* base, uint64_t type_item, bool self) {
+    if (!base || !type_item) return NULL;
+    Path* path = path_alloc_op(pool, base, LPATH_SEG_QUERY, NULL, 0, 0);
+    if (!path) return NULL;
+    path->query_type = type_item;
+    if (self) path->flags |= PATH_FLAG_QUERY_SELF;
+    return path;
+}
+
 /**
- * Check if a path contains any wildcard segments.
+ * Check if a path contains any enumerating step: a wildcard (S2.4.6) or a
+ * type query (S2.4.7). Forcing such a path continues per match.
  */
 bool path_has_wildcards(Path* path) {
     Path* p = path;
     while (p && p->parent) {
         LPathSegmentType seg_type = PATH_GET_SEG_TYPE(p);
-        if (seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC) {
+        if (seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC ||
+                seg_type == LPATH_SEG_QUERY) {
             return true;
         }
         p = p->parent;
@@ -724,9 +758,21 @@ bool path_has_wildcards(Path* path) {
 
 #ifdef LAMBDA_PATH_RUNTIME_IMPLEMENTATION
 extern Pool* path_get_pool(void);
+extern PathEnumerationResolver g_path_enumeration_resolver;
 #endif
 
 #ifndef PATH_NO_ITERATION
+// A query step anywhere, or a wildcard with further steps, is enumerated by
+// the runtime's force walk (S2.4.6, S2.4.7); a leaf wildcard stays here.
+static bool path_needs_runtime_enumeration(Path* path) {
+    for (Path* p = path; p && p->parent; p = p->parent) {
+        LPathSegmentType type = PATH_GET_SEG_TYPE(p);
+        if (type == LPATH_SEG_QUERY) return true;
+        if ((type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC) && p != path) return true;
+    }
+    return false;
+}
+
 
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
@@ -890,6 +936,11 @@ Item path_resolve_for_iteration(Path* path) {
     // Already resolved?
     if (path->result != 0) {
         return path->result;
+    }
+    if (g_path_enumeration_resolver && path_needs_runtime_enumeration(path)) {
+        Item matches = g_path_enumeration_resolver(path);
+        if (matches != ITEM_ERROR) path->result = matches;
+        return matches;
     }
     
 #ifdef LAMBDA_NO_FILE_IO

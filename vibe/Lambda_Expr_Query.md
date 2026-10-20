@@ -374,7 +374,7 @@ e?<p>.b      // (1, 2, 3)
 e?<p>[0]     // <p b: 1> — a window over the run, not per item
 ```
 
-This resolves §12's deferred auto-map: ruling by value kind rather than by spelling is what keeps `let d = html?<div>; d.class` equal to `html?<div>.class`, which was the deferral's strongest objection. Paths carry the same steps; what forcing a wildcard path reads is [Type_Path §6.4](Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826) (S2.4.6).
+This resolves §12's deferred auto-map: ruling by value kind rather than by spelling is what keeps `let d = html?<div>; d.class` equal to `html?<div>.class`, which was the deferral's strongest objection. Paths carry the same steps; what forcing a wildcard path reads is [Type_Path §6.4](Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826) (S2.4.6). The queries `?T` and `.?T` are recursive like `**` and get the same file boundary on paths (S2.4.7, PTH85): over a directory they filter path values and read no file, and only a step applied to a file match enters it, so `\.src.**?T#` searches every file while `\.src?T#` searches none.
 
 ---
 
