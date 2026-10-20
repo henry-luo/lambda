@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15 (rev 10 — U26 superseded: AST interpreter adopted by user ruling, `vibe/Lambda_Design_Ast_Interpreter.md` / **D8.1.1v2**)
 **Status:** Design settled — ledger U1–U36 in §9; continuation decisions U27–U36 are implementation requirements; **U26 superseded 2026-08-15** (§12 retained as the historical record). The active Lambda/LambdaJS implementation proposal is `vibe/Lambda_Design_JS_Unified.md` (2026-08-28).
-**Related:** `vibe/Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `vibe/impl/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
+**Related:** `vibe/Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `vibe/impl/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses.md` (FC1–FC9)
 
 ---
 

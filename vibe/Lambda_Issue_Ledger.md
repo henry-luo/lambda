@@ -1587,6 +1587,12 @@ absent attributes validate, and a real type violation still fails.
 
 
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
+*Update 2026-10-20:* the clause tail is now ruled and enforced — S14.1.2v2
+puts `let`/`where` before `group by` and `order by`/`limit`/`offset` after
+it, each at most once (E239). That is the phase-ordered tail both options
+below keep; only the generator/`let` prefix question remains open
+([Expr_For_Clauses §4.4](Lambda_Expr_For_Clauses.md#44-the-clause-pipeline)).
+
 Clause order is fixed: **all generators, then all `let`s**. Measured
 2026-08-25:
 

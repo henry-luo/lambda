@@ -1210,7 +1210,7 @@ data | ~.name where len(~) > 3 | upper(~)
 | XPath | `[predicate]` | Bracket syntax |
 | XQuery | `where` clause | Part of FLWOR |
 
-~~### Future Query Clauses (Roadmap)~~ *(superseded: `order by`, `limit`, `offset`, `group by` landed as `for`-header clauses — S14, `Lambda_Expr_For_Clauses2.md`)*
+~~### Future Query Clauses (Roadmap)~~ *(superseded: `order by`, `limit`, `offset`, `group by` landed as `for`-header clauses — S14, `Lambda_Expr_For_Clauses.md`)*
 
 ~~Using `where` as a keyword opens the door to additional **query clauses** inspired by SQL and XQuery's FLWOR expressions:~~
 

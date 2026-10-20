@@ -17763,21 +17763,30 @@ static void mir_join_bind_tuple_vars(MirTranspiler* mt, AstLoopNode* first, AstL
     }
 }
 
-static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool use_new_side) {
-    if (!loop || loop->join_key_count <= 0) return emit_null_item_reg(mt);
-    if (loop->join_key_count == 1) {
-        AstJoinKey* key = loop->join_keys;
-        AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
-        return transpile_box_item(mt, expr);
-    }
+// A key in the representation the shared runtime helpers consume -- group,
+// order and join keys alike: the boxed value for one expression, an Array
+// tuple for several.
+typedef AstNode* (*MirKeyExprOf)(AstNode* node);
+static AstNode* mir_group_key_expr(AstNode* node) { return ((AstGroupKey*)node)->expr; }
+static AstNode* mir_order_key_expr(AstNode* node) { return ((AstOrderSpec*)node)->expr; }
+static AstNode* mir_join_prior_expr(AstNode* node) { return ((AstJoinKey*)node)->prior_expr; }
+static AstNode* mir_join_new_expr(AstNode* node) { return ((AstJoinKey*)node)->new_expr; }
+
+static MIR_reg_t mir_box_key_item(MirTranspiler* mt, AstNode* first, MirKeyExprOf expr_of) {
+    if (!first) return emit_null_item_reg(mt);
+    if (!first->next) return transpile_box_item(mt, expr_of(first));
     MIR_reg_t tuple = emit_call_0(mt, "array_plain", MIR_T_P);
-    for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
-        AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
-        MIR_reg_t boxed = transpile_box_item(mt, expr);
+    for (AstNode* node = first; node; node = node->next) {
+        MIR_reg_t boxed = transpile_box_item(mt, expr_of(node));
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
     return emit_box_container(mt, tuple);
+}
+
+static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool use_new_side) {
+    return mir_box_key_item(mt, loop ? (AstNode*)loop->join_keys : NULL,
+        use_new_side ? mir_join_new_expr : mir_join_prior_expr);
 }
 
 static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_reg_t rows,
@@ -17831,11 +17840,15 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
     bool has_offset = for_node->offset != NULL;
     MIR_reg_t final_reg;
     if (has_order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        emit_call_void_3(mt, "fn_sort_by_keys",
+        // Both tiers keep one value and one key per row; ordering spreads the
+        // rows back into a fresh stream before the window (S6).
+        int64_t key_count = 0;
+        int64_t desc_mask = ast_order_desc_mask(for_node->order, &key_count);
+        output = emit_call_4(mt, "fn_order_rows", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, output),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_arr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, first_spec->descending ? 1 : 0));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, desc_mask),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, key_count));
     }
     if (has_offset || has_limit) {
         // The window trims the raw stream in place, ordered or not, so the one
@@ -17905,22 +17918,84 @@ static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
         // a for body is an item position: a nested for splices (S2.5.2v2)
         MIR_reg_t boxed_result = for_node->then
             ? mir_box_sequence_item(mt, for_node->then) : emit_null_item_reg(mt);
-        emit_call_void_2(mt, "array_push_spread", MIR_T_P,
-            MIR_new_reg_op(mt->ctx, output),
+        // an ordered stream keeps one value per row, so a body yielding several
+        // items sorts as a unit; fn_order_rows spreads the rows afterwards
+        emit_call_void_2(mt, for_node->order ? "array_push_verbatim" : "array_push_spread",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, output),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
     } else if (for_node->then) {
         transpile_discard_expr(mt, for_node->then);
     }
 
-    if (for_node->order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        if (result_demanded) {
-            MIR_reg_t boxed_key = transpile_box_item(mt, first_spec->expr);
-            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
-                MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
+    if (for_node->order && result_demanded) {
+        MIR_reg_t boxed_key = mir_box_key_item(mt, for_node->order, mir_order_key_expr);
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
+            MIR_new_reg_op(mt->ctx, keys_arr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
+    } else if (for_node->order) {
+        // Result demand suppresses key storage, not evaluation of an order
+        // expression whose procedure calls may still have effects.
+        for (AstNode* spec = for_node->order; spec; spec = spec->next) {
+            transpile_discard_expr(mt, ((AstOrderSpec*)spec)->expr);
         }
     }
+}
+
+// S14.1.1v2: group the collected rows, then run the post-group clauses once per
+// record `[members, key_1, ..., key_n]`, with `into` bound to the members
+// array and each key name to its value. The single-source and joined paths
+// share it; the caller pops the post-group scope.
+static MIR_reg_t mir_emit_group_stage(MirTranspiler* mt, AstForNode* for_node,
+        MIR_reg_t group_rows, MIR_reg_t group_keys, bool result_demanded,
+        MIR_reg_t output, MIR_reg_t keys_arr) {
+    AstGroupClause* group = for_node->group;
+    MIR_reg_t groups = emit_call_3(mt, "fn_group_by_keys", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_rows)),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_keys)),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, group->key_count));
+
+    // Row bindings belong only to collection. Re-open a clean post-group scope
+    // so the group names cannot resolve to a stale source name.
+    pop_scope(mt);
+    push_scope(mt);
+    MIR_reg_t groups_item = emit_box_container(mt, groups);
+    MIR_reg_t groups_len = emit_machine_len(mt, groups_item);
+    MirIndexedLoopFrame out_loop = mir_begin_indexed_loop(mt, "goutidx");
+    emit_label(mt, out_loop.loop);
+    MIR_reg_t out_cmp = new_reg(mt, "goutcmp", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, out_cmp),
+        MIR_new_reg_op(mt->ctx, out_loop.index), MIR_new_reg_op(mt->ctx, groups_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, out_loop.end), MIR_new_reg_op(mt->ctx, out_cmp)));
+    MIR_reg_t record = emit_call_2(mt, "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, groups_item),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, out_loop.index));
+    MIR_reg_t members = emit_call_2(mt, "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, record), MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+    char name[128];
+    snprintf(name, sizeof(name), "%.*s", (int)group->name->len, group->name->chars);
+    set_var(mt, name, emit_unbox(mt, members, LMD_TYPE_ARRAY), MIR_T_P, LMD_TYPE_ARRAY);
+    publish_var_binding(mt, name, group->entry);
+    int64_t part = 1;
+    for (AstGroupKey* key = group->keys; key; key = (AstGroupKey*)key->next, part++) {
+        if (!key->alias || !key->entry) continue;
+        MIR_reg_t value = emit_call_2(mt, "item_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, record), MIR_T_I64, MIR_new_int_op(mt->ctx, part));
+        snprintf(name, sizeof(name), "%.*s", (int)key->alias->len, key->alias->chars);
+        set_var(mt, name, value, MIR_T_I64, LMD_TYPE_ANY);
+        publish_var_binding(mt, name, key->entry);
+    }
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
+    emit_label(mt, out_loop.continue_label);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, out_loop.index),
+        MIR_new_reg_op(mt->ctx, out_loop.index), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, out_loop.loop)));
+    emit_label(mt, out_loop.end);
+    if (mt->loop_depth > 0) mt->loop_depth--;
+    if (!result_demanded) return emit_null_item_reg(mt);
+    return mir_finalize_for_output(mt, for_node, output, keys_arr);
 }
 
 // Joined rows are already materialized as Elements by the join helpers.  A
@@ -17953,25 +18028,8 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, group_rows),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item));
 
-    int key_count = 0;
-    for (AstGroupKey* gk = for_node->group->keys; gk;
-            gk = (AstGroupKey*)gk->next) key_count++;
-    MIR_reg_t group_key_item;
-    if (key_count <= 1) {
-        AstGroupKey* gk = for_node->group->keys;
-        group_key_item = gk && gk->expr ? transpile_box_item(mt, gk->expr)
-            : emit_null_item_reg(mt);
-    } else {
-        MIR_reg_t key_tuple = emit_call_0(mt, "array_plain", MIR_T_P);
-        for (AstGroupKey* gk = for_node->group->keys; gk;
-                gk = (AstGroupKey*)gk->next) {
-            MIR_reg_t boxed_key = transpile_box_item(mt, gk->expr);
-            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
-                MIR_new_reg_op(mt->ctx, key_tuple),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        }
-        group_key_item = emit_box_container(mt, key_tuple);
-    }
+    MIR_reg_t group_key_item = mir_box_key_item(mt, (AstNode*)for_node->group->keys,
+        mir_group_key_expr);
     emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
         MIR_new_reg_op(mt->ctx, group_keys),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
@@ -17985,56 +18043,8 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
     emit_label(mt, collect.end);
     if (mt->loop_depth > 0) mt->loop_depth--;
 
-    MIR_reg_t aliases = emit_call_0(mt, "array_plain", MIR_T_P);
-    for (AstGroupKey* gk = for_node->group->keys; gk;
-            gk = (AstGroupKey*)gk->next) {
-        const char* alias = gk->alias ? gk->alias->chars : "";
-        MIR_reg_t alias_ptr = emit_load_string_literal(mt, alias);
-        MIR_reg_t alias_str = emit_call_1(mt, "heap_create_name", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, alias_ptr));
-        MIR_reg_t alias_item = emit_box_string(mt, alias_str);
-        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
-            MIR_new_reg_op(mt->ctx, aliases),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, alias_item));
-    }
-    MIR_reg_t groups = emit_call_3(mt, "fn_group_by_keys_items", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_rows)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_keys)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, aliases)));
-
-    // Tuple bindings belong only to collection.  Re-open a clean post-group
-    // scope so `into g` cannot accidentally resolve to a stale source name.
-    pop_scope(mt);
-    push_scope(mt);
-    MIR_reg_t groups_item = emit_box_container(mt, groups);
-    MIR_reg_t groups_len = emit_machine_len(mt, groups_item);
-    MirIndexedLoopFrame out_loop = mir_begin_indexed_loop(mt, "jgoutidx");
-    emit_label(mt, out_loop.loop);
-    MIR_reg_t out_cmp = new_reg(mt, "jggoutcmp", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, out_cmp),
-        MIR_new_reg_op(mt->ctx, out_loop.index), MIR_new_reg_op(mt->ctx, groups_len)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, out_loop.end), MIR_new_reg_op(mt->ctx, out_cmp)));
-    MIR_reg_t group_item = emit_call_2(mt, "item_at", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, groups_item),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, out_loop.index));
-    MIR_reg_t group_el = emit_unbox(mt, group_item, LMD_TYPE_ELEMENT);
-    char group_name[128];
-    snprintf(group_name, sizeof(group_name), "%.*s",
-        (int)for_node->group->name->len, for_node->group->name->chars);
-    set_var(mt, group_name, group_el, MIR_T_P, LMD_TYPE_ELEMENT);
-    publish_var_binding(mt, group_name, for_node->group->entry);
-    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
-    emit_label(mt, out_loop.continue_label);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, out_loop.index),
-        MIR_new_reg_op(mt->ctx, out_loop.index), MIR_new_int_op(mt->ctx, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, out_loop.loop)));
-    emit_label(mt, out_loop.end);
-    if (mt->loop_depth > 0) mt->loop_depth--;
-    if (!result_demanded) return emit_null_item_reg(mt);
-    return mir_finalize_for_output(mt, for_node, output, keys_arr);
+    return mir_emit_group_stage(mt, for_node, group_rows, group_keys, result_demanded,
+        output, keys_arr);
 }
 
 static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
@@ -18597,22 +18607,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_rows),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, current_item));
 
-        int key_count = 0;
-        for (AstGroupKey* gk = for_node->group->keys; gk; gk = (AstGroupKey*)gk->next) key_count++;
-        MIR_reg_t group_key_item = 0;
-        if (key_count <= 1) {
-            AstGroupKey* gk = for_node->group->keys;
-            group_key_item = gk && gk->expr ? transpile_box_item(mt, gk->expr)
-                : emit_null_item_reg(mt);
-        } else {
-            MIR_reg_t tuple = emit_call_0(mt, "array_plain", MIR_T_P);
-            for (AstGroupKey* gk = for_node->group->keys; gk; gk = (AstGroupKey*)gk->next) {
-                MIR_reg_t boxed_key = transpile_box_item(mt, gk->expr);
-                emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-            }
-            group_key_item = emit_box_container(mt, tuple);
-        }
+        MIR_reg_t group_key_item = mir_box_key_item(mt, (AstNode*)for_node->group->keys,
+            mir_group_key_expr);
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
 
@@ -18623,82 +18619,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         emit_label(mt, l_end);
         mir_free_loop_keys(mt, src);
 
-        MIR_reg_t aliases_arr = emit_call_0(mt, "array_plain", MIR_T_P);
-        for (AstGroupKey* gk = for_node->group->keys; gk; gk = (AstGroupKey*)gk->next) {
-            const char* alias_chars = gk->alias ? gk->alias->chars : "";
-            MIR_reg_t alias_ptr = emit_load_string_literal(mt, alias_chars);
-            MIR_reg_t alias_str = emit_call_1(mt, "heap_create_name", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, alias_ptr));
-            MIR_reg_t alias_item = emit_box_string(mt, alias_str);
-            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, aliases_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, alias_item));
-        }
-
-        MIR_reg_t groups = emit_call_3(mt, "fn_group_by_keys_items", MIR_T_P,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_rows)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, group_keys)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, aliases_arr)));
-
-        // The row-collection scope ends at group materialization; post-group code may only see `into`.
-        pop_scope(mt);
-        push_scope(mt);
-
-        MIR_reg_t out_idx = new_reg(mt, "goutidx", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out_idx),
-            MIR_new_int_op(mt->ctx, 0)));
-        MIR_reg_t groups_item = emit_box_container(mt, groups);
-        MIR_reg_t groups_len = emit_machine_len(mt, groups_item);
-        MIR_label_t l_out_loop = new_label(mt);
-        MIR_label_t l_out_end = new_label(mt);
-        emit_label(mt, l_out_loop);
-        MIR_reg_t out_cmp = new_reg(mt, "goutcmp", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, out_cmp),
-            MIR_new_reg_op(mt->ctx, out_idx), MIR_new_reg_op(mt->ctx, groups_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_out_end),
-            MIR_new_reg_op(mt->ctx, out_cmp)));
-
-        MIR_reg_t group_item = emit_call_2(mt, "item_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, groups_item),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, out_idx));
-        MIR_reg_t group_el = emit_unbox(mt, group_item, LMD_TYPE_ELEMENT);
-        char group_name[128];
-        snprintf(group_name, sizeof(group_name), "%.*s", (int)for_node->group->name->len, for_node->group->name->chars);
-        set_var(mt, group_name, group_el, MIR_T_P, LMD_TYPE_ELEMENT);
-        publish_var_binding(mt, group_name, for_node->group->entry);
-
-        if (result_demanded) {
-            MIR_reg_t boxed_result = for_node->then
-                ? mir_box_sequence_item(mt, for_node->then) : emit_null_item_reg(mt);
-            emit_call_void_2(mt, "array_push_spread", MIR_T_P,
-                MIR_new_reg_op(mt->ctx, output),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
-        } else if (for_node->then) {
-            transpile_discard_expr(mt, for_node->then);
-        }
-
-        if (has_order && result_demanded) {
-            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            MIR_reg_t boxed_key = transpile_box_item(mt, first_spec->expr);
-            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        } else if (has_order) {
-            // Result demand suppresses key storage, not evaluation of an
-            // order expression whose procedure calls may still have effects.
-            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            transpile_discard_expr(mt, first_spec->expr);
-        }
-
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, out_idx),
-            MIR_new_reg_op(mt->ctx, out_idx), MIR_new_int_op(mt->ctx, 1)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_out_loop)));
-        emit_label(mt, l_out_end);
-
-        if (!result_demanded) {
-            pop_scope(mt);
-            return emit_null_item_reg(mt);
-        }
-
-        MIR_reg_t final_reg = mir_finalize_for_output(mt, for_node, output, keys_arr);
+        MIR_reg_t final_reg = mir_emit_group_stage(mt, for_node, group_rows, group_keys,
+            result_demanded, output, keys_arr);
         pop_scope(mt);
         return final_reg;
     }

@@ -560,16 +560,28 @@ typedef struct AstOrderSpec : AstNode {
     bool descending;    // true if 'desc' or 'descending'
 } AstOrderSpec;
 
+// `order by` specs as fn_order_rows takes them: the spec count, and bit i set
+// when spec i is `desc`. The resolver caps a clause at 63 specs (E239).
+static inline int64_t ast_order_desc_mask(const AstNode* order, int64_t* count) {
+    int64_t mask = 0, n = 0;
+    for (const AstNode* spec = order; spec; spec = spec->next, n++) {
+        if (((const AstOrderSpec*)spec)->descending) mask |= (int64_t)1 << n;
+    }
+    if (count) *count = n;
+    return mask;
+}
+
 typedef struct AstGroupKey : AstNode {
     AstNode *expr;      // grouping key expression
-    String* alias;      // attribute name on the group element
+    String* alias;      // post-group name of the key (`as`, or FC9-inferred)
+    NameEntry* entry;   // post-group binding of the key value (S14.1.1v2)
 } AstGroupKey;
 
 // Group clause: group by expr [as alias], ... into name
 typedef struct AstGroupClause : AstNode {
     AstGroupKey *keys;  // linked list of key specs
     String* name;       // group binding name (from 'into name')
-    NameEntry* entry;   // post-group binding for `into name`
+    NameEntry* entry;   // post-group binding for `into name`: the members array
     int key_count;
 } AstGroupClause;
 

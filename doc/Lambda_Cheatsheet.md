@@ -454,9 +454,9 @@ for (x in [3,1,2] order by x desc) x    // (3,2,1)
 for (x in data limit 5 offset 10) x     // pagination
 for (x in data, let y=x*2
     where y>5 order by y desc limit 3) y
-// g is an <group keys as attrs, members as children>
+// each key is bound by name; g is the array of the group's rows
 for (x in sales group by x.region into g)
-    {region: g.region, n: len(content(g))}
+    {region: region, n: len(g)}
 ```
 
 Joins (`on`): relate comma sources; `?` = left join

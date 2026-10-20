@@ -1059,7 +1059,7 @@ That gap is now closed by `test/lambda/element_content_axes.ls`, which pins both
 
 **Migrated call sites** (`content()` everywhere): `graph/model.ls` `element_children`/`child_items`, `graph/transform/content.ls`, `graph/transform/html.ls`, `editor/mod_edit_schema.ls` `children_array`, and `math/optimize.ls` — where `can_merge` tested `len(a) != 1` meaning *exactly one child*, so a single class attribute silently disabled all span merging. Fixtures using the idiom to express a child walk were migrated the same way rather than re-baselined; only 6 goldens changed, all bare length numbers.
 
-**Still open, and worth a ruling of its own:** a `group by … into g` binds an element whose attributes are the group key, so `len(g)` now counts the key alongside the members and member count must be spelled `len(content(g))`. That is correct under S8.3.1v2 but is an ergonomic wart on the group-by surface.
+**Resolved 2026-10-20 by FC1-B / S14.1.1v2** ([Expr_For_Clauses §6.1](Lambda_Expr_For_Clauses.md#61-keys-are-bindings-the-group-is-an-array-fc1-b)): `into g` now binds an array of the group's rows and each key is bound by name, so `len(g)` is the row count. The note below records the wart as it stood. **Was still open, and worth a ruling of its own:** a `group by … into g` binds an element whose attributes are the group key, so `len(g)` now counts the key alongside the members and member count must be spelled `len(content(g))`. That is correct under S8.3.1v2 but is an ergonomic wart on the group-by surface.
 
 <a id="lr07-16"></a>**LR07-16 · Dynamic calls ignore argument names · FIXED 2026-09-25**
 `fn f(a, b) => a - b; let g = f` then `g(b: 1, a: 5)` returns `-4` on both

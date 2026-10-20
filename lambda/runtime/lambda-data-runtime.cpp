@@ -2197,7 +2197,7 @@ static int group_compare_entry(const void* a, const void* b, void* udata) {
 }
 
 // Impl_Map_Transition_Coverage P3: a runtime-built element of a fixed tag (a
-// group-by group, a join tuple) starts on that tag's root in the runtime shape
+// join tuple) starts on that tag's root in the runtime shape
 // tree, so elements with the same attributes share one type instead of each
 // minting its own. Without a tree it keeps a private type; its tag is a
 // literal, never a raw chars pointer into an otherwise unowned GC String.
@@ -2219,13 +2219,19 @@ void runtime_element_put(Element* element, String* key, Item value) {
     fn_map_set((Item){.element = element}, (Item){.item = s2it(key)}, value);
 }
 
-static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
-    if (alias_count == 1) return key;
+static Item group_key_part(Item key, int64_t index, int64_t key_count) {
+    if (key_count == 1) return key;
     if (get_type_id(key) == LMD_TYPE_ARRAY) return item_at(key, index);
     return ItemNull;
 }
 
-Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count) {
+// S14.1.1v2: bucket the rows by key in first-appearance order (FC4) and return
+// one record per group, `[members, key_1, ..., key_n]`. `members` is a plain
+// array holding every row verbatim -- nulls and strings included -- because a
+// group is not element content: the v1 group element merged string members
+// and dropped null rows (S2.6.2-S2.6.4). A multi-key tuple is split into its
+// parts so each key name binds its own value.
+Array* fn_group_by_keys(Item rows_item, Item keys_item, int64_t key_count) {
     RootFrame roots(7);
     Rooted<Item> rooted_rows_item(roots, rows_item);
     Rooted<Item> rooted_keys_item(roots, keys_item);
@@ -2233,11 +2239,11 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
     Rooted<Array*> rooted_order(roots, (Array*)NULL);
     Rooted<Array*> rooted_member_groups(roots, (Array*)NULL);
     Rooted<Array*> rooted_new_members(roots, (Array*)NULL);
-    Rooted<Element*> rooted_group(roots, (Element*)NULL);
+    Rooted<Array*> rooted_record(roots, (Array*)NULL);
     rooted_out.set(array_plain());
     if (get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(keys_item) != LMD_TYPE_ARRAY ||
-        !aliases || alias_count <= 0 || !active_runtime || !active_runtime->pool) {
-        log_error("group_by_keys: invalid rows/keys/aliases/runtime");
+        key_count <= 0 || !active_runtime || !active_runtime->pool) {
+        log_error("group_by_keys: invalid rows/keys/key count/runtime");
         return rooted_out.get();
     }
 
@@ -2285,61 +2291,18 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         const GroupHashEntry* entry = (const GroupHashEntry*)hashmap_get(table, &probe);
         if (!entry || entry->group_index < 0) continue;
         Item entry_key = entry->key;
-        Array* member_groups = rooted_member_groups.get();
-        Item members_item = member_groups->items[entry->group_index];
-        Array* members = get_type_id(members_item) == LMD_TYPE_ARRAY
-            ? members_item.array : NULL;
-
-        // Runtime group elements contain GC Items. A pool-immortal Element is
-        // invisible to the GC tracer, so later allocations reclaimed its
-        // member values even while the output array retained the Element.
-        Element* group = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
-        group->type_id = LMD_TYPE_ELEMENT;
-        rooted_group.set(group);
-        group = rooted_group.get();
-        group->type = runtime_element_type("group", 5);
-        if (!group->type) return rooted_out.get();
-
-        for (int64_t k = 0; k < alias_count; k++) {
-            String* attr = heap_create_name(aliases[k]);
-            runtime_element_put(rooted_group.get(), attr, group_key_part(entry_key, k, alias_count));
+        rooted_record.set(array_plain());
+        array_push_verbatim(rooted_record.get(),
+            rooted_member_groups.get()->items[entry->group_index]);
+        for (int64_t k = 0; k < key_count; k++) {
+            array_push_verbatim(rooted_record.get(), group_key_part(entry_key, k, key_count));
         }
-        for (int64_t m = 0; members && m < members->length; m++) {
-            // S14.1.1/S2.6.4: group members are element content, so adjacent strings merge.
-            group = rooted_group.get();
-            array_append((Array*)group, members->items[m], active_runtime->pool, NULL);
-        }
-        group = rooted_group.get();
-        array_push_verbatim(rooted_out.get(), (Item){.element = group});
-        rooted_group.set((Element*)NULL);
+        array_push_verbatim(rooted_out.get(), (Item){.array = rooted_record.get()});
+        rooted_record.set((Array*)NULL);
     }
 
     hashmap_free(table);
     return rooted_out.get();
-}
-
-Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item) {
-    RootFrame roots(3);
-    Rooted<Item> rooted_rows(roots, rows_item);
-    Rooted<Item> rooted_keys(roots, keys_item);
-    Rooted<Item> rooted_aliases(roots, aliases_item);
-    if (get_type_id(aliases_item) != LMD_TYPE_ARRAY || !aliases_item.array) {
-        log_error("group_by_keys_items: aliases must be an array");
-        return array_plain();
-    }
-    Array* aliases = rooted_aliases.get().array;
-    const char** alias_names = (const char**)mem_alloc(sizeof(char*) * aliases->length, MEM_CAT_CONTAINER);
-    if (!alias_names) return array_plain();
-    for (int64_t i = 0; i < aliases->length; i++) {
-        aliases = rooted_aliases.get().array;
-        Item alias_item = aliases->items[i];
-        String* str = alias_item.get_safe_string();
-        alias_names[i] = str ? str->chars : "";
-    }
-    Array* result = fn_group_by_keys(rooted_rows.get(), rooted_keys.get(),
-        alias_names, rooted_aliases.get().array->length);
-    mem_free(alias_names);
-    return result;
 }
 
 typedef struct JoinHashEntry {

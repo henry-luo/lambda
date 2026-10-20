@@ -12,8 +12,8 @@ count_args(for (x in [1, 2]) x, 9);
 [for (x in [3, 1, 2] order by (0 - x, 1) desc) x];
 
 // a group key that is a list is one key per row: two groups of two
-[for (x in [1, 2, 3, 4] group by (x % 2, 7) as k into g) len(content(g))];
-[for (x in [1, 2, 3, 4] group by (x % 2, 7) as k into g) len(g.k)];
+[for (x in [1, 2, 3, 4] group by (x % 2, 7) as k into g) len(g)];
+[for (x in [1, 2, 3, 4] group by (x % 2, 7) as k into g) len(k)];
 
 // element-copying transforms keep a list element whole
 len(reverse(args_of(for (x in [1, 2]) x, 5)));

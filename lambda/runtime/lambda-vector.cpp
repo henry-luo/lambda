@@ -175,9 +175,11 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
 // bubble sorts, so a reversed 65,536-element sort took 28 s; equal keys still
 // keep their input order, ascending or descending.
 typedef Item (*SortKeyAt)(const void* ctx, int64_t index);
+// negative when index `a` sorts before index `b`
+typedef int (*SortIndexCmp)(const void* ctx, int64_t a, int64_t b);
 
-static void stable_sort_indices_by_total_order(int64_t* indices, int64_t len,
-        bool descending, SortKeyAt key_at, const void* ctx) {
+static void stable_sort_indices(int64_t* indices, int64_t len, SortIndexCmp cmp,
+        const void* ctx) {
     if (len < 2) return;
     int64_t* tmp = (int64_t*)mem_alloc(len * sizeof(int64_t), MEM_CAT_EVAL);
     for (int64_t width = 1; width < len; width *= 2) {
@@ -186,8 +188,7 @@ static void stable_sort_indices_by_total_order(int64_t* indices, int64_t len,
             int64_t hi = lo + 2 * width < len ? lo + 2 * width : len;
             int64_t i = lo, j = mid, k = lo;
             while (i < mid && j < hi) {
-                int cmp = total_cmp(key_at(ctx, indices[j]), key_at(ctx, indices[i]));
-                bool right_first = descending ? (cmp > 0) : (cmp < 0);
+                bool right_first = cmp(ctx, indices[j], indices[i]) < 0;
                 tmp[k++] = right_first ? indices[j++] : indices[i++];
             }
             while (i < mid) tmp[k++] = indices[i++];
@@ -196,6 +197,24 @@ static void stable_sort_indices_by_total_order(int64_t* indices, int64_t len,
         memcpy(indices, tmp, len * sizeof(int64_t));
     }
     mem_free(tmp);
+}
+
+typedef struct TotalOrderSortCtx {
+    SortKeyAt key_at;
+    const void* ctx;
+    bool descending;
+} TotalOrderSortCtx;
+
+static int total_order_index_cmp(const void* ctx, int64_t a, int64_t b) {
+    const TotalOrderSortCtx* sort = (const TotalOrderSortCtx*)ctx;
+    int cmp = total_cmp(sort->key_at(sort->ctx, a), sort->key_at(sort->ctx, b));
+    return sort->descending ? -cmp : cmp;  // S6.2.3: desc is full reversal
+}
+
+static void stable_sort_indices_by_total_order(int64_t* indices, int64_t len,
+        bool descending, SortKeyAt key_at, const void* ctx) {
+    TotalOrderSortCtx sort = {key_at, ctx, descending};
+    stable_sort_indices(indices, len, total_order_index_cmp, &sort);
 }
 
 // apply a sorted permutation to an Item array in place
@@ -2649,33 +2668,55 @@ Item fn_sort1(Item item) {
     return seq_finish_array({ .array = result });
 }
 
-// sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
-// Keys are compared as doubles; values preserve their original Item type
-static Item sort_key_vector(const void* ctx, int64_t index) {
-    return vector_get(*(const Item*)ctx, index);
+// `order by` keys: one per row, or a tuple of one part per spec when there
+// are several; spec i is reversed when bit i of desc_mask is set (S6.2.3).
+typedef struct OrderKeysCtx {
+    Item keys;
+    int64_t key_count;
+    int64_t desc_mask;
+} OrderKeysCtx;
+
+static int order_keys_cmp(const void* ctx, int64_t a, int64_t b) {
+    const OrderKeysCtx* order = (const OrderKeysCtx*)ctx;
+    Item key_a = vector_get(order->keys, a);
+    Item key_b = vector_get(order->keys, b);
+    if (order->key_count <= 1) {
+        int cmp = total_cmp(key_a, key_b);
+        return (order->desc_mask & 1) ? -cmp : cmp;
+    }
+    // later specs only break ties of earlier ones
+    for (int64_t i = 0; i < order->key_count; i++) {
+        int cmp = total_cmp(vector_get(key_a, i), vector_get(key_b, i));
+        if (cmp) return ((order->desc_mask >> i) & 1) ? -cmp : cmp;
+    }
+    return 0;
 }
 
-void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
-    int64_t len = vector_length(values);
+// Stable sort of a for-expression's rows by their `order by` keys (S6.2).
+// `rows` holds one body value per row, so a body that yields several items
+// moves as a unit; the result spreads each row back into a fresh stream, which
+// keeps the for-expression a list (S2.5.2v2) for the caller to window/finish.
+Array* fn_order_rows(Item rows, Item keys, int64_t desc_mask, int64_t key_count) {
+    RootFrame roots(3);
+    Rooted<Item> rooted_rows(roots, rows);
+    Rooted<Item> rooted_keys(roots, keys);
+    Rooted<Array*> rooted_out(roots, array_spreadable());
+    int64_t len = vector_length(rows);
     int64_t key_len = vector_length(keys);
-    if (len == 0 || key_len == 0) {
-        return;
-    }
     if (len != key_len) {
-        log_error("sort_by_keys: values length %ld != keys length %ld", len, key_len);
-        return;
+        log_error("order_rows: rows length %ld != keys length %ld", len, key_len);
+        key_count = 0;  // keep input order rather than misalign rows and keys
     }
-
-    // build index permutation array; keys stay as Items so sort/order by share total order.
     int64_t* indices = identity_indices(len);
-    stable_sort_indices_by_total_order(indices, len, descending != 0, sort_key_vector, &keys);
-
-    // rearrange values array in-place using the sorted index permutation
-    // values must be an Array (LMD_TYPE_ARRAY) with items pointer
-    permute_items(values.array->items, indices, len);
+    if (key_count > 0) {
+        OrderKeysCtx order = {rooted_keys.get(), key_count, desc_mask};
+        stable_sort_indices(indices, len, order_keys_cmp, &order);
+    }
+    for (int64_t i = 0; i < len; i++) {
+        array_push_spread(rooted_out.get(), vector_get(rooted_rows.get(), indices[i]));
+    }
     mem_free(indices);
-    // the stream keeps its kind: an ordered for-expression is still a list
-    // (S2.5.2v2), finished by the caller
+    return rooted_out.get();
 }
 
 // sort(vec, option) - sort with direction, key function, or options map

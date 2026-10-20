@@ -119,6 +119,7 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_FUNCTION_ARGUMENT_LIMIT, "FUNCTION_ARGUMENT_LIMIT", "Function argument limit exceeded"},
     {ERR_INVALIDATED_BINDING, "INVALIDATED_BINDING", "Binding read follows a hidden cross-frame mutation"},
     {ERR_FILTER_BODY_NO_CURRENT, "FILTER_BODY_NO_CURRENT", "Filter body does not mention ~"},
+    {ERR_FOR_CLAUSE, "FOR_CLAUSE", "Invalid for-header clause"},
 
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},

@@ -2359,6 +2359,34 @@ TEST_F(NegativeScriptTest, SemanticError_FilterBodyWithoutCurrentItem) {
         "error[E238]: filter body must mention `~`");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ForGroupKeyNeedsName) {
+    // FC9/S14.1.2v2: a computed group key gets no generated or empty name
+    ExpectErrorMessage("test/lambda/negative/semantic/for_group_key_name.ls",
+        "error[E239]: group key needs a name: write `as NAME`");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ForGroupKeyNameCollision) {
+    // FC9/S14.1.2v2: key names share the post-group scope with `into`
+    ExpectErrorMessage("test/lambda/negative/semantic/for_group_key_collision.ls",
+        "error[E209]: group key name 'region' is already used in this `group by`");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ForJoinNonEquiOn) {
+    // FC5/S14.1.3: a non-equi `on` is a compile error, never an empty result
+    ExpectErrorMessage("test/lambda/negative/semantic/for_join_non_equi.ls",
+        "error[E239]: join `on` supports only equality tests");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ForClausePlacement) {
+    // S14.1.2v2: row clauses precede `group by`, group clauses follow it, once each
+    const char* script = "test/lambda/negative/semantic/for_clause_placement.ls";
+    ExpectErrorMessage(script, "error[E239]: repeated `where`");
+    ExpectErrorMessage(script, "error[E239]: `where` after `group by`");
+    ExpectErrorMessage(script, "error[E239]: `let` after `group by`");
+    ExpectErrorMessage(script, "error[E239]: `order by`, `limit` and `offset` go after `group by`");
+    ExpectErrorMessage(script, "error[E239]: repeated `limit`");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_SignatureReturnLineStart) {
     ExpectErrorCode("test/lambda/negative/syntax/fn_signature_return_line_start.ls",
         "error[E100]");

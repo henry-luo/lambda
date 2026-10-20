@@ -62,7 +62,7 @@ type Pos3 = int that ~ > 0;
 [type(int) == type, type(1) == type(2), type(1) == type("a")];
 "-- a hash agrees with == --";
 let ts = [(1 | 2), (2 | 1), int, type(5), (int | none), U1, U2, (1 & 2)];
-[for (t in ts group by t into g) len(content(g))];
+[for (t in ts group by t as tk into g) len(g)];
 len(unique(ts));
 "-- LR03-15: a sized arm of a union admits its values --";
 [5u8 is (u8 | string), 5i16 is (i16 | string), 5u8 is u8, 300 is (u8 | string)];
