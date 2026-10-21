@@ -23,13 +23,6 @@ MODULE_DIR="$ROOT/modules/rdb-drivers"
 PG_VERSION=18.6
 PG_TARBALL="postgresql-$PG_VERSION.tar.bz2"
 PG_URL="https://ftp.postgresql.org/pub/source/v$PG_VERSION/$PG_TARBALL"
-PG_MESON_OPTS=(
-    --buildtype=release -Ddefault_library=static -Db_staticpic=true
-    -Dssl=none -Dgssapi=disabled -Dldap=disabled -Dlibcurl=disabled -Dicu=disabled
-    -Dreadline=disabled -Dzlib=disabled -Dlz4=disabled -Dzstd=disabled
-    -Dnls=disabled -Dlibxml=disabled -Dlibxslt=disabled -Dpam=disabled
-    -Dbonjour=disabled -Dselinux=disabled -Dsystemd=disabled -Duuid=none
-)
 
 MARIADB_CC_VERSION=3.3.21
 MARIADB_CC_TARBALL="mariadb-connector-c-$MARIADB_CC_VERSION.tar.gz"
@@ -40,13 +33,6 @@ MARIADB_CC_SHA256=828a1b2d0409d08339051a2cf25fb49e296d835ade8115011baaa5b7857e81
 # The SHA-2 logins need a crypto backend, so the module registers Lambda-side
 # implementations (RDB12); the cleartext-password plugin is off because it
 # would send the password whether or not the bridge guarantees TLS.
-MARIADB_CC_CMAKE_OPTS=(
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    -DWITH_SSL=OFF -DWITH_EXTERNAL_ZLIB=OFF -DWITH_CURL=OFF -DWITH_UNIT_TESTS=OFF
-    -DCLIENT_PLUGIN_DIALOG=OFF -DCLIENT_PLUGIN_AUTH_GSSAPI_CLIENT=OFF
-    -DCLIENT_PLUGIN_REMOTE_IO=OFF -DCLIENT_PLUGIN_MYSQL_CLEAR_PASSWORD=OFF
-    -DCLIENT_PLUGIN_MYSQL_OLD_PASSWORD=OFF -DCLIENT_PLUGIN_CLIENT_ED25519=OFF
-)
 
 mkdir -p "$SRC_DIR" "$BUILD_DIR" "$PREFIX/include" "$PREFIX/lib"
 
@@ -71,15 +57,7 @@ verify "$PG_TARBALL" "$PG_SHA256"
 PG_SRC="$BUILD_DIR/postgresql-$PG_VERSION"
 rm -rf "$PG_SRC"
 tar xjf "$SRC_DIR/$PG_TARBALL" -C "$BUILD_DIR"
-(
-    cd "$PG_SRC"
-    meson setup _build "${PG_MESON_OPTS[@]}" >/dev/null
-    ninja -C _build src/interfaces/libpq/libpq.a \
-        src/common/libpgcommon_shlib.a src/port/libpgport_shlib.a >/dev/null
-    cp _build/src/interfaces/libpq/libpq.a _build/src/common/libpgcommon_shlib.a \
-        _build/src/port/libpgport_shlib.a "$PREFIX/lib/"
-    cp src/interfaces/libpq/libpq-fe.h src/include/postgres_ext.h "$PREFIX/include/"
-)
+python3 "$ROOT/utils/build_dependencies.py" libpq --source "$PG_SRC" --prefix "$PREFIX"
 
 # ── MariaDB Connector/C ───────────────────────────────────────────────
 fetch "$MARIADB_CC_URL" "$MARIADB_CC_TARBALL"
@@ -87,15 +65,7 @@ verify "$MARIADB_CC_TARBALL" "$MARIADB_CC_SHA256"
 CC_SRC="$BUILD_DIR/mariadb-connector-c-$MARIADB_CC_VERSION"
 rm -rf "$CC_SRC"
 tar xzf "$SRC_DIR/$MARIADB_CC_TARBALL" -C "$BUILD_DIR"
-(
-    cd "$CC_SRC"
-    cmake -S . -B _build "${MARIADB_CC_CMAKE_OPTS[@]}" >/dev/null
-    cmake --build _build --target mariadbclient -j8 >/dev/null
-    cp _build/libmariadb/libmariadbclient.a "$PREFIX/lib/"
-    mkdir -p "$PREFIX/include/mariadb/mysql"
-    cp include/*.h _build/include/*.h "$PREFIX/include/mariadb/"
-    cp include/mysql/*.h "$PREFIX/include/mariadb/mysql/"
-)
+python3 "$ROOT/utils/build_dependencies.py" mariadb --source "$CC_SRC" --prefix "$PREFIX"
 ZLIB_VERSION="$(sed -n 's/^#define ZLIB_VERSION "\(.*\)"/\1/p' "$CC_SRC/external/zlib/zlib.h")"
 
 # ── what was built, for the licence gate (§13.8) ─────────────────────
@@ -123,8 +93,8 @@ unmodified from these upstream releases by \`utils/build-rdb-deps.sh\`
 
 ## Build options
 
-- libpq (meson): \`${PG_MESON_OPTS[*]}\`
-- Connector/C (cmake): \`${MARIADB_CC_CMAKE_OPTS[*]}\`
+- libpq: Premake profile \`libpq\` in \`build_deps_config.json\`
+- Connector/C: Premake profile \`mariadb\` in \`build_deps_config.json\`
 
 ## Relinking against a modified Connector/C (LGPL-2.1 section 6)
 

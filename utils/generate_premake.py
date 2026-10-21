@@ -17,6 +17,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from build_config import load_build_config, resolve_source_sets
 
 # Verbosity: progress/DEBUG output is silenced by default so build invocations
 # stay quiet; pass --verbose (-V) to restore it. Real errors and warnings always
@@ -54,11 +55,10 @@ class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None,
                  linux_multiarch_triplet: Optional[str] = None,
                  linux_pkg_config_includes: Optional[List[str]] = None,
-                 target_architecture: Optional[str] = None):
+                 target_architecture: Optional[str] = None, config_data: Optional[Dict[str, Any]] = None):
         """Linux toolchain facts default to probing the host gcc/pkg-config;
         passing them in lets a non-Linux host generate the Linux config for validation."""
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self.config = json.load(f)
+        self.config = copy.deepcopy(config_data) if config_data is not None else load_build_config(config_path)
         # Generated contracts must exist before any project consumes their headers.
         for generator in self.config.get('code_generators', []):
             subprocess.run([sys.executable, generator['script'], *generator.get('args', [])], check=True)
@@ -140,13 +140,7 @@ class PremakeGenerator:
         system = ('windows' if self.use_windows_config else
                   'linux' if self.use_linux_config else 'macos')
         for target in self.config.get('targets', []):
-            for group in target.get('source_sets', []):
-                if system not in group.get('platforms', [system]):
-                    continue
-                if self.target_architecture not in group.get('architectures', [self.target_architecture]):
-                    continue
-                for key in ('source_files', 'includes', 'defines', 'file_rules'):
-                    target.setdefault(key, []).extend(group.get(key, []))
+            resolve_source_sets(target, system, self.target_architecture)
 
     def _resolve_linux_multiarch_paths(self, triplet: Optional[str] = None) -> None:
         """Resolve Debian archive paths for the given triplet, else the native compiler target."""
@@ -704,7 +698,8 @@ class PremakeGenerator:
         # Parse language and standard
         if lang.startswith('c++'):
             return "C++", lang, True
-        elif lang.startswith('c') and lang[1:].isdigit():
+        elif (lang.startswith('c') and lang[1:].isdigit()) or \
+                (lang.startswith('gnu') and lang[3:].isdigit()):
             return "C", lang, False
         else:
             # Fallback: detect from source files if target provided
@@ -1485,12 +1480,12 @@ class PremakeGenerator:
             f'    kind "{kind}"',
             f'    language "{final_language}"',
             f'    targetdir "{lib.get("target_dir", "build/lib")}"',
-            '    objdir "build/obj/%{prj.name}"',
+            f'    objdir "{lib.get("obj_dir", "build/obj/%{prj.name}")}"',
             '    ',
         ])
         self.premake_content.extend(self._static_lib_rebuild_lines(kind))
         if link_type == 'executable':
-            self.premake_content.append('    targetextension ".exe"')
+            self.premake_content.append(f'    targetextension "{lib.get("target_extension", ".exe")}"')
             self.premake_content.append('    ')
 
         target_name = lib.get('target_name')

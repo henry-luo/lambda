@@ -6,6 +6,7 @@ set -e
 
 SCRIPT_DIR="$(pwd)"
 source "$SCRIPT_DIR/utils/setup_thorvg.sh"
+source "$SCRIPT_DIR/utils/setup_build_deps.sh"
 DEPS_DIR="win-native-deps"
 
 # Detect MSYS2 environment
@@ -125,8 +126,6 @@ echo "Selected toolchain: $COMPILER_NAME"
 # Core build tools
 install_msys2_package "base-devel" "Base development tools (make, autotools, etc.)"
 install_msys2_package "$COMPILER_PACKAGE" "C/C++ compiler"
-install_msys2_package "${TOOLCHAIN_PREFIX}-cmake" "CMake build system"
-install_msys2_package "${TOOLCHAIN_PREFIX}-ninja" "Ninja build system"
 
 # Compiler cache for faster rebuilds
 install_msys2_package "ccache" "Compiler cache (dramatically speeds up rebuilds)"
@@ -141,7 +140,7 @@ if ! install_msys2_package "${TOOLCHAIN_PREFIX}-premake" "Premake5 build system 
     fi
 fi
 
-# Note: pkgconf is already installed as a dependency of cmake, no need for separate pkg-config
+install_msys2_package "${TOOLCHAIN_PREFIX}-pkgconf" "Library discovery"
 
 # Essential libraries for Lambda
 echo ""
@@ -172,7 +171,6 @@ install_msys2_package "curl" "curl for downloading"
 install_msys2_package "wget" "wget for downloading"
 
 # ThorVG build dependencies
-install_msys2_package "${TOOLCHAIN_PREFIX}-meson" "Meson build system (for ThorVG)"
 install_msys2_package "${TOOLCHAIN_PREFIX}-pkgconf" "pkg-config tool"
 
 # Node.js (needed for tree-sitter parser generation)
@@ -832,10 +830,10 @@ build_thorvg() {
         # Use v1.0-pre34 for latest features and TTF loader support
         if ! git clone --depth 1 --branch v1.0-pre34 https://github.com/thorvg/thorvg.git; then
             echo "Warning: Could not clone ThorVG repository"
-            cd - > /dev/null
+            cd "$SCRIPT_DIR"
             return 1
         fi
-        cd - > /dev/null
+        cd "$SCRIPT_DIR"
         THORVG_SRC="$DEPS_DIR/src/thorvg"
     fi
 
@@ -864,46 +862,9 @@ build_thorvg() {
         export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
         export CXXFLAGS="-O2 -std=c++17 -DNDEBUG -D_WIN32 -DWINDOWS"
 
-        # Clean previous builds
-        rm -rf builddir 2>/dev/null || true
-
-        # Configure ThorVG with Meson
-        # CRITICAL: Build with ONLY SW engine (no GL) to avoid OpenGL symbol conflicts
-        # The GL engine includes GLAD which defines GL functions as global variables,
-        # causing bus errors at runtime when system OpenGL tries to use them.
-        echo "Configuring ThorVG with Meson (SW engine only)..."
-        if ! meson setup builddir \
-            --prefix="$SCRIPT_DIR/$DEPS_DIR" \
-            --buildtype=plain \
-            --default-library=static \
-            -Dengines=sw \
-            -Dloaders=svg,ttf,lottie \
-            -Dsavers= \
-            -Dbindings=capi \
-            -Dtools= \
-            -Dtests=false \
-            -Dsimd=true \
-            -Dthreads=true; then
-            echo "Error: ThorVG meson configuration failed"
-            cd - > /dev/null
-            return 1
-        fi
-
-        # Build ThorVG
-        echo "Building ThorVG v1.0-pre34 (this may take a few minutes)..."
-        if ! ninja -C builddir; then
-            echo "Error: ThorVG build failed"
-            cd - > /dev/null
-            return 1
-        fi
-
-        # Install ThorVG
-        echo "Installing ThorVG to win-native-deps..."
-        if ! ninja -C builddir install; then
-            echo "Error: ThorVG installation failed"
-            cd - > /dev/null
-            return 1
-        fi
+        local source_path="$(pwd)"
+        cd "$SCRIPT_DIR"
+        build_premake_dependency thorvg "$source_path" "$SCRIPT_DIR/$DEPS_DIR" || return 1
 
         # Verify installation
         if [ -f "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" ] && [ -f "$SCRIPT_DIR/$DEPS_DIR/include/thorvg.h" ]; then
@@ -915,21 +876,21 @@ build_thorvg() {
                     echo "✅ ThorVG v1.0-pre34 built and installed successfully"
                     echo "   - Text API: ✓ Available"
                     echo "   - GL symbols: ✓ None (no conflicts)"
-                    cd - > /dev/null
+                    cd "$SCRIPT_DIR"
                     return 0
                 else
                     echo "❌ ThorVG contains GL symbols (should not happen with sw-only build)"
-                    cd - > /dev/null
+                    cd "$SCRIPT_DIR"
                     return 1
                 fi
             else
                     echo "❌ ThorVG text API or Lottie loader not available"
-                cd - > /dev/null
+                cd "$SCRIPT_DIR"
                 return 1
             fi
         fi
 
-        cd - > /dev/null
+        cd "$SCRIPT_DIR"
         return 0
     else
         echo "Error: ThorVG source directory not found"
@@ -994,7 +955,7 @@ fi
 # Check other tools
 echo ""
 echo "Verifying build tools..."
-tools=("make" "cmake" "ninja" "git" "pkg-config" "premake5" "meson")
+tools=("make" "git" "pkg-config" "premake5")
 for tool in "${tools[@]}"; do
     if command_exists "$tool"; then
         version=$($tool --version 2>/dev/null | head -1 || echo "version unknown")
@@ -1082,7 +1043,7 @@ echo "For release build:"
 echo "  make build-release"
 echo ""
 echo "Dependencies installed:"
-echo "  ✅ Build tools (make, cmake, ninja, premake5, meson)"
+echo "  ✅ Build tools (make, premake5)"
 echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
 echo "  ✅ ccache (compiler cache for 5-30x faster rebuilds)"
 echo "  ✅ mpdecimal (multi-precision decimal arithmetic)"

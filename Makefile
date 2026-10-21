@@ -970,6 +970,17 @@ build-node-crypto: build build-windows-host-import
 build-rdb-deps:
 	utils/build-rdb-deps.sh
 
+.PHONY: build-dependency build-typemeta-extract test-build-dependencies
+build-dependency:
+	@test -n "$(DEP)" || { echo "Usage: make build-dependency DEP=thorvg [ARGS=...]"; exit 1; }
+	$(PYTHON) utils/build_dependencies.py $(DEP) --jobs $(JOBS) $(ARGS)
+
+build-typemeta-extract:
+	$(PYTHON) utils/build_dependencies.py typemeta-extract --jobs $(JOBS) $(ARGS)
+
+test-build-dependencies:
+	$(PYTHON) utils/test_build_deps.py
+
 build-rdb-drivers: build
 	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
 	@echo "Building external rdb-drivers Jube module..."

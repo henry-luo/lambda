@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from build_config import load_build_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,15 +83,7 @@ def dependency_archives(config, profile, tools, env, build, jobs):
                             f'-j{jobs}', dependency['make_target']],
                            log, dep_env, source)
             else:
-                destination = build / name
-                flags = ' '.join(profile['flags'])
-                run_logged([str(tools / 'emcmake'), 'cmake', '-S',
-                            str(ROOT / dependency['cmake_source']), '-B',
-                            str(destination), '-DCMAKE_BUILD_TYPE=MinSizeRel',
-                            f'-DCMAKE_C_FLAGS={flags}', f'-DCMAKE_CXX_FLAGS={flags}',
-                            *dependency.get('cmake_flags', [])], log, env)
-                run_logged(['cmake', '--build', str(destination),
-                            '--parallel', str(jobs)], log, env)
+                raise RuntimeError(f'no source build recipe for WASM dependency {name}')
         archives.append(str(archive))
     return archives, extra_sources
 
@@ -120,7 +113,7 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
-    config = json.loads((ROOT / 'build_lambda_config.json').read_text())
+    config = load_build_config(ROOT / 'build_lambda_config.json')
     profile = config['platforms']['lambda-wasm']
     compiler = compiler_path()
     if not compiler.is_file():
