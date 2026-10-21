@@ -251,3 +251,65 @@ button { font: inherit; color: inherit; }
 .bk-bar select { min-width: 140px; }
 /* a leaf seen in perspective rises past the book: keep the bars above it */
 .bk-bar, .bk-bar-spreads { position: relative; z-index: 2; }
+
+/* toolbar creations shown as icons */
+.pill.icon-only { padding: 0 9px; }
+
+/* memories film: a player without controls over the album's film bar */
+.film-layer { position: fixed; inset: 0; z-index: 35; flex-direction: column; background: #000; color: #f2f2f7; }
+.film-host { flex: 1; min-height: 0; overflow: hidden; background: #000; }
+.film-stage .slide-player:focus { outline: none; }
+#film-sound[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); color: #f2f2f7; }
+#film-sound[aria-pressed="false"] { background: transparent; opacity: 0.45; }
+.film-bar { display: flex; align-items: center; gap: 14px; height: 64px; padding: 0 20px; background: #1b1c1f; border-top: 1px solid #2c2d31; }
+.film-play { display: flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px; border: 0; border-radius: 20px;
+  background: #0a84ff; color: #fff; cursor: pointer; }
+.film-play:hover { background: #409cff; }
+.film-play .film-play-icon { display: flex; }
+.film-play .film-pause-icon, #film[data-playing="true"] .film-play .film-play-icon { display: none; }
+#film[data-playing="true"] .film-play .film-pause-icon { display: flex; }
+.film-time { flex: none; min-width: 40px; color: #a1a1a6; font-size: 13px; font-variant-numeric: tabular-nums; }
+.film-scrub { position: relative; flex: 1; height: 64px; }
+/* a 22 px hit area around a 6 px rail */
+.film-track { position: absolute; left: 0; right: 0; top: 10px; height: 22px; cursor: pointer;
+  background: linear-gradient(transparent 8px, rgba(255, 255, 255, 0.18) 8px, rgba(255, 255, 255, 0.18) 14px, transparent 14px); }
+.film-track:focus { outline: none; }
+.film-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: linear-gradient(transparent 8px, #0a84ff 8px, #0a84ff 14px, transparent 14px); }
+.film-thumb { position: absolute; left: 0; top: 4px; width: 14px; height: 14px; margin-left: -7px; border-radius: 7px;
+  background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+.film-ticks { position: absolute; left: 0; right: 0; top: 34px; height: 22px; }
+.film-chapter { position: absolute; top: 0; height: 20px; max-width: 160px; overflow: hidden; padding: 0 0 0 6px; border: 0;
+  border-left: 2px solid rgba(255, 255, 255, 0.35); background: transparent; color: #a1a1a6; font: inherit; font-size: 11px;
+  white-space: nowrap; text-align: left; cursor: pointer; }
+.film-chapter:hover, .film-chapter[aria-current="true"] { color: #fff; }
+.film-chapter[aria-current="true"] { border-left-color: #0a84ff; }
+
+/* places: a map over the grid with its pins and the chosen pin's photos */
+.places { position: absolute; inset: 0; z-index: 6; background: var(--bg); }
+.places-map { position: relative; flex: 1; min-width: 0; overflow: hidden; background: #dde6ee; }
+.places-view, .places-view geomap { display: block; }
+.places-view [data-map-host] { position: relative; }
+/* lambda.map's navigation buttons, floated over the map */
+.places-view [data-map-host] > [role="group"] { position: absolute; top: 12px; left: 12px; display: flex; gap: 4px; }
+.places-view [data-map-action] { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 7px;
+  background: rgba(255, 255, 255, 0.92); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.places-view [data-map-action]:hover { background: #fff; }
+.places-panel { display: flex; flex-direction: column; flex: none; width: 300px; overflow: hidden; border-left: 1px solid var(--line); background: var(--panel); }
+.places-detail { max-height: 58%; overflow: auto; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.places-hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.places-title { margin: 0 0 4px; font-size: 15px; }
+.places-meta { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.places-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.places-photo { height: 84px; padding: 0; overflow: hidden; border: 0; border-radius: 4px; cursor: pointer; }
+.places-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.places-heading { margin: 12px 16px 6px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.places-list { flex: 1; overflow: auto; padding: 0 8px 12px; }
+/* a grid row: a nowrap name inside a live flex row is a known paint gap (M3 checkpoint) */
+.place { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 6px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; line-height: 18px;
+  text-align: left; cursor: pointer; }
+.place:hover { background: #eef0f3; }
+.place[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
+.place small { color: var(--muted); }
+.place-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

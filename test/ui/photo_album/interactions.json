@@ -189,7 +189,9 @@
     {
       "type": "dblclick",
       "target": {
-        "selector": "#tile-1"
+        "selector": "#tile-1",
+        "offset_x": 120,
+        "offset_y": 20
       }
     },
     {

@@ -1,0 +1,39 @@
+{
+  seconds: 97,
+  about_ninety: true,
+  chapters: [["2019–2020", 9, 6, ["Cities"]], ["2021–2022", 13, 46, ["Cities"]], ["2023–2024", 12, 102, ["Cities"]], ["2025–2026", 6, 146, ["Cities"]]],
+  shots: {
+    single: 36,
+    split: 0,
+    quick: 4,
+    chapter: 4
+  },
+  motions: [["title", "zoom", "cut", 6], ["chapter", "none", "fade", 4], ["single", "pan-right", "morph", 4], ["single", "zoom", "fade", 4], ["single", "pan-left", "push", 4], ["single", "pan-right", "fade", 4], ["single", "zoom", "fade", 4], ["single", "pan-left", "fade", 4], ["single", "pan-right", "fade", 4], ["single", "zoom", "push", 4], ["single", "pan-left", "fade", 4], ["chapter", "none", "fade", 4], ["single", "zoom", "morph", 4], ["single", "pan-left", "fade", 4]],
+  every_photo_once: true,
+  chronological: true,
+  quick_runs_cut: true,
+  chapter_openers_morph: true,
+  deck_on_beats: true,
+  deck_duration: true,
+  credits: ["credits", 40],
+  small: [29, ["title", "chapter", "single", "single", "single", "credits"]],
+  score: {
+    seconds: 97,
+    same_length: true,
+    sorted: true,
+    notes: 664,
+    channels: [0, 1, 2, 3, 9],
+    within: true,
+    chapter_downbeats: true
+  },
+  snapshots: [true, true, {
+      slide: 9,
+      cue: 0,
+      time_ms: 750
+    }, {
+      slide: 45,
+      cue: 0,
+      time_ms: 9500
+    }],
+  clock: ["0:00", "1:05", "10:00"]
+}

@@ -1,0 +1,18 @@
+{
+  located: [12, 836],
+  bounds: [-3, 40, 41, 62],
+  fixture_bands: [[5, 5, 2], [1, 2, 1, 1, 1, 2, 2, 2], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  world_pins: [27, 109, 274, 519, 644],
+  partitions: [true, true],
+  nested: true,
+  library_order: true,
+  features: [4231, {
+      count: 3,
+      zmin: 0,
+      zmax: 1
+    }],
+  biggest: [313, "313 photos · 46.6° N, 4.7° E"],
+  single: "Morning ridge",
+  band_of: [0, 3, 11],
+  outline: [29, true]
+}

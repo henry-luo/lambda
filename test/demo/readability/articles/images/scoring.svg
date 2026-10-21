@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" width="640" height="300" font-family="Menlo, Consolas, monospace">
+  <rect width="640" height="300" fill="#f4f7fb"/>
+  <g stroke="#9aaabb" stroke-width="2" fill="none">
+    <path d="M320 58 L170 118"/><path d="M320 58 L470 118"/>
+    <path d="M170 146 L80 206"/><path d="M170 146 L170 206"/><path d="M170 146 L260 206"/>
+    <path d="M470 146 L410 206"/><path d="M470 146 L530 206"/>
+  </g>
+  <g stroke="#2e8a57" stroke-width="3" fill="none" stroke-dasharray="6 5">
+    <path d="M88 200 L158 150"/><path d="M170 200 L170 152"/><path d="M252 200 L182 150"/>
+  </g>
+  <rect x="270" y="30" width="100" height="30" rx="6" fill="#dfe6ee"/>
+  <text x="320" y="50" text-anchor="middle" font-size="13" fill="#3a4a5c">body</text>
+  <rect x="96" y="116" width="148" height="32" rx="6" fill="#2e8a57"/>
+  <text x="170" y="137" text-anchor="middle" font-size="13" fill="#fff">div.post  58.4</text>
+  <rect x="396" y="116" width="148" height="32" rx="6" fill="#d9dee5"/>
+  <text x="470" y="137" text-anchor="middle" font-size="13" fill="#59687a">nav.toc  0.6</text>
+  <g font-size="12" text-anchor="middle">
+    <rect x="44" y="204" width="72" height="28" rx="5" fill="#cfe9d9"/><text x="80" y="223" fill="#1d5e3a">p  +5</text>
+    <rect x="134" y="204" width="72" height="28" rx="5" fill="#cfe9d9"/><text x="170" y="223" fill="#1d5e3a">p  +7</text>
+    <rect x="224" y="204" width="72" height="28" rx="5" fill="#cfe9d9"/><text x="260" y="223" fill="#1d5e3a">p  +4</text>
+    <rect x="374" y="204" width="72" height="28" rx="5" fill="#eceff3"/><text x="410" y="223" fill="#7b8898">a</text>
+    <rect x="494" y="204" width="72" height="28" rx="5" fill="#eceff3"/><text x="530" y="223" fill="#7b8898">a</text>
+  </g>
+  <g font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#3a4a5c">
+    <text x="40" y="270">Paragraphs push their scores to parents and grandparents.</text>
+    <text x="40" y="288">Link density scales the navigation down to almost nothing.</text>
+  </g>
+</svg>

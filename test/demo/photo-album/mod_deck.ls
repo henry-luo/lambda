@@ -31,7 +31,7 @@ fn step(lib, ids, i, n) {
 
 pub fn plan(lib, ids) => [{kind:"title", ids:slice(ids, 0, 1)}, *step(lib, slice(ids, 0, MAX_PHOTOS), 0, 1), {kind:"credits", ids:slice(ids, 0, MAX_PHOTOS)}]
 
-fn years(lib, ids) {
+pub fn years(lib, ids) {
     let ys = [for (id in ids) L.photo(lib, id).year]
     let lo = min(ys)
     let hi = max(ys);
@@ -40,10 +40,10 @@ fn years(lib, ids) {
 
 fn place(lib, p) => join([for (part in [L.album_name(lib, p), L.location_label(p)] where part != "") part], " · ")
 
-// a photo, or its average colour when the file is not downloaded
-fn picture(p, id, box, prefix, fit, morph = null) => if (p.has_photo)
+// a photo, or its average colour when the file is not downloaded; the film also uses it
+pub fn picture(p, id, box, prefix, fit, morph = null, style = null) => if (p.has_photo)
     <image id:id, src:prefix ++ "photos/" ++ p.file, x:box[0], y:box[1], width:box[2], height:box[3], fit:symbol(fit),
-        *:(if (morph != null) {morph_id:morph} else {})>
+        *:(if (morph != null) {morph_id:morph} else {}), *:(if (style != null) {style:style} else {})>
     else <shape id:id, kind:'rect', x:box[0], y:box[1], width:box[2], height:box[3], fill:p.color or "#444444",
         *:(if (morph != null) {morph_id:morph} else {})>
 

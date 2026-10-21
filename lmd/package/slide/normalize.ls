@@ -7,12 +7,12 @@ import compose: .compose
 
 pub fn compile(deck, options = {}) map^ {
     let checked_options = if (not (options is map)) raise c.fail("options", "expected map")
-    let checked_options_attrs = c.attributes(options, ["instance", "width", "height", "base_uri", "reduced_motion", "autostart", "autoplay_dwell_ms", "ui"], "options")^;
+    let checked_options_attrs = c.attributes(options, ["instance", "width", "height", "base_uri", "reduced_motion", "autostart", "autoplay_dwell_ms", "ui", "controls"], "options")^;
     let checked_options_ui = themes.ui_style(options.ui, "options.ui")^;
     let checked_options_numbers = c.numbers(options, ["width", "height", "autoplay_dwell_ms"], true, "options")^;
     let checked_instance = if (options.instance != null and not c.instance_id(options.instance)) raise c.fail("options", "invalid instance ID")
     let checked_base = if (options.base_uri != null and not (options.base_uri is string)) raise c.fail("options", "base_uri must be string")
-    let checked_flags = if (any([for (key in ["reduced_motion", "autostart"] where options[key] != null) not (options[key] is bool)]))
+    let checked_flags = if (any([for (key in ["reduced_motion", "autostart", "controls"] where options[key] != null) not (options[key] is bool)]))
         raise c.fail("options", "player flags must be bool")
     let guard_1 = if (not (deck is element) or name(deck) != 'presentation') raise c.fail("deck", "expected presentation element")
     // autostart/reduced_motion/autoplay_dwell_ms are presenter defaults for .slides decks

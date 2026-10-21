@@ -630,9 +630,9 @@ TEST(UrlSafetyRegression, NormalizePathStaysNulTerminatedInCapacity) {
         EXPECT_EQ((unsigned char)g.after[i], 0xAAu) << "overflow at after[" << i << "]";
 }
 
-// H5: reconstructing href for a path longer than the 4096-byte href_buf must clamp,
-// not run the snprintf cursor past the buffer end.
-TEST(UrlSafetyRegression, HrefReconstructionClampsVeryLongPath) {
+// H5: reconstructing href for a very long path must neither overflow nor truncate:
+// the buffer is sized from the components (long data: URLs are ordinary).
+TEST(UrlSafetyRegression, HrefReconstructionKeepsVeryLongPath) {
     char longurl[6000];
     int n = snprintf(longurl, sizeof(longurl), "http://h/");
     memset(longurl + n, 'a', 5000);
@@ -640,6 +640,8 @@ TEST(UrlSafetyRegression, HrefReconstructionClampsVeryLongPath) {
 
     Url* url = url_parse(longurl);          // must not overflow / crash
     ASSERT_NE(url, nullptr);
-    if (url->href) EXPECT_LT(url->href->len, 4096u);   // clamped within href_buf
+    ASSERT_NE(url->href, nullptr);
+    EXPECT_EQ(url->href->len, (size_t)(n + 5000));
+    EXPECT_STREQ(url->href->chars, longurl);
     url_destroy(url);
 }

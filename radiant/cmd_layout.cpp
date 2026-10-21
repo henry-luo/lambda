@@ -4893,6 +4893,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         return;
     }
 
+    // Imperative DOM writes made earlier in this handler turn (e.g. set_inner_html
+    // after a nested dispatch re-rendered another view) are pending in the mutation
+    // ledger. The splice below cascades only the template subtrees, yet resets that
+    // ledger at the end, so commit those writes first or they never get their cascade.
+    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
+
     bool can_incremental = (doc->element_dom_map != nullptr) &&
                            (doc->root != nullptr) &&
                            (result_count > 0);
