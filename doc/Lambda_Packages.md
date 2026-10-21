@@ -35,6 +35,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 19. [doc.ebook — EPUB reader](#19-docebook--epub-reader)
 20. [doc.diff — Git and patch review](#20-docdiff--git-and-patch-review)
 21. [doc.readability — Article extraction](#21-docreadability--article-extraction)
+22. [scene3d.motion — Character animation](#22-scene3dmotion--character-animation)
 
 ---
 
@@ -55,6 +56,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
+| `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda demo scene3d` |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
@@ -2011,3 +2013,34 @@ article.html   // the article as HTML; article.content is the same as an element
 `readerable(source, {min_content_length: 140, min_score: 20})` accepts the same thresholds as `isProbablyReaderable`. Design, fidelity rules and limits: [Lambda_Pkg_Readability.md](../vibe/Lambda_Pkg_Readability.md).
 
 `./lambda.exe demo readability` shows both functions at work: a browser window whose reader icon swaps each page for its extracted article ([demo guide](../test/demo/readability/README.md)).
+
+## 22. scene3d.motion — Character animation
+
+`lambda.scene3d.motion` turns rigged characters and motion capture into animated `<scene3d>` content. FBX (binary 7.1–7.7 and ASCII 7.x) and BVH files convert once into a renderer-independent `<character>` element: a skeleton of named joints with rest poses and VRM 1.0 humanoid roles, baked clips whose channels name joints, and an optional skinned body in character space (metres, Y-up, +Z forward). Clips therefore move between characters by joint name or role. Every function except playback is pure (S12.1.1v3); a `<motion-controller>` hands playback to Radiant.
+
+```lambda no-run
+import s: lambda.scene3d
+import motion: lambda.scene3d.motion
+
+let hero = motion.load("hero.fbx", {rig: 'mixamo'})^
+let walk = motion.load("walk.bvh", {rig: 'cmu', scale: 0.01})^
+let rigged = motion.attach(hero, {walk: motion.in_place(walk)^})^
+let group = motion.scene(rigged, {id: "hero"})^
+s.scene([s.camera({id: "cam", position: [0.0, 1.4, 4.0]}), s.light('ambient'),
+    motion.control(group, [motion.motion_state('walk', "walk")], {state: 'walk'})^], {camera: "cam"})
+```
+
+| Function | Purpose |
+|---|---|
+| `load(source, options)` | `input(source, {type: 'character'})` plus `format`, `scale` (to metres), `up` (`'y'` or `'z'`), `rig` and `clip` (keep one clip) |
+| `validate(character)` | The schema types plus unique joints, roles and clip names, key counts and skin indices |
+| `humanoid(character, rig)` | Roles from the `'mixamo'`, `'cmu'` or `'vrm'` profile, or a `{joint: role}` map |
+| `attach(character, {name: source})` | Adds each source's first clip under `name`: copied when rest rotations match, otherwise retargeted; root motion scales by leg length |
+| `retarget(clip, from, to, options)` | Transfers each joint's world rotation change from rest; `rest_frame` lets a key stand in for the source rest pose |
+| `in_place(character, axes)`, `mirror(character)`, `trim(character, from, to)` | Hold the root's horizontal translation, swap sides and reflect across the YZ plane, or keep a span of keys rebased to 0 |
+| `pose(character, clip, key)` | Each joint's world matrix at a key, or at rest |
+| `mannequin(character, options)` | A skinned bone figure for a bodiless skeleton such as BVH |
+| `scene(character, options)` | A `<group>` with a skeleton, body meshes and one `<animation-clip>` per clip (`id`, `transform`, `autoplay`) |
+| `control(group, states, options)`, `motion_state(name, clip, options)` | A `<motion-controller>`: the template requests `state` and `cue`; Radiant crossfades, follows `next` after a `once` state and fires `statechange` |
+
+`input(x.fbx)` and `input(x.bvh)` also give the raw `<fbx>` record tree and the `<bvh>` hierarchy and motion matrix. Limits: 1,024 joints and clips per character, 256 bones per rendered skeleton and 1,024 tracks per clip. FBX conversion follows profile 1 (Mixamo- and Blender-style files); blend shapes, constraints, cameras, lights and extra animation layers are omitted with warnings, and inheritance other than RSrs is an error. Design and acceptance: [Lambda_Pkg_Motion.md](../vibe/Lambda_Pkg_Motion.md); implementation record: [Lambda_Impl_Motion.md](../vibe/impl/Lambda_Impl_Motion.md).
