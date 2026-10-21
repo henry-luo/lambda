@@ -27,7 +27,7 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 - **`attach` copies within one rig.** Kenney's jump file carries its own posed rest, so "same rest rotations" sent a same-rig clip to retargeting. One rig is now recognised by bone-offset directions (three bones in four, ignoring short control bones); the copy path keeps translations, scaled by the median bone-length ratio, and holds rest values the clip omits. Genuinely different local frames (the generated `twisted.fbx`) still retarget.
 - **Joint matching (§8.3 step 1).** Matching by name before role paired CMU `Spine` (chest) with Mixamo `Spine` (spine). Roles now win wherever both joints are tagged; names remain the fallback. Recorded in the proposal's Appendix C.
 - **`state` is a reserved word** in Lambda, so the state constructor is `motion.motion_state`, named after its element.
-- **Template re-renders rebuild their DOM subtree.** The proposal assumed a regenerated `<scene3d>` keeps its nodes. Radiant replaces a view's result subtree and preserves state through `*_follow_rebuild` hooks; `scene3d_follow_rebuild` now carries the entry, its GL context and its playback to the corresponding viewport, and invalidates the cached mutation epoch so the next compile reconciles. The animation source hash now covers content only; bindings still require their bone and mesh nodes to stay connected, so a structurally different rebuild restarts playback as before.
+- **Template re-renders rebuild their DOM subtree.** The proposal assumed a regenerated `<scene3d>` keeps its nodes. Radiant replaces a view's result subtree and preserves state through `*_follow_rebuild` hooks; `scene3d_follow_rebuild` now carries the entry, its GL context, its playback and its physics world to the corresponding viewport, and invalidates the cached mutation epoch so the next compile reconciles. The animation source hash now covers content only; bindings still require their bone and mesh nodes to stay connected, so a structurally different rebuild restarts playback as before.
 - **Event-sim `update` and `seek`** act on the last compiled scene. The live host compiles before every frame; the controller fixture takes a `snapshot` after each click to do the same.
 - **The mixer still capped clips at 256 tracks** after M0 raised the scene parser to 1,024; M5 raised the mixer to match.
 - **Euler subdivision** splits an interval while the sum of its three axis changes reaches 180°, which bounds the composite rotation below half a turn (stricter than the proposal's per-axis 180°).
@@ -53,7 +53,6 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 
 - **Mixamo.** The local-only check against downloaded Mixamo characters and clips still needs those files.
 - **`FBXLoader` differences.** Three.js keys every curve linearly and re-slerps Euler turns, so it differs from ufbx and the converter on constant steps, cubic keys and long Euler turns; `motion_oracle.ls` records where.
-- **Physics across template rebuilds.** `scene3d_follow_rebuild` carries animation, not `Scene3dPhysics`, which is still recreated when a view re-renders.
 - **Package import warnings.** Importing `lambda.scene3d.motion` logs shadow-lint warnings for `load` (as `lambda.scene3d.asset` already does).
 - **Later stages** remain as listed in the proposal's §12.
 

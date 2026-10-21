@@ -854,7 +854,7 @@ void scene3d_collect(DomDocument* document) {
     }
 }
 // a template re-render replaces the scene's DOM subtree; the entry, its GL
-// context and its playback follow the structurally corresponding viewport
+// context, its playback and its physics world follow the structurally corresponding viewport
 void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root) {
     Scene3dRegistry* registry=scene3d_registry(document,false);
     if (!registry || !old_root || !new_root || old_root==new_root) return;
@@ -864,6 +864,7 @@ void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* n
         if (!replacement || !replacement->is_element() || !scene3d_tag(replacement->as_element(),"scene3d")) continue;
         entry->root=dom_node_ref(replacement); entry->mutation_epoch=UINT64_MAX;
         scene3d_animation_follow_rebuild(entry->animation,old_root,new_root);
+        scene3d_physics_follow_rebuild(entry->physics,old_root,new_root);
     }
 }
 void scene3d_release_subtree(DomNode* root) {

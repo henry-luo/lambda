@@ -35,7 +35,10 @@ Topology is fixed after creation. Core commands cover forces/impulses,
 velocities, teleports, gravity, wake and kinematic targets. Persistent forces,
 object insertion/removal and material edits are later command extensions.
 Structural scene changes currently recreate the world; appearance/camera
-changes preserve matching physical descriptions.
+changes preserve matching physical descriptions. A template re-render that rebuilds
+the scene's DOM carries the world to the corresponding nodes and keeps it while
+the authored physics is unchanged; changed authored physics restarts it
+(**S12.1.5v2**).
 
 Presentation currently uses completed tick poses. Interpolated poses,
 tick-sampled kinematic animation, refined edit preservation, checkpoint/replay,
@@ -76,6 +79,17 @@ collision geometry retained the correct orientation. The adapter and authored
 quaternion path now share one conversion helper. A native test compares
 rendered axes to the independent vector rotation used by collision detection,
 both initially and after stepping (**S12.1.5v2**).
+
+A template re-render (2026-10-21) rebuilds the scene's DOM without bumping
+the document's mutation epoch, so the world kept matching its old description
+while its bindings still named the freed nodes: presented poses missed the new
+nodes, contact events lost their target, and authored changes from the template
+never reached the world. `scene3d_physics_follow_rebuild` now moves the root
+and every binding to the structurally corresponding node, as the scene's
+animation already did, and forces the next match to recompile. The case
+`PhysicsWorldSurvivesTemplateRerenderUntilAuthoredPhysicsChanges` checks ticks,
+the presented pose after an unrelated re-render, and a restart when the
+template changes gravity.
 
 ## Verification
 

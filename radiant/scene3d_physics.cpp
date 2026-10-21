@@ -129,6 +129,27 @@ bool scene3d_physics_matches(Scene3dPhysics* state,DomElement* root){
     if(current.playing!=state->scene.playing){state->scene.playing=current.playing;physics_scene_play(state,current.playing);}
     state->epoch=root->doc->mutation_epoch;return true;
 }
+// bindings hold raw node pointers, so only nodes still inside the old scene are dereferenced
+static void physics_follow_bindings(lam::ArrayList<PhysicsBinding>& list,DomNode* node,DomNode* old_root,DomNode* new_root){
+    if(!node->is_element())return;
+    for(size_t i=0;i<list.size();i++)if(list[i].node==(void*)node->as_element()){
+        DomNode* replacement=view_state_corresponding_node(node,old_root,new_root);
+        list[i].node=replacement&&replacement->is_element()?replacement->as_element():nullptr;
+    }
+    for(DomNode* c=node->as_element()->first_child;c;c=c->next_sibling)physics_follow_bindings(list,c,old_root,new_root);
+}
+// a template re-render rebuilds the scene's DOM: the world follows the corresponding
+// nodes and survives while the authored physics is unchanged, as form controls keep
+// native edits; changed authored physics fails the next match and restarts (S12.1.5v2)
+void scene3d_physics_follow_rebuild(Scene3dPhysics* state,DomNode* old_root,DomNode* new_root){
+    if(!state)return;
+    DomNode* scene=dom_node_ref_validate(state->document,state->root);if(!scene)return;
+    physics_follow_bindings(state->scene.bindings,scene,old_root,new_root);
+    physics_follow_bindings(state->scene.ids,scene,old_root,new_root);
+    view_state_ref_follow_rebuild(state->document,&state->root,old_root,new_root);
+    // a rebuild leaves the document's mutation epoch alone; force the next match to recompile
+    state->epoch=UINT64_MAX;
+}
 uint64_t scene3d_physics_generation(Scene3dPhysics* state){return state?state->generation:0;}
 bool scene3d_physics_advance(Scene3dPhysics* state,size_t ticks,PhysicsState* result,PhysicsError* error){
     if(!state||!state->world||!result)return false;
