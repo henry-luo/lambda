@@ -1644,12 +1644,22 @@ TEST(JsInterpreter, AutoMvpPromotedDefinitionsShareOneNativeRealm) {
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
     ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
+    // first promotion occurs inside an async activation; the next turn must find its realm.
     Item value = transpile_js_to_mir(&runtime,
         "function f(){return Math.max}function g(){return Math.min}"
-        "f();g();f();g();gc();if(f()!==Math.max||g()!==Math.min)throw 1;[f,g];",
+        "var completed=[];"
+        "async function warm(){f();g();f();g();gc();await 0;}"
+        "warm().then(async function(){"
+        "if(f()!==Math.max||g()!==Math.min)throw 1;completed.push(true);});"
+        "[f,g,completed];",
         "p2-mvp-shared-realm.js", NULL);
     unsetenv("JS_FUNC_JIT_THRESHOLD"); unsetenv("JS_EXEC_BACKEND");
     ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    ASSERT_EQ(value.array->length, 3);
+    Item completed = value.array->items[2];
+    ASSERT_EQ(get_type_id(completed), LMD_TYPE_ARRAY);
+    ASSERT_EQ(completed.array->length, 1);
+    EXPECT_EQ(completed.array->items[0].item, ITEM_TRUE);
     for (int i = 0; i < 2; i++) {
         Item function = value.array->items[i];
         ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
@@ -2553,7 +2563,9 @@ TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolati
         ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, helpers, NULL)));
         heap_gc_collect();
         Item result = js_interp_execute_source(&runtime, test, sizeof(test) - 1, "test.js", NULL);
-        ASSERT_FALSE(item_is_error(result));
+        char diagnostic[512];
+        js_error_lane_format(result, diagnostic, sizeof(diagnostic));
+        ASSERT_FALSE(item_is_error(result)) << "iteration " << i << ": " << diagnostic;
         EXPECT_EQ(result.item, ITEM_TRUE);
         runtime_reset_heap(&runtime);
         runtime_release_script_generation(&runtime, checkpoint, module_checkpoint);

@@ -392,6 +392,10 @@ static MvpLmdProgram* mvp_lmd_new_unit(MvpLmdExecution* execution, MvpLmdProgram
 }
 void mvp_lmd_runtime_reset() {
     if (!context || !js_active_runtime_state) return;
+    Runtime* runtime = context->runtime;
+    for (int i = 0; runtime && runtime->scripts && i < runtime->scripts->length; i++) {
+        js_script_reset_heap(js_script_from_script((Script*)runtime->scripts->data[i]));
+    }
     // queued work is already retired by js_batch_reset. Drop heap-derived
     // owners before replacement; Script extensions retain compiler metadata.
     js_runtime_state.formal_mir_owner = NULL;
@@ -783,7 +787,8 @@ const char* mvp_lmd_program_reference(MvpLmdProgram* program) {
 MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program) {
     if (program) return program->library_active ? program->library : NULL;
     // derived TLS points into the owning context capsule; teardown clears it.
-    if (context != mvp_lmd_library_context) {
+    // an activation may restore an empty cache saved before another turn's first promotion.
+    if (context != mvp_lmd_library_context || !mvp_lmd_library_slot) {
         mvp_lmd_library_context = context;
         mvp_lmd_library_slot = (MvpLmdLibraryState**)context_capsule_extension(context, MVP_LMD_CAPSULE_OWNER, 0);
         mvp_lmd_foreign_library = mvp_lmd_library_slot && *mvp_lmd_library_slot &&
@@ -856,9 +861,9 @@ struct MvpLmdRealmAmbient {
 };
 static void mvp_lmd_realm_save(void* opaque) {
     auto* state = (MvpLmdRealmAmbient*)opaque;
+    state->current = mvp_lmd_program_library();
     state->context = mvp_lmd_library_context;
     state->slot = mvp_lmd_library_slot;
-    state->current = mvp_lmd_program_library();
     state->foreign = mvp_lmd_foreign_library;
 }
 static void mvp_lmd_realm_load(const void* opaque) {

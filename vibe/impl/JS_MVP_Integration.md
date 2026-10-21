@@ -1,6 +1,7 @@
 # JS MVP integration implementation
 
-**Date:** 2026-10-21  
+**Date:** 2026-10-22
+
 **Authority:** **D8.1.3v29**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
 **Design:** [JS MVP integration](../jube/JS_MVP_Integration.md)  
 **Status:** implementation and qualification in progress; integration is not closed.
@@ -8,21 +9,34 @@
 ## AUTO default checkpoint (2026-10-22)
 
 **D8.1.3v29** corrects the tier-policy interpretation: AUTO is the default;
-activated MIR uses fast MVP. Focused selection/promotion checks pass 14/14.
-The Lambda baseline passes 7,863/8,010, including 840/840 MVP, 513/513 JS and
-322/322 MIR forced-GC cases. Its 147 failures are in Script Ownership tests;
-the first failing retained typed-array/property-helper case also fails alone,
-and later failures include stale module-layout errors after that case.
+activated MIR uses fast MVP. The remaining AUTO failures had two lifetime causes
+(**D5.3.3**, **D5.4.2–D5.4.3**):
 
-WPT input events report 13 passed, 12 skipped and 7 failed. The native Promise
-policy fix removes the reproduced promotion crash; unfinished subtests remain
-under AUTO promotion, while forced AST and diagnostic promotion-disabled runs
-complete the typing case. These failures remain qualification limits; baseline
-expectations and promotion thresholds are unchanged.
+- Retained AST definitions kept promoted callable Items after heap replacement.
+  Full realm reset now unregisters their precise roots and clears heap-derived
+  callable, shape and promotion state. Definition facts remain reusable. The
+  retained typed-array/property-helper case now completes both generations;
+  the complete Script Ownership suite passes 215/215.
+- An async activation could restore an empty MIR library cache saved before
+  the first promotion installed the context capsule. Library lookup now
+  refreshes an absent cache, and ambient snapshots capture the refreshed tuple.
+  The existing shared-realm regression now promotes inside one async activation
+  and verifies intrinsic identities from a later async activation.
 
-`make test262-baseline` exits successfully with 40,258/40,261 fully passing
-cases and three RegExp property-escape cases that pass only on isolated retry.
-There are no permanent failures, but this is not zero-retry qualification.
+WPT input events pass 20 cases, with 12 existing skips and no failures. Typing
+completes 13/13 subtests; each non-collapsed selection variant completes 70/70.
+The final release run takes 48.3 s with the backend selector unset and default
+promotion thresholds (`temp/auto-wpt-final-release-provenance.json`).
+The earlier native Promise policy fix remains in place. Promotion thresholds
+and baseline expectations are unchanged.
+
+`make test-lambda-baseline` passes 8,018/8,018 (2,112 input and 5,906 runtime),
+including 215/215 Script Ownership, 840/840 MVP, 519/519 JS and 322/322 MIR
+forced-GC cases. `caffeinate -is make test262-baseline` exits successfully with
+40,260/40,261 fully passing cases, zero permanent failures and 2,652 skips in
+its configured AST/MIR lanes. `Grapheme_Base` exceeds the timing threshold in
+its MIR batch and passes on isolated retry (2.6 s). This is not zero-retry
+qualification; the existing timing limit remains a qualification caveat.
 
 ## Changes
 
