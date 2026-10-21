@@ -1,26 +1,136 @@
 # Retained computed style, sizing and layout
 
-**Status:** milestones 1–3a, the independent milestone-3b consumers and shared
-update/publication implemented and regression-qualified; general 3b and LLVM
-ancestor-height fidelity remain open, 2026-10-21.  
+**Status:** integrated continuous-document implementation qualified,
+2026-10-21. Conservative adapters are listed below. Later milestone sections
+retain earlier checkpoint history; the integrated outcome supersedes their pending lists.
 **Design:** [CSS Cascade §3.47](../radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs),
 [View Reuse VR15](../radiant/Radiant_Design_View_Reuse.md#vr15--computation-identity-follows-inputs-and-values-not-execution).  
 **Ownership:** D4.5.1v4 / D4.1.4v5 / D4.5.2; no formal ruling changes.
 
 ## Milestones
 
+### Integrated completion session
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: complete the remaining
+continuous-document retained-layout work in one session. Keep the existing
+qualified changes and use focused checks while implementing; run the required
+aggregate gates, full LLVM comparison and paired release timing after integration.
+
+- [x] Make column preparation demand-driven at its assigned inline width.
+- [x] Publish refined stretch constraints to dependent descendants without
+  rerunning unrelated flow; include LLVM's sidebar and definite/cyclic controls.
+- [x] Give retained flow results independent fragments and multiple constraint
+  entries, with A→B→A replay, invalidation and teardown coverage.
+- [x] Retain ordered generated effects with complete entry/output contracts;
+  migrate the common list/pseudo/resource/positioned/table/grid flex subtrees.
+- [x] Preserve computed-value identity across equivalent re-resolution and share
+  immutable font inputs while retaining element-owned mutation/used metrics.
+- [x] Qualify the integrated implementation: native regressions, Radiant baseline,
+  layout lint, complete LLVM geometry/work and isolated paired release trials.
+
+Implemented acceptance covers assigned-width column scheduling, final sidebar
+stretch, A→B→A width/height restoration, destructive measurement probes, empty
+text fragments, stale-input rejection and exact snapshot teardown. Native cases
+cover list numbering, nested quotes, generated counters, HTML images, contained
+absolute children, collapsed table borders, grid tracks and horizontal percentages.
+Font tests distinguish unitless/fixed leading, equivalent values and transitive variables.
+Ancestor replay also expires descendant live associations while preserving owned
+constraint entries: a child can replay B after its parent's A snapshot replaced
+the live fragments, without measuring B again.
+
+Conservative adapters remain for paged/shadow/custom lifecycle, relevance/remembered-size producers, fragmented and
+vertical flow, SVG/form roles, block-dependent percentages, percentage gaps,
+first-line/letter transforms and unnormalized computed expressions. These paths
+retain their existing behavior; this checkpoint does not claim universal CSS
+conformance or browser-equivalent loading speed. Current artifacts:
+`temp/retained-layout-completion/`.
+
+Preparation resolves computed inputs without starting motion or repeatedly applying
+UA font scaling. Intrinsic queries bind both element and view context; native
+controls retain their measurement-owned sizing state. Actual flow rebinds provisional
+used geometry, while table structure construction preserves the box already assigned
+by its caller. Shared UA display suppression keeps closed dialogs hidden on cached
+dispatch. Generated list items publish their implicit increment before counter-set
+and materialize a marker in the ordered stage.
+
+The existing host frame walk commits foreign iframe writes through the shared update
+checkpoint without laying out the parent. Paint-only commits also publish computed
+style validity. The EPUB resize assertion now expects a computed matrix, matching its
+initial-load assertion and [CSS Transforms 1 §4.2](https://www.w3.org/TR/css-transforms-1/#serialization-of-transforms).
+
+The paged formatting-context assertion now checks an outside marker for
+`inline flow-root list-item`, rather than requiring inline text indentation.
+[CSS Lists 3 §3.5](https://drafts.csswg.org/css-lists-3/#list-style-position-property)
+distinguishes block containers from inline boxes. Bundled Chromium 148 confirms
+box/text x=10px and computed `list-style-position: outside`; the retained-page
+test also requires the generated bullet before the text. Evidence:
+`temp/retained-layout-completion/browser-marker.{cjs,json}`.
+
+The complete LLVM capture preserves article geometry, text and style values.
+There are 42,951 equivalent font-weight spelling changes (`400` → `normal`),
+retained explicitly in `classification.json`; canonicalizing only that alias
+makes the full article subtree equal. The sole rendered geometry difference is
+the sidebar child height, 315,655.7 → 443,287.5px, now matching its stretched
+parent. The content height also equals its completed footer bottom.
+
+| Work across the same three document updates | Previous qualified release | Integrated release |
+|---|---:|---:|
+| Height requests | 770,551 | 340,416 |
+| Height computations | 733,176 | 300,578 |
+| Full CSS resolutions | 239,065 | 239,924 |
+| Parent-key invalidations | 2 | 0 |
+
+Height computations fall 59.0%; full CSS work is effectively flat (+0.4%).
+The page still performs three document updates; this does not establish universal
+once-only layout or browser-equivalent loading speed.
+
+Final release qualification passes: **6,095 passed, 143 recorded partial
+outcomes, 2 skipped, zero unexpected failures** (6,240 total). This includes
+184 native text/layout, 502 paged-media and all 3,294 layout-floor cases, plus
+UI/DOM, snapshots, render and input events. The separate core suite passes
+172/172. Layout integer-cast lint, document links and `git diff --check` pass.
+No layout reference, comparator or pass floor changed. The two corrected test
+expectations and their independent evidence are documented above.
+
+Live Example.com and LLVM homepage smoke tests pass 2/2. The actual online
+LangRef also renders and exits cleanly with `MEMTRACK_LIVE bytes=0 count=0`.
+These are focused online checks; the 1,161-URL online inventory was not rerun.
+
+Three interleaved, fresh-process release pairs use identical frozen offline
+LLVM assets with profiling disabled and no concurrent builds/tests:
+
+| Metric | Previous qualified release | Integrated release |
+|---|---:|---:|
+| Load time, trials (s) | 24.480 / 24.203 / 24.697 | 20.935 / 21.264 / 21.362 |
+| Median load time (s) | 24.480 | 21.264 |
+| Median peak RSS (MiB) | 765.0 | 831.8 |
+
+Median loading time falls **13.1%**; independently owned query fragments cost
+**66.8 MiB** of additional median peak RSS. All six loads render successfully.
+Queries retain at most `LAYOUT_CACHE_SIZE` entries per owner; mutable font
+metrics/handles remain element-owned. The conservative adapters above and the
+three document updates remain explicit limits.
+
+Evidence under `temp/retained-layout-completion/`: `baseline-qualified.log`,
+`baseline-qualified-output/`, `review-{native,core,paged}.log`, `online-final.log`,
+`live-langref.*`, `lint-final.log`, full before/after trees and profile logs,
+`comparison-after.json`, `classification{,-summary}.json`, `manifest.json`,
+`source.patch`, `source-fixtures/`, `trials.json` and `report.json`. The immutable
+source patch freezes the measured candidate before results-only documentation
+updates; final documentation is also preserved separately. Earlier failed
+experiments remain available.
+
 | Milestone | Outcome and acceptance | State |
 |---|---|---|
 | 1. Stable style inputs | Repeating a parent's resolution for layout storage/context does not invalidate descendants when computed inputs are unchanged. Font, variables, real style edits and unsupported effects still invalidate correctly. | implemented and qualified |
 | 2. Retained sizing queries | Repeated height requests and A→B→A constraints reuse results; changed width, percent bases, fonts, content/style versions and measurement policy miss correctly. | implemented and qualified for supported horizontal flow subtrees, including flex-item flow |
 | 3a. Computed box boundary | Provisional inline/block roles and new prop allocation do not rerun the cascade. Clean computed geometry is immutable; dependent used values have separate storage. | implemented and qualified for eligible horizontal boxes |
-| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | demand-driven row preparation, independent block/inline/nested-flex flow sharing and height-key normalization qualified; general query-owned results pending |
-| 4. Shared update/publication | Correct retained anonymous-table/list mutations; reuse current script-produced geometry at presentation and skip unchanged geometry reads. | implemented; regression gates pass, LLVM ancestor-height fidelity open |
+| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | implemented and qualified for ordinary horizontal block/inline/flex, lists/pseudos/images/positioning/table/grid and inline percentages, with independently owned fragments and multiple constraint entries |
+| 4. Shared update/publication | Correct retained anonymous-table/list mutations; reuse current script-produced geometry at presentation and skip unchanged geometry reads. | implemented and qualified for continuous-document publication, foreign iframe writes and dependent-child stretch propagation |
 
-Milestone 1 uses stable input identity as a conservative migration step, not
-complete computed-value equality. Milestone 2 must not claim reuse of line
-fragments while the legacy estimate path still returns only a scalar height.
-Keep such limitations explicit until the relevant consumer is migrated.
+Inherited output identity now compares normalized applied inputs separately from
+own input versions. Complex declaration-driven values remain conservative.
+Scalar intrinsic estimates remain distinct from query-owned fragment results.
 
 ## Milestone 3a: computed box boundary
 
@@ -44,7 +154,8 @@ Implemented and qualified for eligible horizontal selected-view boxes.
   Replaced-element height policy remains on its existing path.
 
 Pool ownership remains **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Secondary views,
-table/replaced/form/SVG roles and unsupported effects retain their adapters.
+form/SVG roles and unsupported effects retain their adapters; table and HTML
+replaced roles now retain typed computed/used sizing, including HTML dimension hints.
 Vertical flow still stores assigned inline constraints in mutable props; migrate
 that consumer with retained flow results before extending the computed-box
 boundary. Immutable font sharing, stable boxes/line fragments and loader
@@ -466,6 +577,71 @@ no timing sweep was run. Its generated/effectful and dependent formatting paths,
 including the known ancestor-height mismatch, remain open. Full comparison and
 binary/input/source provenance: `geometry-report.json`, `manifest.json` and
 `source.patch`; native/lint evidence: `*-qualified.log`.
+
+## LLVM height ownership and repeated queries
+
+**VR15:** isolate the first disagreement between a flex item's natural height
+query and its completed content, then repair the owning stage. Preserve selected
+view ownership (**D4.5.1v4 / D4.5.2**). The owning stage is final flex-content
+reconciliation: provisional scalar heights were becoming final parent constraints
+despite completed descendant flow. Query widths, returned heights and enclosing
+flex stages isolate the disagreement, reproduced in a small native fixture.
+Acceptance: the reduced case's auto-height ancestors contain completed flow on
+initial and retained layout, while definite-height/cyclic controls stay correct;
+LLVM ancestors reflect their completed content without changing article geometry.
+Repeated-work evidence must identify the calling stage and actual computations.
+Scope excludes general ordered-effect replay and unrelated rendering fidelity.
+Verification: focused text/core cases and Chromium, full LLVM geometry/work
+comparison, then Radiant baseline and layout lint. Timing claims require three
+isolated release pairs. Artifacts: `temp/llvm-natural-flow/`.
+
+The trace isolates the overwrite: `.content` completes at 443,287.53px, but
+`.main` restores its 315,655.66px estimate as a definite stretched cross size.
+An initial attempt to change final axis-definiteness policy breaks the cyclic
+calc control and taller-sibling stretch; `rejected-axis.patch` and
+`axis-focused.log` preserve that rejected experiment. The implementation instead
+marks block sizes inherited from estimated auto row lines as provisional and
+propagates completed growth without changing percentage/stretch computation.
+Authored heights remain constraints, and a taller sibling's allocated line size
+cannot shrink during refinement. Retained content keys include that policy.
+
+The initial whole-page height query originates in block layout's percentage
+replaced-descendant fallback. Flex already owns natural contributions at its
+assigned widths; running that block fallback first walks 84,600 descendants at
+the wrong width. The flex path now skips it. Other expensive queries remain in
+flex cross sizing, column preparation at max-content width (11,716px), and flex
+basis at the assigned content width (863px). General query-owned results and
+ordered effects are still required to remove those repeated walks.
+
+Qualified: 179 native text/layout and 170 core tests pass, including the
+60px/100px mixed-font reproducer, taller-sibling and definite stretch, retained
+reflow, width/text mutation and percentage-SVG control. Chromium independently
+confirms these cases. LLVM height computations fall 817,928→733,176 (10.4%) and
+requests 855,303→770,551; document layouts remain three. Raw tree comparison is
+preserved: skipping the speculative query omits two unrendered subtrees (mobile
+header and a hidden theme toggle). The complete article subtree is identical;
+the rendered tree differs only in four parent heights, now 443,287.5px. The
+sidebar's nested percentage-height box remains stale, and existing font/footer
+differences from Chromium remain outside this milestone. Full release Radiant
+baseline: **6,089 passed, 143 existing partial outcomes, 2 skipped, zero unexpected
+failures** (6,234 total), including all 3,294 layout floors, 664 UI cases and
+32 input-event files. Layout integer-cast lint and diff checks pass; no reference,
+floor or comparator changed.
+
+Three isolated, interleaved release pairs use identical local LLVM assets.
+Load times are 25.093/25.372/25.084s before and 24.132/24.483/24.261s after:
+median **25.093→24.261s (3.3% faster)**. All six runs exit successfully and render.
+Median peak RSS is 760.6→763.8MiB; this phase does not improve memory usage.
+Raw full-tree comparison and rendered/hidden classification are preserved in
+`comparison-after.json` and `classification.json`; timing, binary/source/input
+provenance and gate evidence are in `report.json`, `manifest.json`,
+`benchmark-source.patch`, `source.patch` and `baseline.log`.
+
+Next: migrate preliminary column height measurement from max-content width to
+the assigned-width query, preserving automatic minima and definite/cyclic
+controls. Separately propagate a refined parent height to dependent children
+without replaying unrelated content; LLVM's sidebar supplies the acceptance case.
+General fragment ownership and ordered-effect contracts remain pending.
 
 ## Verification budget
 

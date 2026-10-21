@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
+
 > **Scoped source refresh:** 2026-10-19 — system color-face tracking and retained inherited sizes (§3.3); selected-face color and combining-cluster painting (§3.4–§3.5).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the font layer as seen from Radiant. Its single most important message is a boundary: the real font engine — glyph rasterization, `cmap` lookup, GPOS/`kern` kerning, per-codepoint fallback, the glyph cache, WOFF2 decode, and COLR/CBDT color-emoji handling — is **not** in `radiant/`. It lives in the unified module under `lib/font/` (~30 files). Radiant's `font.cpp` and `font_face.cpp` are a thin CSS→engine bridge: they map a CSS-resolved `FontProp` to the engine's `FontStyleDesc`, resolve and cache the `FontHandle`, parse and register `@font-face` descriptors, and copy engine metrics back onto the `FontProp`. Everything typographic below the handle is the engine's concern.
@@ -29,15 +31,23 @@ The engine is large enough to stand alone (~30 files: `font_context.c`, `font_gl
 
 `struct FontProp` (`view.hpp:409`) is the CSS-resolved font state that CSS style resolution ([RAD_02 — CSS Style Resolution](RAD_02_CSS_Style_Resolution.md)) fills. It carries three groups of fields:
 
-- **Requested CSS style:** `family`, `font_size` (in device pixels, already scaled by `pixel_ratio`), `font_style`, `font_weight`, `font_variant`, `font_kerning`, the precise `font_weight_numeric` (100–900, `0` meaning "use the keyword"), plus `letter_spacing`/`word_spacing` and the text-decoration/shadow fields that ride along on the same struct.
+- **Requested CSS style:** `family`, `font_size` (computed CSS pixels; `used_zoom` contributes to used metrics), `font_style`, `font_weight`, `font_variant`, `font_kerning`, the precise `font_weight_numeric` (100–900, `0` meaning "use the keyword"), plus `letter_spacing`/`word_spacing` and the text-decoration/shadow fields that ride along on the same struct.
 - **Derived metrics** (populated by the bridge, not by CSS): `space_width`, `ascender`, `descender`, `font_height`, `has_kerning` (`view.hpp:422-426`).
 - **The cached-handle alias:** `FontHandle* font_handle`. `FontProp` does not own the handle directly; it holds a cache-managed alias lease while the prop is live.
 
-The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontProp` into the engine's `FontStyleDesc` — mapping `font_weight_numeric` (or, absent that, the `bold`/`bolder`/`lighter` keywords) to a `FontWeight`, and `italic`/`oblique` to a `FontSlant`. This helper is used at the per-glyph layer (it is passed to `font_load_glyph` so the engine knows the requested style when it needs to resolve a fallback face for a missing codepoint); `setup_font` builds an equivalent `FontStyleDesc` inline rather than calling this helper — the two mappings are duplicated (see [§8](#8-known-issues--future-improvements)).
+The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontProp` into the engine's `FontStyleDesc` — mapping `font_weight_numeric` (or, absent that, the `bold`/`bolder`/`lighter` keywords) to a `FontWeight`, and `italic`/`oblique` to a `FontSlant`. This helper supplies the same style descriptor to `setup_font` and glyph fallback;
+`setup_font` adds the UI default-family fallback when the requested family is absent.
 
 `FontBox` (`view.hpp`) is the transient "current font" the layout context swaps in and out as it enters and leaves inline spans: a `FontProp* style` and `current_font_size`. It is an alias of the prop, not a second handle owner; `font_box_handle` derives the handle from `style`. `lycon->font` is a `FontBox`; `setup_font` is what fills it. This follows the Radiant seam's pin/copy-as-value contract, **D4.5.1v3**.
 
 ---
+
+`FontProp::computed_inputs` shares a canonical `ComputedFontInputs` value for
+font selection and spacing (**VR15**). `view_tree_canonical_font_inputs` hashes
+fields and confirms exact equality; canonical values live with the selected
+view tree. Each element still owns mutable metrics, its pinned handle and text
+shadow chain (**D4.5.1v4 / D4.1.4v5 / D4.5.2**). The mutable `FontProp` remains
+the compatibility adapter; whole font props are not shared.
 
 ## 3. `setup_font` — resolve-and-cache (`font.cpp`)
 

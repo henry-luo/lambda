@@ -347,8 +347,15 @@ float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
-bool layout_flow_is_context_independent(DomElement* element, bool include_height = false);
-bool layout_box_is_context_independent(DomElement* element, bool include_height = false);
+enum LayoutQueryContract : uint8_t {
+    LAYOUT_QUERY_LEGACY = 0,
+    LAYOUT_QUERY_ORDERED_EFFECTS = 1,
+    LAYOUT_QUERY_ASSIGNED_INLINE_SIZE = 2,
+};
+bool layout_flow_is_context_independent(DomElement* element, bool include_height = false,
+                                       uint8_t contract = LAYOUT_QUERY_LEGACY);
+bool layout_box_is_context_independent(DomElement* element, bool include_height = false,
+                                      uint8_t contract = LAYOUT_QUERY_LEGACY);
 bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
 bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElement* element);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
@@ -721,6 +728,7 @@ bool layout_can_retain_geometry(LayoutContext* lycon);
 // committed style pass resolves it afresh (dom_node_resolve_style).
 bool layout_boundary_consumed_by_flow(DomElement* element);
 void dom_node_resolve_style(DomNode* node, LayoutContext* context);
+ViewType layout_view_type_for_display(DisplayValue display, bool blockified = false);
 void layout_reset_boundary_flow_state(BoundaryProp* boundary);
 void layout_reset_position_style(LayoutContext* context, ViewSpan* view);
 
@@ -785,6 +793,10 @@ struct IntrinsicWidthCacheEntry {
 struct CssResolvedStyle;
 struct IntrinsicHeightCache;
 struct FlexMeasuredFlow;
+struct LayoutFlowResult;
+LayoutFlowResult* layout_flow_result_capture(LayoutContext* context, DomNode* root);
+bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* result);
+void layout_flow_result_release(Pool* pool, LayoutFlowResult* result);
 // tier-2: selected-view pool, with independently invalidated sizing and CSS state.
 struct LayoutCache {
     // computed CSS outlives individual measurement contexts, unlike size results.
@@ -1517,6 +1529,7 @@ struct LayoutCounterScope {
     void close();
     ~LayoutCounterScope() { close(); }
 };
+bool layout_prepare_generated_effects(LayoutContext* context, DomNode* root);
 struct CounterCheckpointState;
 // measurement temporarily owns cloned active maps; rollback restores values, frames and quote depth.
 struct CounterCheckpoint {
@@ -2118,7 +2131,7 @@ bool layout_marker_is_outside(View* view);
 bool layout_list_item_has_in_flow_content(DomElement* element);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
-void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
+void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style, DomElement* implicit_item = nullptr);
 
 // One in-flow item used by both direct and nested multicol distribution.
 // Keeping the break and fragmentation facts beside the measured extent avoids
@@ -2785,6 +2798,8 @@ typedef struct FlexContainerLayout : FlexProp {
     bool direct_text_geometry_handled;
     // Original container used to distinguish direct text from flattened runs.
     lam::Up<ViewBlock> container;
+    // an estimated auto row line supplies a stretch size that completed content may enlarge.
+    bool block_size_is_provisional;
     // Sizing mode flags (CSS Flexbox spec §9.2)
     // When true, the axis size is indefinite (fit-content/shrink-to-fit)
     // and flex-grow should NOT distribute additional space
@@ -3852,6 +3867,9 @@ typedef struct LayoutContext {
     lam::Up<DomElement> measurement_root;
     // a completed natural-size query precedes the root's final flex stretch.
     lam::Up<ViewBlock> natural_flex_height_root;
+    // source-order generation is a separate stage; measurement/flow consume its immutable output.
+    bool generated_effects_prepared;
+    bool preparing_generated_effects;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -3963,6 +3981,8 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
 bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context = nullptr);
+void layout_apply_html_axis_value(LayoutContext* context, ViewBlock* block, LayoutAxis axis,
+    float value, bool percentage, float basis, bool clear_unresolved, bool store_resolved);
 bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,
     LayoutContext* context = nullptr);
 bool layout_block_has_automatic_height(ViewBlock* block);
@@ -4647,6 +4667,7 @@ bool layout_is_inline_math_box(DomNode* node);
 // shadow-tree child while preserving the fragment's DOM parentage.
 DomElement* layout_shadow_formatting_parent(DomNode* node);
 bool layout_is_shadow_slot(DomNode* node);
+bool layout_node_is_hidden_by_closed_details(DomNode* node);
 void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
@@ -5674,19 +5695,39 @@ struct LayoutContextScope {
 // Intrinsic width recursion changes both the element cycle bit and active view;
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
+// Nested DOM/view work must restore both handles together; restoring only the
+// view leaves style resolution attached to the previous element on early exit.
+// tier-3: layout-transient, valid within pass
+struct LayoutViewScope {
+    lam::Up<LayoutContext> lycon;
+    lam::Up<DomNode> saved_elmt;
+    lam::Up<View> saved_view;
+    explicit LayoutViewScope(LayoutContext* l)
+        : lycon(l), saved_elmt(l ? l->elmt : nullptr), saved_view(l ? l->view : nullptr) {}
+    ~LayoutViewScope() {
+        if (!lycon) return;
+        lycon->elmt = saved_elmt;
+        lycon->view = saved_view;
+    }
+    LayoutViewScope(const LayoutViewScope&) = delete;
+    LayoutViewScope& operator=(const LayoutViewScope&) = delete;
+};
+
 struct IntrinsicMeasureScope {
     lam::Up<LayoutContext> lycon;
     lam::Up<DomElement> element;
-    lam::Up<View> saved_view;
+    LayoutViewScope view_scope;
 
     IntrinsicMeasureScope(LayoutContext* l, DomElement* e)
-        : lycon(l), element(e), saved_view(l ? l->view : nullptr) {
+        : lycon(l), element(e), view_scope(l) {
         if (element) element->set_measuring_intrinsic_width(true);
-        if (lycon && element) lycon->view = lam::up(static_cast<View*>(element));
+        if (lycon && element) {
+            lycon->view = lam::up(static_cast<View*>(element));
+            lycon->elmt = lam::up(static_cast<DomNode*>(element));
+        }
     }
     ~IntrinsicMeasureScope() {
         if (element) element->set_measuring_intrinsic_width(false);
-        if (lycon) lycon->view = saved_view;
     }
     IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
     IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
@@ -5714,24 +5755,6 @@ struct LayoutMeasurementRootScope {
     LayoutMeasurementRootScope(const LayoutMeasurementRootScope&) = delete;
     LayoutMeasurementRootScope& operator=(const LayoutMeasurementRootScope&) = delete;
 };
-// Nested DOM/view work must restore both handles together; restoring only the
-// view leaves style resolution attached to the previous element on early exit.
-// tier-3: layout-transient, valid within pass
-struct LayoutViewScope {
-    lam::Up<LayoutContext> lycon;
-    lam::Up<DomNode> saved_elmt;
-    lam::Up<View> saved_view;
-    explicit LayoutViewScope(LayoutContext* l)
-        : lycon(l), saved_elmt(l ? l->elmt : nullptr), saved_view(l ? l->view : nullptr) {}
-    ~LayoutViewScope() {
-        if (!lycon) return;
-        lycon->elmt = saved_elmt;
-        lycon->view = saved_view;
-    }
-    LayoutViewScope(const LayoutViewScope&) = delete;
-    LayoutViewScope& operator=(const LayoutViewScope&) = delete;
-};
-
 // consume-only probes copy scalar results before releasing substituted CSS values.
 struct CssComputedValueScratch {
     LayoutContext* context;

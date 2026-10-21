@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-10-03 *(cascade sub-value ordering; other sections retain their earlier scope)*
 
+> **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *used/computed value* step of CSS: how the already-parsed, already-cascaded style for an element is turned into concrete floats, colors, and enums stored directly on the view node's property structs. It draws the seam between Radiant and the CSS engine in `lambda/input/css/` (which owns parsing, specificity, and the cascade), describes the two-pass font-first resolution and the ~248-case property switch, the value resolvers for lengths/colors/`var()`, the imperative UA-default and HTML-presentational-attribute pass, and the memory-safety helpers that keep shorthand expansion sound.
 >
 > **Primary sources:** `radiant/resolve_css_style.cpp` (the property resolver — the largest file in the repo at ~13.9k lines), `radiant/resolve_htm_style.cpp` (UA defaults + legacy HTML attributes), `radiant/view.hpp` (shorthand scratch declarations), `radiant/css_animation.cpp` (animation-longhand consumption), `radiant/render.hpp` (owned-pointer retention), the computed-style prop structs in `radiant/view.hpp` (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), and the seam types in `lambda/input/css/css_style_node.hpp` / `css_style.hpp`. Caller order lives in `radiant/layout.cpp`.
@@ -22,6 +24,25 @@ Radiant must compare declarations when different CSS names write the same used-v
 The node this writes onto is the same unified DOM/view node described in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md); the layout modes in [RAD_03 — Layout Driver, Block Layout & BFC](RAD_03_Layout_Driver_Block_BFC.md) onward consume the props this doc produces.
 
 ---
+
+### 1.1 Retained computed and used values
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**:
+`css_resolved_style.cpp` retains clean typed geometry separately from a lazily
+applied used box. Context changes reevaluate dependency-matched percentage
+bindings, including HTML dimension hints, without rerunning the cascade.
+`CssResolvedStyle` separates own input revision from inherited output revision;
+line-height kind, font selection/spacing, text/list state and transitive custom
+properties contribute to inherited identity. Complex declaration-driven values
+remain conservative. `set_view` preserves initialized table style instead of
+resetting it on every dispatch. See [the integrated contract](../../../vibe/radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs)
+for supported consumers and qualification status.
+
+Ordered generated-effect preparation computes style without starting motion and
+marks provisional used geometry for binding by its real consumer. Full UA resolution
+starts from inherited font values, so repeated preparation cannot rescale monospace
+defaults. Closed-dialog suppression uses the same UA display helper as dispatch;
+cached geometry must not turn a hidden dialog into a block.
 
 ## 2. Where resolution is invoked
 

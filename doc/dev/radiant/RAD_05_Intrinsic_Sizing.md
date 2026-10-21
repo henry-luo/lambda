@@ -76,7 +76,21 @@ separate conformance work.
 
 ### 2.3 The re-entrancy guard
 
-`measuring_intrinsic_width` breaks measurement cycles. Percentage-height ↔ aspect-ratio ↔ width dependencies can make an element's width depend transitively on itself; when the monolith re-enters an element already being measured, it returns `{0,0}` rather than recursing forever (`intrinsic_sizing.cpp:1951-1954`). The flag is set on entry (`:1955`) and cleared on every return path by an inline `MeasureGuard` RAII object (`:1957-1961`). Two sibling guards restore the saved `lycon->view` (`IntrinsicViewGuard`, `:1964-1969`) and the saved font context, releasing any temp font handles (`TempIntrinsicFontGuard`, `:1977-1989`).
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2** (scoped source refresh,
+2026-10-21): `IntrinsicMeasureScope` uses `LayoutViewScope` to bind and restore
+both `elmt` and `view`. Recursive resolution must not style the parent's element
+through a child's view. Ordered preparation marks provisional used values for
+rebinding by their consumer; uncached legacy adapters remain unresolved until
+that consumer runs. A cached style bit cannot validate a provisional native
+control percentage. Native-control intrinsic state remains measurement-owned.
+See [the retained-layout record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md).
+
+`measuring_intrinsic_width` breaks measurement cycles. Percentage-height,
+aspect-ratio and width can depend transitively on one another; re-entering an
+element already being measured returns `{0,0}`. `IntrinsicMeasureScope` sets
+the flag on entry and clears it on every return path. Its `LayoutViewScope`
+restores the caller's element/view, while `IntrinsicFontScope` restores the
+font context and releases temporary font handles.
 
 ---
 

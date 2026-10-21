@@ -23,6 +23,27 @@ struct CanonicalStrings {
         &CanonicalString::chars, &CanonicalString::length>> index;
 };
 
+#define FONT_INPUT_SCALARS(F) \
+    F(font_size) F(used_zoom) F(initial_letter_computed_font_size) \
+    F(font_style) F(font_weight) F(font_variant) F(font_kerning) F(font_weight_numeric) \
+    F(letter_spacing) F(word_spacing) F(letter_spacing_percent) F(letter_spacing_length) \
+    F(word_spacing_percent) F(word_spacing_length) F(letter_spacing_is_percent) \
+    F(letter_spacing_is_set) F(word_spacing_is_percent) F(word_spacing_is_set) F(font_size_from_medium)
+
+struct CanonicalFontEntry { const ComputedFontInputs* value; };
+struct CanonicalFontKeyOps {
+    static uint64_t hash(const CanonicalFontEntry& entry, uint64_t, uint64_t);
+    static bool equals(const CanonicalFontEntry& a, const CanonicalFontEntry& b) {
+        if (a.value->family != b.value->family ||
+            a.value->platform_fallback_family != b.value->platform_fallback_family) return false;
+#define FONT_COMPARE(field) if (a.value->field != b.value->field) return false;
+        FONT_INPUT_SCALARS(FONT_COMPARE)
+#undef FONT_COMPARE
+        return true;
+    }
+};
+struct CanonicalFontInputs { TypedHashMap<CanonicalFontEntry, CanonicalFontKeyOps> index; };
+
 static uint32_t inline_float_hash_bits(float value) {
     if (value == 0.0f) return 0; // CSS treats positive and negative zero as the same value.
     uint32_t bits = 0;
@@ -30,6 +51,44 @@ static uint32_t inline_float_hash_bits(float value) {
     if (isnan(value)) return 0x7fc00000u;
     return bits;
 }
+
+uint64_t CanonicalFontKeyOps::hash(const CanonicalFontEntry& entry, uint64_t, uint64_t) {
+    uint64_t hash = hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS, entry.value->family ? entry.value->family : "");
+    hash = hash_fnv1a_64_extend_cstr(hash, entry.value->platform_fallback_family ? entry.value->platform_fallback_family : "");
+#define FONT_HASH(field) hash = hash_fnv1a_64_extend_u64le(hash, inline_float_hash_bits(entry.value->field));
+    FONT_INPUT_SCALARS(FONT_HASH)
+#undef FONT_HASH
+    return hash;
+}
+
+const ComputedFontInputs* view_tree_canonical_font_inputs(ViewTree* tree, const FontProp* font) {
+    if (!tree || !tree->canonical_prop_arena || !font) return nullptr;
+    ComputedFontInputs inputs = {};
+    inputs.family = font->family ? view_tree_canonical_font_family(tree, font->family, strlen(font->family)) : nullptr;
+    inputs.platform_fallback_family = font->platform_fallback_family
+        ? view_tree_canonical_string(tree, font->platform_fallback_family, strlen(font->platform_fallback_family)) : nullptr;
+    if ((font->family && !inputs.family) || (font->platform_fallback_family && !inputs.platform_fallback_family)) return nullptr;
+#define FONT_COPY(field) inputs.field = font->field;
+    FONT_INPUT_SCALARS(FONT_COPY)
+#undef FONT_COPY
+    if (!tree->canonical_fonts) {
+        auto* fonts = (CanonicalFontInputs*)pool_calloc(tree->prop_pool, sizeof(CanonicalFontInputs));
+        if (!fonts) return nullptr;
+        if (!fonts->index.init(0)) { pool_free(tree->prop_pool, fonts); return nullptr; }
+        tree->canonical_fonts = lam::own(fonts);
+    }
+    if (const CanonicalFontEntry* found = tree->canonical_fonts->index.get({&inputs})) return found->value;
+    ArenaStats stats = {};
+    arena_get_stats(tree->canonical_prop_arena, &stats);
+    if (stats.active_bytes + sizeof(inputs) > tree->canonical_prop_cap_bytes) return nullptr;
+    auto* value = (ComputedFontInputs*)arena_alloc(tree->canonical_prop_arena, sizeof(inputs));
+    if (!value) return nullptr;
+    *value = inputs;
+    tree->canonical_fonts->index.set({value});
+    return tree->canonical_fonts->index.oom() ? nullptr : value;
+}
+
+#undef FONT_INPUT_SCALARS
 
 static bool cursor_images_equal(const CursorImageSpec* left,
                                 const CursorImageSpec* right) {
@@ -272,6 +331,10 @@ static void canonical_strings_destroy(ViewTree* tree) {
 
 void view_tree_canonical_destroy(ViewTree* tree) {
     if (!tree) return;
+    if (tree->canonical_fonts) {
+        tree->canonical_fonts->index.destroy();
+        lam::free_owned(tree->prop_pool.get(), tree->canonical_fonts);
+    }
     canonical_strings_destroy(tree);
     for (size_t i = 0; i < tree->inline_canonical_bucket_count; i++) {
         lam::free_owned_list(tree->prop_pool, tree->inline_canonical_buckets[i]);

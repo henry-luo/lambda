@@ -1,0 +1,27 @@
+<!doctype html>
+<style>
+@font-face { font-family: FlowMetrics; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin:0; font:10px/1 FlowMetrics; }
+.row { display:flex; width:120px; align-items:flex-start; }
+.item { flex:0 0 60px; min-width:0; }
+ol { margin:0; padding:0; list-style-position:inside; }
+.generated { counter-reset:chapter; quotes:'A' 'Z' 'B' 'Y'; }
+.generated p { margin:0; counter-increment:chapter; }
+.generated p::before { content:counter(chapter) ' '; }
+.generated q::before { content:open-quote; }
+.generated q::after { content:close-quote; }
+table { border-collapse:collapse; }
+td { padding:0; border:1px solid black; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:2px; }
+.positioned { position:relative; }
+.anchor { position:absolute; top:2px; left:3px; width:10px; height:10px; }
+</style>
+<div id="result">
+<div class="row"><div id="list" class="item"><ol><li>XX XX XX</li><li>XX XX</li></ol></div></div>
+<div class="row"><div id="generated" class="item generated"><p id="chapter-a">XX XX XX</p><p id="chapter-b"><q id="quote-a">X<q id="quote-b">X</q></q></p></div></div>
+<div class="row"><div id="resource" class="item"><img width="20" height="20" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E"> XX XX XX</div></div>
+<div class="row"><div id="positioned" class="item positioned"><span class="anchor"></span><span>XX XX XX</span></div></div>
+<div class="row"><div id="table" class="item"><table><tbody><tr><td>XX XX XX</td><td>XX</td></tr><tr><td>XX</td><td>XX XX</td></tr></tbody></table></div></div>
+<div class="row"><div id="grid" class="item"><div class="grid"><div>XX XX XX</div><div>XX XX</div><div>XX</div></div></div></div>
+<div class="row"><div id="percent-inline" class="item"><div style="width:50%;padding-top:10%">XX XX XX</div></div></div>
+</div>

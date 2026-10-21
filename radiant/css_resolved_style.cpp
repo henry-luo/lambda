@@ -4,6 +4,7 @@
 #include "../lambda/dom/dom.h"
 #include "../lib/tagged.hpp"
 #include "../lib/generation.h"
+#include "../lib/strbuf.h"
 
 int64_t g_style_resolve_incremental = 0;
 int64_t g_style_geometry_evaluations = 0;
@@ -31,31 +32,8 @@ struct CssGeometryBinding {
     int64_t priority;
     CssPropertyCode property;
     uint8_t dependencies;
-};
-
-struct CssAxisValues {
-    float given, minimum, maximum, percent, min_percent, max_percent;
-    float fit_limit, fit_percent;
-    CssEnum type, min_type, max_type;
-};
-
-struct CssUsedGeometry {
-    bool context_width, context_height;
-    float context_given_width, context_given_height;
-    CssAxisValues axes[2];
-    Margin margin;
-    Spacing padding;
-    Spacing border_width;
-    float insets[4], inset_percents[4];
-    bool inset_present[4];
-    float flex_basis;
-    float flex_grow, flex_shrink, aspect_ratio;
-    CssEnum align_self;
-    int order;
-    bool flex_percent, flex_content, flex_stretch;
-    CssEnum position, clear, float_prop;
-    int z_index;
-    bool has_z_index;
+    float html_value;
+    bool html, persist, clear_unresolved, store_resolved;
 };
 
 // tier-2: context-dependent application, separate from the immutable computed box.
@@ -75,7 +53,10 @@ struct CssResolvedStyle {
     lam::Own<CssUsedBox> used_box; // lazily allocated for dependent lengths
     CssFontKey parent_font, own_font;
     uint64_t query_epoch, font_generation;
-    uint32_t style_version, layout_generation, revision, parent_revision;
+    uint32_t style_version, layout_generation, revision, inherited_revision, parent_revision;
+    const char* inherited_identity;
+    const char* custom_identity;
+    bool inherits_noninherited, inherited_unknown;
     float viewport_width, viewport_height, raster_scale, root_font_size;
     uint32_t role_flags;
     uint8_t dependencies;
@@ -122,6 +103,12 @@ bool css_resolved_style_is_containing_block_independent(DomElement* element) {
     return style && style->valid && style->dependencies == 0;
 }
 
+bool css_resolved_style_is_block_size_independent(DomElement* element) {
+    const CssResolvedStyle* style = element && element->layout_cache
+        ? element->layout_cache->resolved_style.get() : nullptr;
+    return style && style->valid && !(style->dependencies & CSS_GEOMETRY_Y);
+}
+
 static uint32_t css_style_role_flags(DomElement* element) {
     return element->elmt_flags & (ELMT_FLAG_PARENT_ITEM_KIND_MASK | ELMT_FLAG_ROLE_KIND_MASK);
 }
@@ -131,12 +118,129 @@ static DomElement* css_style_parent(DomElement* element) {
         ? element->parent->as_element() : nullptr;
 }
 
+uint32_t css_resolved_style_inherited_revision(DomElement* element) {
+    const CssResolvedStyle* style = element && element->layout_cache
+        ? element->layout_cache->resolved_style.get() : nullptr;
+    return style ? style->inherited_revision : 0;
+}
+
 static uint32_t css_parent_revision(LayoutContext* context, DomElement* element) {
     // source wrappers above the selected root do not own this view's caches (D4.5.1v4).
     DomElement* parent = element != context->doc->root ? css_style_parent(element) : nullptr;
     CssResolvedStyle* style = parent && parent->layout_cache
         ? parent->layout_cache->resolved_style.get() : nullptr;
-    return style ? style->revision : 0;
+    CssResolvedStyle* child = element->layout_cache ? element->layout_cache->resolved_style.get() : nullptr;
+    return style && child && child->inherits_noninherited
+        ? style->revision : css_resolved_style_inherited_revision(parent);
+}
+
+struct CssInheritedIdentity {
+    StrBuf* bytes = strbuf_new();
+    bool complete = bytes != nullptr;
+    ~CssInheritedIdentity() { strbuf_free(bytes); }
+    template<typename T> void add(T value) {
+        if (!complete) return;
+        size_t length = bytes->length;
+        strbuf_append_str_n(bytes, (const char*)&value, sizeof(value));
+        complete = bytes->length - length == sizeof(value);
+    }
+    void add(float value) { add_bits(value == 0.0f ? 0.0f : value); }
+    template<typename T> void add_bits(T value) {
+        if (!complete) return;
+        size_t length = bytes->length;
+        strbuf_append_str_n(bytes, (const char*)&value, sizeof(value));
+        complete = bytes->length - length == sizeof(value);
+    }
+    void text(const char* value) {
+        size_t length = value ? strlen(value) : 0;
+        add(length);
+        if (!complete) return;
+        size_t previous = bytes->length;
+        strbuf_append_str_n(bytes, value ? value : "", length);
+        complete = bytes->length - previous == length;
+    }
+};
+
+static const char* css_inherited_identity(LayoutContext* context, DomElement* element) {
+    CssInheritedIdentity identity;
+    const FontProp* font = element->font ? element->font.get() : &FONT_PROP_DEFAULT;
+    const ComputedFontInputs* inputs = view_tree_canonical_font_inputs(context->doc->view_tree, font);
+    if (!inputs) return nullptr;
+    identity.add(inputs);
+#define FONT_ID(field) identity.add(font->field)
+    FONT_ID(text_deco); FONT_ID(text_deco_extra); FONT_ID(text_deco_style); FONT_ID(text_deco_color.c);
+    FONT_ID(text_deco_color_current); FONT_ID(text_deco_thickness); FONT_ID(text_underline_offset);
+    FONT_ID(text_underline_offset_mode); FONT_ID(text_deco_skip_ink); FONT_ID(text_underline_position);
+    FONT_ID(text_underline_side); FONT_ID(text_emphasis_enabled); FONT_ID(text_emphasis_under);
+    FONT_ID(text_emphasis_left); FONT_ID(text_emphasis_color_current); FONT_ID(text_emphasis_mark);
+    FONT_ID(text_emphasis_color.c);
+#undef FONT_ID
+    for (const TextShadow* shadow = font->text_shadow; shadow; shadow = shadow->next) {
+        identity.add(true); identity.add(shadow->offset_x); identity.add(shadow->offset_y);
+        identity.add(shadow->blur_radius); identity.add(shadow->color.c);
+    }
+    identity.add(false);
+    const InlineProp* inl = element->in_line ? element->inl() : &INLINE_PROP_DEFAULT;
+#define INLINE_ID(field) identity.add(inl->field)
+    INLINE_ID(cursor); INLINE_ID(image_rendering); INLINE_ID(color.c); INLINE_ID(has_color);
+    INLINE_ID(accent_color.c); INLINE_ID(has_accent_color); INLINE_ID(visibility);
+    INLINE_ID(svg_fill_color.c); INLINE_ID(svg_stroke_color.c); INLINE_ID(svg_stroke_width);
+    INLINE_ID(has_svg_fill); INLINE_ID(svg_fill_none); INLINE_ID(has_svg_stroke);
+    INLINE_ID(svg_stroke_none); INLINE_ID(has_svg_stroke_width); INLINE_ID(ruby_position);
+#undef INLINE_ID
+    for (const CursorImageSpec* image = inl->cursor_images; image; image = image->next) {
+        identity.add(true); identity.text(image->url); identity.add(image->hotspot_x);
+        identity.add(image->hotspot_y); identity.add(image->has_hotspot);
+    }
+    identity.add(false);
+    const BlockProp* block = element->blk ? element->block() : &BLOCK_PROP_DEFAULT;
+#define BLOCK_ID(field) identity.add(block->field)
+    BLOCK_ID(text_align); BLOCK_ID(text_align_last); BLOCK_ID(text_justify); BLOCK_ID(direction);
+    BLOCK_ID(writing_mode); BLOCK_ID(text_transform); BLOCK_ID(white_space); BLOCK_ID(text_wrap_mode);
+    BLOCK_ID(text_wrap_style); BLOCK_ID(word_break); BLOCK_ID(overflow_wrap); BLOCK_ID(hyphens);
+    BLOCK_ID(hyphenate_limits[0]); BLOCK_ID(hyphenate_limits[1]); BLOCK_ID(hyphenate_limits[2]);
+    BLOCK_ID(hyphenate_limits_is_set); BLOCK_ID(line_break); BLOCK_ID(text_spacing_trim);
+    BLOCK_ID(text_autospace); BLOCK_ID(text_autospace_is_set); BLOCK_ID(tab_size); BLOCK_ID(tab_size_length);
+    BLOCK_ID(text_indent); BLOCK_ID(text_indent_percent); BLOCK_ID(text_indent_calc);
+    BLOCK_ID(text_indent_hanging); BLOCK_ID(text_indent_each_line); BLOCK_ID(dominant_baseline);
+    BLOCK_ID(list_style_type); BLOCK_ID(list_style_position);
+#undef BLOCK_ID
+    identity.text(block->hyphenate_character);
+    identity.text(block->list_style_type_string);
+    identity.text(block->list_style_image.url);
+    identity.add(block->list_style_image.gradient_type);
+    identity.add(block->list_style_image.linear_gradient.get());
+    identity.add(block->list_style_image.radial_gradient.get());
+    identity.add(block->list_style_image.conic_gradient.get());
+    identity.add(block->list_style_image.resolution);
+    const CssValue* leading = block->line_height ? block->line_height.get() : css_line_height_normal_value();
+    identity.add(leading->type);
+    if (leading->type == CSS_VALUE_TYPE_KEYWORD) identity.add(leading->data.keyword);
+    else if (leading->type == CSS_VALUE_TYPE_NUMBER) identity.add(leading->data.number.value);
+    else if (leading->type == CSS_VALUE_TYPE_LENGTH) {
+        identity.add(leading->data.length.value); identity.add(leading->data.length.unit);
+    } else identity.add(leading); // an unmigrated expression conservatively retains declaration identity.
+    CssResolvedStyle* style = element->layout_cache->resolved_style;
+    identity.add(style->custom_identity);
+    if (style->inherited_unknown) identity.add(style->revision);
+    return identity.complete ? view_tree_canonical_string(context->doc->view_tree,
+        identity.bytes->str, identity.bytes->length) : nullptr;
+}
+
+static const char* css_custom_identity(LayoutContext* context, DomElement* element) {
+    DomElement* parent = css_style_parent(element);
+    CssResolvedStyle* inherited = parent && parent->layout_cache ? parent->layout_cache->resolved_style.get() : nullptr;
+    if (!element->css_variables && (!inherited || !inherited->custom_identity)) return nullptr;
+    CssInheritedIdentity identity;
+    identity.add(inherited ? inherited->custom_identity : nullptr);
+    for (const CssCustomProp* variable = element->css_variables; variable; variable = variable->next) {
+        identity.add(true); identity.text(variable->name); identity.text(variable->value_text);
+        identity.add(variable->animation_owner);
+        if (!variable->value_text) identity.add(variable->value.get());
+    }
+    identity.add(false);
+    return identity.complete ? view_tree_canonical_string(context->doc->view_tree,
+        identity.bytes->str, identity.bytes->length) : nullptr;
 }
 
 bool css_resolved_style_cache_allowed(LayoutContext* context, DomElement* element) {
@@ -145,18 +249,13 @@ bool css_resolved_style_cache_allowed(LayoutContext* context, DomElement* elemen
         context->css_query_probe || context->selected_style ||
         context->doc->view_tree->model || element->doc != context->doc ||
         element->scratch_lived() || element->is_table_fixup() || element->form_control() ||
-        element->table_prop() ||
-        dom_element_is_svg(element) || layout_element_is_replaced(element) ||
+        dom_element_is_svg(element) ||
         !dom_element_is_connected(element) ||
         (context->selected_view_tree && context->selected_view_tree != context->doc->view_tree)) return false;
     // vertical flow still owns assigned inline constraints in mutable props;
     // retain its legacy adapter until that consumer moves to retained flow queries.
     if (layout_element_inline_axis_is_vertical(element)) return false;
-    DisplayValue display = element->display;
-    return display.inner != CSS_VALUE_TABLE_ROW && display.inner != CSS_VALUE_TABLE_ROW_GROUP &&
-        display.inner != CSS_VALUE_TABLE_HEADER_GROUP && display.inner != CSS_VALUE_TABLE_FOOTER_GROUP &&
-        display.inner != CSS_VALUE_TABLE_COLUMN && display.inner != CSS_VALUE_TABLE_COLUMN_GROUP &&
-        display.inner != CSS_VALUE_TABLE_CELL;
+    return true;
 }
 
 static uint64_t css_font_generation(LayoutContext* context) {
@@ -246,6 +345,13 @@ bool css_geometry_context_equal(const CssGeometryContext& a, const CssGeometryCo
     return css_geometry_changes(a, b) == 0;
 }
 
+bool css_resolved_geometry_context_equal(DomElement* element,
+    const CssGeometryContext& a, const CssGeometryContext& b) {
+    const CssResolvedStyle* style = element && element->layout_cache
+        ? element->layout_cache->resolved_style.get() : nullptr;
+    return style && style->valid && !(css_geometry_changes(a, b) & style->dependencies);
+}
+
 template<bool capture, typename T, typename Retained>
 static void css_transfer_value(T* applied, Retained* retained) {
     if constexpr (capture) *retained = *applied;
@@ -271,6 +377,7 @@ static void css_geometry_transfer(LayoutContext* context, DomElement* element,
     if (capture || element->blk) {
         BlockProp initial;
         BlockProp* block = css_geometry_storage(element->block_mut(), BLOCK_PROP_DEFAULT, &initial);
+        css_transfer_value<capture>(&block->box_sizing, &geometry->box_sizing);
         for (size_t axis = 0; axis < 2; axis++) {
             LayoutAxisRefs refs(block, axis == 0);
             auto* values = &geometry->axes[axis];
@@ -340,6 +447,19 @@ static void css_geometry_transfer(LayoutContext* context, DomElement* element,
     }
 }
 
+void css_used_geometry_capture(LayoutContext* context, DomElement* element, CssUsedGeometry* geometry) {
+    *geometry = {};
+    css_geometry_transfer<true>(context, element, geometry);
+}
+
+void css_used_geometry_restore(LayoutContext* context, DomElement* element, const CssUsedGeometry& geometry) {
+    CssUsedGeometry used = geometry;
+    css_geometry_transfer<false>(context, element, &used);
+    CssResolvedStyle* style = element->layout_cache ? element->layout_cache->resolved_style.get() : nullptr;
+    // a copied used box cannot certify the context most recently applied to live props.
+    if (style && style->used_box) lam::free_owned(context->pool.get(), style->used_box);
+}
+
 static uint8_t css_geometry_property(CssPropertyCode property) {
     if (property == CSS_PROPERTY_WIDTH || property == CSS_PROPERTY_MIN_WIDTH ||
         property == CSS_PROPERTY_MAX_WIDTH || property == CSS_PROPERTY_LEFT ||
@@ -396,6 +516,8 @@ CssStyleRecordScope::CssStyleRecordScope(LayoutContext* c, DomElement* element)
     css_bindings_clear(recording, context->pool);
     recording->element = element;
     recording->reusable = true;
+    recording->inherits_noninherited = false;
+    recording->inherited_unknown = false;
     recording->viewport_dependent = false;
     recording->root_font_dependent = false;
     recording->geometry = {};
@@ -421,12 +543,27 @@ void CssStyleRecordScope::commit() {
     recording->parent = css_style_parent(element);
     recording->parent_revision = css_parent_revision(context, element);
     recording->own_font = css_font_key(element->font);
+    if (element->font) element->font->computed_inputs = lam::shared(
+        view_tree_canonical_font_inputs(context->doc->view_tree, element->font));
+    recording->custom_identity = css_custom_identity(context, element);
+    const char* inherited = css_inherited_identity(context, element);
+    if (!inherited || recording->inherited_identity != inherited)
+        recording->inherited_revision = generation_next32(recording->inherited_revision);
+    recording->inherited_identity = inherited;
     recording->font_generation = css_font_generation(context);
     recording->raster_scale = ui_context_raster_scale(context->ui_context);
     recording->root_font_size = context->root_font_size;
     recording->role_flags = css_style_role_flags(element);
     recording->viewport_width = context->width;
     recording->viewport_height = context->height;
+    recording->dependencies = recording->preferred_percentages = 0;
+    for (CssGeometryBinding* binding = recording->bindings; binding; binding = binding->next) {
+        if (binding->html && layout_specified_physical_size_declaration(element,
+                binding->property == CSS_PROPERTY_WIDTH)) binding->dependencies = 0;
+        recording->dependencies |= binding->dependencies;
+        if (binding->property == CSS_PROPERTY_WIDTH || binding->property == CSS_PROPERTY_HEIGHT)
+            recording->preferred_percentages |= binding->dependencies;
+    }
     recording->context = css_geometry_context(context, element);
     css_geometry_transfer<true>(context, element, &recording->geometry);
     recording->valid = recording->reusable;
@@ -449,6 +586,11 @@ void css_resolved_style_record(LayoutContext* context, CssPropertyCode property,
         return;
     }
     uint8_t dependencies = css_geometry_property(property);
+    if (css_value_keyword_equals(value, CSS_VALUE_INHERIT) && !css_property_runtime_inherited(property))
+        style->inherits_noninherited = true;
+    // SVG's declaration-driven inherited presentation values are not represented by HTML props.
+    if (css_property_is_svg_presentation(property) && !css_property_is_svg_paint(property))
+        style->inherited_unknown = true;
     if (dependencies && css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
         // legacy explicit box inheritance reads the parent's mutable used values.
         css_style_unsupported(style, CSS_STYLE_INHERIT);
@@ -507,6 +649,24 @@ void css_resolved_style_note_axis(LayoutContext* context, LayoutAxis axis) {
     else style->geometry.context_height = true;
 }
 
+void css_resolved_style_record_html_axis(LayoutContext* context, LayoutAxis axis, float value,
+    bool percentage, bool persist, bool clear_unresolved, bool store_resolved) {
+    css_resolved_style_note_axis(context, axis);
+    CssResolvedStyle* style = context->css_style_recording;
+    if (!style || !style->reusable || style->element != context->view || !percentage) return;
+    auto* binding = (CssGeometryBinding*)pool_calloc(context->pool, sizeof(CssGeometryBinding));
+    if (!binding) { css_style_unsupported(style, CSS_STYLE_ALLOCATION); return; }
+    binding->html = true; binding->html_value = value; binding->persist = persist;
+    binding->clear_unresolved = clear_unresolved; binding->store_resolved = store_resolved;
+    binding->property = axis == LAYOUT_AXIS_X ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
+    binding->dependencies = axis == LAYOUT_AXIS_X ? CSS_GEOMETRY_X : CSS_GEOMETRY_Y;
+    if (style->last_binding) style->last_binding->next = binding;
+    else style->bindings = binding;
+    style->last_binding = binding;
+    style->dependencies |= binding->dependencies;
+    style->preferred_percentages |= binding->dependencies;
+}
+
 bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element) {
     if (!css_resolved_style_input_revision(context, element)) return false;
     const CssResolvedStyle* style = element->layout_cache->resolved_style;
@@ -544,6 +704,16 @@ bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {
         // only used values evolve with constraints; committed computed values stay frozen (VR15).
         for (const CssGeometryBinding* binding = style->bindings; binding; binding = binding->next) {
             if (!(binding->dependencies & changed)) continue;
+            if (binding->html) {
+                LayoutAxis axis = binding->property == CSS_PROPERTY_WIDTH ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+                layout_apply_html_axis_value(context, binding->persist
+                    ? lam::unsafe_view_block_element_storage(element) : nullptr, axis,
+                    binding->html_value, true, axis == LAYOUT_AXIS_X
+                        ? context->block.content_width : context->block.content_height,
+                    binding->clear_unresolved, binding->store_resolved);
+                g_style_geometry_evaluations++;
+                continue;
+            }
             css_apply_computed_property(binding->property, binding->declaration,
                 binding->declaration->value, binding->priority, context);
             g_style_geometry_evaluations++;

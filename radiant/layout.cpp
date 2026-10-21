@@ -2303,6 +2303,29 @@ bool layout_boundary_consumed_by_flow(DomElement* element) {
         boundary->margin_chain_positive != 0.0f || boundary->margin_chain_negative != 0.0f;
 }
 
+ViewType layout_view_type_for_display(DisplayValue display, bool blockified) {
+    if (display.inner == CSS_VALUE_TABLE) return RDT_VIEW_TABLE;
+    if (display.outer == CSS_VALUE_INLINE_BLOCK) return RDT_VIEW_INLINE_BLOCK;
+    if (display.outer == CSS_VALUE_LIST_ITEM) return RDT_VIEW_LIST_ITEM;
+    if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_CONTENTS)
+        return blockified ? RDT_VIEW_BLOCK : RDT_VIEW_INLINE;
+    if (display.outer == CSS_VALUE_TABLE_CELL) return RDT_VIEW_TABLE_CELL;
+    if (display.outer == CSS_VALUE_TABLE_ROW) return RDT_VIEW_TABLE_ROW;
+    if (display.outer == CSS_VALUE_TABLE_ROW_GROUP || display.outer == CSS_VALUE_TABLE_HEADER_GROUP ||
+        display.outer == CSS_VALUE_TABLE_FOOTER_GROUP) return RDT_VIEW_TABLE_ROW_GROUP;
+    if (display.outer == CSS_VALUE_TABLE_COLUMN) return RDT_VIEW_TABLE_COLUMN;
+    if (display.outer == CSS_VALUE_TABLE_COLUMN_GROUP) return RDT_VIEW_TABLE_COLUMN_GROUP;
+    return RDT_VIEW_BLOCK;
+}
+
+static void layout_reset_inherited_font(LayoutContext* context, DomElement* element) {
+    DomElement* parent = element->parent_element();
+    const FontProp* inherited = parent && parent->font ? parent->font.get() : context->font.style.get();
+    // a full cascade starts from inherited inputs, never an earlier UA-scaled output.
+    if (element->font && inherited && inherited != element->font.get())
+        radiant_copy_font_values(element->font, inherited);
+}
+
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     uint64_t t_start = time_now_ns();
 
@@ -2310,7 +2333,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         DomElement* dom_elem = node->as_element();
         // namespaced page traits enter the shared cascade as presentational hints.
         radiant_native_hints_declare(lycon, dom_elem);
-        if (dom_elem && dom_elem->specified_style) {
+        if (dom_elem && (dom_elem->specified_style ||
+                radiant::css_resolved_style_cache_allowed(lycon, dom_elem))) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
             bool measuring = layout_context_is_measuring(lycon);
@@ -2319,6 +2343,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // validated committed boxes keep algorithm-assigned constraints; changed
             // computed inputs or percentage bases restore clean values before flow (VR15).
             if (styles_current && !measuring && !dom_elem->measure_restyled() &&
+                !layout_element_is_replaced(dom_elem) &&
                 !layout_boundary_consumed_by_flow(dom_elem) &&
                 (!radiant::css_resolved_style_cache_allowed(lycon, dom_elem) ||
                  radiant::css_resolved_style_matches_context(lycon, dom_elem))) {
@@ -2369,7 +2394,14 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 if (parent_elem && parent_elem->font) {
                     setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
                 }
+                layout_reset_inherited_font(lycon, dom_elem);
                 apply_element_default_style(lycon, dom_elem);
+                if (!dom_elem->specified_style && lycon->font.style) {
+                    // UA-only elements need the same retained computed record as authored styles.
+                    if (!dom_elem->font && !dom_elem->scratch_lived()) dom_elem->ensure_font(lycon);
+                    if (dom_elem->font) radiant_fill_missing_font_values(
+                        dom_elem->font, lycon->font.style, false);
+                }
                 if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
                     // CSS Cascade: HTML defaults remain available for control semantics,
                     // while a winning all keyword resets the visual property state.
@@ -2414,14 +2446,16 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 record.commit();
             }
 
-            // finalize HTML defaults before capturing or sampling animation values.
-            css_web_animation_resolve(dom_elem, lycon);
-            if (lycon->css_query_probe ||
-                view_content_visibility_hides(dom_elem, CONTENT_VISIBILITY_PAINT)) {
-                css_motion_sample_existing(dom_elem, lycon);
-            } else if (lycon->ui_context) {
-                css_animation_resolve(dom_elem, lycon);
-                css_transition_resolve(dom_elem, lycon);
+            // ordered-effect preparation cannot publish motion baselines from provisional boxes.
+            if (!lycon->preparing_generated_effects) {
+                css_web_animation_resolve(dom_elem, lycon);
+                if (lycon->css_query_probe ||
+                    view_content_visibility_hides(dom_elem, CONTENT_VISIBILITY_PAINT)) {
+                    css_motion_sample_existing(dom_elem, lycon);
+                } else if (lycon->ui_context) {
+                    css_animation_resolve(dom_elem, lycon);
+                    css_transition_resolve(dom_elem, lycon);
+                }
             }
 
             if (measuring) {
@@ -2437,6 +2471,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 dom_elem->set_needs_style_recompute(false);
             }
         } else {
+            layout_reset_inherited_font(lycon, dom_elem);
             apply_element_default_style(lycon, dom_elem);
             // CSS 2.1: Elements without specified styles still have computed values
             if (lycon->font.style) {
@@ -4483,6 +4518,8 @@ static bool layout_mathml_tree_has_content(DomNode* node) {
     if (!node || !node->is_element()) return false;
     for (DomNode* child = node->as_element()->first_child; child;
          child = child->next_sibling) {
+        // generated effects do not turn an empty MathML content box into authored math content.
+        if (child->is_element() && layout_generated_pseudo(child->as_element(), nullptr, nullptr)) continue;
         if (child->is_text()) {
             if (layout_dom_text_has_non_whitespace(child->as_text())) return true;
             continue;
@@ -4518,6 +4555,7 @@ static void layout_empty_mathml_tree(LayoutContext* lycon, DomNode* node,
     for (DomNode* child = node->as_element()->first_child; child;
          child = child->next_sibling) {
         if (!child->is_element()) continue;
+        if (layout_generated_pseudo(child->as_element(), nullptr, nullptr)) continue;
         DisplayValue child_display = resolve_display_value(child);
         if (layout_display_is_none(child_display)) {
             child->as_element()->view_type = RDT_VIEW_NONE;
@@ -4648,7 +4686,7 @@ static void layout_move_display_contents_pseudo_to_edge(
     parent->last_child = lam::up(last);
 }
 
-static bool layout_node_is_hidden_by_closed_details(DomNode* node) {
+bool layout_node_is_hidden_by_closed_details(DomNode* node) {
     if (!node) return false;
     for (DomNode* ancestor = node->parent; ancestor;
          ancestor = ancestor->parent) {
@@ -6286,6 +6324,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     for (;;) {
         // a repeated page-flow pass rewinds the pages of the one it replaces
         if (lycon.paged && !paged_flow_pass_begin(&lycon)) break;
+        if (!layout_prepare_generated_effects(&lycon, root_node)) {
+            log_error("layout generation: cannot prepare ordered generated effects");
+            return;
+        }
         layout_html_root(&lycon, root_node);
         if (lycon.paged && !paged_flow_pass_settle(&lycon)) break;
         ViewBlock* viewport = lam::view_as_block(doc->view_tree->root);

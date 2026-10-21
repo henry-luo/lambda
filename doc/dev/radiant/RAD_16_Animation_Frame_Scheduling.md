@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-10-09 (§8 detached mutation reconciliation); 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
 
+> **Scoped source refresh:** 2026-10-21 — embedded-document publication at the frame boundary; integrated qualification is recorded in the retained-layout implementation record.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *timing half* of Radiant: the cross-platform `RadiantFrameClock` vsync wake source, the `window.cpp` render loop it paces, the generic `AnimationScheduler`/`TimingFunction`/`AnimationInstance` engine, the CSS `@keyframes` runtime (`KeyframeRegistry`, per-frame keyframe sampling into in-place view mutations and dirty rects), and the video-frame wake path. The threading contract is the load-bearing idea: the native clock only *wakes* the loop; every animation sample and every mutation runs on the UI thread.
 >
 > **Primary sources:** `radiant/radiant.hpp` + `radiant/frame_clock.cpp` (`RadiantFrameClock`, native vsync thread, timeout policy), `radiant/view.hpp` + `radiant/animation.cpp` (`AnimationScheduler`, `AnimationInstance`, `TimingFunction`), `radiant/view.hpp` + `radiant/css_animation.cpp` (`KeyframeRegistry`, `CssKeyframes`, keyframe sampling, style-resolution wiring), `radiant/render.hpp` + `radiant/video_frame_wake.cpp` (video wake), `radiant/window.cpp` (`view_frame_clock` main loop, `view_wake_glfw`, `view_next_wait_timeout`).
@@ -10,6 +12,15 @@
 ---
 
 ## 1. Purpose and shape
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: the existing embedded
+document walk commits pending child mutations through `layout_update_document`
+before sampling that child's animation. A parent callback can change child CSS
+without dirtying parent geometry; the host viewport is temporarily rebound and
+restored by the shared event reflow helper. Active script/layout execution defers
+this commit. Clean children perform no layout. Paint-only publication marks the
+resolved style current together with its presentation values. See
+[the retained-layout record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md).
 
 Radiant's document viewer is not a spin-loop. It is an event-driven GLFW loop that parks in `glfwWaitEventsTimeout` when idle and only redraws when something asks it to: a script's `requestAnimationFrame`, a caret blink, a CSS animation, a decoded video frame, an async resource completion, or a raw input event. This document describes the machinery that decides *when* to wake and *what* time-driven visuals to sample once awake.
 
