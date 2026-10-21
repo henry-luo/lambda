@@ -729,6 +729,8 @@ Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
 bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
     Item value);
 Item scalar_storage_read(Item item, bool immortal);
+// JS reading: an in-band i64/u64 may return as an inline int (one JS number type)
+Item js_scalar_storage_read(Item item, bool immortal);
 
 static inline Map* map_shape_field_to_map(void* map_data, const ShapeEntry* field) {
     return map_data && field ? *(Map**)map_field_ptr(map_data, field) : nullptr;

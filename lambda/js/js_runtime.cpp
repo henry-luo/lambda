@@ -5108,7 +5108,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 // movable scalar storage; publish a current number-home Item
                 // before later property/call allocations can compact it.
                 return borrowed_shape_value
-                    ? scalar_storage_read(ord_val, false) : ord_val;
+                    ? js_scalar_storage_read(ord_val, false) : ord_val;
             }
             if (st == JS_OWN_DELETED) {
                 own_found = true;
@@ -9006,7 +9006,7 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
         if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
             // a consumer can allocate after this read, moving the array's
             // scalar tail. Its result needs a transient number home (D5.3.4).
-            return scalar_storage_read(arr->items[idx], false);
+            return js_scalar_storage_read(arr->items[idx], false);
         }
         if (!lookup_prototype) return make_js_undefined();
     }
@@ -20039,7 +20039,7 @@ static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
 
 static Item js_collection_node_read_item(JsCollectionOrderNode* node,
         JsCollectionNodeSlot slot) {
-    return node ? owned_item_slot_read(node->slots,
+    return node ? js_owned_item_slot_read(node->slots,
         JS_COLLECTION_NODE_ITEM_COUNT, slot, false) : ItemNull;
 }
 

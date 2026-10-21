@@ -723,18 +723,44 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
     }
 }
 
+// js_number selects the JS reading. Lambda keeps a stored i64/u64 typed as
+// stored at every magnitude: re-typing an in-band one as `int` on read made
+// `[2i64, "a"][0]` an int while `[2^53 i64, "a"][0]` stayed i64 (S9.3.1, D2.6.2).
+// JS has one number type, so its readers may return an in-band i64/u64 as an
+// inline int and skip allocating a scalar home on every property read.
+static Item scalar_storage_read_as(Item item, bool immortal, bool js_number);
+
+static Item owned_item_slot_read_as(Item* storage, int64_t item_count,
+                                    int64_t index, bool immortal, bool js_number) {
+    if (!storage || item_count <= 0 || index < 0 || index >= item_count) return ItemNull;
+    return scalar_storage_read_as(storage[index], immortal, js_number);
+}
+
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal) {
-    if (!storage || item_count <= 0 || index < 0 || index >= item_count) return ItemNull;
-    return scalar_storage_read(storage[index], immortal);
+    return owned_item_slot_read_as(storage, item_count, index, immortal, false);
+}
+
+Item js_owned_item_slot_read(Item* storage, int64_t item_count,
+                             int64_t index, bool immortal) {
+    return owned_item_slot_read_as(storage, item_count, index, immortal, true);
 }
 
 Item scalar_storage_read(Item item, bool immortal) {
+    return scalar_storage_read_as(item, immortal, false);
+}
+
+Item js_scalar_storage_read(Item item, bool immortal) {
+    return scalar_storage_read_as(item, immortal, true);
+}
+
+static Item scalar_storage_read_as(Item item, bool immortal, bool js_number) {
     if (immortal) return item;
 #ifdef LAMBDA_IO_STATIC_VALUES
     // The standalone input library has no execution side stack; all of its
     // container storage is owned by the live input pool, so the reference is
     // already stable for the reader's lifetime.
+    (void)js_number;
     return item;
 #else
     // Owned storage may move or die independently of the reader. Re-home its
@@ -745,15 +771,16 @@ Item scalar_storage_read(Item item, bool immortal) {
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64: {
         int64_t value = item.get_int64();
-        // Most JS numeric fields fit the inline int53 lane. Re-homing those
-        // values on the side-number stack made every property read allocate;
-        // reserve transient homes for the genuinely out-of-band values.
-        if (value >= INT53_MIN && value <= INT53_MAX) return (Item){.item = i2it(value)};
+        if (js_number && value >= INT53_MIN && value <= INT53_MAX) {
+            return (Item){.item = i2it(value)};
+        }
         return box_int64_value(value);
     }
     case LMD_TYPE_UINT64: {
         uint64_t value = item.get_uint64();
-        if (value <= (uint64_t)INT53_MAX) return (Item){.item = i2it((int64_t)value)};
+        if (js_number && value <= (uint64_t)INT53_MAX) {
+            return (Item){.item = i2it((int64_t)value)};
+        }
         return box_uint64_value(value);
     }
     case LMD_TYPE_FLOAT:

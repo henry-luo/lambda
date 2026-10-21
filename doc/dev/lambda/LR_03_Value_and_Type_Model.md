@@ -69,7 +69,7 @@ The JIT-facing scalar unbox entry points are `it2d` (`lambda-data.cpp:309`), `it
 
 <img alt="Container struct family" src="diagram/d03_container_family.svg" width="720">
 
-All container types extend `struct Container` (`lambda.h:580`; C++ derivations in `lambda.hpp`). The shared header is: `TypeId type_id` at byte 0 (the dereference target for `type_id()`), a lifecycle-flags union (`is_content`/`is_spreadable`/`is_heap`/`is_data_migrated`/`is_static`, `:586`), a second `array_flags` union (`is_ndim`/`is_view`/`is_pinned`/`is_mutable_view`, `:595`), and a `uint8_t map_kind` byte that is **reused as `elem_type` for `ArrayNum`** (`ArrayNum::get_elem_type()`, `lambda.hpp:366`).
+All container types extend `struct Container` (`lambda.h:580`; C++ derivations in `lambda.hpp`). The shared header is: `TypeId type_id` at byte 0 (the dereference target for `type_id()`), a lifecycle-flags union (`is_content`/`is_spreadable`/`is_heap`/`is_data_migrated`/`is_static`, `:586`), a second `array_flags` union (`is_ndim`/`is_view`/`is_pinned` (retired, unused)/`is_mutable_view`, `:595`), and a `uint8_t map_kind` byte that is **reused as `elem_type` for `ArrayNum`** (`ArrayNum::get_elem_type()`, `lambda.hpp:366`).
 
 The concrete containers:
 

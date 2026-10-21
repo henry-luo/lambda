@@ -1,5 +1,5 @@
 // matmul / concat / stack for typed N-D arrays
-// Phase 2 — N-D structural ops (Lambda_Typed_Array2.md §1)
+// N-D structural ops (Lambda_Typed_Array.md §6.3)
 
 // ============================================================
 // MATMUL — 2-D · 2-D

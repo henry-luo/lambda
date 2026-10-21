@@ -1,0 +1,56 @@
+'=== 1-D: only one exact element type packs ==='
+[1, 2.5]
+int
+float
+int
+i64
+[9007199254740993, 2.5]
+i64
+'=== N-D: rows of different types stay nested ==='
+[[9007199254740993, 1], [2.5, 3.5]]
+i64
+float
+[[9007199254740993, 1], [2.5, 3.5]]
+i64
+int
+float
+'=== N-D: rows of one type still form a tensor ==='
+2
+[2, 2]
+2
+[2, 3]
+[2, 3]
+'=== comprehension results keep their element types ==='
+[1, 2.5, 3]
+int
+float
+'=== an i64 or u64 in a generic container stays typed at any magnitude ==='
+i64
+i64
+u64
+i64
+'=== arithmetic follows scalar promotion per element ==='
+[2, 3.5]
+int
+float
+[1.5, 2.5]
+float
+[0, 3]
+u8
+float
+'=== reductions widen narrow lanes; mean is float ==='
+300
+int
+400
+[200, 300]
+int
+[300, 200]
+200
+3.5
+150
+float
+-9223372036854775808
+1.5
+145
+200
+u8

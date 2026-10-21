@@ -1294,6 +1294,121 @@ static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
     }
 }
 
+// syntax_flags of a literal that is the operand of a prefix `-`. A signed
+// decimal literal may spell 2^(b-1) only there (`-128i8`); bare, `128i8`
+// overflows i8 (S4.1.5).
+enum { LSF_LITERAL_NEGATED = 1u << 0 };
+
+typedef enum SizedConstStatus {
+    SIZED_CONST_NONE = 0,   // not a sized integer constant
+    SIZED_CONST_OK,
+    SIZED_CONST_OVERFLOW,   // a sub-expression overflowed; reported where it did
+} SizedConstStatus;
+
+static bool sized_lane_holds(LambdaNumericKind kind, __int128 value) {
+    int bits = lambda_numeric_sized_bits(kind);
+    if (bits <= 0) return false;
+    if (lambda_numeric_sized_is_unsigned(kind)) {
+        return value >= 0 && value <= (bits == 64 ? (__int128)UINT64_MAX :
+            ((__int128)1 << bits) - 1);
+    }
+    __int128 bound = (__int128)1 << (bits - 1);
+    return value >= -bound && value < bound;
+}
+
+// S4.1.5: the exact value and lane of a sized integer constant -- a sized
+// literal, or a parenthesized, negated, or `+ - *` combination of them, in the
+// lane S4.4.4 selects. Machine ints wrap only at run time; a constant that
+// leaves its lane is a compile error, as `256u8` already is.
+static SizedConstStatus ast_sized_constant(Transpiler* tp, AstNode* node,
+        __int128* value, LambdaNumericKind* kind) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    // the operator node being resolved has no type yet; only a leaf needs one
+    if (!node) return SIZED_CONST_NONE;
+    if (node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op != OPERATOR_NEG) return SIZED_CONST_NONE;
+        SizedConstStatus status = ast_sized_constant(tp, unary->operand, value, kind);
+        if (status != SIZED_CONST_OK) return status;
+        // a decimal 2^(b-1) operand was stored as its wrapped bits (`128i8`
+        // reads -128) because only its negation is in range
+        bool unsigned_lane = lambda_numeric_sized_is_unsigned(*kind);
+        int bits = lambda_numeric_sized_bits(*kind);
+        if (!unsigned_lane && *value == -((__int128)1 << (bits - 1))) {
+            AstNode* operand = unary->operand;
+            while (operand && operand->node_type == AST_NODE_PRIMARY &&
+                    ((AstPrimaryNode*)operand)->expr) {
+                operand = ((AstPrimaryNode*)operand)->expr;
+            }
+            if (operand && (operand->syntax_flags & LSF_LITERAL_NEGATED)) *value = -*value;
+        }
+        *value = -*value;
+        return sized_lane_holds(*kind, *value) ? SIZED_CONST_OK : SIZED_CONST_OVERFLOW;
+    }
+    if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
+                binary->op != OPERATOR_MUL) return SIZED_CONST_NONE;
+        __int128 left = 0, right = 0;
+        LambdaNumericKind left_kind = LAMBDA_NUM_INVALID, right_kind = LAMBDA_NUM_INVALID;
+        SizedConstStatus left_status = ast_sized_constant(tp, binary->left, &left, &left_kind);
+        SizedConstStatus right_status = ast_sized_constant(tp, binary->right, &right, &right_kind);
+        if (left_status == SIZED_CONST_OVERFLOW || right_status == SIZED_CONST_OVERFLOW) {
+            return SIZED_CONST_OVERFLOW;
+        }
+        if (left_status != SIZED_CONST_OK || right_status != SIZED_CONST_OK) {
+            return SIZED_CONST_NONE;
+        }
+        *kind = lambda_numeric_sized_integer_result(left_kind, right_kind);
+        bool beyond = binary->op == OPERATOR_ADD ? __builtin_add_overflow(left, right, value) :
+            binary->op == OPERATOR_SUB ? __builtin_sub_overflow(left, right, value) :
+            __builtin_mul_overflow(left, right, value);
+        return !beyond && sized_lane_holds(*kind, *value) ? SIZED_CONST_OK : SIZED_CONST_OVERFLOW;
+    }
+    if (node->node_type != AST_NODE_PRIMARY || !node->type || !node->type->is_literal) {
+        return SIZED_CONST_NONE;
+    }
+    *kind = lambda_numeric_kind_from_type(node->type);
+    if (!lambda_numeric_is_sized_integer(*kind)) return SIZED_CONST_NONE;
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return SIZED_CONST_NONE;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:  *value = item.get_int64(); return SIZED_CONST_OK;
+    case LMD_TYPE_UINT64: *value = item.get_uint64(); return SIZED_CONST_OK;
+    case LMD_TYPE_NUM_SIZED: *value = item.get_num_sized_as_int64(); return SIZED_CONST_OK;
+    default: return SIZED_CONST_NONE;
+    }
+}
+
+// The diagnostic for a sized constant `node` whose own operation leaves its
+// lane; silent when a sub-expression already overflowed (reported there).
+static bool reject_sized_constant_overflow(Transpiler* tp, AstNode* node) {
+    __int128 value = 0;
+    LambdaNumericKind kind = LAMBDA_NUM_INVALID;
+    if (ast_sized_constant(tp, node, &value, &kind) != SIZED_CONST_OVERFLOW) return false;
+    // report only when every operand is itself a valid constant
+    AstNode* operands[2] = {NULL, NULL};
+    if (node->node_type == AST_NODE_UNARY) {
+        operands[0] = ((AstUnaryNode*)node)->operand;
+    } else if (node->node_type == AST_NODE_BINARY) {
+        operands[0] = ((AstBinaryNode*)node)->left;
+        operands[1] = ((AstBinaryNode*)node)->right;
+    }
+    for (AstNode* operand : operands) {
+        __int128 ignored = 0;
+        LambdaNumericKind operand_kind = LAMBDA_NUM_INVALID;
+        if (operand && ast_sized_constant(tp, operand, &ignored, &operand_kind) ==
+                SIZED_CONST_OVERFLOW) return true;
+    }
+    record_semantic_error_span(tp, node->source_span, ERR_INVALID_NUMBER,
+        "sized integer constant expression overflows %c%d; machine integers wrap only at run time",
+        lambda_numeric_sized_is_unsigned(kind) ? 'u' : 'i', lambda_numeric_sized_bits(kind));
+    return true;
+}
+
 static Type* ast_called_type_target(AstNode* function) {
     function = ast_unwrap_primary_to_leaf(function);
     if (!function || !function->type) return NULL;
@@ -4234,13 +4349,17 @@ static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal)
         case NUM_UINT8:  return 0xFFULL;
         case NUM_UINT16: return 0xFFFFULL;
         case NUM_UINT32: return 0xFFFFFFFFULL;
+        // i64 (suffix sentinel 0xFF): a decimal literal had no limit, so
+        // `18446744073709551615i64` read back as -1
+        case 0xFF:       return decimal_literal ? 9223372036854775808ULL : UINT64_MAX;
         default:         return UINT64_MAX;
     }
 }
 
-// Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
+// Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64);
+// `negated` is set when the literal is the operand of a prefix `-`.
 static Type* build_lit_sized_integer_from_span(Transpiler* tp,
-        SourceSpan span) {
+        SourceSpan span, bool negated) {
     StrView source = source_span_text(tp, span);
     char* num_str = ast_copy_source_text(tp, source, span);
     if (!num_str) return &TYPE_ERROR;
@@ -4265,10 +4384,18 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
     }
     bool decimal_literal = sized_literal_is_decimal(num_str);
     uint64_t limit = sized_literal_limit(num_type, decimal_literal);
-    if (raw_value > limit) {
+    // S4.1.5: a signed decimal limit is 2^(b-1), which only `-128i8` may
+    // spell; a bare `128i8` had silently read back as -128
+    bool signed_lane = num_type == NUM_INT8 || num_type == NUM_INT16 ||
+        num_type == NUM_INT32 || num_type == 0xFF;
+    if (raw_value > limit ||
+            (decimal_literal && signed_lane && raw_value == limit && !negated)) {
         // sized constants are checked before packing so invalid source cannot silently truncate.
+        // i64/u64 use suffix sentinels the sized-type name table does not know
+        const char* lane_name = num_type == 0xFF ? "i64" : num_type == 0xFE ? "u64" :
+            get_num_sized_type_name(num_type);
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
-            "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
+            "sized integer literal '%s' overflows %s", num_str, lane_name);
         mem_free(num_str);
         return &TYPE_ERROR;
     }
@@ -4408,7 +4535,8 @@ static Type* build_literal_type_from_span(Transpiler* tp,
     case LAMBDA_AST_LITERAL_DECIMAL:
         return build_lit_decimal_from_span(tp, span);
     case LAMBDA_AST_LITERAL_SIZED_INTEGER:
-        return build_lit_sized_integer_from_span(tp, span);
+        return build_lit_sized_integer_from_span(tp, span,
+            literal && (literal->syntax_flags & LSF_LITERAL_NEGATED));
     case LAMBDA_AST_LITERAL_SIZED_FLOAT:
         return build_lit_sized_float_from_span(tp, span);
     case LAMBDA_AST_LITERAL_IMAGINARY:
@@ -4551,10 +4679,22 @@ static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
         return;
     }
     else if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+        // S4.1.5: `-1u8` is a constant that leaves its lane
+        if (ast_node->op == OPERATOR_NEG &&
+                reject_sized_constant_overflow(tp, (AstNode*)ast_node)) {
+            ast_node->type = &TYPE_ERROR;
+            return;
+        }
         ast_node->type = operand->type;
         return;
     }
     else if (IS_NUMERIC_ID(operand_type)) {
+        // S4.1.5: negating the i64 minimum is a constant outside the lane
+        if (operand_type == LMD_TYPE_INT64 && ast_node->op == OPERATOR_NEG &&
+                reject_sized_constant_overflow(tp, (AstNode*)ast_node)) {
+            ast_node->type = &TYPE_ERROR;
+            return;
+        }
         type_id = operand_type;
     }
     else if (operand_type != LMD_TYPE_ANY) {
@@ -9106,6 +9246,14 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
         // MIR lowering could obscure the source diagnostic (S3.3.4).
         record_semantic_error_span(tp, right->source_span, ERR_INVALID_OPERATION,
             "integral division or remainder by literal zero");
+        node->type = &TYPE_ERROR;
+        return;
+    }
+    // S4.1.5: `200u8 + 100u8` is a constant that leaves its lane, a compile
+    // error as `256u8` is; only run-time values wrap
+    if ((node->op == OPERATOR_ADD || node->op == OPERATOR_SUB ||
+            node->op == OPERATOR_MUL) &&
+            reject_sized_constant_overflow(tp, (AstNode*)node)) {
         node->type = &TYPE_ERROR;
         return;
     }
@@ -14809,6 +14957,16 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
         AstUnaryNode* unary = (AstUnaryNode*)build_operand_syntax(tp, span,
             AST_NODE_UNARY, sizeof(AstUnaryNode), LSF_UNARY, operand);
         unary->op_str = direct_token_text(tp, reduction->detail_token);
+        // the literal under a prefix `-` may spell a signed 2^(b-1) (`-128i8`)
+        AstNode* negated = operand;
+        while (negated && negated->node_type == AST_NODE_PRIMARY &&
+                negated->syntax_form != LSF_LITERAL && ((AstPrimaryNode*)negated)->expr) {
+            negated = ((AstPrimaryNode*)negated)->expr;
+        }
+        if (negated && negated->syntax_form == LSF_LITERAL &&
+                unary->op_str.length == 1 && unary->op_str.str[0] == '-') {
+            negated->syntax_flags |= LSF_LITERAL_NEGATED;
+        }
         return (AstNode*)unary;
     }
     }

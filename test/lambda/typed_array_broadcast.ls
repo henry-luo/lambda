@@ -1,5 +1,5 @@
 // NumPy-style shape broadcasting on N-D typed arrays.
-// Phase 2b §1 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §6.4
 // Rules: right-align dims; pad shorter with leading 1s; at each axis dims must
 // be equal or one of them must be 1 (the size-1 axis is "stretched").
 

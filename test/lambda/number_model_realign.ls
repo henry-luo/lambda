@@ -2,14 +2,23 @@
 fn show(x) => [type(x), x]
 
 "=== sized lanes ==="
-show(127i8 + 1i8)
-show(32767i16 + 1i16)
-show(2147483647i32 + 1i32)
-show(9223372036854775807i64 + 1i64)
-show(255u8 + 1u8)
-show(65535u16 + 1u16)
-show(4294967295u32 + 1u32)
-show(18446744073709551615u64 + 1u64)
+// run-time operands: a literal-only overflow is a compile error (S4.1.5)
+let i8_max = 127i8
+let i16_max = 32767i16
+let i32_max = 2147483647i32
+let i64_max = 9223372036854775807i64
+let u8_max = 255u8
+let u16_max = 65535u16
+let u32_max = 4294967295u32
+let u64_max = 18446744073709551615u64
+show(i8_max + 1i8)
+show(i16_max + 1i16)
+show(i32_max + 1i32)
+show(i64_max + 1i64)
+show(u8_max + 1u8)
+show(u16_max + 1u16)
+show(u32_max + 1u32)
+show(u64_max + 1u64)
 show(1i8 + 1u8)
 show(1i32 + 1u32)
 show(1i64 + 1u64)

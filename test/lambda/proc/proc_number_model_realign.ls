@@ -9,7 +9,9 @@ pn emit(value) {
 fn add_one(value: u64) => value + 1
 
 pn main() {
-    emit(127i8 + 1i8)
+    // a run-time operand: a literal-only overflow is a compile error (S4.1.5)
+    let i8_max = 127i8
+    emit(i8_max + 1i8)
     emit(1i8 + 1u8)
     emit(1i32 + 1u32)
     emit(1i64 + 1u64)

@@ -46,7 +46,10 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
 // Forward declarations from lambda-eval-num.cpp
 Item push_d(double val);
 Item box_int64_value(int64_t val);
-Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out);
+Item fn_numeric_fold(Item item, int multiply, int skip_null, int statistic,
+    int64_t* count_out);
+Item lambda_reduction_element(Item element);
+Item lambda_statistic_element(Item element);
 
 //==============================================================================
 // Type Detection Helpers
@@ -1742,7 +1745,7 @@ static bool vector_number_or_null(Item item, double* out, bool* is_null) {
 // prod(vec) - product of all elements
 Item fn_math_prod(Item item) {
     int64_t count = 0;
-    return fn_numeric_fold(item, 1, 0, &count);
+    return fn_numeric_fold(item, 1, 0, 0, &count);
 }
 
 // cumsum(vec) - cumulative sum
@@ -1751,7 +1754,8 @@ static Item vector_cumulative_model(Item item, int op) {
     if (len < 0) return ItemError;
     if (len == 0) return (Item){.array = array()};
 
-    LambdaNumericKind kind = vector_static_numeric_kind(item);
+    // S10.2.4: a running sum or product widens a narrow sized lane to int
+    LambdaNumericKind kind = lambda_reduction_kind(vector_static_numeric_kind(item));
     LambdaNumericDecision decision = lambda_numeric_classify(
         vector_numeric_family(op), kind, kind);
     ArrayNumElemType result_elem = ELEM_INT;
@@ -1759,11 +1763,11 @@ static Item vector_cumulative_model(Item item, int op) {
 
     RootFrame roots(3);
     Rooted<Item> rooted_source(roots, item);
-    Rooted<Item> accumulator(roots, vector_get(item, 0));
+    Rooted<Item> accumulator(roots, lambda_reduction_element(vector_get(item, 0)));
     Rooted<Item> rooted_result(roots, vector_allocate_result(len, typed, result_elem));
     if (!vector_store_result(&rooted_result, typed, 0, accumulator.get())) return ItemError;
     for (int64_t i = 1; i < len; i++) {
-        Item element = vector_get(rooted_source.get(), i);
+        Item element = lambda_reduction_element(vector_get(rooted_source.get(), i));
         Item next = vector_numeric_apply(accumulator.get(), element, op);
         if (get_type_id(next) == LMD_TYPE_ERROR) return ItemError;
         accumulator.set(next);
@@ -3193,11 +3197,13 @@ Item fn_slice2(Item vec, Item start_item) {
 }
 
 // ============================================================================
-// view(arr, start, end) — read-only view sharing arr's storage.
+// view(arr, start, end) — a view sharing arr's storage.
 // Allocates a new ArrayNum whose data pointer is base->data + start*elem_size.
 // The view's shape side-table holds a reference to the base, keeping it alive
-// across GC; the base is also pinned so its data buffer cannot be relocated.
-// Mutation through the view raises an error (see fn_array_set / array_num_set_item).
+// across GC; compaction rebases the view's data pointer when it moves the
+// base's buffer (gc_rebind_array_num_gc_view). The view is created with
+// is_mutable_view set, so procedural writes go through to the base; confining
+// write-through to var-parameter borrows (S9.2.2) is still open.
 // ============================================================================
 Item fn_subview(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
@@ -3970,14 +3976,24 @@ static int64_t parse_axis(Item axis_item) {
 
 // Collapse `axis` of a typed array via the reduction op.  Result is an
 // (ndim-1)-D ArrayNum, or a scalar Item when the input is 1-D.
+// S10.2.4: how one element joins a reduction -- sum/prod widen a narrow sized
+// integer to int, avg combines in float, and min/max compare the element as is.
+static Item reduce_lane_element(Item element, int op) {
+    if (op == RED_SUM || op == RED_PROD) return lambda_reduction_element(element);
+    if (op == RED_AVG) return lambda_statistic_element(element);
+    return element;
+}
+
 static Item reduce_lane_model(ArrayNum* arr, int64_t base_offset,
         int64_t stride, int64_t length, int op) {
     if (length <= 0) return ItemNull;
     RootFrame roots(2);
     Rooted<ArrayNum*> rooted_arr(roots, arr);
-    Rooted<Item> accumulator(roots, array_num_read_item(arr, base_offset));
+    Rooted<Item> accumulator(roots,
+        reduce_lane_element(array_num_read_item(arr, base_offset), op));
     for (int64_t i = 1; i < length; i++) {
-        Item element = array_num_read_item(rooted_arr.get(), base_offset + i * stride);
+        Item element = reduce_lane_element(
+            array_num_read_item(rooted_arr.get(), base_offset + i * stride), op);
         Item next;
         if (op == RED_SUM || op == RED_AVG) next = fn_add(accumulator.get(), element);
         else if (op == RED_PROD) next = fn_mul(accumulator.get(), element);
@@ -4004,6 +4020,8 @@ static LambdaNumericDecision reduce_result_decision(
             LAMBDA_NUM_OVERFLOW_EXACT
         };
     }
+    // the elements join as reduce_lane_element converts them (S10.2.4)
+    element_kind = op == RED_AVG ? LAMBDA_NUM_FLOAT : lambda_reduction_kind(element_kind);
     LambdaNumericDecision fold = lambda_numeric_classify(
         op == RED_PROD ? LAMBDA_NUM_OP_MUL : LAMBDA_NUM_OP_ADD,
         element_kind, element_kind);
@@ -4101,7 +4119,9 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
         return ItemError;
     }
     int vector_op = is_prod ? 2 : 0;
-    LambdaNumericKind element_kind = lambda_numeric_kind_from_elem_type(arr->get_elem_type());
+    // S10.2.4: a running sum or product widens a narrow sized lane to int
+    LambdaNumericKind element_kind = lambda_reduction_kind(
+        lambda_numeric_kind_from_elem_type(arr->get_elem_type()));
     LambdaNumericDecision decision = lambda_numeric_classify(
         is_prod ? LAMBDA_NUM_OP_MUL : LAMBDA_NUM_OP_ADD,
         element_kind, element_kind);
@@ -4146,8 +4166,8 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
     int64_t src_base = 0, res_base = 0;
     for (int64_t lane = 0; lane < na_total; lane++) {
         for (int64_t a = 0; a < axis_len; a++) {
-            Item value = array_num_read_item(rooted_arr.get(),
-                src_base + a * src_axis_str);
+            Item value = lambda_reduction_element(array_num_read_item(
+                rooted_arr.get(), src_base + a * src_axis_str));
             if (a == 0) accumulator.set(value);
             else {
                 Item next = is_prod ? fn_mul(accumulator.get(), value) :

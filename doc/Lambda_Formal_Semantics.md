@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 70.0.0 (2026-10-20)
+**Spec version:** 70.1.0 (2026-10-21)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1495,6 +1495,15 @@ construct; `let` is final; there is no global mutable state.* [C4, RG14]
   A corollary of "values never alias", and what makes cycles
   unconstructible. Porting hazard (silent): *fill-after-storing* leaves the
   stored copy empty — fill before storing, or read-modify-write. [C4]
+- **S9.3.2** **Construction preserves each element's type and precision.**
+  An array literal, comprehension, pipe, or other builder stores every element
+  exactly as given — it never promotes elements to a common numeric type:
+  `[1, 2.5][0]` is `int`, `[1, 2i64][1]` is `i64`, and an `i64` beside a
+  `float` keeps every digit, in a 1-D array or as an N-D row. A packed numeric
+  representation is chosen only when every element already has one exact type
+  (D2.6.2); otherwise the array stays generic. Storing a scalar in a container
+  and reading it back keeps its type at every magnitude. A declared `T[]`
+  contract still admits elements by S11.4.5. [USER 2026-10-21; Typed_Array §4]
 
 *Replacement idiom for reference sharing — the **handle store**: one container
 owns each record, every other reference is a key into it, the store travels as
@@ -1615,10 +1624,22 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   error lanes must preserve comparison failure, never become successful
   Boolean answers; the whole-result versus per-lane error shape is SO50.
   Bare `==` uses deep scalar equality under S5.1. [C10, C8.8]
-- **S10.2.3*** Mask consumption is explicit and non-magical: `sum(mask)`
+- **S10.2.3** Mask consumption is explicit and non-magical: `sum(mask)`
   counts true lanes; `a[mask]` is boolean indexing. `and`/`or` remain scalar
   short-circuit operators, never mask combinators. Condition-position lints
   protect the truthiness boundary (suggest `any`/`all`/`len`). [C10]
+- **S10.2.4** Element-wise arithmetic promotes exactly as scalar arithmetic
+  does: each result element has the type the scalar operation gives its pair
+  of elements (S4.4–S4.5), so `[1, 2.5] + 1` is `[2, 3.5]` holding an `int`
+  and a `float`, `i16[] * i16[]` stays `i16` and wraps, and `int[] / int[]` is
+  `float[]`. Arrays add no promotion rules of their own. Reductions widen
+  instead, as NumPy, Julia and R do: `sum`, `prod`, `cumsum` and `cumprod`
+  accumulate a narrow sized integer lane (`i8`…`u32`) in `int` and an
+  `i64`/`u64` lane in itself, whole-array or along an axis, so
+  `sum([200u8, 100u8])` is `300`; `avg`, `mean`, `variance` and `deviation`
+  accumulate every bounded number in `float`, so `avg([200u8, 100u8])` is
+  `150.0`; `min` and `max` keep the lane. [USER 2026-10-21; Typed_Array §7.2,
+  §7.6]
 
 ### S10.3 Keyword operators
 
@@ -2952,7 +2973,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S9.2.4v2 (view-state half) | Not implemented — see the exclusivity row. |
 | Exclusivity (S9.2 / CW §11.3) | **Two of four faces effectively hold.** Face 1 (two `var` args naming one variable) rejects via `E211`. Face 3 (path-prefix) rejects at the *conservative whole-base* granularity the design sanctions as its Stage-2 v1 — so `f(var t, var t.a)` is caught, and `f(var t.a, var t.b)` is caught too though the ruling would permit it. **Face 2 (receiver vs `var` arg) is unreachable**: a `pn` method with a `var` parameter cannot be dispatched at all (`E229`, "dynamic dispatch of a function with `var` parameters is deferred"), so the check would be dead code until that lands. The ratified path that lifts `E229` is CW33 (COW doc §11.10, 2026-08-29) — the `var`-param address ABI, under which this check becomes a slot-address compare in the callee prologue. **Face 4 closed at whole-base granularity (CW31, 2026-08-29; worktree branch `nm-impl-work`, pending merge)**: a `subview` binding records its ultimate base (`NameEntry::view_base`, chased through view-of-view), and the call-site check conflicts two `var` args sharing an effective root — overlapping subviews and view-vs-base both reject via `E211`; views of distinct bases pass. Disjoint tiles of one base also reject: the same sanctioned false positive as face 3, with the splitter ladder unchanged. Fixture: `test/lambda/negative/semantic/var_view_overlap.ls`. |
 | S9.3.1 | **UNCONDITIONAL since 2026-08-29** — insertion capture is applied at the specified container insertion points on both tiers, and `LAMBDA_COW_CAPTURE` is no longer consulted. The implementation marks named values at capture sites; freshly produced containers are not marked because they have no second observer at that insertion point. Plain-parameter snapshots under **S9.1.3** are unconditional as well, with `var` remaining the sole write-through construct. Full implementation record: [LR12-R9](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-r9>). |
-| S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
+| S10.2.2v2, S10.2.3 | **Landed 2026-07-08; re-verified 2026-10-21.** `eq ne lt le gt ge` broadcast to bool masks and bare `< <= > >=` are scalar-only (`typed_array_mask.ls`, `phase6_elementwise_compare.ls`). Masks are consumed by `sum`, `a[mask]`, `any` and `all`; `and`/`or` stay scalar short-circuit (`m and n` is `n`); `lambda_condition_lint` warns on a mask or container in condition position. S10.2.3 is complete. **Residue:** element-wise error shapes (SO50, the comparison-core row above) keep S10.2.2v2 marked. |
 | S11.1.1v3 (v2 core) | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. Since 2026-09-23 (both tiers) ArrayNum views and N-D arrays also cross contracts with no exact packed lane (`number[]`, `float[][]`, `int?[]`, unions): admission presents their elements -- scalars, or leading-axis rows -- as a snapshot copy (S9.2.2), where it had rejected everything `is` accepted; and the JIT's `len` of an annotated N-D binding counts rows, not leaves. Fixture `proc/array_view_admission.ls`. **Counted axes enforced at typed boundaries since 2026-09-23 (both tiers):** once P5 made `T[n]` an array layer, the admission fast paths (lane, rank and certificate reuse) proved it from the leaf lane and rank alone, so `int[3]` admitted `[1, 2]` and `int[2][3]` any row count or row length. Admission now checks every counted axis first; a counted certificate re-checks the live lengths on every reuse (D3.3.3v3), since a push or splice changes them without a boundary, and the JIT no longer elides a counted contract's boundary on the strength of a binding's or record field's declared type. Fixtures `negative/runtime/array_count_*.ls`, `type_counted_rank.ls` §5. **Residue:** a record whose field is counted keeps its trusted shape across a push through that field, so a later record boundary admits the stale length (both tiers); whether such a push should itself raise (S7.8.1) is unruled. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
 | S11.1.5v2 | **Colour half conformant as of 2026-09-18; the v2 signature syntax as of 2026-09-24.** `pn`/`pn (...)` parse in type position (C parser, type-pattern parser, Tree-sitter); `is fn`/`is pn`, `match` arms and parameter admission test the colour through one runtime rule, and the static boundary rejects a known wrong colour (E207) while deferring a `function`-typed source to the runtime check; system procedure references carry their signature on both tiers. Fixtures `test/lambda/proc/fn_pn_function_types.ls`, `negative/semantic/fn_pn_colour_mismatch.ls`, `negative/runtime/fn_pn_colour_mismatch.ls`. The v2 signature landed in the C statement parser, the type-pattern parser and Tree-sitter: `fn int` is rejected, `fn ()` and `fn (x: int)` parse with an `any` return, a signature may return a signature, and a line-start name after a return-less signature is E100 (S16.2.3v3). No corpus file used the retired shorthand. **Residue:** a binder over a function value still selects `function` (blocked on SO44); hosted (JS) function values read as `fn`; `function (...)` does not parse in type position in either front end; a declaration cannot spell a signature as its return type (`fn make() fn (y: int) int {…}` is rejected by both front ends — an alias works); a suffix on a function type is SO45. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
@@ -3143,8 +3164,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
-| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
-| S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
+| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2) |
+| S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md`, `Lambda_Typed_Array.md` (S10.2.4) |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |

@@ -659,7 +659,7 @@ double array_num_read_double(ArrayNum* arr, int64_t offset) {
 // Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
 // Walks strides to compute a flat offset, then reads the scalar at that offset.
 // Fewer indices than axes select a leading-axis view, as the chained arr[i][j]
-// does (Lambda_Typed_Array2.md); more, or an out-of-range index, read ItemNull.
+// does (Lambda_Typed_Array.md §5); more, or an out-of-range index, read ItemNull.
 Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     if (!arr || ndim < 1) return ItemNull;
     // 1-D access: arr[i] when arr is 1-D
@@ -1717,12 +1717,38 @@ Array* array_spreadable() {
 // ArrayNum.  Returns the new ArrayNum on success, or NULL if promotion isn't
 // applicable (heterogeneous children, jagged, mixed types, empty, etc.).
 //
+// The lane that holds a scalar item by its own type. Construction never
+// converts, so int stays int, i64 stays i64, and a sized value keeps its kind.
+static bool scalar_exact_elem_type(Item item, ArrayNumElemType* out) {
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT:       *out = ELEM_INT; return true;
+    case LMD_TYPE_INT64:     *out = ELEM_INT64; return true;
+    case LMD_TYPE_UINT64:    *out = ELEM_UINT64; return true;
+    case LMD_TYPE_FLOAT:     *out = ELEM_FLOAT64; return true;
+    case LMD_TYPE_BOOL:      *out = ELEM_BOOL; return true;
+    case LMD_TYPE_NUM_SIZED: *out = num_sized_to_elem_type(item.get_num_type()); return true;
+    default:                 return false;
+    }
+}
+
+// Array construction preserves every element's literal type and precision
+// (Lambda_Typed_Array.md §4.1): items pack into a typed lane only when all of
+// them have the same exact type. Any mix (int with float, int with i64, i64
+// with float) stays a generic array, so no element is re-typed or rounded.
+static bool uniform_scalar_elem_type(Item* items, int64_t n, ArrayNumElemType* out) {
+    if (n <= 0 || !scalar_exact_elem_type(items[0], out)) return false;
+    for (int64_t i = 1; i < n; i++) {
+        ArrayNumElemType et;
+        if (!scalar_exact_elem_type(items[i], &et) || et != *out) return false;
+    }
+    return true;
+}
+
 // Used by array_end to catch nested-literal cases the static AST detector
 // missed (let-bound rows, function-returned rows, etc.).
 // Determine whether the child item is a "row-like" numeric sequence (ArrayNum
-// or generic Array of homogeneous numerics) and extract its length / etype.
-// Returns true on success with rt_length set; etype defaults to LMD_TYPE_INT
-// (caller may widen later when scanning siblings).
+// or generic Array whose items share one exact type) and extract its length
+// and element type.
 static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, bool* is_arr_num) {
     TypeId tid = get_type_id(it);
     if (tid == LMD_TYPE_ARRAY_NUM) {
@@ -1739,28 +1765,8 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
         // words, not Items, and folding it into a tensor would drop its nulls
         // and its contract, so it is never a plain numeric row.
         if (!a || a->is_spreadable || array_has_native_lane(a)) return false;
-        if (a->length == 0) return false;
-        // Scan items: retain flex-int storage unless a full-width value or a
-        // float actually requires a wider semantic lane.
-        bool any_float = false;
-        bool any_int64 = false;
-        bool any_uint64 = false;
-        int64_t uint64_count = 0;
-        for (int64_t i = 0; i < a->length; i++) {
-            TypeId it_tid = get_type_id(a->items[i]);
-            if (it_tid == LMD_TYPE_FLOAT) any_float = true;
-            else if (it_tid == LMD_TYPE_INT64) any_int64 = true;
-            else if (it_tid == LMD_TYPE_UINT64) {
-                any_uint64 = true;
-                uint64_count++;
-            }
-            else if (it_tid != LMD_TYPE_INT) return false;
-        }
-        // Mixed signed/unsigned rows remain boxed; a compact lane must retain
-        // one stable element type for every source value.
-        if (any_uint64 && uint64_count != a->length) return false;
-        *etype_out = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 :
-            any_uint64 ? ELEM_UINT64 : ELEM_INT;
+        // a mixed row stays generic: folding it would re-type its elements
+        if (!uniform_scalar_elem_type(a->items, a->length, etype_out)) return false;
         *len_out = a->length;
         *is_arr_num = false;
         return true;
@@ -1768,26 +1774,17 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
     return false;
 }
 
-// Write one element of the source row to the promoted N-D ArrayNum's data buffer
-// at position flat_idx.  Handles both ArrayNum source (typed read) and generic
-// Array source (Item-unboxed read).  When the source elem_type differs from
-// the destination etype (e.g. int row stored into a float-widened tensor),
-// converts element-by-element via the Item path; same-type rows memcpy.
-static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t flat_idx,
-                                 Item src_item) {
+// Write one source row into the promoted N-D ArrayNum's data buffer at
+// position flat_idx. Every row already has the tensor's exact element type
+// (rows are never widened), so an ArrayNum row is a byte copy and a generic
+// row stores items of that same type.
+static void write_row_into_ndim(ArrayNum* dst, int64_t flat_idx, Item src_item) {
     TypeId tid = get_type_id(src_item);
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* src = src_item.array_num;
-        if (src->get_elem_type() == etype) {
-            // same elem_type -- a byte copy, by position: a strided row (of a
-            // transposed matrix) is not the next `length` elements of its base
-            array_num_copy_same_type_bytes(dst, flat_idx, src, 0, src->length);
-        } else {
-            // type mismatch (e.g. int row into float tensor): convert per element
-            for (int64_t j = 0; j < src->length; j++) {
-                array_num_set_item(dst, flat_idx + j, array_num_get(src, j));
-            }
-        }
+        // a byte copy, by position: a strided row (of a transposed matrix)
+        // is not the next `length` elements of its base
+        array_num_copy_same_type_bytes(dst, flat_idx, src, 0, src->length);
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* src = src_item.array;
         for (int64_t j = 0; j < src->length; j++) {
@@ -1836,31 +1833,17 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
             for (int j = 0; j < fs->ndim; j++) if (sd[j] != fd[j]) return NULL;
         }
     } else {
-        // 1-D rows: each sibling must be the same length, same (or compatible) elem_type
+        // 1-D rows: each sibling must have the same length and the same exact
+        // element type. Rows are never widened into a common lane: an int or
+        // i64 row beside a float row would be re-typed (and an i64 above 2^53
+        // rounded), so mixed rows stay a nested array (Lambda_Typed_Array.md §4.2).
         shape_stack[1] = inner_len;
         out_ndim = 2;
-        bool any_float = (etype == ELEM_FLOAT64);
-        bool any_int64 = (etype == ELEM_INT64);
         for (int64_t i = 1; i < arr->length; i++) {
             ArrayNumElemType e2; int64_t l2; bool an2;
             if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
-            if (l2 != inner_len) return NULL;
-            // u64 is a distinct sized lane. Do not make N-D promotion depend on
-            // row order or silently coerce it into a signed/float lane.
-            if (etype == ELEM_UINT64 || e2 == ELEM_UINT64) {
-                if (e2 != etype) return NULL;
-                continue;
-            }
-            // widen to float if any row is float
-            if (e2 == ELEM_FLOAT64) any_float = true;
-            else if (e2 == ELEM_INT64) any_int64 = true;
-            else if (e2 != etype && e2 != ELEM_INT) {
-                // refuse exotic compact mixes for simplicity
-                return NULL;
-            }
+            if (l2 != inner_len || e2 != etype) return NULL;
         }
-        if (any_float) etype = ELEM_FLOAT64;
-        else if (any_int64) etype = ELEM_INT64;
     }
 
     // Allocate promoted N-D ArrayNum
@@ -1872,66 +1855,20 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
     // Fill: each row writes inner_len elements at offset i*inner_len
     int64_t flat_idx = 0;
     for (int64_t i = 0; i < arr->length; i++) {
-        write_row_into_ndim(promoted, etype, flat_idx, arr->items[i]);
+        write_row_into_ndim(promoted, flat_idx, arr->items[i]);
         flat_idx += inner_len;
     }
     return promoted;
 }
 
-// Promote a flat array whose elements are ALL numeric scalars into a 1-D typed
-// ArrayNum (compact storage).  Returns NULL if any element is non-numeric.
-// This is what makes pipe-map (`arr | ~*2`) and numeric comprehensions
+// Promote a flat array whose elements all share one exact numeric or bool
+// type into a 1-D typed ArrayNum (compact storage); any mix keeps it generic.
+// This is what makes pipe-map (`arr |> ~ * 2`) and numeric comprehensions
 // (`[for (x in arr) x*2]`) produce typed results — both finalize via array_end.
 static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     int64_t n = arr->length;
-    bool any_float = false;
-    bool any_int64 = false;
-    bool any_uint64 = false;
-    int64_t uint64_count = 0;
-    bool any_sized = false;
-    bool mixed_sized = false;
-    NumSizedType sized_type = NUM_INT8;
-    int64_t sized_count = 0;
-    int64_t bool_count = 0, num_count = 0;
-    for (int64_t i = 0; i < n; i++) {
-        TypeId t = get_type_id(arr->items[i]);
-        if (t == LMD_TYPE_BOOL) {
-            bool_count++;
-        } else if (t == LMD_TYPE_FLOAT) {
-            any_float = true; num_count++;
-        } else if (t == LMD_TYPE_INT64) {
-            any_int64 = true; num_count++;
-        } else if (t == LMD_TYPE_UINT64) {
-            any_uint64 = true; uint64_count++; num_count++;
-        } else if (t == LMD_TYPE_NUM_SIZED) {
-            NumSizedType st = arr->items[i].get_num_type();
-            if (!any_sized) sized_type = st;
-            else if (st != sized_type) mixed_sized = true;
-            any_sized = true;
-            sized_count++;
-            num_count++;
-        } else if (t == LMD_TYPE_INT) {
-            num_count++;
-        } else {
-            return NULL;  // a non-numeric, non-bool element — keep generic
-        }
-    }
-    // all-bool → ELEM_BOOL (mask); all-numeric → int/float; mixed → keep generic
     ArrayNumElemType et;
-    if (bool_count == n)     et = ELEM_BOOL;
-    else if (num_count == n) {
-        // A typed array is observable through subsequent arithmetic. Only
-        // compact when the destination lane exactly preserves every element.
-        if (any_sized) {
-            if (mixed_sized || sized_count != n) return NULL;
-            et = num_sized_to_elem_type(sized_type);
-        } else {
-            if ((any_float && any_int64) || (any_uint64 && uint64_count != n)) return NULL;
-            et = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 :
-                any_uint64 ? ELEM_UINT64 : ELEM_INT;
-        }
-    }
-    else return NULL;
+    if (!uniform_scalar_elem_type(arr->items, n, &et)) return NULL;
     ArrayNum* result = array_num_new(et, n);
     if (!result) return NULL;
     for (int64_t i = 0; i < n; i++) array_num_set_item(result, i, arr->items[i]);

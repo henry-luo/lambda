@@ -179,6 +179,8 @@ These functions work on both scalars and collections (element-wise).
 | `avg(vec)`    | Arithmetic mean       | `avg([1, 2, 3])`    | `2.0`  |
 | `avg(vec, true)` | Mean skipping `null` items | `avg([1, null, 3], true)` | `2` |
 
+Over sized integers, reductions widen instead of wrapping: `sum`, `math.prod`, `math.cumsum` and `math.cumprod` accumulate `i8`…`u32` elements in `int` (an `i64`/`u64` lane stays in its lane), and `avg` and `math.mean` accumulate in `float`. So `sum([200u8, 100u8])` is `300` and `avg([200u8, 100u8])` is `150.0`, while element-wise `[200u8] + [100u8]` wraps to `[44u8]`; `min` and `max` keep the element type (**S10.2.4**).
+
 ```lambda
 abs(-5)                 // 5
 round(3.7)              // 4
