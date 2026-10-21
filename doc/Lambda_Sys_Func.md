@@ -1880,10 +1880,19 @@ array uses straight alpha. Quantization happens at the final RGBA8 boundary.
 Options default to neutral processing. Supported fields are `turns` (0–3),
 `flip_x`, `flip_y`, `angle` (−15–15 degrees), `crop` (`left,top,right,bottom`
 fractions), `exposure`, `brightness`, `contrast`, `saturation`, `temperature`,
-`gamma`, `black`, `white`, `shadows`, `highlights`, `intensity`, `vignette`,
+`gamma`, `black`, `white`, `output_black`, `output_white`, `curves`,
+`shadows`, `highlights`, `intensity`, `vignette`,
 `softness`, `sharpen`, and `output_width`/`output_height`. Both output dimensions
 are zero or both positive. `matrix` is a flat array of 12 finite coefficients:
 three `[R,G,B,offset]` rows, blended with adjusted RGB by `intensity`.
+After the matrix, `curves` applies a master `rgb` curve followed by separate
+`r`/`g`/`b` curves. Omitted channels are identity. Each channel is an array of
+2–32 normalized `[input,output]` pairs: finite values in [0,1], strictly increasing
+inputs starting at 0 and ending at 1. Evaluation uses exact linear segments,
+including nonmonotone outputs. `output_black`/`output_white` then map RGB into
+that output interval (defaults 0/1, finite ordered endpoints in [0,1]). These
+tone operations preserve alpha. Input `black`/`white` precede gamma, with
+black in [0,0.95], white in [0.05,1], black < white, and gamma in [0.2,3].
 `compare:true` skips color/effects, and `uncropped:true` skips crop/output resize.
 The Photo demo supplies preset matrices from one shared coefficient catalog.
 

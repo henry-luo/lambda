@@ -4,6 +4,7 @@
 // ==========================================================================
 
 #include "render.hpp"
+#include "rdt_path_internal.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
@@ -45,6 +46,108 @@ bool dl_supports_premultiplied_capture(const DisplayList* list) {
         if (item.op == DL_DRAW_GLYPH && item.draw_glyph.is_color_emoji) return false;
     }
     return !cursor.failed;
+}
+
+static uint64_t dl_fingerprint_fold(uint64_t hash, const void* data, size_t length) {
+    return data && length ? hashmap_xxhash3(data, length, hash, 0x5bd1e995u) : hashmap_xxhash3(&hash, sizeof(hash), 0, 1);
+}
+
+static uint64_t dl_fingerprint_clip_shapes(uint64_t hash, const DlClipShapeStack* stack) {
+    if (!stack) return dl_fingerprint_fold(hash, nullptr, 0);
+    hash = dl_fingerprint_fold(hash, &stack->depth, sizeof(stack->depth));
+    for (int d = 0; d < stack->depth && d < RDT_MAX_CLIP_SHAPES; d++) {
+        hash = dl_fingerprint_fold(hash, &stack->type[d], sizeof(stack->type[d]));
+        hash = dl_fingerprint_fold(hash, stack->params[d], sizeof(stack->params[d]));
+        int count = stack->polygon_count[d];
+        hash = dl_fingerprint_fold(hash, &count, sizeof(count));
+        if (count > 0) {
+            hash = dl_fingerprint_fold(hash, stack->polygon_vx[d].get(), (size_t)count * sizeof(float));
+            hash = dl_fingerprint_fold(hash, stack->polygon_vy[d].get(), (size_t)count * sizeof(float));
+        }
+    }
+    return hash;
+}
+
+// Payloads owned per recording are folded by content and their pointers cleared from the
+// item copy; borrowed glyph-cache buffers and resource handles stay as identities.
+bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint) {
+    if (!list || !fingerprint) return false;
+    ImageSurfaceReadScope read_scope;  // resolved image pixels stay valid while folded
+    uint64_t hash = 0x9e3779b97f4a7c15ull;
+    for (int index = 0; index < list->item_count(); index++) {
+        const DisplayItem* source = &list->data()[index];
+        alignas(DisplayItem) unsigned char bytes[sizeof(DisplayItem)];
+        memcpy(bytes, source, sizeof(DisplayItem));
+        auto clear = [&](size_t offset, size_t size) { memset(bytes + offset, 0, size); };
+        switch (source->op) {
+            case DL_DRAW_PICTURE: case DL_DRAW_FRAGMENT: case DL_VIDEO_PLACEHOLDER:
+            case DL_WEBVIEW_LAYER_PLACEHOLDER: case DL_APPLY_FILTER:
+                return false;
+            case DL_FILL_PATH: case DL_STROKE_PATH: case DL_FILL_LINEAR_GRADIENT:
+            case DL_FILL_RADIAL_GRADIENT: case DL_PUSH_CLIP: {
+                // every path-carrying op starts with its path, at one union offset
+                const RdtPath* path = source->fill_path.path.get();
+                int entries = path ? path->count : 0;
+                hash = dl_fingerprint_fold(hash, &entries, sizeof(entries));
+                if (entries > 0) hash = dl_fingerprint_fold(hash, path->entries, (size_t)entries * sizeof(RdtPath::Entry));
+                clear(offsetof(DisplayItem, fill_path.path), sizeof(void*));
+                if (source->op == DL_STROKE_PATH) {
+                    const DlStrokePath& stroke = source->stroke_path;
+                    hash = dl_fingerprint_fold(hash, stroke.dash_array.get(), (size_t)max(stroke.dash_count, 0) * sizeof(float));
+                    clear(offsetof(DisplayItem, stroke_path.dash_array), sizeof(void*));
+                } else if (source->op == DL_FILL_LINEAR_GRADIENT || source->op == DL_FILL_RADIAL_GRADIENT) {
+                    bool linear = source->op == DL_FILL_LINEAR_GRADIENT;
+                    const RdtGradientStop* stops = linear ? source->fill_linear_gradient.stops.get()
+                                                          : source->fill_radial_gradient.stops.get();
+                    int count = linear ? source->fill_linear_gradient.stop_count : source->fill_radial_gradient.stop_count;
+                    const RdtGradientOptions& options = linear ? source->fill_linear_gradient.options
+                                                               : source->fill_radial_gradient.options;
+                    hash = dl_fingerprint_fold(hash, stops, (size_t)max(count, 0) * sizeof(RdtGradientStop));
+                    hash = dl_fingerprint_fold(hash, options.dash_array.get(), (size_t)max(options.dash_count, 0) * sizeof(float));
+                    clear(linear ? offsetof(DisplayItem, fill_linear_gradient.stops) : offsetof(DisplayItem, fill_radial_gradient.stops), sizeof(void*));
+                    clear(linear ? offsetof(DisplayItem, fill_linear_gradient.options.dash_array)
+                                 : offsetof(DisplayItem, fill_radial_gradient.options.dash_array), sizeof(void*));
+                }
+                break;
+            }
+            case DL_DRAW_IMAGE: {
+                // images fold by the pixels they draw: a frame-local buffer (a rasterised
+                // gradient) or an owner recreated per recording (a rasterised text shadow)
+                // keeps its fingerprint while its pixels do
+                DlResolvedImage image = {};
+                if (!dl_draw_image_resolve(&source->draw_image, &image) || !image.pixels ||
+                    image.width <= 0 || image.height <= 0 || image.stride < image.width) return false;
+                for (int row = 0; row < image.height; row++)
+                    hash = dl_fingerprint_fold(hash, image.pixels.get() + (size_t)row * image.stride,
+                        (size_t)image.width * sizeof(uint32_t));
+                hash = dl_fingerprint_fold(hash, &image.straight_alpha, sizeof(image.straight_alpha));
+                clear(offsetof(DisplayItem, draw_image.local_pixels), sizeof(void*));
+                clear(offsetof(DisplayItem, draw_image.snapshot_lease), sizeof(void*));
+                clear(offsetof(DisplayItem, draw_image.resource), sizeof(source->draw_image.resource));
+                clear(offsetof(DisplayItem, draw_image.resource_generation), sizeof(source->draw_image.resource_generation));
+                break;
+            }
+            case DL_BLIT_SURFACE_SCALED:
+                if (source->blit_surface_scaled.local_source) return false;
+                hash = dl_fingerprint_clip_shapes(hash, source->blit_surface_scaled.clip_shapes.get());
+                clear(offsetof(DisplayItem, blit_surface_scaled.snapshot_lease), sizeof(void*));
+                clear(offsetof(DisplayItem, blit_surface_scaled.clip_shapes), sizeof(void*));
+                break;
+            case DL_FILL_SURFACE_RECT:
+                hash = dl_fingerprint_clip_shapes(hash, source->fill_surface_rect.clip_shapes.get());
+                clear(offsetof(DisplayItem, fill_surface_rect.clip_shapes), sizeof(void*));
+                break;
+            case DL_BEGIN_ELEMENT: case DL_END_ELEMENT:
+                // accessibility semantics do not paint
+                clear(offsetof(DisplayItem, element_marker.semantics), sizeof(RenderSemanticGroup));
+                break;
+            default:
+                break;
+        }
+        hash = dl_fingerprint_fold(hash, bytes, sizeof(bytes));
+    }
+    *fingerprint = hash;
+    return true;
 }
 
 bool dl_supports_vector_translation(const DisplayList* list, int first, int end) {

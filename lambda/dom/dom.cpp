@@ -567,8 +567,11 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
         sequence = doc->js.mutation_sequence + 1;
     }
     // the reconciler may skip layout only for reflow requests this batch made
-    if (doc->js.mutation_record_count == 0 && doc->js.mutation_record_overflow == 0)
+    if (doc->js.mutation_record_count == 0 && doc->js.mutation_record_overflow == 0) {
         doc->js.reflow_pending_before_batch = doc->state && doc->state->needs_reflow;
+        doc->js.dirty_before_batch = doc->state && doc->state->is_dirty;
+        doc->js.full_repaint_requests_before_batch = doc->state ? doc->state->full_repaint_requests : 0;
+    }
     doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
 
     if (dom_js_mutation_records_reserve(doc, doc->js.mutation_record_count + 1)) {
@@ -696,14 +699,14 @@ extern "C" __attribute__((weak)) bool dom_edit_transaction_defer_mutation(
 
 // Helper: increment DOM mutation counter on current document and record the
 // mutation shape for future incremental cascade/layout decisions.
-// An inline <svg> is painted from a cached raster while its subtree is unchanged
-// (render_svg_inline.cpp). Any mutation at or below an <svg> root, including the
-// removal side of a move (reached through `parent`), advances that root's generation.
-static void dom_svg_layer_note_mutation(DomNode* node) {
+// An inline <svg> and a paint layer are painted from a cached raster while their subtree
+// is unchanged (render_svg_inline.cpp, render_paint_layer.cpp). Any mutation at or below
+// such a root, including the removal side of a move (reached through `parent`), advances
+// its generation. `moves_only` marks a non-inherited presentation write, which leaves its
+// own target's layer content unchanged.
+static void dom_layer_note_mutation(DomNode* node, bool moves_only = false) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur->is_element() && cur->as_element()->tag() == MARKUP_NAME_SVG) {
-            cur->as_element()->svg_layer_generation++;
-        }
+        if (cur->is_element() && !(moves_only && cur == node)) cur->as_element()->layer_generation++;
     }
 }
 
@@ -713,7 +716,7 @@ extern "C" void dom_svg_invalidate_presentation(void* opaque) {
     // sampled paint changes expire SVG queries and layers without changing authored DOM.
     DomDocument* document = node->as_element()->doc;
     if (document) document->style_query_epoch++;
-    dom_svg_layer_note_mutation(node);
+    dom_layer_note_mutation(node);
 }
 
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
@@ -735,10 +738,11 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     doc->js.mutation_sequence++;
     doc->mutation_epoch++;
     // a non-inherited presentation value stays on its element (style_content_epoch)
-    if (presentation_property == CSS_PROPERTY_UNKNOWN ||
-        css_property_runtime_inherited(presentation_property)) doc->style_content_epoch++;
-    dom_svg_layer_note_mutation(target);
-    if (parent && (!target || parent != target->parent)) dom_svg_layer_note_mutation(parent);
+    bool inherited_change = presentation_property == CSS_PROPERTY_UNKNOWN ||
+        css_property_runtime_inherited(presentation_property);
+    if (inherited_change) doc->style_content_epoch++;
+    dom_layer_note_mutation(target, !inherited_change);
+    if (parent && (!target || parent != target->parent)) dom_layer_note_mutation(parent);
     dom_record_inline_stylesheet_mutation(doc, kind, target, parent);
 
     bool has_pending_structural_record = false;

@@ -1,0 +1,14 @@
+"1 BVH agrees with BVHLoader, whose position channels add to OFFSET"
+[true, true]
+"2 FBX joints agree with ufbx in every case"
+[["jump.fbx#jump", true], ["jump-ascii.fbx#jump", true], ["jump-7500.fbx#jump", true], ["rig.fbx#curl", true], ["rig.fbx#wave", true], ["rig.fbx#sway", true], ["kenney/characterMedium.fbx", true], ["kenney/jump.fbx#Root|Jump", true]]
+"3 and with FBXLoader where it evaluates the same curves"
+[["jump.fbx#jump", true], ["jump-ascii.fbx#jump", true], ["jump-7500.fbx#jump", true], ["kenney/characterMedium.fbx", true], ["kenney/jump.fbx#Root|Jump", true]]
+[["rig.fbx#curl", true], ["rig.fbx#wave", true], ["rig.fbx#sway", true]]
+"4 skinned vertices agree with ufbx and FBXLoader"
+[["jump.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["jump-ascii.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["jump-7500.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["rig.fbx#curl", [[15, true], [15, true]]], ["rig.fbx#wave", [[15, true], [15, true]]], ["rig.fbx#sway", [[15, true], [15, true], [15, true]]], ["kenney/characterMedium.fbx", [[3256, true]]]]
+[["jump.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["jump-ascii.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["jump-7500.fbx#jump", [[624, true], [624, true], [624, true], [624, true]]], ["kenney/characterMedium.fbx", [[3256, true]]]]
+"5 a rigid prop rides its joint as ufbx places it"
+[true, true]
+"6 retargeting agrees with SkeletonUtils given world-change-from-rest offsets"
+true

@@ -18,14 +18,14 @@
 {
   svg: true,
   text: true,
-  embedded_fonts: true,
+  referenced_fonts: true,
   external_stylesheets: 0
 }
 "prose AMS symbol:"
 {
   svg: true,
   text: true,
-  embedded_fonts: true,
+  referenced_fonts: true,
   external_stylesheets: 0,
   unknown: null
 }

@@ -92,7 +92,10 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 
 | Target | Description |
 |--------|-------------|
-| `generate-premake` | Generate `premake5.lua` from `build_lambda_config.json` using `utils/generate_premake.py`. |
+| `generate-premake` | Generate Premake from `build_lambda_config.json` and its `build_deps_config.json` import using `utils/generate_premake.py`. |
+| `build-dependency DEP=<name> ARGS=...` | Compile and optionally install a source dependency through its JSON/Premake recipe; source and install overrides are `--source` and `--prefix`. |
+| `build-typemeta-extract` | Build the optional Clang metadata utility using `llvm-config` to locate LLVM headers and libraries. |
+| `test-build-dependencies` | Check config imports, feature probes, header templates, and execution of a consumer linked to a freshly built dependency archive. |
 | `clean-premake` | Clean Premake build artifacts and generated Lua files. |
 | `build-test` | Build all test executables using Premake (debug mode). Also builds `lambda-input` DLLs. If a release build was active, restores the release `lambda.exe` after building tests. |
 | `build-lambda-input` | Build lambda-input DLLs (prerequisite for `build-test`). |

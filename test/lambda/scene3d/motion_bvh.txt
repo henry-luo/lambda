@@ -1,0 +1,12 @@
+"1 the raw tree keeps the file's structure"
+['bvh', 'hierarchy', 31, 31, 69, 122.544233]
+"2 one conversion into the character schema"
+[true, 'bvh', 'm', 22, "jump", 30.000003000000298, 31, 13]
+"3 world joint positions match the reference within a micrometre"
+[true, true, true, true]
+"4 a mannequin skins every bone, and the scene names bones and tracks"
+[1, "jumper-skeleton", "jump", true, 14, "jumper-bone-0.position"]
+"5 an unknown clip or a bad scene id is an error"
+["no clip", "bad id"]
+"6 malformed BVH is rejected at the parser"
+[3, "frame count", "short row", "frame time", "channel", "no motion"]

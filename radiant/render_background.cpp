@@ -1078,6 +1078,136 @@ static uint32_t* render_outer_shadow_blur_image(
     return shadow_buf;
 }
 
+// A box shadow under a transform is rasterised at record time (rounded rect, blur, border-box
+// exclusion). Re-recording a transformed subtree (each frame of a 3D plane, a paint-layer
+// capture or revalidation) would blur it again, so the document keeps those images, keyed
+// by the shadow's geometry relative to its pixel origin, and records them by handle.
+struct ShadowImageKey {
+    float values[24];
+};
+
+struct ShadowImageCacheEntry {
+    ShadowImageKey key;
+    ImageSurface* surface;
+    uint64_t used;
+};
+
+static const int SHADOW_IMAGE_CACHE_ENTRIES = 64;
+static const size_t SHADOW_IMAGE_CACHE_MAX_BYTES = (size_t)64 << 20;
+
+struct ShadowImageCache : DomDocumentResourceData {
+    ShadowImageCacheEntry entries[SHADOW_IMAGE_CACHE_ENTRIES];
+    int count;
+    size_t bytes;
+    uint64_t clock;
+    lam::Own<Pool> pool;  // holds this cache
+    lam::Up<DomDocument> document;
+};
+
+static void shadow_image_cache_drop(ShadowImageCache* cache, int index) {
+    ShadowImageCacheEntry& entry = cache->entries[index];
+    if (entry.surface) {
+        cache->bytes -= (size_t)entry.surface->pitch * (size_t)entry.surface->height;
+        // a recording still holding it reads through its handle; destroy defers while read
+        image_surface_destroy(entry.surface);
+    }
+    cache->entries[index] = cache->entries[--cache->count];
+}
+
+static void shadow_image_cache_destroy(DomDocumentResourceData* data) {
+    ShadowImageCache* cache = (ShadowImageCache*)data;
+    if (!cache) return;
+    while (cache->count > 0) shadow_image_cache_drop(cache, cache->count - 1);
+    cache->document->services.shadow_image_cache = nullptr;
+    mem_pool_destroy(cache->pool);
+}
+
+static ShadowImageCache* shadow_image_cache_for(DomDocument* document) {
+    if (!document) return nullptr;
+    ShadowImageCache* cache = (ShadowImageCache*)document->services.shadow_image_cache;
+    if (cache) return cache;
+    MemContext* context = (MemContext*)document->services.mem_ctx;
+    Pool* pool = mem_pool_create(context ? context : mem_context_process(MEM_ROLE_RENDER),
+                                 MEM_ROLE_RENDER, "shadow_image.cache");
+    if (!pool) return nullptr;
+    cache = (ShadowImageCache*)pool_calloc(pool, sizeof(ShadowImageCache));
+    if (!cache || !dom_document_add_resource(document, cache, shadow_image_cache_destroy)) {
+        mem_pool_destroy(pool);
+        return nullptr;
+    }
+    cache->pool = lam::own(pool);
+    cache->document = lam::up(document);
+    document->services.shadow_image_cache = cache;
+    return cache;
+}
+
+// The cached shadow image for this geometry, built on a miss. Null when the shadow paints
+// nothing or the cache cannot hold it; `x`/`y` receive its pixel origin in paint coordinates.
+static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon,
+    float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+    float sr_tl, float sr_tr, float sr_br, float sr_bl, Color color, float blur,
+    int exclude_type, const float* exclude_params, int* x, int* y) {
+    ImageSurface* target = rdcon->ui_context ? rdcon->ui_context->surface : nullptr;
+    DomDocument* document = rdcon->ui_context ? rdcon->ui_context->document : nullptr;
+    if (!target || !document || color.a == 0 || memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) return nullptr;
+    // the same pixel box build_outer_shadow_image derives
+    float pad = blur < 0 ? 0 : blur;
+    int x0 = max(0, (int)floorf(shadow_x - pad)), y0 = max(0, (int)floorf(shadow_y - pad)); // INT_CAST_OK: pixel box
+    int x1 = min(target->width, (int)ceilf(shadow_x + shadow_w + pad)); // INT_CAST_OK: pixel box
+    int y1 = min(target->height, (int)ceilf(shadow_y + shadow_h + pad)); // INT_CAST_OK: pixel box
+    if (x1 <= x0 || y1 <= y0) return nullptr;
+    ShadowImageKey key = {};
+    float values[] = {shadow_x - x0, shadow_y - y0, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, blur,
+        (float)color.r, (float)color.g, (float)color.b, (float)color.a, (float)exclude_type,
+        exclude_params[0] - x0, exclude_params[1] - y0, exclude_params[2], exclude_params[3],
+        exclude_params[4], exclude_params[5], exclude_params[6], exclude_params[7],
+        (float)(x1 - x0), (float)(y1 - y0)};
+    static_assert(sizeof(values) == sizeof(key.values), "shadow image key layout");
+    memcpy(key.values, values, sizeof(values));
+    ShadowImageCache* cache = shadow_image_cache_for(document);
+    if (!cache) return nullptr;
+    cache->clock++;
+    for (int i = 0; i < cache->count; i++) {
+        ShadowImageCacheEntry& entry = cache->entries[i];
+        if (memcmp(&entry.key, &key, sizeof(key)) == 0) {
+            entry.used = cache->clock;
+            *x = x0; *y = y0;
+            return entry.surface;
+        }
+    }
+    // the build allocates unscoped scratch; rewind it once the pixels are copied out
+    ScratchMark mark = scratch_mark(&rdcon->scratch);
+    int bx = 0, by = 0, bw = 0, bh = 0;
+    uint32_t* pixels = render_outer_shadow_blur_image(&rdcon->scratch, target, shadow_x, shadow_y,
+        shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, color, blur, exclude_type, exclude_params,
+        &bx, &by, &bw, &bh);
+    size_t bytes = (size_t)bw * (size_t)bh * 4u;
+    if (!pixels || bw <= 0 || bh <= 0 || bx != x0 || by != y0 || bytes > SHADOW_IMAGE_CACHE_MAX_BYTES) {
+        scratch_restore(&rdcon->scratch, mark);
+        return nullptr;
+    }
+    // least recently used entries make room
+    while (cache->count > 0 && (cache->count == SHADOW_IMAGE_CACHE_ENTRIES ||
+                                cache->bytes + bytes > SHADOW_IMAGE_CACHE_MAX_BYTES)) {
+        int oldest = 0;
+        for (int i = 1; i < cache->count; i++)
+            if (cache->entries[i].used < cache->entries[oldest].used) oldest = i;
+        shadow_image_cache_drop(cache, oldest);
+    }
+    ImageSurface* surface = image_surface_create(bw, bh);
+    if (surface) {
+        for (int row = 0; row < bh; row++)
+            memcpy((uint8_t*)surface->pixels + (size_t)row * surface->pitch, pixels + (size_t)row * bw, (size_t)bw * 4u);
+    }
+    scratch_restore(&rdcon->scratch, mark);
+    if (!surface) return nullptr;
+    surface->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    cache->entries[cache->count++] = {key, surface, cache->clock};
+    cache->bytes += (size_t)surface->pitch * (size_t)surface->height;
+    *x = x0; *y = y0;
+    return surface;
+}
+
 /**
  * Render box-shadow effects for an element (CSS Backgrounds Level 3 §7)
  *
@@ -1157,7 +1287,15 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         exclude_params[6] = r_br;       exclude_params[7] = r_bl;
 
         // hard shadows also exclude the border-box, even for transparent square boxes.
-        if (xform && rdcon->ui_context->surface) {
+        int cached_x = 0, cached_y = 0;
+        ImageSurface* cached = xform && rdcon->ui_context->surface ? shadow_image_cached(rdcon,
+            shadow_x, shadow_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
+            exclude_type, exclude_params, &cached_x, &cached_y) : nullptr;
+        if (cached) {
+            Rect dst = {(float)cached_x, (float)cached_y, (float)cached->width, (float)cached->height};
+            render_painter_draw_pixels_rect(rdcon, (const uint32_t*)cached->pixels, cached->width,
+                cached->height, cached->pitch / 4, &dst, nullptr, 255, cached, SCALE_MODE_LINEAR);
+        } else if (xform && rdcon->ui_context->surface) {
             assert(rdcon->dl && "transformed box-shadow requires display-list recording");
             ScratchArena* shadow_arena = &rdcon->dl->arena;
             int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;

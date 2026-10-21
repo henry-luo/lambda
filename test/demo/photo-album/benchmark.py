@@ -8,8 +8,9 @@ The script copies the demo into temp/photo-album/bench/, instruments the copy's
 handlers with clock() prints (the shipped app reads no clocks), and replays a
 headless session: timeline scrolling, tile zoom steps and viewer paging. It
 reports Lambda handler times per step, wall time per step (which also covers
-Radiant layout and paint), and the host's peak resident memory for several
-viewer-paging lengths (gap G2 in vibe/Lambda_Demo_Photo_Album.md).
+Radiant layout and paint), album-book page-turn frame times, and the host's
+peak resident memory for several viewer-paging lengths (gap G2 in
+vibe/Lambda_Demo_Photo_Album.md).
 """
 import argparse, json, os, re, resource, shutil, statistics, subprocess, sys, time
 from pathlib import Path
@@ -45,14 +46,19 @@ PROBES = {
                 "    return probe_result\n"
                 "}\n"
                 "pn publish_inner(owner, st) {\n"),
-    "dispatch": ("pn dispatch(owner, st, action) {\n",
-                 "pn dispatch(owner, st, action) {\n"
+    "dispatch": ("pn dispatch(owner, st, action, now_ms = 0.0) {\n",
+                 "pn dispatch(owner, st, action, now_ms = 0.0) {\n"
                  "    let probe_t0 = clock()\n"
-                 "    let probe_result = dispatch_inner(owner, st, action)\n"
+                 "    let probe_result = dispatch_inner(owner, st, action, now_ms)\n"
                  "    print(\"PA_COMMAND \" ++ action ++ \" \" ++ string((clock() - probe_t0) * 1000) ++ \"\\n\")\n"
                  "    return probe_result\n"
                  "}\n"
-                 "pn dispatch_inner(owner, st, action) {\n"),
+                 "pn dispatch_inner(owner, st, action, now_ms) {\n"),
+    # a page turn: the gap between frames within one turn is a whole frame, Radiant's paint included
+    "book_frame": ("    session = {*:session, book:BK.frame(evt.target, CTX, session.book, evt.time_stamp)}\n",
+                   "    let probe_now = clock()\n"
+                   "    print(\"PA_BOOK_FRAME_AT \" ++ string(probe_now - floor(probe_now / 100) * 100) ++ \"\\n\")\n"
+                   "    session = {*:session, book:BK.frame(evt.target, CTX, session.book, evt.time_stamp)}\n"),
 }
 
 
@@ -62,11 +68,11 @@ def prepare():
         shutil.rmtree(app)
     app.mkdir(parents=True)
     for path in SOURCE.iterdir():
-        if path.suffix in (".ls", ".css") and not path.name.startswith("_"):
+        if path.suffix in (".ls", ".css") and not path.name.startswith("_") or path.name == "world-outline.json":
             shutil.copyfile(path, app / path.name)
-    # the entry imports ~~.mod_resources and ~~.mod_publish from the demo collection's root
-    shutil.copyfile(ROOT / "test/demo/mod_resources.ls", WORK / "mod_resources.ls")
-    shutil.copyfile(ROOT / "test/demo/mod_publish.ls", WORK / "mod_publish.ls")
+    # modules import ~~.mod_resources, ~~.mod_publish and ~~.mod_midi from the demo collection's root
+    for shared in ("mod_resources.ls", "mod_publish.ls", "mod_midi.ls"):
+        shutil.copyfile(ROOT / "test/demo" / shared, WORK / shared)
     entry = app / "photo-album.ls"
     source = entry.read_text()
     for name, (old, new) in PROBES.items():
@@ -81,7 +87,10 @@ GRID_KEYS = 40
 NOOP_KEYS = 12  # unhandled keys: the replay's own per-event cost, a baseline for the other steps
 
 
-def events(scroll_steps, zoom_steps, viewer_steps):
+BOOK_TICKS = 45  # 16 ms ticks per page turn: enough for the 0.55 s turn to land
+
+
+def events(scroll_steps, zoom_steps, viewer_steps, book_turns=0):
     script = [{"type": "advance_time", "ms": 200}]
     for _ in range(scroll_steps):
         script += [{"type": "script", "js": "const p=document.getElementById('port');p.scrollTop+=700;p.dispatchEvent(new Event('scroll'))"},
@@ -105,6 +114,14 @@ def events(scroll_steps, zoom_steps, viewer_steps):
         for _ in range(viewer_steps):
             script += [{"type": "key_press", "key": "right"}, {"type": "advance_time", "ms": 16}]
     script.append({"type": "assert_script", "js": "document.querySelectorAll('#grid .tile').length>0"})
+    if book_turns:
+        # the album book over the scope: each turn starts from Next, and frames run until it lands
+        script += [{"type": "key_press", "key": "escape"}, {"type": "click", "target": {"selector": "#book-button"}},
+                   {"type": "advance_time", "ms": 200}]
+        for _ in range(book_turns):
+            script += [{"type": "script", "js": "console.log('PA_BOOK_TURN')"},
+                       {"type": "click", "target": {"selector": "#bk-next"}}] + [{"type": "advance_time", "ms": 16}] * BOOK_TICKS
+        script.append({"type": "assert_script", "js": "Number(document.getElementById('book').getAttribute('data-turned'))===%d" % book_turns})
     return {"name": "photo album benchmark", "html": "", "viewport": {"width": 1440, "height": 900}, "events": script}
 
 
@@ -138,6 +155,9 @@ def run(binary, entry, plan, label):
     samples["step zoom"] = gaps(zoom_keys)
     samples["step grid-key"] = gaps(grid_keys)
     samples["step viewer"] = gaps(viewer_keys)
+    # frame gaps within each turn; the gap across a turn boundary holds idle ticks and the click
+    turns = output.split("PA_BOOK_TURN")[1:]
+    samples["step book-frame"] = [g for t in turns for g in gaps([float(v) for v in re.findall(r"PA_BOOK_FRAME_AT ([0-9.]+)", t)])]
     # macOS reports ru_maxrss in bytes, Linux in KiB; RUSAGE_CHILDREN keeps the largest child so far
     scale = 1 if sys.platform == "darwin" else 1024
     return {"wall_s": wall, "peak_mb": max(peak, before) * scale / 1e6, "samples": samples}
@@ -155,25 +175,27 @@ def main():
     parser.add_argument("--scroll", type=int, default=60)
     parser.add_argument("--zoom", type=int, default=4)
     parser.add_argument("--viewer", type=int, nargs="+", default=[0, 100, 300])
+    parser.add_argument("--book", type=int, default=6, help="album book page turns, in the first run only")
     args = parser.parse_args()
     # PHOTO_ALBUM_BENCH_CORPUS may name a manifest-only copy to time the grid without image decoding
     if not (ROOT / CORPUS / "photos.json").exists():
         raise SystemExit("benchmark: no photos.json in " + CORPUS)
     entry = prepare()
     report = {"binary": args.binary, "runs": []}
-    for steps in args.viewer:
+    for run_index, steps in enumerate(args.viewer):
         # each length runs in its own process so RUSAGE_CHILDREN's peak belongs to it alone
         child = subprocess.run([sys.executable, "-I", __file__, "--binary", args.binary, "--scroll", str(args.scroll),
-                                "--zoom", str(args.zoom), "--single", str(steps)], cwd=ROOT, capture_output=True, text=True)
+                                "--zoom", str(args.zoom), "--book", str(args.book if run_index == 0 else 0),
+                                "--single", str(steps)], cwd=ROOT, capture_output=True, text=True)
         if child.returncode != 0:
             raise SystemExit(child.stdout + child.stderr)
         report["runs"].append(json.loads(child.stdout))
     print(json.dumps(report, indent=2))
 
 
-def single(binary, scroll, zoom, steps):
+def single(binary, scroll, zoom, steps, book_turns):
     entry = WORK / "app/photo-album.ls"
-    plan = {"events": events(scroll, zoom, steps), "scroll_steps": scroll, "zoom_steps": zoom}
+    plan = {"events": events(scroll, zoom, steps, book_turns), "scroll_steps": scroll, "zoom_steps": zoom}
     measured = run(binary, entry, plan, f"run-{steps}")
     out = {"viewer_steps": steps, "wall_s": round(measured["wall_s"], 2), "peak_mb": round(measured["peak_mb"], 1)}
     for kind, values in sorted(measured["samples"].items()):
@@ -186,6 +208,7 @@ if __name__ == "__main__":
     if "--single" in sys.argv:
         at = sys.argv.index("--single")
         options = dict(zip(sys.argv[1:at:2], sys.argv[2:at:2]))
-        single(options["--binary"], int(options["--scroll"]), int(options["--zoom"]), int(sys.argv[at + 1]))
+        single(options["--binary"], int(options["--scroll"]), int(options["--zoom"]), int(sys.argv[at + 1]),
+               int(options.get("--book", "0")))
     else:
         main()

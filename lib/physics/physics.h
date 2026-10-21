@@ -61,7 +61,7 @@ typedef struct PhysicsState {
 } PhysicsState;
 typedef enum PhysicsCommandKind {
     PHYSICS_IMPULSE, PHYSICS_FORCE, PHYSICS_TORQUE, PHYSICS_TELEPORT,
-    PHYSICS_VELOCITY, PHYSICS_WAKE, PHYSICS_TARGET, PHYSICS_GRAVITY
+    PHYSICS_VELOCITY, PHYSICS_WAKE, PHYSICS_TARGET, PHYSICS_GRAVITY, PHYSICS_ANGULAR_VELOCITY
 } PhysicsCommandKind;
 typedef struct PhysicsCommand {
     PhysicsCommandKind kind;
@@ -91,6 +91,11 @@ bool physics_create(const PhysicsDesc* desc, PhysicsWorld** result, PhysicsError
 void physics_destroy(PhysicsWorld* world);
 // invalid commands reject the entire batch; forces/torques last for the next tick only.
 bool physics_apply(PhysicsWorld* world, const PhysicsCommand* commands, size_t count, PhysicsError* error);
+// replaces body damping/gravity scale and every collider descriptor, in creation order, keeping
+// each body's simulated pose and velocities; ids, motion types and collider owners must not
+// change. Mass properties recompute; a rejected edit leaves the previous configuration.
+bool physics_configure(PhysicsWorld* world, const PhysicsBodyDesc* bodies, size_t body_count,
+                       const PhysicsColliderDesc* colliders, size_t collider_count, PhysicsError* error);
 // events accumulate across this call's ticks. Numerical/quota faults disable further mutation.
 bool physics_step(PhysicsWorld* world, size_t ticks, PhysicsState* result, PhysicsError* error);
 // faulted worlds remain readable with the last completed body snapshot.

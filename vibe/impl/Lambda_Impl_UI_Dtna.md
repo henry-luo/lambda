@@ -27,11 +27,37 @@ deferred by the user's scope decision.
   rules provide disabled inheritance. Nonvisual provider context remains open.
 - **S10.1.1v3:** singleton text unions in template attribute predicates must
   match their branches; they must not become presence-only constraints.
-- **D8.1.1v17:** package model/contract fixtures run on `interp`, `auto`, and
-  `jit`. Native interaction is tested separately on forced `interp` and `jit`;
-  pure tier parity alone does not certify handler behavior.
+- **D8.1.1v18/D7.2.3:** package model/contract fixtures run once on the selected
+  default backend through the discovered golden batch, reusing in-process
+  imports. Native interaction and document-error teardown retain their separate
+  forced `interp` and `jit` checks; package goldens do not certify handlers.
 - **D4.5.2/D5.3.3:** no package-owned native registry retains raw GC items.
   Existing template and DOM lifetime mechanisms retain component sources.
+
+## Regression runner tuning — 2026-10-21
+
+The 27 package goldens remain in `test/lambda/ui_dtna/` and run through the
+ordinary discovered batch. The separate contract wrapper duplicated those
+same fixtures on the same backend, adding 27 cold CLI launches; it is removed.
+The batch retains the existing in-process import reuse (**D7.2.3/D8.5.1v7**).
+Other tier matrices are unchanged.
+
+`dtna_error_document.ls` now imports `lambda.ui.dtna.button` and calls its
+descriptor directly, the same constructor reached by the facade's `button()`.
+This preserves the unhandled validation error and its diagnostic-mirror lifetime
+(**D4.5.2/D5.3.3**) while avoiding the unrelated timeline/chart import graph.
+The subprocess regression still checks load-rejection exit 1 on forced
+interpreter and JIT. No package implementation or runtime code changed.
+
+Release verification: the focused runner passes all 28 GTests (the 27 unchanged
+goldens plus the two-tier teardown regression) in 0.571 s, or 1.222 s including
+process startup/discovery. Teardown itself drops from 7.803 s to 0.196 s.
+The full runner finishes in 60.868 s with 1668/1670 passing. `type_families`
+retains its independently reproduced E201 failure; AUTO `array_view_admission`
+also fails once in five direct CLI runs, while the isolated Tune27 parity
+recheck passes. These are qualification limits, not DTNA coverage changes.
+Artifacts are under `temp/lambda_test_profile/dtna_tuning/`: `focused_results.json`,
+`full_results.json`, `tier_parity_recheck.json`, and `array_view_admission_direct.json`.
 
 ## Implemented modules
 

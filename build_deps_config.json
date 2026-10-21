@@ -1,0 +1,3125 @@
+{
+  "description": "Lambda-owned source builds for native dependencies; imported by build_lambda_config.json",
+  "targets": [
+    {
+      "name": "re2",
+      "description": "Vendored RE2 source closure; built directly by Premake",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
+      "lang": "c++17",
+      "pic": true,
+      "source_files": [
+        "lib/re2/re2/bitmap256.cc",
+        "lib/re2/re2/bitstate.cc",
+        "lib/re2/re2/compile.cc",
+        "lib/re2/re2/dfa.cc",
+        "lib/re2/re2/filtered_re2.cc",
+        "lib/re2/re2/mimics_pcre.cc",
+        "lib/re2/re2/nfa.cc",
+        "lib/re2/re2/onepass.cc",
+        "lib/re2/re2/parse.cc",
+        "lib/re2/re2/perl_groups.cc",
+        "lib/re2/re2/prefilter.cc",
+        "lib/re2/re2/prefilter_tree.cc",
+        "lib/re2/re2/prog.cc",
+        "lib/re2/re2/re2.cc",
+        "lib/re2/re2/regexp.cc",
+        "lib/re2/re2/set.cc",
+        "lib/re2/re2/simplify.cc",
+        "lib/re2/re2/stringpiece.cc",
+        "lib/re2/re2/tostring.cc",
+        "lib/re2/re2/unicode_casefold.cc",
+        "lib/re2/re2/unicode_groups.cc",
+        "lib/re2/util/rune.cc",
+        "lib/re2/util/strutil.cc"
+      ],
+      "includes": [
+        "lib/re2"
+      ],
+      "source_sets": [
+        {
+          "platforms": [
+            "windows"
+          ],
+          "defines": [
+            "UNICODE",
+            "_UNICODE",
+            "STRICT",
+            "NOMINMAX",
+            "_CRT_SECURE_NO_WARNINGS",
+            "_SCL_SECURE_NO_WARNINGS"
+          ]
+        }
+      ],
+      "link": "static"
+    },
+    {
+      "name": "lambda-archive-readers",
+      "description": "Libarchive memory readers with Lambda embedding and bounded codec hooks",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
+      "lang": "c17",
+      "pic": true,
+      "single_project": true,
+      "source_files": [
+        "lib/zip/archive_acl.c",
+        "lib/zip/archive_blake2s_ref.c",
+        "lib/zip/archive_blake2sp_ref.c",
+        "lib/zip/archive_check_magic.c",
+        "lib/zip/archive_crc32.c",
+        "lib/zip/archive_entry.c",
+        "lib/zip/archive_entry_copy_stat.c",
+        "lib/zip/archive_entry_sparse.c",
+        "lib/zip/archive_entry_stat.c",
+        "lib/zip/archive_entry_strmode.c",
+        "lib/zip/archive_entry_xattr.c",
+        "lib/zip/archive_options.c",
+        "lib/zip/archive_pack_dev.c",
+        "lib/zip/archive_parse_date.c",
+        "lib/zip/archive_ppmd7.c",
+        "lib/zip/archive_random.c",
+        "lib/zip/archive_read.c",
+        "lib/zip/archive_read_open_memory.c",
+        "lib/zip/archive_read_set_options.c",
+        "lib/zip/archive_read_support_filter_bzip2.c",
+        "lib/zip/archive_read_support_filter_none.c",
+        "lib/zip/archive_read_support_filter_xz.c",
+        "lib/zip/archive_read_support_filter_zstd.c",
+        "lib/zip/archive_read_support_format_7zip.c",
+        "lib/zip/archive_read_support_format_rar.c",
+        "lib/zip/archive_read_support_format_rar5.c",
+        "lib/zip/archive_read_support_format_raw.c",
+        "lib/zip/archive_read_support_format_tar.c",
+        "lib/zip/archive_string.c",
+        "lib/zip/archive_string_sprintf.c",
+        "lib/zip/archive_time.c",
+        "lib/zip/archive_util.c",
+        "lib/zip/archive_virtual.c",
+        "lib/zip/archive_windows.c",
+        "lib/archive_codec/codec.c"
+      ],
+      "includes": [
+        "lib/zip",
+        "lib/archive_codec",
+        "build_temp/archive-config/include"
+      ],
+      "defines": [
+        "LIBARCHIVE_STATIC",
+        "PLATFORM_CONFIG_H=\\\"lambda_archive_config.h\\\""
+      ],
+      "libraries": [
+        "lambda-lib",
+        "zlib",
+        "lzma",
+        "bzip2",
+        "zstd",
+        "archive-iconv"
+      ],
+      "link": "static",
+      "file_rules": [
+        {
+          "files": [
+            "lib/zip/**.c",
+            "lib/archive_codec/**.c"
+          ],
+          "build_options": [
+            "-UDEBUG"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lambda-image-codecs",
+      "description": "Explicit image I/O source closure; no upstream build system",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
+      "lang": "c17",
+      "pic": true,
+      "single_project": true,
+      "optimize": "Size",
+      "source_files": [
+        "build_temp/image-config/aom_build_config.c",
+        "lib/image/giflib/dgif_lib.c",
+        "lib/image/giflib/egif_lib.c",
+        "lib/image/giflib/gif_hash.c",
+        "lib/image/giflib/gif_err.c",
+        "lib/image/giflib/gifalloc.c",
+        "lib/image/giflib/openbsd-reallocarray.c",
+        "lib/image/libaom/aom/src/aom_codec.c",
+        "lib/image/libaom/aom/src/aom_decoder.c",
+        "lib/image/libaom/aom/src/aom_encoder.c",
+        "lib/image/libaom/aom/src/aom_image.c",
+        "lib/image/libaom/aom/src/aom_integer.c",
+        "lib/image/libaom/aom_dsp/aom_convolve.c",
+        "lib/image/libaom/aom_dsp/aom_dsp_rtcd.c",
+        "lib/image/libaom/aom_dsp/binary_codes_reader.c",
+        "lib/image/libaom/aom_dsp/bitreader.c",
+        "lib/image/libaom/aom_dsp/bitreader_buffer.c",
+        "lib/image/libaom/aom_dsp/bitwriter_buffer.c",
+        "lib/image/libaom/aom_dsp/blend_a64_hmask.c",
+        "lib/image/libaom/aom_dsp/blend_a64_mask.c",
+        "lib/image/libaom/aom_dsp/blend_a64_vmask.c",
+        "lib/image/libaom/aom_dsp/entcode.c",
+        "lib/image/libaom/aom_dsp/entdec.c",
+        "lib/image/libaom/aom_dsp/intrapred.c",
+        "lib/image/libaom/aom_dsp/loopfilter.c",
+        "lib/image/libaom/aom_dsp/odintrin.c",
+        "lib/image/libaom/aom_mem/aom_mem.c",
+        "lib/image/libaom/aom_scale/aom_scale_rtcd.c",
+        "lib/image/libaom/aom_scale/generic/yv12config.c",
+        "lib/image/libaom/aom_scale/generic/yv12extend.c",
+        "lib/image/libaom/aom_util/aom_thread.c",
+        "lib/image/libaom/av1/arg_defs.c",
+        "lib/image/libaom/av1/av1_dx_iface.c",
+        "lib/image/libaom/av1/common/alloccommon.c",
+        "lib/image/libaom/av1/common/av1_inv_txfm1d.c",
+        "lib/image/libaom/av1/common/av1_inv_txfm2d.c",
+        "lib/image/libaom/av1/common/av1_loopfilter.c",
+        "lib/image/libaom/av1/common/av1_rtcd.c",
+        "lib/image/libaom/av1/common/av1_txfm.c",
+        "lib/image/libaom/av1/common/blockd.c",
+        "lib/image/libaom/av1/common/cdef.c",
+        "lib/image/libaom/av1/common/cdef_block.c",
+        "lib/image/libaom/av1/common/cfl.c",
+        "lib/image/libaom/av1/common/common_data.c",
+        "lib/image/libaom/av1/common/convolve.c",
+        "lib/image/libaom/av1/common/debugmodes.c",
+        "lib/image/libaom/av1/common/entropy.c",
+        "lib/image/libaom/av1/common/entropymode.c",
+        "lib/image/libaom/av1/common/entropymv.c",
+        "lib/image/libaom/av1/common/frame_buffers.c",
+        "lib/image/libaom/av1/common/idct.c",
+        "lib/image/libaom/av1/common/mvref_common.c",
+        "lib/image/libaom/av1/common/obu_util.c",
+        "lib/image/libaom/av1/common/pred_common.c",
+        "lib/image/libaom/av1/common/quant_common.c",
+        "lib/image/libaom/av1/common/reconinter.c",
+        "lib/image/libaom/av1/common/reconintra.c",
+        "lib/image/libaom/av1/common/resize.c",
+        "lib/image/libaom/av1/common/restoration.c",
+        "lib/image/libaom/av1/common/scale.c",
+        "lib/image/libaom/av1/common/scan.c",
+        "lib/image/libaom/av1/common/seg_common.c",
+        "lib/image/libaom/av1/common/thread_common.c",
+        "lib/image/libaom/av1/common/tile_common.c",
+        "lib/image/libaom/av1/common/timing.c",
+        "lib/image/libaom/av1/common/txb_common.c",
+        "lib/image/libaom/av1/common/warped_motion.c",
+        "lib/image/libaom/av1/decoder/decodeframe.c",
+        "lib/image/libaom/av1/decoder/decodemv.c",
+        "lib/image/libaom/av1/decoder/decoder.c",
+        "lib/image/libaom/av1/decoder/decodetxb.c",
+        "lib/image/libaom/av1/decoder/detokenize.c",
+        "lib/image/libaom/av1/decoder/grain_synthesis.c",
+        "lib/image/libaom/av1/decoder/obu.c",
+        "lib/image/libaom/common/args_helper.c",
+        "lib/image/libavif/src/alpha.c",
+        "lib/image/libavif/src/avif.c",
+        "lib/image/libavif/src/codec_aom.c",
+        "lib/image/libavif/src/colr.c",
+        "lib/image/libavif/src/colrconvert.c",
+        "lib/image/libavif/src/diag.c",
+        "lib/image/libavif/src/exif.c",
+        "lib/image/libavif/src/gainmap.c",
+        "lib/image/libavif/src/io.c",
+        "lib/image/libavif/src/mem.c",
+        "lib/image/libavif/src/obu.c",
+        "lib/image/libavif/src/properties.c",
+        "lib/image/libavif/src/rawdata.c",
+        "lib/image/libavif/src/read.c",
+        "lib/image/libavif/src/reformat.c",
+        "lib/image/libavif/src/reformat_libsharpyuv.c",
+        "lib/image/libavif/src/reformat_libyuv.c",
+        "lib/image/libavif/src/scale.c",
+        "lib/image/libavif/src/stream.c",
+        "lib/image/libavif/src/utils.c",
+        "lib/image/libavif/third_party/libyuv/source/planar_functions.c",
+        "lib/image/libavif/third_party/libyuv/source/row_common.c",
+        "lib/image/libavif/third_party/libyuv/source/scale.c",
+        "lib/image/libavif/third_party/libyuv/source/scale_any.c",
+        "lib/image/libavif/third_party/libyuv/source/scale_common.c",
+        "lib/image/libjpeg-turbo/src/jaricom.c",
+        "lib/image/libjpeg-turbo/src/jcapimin.c",
+        "lib/image/libjpeg-turbo/src/jcarith.c",
+        "lib/image/libjpeg-turbo/src/jchuff.c",
+        "lib/image/libjpeg-turbo/src/jcicc.c",
+        "lib/image/libjpeg-turbo/src/jcinit.c",
+        "lib/image/libjpeg-turbo/src/jclhuff.c",
+        "lib/image/libjpeg-turbo/src/jcmarker.c",
+        "lib/image/libjpeg-turbo/src/jcmaster.c",
+        "lib/image/libjpeg-turbo/src/jcomapi.c",
+        "lib/image/libjpeg-turbo/src/jcparam.c",
+        "lib/image/libjpeg-turbo/src/jcphuff.c",
+        "lib/image/libjpeg-turbo/src/jdapimin.c",
+        "lib/image/libjpeg-turbo/src/jdarith.c",
+        "lib/image/libjpeg-turbo/src/jdatadst-tj.c",
+        "lib/image/libjpeg-turbo/src/jdatadst.c",
+        "lib/image/libjpeg-turbo/src/jdatasrc-tj.c",
+        "lib/image/libjpeg-turbo/src/jdatasrc.c",
+        "lib/image/libjpeg-turbo/src/jdhuff.c",
+        "lib/image/libjpeg-turbo/src/jdicc.c",
+        "lib/image/libjpeg-turbo/src/jdinput.c",
+        "lib/image/libjpeg-turbo/src/jdlhuff.c",
+        "lib/image/libjpeg-turbo/src/jdmarker.c",
+        "lib/image/libjpeg-turbo/src/jdmaster.c",
+        "lib/image/libjpeg-turbo/src/jdphuff.c",
+        "lib/image/libjpeg-turbo/src/jerror.c",
+        "lib/image/libjpeg-turbo/src/jfdctflt.c",
+        "lib/image/libjpeg-turbo/src/jmemmgr.c",
+        "lib/image/libjpeg-turbo/src/jmemnobs.c",
+        "lib/image/libjpeg-turbo/src/jpeg_nbits.c",
+        "lib/image/libjpeg-turbo/src/turbojpeg.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccoefct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccoefct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdctmgr-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdctmgr-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcoefct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcoefct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddctmgr-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddctmgr-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmerge-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmerge-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctfst-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctfst-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctint-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctint-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctflt-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctflt-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctfst-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctfst-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctint-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctint-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctred-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctred-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant1-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant1-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant2-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant2-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-8.c",
+        "lib/image/libnsbmp/src/libnsbmp.c",
+        "lib/image/libpng/png.c",
+        "lib/image/libpng/pngerror.c",
+        "lib/image/libpng/pngget.c",
+        "lib/image/libpng/pngmem.c",
+        "lib/image/libpng/pngpread.c",
+        "lib/image/libpng/pngread.c",
+        "lib/image/libpng/pngrio.c",
+        "lib/image/libpng/pngrtran.c",
+        "lib/image/libpng/pngrutil.c",
+        "lib/image/libpng/pngset.c",
+        "lib/image/libpng/pngtrans.c",
+        "lib/image/libpng/pngwio.c",
+        "lib/image/libpng/pngwrite.c",
+        "lib/image/libpng/pngwtran.c",
+        "lib/image/libpng/pngwutil.c",
+        "lib/image/libtiff/libtiff/tif_aux.c",
+        "lib/image/libtiff/libtiff/tif_close.c",
+        "lib/image/libtiff/libtiff/tif_codec.c",
+        "lib/image/libtiff/libtiff/tif_color.c",
+        "lib/image/libtiff/libtiff/tif_compress.c",
+        "lib/image/libtiff/libtiff/tif_dir.c",
+        "lib/image/libtiff/libtiff/tif_dirinfo.c",
+        "lib/image/libtiff/libtiff/tif_dirread.c",
+        "lib/image/libtiff/libtiff/tif_dirwrite.c",
+        "lib/image/libtiff/libtiff/tif_dumpmode.c",
+        "lib/image/libtiff/libtiff/tif_error.c",
+        "lib/image/libtiff/libtiff/tif_extension.c",
+        "lib/image/libtiff/libtiff/tif_fax3.c",
+        "lib/image/libtiff/libtiff/tif_fax3sm.c",
+        "lib/image/libtiff/libtiff/tif_flush.c",
+        "lib/image/libtiff/libtiff/tif_getimage.c",
+        "lib/image/libtiff/libtiff/tif_hash_set.c",
+        "lib/image/libtiff/libtiff/tif_jpeg.c",
+        "lib/image/libtiff/libtiff/tif_lzw.c",
+        "lib/image/libtiff/libtiff/tif_open.c",
+        "lib/image/libtiff/libtiff/tif_packbits.c",
+        "lib/image/libtiff/libtiff/tif_predict.c",
+        "lib/image/libtiff/libtiff/tif_print.c",
+        "lib/image/libtiff/libtiff/tif_read.c",
+        "lib/image/libtiff/libtiff/tif_strip.c",
+        "lib/image/libtiff/libtiff/tif_swab.c",
+        "lib/image/libtiff/libtiff/tif_tile.c",
+        "lib/image/libtiff/libtiff/tif_version.c",
+        "lib/image/libtiff/libtiff/tif_warning.c",
+        "lib/image/libtiff/libtiff/tif_write.c",
+        "lib/image/libtiff/libtiff/tif_zip.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_cpu.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_csp.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_dsp.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_gamma.c",
+        "lib/image/libwebp/src/dec/alpha_dec.c",
+        "lib/image/libwebp/src/dec/buffer_dec.c",
+        "lib/image/libwebp/src/dec/frame_dec.c",
+        "lib/image/libwebp/src/dec/idec_dec.c",
+        "lib/image/libwebp/src/dec/io_dec.c",
+        "lib/image/libwebp/src/dec/quant_dec.c",
+        "lib/image/libwebp/src/dec/tree_dec.c",
+        "lib/image/libwebp/src/dec/vp8_dec.c",
+        "lib/image/libwebp/src/dec/vp8l_dec.c",
+        "lib/image/libwebp/src/dec/webp_dec.c",
+        "lib/image/libwebp/src/dsp/alpha_processing.c",
+        "lib/image/libwebp/src/dsp/cost.c",
+        "lib/image/libwebp/src/dsp/cpu.c",
+        "lib/image/libwebp/src/dsp/dec.c",
+        "lib/image/libwebp/src/dsp/dec_clip_tables.c",
+        "lib/image/libwebp/src/dsp/enc.c",
+        "lib/image/libwebp/src/dsp/filters.c",
+        "lib/image/libwebp/src/dsp/lossless.c",
+        "lib/image/libwebp/src/dsp/lossless_enc.c",
+        "lib/image/libwebp/src/dsp/rescaler.c",
+        "lib/image/libwebp/src/dsp/ssim.c",
+        "lib/image/libwebp/src/dsp/upsampling.c",
+        "lib/image/libwebp/src/dsp/yuv.c",
+        "lib/image/libwebp/src/enc/alpha_enc.c",
+        "lib/image/libwebp/src/enc/analysis_enc.c",
+        "lib/image/libwebp/src/enc/backward_references_cost_enc.c",
+        "lib/image/libwebp/src/enc/backward_references_enc.c",
+        "lib/image/libwebp/src/enc/config_enc.c",
+        "lib/image/libwebp/src/enc/cost_enc.c",
+        "lib/image/libwebp/src/enc/filter_enc.c",
+        "lib/image/libwebp/src/enc/frame_enc.c",
+        "lib/image/libwebp/src/enc/histogram_enc.c",
+        "lib/image/libwebp/src/enc/iterator_enc.c",
+        "lib/image/libwebp/src/enc/near_lossless_enc.c",
+        "lib/image/libwebp/src/enc/picture_csp_enc.c",
+        "lib/image/libwebp/src/enc/picture_enc.c",
+        "lib/image/libwebp/src/enc/picture_psnr_enc.c",
+        "lib/image/libwebp/src/enc/picture_rescale_enc.c",
+        "lib/image/libwebp/src/enc/picture_tools_enc.c",
+        "lib/image/libwebp/src/enc/predictor_enc.c",
+        "lib/image/libwebp/src/enc/quant_enc.c",
+        "lib/image/libwebp/src/enc/syntax_enc.c",
+        "lib/image/libwebp/src/enc/token_enc.c",
+        "lib/image/libwebp/src/enc/tree_enc.c",
+        "lib/image/libwebp/src/enc/vp8l_enc.c",
+        "lib/image/libwebp/src/enc/webp_enc.c",
+        "lib/image/libwebp/src/utils/bit_reader_utils.c",
+        "lib/image/libwebp/src/utils/bit_writer_utils.c",
+        "lib/image/libwebp/src/utils/color_cache_utils.c",
+        "lib/image/libwebp/src/utils/filters_utils.c",
+        "lib/image/libwebp/src/utils/huffman_encode_utils.c",
+        "lib/image/libwebp/src/utils/huffman_utils.c",
+        "lib/image/libwebp/src/utils/palette.c",
+        "lib/image/libwebp/src/utils/quant_levels_dec_utils.c",
+        "lib/image/libwebp/src/utils/quant_levels_utils.c",
+        "lib/image/libwebp/src/utils/random_utils.c",
+        "lib/image/libwebp/src/utils/rescaler_utils.c",
+        "lib/image/libwebp/src/utils/thread_utils.c",
+        "lib/image/libwebp/src/utils/utils.c"
+      ],
+      "includes": [
+        "build_temp/image-config/include",
+        "lib/image/libpng",
+        "lib/image/libjpeg-turbo/src",
+        "lib/image/libwebp/src",
+        "lib/image/libavif/include",
+        "lib/image/libtiff/libtiff",
+        "lib/image/giflib",
+        "lib/image/libnsbmp/include",
+        "lib/image/libaom",
+        "lib/image/libavif/third_party/libyuv/include",
+        "lib/image/libnsbmp/src",
+        "lib/image/libwebp",
+        "build_temp/image-config/webp"
+      ],
+      "defines": [
+        "NDEBUG"
+      ],
+      "libraries": [
+        "zlib",
+        "pthread"
+      ],
+      "file_rules": [
+        {
+          "files": [
+            "lib/image/libjpeg-turbo/**.c"
+          ],
+          "defines": [
+            "LAMBDA_IMAGE_IO_ONLY"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libwebp/**.c"
+          ],
+          "defines": [
+            "HAVE_CONFIG_H"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libavif/**.c"
+          ],
+          "defines": [
+            "AVIF_CODEC_AOM=1",
+            "AVIF_STATIC",
+            "AVIF_CODEC_AOM_DECODE=1"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/resize_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/resize_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/warp_plane_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/warp_plane_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libwebp/**_sse41.c"
+          ],
+          "build_options": [
+            "-msse4.1"
+          ]
+        }
+      ],
+      "source_sets": [
+        {
+          "architectures": [
+            "arm64"
+          ],
+          "source_files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_i8mm.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve_copy_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_i8mm.c",
+            "lib/image/libaom/aom_dsp/arm/blend_a64_mask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_hmask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_mask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_vmask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_sve.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_intrapred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_loopfilter_neon.c",
+            "lib/image/libaom/aom_dsp/arm/intrapred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/loopfilter_neon.c",
+            "lib/image/libaom/aom_ports/aarch64_cpudetect.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_horiz_rs_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/av1_inv_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/blend_a64_hmask_neon.c",
+            "lib/image/libaom/av1/common/arm/blend_a64_vmask_neon.c",
+            "lib/image/libaom/av1/common/arm/cdef_block_neon.c",
+            "lib/image/libaom/av1/common/arm/cfl_neon.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_horiz_rs_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_scale_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_inv_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_reconinter_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_reconintra_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_sve.c",
+            "lib/image/libaom/av1/common/arm/highbd_wiener_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/reconinter_neon.c",
+            "lib/image/libaom/av1/common/arm/reconintra_neon.c",
+            "lib/image/libaom/av1/common/arm/resize_neon.c",
+            "lib/image/libaom/av1/common/arm/resize_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/resize_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/selfguided_neon.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_neon.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_sve.c",
+            "lib/image/libaom/av1/common/arm/wiener_convolve_neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/aarch64/jchuff-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/aarch64/jsimd.c",
+            "lib/image/libjpeg-turbo/simd/arm/jccolor-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcgray-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcphuff-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcsample-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdcolor-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdmerge-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdsample-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jfdctfst-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jfdctint-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctfst-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctint-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctred-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jquanti-neon.c",
+            "lib/image/libpng/arm/arm_init.c",
+            "lib/image/libpng/arm/filter_neon_intrinsics.c",
+            "lib/image/libpng/arm/palette_neon_intrinsics.c",
+            "lib/image/libwebp/sharpyuv/sharpyuv_neon.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_neon.c",
+            "lib/image/libwebp/src/dsp/cost_neon.c",
+            "lib/image/libwebp/src/dsp/dec_neon.c",
+            "lib/image/libwebp/src/dsp/enc_neon.c",
+            "lib/image/libwebp/src/dsp/filters_neon.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_neon.c",
+            "lib/image/libwebp/src/dsp/lossless_neon.c",
+            "lib/image/libwebp/src/dsp/rescaler_neon.c",
+            "lib/image/libwebp/src/dsp/upsampling_neon.c",
+            "lib/image/libwebp/src/dsp/yuv_neon.c"
+          ],
+          "includes": [
+            "build_temp/image-config/aom/arm64",
+            "build_temp/image-config/jpeg-arm"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "lib/image/libjpeg-turbo/**.c"
+              ],
+              "defines": [
+                "NEON_INTRINSICS"
+              ]
+            }
+          ]
+        },
+        {
+          "architectures": [
+            "x86_64"
+          ],
+          "source_files": [
+            "lib/image/libpng/intel/filter_sse2_intrinsics.c",
+            "lib/image/libpng/intel/intel_init.c",
+            "lib/image/libwebp/sharpyuv/sharpyuv_sse2.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_sse2.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_sse41.c",
+            "lib/image/libwebp/src/dsp/cost_sse2.c",
+            "lib/image/libwebp/src/dsp/dec_sse2.c",
+            "lib/image/libwebp/src/dsp/dec_sse41.c",
+            "lib/image/libwebp/src/dsp/enc_sse2.c",
+            "lib/image/libwebp/src/dsp/enc_sse41.c",
+            "lib/image/libwebp/src/dsp/filters_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_sse41.c",
+            "lib/image/libwebp/src/dsp/lossless_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_sse41.c",
+            "lib/image/libwebp/src/dsp/rescaler_sse2.c",
+            "lib/image/libwebp/src/dsp/ssim_sse2.c",
+            "lib/image/libwebp/src/dsp/upsampling_sse2.c",
+            "lib/image/libwebp/src/dsp/upsampling_sse41.c",
+            "lib/image/libwebp/src/dsp/yuv_sse2.c",
+            "lib/image/libwebp/src/dsp/yuv_sse41.c"
+          ],
+          "includes": [
+            "build_temp/image-config/aom/generic"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "lib/image/libpng/**.c"
+              ],
+              "defines": [
+                "PNG_INTEL_SSE_OPT=1",
+                "PNG_INTEL_SSE_IMPLEMENTATION=1"
+              ]
+            }
+          ]
+        },
+        {
+          "platforms": [
+            "macos",
+            "linux"
+          ],
+          "source_files": [
+            "lib/image/libtiff/libtiff/tif_unix.c"
+          ]
+        },
+        {
+          "platforms": [
+            "windows"
+          ],
+          "source_files": [
+            "lib/image/libtiff/libtiff/tif_win32.c"
+          ]
+        }
+      ]
+    }
+  ],
+  "image_codecs": {
+    "generated_files": [
+      {
+        "path": "build_temp/image-config/include/pnglibconf.h",
+        "preamble": [
+          "#pragma once",
+          "/* libpng feature profile; upstream notices remain in png.h and LICENSE. */"
+        ],
+        "defines": {
+          "PNG_16BIT_SUPPORTED": "",
+          "PNG_ALIGNED_MEMORY_SUPPORTED": "",
+          "PNG_BENIGN_ERRORS_SUPPORTED": "",
+          "PNG_BENIGN_READ_ERRORS_SUPPORTED": "",
+          "PNG_BUILD_GRAYSCALE_PALETTE_SUPPORTED": "",
+          "PNG_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_COLORSPACE_SUPPORTED": "",
+          "PNG_CONSOLE_IO_SUPPORTED": "",
+          "PNG_CONVERT_tIME_SUPPORTED": "",
+          "PNG_EASY_ACCESS_SUPPORTED": "",
+          "PNG_ERROR_TEXT_SUPPORTED": "",
+          "PNG_FIXED_POINT_SUPPORTED": "",
+          "PNG_FLOATING_ARITHMETIC_SUPPORTED": "",
+          "PNG_FLOATING_POINT_SUPPORTED": "",
+          "PNG_FORMAT_AFIRST_SUPPORTED": "",
+          "PNG_FORMAT_BGR_SUPPORTED": "",
+          "PNG_GAMMA_SUPPORTED": "",
+          "PNG_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_HANDLE_AS_UNKNOWN_SUPPORTED": "",
+          "PNG_INCH_CONVERSIONS_SUPPORTED": "",
+          "PNG_INFO_IMAGE_SUPPORTED": "",
+          "PNG_IO_STATE_SUPPORTED": "",
+          "PNG_MNG_FEATURES_SUPPORTED": "",
+          "PNG_POINTER_INDEXING_SUPPORTED": "",
+          "PNG_PROGRESSIVE_READ_SUPPORTED": "",
+          "PNG_READ_16BIT_SUPPORTED": "",
+          "PNG_READ_ALPHA_MODE_SUPPORTED": "",
+          "PNG_READ_ANCILLARY_CHUNKS_SUPPORTED": "",
+          "PNG_READ_BACKGROUND_SUPPORTED": "",
+          "PNG_READ_BGR_SUPPORTED": "",
+          "PNG_READ_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_READ_COMPOSITE_NODIV_SUPPORTED": "",
+          "PNG_READ_COMPRESSED_TEXT_SUPPORTED": "",
+          "PNG_READ_EXPAND_16_SUPPORTED": "",
+          "PNG_READ_EXPAND_SUPPORTED": "",
+          "PNG_READ_FILLER_SUPPORTED": "",
+          "PNG_READ_GAMMA_SUPPORTED": "",
+          "PNG_READ_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_READ_GRAY_TO_RGB_SUPPORTED": "",
+          "PNG_READ_INTERLACING_SUPPORTED": "",
+          "PNG_READ_INT_FUNCTIONS_SUPPORTED": "",
+          "PNG_READ_INVERT_ALPHA_SUPPORTED": "",
+          "PNG_READ_INVERT_SUPPORTED": "",
+          "PNG_READ_OPT_PLTE_SUPPORTED": "",
+          "PNG_READ_PACKSWAP_SUPPORTED": "",
+          "PNG_READ_PACK_SUPPORTED": "",
+          "PNG_READ_QUANTIZE_SUPPORTED": "",
+          "PNG_READ_RGB_TO_GRAY_SUPPORTED": "",
+          "PNG_READ_SCALE_16_TO_8_SUPPORTED": "",
+          "PNG_READ_SHIFT_SUPPORTED": "",
+          "PNG_READ_STRIP_16_TO_8_SUPPORTED": "",
+          "PNG_READ_STRIP_ALPHA_SUPPORTED": "",
+          "PNG_READ_SUPPORTED": "",
+          "PNG_READ_SWAP_ALPHA_SUPPORTED": "",
+          "PNG_READ_SWAP_SUPPORTED": "",
+          "PNG_READ_TEXT_SUPPORTED": "",
+          "PNG_READ_TRANSFORMS_SUPPORTED": "",
+          "PNG_READ_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_READ_USER_CHUNKS_SUPPORTED": "",
+          "PNG_READ_USER_TRANSFORM_SUPPORTED": "",
+          "PNG_READ_bKGD_SUPPORTED": "",
+          "PNG_READ_cHRM_SUPPORTED": "",
+          "PNG_READ_cICP_SUPPORTED": "",
+          "PNG_READ_cLLI_SUPPORTED": "",
+          "PNG_READ_eXIf_SUPPORTED": "",
+          "PNG_READ_gAMA_SUPPORTED": "",
+          "PNG_READ_hIST_SUPPORTED": "",
+          "PNG_READ_iCCP_SUPPORTED": "",
+          "PNG_READ_iTXt_SUPPORTED": "",
+          "PNG_READ_mDCV_SUPPORTED": "",
+          "PNG_READ_oFFs_SUPPORTED": "",
+          "PNG_READ_pCAL_SUPPORTED": "",
+          "PNG_READ_pHYs_SUPPORTED": "",
+          "PNG_READ_sBIT_SUPPORTED": "",
+          "PNG_READ_sCAL_SUPPORTED": "",
+          "PNG_READ_sPLT_SUPPORTED": "",
+          "PNG_READ_sRGB_SUPPORTED": "",
+          "PNG_READ_tEXt_SUPPORTED": "",
+          "PNG_READ_tIME_SUPPORTED": "",
+          "PNG_READ_tRNS_SUPPORTED": "",
+          "PNG_READ_zTXt_SUPPORTED": "",
+          "PNG_SAVE_INT_32_SUPPORTED": "",
+          "PNG_SAVE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_SEQUENTIAL_READ_SUPPORTED": "",
+          "PNG_SETJMP_SUPPORTED": "",
+          "PNG_SET_OPTION_SUPPORTED": "",
+          "PNG_SET_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_SET_USER_LIMITS_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_AFIRST_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_BGR_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_AFIRST_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_BGR_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_STDIO_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_SUPPORTED": "",
+          "PNG_STDIO_SUPPORTED": "",
+          "PNG_STORE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_TEXT_SUPPORTED": "",
+          "PNG_TIME_RFC1123_SUPPORTED": "",
+          "PNG_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_USER_CHUNKS_SUPPORTED": "",
+          "PNG_USER_LIMITS_SUPPORTED": "",
+          "PNG_USER_MEM_SUPPORTED": "",
+          "PNG_USER_TRANSFORM_INFO_SUPPORTED": "",
+          "PNG_USER_TRANSFORM_PTR_SUPPORTED": "",
+          "PNG_WARNINGS_SUPPORTED": "",
+          "PNG_WRITE_16BIT_SUPPORTED": "",
+          "PNG_WRITE_ANCILLARY_CHUNKS_SUPPORTED": "",
+          "PNG_WRITE_BGR_SUPPORTED": "",
+          "PNG_WRITE_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_WRITE_COMPRESSED_TEXT_SUPPORTED": "",
+          "PNG_WRITE_CUSTOMIZE_COMPRESSION_SUPPORTED": "",
+          "PNG_WRITE_CUSTOMIZE_ZTXT_COMPRESSION_SUPPORTED": "",
+          "PNG_WRITE_FILLER_SUPPORTED": "",
+          "PNG_WRITE_FILTER_SUPPORTED": "",
+          "PNG_WRITE_FLUSH_SUPPORTED": "",
+          "PNG_WRITE_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_WRITE_INTERLACING_SUPPORTED": "",
+          "PNG_WRITE_INT_FUNCTIONS_SUPPORTED": "",
+          "PNG_WRITE_INVERT_ALPHA_SUPPORTED": "",
+          "PNG_WRITE_INVERT_SUPPORTED": "",
+          "PNG_WRITE_OPTIMIZE_CMF_SUPPORTED": "",
+          "PNG_WRITE_PACKSWAP_SUPPORTED": "",
+          "PNG_WRITE_PACK_SUPPORTED": "",
+          "PNG_WRITE_SHIFT_SUPPORTED": "",
+          "PNG_WRITE_SUPPORTED": "",
+          "PNG_WRITE_SWAP_ALPHA_SUPPORTED": "",
+          "PNG_WRITE_SWAP_SUPPORTED": "",
+          "PNG_WRITE_TEXT_SUPPORTED": "",
+          "PNG_WRITE_TRANSFORMS_SUPPORTED": "",
+          "PNG_WRITE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_WRITE_USER_TRANSFORM_SUPPORTED": "",
+          "PNG_WRITE_WEIGHTED_FILTER_SUPPORTED": "",
+          "PNG_WRITE_bKGD_SUPPORTED": "",
+          "PNG_WRITE_cHRM_SUPPORTED": "",
+          "PNG_WRITE_cICP_SUPPORTED": "",
+          "PNG_WRITE_cLLI_SUPPORTED": "",
+          "PNG_WRITE_eXIf_SUPPORTED": "",
+          "PNG_WRITE_gAMA_SUPPORTED": "",
+          "PNG_WRITE_hIST_SUPPORTED": "",
+          "PNG_WRITE_iCCP_SUPPORTED": "",
+          "PNG_WRITE_iTXt_SUPPORTED": "",
+          "PNG_WRITE_mDCV_SUPPORTED": "",
+          "PNG_WRITE_oFFs_SUPPORTED": "",
+          "PNG_WRITE_pCAL_SUPPORTED": "",
+          "PNG_WRITE_pHYs_SUPPORTED": "",
+          "PNG_WRITE_sBIT_SUPPORTED": "",
+          "PNG_WRITE_sCAL_SUPPORTED": "",
+          "PNG_WRITE_sPLT_SUPPORTED": "",
+          "PNG_WRITE_sRGB_SUPPORTED": "",
+          "PNG_WRITE_tEXt_SUPPORTED": "",
+          "PNG_WRITE_tIME_SUPPORTED": "",
+          "PNG_WRITE_tRNS_SUPPORTED": "",
+          "PNG_WRITE_zTXt_SUPPORTED": "",
+          "PNG_bKGD_SUPPORTED": "",
+          "PNG_cHRM_SUPPORTED": "",
+          "PNG_cICP_SUPPORTED": "",
+          "PNG_cLLI_SUPPORTED": "",
+          "PNG_eXIf_SUPPORTED": "",
+          "PNG_gAMA_SUPPORTED": "",
+          "PNG_hIST_SUPPORTED": "",
+          "PNG_iCCP_SUPPORTED": "",
+          "PNG_iTXt_SUPPORTED": "",
+          "PNG_mDCV_SUPPORTED": "",
+          "PNG_oFFs_SUPPORTED": "",
+          "PNG_pCAL_SUPPORTED": "",
+          "PNG_pHYs_SUPPORTED": "",
+          "PNG_sBIT_SUPPORTED": "",
+          "PNG_sCAL_SUPPORTED": "",
+          "PNG_sPLT_SUPPORTED": "",
+          "PNG_sRGB_SUPPORTED": "",
+          "PNG_tEXt_SUPPORTED": "",
+          "PNG_tIME_SUPPORTED": "",
+          "PNG_tRNS_SUPPORTED": "",
+          "PNG_zTXt_SUPPORTED": "",
+          "PNG_API_RULE": "0",
+          "PNG_DEFAULT_READ_MACROS": "1",
+          "PNG_GAMMA_THRESHOLD_FIXED": "5000",
+          "PNG_IDAT_READ_SIZE": "PNG_ZBUF_SIZE",
+          "PNG_INFLATE_BUF_SIZE": "1024",
+          "PNG_LINKAGE_API": "extern",
+          "PNG_LINKAGE_CALLBACK": "extern",
+          "PNG_LINKAGE_DATA": "extern",
+          "PNG_LINKAGE_FUNCTION": "extern",
+          "PNG_MAX_GAMMA_8": "11",
+          "PNG_QUANTIZE_BLUE_BITS": "5",
+          "PNG_QUANTIZE_GREEN_BITS": "5",
+          "PNG_QUANTIZE_RED_BITS": "5",
+          "PNG_TEXT_Z_DEFAULT_COMPRESSION": "(-1)",
+          "PNG_TEXT_Z_DEFAULT_STRATEGY": "0",
+          "PNG_USER_CHUNK_CACHE_MAX": "1000",
+          "PNG_USER_CHUNK_MALLOC_MAX": "8000000",
+          "PNG_USER_HEIGHT_MAX": "1000000",
+          "PNG_USER_WIDTH_MAX": "1000000",
+          "PNG_ZBUF_SIZE": "8192",
+          "PNG_Z_DEFAULT_COMPRESSION": "(-1)",
+          "PNG_Z_DEFAULT_NOFILTER_STRATEGY": "0",
+          "PNG_Z_DEFAULT_STRATEGY": "1",
+          "PNG_sCAL_PRECISION": "5",
+          "PNG_sRGB_PROFILE_CHECKS": "2"
+        }
+      },
+      {
+        "path": "build_temp/image-config/include/jconfig.h",
+        "lines": [
+          "/* Version ID for the JPEG library.",
+          " * Might be useful for tests like \"#if JPEG_LIB_VERSION >= 60\".",
+          " */",
+          "#define JPEG_LIB_VERSION  62",
+          "",
+          "/* libjpeg-turbo version */",
+          "#define LIBJPEG_TURBO_VERSION  3.1.2",
+          "",
+          "/* libjpeg-turbo version in integer form */",
+          "#define LIBJPEG_TURBO_VERSION_NUMBER  3001002",
+          "",
+          "/* Support arithmetic encoding when using 8-bit samples */",
+          "#define C_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support arithmetic decoding when using 8-bit samples */",
+          "#define D_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support in-memory source/destination managers */",
+          "#define MEM_SRCDST_SUPPORTED  1",
+          "",
+          "/* Use accelerated SIMD routines when using 8-bit samples */",
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WITH_SIMD 1",
+          "#endif",
+          "",
+          "/* This version of libjpeg-turbo supports run-time selection of data precision,",
+          " * so BITS_IN_JSAMPLE is no longer used to specify the data precision at build",
+          " * time.  However, some downstream software expects the macro to be defined.",
+          " * Since 12-bit data precision is an opt-in feature that requires explicitly",
+          " * calling 12-bit-specific libjpeg API functions and using 12-bit-specific data",
+          " * types, the unmodified portion of the libjpeg API still behaves as if it were",
+          " * built for 8-bit precision, and JSAMPLE is still literally an 8-bit data",
+          " * type.  Thus, it is correct to define BITS_IN_JSAMPLE to 8 here.",
+          " */",
+          "#ifndef BITS_IN_JSAMPLE",
+          "#define BITS_IN_JSAMPLE  8",
+          "#endif",
+          "",
+          "#ifdef _WIN32",
+          "",
+          "#undef RIGHT_SHIFT_IS_UNSIGNED",
+          "",
+          "/* Define \"boolean\" as unsigned char, not int, per Windows custom */",
+          "#ifndef __RPCNDR_H__            /* don't conflict if rpcndr.h already read */",
+          "typedef unsigned char boolean;",
+          "#endif",
+          "#define HAVE_BOOLEAN            /* prevent jmorecfg.h from redefining it */",
+          "",
+          "/* Define \"INT32\" as int, not long, per Windows custom */",
+          "#if !(defined(_BASETSD_H_) || defined(_BASETSD_H))   /* don't conflict if basetsd.h already read */",
+          "typedef short INT16;",
+          "typedef signed int INT32;",
+          "#endif",
+          "#define XMD_H                   /* prevent jmorecfg.h from redefining it */",
+          "",
+          "#else",
+          "",
+          "/* Define if your (broken) compiler shifts signed values as if they were",
+          "   unsigned. */",
+          "/* #undef RIGHT_SHIFT_IS_UNSIGNED */",
+          "",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/jconfigint.h",
+        "lines": [
+          "/* libjpeg-turbo build number */",
+          "#define BUILD  \"20261015\"",
+          "",
+          "/* How to hide global symbols. */",
+          "#define HIDDEN  __attribute__((visibility(\"hidden\")))",
+          "",
+          "/* Compiler's inline keyword */",
+          "#undef inline",
+          "",
+          "/* How to obtain function inlining. */",
+          "#define INLINE  __inline__ __attribute__((always_inline))",
+          "",
+          "/* How to obtain thread-local storage */",
+          "#define THREAD_LOCAL  __thread",
+          "",
+          "/* Define to the full name of this package. */",
+          "#define PACKAGE_NAME  \"libjpeg-turbo\"",
+          "",
+          "/* Version number of package */",
+          "#define VERSION  \"3.1.2\"",
+          "",
+          "/* The size of `size_t', as computed by sizeof. */",
+          "#define SIZEOF_SIZE_T  __SIZEOF_SIZE_T__",
+          "",
+          "/* Define if your compiler has __builtin_ctzl() and sizeof(unsigned long) == sizeof(size_t). */",
+          "#define HAVE_BUILTIN_CTZL",
+          "",
+          "/* Define to 1 if you have the <intrin.h> header file. */",
+          "/* #undef HAVE_INTRIN_H */",
+          "",
+          "#if defined(_MSC_VER) && defined(HAVE_INTRIN_H)",
+          "#if (SIZEOF_SIZE_T == 8)",
+          "#define HAVE_BITSCANFORWARD64",
+          "#elif (SIZEOF_SIZE_T == 4)",
+          "#define HAVE_BITSCANFORWARD",
+          "#endif",
+          "#endif",
+          "",
+          "#if defined(__has_attribute)",
+          "#if __has_attribute(fallthrough)",
+          "#define FALLTHROUGH  __attribute__((fallthrough));",
+          "#else",
+          "#define FALLTHROUGH",
+          "#endif",
+          "#else",
+          "#define FALLTHROUGH",
+          "#endif",
+          "",
+          "/*",
+          " * Define BITS_IN_JSAMPLE as either",
+          " *   8   for 8-bit sample values (the usual setting)",
+          " *   12  for 12-bit sample values",
+          " * Only 8 and 12 are legal data precisions for lossy JPEG according to the",
+          " * JPEG standard, and the IJG code does not support anything else!",
+          " */",
+          "",
+          "#ifndef BITS_IN_JSAMPLE",
+          "#define BITS_IN_JSAMPLE  8      /* use 8 or 12 */",
+          "#endif",
+          "",
+          "#undef C_ARITH_CODING_SUPPORTED",
+          "#undef D_ARITH_CODING_SUPPORTED",
+          "#undef WITH_SIMD",
+          "",
+          "#if BITS_IN_JSAMPLE == 8",
+          "",
+          "/* Support arithmetic encoding */",
+          "#define C_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support arithmetic decoding */",
+          "#define D_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Use accelerated SIMD routines. */",
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WITH_SIMD 1",
+          "#endif",
+          "",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/jversion.h",
+        "lines": [
+          "/*",
+          " * jversion.h",
+          " *",
+          " * This file was part of the Independent JPEG Group's software:",
+          " * Copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.",
+          " * libjpeg-turbo Modifications:",
+          " * Copyright (C) 2010, 2012-2024, D. R. Commander.",
+          " * For conditions of distribution and use, see the accompanying README.ijg",
+          " * file.",
+          " *",
+          " * This file contains software version identification.",
+          " */",
+          "",
+          "",
+          "#if JPEG_LIB_VERSION >= 80",
+          "",
+          "#define JVERSION        \"8d  15-Jan-2012\"",
+          "",
+          "#elif JPEG_LIB_VERSION >= 70",
+          "",
+          "#define JVERSION        \"7  27-Jun-2009\"",
+          "",
+          "#else",
+          "",
+          "#define JVERSION        \"6b  27-Mar-1998\"",
+          "",
+          "#endif",
+          "",
+          "/*",
+          " * NOTE: It is our convention to place the authors in the following order:",
+          " * - libjpeg-turbo authors (2009-) in descending order of the date of their",
+          " *   most recent contribution to the project, then in ascending order of the",
+          " *   date of their first contribution to the project, then in alphabetical",
+          " *   order",
+          " * - Upstream authors in descending order of the date of the first inclusion of",
+          " *   their code",
+          " */",
+          "",
+          "#define JCOPYRIGHT1 \\",
+          "  \"Copyright (C) 2009-2024 D. R. Commander\\n\" \\",
+          "  \"Copyright (C) 2015, 2020 Google, Inc.\\n\" \\",
+          "  \"Copyright (C) 2019-2020 Arm Limited\\n\" \\",
+          "  \"Copyright (C) 2015-2016, 2018 Matthieu Darbois\\n\" \\",
+          "  \"Copyright (C) 2011-2016 Siarhei Siamashka\\n\" \\",
+          "  \"Copyright (C) 2015 Intel Corporation\\n\"",
+          "#define JCOPYRIGHT2 \\",
+          "  \"Copyright (C) 2013-2014 Linaro Limited\\n\" \\",
+          "  \"Copyright (C) 2013-2014 MIPS Technologies, Inc.\\n\" \\",
+          "  \"Copyright (C) 2009, 2012 Pierre Ossman for Cendio AB\\n\" \\",
+          "  \"Copyright (C) 2009-2011 Nokia Corporation and/or its subsidiary(-ies)\\n\" \\",
+          "  \"Copyright (C) 1999-2006 MIYASAKA Masaru\\n\" \\",
+          "  \"Copyright (C) 1999 Ken Murchison\\n\" \\",
+          "  \"Copyright (C) 1991-2020 Thomas G. Lane, Guido Vollbeding\\n\"",
+          "",
+          "#define JCOPYRIGHT_SHORT \\",
+          "  \"Copyright (C) 1991-2025 The libjpeg-turbo Project and many others\""
+        ]
+      },
+      {
+        "path": "build_temp/image-config/jpeg-arm/neon-compat.h",
+        "lines": [
+          "/*",
+          " * Copyright (C) 2020, 2024, D. R. Commander.  All Rights Reserved.",
+          " * Copyright (C) 2020-2021, Arm Limited.  All Rights Reserved.",
+          " *",
+          " * This software is provided 'as-is', without any express or implied",
+          " * warranty.  In no event will the authors be held liable for any damages",
+          " * arising from the use of this software.",
+          " *",
+          " * Permission is granted to anyone to use this software for any purpose,",
+          " * including commercial applications, and to alter it and redistribute it",
+          " * freely, subject to the following restrictions:",
+          " *",
+          " * 1. The origin of this software must not be misrepresented; you must not",
+          " *    claim that you wrote the original software. If you use this software",
+          " *    in a product, an acknowledgment in the product documentation would be",
+          " *    appreciated but is not required.",
+          " * 2. Altered source versions must be plainly marked as such, and must not be",
+          " *    misrepresented as being the original software.",
+          " * 3. This notice may not be removed or altered from any source distribution.",
+          " */",
+          "",
+          "#define HAVE_VLD1_S16_X3",
+          "#define HAVE_VLD1_U16_X2",
+          "#define HAVE_VLD1Q_U8_X4",
+          "",
+          "/* Define compiler-independent count-leading-zeros and byte-swap macros */",
+          "#if defined(_MSC_VER) && !defined(__clang__)",
+          "#define BUILTIN_CLZ(x)  _CountLeadingZeros(x)",
+          "#define BUILTIN_CLZLL(x)  _CountLeadingZeros64(x)",
+          "#define BUILTIN_BSWAP64(x)  _byteswap_uint64(x)",
+          "#elif defined(__clang__) || defined(__GNUC__)",
+          "#define BUILTIN_CLZ(x)  __builtin_clz(x)",
+          "#define BUILTIN_CLZLL(x)  __builtin_clzll(x)",
+          "#define BUILTIN_BSWAP64(x)  __builtin_bswap64(x)",
+          "#else",
+          "#error \"Unknown compiler\"",
+          "#endif",
+          "",
+          "#if defined(__clang__)",
+          "#pragma clang diagnostic ignored \"-Wdeclaration-after-statement\"",
+          "#pragma clang diagnostic ignored \"-Wc99-extensions\"",
+          "#elif defined(__GNUC__)",
+          "#pragma GCC diagnostic ignored \"-Wdeclaration-after-statement\"",
+          "#pragma GCC diagnostic ignored \"-Wpedantic\"",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/webp/src/webp/config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "HAVE_BUILTIN_BSWAP16": "1",
+          "HAVE_BUILTIN_BSWAP32": "1",
+          "HAVE_BUILTIN_BSWAP64": "1",
+          "WEBP_USE_THREAD": "1"
+        },
+        "lines": [
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WEBP_HAVE_NEON",
+          "#elif defined(__x86_64__) || defined(_M_X64)",
+          "#define WEBP_HAVE_SSE2",
+          "#define WEBP_HAVE_SSE41",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/tiffconf.h",
+        "preamble": [
+          "#pragma once",
+          "#include <stddef.h>",
+          "#include <stdint.h>",
+          "#include <inttypes.h>"
+        ],
+        "defines": {
+          "TIFF_INT16_T": "int16_t",
+          "TIFF_INT32_T": "int32_t",
+          "TIFF_INT64_T": "int64_t",
+          "TIFF_INT8_T": "int8_t",
+          "TIFF_UINT16_T": "uint16_t",
+          "TIFF_UINT32_T": "uint32_t",
+          "TIFF_UINT64_T": "uint64_t",
+          "TIFF_UINT8_T": "uint8_t",
+          "TIFF_SSIZE_T": "ptrdiff_t",
+          "HAVE_IEEEFP": "1",
+          "HOST_FILLORDER": "FILLORDER_LSB2MSB",
+          "HOST_BIGENDIAN": "0",
+          "CCITT_SUPPORT": "1",
+          "JPEG_SUPPORT": "1",
+          "LZW_SUPPORT": "1",
+          "PACKBITS_SUPPORT": "1",
+          "ZIP_SUPPORT": "1",
+          "STRIPCHOP_DEFAULT": "TIFF_STRIPCHOP",
+          "SUBIFD_SUPPORT": "1",
+          "DEFAULT_EXTRASAMPLE_AS_ALPHA": "1",
+          "CHECK_JPEG_YCBCR_SUBSAMPLING": "1",
+          "MDI_SUPPORT": "1",
+          "COLORIMETRY_SUPPORT": "",
+          "YCBCR_SUPPORT": "",
+          "CMYK_SUPPORT": "",
+          "ICC_SUPPORT": "",
+          "PHOTOSHOP_SUPPORT": "",
+          "IPTC_SUPPORT": ""
+        }
+      },
+      {
+        "path": "build_temp/image-config/include/tif_config.h",
+        "preamble": [
+          "#pragma once",
+          "#include \"tiffconf.h\""
+        ],
+        "defines": {
+          "CCITT_SUPPORT": "1",
+          "CHECK_JPEG_YCBCR_SUBSAMPLING": "1",
+          "HAVE_ASSERT_H": "1",
+          "HAVE_FCNTL_H": "1",
+          "HAVE_SYS_TYPES_H": "1",
+          "PACKAGE": "\"LibTIFF Software\"",
+          "PACKAGE_BUGREPORT": "\"tiff@lists.osgeo.org\"",
+          "PACKAGE_NAME": "\"LibTIFF Software\"",
+          "PACKAGE_TARNAME": "\"tiff\"",
+          "PACKAGE_URL": "\"\"",
+          "SIZEOF_SIZE_T": "__SIZEOF_SIZE_T__",
+          "STRIP_SIZE_DEFAULT": "8192",
+          "TIFF_MAX_DIR_COUNT": "1048576",
+          "TIFF_SIZE_FORMAT": "\"zu\"",
+          "TIFF_SSIZE_FORMAT": "\"td\""
+        },
+        "lines": [
+          "#if defined(_WIN32)",
+          "#define USE_WIN32_FILEIO 1",
+          "#define HAVE_IO_H 1",
+          "#else",
+          "#define HAVE_UNISTD_H 1",
+          "#define HAVE_STRINGS_H 1",
+          "#define HAVE_MMAP 1",
+          "#define HAVE_FSEEKO 1",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "AOM_ARCH_AARCH64": "1",
+          "AOM_ARCH_ARM": "1",
+          "AOM_ARCH_PPC": "0",
+          "AOM_ARCH_RISCV": "0",
+          "AOM_ARCH_X86": "0",
+          "AOM_ARCH_X86_64": "0",
+          "CONFIG_ACCOUNTING": "0",
+          "CONFIG_ANALYZER": "0",
+          "CONFIG_AV1_DECODER": "1",
+          "CONFIG_AV1_ENCODER": "0",
+          "CONFIG_AV1_HIGHBITDEPTH": "1",
+          "CONFIG_AV1_TEMPORAL_DENOISING": "0",
+          "CONFIG_BIG_ENDIAN": "0",
+          "CONFIG_BITRATE_ACCURACY": "0",
+          "CONFIG_BITRATE_ACCURACY_BL": "0",
+          "CONFIG_BITSTREAM_DEBUG": "0",
+          "CONFIG_COEFFICIENT_RANGE_CHECKING": "0",
+          "CONFIG_COLLECT_COMPONENT_TIMING": "0",
+          "CONFIG_COLLECT_PARTITION_STATS": "0",
+          "CONFIG_COLLECT_RD_STATS": "0",
+          "CONFIG_CWG_C013": "0",
+          "CONFIG_CWG_E050": "0",
+          "CONFIG_DEBUG": "0",
+          "CONFIG_DENOISE": "0",
+          "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
+          "CONFIG_ENTROPY_STATS": "0",
+          "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
+          "CONFIG_FPMT_TEST": "0",
+          "CONFIG_GCC": "1",
+          "CONFIG_GCOV": "0",
+          "CONFIG_GPROF": "0",
+          "CONFIG_INSPECTION": "0",
+          "CONFIG_INTERNAL_STATS": "0",
+          "CONFIG_INTER_STATS_ONLY": "0",
+          "CONFIG_LIBVMAF_PSNR_PEAK": "1",
+          "CONFIG_LIBYUV": "0",
+          "CONFIG_MAX_DECODE_PROFILE": "2",
+          "CONFIG_MISMATCH_DEBUG": "0",
+          "CONFIG_MULTITHREAD": "1",
+          "CONFIG_NN_V2": "0",
+          "CONFIG_NORMAL_TILE_MODE": "0",
+          "CONFIG_OPTICAL_FLOW_API": "0",
+          "CONFIG_OS_SUPPORT": "1",
+          "CONFIG_OUTPUT_FRAME_SIZE": "0",
+          "CONFIG_PARTITION_SEARCH_ORDER": "0",
+          "CONFIG_PIC": "1",
+          "CONFIG_QUANT_MATRIX": "1",
+          "CONFIG_RATECTRL_LOG": "0",
+          "CONFIG_RD_COMMAND": "0",
+          "CONFIG_RD_DEBUG": "0",
+          "CONFIG_REALTIME_ONLY": "0",
+          "CONFIG_RT_ML_PARTITIONING": "0",
+          "CONFIG_RUNTIME_CPU_DETECT": "1",
+          "CONFIG_SALIENCY_MAP": "0",
+          "CONFIG_SHARED": "0",
+          "CONFIG_SIZE_LIMIT": "0",
+          "CONFIG_SPEED_STATS": "0",
+          "CONFIG_SVT_AV1": "0",
+          "CONFIG_TFLITE": "0",
+          "CONFIG_THREE_PASS": "0",
+          "CONFIG_TUNE_BUTTERAUGLI": "0",
+          "CONFIG_TUNE_VMAF": "0",
+          "CONFIG_WEBM_IO": "0",
+          "DECODE_HEIGHT_LIMIT": "0",
+          "DECODE_WIDTH_LIMIT": "0",
+          "FORCE_HIGHBITDEPTH_DECODING": "0",
+          "HAVE_ARM_CRC32": "1",
+          "HAVE_AVX": "0",
+          "HAVE_AVX2": "0",
+          "HAVE_FEXCEPT": "0",
+          "HAVE_MMX": "0",
+          "HAVE_NEON": "1",
+          "HAVE_NEON_DOTPROD": "1",
+          "HAVE_NEON_I8MM": "1",
+          "HAVE_PTHREAD_H": "1",
+          "HAVE_RVV": "0",
+          "HAVE_SSE": "0",
+          "HAVE_SSE2": "0",
+          "HAVE_SSE3": "0",
+          "HAVE_SSE4_1": "0",
+          "HAVE_SSE4_2": "0",
+          "HAVE_SSSE3": "0",
+          "HAVE_SVE": "1",
+          "HAVE_SVE2": "1",
+          "HAVE_UNISTD_H": "1",
+          "HAVE_VSX": "0",
+          "HAVE_WXWIDGETS": "0",
+          "STATIC_LINK_JXL": "0"
+        }
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_version.h",
+        "lines": [
+          "/*",
+          " * Copyright (c) 2026, Alliance for Open Media. All rights reserved.",
+          " *",
+          " * This source code is subject to the terms of the BSD 2 Clause License and",
+          " * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License",
+          " * was not distributed with this source code in the LICENSE file, you can",
+          " * obtain it at www.aomedia.org/license/software. If the Alliance for Open",
+          " * Media Patent License 1.0 was not distributed with this source code in the",
+          " * PATENTS file, you can obtain it at www.aomedia.org/license/patent.",
+          " */",
+          "",
+          "#ifndef AOM_VERSION_H_",
+          "#define AOM_VERSION_H_",
+          "#define VERSION_MAJOR 3",
+          "#define VERSION_MINOR 12",
+          "#define VERSION_PATCH 1",
+          "#define VERSION_EXTRA \"\"",
+          "#define VERSION_PACKED \\",
+          "  ((VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | (VERSION_PATCH))",
+          "#define VERSION_STRING_NOSP \"v3.12.1\"",
+          "#define VERSION_STRING \" v3.12.1\"",
+          "#endif  // AOM_VERSION_H_"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "AOM_ARCH_AARCH64": "0",
+          "AOM_ARCH_ARM": "0",
+          "AOM_ARCH_PPC": "0",
+          "AOM_ARCH_RISCV": "0",
+          "AOM_ARCH_X86": "0",
+          "AOM_ARCH_X86_64": "0",
+          "CONFIG_ACCOUNTING": "0",
+          "CONFIG_ANALYZER": "0",
+          "CONFIG_AV1_DECODER": "1",
+          "CONFIG_AV1_ENCODER": "0",
+          "CONFIG_AV1_HIGHBITDEPTH": "1",
+          "CONFIG_AV1_TEMPORAL_DENOISING": "0",
+          "CONFIG_BIG_ENDIAN": "0",
+          "CONFIG_BITRATE_ACCURACY": "0",
+          "CONFIG_BITRATE_ACCURACY_BL": "0",
+          "CONFIG_BITSTREAM_DEBUG": "0",
+          "CONFIG_COEFFICIENT_RANGE_CHECKING": "0",
+          "CONFIG_COLLECT_COMPONENT_TIMING": "0",
+          "CONFIG_COLLECT_PARTITION_STATS": "0",
+          "CONFIG_COLLECT_RD_STATS": "0",
+          "CONFIG_CWG_C013": "0",
+          "CONFIG_CWG_E050": "0",
+          "CONFIG_DEBUG": "0",
+          "CONFIG_DENOISE": "0",
+          "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
+          "CONFIG_ENTROPY_STATS": "0",
+          "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
+          "CONFIG_FPMT_TEST": "0",
+          "CONFIG_GCC": "1",
+          "CONFIG_GCOV": "0",
+          "CONFIG_GPROF": "0",
+          "CONFIG_INSPECTION": "0",
+          "CONFIG_INTERNAL_STATS": "0",
+          "CONFIG_INTER_STATS_ONLY": "0",
+          "CONFIG_LIBVMAF_PSNR_PEAK": "1",
+          "CONFIG_LIBYUV": "0",
+          "CONFIG_MAX_DECODE_PROFILE": "2",
+          "CONFIG_MISMATCH_DEBUG": "0",
+          "CONFIG_MULTITHREAD": "1",
+          "CONFIG_NN_V2": "0",
+          "CONFIG_NORMAL_TILE_MODE": "0",
+          "CONFIG_OPTICAL_FLOW_API": "0",
+          "CONFIG_OS_SUPPORT": "1",
+          "CONFIG_OUTPUT_FRAME_SIZE": "0",
+          "CONFIG_PARTITION_SEARCH_ORDER": "0",
+          "CONFIG_PIC": "1",
+          "CONFIG_QUANT_MATRIX": "1",
+          "CONFIG_RATECTRL_LOG": "0",
+          "CONFIG_RD_COMMAND": "0",
+          "CONFIG_RD_DEBUG": "0",
+          "CONFIG_REALTIME_ONLY": "0",
+          "CONFIG_RT_ML_PARTITIONING": "0",
+          "CONFIG_RUNTIME_CPU_DETECT": "0",
+          "CONFIG_SALIENCY_MAP": "0",
+          "CONFIG_SHARED": "0",
+          "CONFIG_SIZE_LIMIT": "0",
+          "CONFIG_SPEED_STATS": "0",
+          "CONFIG_SVT_AV1": "0",
+          "CONFIG_TFLITE": "0",
+          "CONFIG_THREE_PASS": "0",
+          "CONFIG_TUNE_BUTTERAUGLI": "0",
+          "CONFIG_TUNE_VMAF": "0",
+          "CONFIG_WEBM_IO": "0",
+          "DECODE_HEIGHT_LIMIT": "0",
+          "DECODE_WIDTH_LIMIT": "0",
+          "FORCE_HIGHBITDEPTH_DECODING": "0",
+          "HAVE_ARM_CRC32": "0",
+          "HAVE_AVX": "0",
+          "HAVE_AVX2": "0",
+          "HAVE_FEXCEPT": "0",
+          "HAVE_MMX": "0",
+          "HAVE_NEON": "0",
+          "HAVE_NEON_DOTPROD": "0",
+          "HAVE_NEON_I8MM": "0",
+          "HAVE_PTHREAD_H": "1",
+          "HAVE_RVV": "0",
+          "HAVE_SSE": "0",
+          "HAVE_SSE2": "0",
+          "HAVE_SSE3": "0",
+          "HAVE_SSE4_1": "0",
+          "HAVE_SSE4_2": "0",
+          "HAVE_SSSE3": "0",
+          "HAVE_SVE": "0",
+          "HAVE_SVE2": "0",
+          "HAVE_UNISTD_H": "1",
+          "HAVE_VSX": "0",
+          "HAVE_WXWIDGETS": "0",
+          "STATIC_LINK_JXL": "0"
+        }
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_version.h",
+        "lines": [
+          "/*",
+          " * Copyright (c) 2026, Alliance for Open Media. All rights reserved.",
+          " *",
+          " * This source code is subject to the terms of the BSD 2 Clause License and",
+          " * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License",
+          " * was not distributed with this source code in the LICENSE file, you can",
+          " * obtain it at www.aomedia.org/license/software. If the Alliance for Open",
+          " * Media Patent License 1.0 was not distributed with this source code in the",
+          " * PATENTS file, you can obtain it at www.aomedia.org/license/patent.",
+          " */",
+          "",
+          "#ifndef AOM_VERSION_H_",
+          "#define AOM_VERSION_H_",
+          "#define VERSION_MAJOR 3",
+          "#define VERSION_MINOR 12",
+          "#define VERSION_PATCH 1",
+          "#define VERSION_EXTRA \"\"",
+          "#define VERSION_PACKED \\",
+          "  ((VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | (VERSION_PATCH))",
+          "#define VERSION_STRING_NOSP \"v3.12.1\"",
+          "#define VERSION_STRING \" v3.12.1\"",
+          "#endif  // AOM_VERSION_H_"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom_build_config.c",
+        "lines": [
+          "#include \"aom/aom_codec.h\"",
+          "const char *aom_codec_build_config(void) { return \"Lambda build_lambda_config.json: AV1 decoder only\"; }"
+        ]
+      }
+    ],
+    "dispatch_generators": [
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_dsp_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=aom_dsp_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/aom_dsp/aom_dsp_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_scale_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=aom_scale_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/aom_scale/aom_scale_rtcd.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/av1_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=av1_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/av1/common/av1_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_dsp_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=aom_dsp_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/aom_dsp/aom_dsp_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_scale_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=aom_scale_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/aom_scale/aom_scale_rtcd.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/av1_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=av1_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/av1/common/av1_rtcd_defs.pl"
+        ]
+      }
+    ]
+  },
+  "archive_codecs": {
+    "generated_files": [
+      {
+        "path": "build_temp/archive-config/include/lambda_archive_config.h",
+        "preamble": [
+          "#pragma once",
+          "/* native memory-only archive profile and Lambda-owned allocator hooks. */"
+        ],
+        "defines": {
+          "HAVE_ERRNO_H": "1",
+          "HAVE_STDINT_H": "1",
+          "HAVE_INTTYPES_H": "1",
+          "HAVE_STDLIB_H": "1",
+          "HAVE_STRING_H": "1",
+          "HAVE_LIMITS_H": "1",
+          "HAVE_WCHAR_H": "1",
+          "HAVE_WCTYPE_H": "1",
+          "HAVE_SYS_TYPES_H": "1",
+          "HAVE_SYS_STAT_H": "1",
+          "HAVE_SYS_TIME_H": "1",
+          "HAVE_TIME_H": "1",
+          "HAVE_LOCALE_H": "1",
+          "HAVE_ZLIB_H": "1",
+          "HAVE_LZMA_H": "1",
+          "HAVE_BZLIB_H": "1",
+          "HAVE_ZSTD_H": "1",
+          "HAVE_MEMMOVE": "1",
+          "HAVE_MBRTOWC": "1",
+          "HAVE_WCRTOMB": "1",
+          "HAVE_WCTOMB": "1",
+          "HAVE_WMEMCPY": "1",
+          "HAVE_WMEMMOVE": "1",
+          "HAVE_DECL_SIZE_MAX": "1",
+          "HAVE_DECL_SSIZE_MAX": "1",
+          "HAVE_DECL_UINT32_MAX": "1",
+          "HAVE_DECL_INT32_MAX": "1",
+          "HAVE_DECL_INT32_MIN": "1",
+          "HAVE_DECL_UINT64_MAX": "1",
+          "HAVE_DECL_INT64_MAX": "1",
+          "HAVE_DECL_INT64_MIN": "1",
+          "HAVE_DECL_UINTMAX_MAX": "1",
+          "HAVE_DECL_INTMAX_MAX": "1",
+          "HAVE_DECL_INTMAX_MIN": "1",
+          "HAVE_STRERROR_R": "1",
+          "HAVE_STRFTIME": "1",
+          "HAVE_FSTAT": "1",
+          "HAVE_STAT": "1",
+          "HAVE_EILSEQ": "1",
+          "HAVE_LIBLZMA": "1",
+          "HAVE_LIBZSTD": "1",
+          "HAVE_ICONV_H": "1",
+          "HAVE_ICONV": "1",
+          "ICONV_CONST": "",
+          "LIBARCHIVE_FATAL_HANDLER": "lambda_archive_fatal",
+          "LIBARCHIVE_7ZIP_CODEC_ALLOWED": "lambda_archive_7zip_codec",
+          "LIBARCHIVE_FORMAT_OUTPUT": "lambda_archive_format_output",
+          "LIBARCHIVE_SINGLE_VOLUME": "1",
+          "LIBARCHIVE_STRICT_NAMES": "1"
+        },
+        "lines": [
+          "#include \"codec.h\"",
+          "#include <stdlib.h>",
+          "#include <string.h>",
+          "#include <wchar.h>",
+          "#include <stdio.h>",
+          "#include <errno.h>",
+          "#include <limits.h>",
+          "#include <sys/types.h>",
+          "#include <sys/stat.h>",
+          "#if !defined(_WIN32)",
+          "#include <unistd.h>",
+          "#define HAVE_UNISTD_H 1",
+          "#define HAVE_FCNTL_H 1",
+          "#define HAVE_GETEUID 1",
+          "#define HAVE_GETEGID 1",
+          "#define HAVE_GETUID 1",
+          "#define HAVE_GETGID 1",
+          "#define HAVE_MKSTEMP 1",
+          "#define HAVE_MBRLEN 1",
+          "#define HAVE_LANGINFO_H 1",
+          "#define HAVE_NL_LANGINFO 1",
+          "#endif",
+          "#if defined(__APPLE__)",
+          "#define HAVE_STAT_ST_MTIMESPEC_TV_NSEC 1",
+          "#define HAVE_STAT_ST_ATIMESPEC_TV_NSEC 1",
+          "#define HAVE_STAT_ST_CTIMESPEC_TV_NSEC 1",
+          "#define HAVE_ARC4RANDOM_BUF 1",
+          "#elif !defined(_WIN32)",
+          "#define HAVE_STAT_ST_MTIM_TV_NSEC 1",
+          "#define HAVE_STAT_ST_ATIM_TV_NSEC 1",
+          "#define HAVE_STAT_ST_CTIM_TV_NSEC 1",
+          "#endif",
+          "#define malloc lambda_archive_malloc",
+          "#define calloc lambda_archive_calloc",
+          "#define realloc lambda_archive_realloc",
+          "#define free lambda_archive_free",
+          "#define strdup lambda_archive_strdup",
+          "#define inflateInit2_ lambda_archive_inflate_init",
+          "#define inflate lambda_archive_inflate",
+          "#define lzma_properties_decode lambda_archive_lzma_properties",
+          "#define lzma_raw_decoder lambda_archive_lzma_raw",
+          "#define lzma_stream_decoder lambda_archive_lzma_stream",
+          "#define lzma_alone_decoder lambda_archive_lzma_alone",
+          "#define lzma_code lambda_archive_lzma_code",
+          "#define BZ2_bzDecompressInit lambda_archive_bzip_init",
+          "#define BZ2_bzDecompress lambda_archive_bzip_decode",
+          "#define ZSTD_createDStream lambda_archive_zstd_create",
+          "#define ZSTD_decompressStream lambda_archive_zstd_decode",
+          "#undef iconv_open",
+          "#undef iconv_close",
+          "#define iconv_open lambda_archive_iconv_open",
+          "#define iconv_close lambda_archive_iconv_close"
+        ]
+      }
+    ]
+  },
+  "dependency_builds": {
+    "utf8proc": {
+      "source_dir": "build_temp/utf8proc",
+      "projects": [
+        {
+          "name": "utf8proc",
+          "lang": "c17",
+          "source_files": [
+            "${source}/utf8proc.c"
+          ],
+          "includes": [
+            "${source}"
+          ],
+          "defines": [
+            "UTF8PROC_STATIC"
+          ],
+          "install_archive": "lib/libutf8proc.a"
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/utf8proc.h",
+          "destination": "include/utf8proc.h",
+          "directory": false
+        }
+      ]
+    },
+    "brotli": {
+      "source_dir": "mac-deps/brotli",
+      "projects": [
+        {
+          "name": "brotlicommon",
+          "lang": "c17",
+          "source_files": [],
+          "includes": [
+            "${source}/c/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libbrotlicommon.a",
+          "source_patterns": [
+            "${source}/c/common/*.c"
+          ]
+        },
+        {
+          "name": "brotlidec",
+          "lang": "c17",
+          "source_files": [],
+          "includes": [
+            "${source}/c/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libbrotlidec.a",
+          "source_patterns": [
+            "${source}/c/dec/*.c"
+          ]
+        },
+        {
+          "name": "brotlienc",
+          "lang": "c17",
+          "source_files": [],
+          "includes": [
+            "${source}/c/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libbrotlienc.a",
+          "source_patterns": [
+            "${source}/c/enc/*.c"
+          ]
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/c/include/brotli",
+          "destination": "include/brotli",
+          "directory": false
+        }
+      ]
+    },
+    "googletest": {
+      "source_dir": "build_temp/googletest",
+      "projects": [
+        {
+          "name": "gtest",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/googletest/src/gtest-all.cc"
+          ],
+          "includes": [
+            "${source}/googletest",
+            "${source}/googletest/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libgtest.a"
+        },
+        {
+          "name": "gtest_main",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/googletest/src/gtest_main.cc"
+          ],
+          "includes": [
+            "${source}/googletest/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libgtest_main.a"
+        },
+        {
+          "name": "gmock",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/googlemock/src/gmock-all.cc"
+          ],
+          "includes": [
+            "${source}/googlemock",
+            "${source}/googlemock/include",
+            "${source}/googletest/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libgmock.a"
+        },
+        {
+          "name": "gmock_main",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/googlemock/src/gmock_main.cc"
+          ],
+          "includes": [
+            "${source}/googlemock/include",
+            "${source}/googletest/include"
+          ],
+          "defines": [],
+          "install_archive": "lib/libgmock_main.a"
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/googletest/include/gtest",
+          "destination": "include/gtest",
+          "directory": false
+        },
+        {
+          "source": "${source}/googlemock/include/gmock",
+          "destination": "include/gmock",
+          "directory": false
+        }
+      ]
+    },
+    "mbedtls": {
+      "source_dir": "build_temp/mbedtls-3.6.5",
+      "projects": [
+        {
+          "name": "mbedcrypto",
+          "lang": "c17",
+          "source_files": [
+            "${source}/library/aes.c",
+            "${source}/library/aesni.c",
+            "${source}/library/aesce.c",
+            "${source}/library/aria.c",
+            "${source}/library/asn1parse.c",
+            "${source}/library/asn1write.c",
+            "${source}/library/base64.c",
+            "${source}/library/bignum.c",
+            "${source}/library/bignum_core.c",
+            "${source}/library/bignum_mod.c",
+            "${source}/library/bignum_mod_raw.c",
+            "${source}/library/block_cipher.c",
+            "${source}/library/camellia.c",
+            "${source}/library/ccm.c",
+            "${source}/library/chacha20.c",
+            "${source}/library/chachapoly.c",
+            "${source}/library/cipher.c",
+            "${source}/library/cipher_wrap.c",
+            "${source}/library/constant_time.c",
+            "${source}/library/cmac.c",
+            "${source}/library/ctr_drbg.c",
+            "${source}/library/des.c",
+            "${source}/library/dhm.c",
+            "${source}/library/ecdh.c",
+            "${source}/library/ecdsa.c",
+            "${source}/library/ecjpake.c",
+            "${source}/library/ecp.c",
+            "${source}/library/ecp_curves.c",
+            "${source}/library/ecp_curves_new.c",
+            "${source}/library/entropy.c",
+            "${source}/library/entropy_poll.c",
+            "${source}/library/error.c",
+            "${source}/library/gcm.c",
+            "${source}/library/hkdf.c",
+            "${source}/library/hmac_drbg.c",
+            "${source}/library/lmots.c",
+            "${source}/library/lms.c",
+            "${source}/library/md.c",
+            "${source}/library/md5.c",
+            "${source}/library/memory_buffer_alloc.c",
+            "${source}/library/nist_kw.c",
+            "${source}/library/oid.c",
+            "${source}/library/padlock.c",
+            "${source}/library/pem.c",
+            "${source}/library/pk.c",
+            "${source}/library/pk_ecc.c",
+            "${source}/library/pk_wrap.c",
+            "${source}/library/pkcs12.c",
+            "${source}/library/pkcs5.c",
+            "${source}/library/pkparse.c",
+            "${source}/library/pkwrite.c",
+            "${source}/library/platform.c",
+            "${source}/library/platform_util.c",
+            "${source}/library/poly1305.c",
+            "${source}/library/psa_crypto.c",
+            "${source}/library/psa_crypto_aead.c",
+            "${source}/library/psa_crypto_cipher.c",
+            "${source}/library/psa_crypto_client.c",
+            "${source}/library/psa_crypto_driver_wrappers_no_static.c",
+            "${source}/library/psa_crypto_ecp.c",
+            "${source}/library/psa_crypto_ffdh.c",
+            "${source}/library/psa_crypto_hash.c",
+            "${source}/library/psa_crypto_mac.c",
+            "${source}/library/psa_crypto_pake.c",
+            "${source}/library/psa_crypto_rsa.c",
+            "${source}/library/psa_crypto_se.c",
+            "${source}/library/psa_crypto_slot_management.c",
+            "${source}/library/psa_crypto_storage.c",
+            "${source}/library/psa_its_file.c",
+            "${source}/library/psa_util.c",
+            "${source}/library/ripemd160.c",
+            "${source}/library/rsa.c",
+            "${source}/library/rsa_alt_helpers.c",
+            "${source}/library/sha1.c",
+            "${source}/library/sha256.c",
+            "${source}/library/sha512.c",
+            "${source}/library/sha3.c",
+            "${source}/library/threading.c",
+            "${source}/library/timing.c",
+            "${source}/library/version.c",
+            "${source}/library/version_features.c"
+          ],
+          "includes": [
+            "${source}/include",
+            "${source}/library"
+          ],
+          "defines": [],
+          "install_archive": "lib/libmbedcrypto.a"
+        },
+        {
+          "name": "mbedx509",
+          "lang": "c17",
+          "source_files": [
+            "${source}/library/pkcs7.c",
+            "${source}/library/x509.c",
+            "${source}/library/x509_create.c",
+            "${source}/library/x509_crl.c",
+            "${source}/library/x509_crt.c",
+            "${source}/library/x509_csr.c",
+            "${source}/library/x509write.c",
+            "${source}/library/x509write_crt.c",
+            "${source}/library/x509write_csr.c"
+          ],
+          "includes": [
+            "${source}/include",
+            "${source}/library"
+          ],
+          "defines": [],
+          "install_archive": "lib/libmbedx509.a"
+        },
+        {
+          "name": "mbedtls",
+          "lang": "c17",
+          "source_files": [
+            "${source}/library/debug.c",
+            "${source}/library/mps_reader.c",
+            "${source}/library/mps_trace.c",
+            "${source}/library/net_sockets.c",
+            "${source}/library/ssl_cache.c",
+            "${source}/library/ssl_ciphersuites.c",
+            "${source}/library/ssl_client.c",
+            "${source}/library/ssl_cookie.c",
+            "${source}/library/ssl_debug_helpers_generated.c",
+            "${source}/library/ssl_msg.c",
+            "${source}/library/ssl_ticket.c",
+            "${source}/library/ssl_tls.c",
+            "${source}/library/ssl_tls12_client.c",
+            "${source}/library/ssl_tls12_server.c",
+            "${source}/library/ssl_tls13_keys.c",
+            "${source}/library/ssl_tls13_server.c",
+            "${source}/library/ssl_tls13_client.c",
+            "${source}/library/ssl_tls13_generic.c"
+          ],
+          "includes": [
+            "${source}/include",
+            "${source}/library"
+          ],
+          "defines": [],
+          "install_archive": "lib/libmbedtls.a"
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/include/mbedtls",
+          "destination": "include/mbedtls",
+          "directory": false
+        },
+        {
+          "source": "${source}/include/psa",
+          "destination": "include/psa",
+          "directory": false
+        }
+      ]
+    },
+    "thorvg": {
+      "source_dir": "mac-deps/thorvg",
+      "projects": [
+        {
+          "name": "thorvg",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/src/renderer/tvgAccessor.cpp",
+            "${source}/src/renderer/tvgAnimation.cpp",
+            "${source}/src/renderer/tvgCanvas.cpp",
+            "${source}/src/renderer/tvgFill.cpp",
+            "${source}/src/renderer/tvgInitializer.cpp",
+            "${source}/src/renderer/tvgLoader.cpp",
+            "${source}/src/renderer/tvgPaint.cpp",
+            "${source}/src/renderer/tvgPicture.cpp",
+            "${source}/src/renderer/tvgRender.cpp",
+            "${source}/src/renderer/tvgSaver.cpp",
+            "${source}/src/renderer/tvgScene.cpp",
+            "${source}/src/renderer/tvgShape.cpp",
+            "${source}/src/renderer/tvgTaskScheduler.cpp",
+            "${source}/src/renderer/tvgText.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwFill.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwImage.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwMath.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwMemPool.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwPostEffect.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwRaster.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwRenderer.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwRle.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwShape.cpp",
+            "${source}/src/renderer/sw_engine/tvgSwStroke.cpp",
+            "${source}/src/common/tvgColor.cpp",
+            "${source}/src/common/tvgCompressor.cpp",
+            "${source}/src/common/tvgMath.cpp",
+            "${source}/src/common/tvgStr.cpp",
+            "${source}/src/loaders/svg/tvgSvgCssStyle.cpp",
+            "${source}/src/loaders/svg/tvgSvgLoader.cpp",
+            "${source}/src/loaders/svg/tvgSvgPath.cpp",
+            "${source}/src/loaders/svg/tvgSvgSceneBuilder.cpp",
+            "${source}/src/loaders/svg/tvgSvgUtil.cpp",
+            "${source}/src/loaders/svg/tvgXmlParser.cpp",
+            "${source}/src/loaders/ttf/tvgTtfLoader.cpp",
+            "${source}/src/loaders/ttf/tvgTtfReader.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/api/jerryscript.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-alloc.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-errors.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-extended-info.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-gc.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-collection.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-conversion.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-errol.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-external-pointers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-number.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-string.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers-value.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-helpers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-init-finalize.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-lcache.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-literal-storage.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-module.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-property-hashmap.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-bigint64array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-bigint64array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-biguint64array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-biguint64array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-float32array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-float32array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-float64array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-float64array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int16array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int16array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int32array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int32array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int8array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-int8array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-typedarray-helpers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-typedarray-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-typedarray.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint16array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint16array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint32array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint32array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint8array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint8array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint8clampedarray-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray/ecma-builtin-uint8clampedarray.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-aggregateerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-aggregateerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-array-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-array-prototype-unscopables.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-array-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-array.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-arraybuffer-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-arraybuffer.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-from-sync-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-function-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-function.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-generator-function.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-generator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-generator.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-async-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-atomics.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-bigint-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-bigint.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-boolean-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-boolean.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-dataview-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-dataview.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-date-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-date.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-error-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-error.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-evalerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-evalerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-function-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-function.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-generator-function.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-generator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-generator.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-global.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-handlers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-helpers-date.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-helpers-error.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-helpers-sort.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-helpers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-intrinsic.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-map-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-map-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-map.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-math.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-number-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-number.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-object-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-promise-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-promise.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-proxy.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-rangeerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-rangeerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-referenceerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-referenceerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-reflect.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-regexp-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-regexp-string-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-regexp.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-set-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-set-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-set.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-shared-arraybuffer-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-shared-arraybuffer.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-string-iterator-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-string-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-string.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-symbol-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-symbol.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-syntaxerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-syntaxerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-type-error-thrower.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-typeerror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-typeerror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-urierror-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-urierror.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakmap-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakmap.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakref-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakref.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakset-prototype.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtin-weakset.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/ecma-builtins.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-arguments-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-array-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-arraybuffer-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-async-generator-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-atomics-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-big-uint.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-bigint-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-bigint.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-boolean-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-comparison.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-container-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-conversion.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-dataview-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-eval.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-exceptions.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-function-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-get-put-value.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-iterator-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-jobqueue.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-lex-env.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-number-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-objects-general.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-objects.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-promise-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-proxy-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-reference.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-regexp-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-shared-arraybuffer-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-string-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-symbol-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations/ecma-typedarray-object.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jcontext/jcontext.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jmem/jmem-allocator.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jmem/jmem-heap.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jmem/jmem-poolman.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jrt/jrt-fatals.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jrt/jrt-logging.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/lit/lit-char-helpers.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/lit/lit-magic-strings.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/lit/lit-strings.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/byte-code.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/common.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-lexer.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-expr.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-mem.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-module.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-statm.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-tagged-template-literal.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-parser-util.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-scanner.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-scanner-ops.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/js-scanner-util.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js/parser-errors.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/regexp/re-bytecode.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/regexp/re-compiler.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/regexp/re-parser.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/opcodes-ecma-arithmetics.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/opcodes-ecma-bitwise.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/opcodes-ecma-relational-equality.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/opcodes.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/vm-stack.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/vm-utils.cpp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm/vm.cpp",
+            "${source}/src/loaders/lottie/tvgLottieAnimation.cpp",
+            "${source}/src/loaders/lottie/tvgLottieBuilder.cpp",
+            "${source}/src/loaders/lottie/tvgLottieExpressions.cpp",
+            "${source}/src/loaders/lottie/tvgLottieInterpolator.cpp",
+            "${source}/src/loaders/lottie/tvgLottieLoader.cpp",
+            "${source}/src/loaders/lottie/tvgLottieModel.cpp",
+            "${source}/src/loaders/lottie/tvgLottieModifier.cpp",
+            "${source}/src/loaders/lottie/tvgLottieParserHandler.cpp",
+            "${source}/src/loaders/lottie/tvgLottieParser.cpp",
+            "${source}/src/loaders/raw/tvgRawLoader.cpp",
+            "${source}/src/bindings/capi/tvgCapi.cpp"
+          ],
+          "includes": [
+            "${root}/build_temp/image-config/include",
+            "${root}/lib/image/libpng",
+            "${root}/lib/image/libjpeg-turbo/src",
+            "${build}/include",
+            "${source}/inc",
+            "${source}/src/bindings/capi",
+            "${source}/src/common",
+            "${source}/src/loaders",
+            "${source}/src/loaders/external_jpg",
+            "${source}/src/loaders/external_png",
+            "${source}/src/loaders/lottie",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/api",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/base",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/builtin-objects/typedarray",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/ecma/operations",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/include",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jcontext",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jmem",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/jrt",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/lit",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/js",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/parser/regexp",
+            "${source}/src/loaders/lottie/jerryscript/jerry-core/vm",
+            "${source}/src/loaders/raw",
+            "${source}/src/loaders/svg",
+            "${source}/src/loaders/ttf",
+            "${source}/src/renderer",
+            "${source}/src/renderer/sw_engine",
+            "${source}/src/savers"
+          ],
+          "defines": [
+            "TVG_STATIC"
+          ],
+          "install_archive": "lib/libthorvg.a",
+          "file_rules": [
+            {
+              "files": [
+                "**.cpp"
+              ],
+              "build_options": [
+                "-fno-exceptions",
+                "-fno-rtti",
+                "-fno-math-errno"
+              ]
+            }
+          ],
+          "source_sets": [
+            {
+              "architectures": [
+                "x86_64"
+              ],
+              "file_rules": [
+                {
+                  "files": [
+                    "${source}/src/renderer/sw_engine/**.cpp"
+                  ],
+                  "build_options": [
+                    "-mavx"
+                  ]
+                }
+              ]
+            },
+            {
+              "platforms": [
+                "macos",
+                "linux"
+              ],
+              "source_files": [
+                "${source}/src/loaders/external_png/tvgPngLoader.cpp",
+                "${source}/src/loaders/external_jpg/tvgJpgLoader.cpp"
+              ]
+            }
+          ]
+        }
+      ],
+      "generated_files": [
+        {
+          "path": "${build}/include/config.h",
+          "defines": {
+            "THORVG_CAPI_BINDING_SUPPORT": 1,
+            "THORVG_FILE_IO_SUPPORT": 1,
+            "THORVG_LOTTIE_EXPRESSIONS_SUPPORT": 1,
+            "THORVG_LOTTIE_LOADER_SUPPORT": 1,
+            "THORVG_PARTIAL_RENDER_SUPPORT": 1,
+            "THORVG_SVG_LOADER_SUPPORT": 1,
+            "THORVG_SW_RASTER_SUPPORT": 1,
+            "THORVG_THREAD_SUPPORT": 1,
+            "THORVG_TTF_LOADER_SUPPORT": 1,
+            "WIN32_LEAN_AND_MEAN": 1,
+            "THORVG_VERSION_STRING": "\"1.0.0\""
+          },
+          "source_sets": [
+            {
+              "architectures": [
+                "arm64"
+              ],
+              "defines": {
+                "THORVG_NEON_VECTOR_SUPPORT": 1
+              }
+            },
+            {
+              "architectures": [
+                "x86_64"
+              ],
+              "defines": {
+                "THORVG_AVX_VECTOR_SUPPORT": 1
+              }
+            },
+            {
+              "platforms": [
+                "macos",
+                "linux"
+              ],
+              "defines": {
+                "THORVG_JPG_LOADER_SUPPORT": 1,
+                "THORVG_PNG_LOADER_SUPPORT": 1
+              }
+            }
+          ]
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/inc/thorvg.h",
+          "destination": "include/thorvg.h",
+          "directory": false
+        },
+        {
+          "source": "${source}/src/bindings/capi/thorvg_capi.h",
+          "destination": "include/thorvg_capi.h",
+          "directory": false
+        }
+      ],
+      "prepare": [
+        {
+          "directory": "${root}",
+          "command": [
+            "python3",
+            "utils/generate_image_config.py",
+            "build_lambda_config.json"
+          ]
+        }
+      ],
+      "compiler_features": [
+        {
+          "name": "openmp",
+          "source": "#include <omp.h>\nint main(void) { return omp_get_max_threads() < 1; }\n",
+          "flags": [
+            "-fopenmp"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "${source}/src/renderer/sw_engine/**.cpp"
+              ],
+              "defines": [
+                "THORVG_SW_OPENMP_SUPPORT=1"
+              ],
+              "build_options": [
+                "-fopenmp"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "nghttp2": {
+      "source_dir": "mac-deps/nghttp2",
+      "projects": [
+        {
+          "name": "nghttp2",
+          "lang": "c17",
+          "source_files": [
+            "${source}/lib/nghttp2_pq.c",
+            "${source}/lib/nghttp2_map.c",
+            "${source}/lib/nghttp2_queue.c",
+            "${source}/lib/nghttp2_frame.c",
+            "${source}/lib/nghttp2_buf.c",
+            "${source}/lib/nghttp2_stream.c",
+            "${source}/lib/nghttp2_outbound_item.c",
+            "${source}/lib/nghttp2_session.c",
+            "${source}/lib/nghttp2_submit.c",
+            "${source}/lib/nghttp2_helper.c",
+            "${source}/lib/nghttp2_alpn.c",
+            "${source}/lib/nghttp2_hd.c",
+            "${source}/lib/nghttp2_hd_huffman.c",
+            "${source}/lib/nghttp2_hd_huffman_data.c",
+            "${source}/lib/nghttp2_version.c",
+            "${source}/lib/nghttp2_priority_spec.c",
+            "${source}/lib/nghttp2_option.c",
+            "${source}/lib/nghttp2_callbacks.c",
+            "${source}/lib/nghttp2_mem.c",
+            "${source}/lib/nghttp2_http.c",
+            "${source}/lib/nghttp2_rcbuf.c",
+            "${source}/lib/nghttp2_extpri.c",
+            "${source}/lib/nghttp2_ratelim.c",
+            "${source}/lib/nghttp2_time.c",
+            "${source}/lib/nghttp2_debug.c",
+            "${source}/lib/sfparse.c"
+          ],
+          "includes": [
+            "${build}/include",
+            "${source}/lib/includes",
+            "${source}/lib"
+          ],
+          "defines": [
+            "BUILDING_NGHTTP2",
+            "NGHTTP2_STATICLIB",
+            "HAVE_CONFIG_H"
+          ],
+          "install_archive": "lib/libnghttp2.a"
+        }
+      ],
+      "metadata": [
+        {
+          "name": "PACKAGE_VERSION",
+          "source": "${source}/CMakeLists.txt",
+          "pattern": "project\\(nghttp2 VERSION ([0-9.]+)"
+        },
+        {
+          "name": "PACKAGE_VERSION_NUM",
+          "source": "${source}/CMakeLists.txt",
+          "pattern": "project\\(nghttp2 VERSION ([0-9.]+)",
+          "transform": "hex_version"
+        }
+      ],
+      "variables": {
+        "HINT_NORETURN": "__attribute__((noreturn))"
+      },
+      "probes": {
+        "headers": {
+          "HAVE_ARPA_INET_H": "arpa/inet.h",
+          "HAVE_FCNTL_H": "fcntl.h",
+          "HAVE_INTTYPES_H": "inttypes.h",
+          "HAVE_LIMITS_H": "limits.h",
+          "HAVE_NETDB_H": "netdb.h",
+          "HAVE_NETINET_IN_H": "netinet/in.h",
+          "HAVE_NETINET_IP_H": "netinet/ip.h",
+          "HAVE_PWD_H": "pwd.h",
+          "HAVE_SYS_SOCKET_H": "sys/socket.h",
+          "HAVE_SYS_TIME_H": "sys/time.h",
+          "HAVE_SYSLOG_H": "syslog.h",
+          "HAVE_UNISTD_H": "unistd.h",
+          "HAVE_WINDOWS_H": "windows.h",
+          "HAVE_TIME_H": "time.h",
+          "HAVE_STDLIB_H": "stdlib.h",
+          "HAVE_GRP_H": "grp.h"
+        },
+        "expressions": {
+          "HAVE_CLOCK_GETTIME": "&clock_gettime",
+          "HAVE_DECL_CLOCK_MONOTONIC": "CLOCK_MONOTONIC",
+          "HAVE_GETTICKCOUNT64": "&GetTickCount64",
+          "HAVE__EXIT": "&_Exit",
+          "HAVE_ACCEPT4": "&accept4",
+          "HAVE_MKOSTEMP": "&mkostemp",
+          "HAVE_PIPE2": "&pipe2",
+          "HAVE_DECL_INITGROUPS": "&initgroups"
+        }
+      },
+      "generated_files": [
+        {
+          "path": "${build}/include/config.h",
+          "template": "${source}/cmakeconfig.h.in"
+        },
+        {
+          "path": "${build}/include/nghttp2/nghttp2ver.h",
+          "template": "${source}/lib/includes/nghttp2/nghttp2ver.h.in"
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/lib/includes/nghttp2/*.h",
+          "destination": "include/nghttp2",
+          "directory": true
+        },
+        {
+          "source": "${build}/include/nghttp2/nghttp2ver.h",
+          "destination": "include/nghttp2/nghttp2ver.h",
+          "directory": false
+        }
+      ]
+    },
+    "libpq": {
+      "source_dir": "mac-deps/rdb/build/postgresql-18.6",
+      "prepare": [
+        {
+          "directory": "${build}/configure",
+          "command": [
+            "${source}/configure",
+            "--prefix=${prefix}",
+            "--without-gssapi",
+            "--without-ldap",
+            "--without-icu",
+            "--without-readline",
+            "--without-zlib",
+            "--without-lz4",
+            "--without-zstd",
+            "--disable-nls",
+            "--without-libxml",
+            "--without-libxslt",
+            "--without-pam",
+            "--without-bonjour",
+            "--without-selinux",
+            "--without-systemd",
+            "--without-libcurl"
+          ],
+          "cache": true,
+          "outputs": [
+            "${build}/configure/src/include/pg_config.h",
+            "${build}/configure/src/Makefile.global"
+          ]
+        },
+        {
+          "directory": "${build}/configure",
+          "command": [
+            "make",
+            "-C",
+            "src/backend",
+            "generated-headers"
+          ]
+        },
+        {
+          "directory": "${build}/configure",
+          "command": [
+            "make",
+            "-C",
+            "src/port",
+            "pg_config_paths.h"
+          ]
+        },
+        {
+          "directory": "${build}/configure",
+          "command": [
+            "make",
+            "-C",
+            "src/common",
+            "kwlist_d.h"
+          ]
+        }
+      ],
+      "projects": [
+        {
+          "name": "pq",
+          "lang": "c17",
+          "source_files": [],
+          "includes": [
+            "${build}/configure/src/common",
+            "${build}/configure/src/include",
+            "${source}/src/include",
+            "${source}/src/interfaces/libpq",
+            "${build}/configure/src/interfaces/libpq",
+            "${build}/configure/src/port",
+            "${source}/src/port",
+            "${source}/src/common"
+          ],
+          "defines": [
+            "SO_MAJOR_VERSION=5"
+          ],
+          "install_archive": "lib/libpq.a",
+          "make_sources": {
+            "directory": "${build}/configure/src/interfaces/libpq",
+            "source_directory": "${source}/src/interfaces/libpq",
+            "variables": [
+              "OBJS",
+              "OBJS_STATIC"
+            ],
+            "make_variables": {
+              "WIN32RES": ""
+            }
+          }
+        },
+        {
+          "name": "pgcommon_shlib",
+          "lang": "c17",
+          "source_files": [
+            "${source}/src/common/archive.c",
+            "${source}/src/common/base64.c",
+            "${source}/src/common/binaryheap.c",
+            "${source}/src/common/blkreftable.c",
+            "${source}/src/common/checksum_helper.c",
+            "${source}/src/common/compression.c",
+            "${source}/src/common/controldata_utils.c",
+            "${source}/src/common/encnames.c",
+            "${source}/src/common/exec.c",
+            "${source}/src/common/file_perm.c",
+            "${source}/src/common/file_utils.c",
+            "${source}/src/common/hashfn.c",
+            "${source}/src/common/ip.c",
+            "${source}/src/common/jsonapi.c",
+            "${source}/src/common/keywords.c",
+            "${source}/src/common/kwlookup.c",
+            "${source}/src/common/link-canary.c",
+            "${source}/src/common/md5_common.c",
+            "${source}/src/common/parse_manifest.c",
+            "${source}/src/common/percentrepl.c",
+            "${source}/src/common/pg_get_line.c",
+            "${source}/src/common/pg_lzcompress.c",
+            "${source}/src/common/pg_prng.c",
+            "${source}/src/common/pgfnames.c",
+            "${source}/src/common/psprintf.c",
+            "${source}/src/common/relpath.c",
+            "${source}/src/common/rmtree.c",
+            "${source}/src/common/saslprep.c",
+            "${source}/src/common/scram-common.c",
+            "${source}/src/common/string.c",
+            "${source}/src/common/stringinfo.c",
+            "${source}/src/common/unicode_case.c",
+            "${source}/src/common/unicode_category.c",
+            "${source}/src/common/unicode_norm.c",
+            "${source}/src/common/username.c",
+            "${source}/src/common/wait_error.c",
+            "${source}/src/common/wchar.c",
+            "${source}/src/common/cryptohash.c",
+            "${source}/src/common/hmac.c",
+            "${source}/src/common/md5.c",
+            "${source}/src/common/sha1.c",
+            "${source}/src/common/sha2.c",
+            "${source}/src/common/restricted_token.c",
+            "${source}/src/common/sprompt.c"
+          ],
+          "includes": [
+            "${build}/configure/src/common",
+            "${build}/configure/src/include",
+            "${source}/src/include",
+            "${source}/src/interfaces/libpq",
+            "${build}/configure/src/interfaces/libpq",
+            "${build}/configure/src/port",
+            "${source}/src/port",
+            "${source}/src/common"
+          ],
+          "defines": [
+            "FRONTEND",
+            "JSONAPI_USE_PQEXPBUFFER"
+          ],
+          "install_archive": "lib/libpgcommon_shlib.a"
+        },
+        {
+          "name": "pgport_shlib",
+          "lang": "c17",
+          "source_files": [],
+          "includes": [
+            "${build}/configure/src/common",
+            "${build}/configure/src/include",
+            "${source}/src/include",
+            "${source}/src/interfaces/libpq",
+            "${build}/configure/src/interfaces/libpq",
+            "${build}/configure/src/port",
+            "${source}/src/port",
+            "${source}/src/common"
+          ],
+          "defines": [
+            "FRONTEND"
+          ],
+          "install_archive": "lib/libpgport_shlib.a",
+          "make_sources": {
+            "directory": "${build}/configure/src/port",
+            "source_directory": "${source}/src/port",
+            "variable": "OBJS",
+            "file_flags": {
+              "${source}/src/port/pg_crc32c_armv8.c": "CFLAGS_CRC",
+              "${source}/src/port/pg_crc32c_sse42.c": "CFLAGS_CRC"
+            }
+          }
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/src/interfaces/libpq/libpq-fe.h",
+          "destination": "include/libpq-fe.h",
+          "directory": false
+        },
+        {
+          "source": "${source}/src/include/postgres_ext.h",
+          "destination": "include/postgres_ext.h",
+          "directory": false
+        }
+      ]
+    },
+    "mariadb": {
+      "source_dir": "mac-deps/rdb/build/mariadb-connector-c-3.3.21",
+      "projects": [
+        {
+          "name": "mariadbclient",
+          "lang": "gnu17",
+          "source_files": [
+            "${source}/plugins/auth/my_auth.c",
+            "${source}/plugins/compress/c_zlib.c",
+            "${source}/plugins/pvio/pvio_socket.c",
+            "${source}/libmariadb/ma_array.c",
+            "${source}/libmariadb/ma_charset.c",
+            "${source}/libmariadb/ma_decimal.c",
+            "${source}/libmariadb/ma_hashtbl.c",
+            "${source}/libmariadb/ma_net.c",
+            "${source}/libmariadb/mariadb_charset.c",
+            "${source}/libmariadb/ma_time.c",
+            "${source}/libmariadb/ma_default.c",
+            "${source}/libmariadb/ma_errmsg.c",
+            "${source}/libmariadb/mariadb_lib.c",
+            "${source}/libmariadb/ma_list.c",
+            "${source}/libmariadb/ma_pvio.c",
+            "${source}/libmariadb/ma_tls.c",
+            "${source}/libmariadb/ma_alloc.c",
+            "${source}/libmariadb/ma_compress.c",
+            "${source}/libmariadb/ma_init.c",
+            "${source}/libmariadb/ma_password.c",
+            "${source}/libmariadb/ma_ll2str.c",
+            "${source}/libmariadb/ma_sha1.c",
+            "${source}/libmariadb/mariadb_stmt.c",
+            "${source}/libmariadb/ma_loaddata.c",
+            "${source}/libmariadb/ma_stmt_codec.c",
+            "${source}/libmariadb/ma_string.c",
+            "${source}/libmariadb/ma_dtoa.c",
+            "${source}/libmariadb/mariadb_rpl.c",
+            "${build}/generated/ma_client_plugin.c",
+            "${source}/libmariadb/ma_io.c",
+            "${source}/external/zlib/adler32.c",
+            "${source}/external/zlib/compress.c",
+            "${source}/external/zlib/crc32.c",
+            "${source}/external/zlib/deflate.c",
+            "${source}/external/zlib/gzclose.c",
+            "${source}/external/zlib/gzlib.c",
+            "${source}/external/zlib/gzread.c",
+            "${source}/external/zlib/gzwrite.c",
+            "${source}/external/zlib/infback.c",
+            "${source}/external/zlib/inffast.c",
+            "${source}/external/zlib/inflate.c",
+            "${source}/external/zlib/inftrees.c",
+            "${source}/external/zlib/trees.c",
+            "${source}/external/zlib/uncompr.c",
+            "${source}/external/zlib/zutil.c",
+            "${source}/libmariadb/mariadb_dyncol.c",
+            "${source}/libmariadb/mariadb_async.c",
+            "${source}/libmariadb/ma_context.c"
+          ],
+          "includes": [
+            "${build}/include",
+            "${source}/include",
+            "${source}/plugins/auth",
+            "${source}/plugins/compress",
+            "${source}/plugins/pvio",
+            "${source}/libmariadb",
+            "${build}/zlib",
+            "${source}/external/zlib"
+          ],
+          "defines": [
+            "HAVE_COMPRESS",
+            "LIBMARIADB",
+            "THREAD",
+            "DBUG_OFF",
+            "_XOPEN_SOURCE",
+            "LIBICONV_PLUG"
+          ],
+          "install_archive": "lib/libmariadbclient.a"
+        }
+      ],
+      "variables": {
+        "PROTOCOL_VERSION": 10,
+        "MARIADB_CLIENT_VERSION": "10.8.8",
+        "MARIADB_BASE_VERSION": "mariadb-10.8",
+        "MARIADB_VERSION_ID": 100808,
+        "MARIADB_PORT": 3306,
+        "MARIADB_UNIX_ADDR": "/tmp/mysql.sock",
+        "CPACK_PACKAGE_VERSION": "3.3.21",
+        "MARIADB_PACKAGE_VERSION_ID": 30321,
+        "CMAKE_SYSTEM_NAME": "${system_name}",
+        "CMAKE_SYSTEM_PROCESSOR": "${architecture}",
+        "CMAKE_INSTALL_PREFIX": "${prefix}",
+        "INSTALL_PLUGINDIR": "lib/mariadb/plugin",
+        "default_charset": "",
+        "CC_SOURCE_REVISION": "",
+        "DEFAULT_CHARSET": "utf8mb4",
+        "ENABLED_LOCAL_INFILE": "AUTO",
+        "Z_HAVE_UNISTD_H": 1,
+        "EXTERNAL_PLUGINS": "extern struct st_mysql_client_plugin_AUTH mysql_native_password_client_plugin;\nextern struct st_mysql_client_plugin_COMPRESSION zlib_client_plugin;\nextern struct st_mysql_client_plugin_PVIO pvio_socket_client_plugin;\n",
+        "BUILTIN_PLUGINS": "  (struct st_mysql_client_plugin *)&mysql_native_password_client_plugin,\n  (struct st_mysql_client_plugin *)&zlib_client_plugin,\n  (struct st_mysql_client_plugin *)&pvio_socket_client_plugin,\n"
+      },
+      "probes": {
+        "headers": {
+          "HAVE_ALLOCA_H": "alloca.h",
+          "HAVE_DLFCN_H": "dlfcn.h",
+          "HAVE_FCNTL_H": "fcntl.h",
+          "HAVE_FLOAT_H": "float.h",
+          "HAVE_LIMITS_H": "limits.h",
+          "HAVE_LINUX_LIMITS_H": "linux/limits.h",
+          "HAVE_PWD_H": "pwd.h",
+          "HAVE_SELECT_H": "select.h",
+          "HAVE_STDDEF_H": "stddef.h",
+          "HAVE_STDINT_H": "stdint.h",
+          "HAVE_STDLIB_H": "stdlib.h",
+          "HAVE_STDIO_H": "stdio.h",
+          "HAVE_STRING_H": "string.h",
+          "HAVE_SYS_IOCTL_H": "sys/ioctl.h",
+          "HAVE_SYS_SELECT_H": "sys/select.h",
+          "HAVE_SYS_SOCKET_H": "sys/socket.h",
+          "HAVE_SYS_STREAM_H": "sys/stream.h",
+          "HAVE_SYS_STAT_H": "sys/stat.h",
+          "HAVE_SYS_SYSCTL_H": "sys/sysctl.h",
+          "HAVE_SYS_TYPES_H": "sys/types.h",
+          "HAVE_SYS_UN_H": "sys/un.h",
+          "HAVE_UNISTD_H": "unistd.h",
+          "HAVE_UCONTEXT_H": "ucontext.h",
+          "HAVE_LOCALE_H": "locale.h",
+          "HAVE_LANGINFO_H": "langinfo.h",
+          "HAVE_POLL_H": "poll.h"
+        },
+        "expressions": {
+          "HAVE_DLERROR": "&dlerror",
+          "HAVE_DLOPEN": "&dlopen",
+          "HAVE_GETPWUID": "&getpwuid",
+          "HAVE_MEMCPY": "&memcpy",
+          "HAVE_POLL": "&poll",
+          "HAVE_STRTOK_R": "&strtok_r",
+          "HAVE_STRTOL": "&strtol",
+          "HAVE_STRTOLL": "&strtoll",
+          "HAVE_STRTOUL": "&strtoul",
+          "HAVE_STRTOULL": "&strtoull",
+          "HAVE_TELL": "&tell",
+          "HAVE_THR_SETCONCURRENCY": "&thr_setconcurrency",
+          "HAVE_THR_YIELD": "&thr_yield",
+          "HAVE_VASPRINTF": "&vasprintf",
+          "HAVE_VSNPRINTF": "&vsnprintf",
+          "HAVE_CUSERID": "&cuserid",
+          "HAVE_SETLOCALE": "&setlocale",
+          "HAVE_NL_LANGINFO": "&nl_langinfo"
+        },
+        "sizes": {
+          "SIZEOF_CHARP": "char *",
+          "SIZEOF_INT": "int",
+          "SIZEOF_LONG": "long",
+          "SIZEOF_LONG_LONG": "long long",
+          "SIZEOF_SIZE_T": "size_t",
+          "SIZEOF_SOCKLEN_T": "socklen_t"
+        },
+        "types": {
+          "SOCKET_SIZE_TYPE": [
+            "socklen_t",
+            "int"
+          ]
+        }
+      },
+      "generated_files": [
+        {
+          "path": "${build}/include/ma_config.h",
+          "template": "${source}/include/ma_config.h.in"
+        },
+        {
+          "path": "${build}/include/mariadb_version.h",
+          "template": "${source}/include/mariadb_version.h.in"
+        },
+        {
+          "path": "${build}/generated/ma_client_plugin.c",
+          "template": "${source}/libmariadb/ma_client_plugin.c.in"
+        },
+        {
+          "path": "${build}/zlib/zconf.h",
+          "template": "${source}/external/zlib/zconf.h.cmakein"
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/include/*.h",
+          "destination": "include/mariadb",
+          "directory": true
+        },
+        {
+          "source": "${build}/include/*.h",
+          "destination": "include/mariadb",
+          "directory": true
+        },
+        {
+          "source": "${source}/include/mysql/*.h",
+          "destination": "include/mariadb/mysql",
+          "directory": true
+        }
+      ]
+    },
+    "typemeta-extract": {
+      "source_dir": "utils",
+      "queries": [
+        {
+          "name": "llvm_include",
+          "tool": "llvm-config",
+          "search_paths": [
+            "/opt/homebrew/opt/llvm/bin",
+            "/usr/local/opt/llvm/bin"
+          ],
+          "args": [
+            "--includedir"
+          ]
+        },
+        {
+          "name": "llvm_libdir",
+          "tool": "llvm-config",
+          "search_paths": [
+            "/opt/homebrew/opt/llvm/bin",
+            "/usr/local/opt/llvm/bin"
+          ],
+          "args": [
+            "--libdir"
+          ]
+        }
+      ],
+      "projects": [
+        {
+          "name": "typemeta_extract",
+          "lang": "c++17",
+          "link": "executable",
+          "target_extension": "",
+          "source_files": [
+            "${source}/typemeta_extract.cpp"
+          ],
+          "includes": [
+            "${llvm_include}"
+          ],
+          "libraries": [
+            "clang-cpp",
+            "LLVM"
+          ],
+          "link_options": [
+            "-L${llvm_libdir}",
+            "-Wl,-rpath,${llvm_libdir}"
+          ],
+          "install_executable": "bin/typemeta_extract"
+        }
+      ]
+    }
+  },
+  "dependency_defaults": {
+    "macos": {
+      "deployment_target": "15.0"
+    }
+  }
+}

@@ -249,6 +249,8 @@ RenderElementMarkerScope render_element_marker_begin(RasterRenderContext* rdcon,
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
     uint32_t view_id = static_cast<View*>(block)->id;
+    if (rdcon->presentation_damage && rdcon->dl == rdcon->presentation_damage_list.get())
+        presentation_damage_note_candidate(rdcon->presentation_damage.get(), block);
     scope.begin_index = dl_begin_element(rdcon->dl, view_id,
         marker_rect.x, marker_rect.y, marker_rect.width, marker_rect.height);
     return scope;
@@ -258,7 +260,12 @@ void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerSc
     if (!rdcon || !rdcon->dl || !scope || scope->begin_index < 0) {
         return;
     }
+    uint32_t view_id = rdcon->dl->data()[scope->begin_index].element_marker.view_id;
     dl_end_element(rdcon->dl, scope->begin_index);
+    if (rdcon->presentation_damage && rdcon->dl == rdcon->presentation_damage_list.get()) {
+        presentation_damage_note_range(rdcon->presentation_damage.get(), rdcon->dl, view_id,
+            scope->begin_index, rdcon->dl->item_count() - 1);
+    }
     scope->begin_index = -1;
 }
 
@@ -794,6 +801,12 @@ static void render_block_finish_profile(RasterRenderContext* rdcon,
                              this_total - result->children_time);
 }
 
+// a paint layer's capture records the block offscreen through the same pipeline
+static void render_block_record_live(RasterRenderContext* rdcon, ViewBlock* block,
+                                     void (*content)(RasterRenderContext*, ViewBlock*)) {
+    render_block_run_paint_pipeline(rdcon, block, content);
+}
+
 void render_block_view(RasterRenderContext* rdcon, ViewBlock* block) {
     render_block_view_content(rdcon,block,nullptr);
 }
@@ -822,12 +835,14 @@ void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
     } else if (enclosing) {
         Css3dPaintPlane parent = enclosing->enter(block);
         // A flat child paints as one plane. Its nested preserved contexts may
-        // compose internally, without joining the enclosing context.
+        // compose internally, without joining the enclosing context. A plane moved by a
+        // presentation transform paints from its layer, before planes are ordered.
         if (!preserve) rdcon->css3d_context = nullptr;
-        result = render_block_run_paint_pipeline(rdcon, block, content);
+        if (preserve || !render_paint_layer_try(rdcon, block, content, render_block_record_live, enclosing))
+            result = render_block_run_paint_pipeline(rdcon, block, content);
         rdcon->css3d_context = lam::up(enclosing);
         enclosing->restore(parent);
-    } else {
+    } else if (!render_paint_layer_try(rdcon, block, content, render_block_record_live, nullptr)) {
         result = render_block_run_paint_pipeline(rdcon, block, content);
     }
     render_block_finish_profile(rdcon, &result, rbv_start);

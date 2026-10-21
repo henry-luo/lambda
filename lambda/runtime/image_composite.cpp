@@ -83,7 +83,7 @@ static bool image_effect_options(Item effect, ImageProcessOptions* out) {
     Item options=item_attr(effect,"options");
     if (get_type_id(options)!=LMD_TYPE_MAP) return false;
     const char* allowed[]={"exposure","brightness","contrast","saturation","temperature","gamma","black","white",
-        "shadows","highlights","intensity","matrix","vignette","softness","sharpen"};
+        "shadows","highlights","intensity","matrix","vignette","softness","sharpen","output_black","output_white","curves"};
     // the iterator borrows its reader, which must outlive the full option scan.
     MapReader reader=MapReader::fromItem(options);
     auto entries=reader.entries(); const char* key; ItemReader value;

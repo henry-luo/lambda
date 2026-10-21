@@ -397,6 +397,9 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
         matrix->values[14] * z + matrix->values[15];
 }
 
+// false when the matrix is singular (a zero scale)
+bool rdt_matrix4_invert(const RdtMatrix4* matrix, RdtMatrix4* inverse);
+
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
@@ -521,6 +524,25 @@ static inline bool rdt_matrix_invert_affine(const RdtMatrix* matrix, RdtMatrix* 
     float c = -matrix->e21 / determinant, d = matrix->e11 / determinant;
     *inverse = {a, b, -a * matrix->e13 - b * matrix->e23,
         c, d, -c * matrix->e13 - d * matrix->e23, 0.0f, 0.0f, 1.0f};
+    return true;
+}
+
+// True when an image maps its source 1:1 onto whole device pixels: no scaling and no
+// transform beyond a translation (a paint layer at rest). `x`/`y` receive the device origin.
+static inline bool rdt_image_is_pixel_copy(const RdtMatrix* matrix, int src_w, int src_h,
+        float dst_x, float dst_y, float dst_w, float dst_h, float* x, float* y) {
+    const float e = 0.002f;
+    if (fabsf(dst_w - (float)src_w) > e || fabsf(dst_h - (float)src_h) > e) return false;
+    float tx = 0.0f, ty = 0.0f;
+    if (matrix) {
+        if (fabsf(matrix->e11 - 1.0f) > 1e-5f || fabsf(matrix->e22 - 1.0f) > 1e-5f ||
+            fabsf(matrix->e12) > 1e-5f || fabsf(matrix->e21) > 1e-5f ||
+            fabsf(matrix->e31) > 1e-8f || fabsf(matrix->e32) > 1e-8f || fabsf(matrix->e33 - 1.0f) > 1e-5f) return false;
+        tx = matrix->e13; ty = matrix->e23;
+    }
+    float ox = dst_x + tx, oy = dst_y + ty;
+    if (fabsf(ox - roundf(ox)) > e || fabsf(oy - roundf(oy)) > e) return false;
+    *x = roundf(ox); *y = roundf(oy);
     return true;
 }
 
@@ -717,6 +739,8 @@ typedef enum {
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
     SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
     SCALE_MODE_PIXELATED,    // Nearest to integer multiple, then smooth to target
+    SCALE_MODE_LINEAR_EDGE,  // Bilinear, with the projected quad's own edges antialiased
+                             // (a paint layer drawn without its plane clip)
 } ScaleMode;
 
 typedef enum {
@@ -4494,6 +4518,10 @@ typedef struct UiContext {
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
     bool render_failed;             // sticky host failure; never present an invalid paint stream
+    // The window present uploads only `present_rect` (device px) when every surface write
+    // since the last present lay inside it; false (the zeroed default) uploads the whole surface.
+    bool present_partial;
+    Bound present_rect;
     bool export_native_graphics;    // file export may lazily create a hidden graphics host for scene snapshots
 
     // font handling

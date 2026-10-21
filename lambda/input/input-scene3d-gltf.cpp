@@ -212,7 +212,7 @@ struct Gltf {
     }
     bool skin_bones(GltfSkin& skin,unsigned si,int node,Item parent,const lam::ArrayList<unsigned char>& needed,const lam::ArrayList<double>& inverse,const lam::ArrayList<int>& joints) {
         if(!needed[node]) return true;
-        unsigned index=skin.count;if(index>=16) return fail("skin requires more than sixteen bones including joint ancestors");
+        unsigned index=skin.count;if(index>=SCENE_ASSET_BONE_LIMIT) return fail("skin requires more than 256 bones including joint ancestors");
         skin.count++;skin.remap[node]=index;
         Item bone=a.element("bone");a.attr(bone,"id",bone_id(si,node));if(!transform(bone,object("nodes",node))) return false;
         for(size_t j=0;j<joints.size();j++) if(joints[j]==node) {
@@ -228,7 +228,7 @@ struct Gltf {
         if(asset_count(field("skins"))>16) return fail("skin quota exceeded");
         for(unsigned si=0;si<asset_count(field("skins"));si++) {
             auto source=object("skins",si);auto list=asset_field(source,"joints");size_t count=asset_count(list);
-            if(!count||count>16) return fail("skin joint count must be 1..16");
+            if(!count||count>SCENE_ASSET_BONE_LIMIT) return fail("skin joint count must be 1..256");
             GltfSkin skin;skin.value=a.element("skeleton");a.attr(skin.value,"id",a.id("skeleton",si));
             lam::ArrayList<int> joints;lam::ArrayList<unsigned char> needed;
             for(size_t n=0;n<nodes.size();n++) {needed.append(0);skin.remap[n]=-1;}

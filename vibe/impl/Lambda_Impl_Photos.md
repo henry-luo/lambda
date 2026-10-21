@@ -2,11 +2,12 @@
 
 **Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
 retouch/actions, editable artwork/styles, channels, tabs, batch, incremental brush
-previews, export options, arrangement and crop drafts. The original worktree was
+previews, export options, arrangement, crop drafts, transform handles, editable
+Levels/Curves, group geometry, guides/snapping and straightening. The original worktree was
 merged and removed; subsequent work takes place in the main checkout. Aggregate
 gates retain the qualification limits recorded below.
 
-Design: [Photos proposal](../Lambda_Demo_Photos.md). Existing contracts:
+Design: [Photos proposal](../Lambda_Demo_Photo_Editor.md). Existing contracts:
 **S9.1.2 / S9.2.2** immutable snapshots, **S12.1.3** pure views and procedural
 handlers, **D5.3.3** precise roots, **D4.5.2** owned pixel transport,
 **D7.2.4v3** shipped package paths. No formal ruling changes.
@@ -34,7 +35,7 @@ rendering edits already present in the checkout are outside its scope.
 | M0 reuse and measurement | Complete for the bounded initial profile; optimized timings below |
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
 | M2 tiles, selections and painting | Implemented; native/package/UI and aggregate results recorded below |
-| M3 transforms, reversible effects and rich persistence | Implemented core: affine, eight blends, clipping/pass-through, effects, histogram and versioned project data; focused checks below |
+| M3 transforms, reversible effects and rich persistence | Implemented core: affine and canvas handles including group/multiselection, straightening, project guides and move snapping, eight blends, clipping/pass-through, effects including Levels/channel Curves, histogram and versioned project data; focused checks below |
 | M4 retouch, type/shapes, channels and actions | Bounded core implemented: retouch/actions, embedded-font multiline text, shapes/basic paths, three layer styles, saved coverage channels, tabs and sequential file batches; long-tail exclusions below |
 | M5 high depth/color and scale qualification | Pending |
 
@@ -930,3 +931,191 @@ and dialog draft through `export.proportional_extent`; the two export script
 fixtures pass again in AUTO and in eager JIT (the latter with forced GC and
 poisoned frees), and the export UI workflow passes again after that extraction.
 No aggregate was repeated for this localized package refactor.
+
+## Transform handles and tone controls — 2026-10-21
+
+The next bounded milestone is implemented in the current checkout, without a
+worktree. It targets two common missing workflows: visual layer resizing/rotation
+and editable Levels/Curves. Existing affine commands, retained effects, image
+processing, project data and gesture history remain authoritative
+(**S9.1.2 / S9.2.2 / S12.1.3 / D4.5.2**); no formal ruling changes are planned.
+
+Acceptance: eight canvas resize handles and a rotation handle preserve source
+samples and the opposite anchor; Shift constrains corner proportions or snaps
+rotation, Alt scales about the center. Cancellation restores the initial snapshot
+and completion commits one undo item, including on already transformed layers.
+Levels exposes existing input endpoints/gamma plus output endpoints. RGB master
+and per-channel curves use bounded, checked piecewise-linear point data in the
+shared image processor, preserving alpha. Both remain editable/reorderable effects
+and round-trip through projects/actions; malformed settings leave state intact.
+
+Scope excludes perspective/warp, group transforms, dedicated adjustment layers,
+smooth spline curves and a general vector pen editor. Focused package/native
+reference checks precede native UI workflows and the required Lambda baseline;
+an optimized host is retained for final native qualification. A Radiant aggregate
+gate is required only if shared engine painting/layout changes become necessary.
+
+### Delivered behavior
+
+`transform.handle_gesture` emits the existing affine command from the initial
+gesture snapshot. World-bounds anchors are premultiplied onto existing transforms,
+retaining source pixels and avoiding cumulative pointer-sample drift. Handles
+remain a fixed screen size and are hidden for locks, groups or multiple targets.
+Shift corners use one signed scale; rotation snaps in 15° increments. Alt anchors
+at the center. Crossing an anchor mirrors, with absolute scale bounded to
+0.001–4096. Ordinary image drags retain radial scaling/Shift rotation. Numeric
+commands, cancellation and one-gesture history share the existing registry
+(**S9.1.2 / S9.2.2 / S12.1.3**).
+
+Levels exposes the existing input endpoints/gamma plus checked output endpoints.
+`curves:{rgb:...,r:...,g:...,b:...}` supplies optional 2–32-point normalized
+piecewise-linear curves, with strictly increasing inputs spanning 0–1. The shared
+processor applies master then channel curves after matrix/intensity, then maps
+output endpoints. Alpha stays unchanged. A bucket-to-segment index accelerates
+exact interpolation without losing narrow peaks between 8-bit samples. Fixed
+owned option arrays also survive existing worker option copies (**D4.5.2**).
+Tone settings invalidate color/blur caches while geometry remains reusable.
+
+The inspector edits curve drafts through a graph or checked Mark point arrays.
+Endpoint inputs remain fixed; interior moves cannot cross neighbors. Its stable
+parent owns capture while the SVG is republished. Escape/pointer cancellation
+restores the preceding draft. Channel switching explicitly reads native text
+before changing channels, retaining edits even before blur/change delivery.
+Initial publication and tab switches refresh the graph from that session's draft.
+Add/Apply submit ordinary editable effects; reordering, toggling, undo, projects
+and action replay retain parameters and original samples. Invalid fields leave
+the document and history intact.
+
+Remaining work includes straighten UI, guides/rulers/navigator, group/perspective
+transforms, smooth curves and dedicated adjustment layers, alongside complex text
+shaping/rich runs, the wider style/PSD catalogue, compressed/deduplicated projects,
+workspace restoration/native pickers, asynchronous batches and M5 high-depth/ICC
+and larger-scene performance qualification. This increment changes no shared
+Radiant layout/painting source or formal ruling.
+
+### Qualification
+
+All records and native captures are under `temp/photos-20261021/`. The optimized
+host passes the final complete Photos UI suite: **18 workflows / 285 assertions**.
+The new handle workflow covers anchored corner resizing, Shift proportions,
+centered Alt scaling, snapped rotation, cancellation and undo/redo. The tone
+workflow covers exact presented pixels, save/reopen, graph insertion/existing-point
+picking/cancellation, per-tab drafts, channel changes before blur, rejected input,
+explicit application and undo. The rendered graph and handles were inspected.
+
+Package/image-focused AUTO checks pass **54/54**; Photos eager JIT with forced
+collection and poisoned frees passes **22/22**. Both new package fixtures also
+pass AUTO with forced collection/poisoned frees, covering **51 true results**.
+Native image-processing checks pass **8/8**, including independent all-byte tone
+reference pixels, alpha, a narrow inter-sample curve peak, malformed options,
+tone-aware cache invalidation and existing bounded scratch/cancellation checks.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` completes successfully:
+**8,010/8,010**, comprising input **2,112/2,112** and runtime **5,898/5,898**.
+This includes all **1,678** script-runner checks and **322** forced-GC checks;
+the earlier checkpoint's unrelated baseline failures do not recur in this run.
+After the gate's debug host refresh, `make build-release-compile JOBS=4` restores
+the release host before the final UI sweep. Its SHA-256 is
+`2b01c4d456a59b209f95f012f3d7cb61efbe40205e1a0907321facc8017d8e34`.
+Documentation links and `git diff --check` pass. No latency benchmark or larger
+M5 performance claim is added. This increment uses the current checkout, without
+a worktree or remote publication.
+
+## Canvas geometry milestone — 2026-10-21
+
+Implement directly in this checkout: shared-center transforms for nested groups
+and selected roots, authored project guides with screen-distance move snapping,
+and a line-based straighten tool. Reuse descendant affines, document metadata,
+gesture snapshots and the command/history registry (**S9.1.2 / S9.2.2 /
+S12.1.3**). No formal ruling changes are required.
+
+Acceptance: transform each selected leaf once, retain source/mask/artwork data,
+reject locked descendants and masked/filtered groups atomically, and preserve
+one-gesture undo/cancel. Guide add/move/remove has undo and project persistence;
+crop/resize adjusts guide coordinates. Move snapping matches canvas/guide
+edges and centers within six screen pixels, supports Alt bypass and shows its
+targets. Straighten aligns a drawn reference to horizontal or vertical through
+an editable affine, with a visible line, cancellation and one undo item.
+
+Excluded: retained group-mask transforms, perspective/warp, ruler/grid/navigator,
+automatic crop after straightening, adjustment layers and background processing.
+Verification budget: focused package and native UI checks, eager JIT/forced-GC
+ownership checks, then the Lambda baseline. Run a Radiant aggregate only if a
+shared native engine change is needed. Restore the release host for final UI
+qualification; all scratch files stay under `temp/photos-canvas-20261021/`.
+
+### Delivered behavior
+
+Relative `layer.transform` commands and handle gestures act on the selected roots'
+combined bounds. A `delta` command carries a document-space affine; each leaf
+receives `T(-position) · delta · T(position) · old_transform`. Source pixels,
+local masks, effects, artwork, IDs and hierarchy stay retained. Selected ancestors
+suppress duplicate child edits; numeric and pointer edits share this operation.
+Moving a selected group also keeps that target when the hit belongs to a child.
+Locks on any descendant reject the whole operation. Group masks/effects/styles
+are rejected because the current stack renderer evaluates them in document
+coordinates; transforming only the leaves would change their relationship.
+Absolute local `matrix`/Reset remains a single-leaf operation. No new retained
+stack transform or flattening is introduced (**S9.1.2 / S9.2.2**).
+
+Straighten (Q) records a document-space reference and horizontal/vertical goal,
+then applies the shortest aligning rotation about the selected bounds center.
+Its line is transient; pointer completion commits one history item, Escape
+restores the initial snapshot, and zero-length/already-aligned lines are no-ops.
+The canvas extent stays unchanged. The checked command also records/replays in
+actions. Native mouse workflows cover both reference axes and cancellation
+(**S12.1.3**).
+
+`photos_guides` metadata contains up to 64 ID-bearing integer-position guides.
+Add, drag, remove and clear use the existing authored document/history path;
+`.photos` preserves them. Image exports omit editor metadata. Image resize scales
+positions, canvas resize drops outside guides, and crop translates/clips them.
+Show/hide and snap switches are per-session view settings without dirty/history
+changes. Move drags align selected bounds' three anchors on each axis to visible
+guides or canvas edges/centers within six screen pixels; Alt bypasses snapping.
+Offsets retain whole-pixel placement. A click or return to the press point never
+creates a snap-induced edit. Magenta target lines and cyan guides are overlays;
+Move owns guide hit areas and stable stage capture while guide nodes republish.
+Guide-only edits reuse the cached raster, and histograms follow presented raster
+identity instead of authored metadata changes (**S9.1.2 / S9.2.2 / D4.5.2**).
+
+Remaining canvas work includes group-mask/filter transforms, rulers/grids,
+navigator, guide locking/layout presets, other-layer snapping, crop aspect/canvas
+anchor controls, perspective/warp and automatic crop after straightening. The
+separate adjustment-layer, smooth-curve, typography/style/PSD, workspace/native
+picker, compressed project, asynchronous batch and M5 color/scale backlog remains.
+No shared native Radiant or image runtime source changes are part of this milestone.
+
+### Qualification — completed 2026-10-22
+
+Records/captures are under `temp/photos-canvas-20261021/`. Package/Draw AUTO
+checks pass **34/34**, and the final Photos eager-JIT sweep with forced collection
+and poisoned frees passes **24/24**. The two new fixtures cover **69 true results**:
+nested/shared-center transforms, source/mask retention, selected-root deduplication,
+locks/unsupported groups, undo/project/action round trips, both straighten axes,
+guide persistence/crop/resize, zoom-dependent snapping/Alt bypass, captured guide
+drags and metadata-only raster cache reuse. New fixtures plus the existing brush
+continuation/cache checks also pass AUTO with forced collection/poisoned frees.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` passes **8,012/8,012**:
+input **2,112/2,112**, runtime **5,900/5,900**, including **1,680** script-runner
+checks and **322** MIR forced-GC checks. Subsequent single-selection/cache
+allocation fast paths pass the focused AUTO/JIT/GC checks above. The full baseline
+was not repeated for those behavior-preserving fast paths or the final demo-only
+status recovery helper.
+
+After restoring the release host with `make build-release-compile JOBS=4`, the
+complete Photos UI sweep passes **20 workflows / 333 assertions**. Additional
+native path/pixel checks qualify the visible yellow straighten line and magenta
+snap targets; a fractional guide-position failure leaves history intact, and
+successful recovery clears its stale status message through a shared helper.
+Updated group, guide and tone workflows pass again (**25/25**, **28/28**,
+**32/32** respectively). The latest qualified fixture set therefore covers
+**20 workflows / 338 assertions**. Native reference/guide/group captures were
+inspected. No broader native Radiant gate is required for these package/demo edits.
+
+The retained release host SHA-256 is
+`47d6659633211666a8b43170993447d8eb33e1357d169183117c6dfa3bd4d5e2`.
+Documentation links and `git diff --check` pass. No latency benchmark, high-depth
+support or larger-scene performance claim is added. This increment remains
+uncommitted in the current checkout; no worktree or remote publication is involved.

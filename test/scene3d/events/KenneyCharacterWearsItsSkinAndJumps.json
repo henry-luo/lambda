@@ -1,0 +1,175 @@
+{
+  "name": "KenneyCharacterWearsItsSkinAndJumps",
+  "viewport": {
+    "width": 200,
+    "height": 260
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#kenney-view",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "start",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          180,
+          255
+        ],
+        [
+          60,
+          140
+        ],
+        [
+          40,
+          120
+        ]
+      ],
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          0,
+          90
+        ],
+        [
+          50,
+          130
+        ],
+        [
+          90,
+          255
+        ]
+      ],
+      "count": {
+        "min": 200
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        40,
+        70,
+        15,
+        50
+      ],
+      "rgba": [
+        [
+          26,
+          38
+        ],
+        [
+          30,
+          42
+        ],
+        [
+          37,
+          49
+        ]
+      ],
+      "count": {
+        "min": 750
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        146,
+        70,
+        15,
+        50
+      ],
+      "rgba": [
+        [
+          26,
+          38
+        ],
+        [
+          30,
+          42
+        ],
+        [
+          37,
+          49
+        ]
+      ],
+      "count": {
+        "min": 750
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#kenney-view",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#kenney-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "start",
+      "count": {
+        "min": 100
+      }
+    }
+  ]
+}

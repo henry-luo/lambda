@@ -1112,13 +1112,39 @@ void repaint_window() {
         framebuffer_width == ui_context.surface->width &&
         framebuffer_height == ui_context.surface->height;
 
-    // generate a texture from the bitmap
-    log_debug("creating rendering texture");
-    GLuint texture;
-    glGenTextures(1, &texture);
+    // One texture persists across presents (Radiant_Design_Animation_Repaint §3 A3): a frame
+    // that wrote only a damage rect uploads just those rows and columns.
+    static GLuint texture = 0;
+    static int texture_width = 0, texture_height = 0;
+    ImageSurface* surface = ui_context.surface.get();
+    bool reuse = texture && glIsTexture(texture) && texture_width == surface->width &&
+        texture_height == surface->height;
+    if (!reuse) {
+        if (texture && glIsTexture(texture)) glDeleteTextures(1, &texture);
+        glGenTextures(1, &texture);
+        texture_width = surface->width;
+        texture_height = surface->height;
+    }
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->width, ui_context.surface->height, 0,
-        GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, ui_context.surface->pixels);
+    const Bound& damage = ui_context.present_rect;
+    if (!reuse || !ui_context.present_partial) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, surface->width, surface->height, 0,
+            GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, surface->pixels);
+    } else if (damage.right > damage.left && damage.bottom > damage.top) {
+        int x0 = (int)fmaxf(0.0f, floorf(damage.left)); // INT_CAST_OK: texel column
+        int y0 = (int)fmaxf(0.0f, floorf(damage.top)); // INT_CAST_OK: texel row
+        int x1 = (int)fminf((float)surface->width, ceilf(damage.right)); // INT_CAST_OK: texel column
+        int y1 = (int)fminf((float)surface->height, ceilf(damage.bottom)); // INT_CAST_OK: texel row
+        if (x1 > x0 && y1 > y0) {
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, surface->pitch / 4);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                (const uint8_t*)surface->pixels + (size_t)y0 * surface->pitch + (size_t)x0 * 4);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        }
+    }
+    // until the next render writes, the texture already holds the surface
+    ui_context.present_partial = true;
+    ui_context.present_rect = {};
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     GLint present_filter = exact_framebuffer_present ? GL_NEAREST : GL_LINEAR;
@@ -1137,8 +1163,6 @@ void repaint_window() {
     glEnd();
     glDisable(GL_TEXTURE_2D);
 
-    // cleanup
-    glDeleteTextures(1, &texture);
 }
 
 void render(GLFWwindow* window) {
@@ -1301,6 +1325,8 @@ void render(GLFWwindow* window) {
         // rerender if the document is dirty or needs repaint (e.g., caret changed)
         if (ui_context.document->state &&
             (ui_context.document->state->is_dirty ||
+             // a presentation frame's old bounds may be off-screen while its new ones are not
+             ui_context.document->state->presentation_damage.pending ||
              (ui_context.document->state->needs_repaint &&
               dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
             render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
@@ -1314,6 +1340,7 @@ void render(GLFWwindow* window) {
             if (ui_context.document->state->has_active_video &&
                 ui_context.document->state->video_placement_count > 0) {
                 render_video_frames_cached(ui_context.document->state, ui_context.surface, &ui_context);
+                ui_context.present_partial = false;  // the cached blit wrote outside any damage rect
             }
         }
     }
@@ -2054,6 +2081,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     // Give the window a moment to render before starting simulation
     double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
     double sim_start_time = radiant_frame_clock_now(&frame_clock) + sim_start_delay;
+    // paint layers left waiting for a capture get an idle frame shortly after interaction stops
+    double idle_layer_time = 0.0;
 
     while (!glfwWindowShouldClose(window) && !ui_context.render_failed) {
         double currentTime = radiant_frame_clock_now(&frame_clock);
@@ -2164,6 +2193,16 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             radiant_frame_clock_mark_presented(&frame_clock, currentTime);
         }
 
+        DomDocument* layer_doc = ui_context.document;
+        bool idle_layer_frame = false;
+        if (frame_driven || do_redraw) idle_layer_time = 0.0;
+        else if (idle_layer_time > 0.0 && currentTime >= idle_layer_time) {
+            idle_layer_time = 0.0;
+            render_paint_layers_idle_frame(layer_doc);
+            idle_layer_frame = true;
+        } else if (idle_layer_time == 0.0 && layer_doc && render_paint_layers_pending(layer_doc)) {
+            idle_layer_time = currentTime + 0.12;
+        }
         double wait_timeout = view_next_wait_timeout(&frame_clock, currentTime,
                                                      frame_driven, caret_visible,
                                                      state ? state->editing_caret_blink_elapsed : 0.0,
@@ -2177,6 +2216,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
             wait_timeout > 0.001) wait_timeout = 0.001;
         if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
+        if (idle_layer_frame) wait_timeout = 0.0;
+        else if (idle_layer_time > 0.0) wait_timeout = fmin(wait_timeout, fmax(0.0, idle_layer_time - currentTime));
         if (wait_timeout > 0.0) {
             glfwWaitEventsTimeout(wait_timeout);
         }

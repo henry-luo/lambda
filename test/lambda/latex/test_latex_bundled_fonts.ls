@@ -26,17 +26,19 @@ let options = {source_path: "elsewhere/paper.tex"}
 "native document:"; bundled_faces(latex.render_document(ast, options))
 "standalone HTML:"; bundled_faces(parse(latex.render_to_html(ast, {*:options, standalone: true}), "html")^)
 "fragment stylesheet links:"; len(stylesheet_links(latex.render(ast, {standalone: false})))
-// RAD07-L3 embeds used faces with text, without external stylesheet links.
+// D7.2.9 references used bundled faces without embedding their bytes.
 let standalone_math = math.render_standalone(parse("x^2", {type: "math", flavor: "latex"})^)
 "standalone math:"; {svg: name(standalone_math) == 'svg',
     text: contains(format(standalone_math, 'html'), "<text"),
-    embedded_fonts: contains(format(standalone_math, 'html'), "@font-face"),
+    referenced_fonts: contains(format(standalone_math, 'html'), "@font-face") and
+        not contains(format(standalone_math, 'html'), "base64,"),
     external_stylesheets: len(stylesheet_links(standalone_math))}
 
 // Prose AMS commands must not depend on the deleted MathLive font classes.
 let prose_symbol = amssymb.render_symbol("twoheadleftarrow")
 "prose AMS symbol:"; {svg: name(prose_symbol) == 'svg',
     text: contains(format(prose_symbol, 'html'), "<text"),
-    embedded_fonts: contains(format(prose_symbol, 'html'), "@font-face"),
+    referenced_fonts: contains(format(prose_symbol, 'html'), "@font-face") and
+        not contains(format(prose_symbol, 'html'), "base64,"),
     external_stylesheets: len(stylesheet_links(prose_symbol)),
     unknown: amssymb.render_symbol("unknown-command")}

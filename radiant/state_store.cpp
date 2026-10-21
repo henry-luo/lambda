@@ -3285,7 +3285,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
         });
 
     if (removed > 0 || owner_changes > 0) {
-        state->is_dirty = true;
+        state->full_repaint_requests++; state->is_dirty = true;
         state->needs_repaint = true;
         state->version++;
         log_debug("view_state_prune_orphans: removed %u orphaned ViewState entries, pruned %u transient owners/flags",
@@ -3327,7 +3327,7 @@ uint32_t state_store_prune_after_reflow(DocState* state) {
     }
 
     if (removed > 0) {
-        state->is_dirty = true;
+        state->full_repaint_requests++; state->is_dirty = true;
         state->needs_repaint = true;
         state->version++;
         log_debug("state_store_prune_after_reflow: pruned %u disconnected state entries/owners",
@@ -3341,7 +3341,7 @@ uint32_t view_state_detach_subtree(DocState* state, DomNode* root) {
     if (!state || !root) return 0;
     uint32_t removed = view_state_detach_node(state, root);
     if (removed > 0) {
-        state->is_dirty = true;
+        state->full_repaint_requests++; state->is_dirty = true;
         state->needs_repaint = true;
         state->version++;
         log_debug("view_state_detach_subtree: removed %u ViewState entries", removed);
@@ -3991,7 +3991,7 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
 
 static void form_state_mark_dirty(DocState* state) {
     if (!state) return;
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "form_view_state_mutation");
@@ -4052,7 +4052,7 @@ static void view_state_set_flag_internal(DocState* state, View* view, ViewStateF
     if (!changed) return;
 
     view_state_log_bool_transition(state, view, transition_name, old_value, value);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     if (assert_after_mutation) state_assert_after_mutation(state, assertion_name);
@@ -4149,7 +4149,7 @@ static void doc_state_set_interaction_target(DocState* state, View* target,
 
     *target_slot = target;
     doc_state_log_view_target_transition(state, transition_name, old_target, target);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, assertion_name);
@@ -4178,7 +4178,7 @@ void doc_state_set_drag_state(DocState* state, View* target, bool dragging) {
     state->is_dragging = dragging;
     doc_state_log_view_target_transition(state, "drag.target", old_target, new_target);
     doc_state_log_bool_transition(state, "drag.active", old_dragging, dragging);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "doc_state_set_drag_state");
@@ -4240,7 +4240,7 @@ void doc_state_update_drag_drop_motion(DocState* state, float x, float y) {
     if (drag_drop->current_x == x && drag_drop->current_y == y) return;
     drag_drop->current_x = x;
     drag_drop->current_y = y;
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "doc_state_update_drag_drop_motion");
@@ -4254,7 +4254,7 @@ void doc_state_set_drag_drop_active(DocState* state, bool active) {
     drag_drop->active = active;
     drag_drop->pending = active ? false : drag_drop->pending;
     if (old_active == drag_drop->active && old_pending == drag_drop->pending) return;
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "doc_state_set_drag_drop_active");
@@ -4286,7 +4286,7 @@ void doc_state_set_drag_drop_target(DocState* state, View* drop_target,
         memset(&drag_drop->drop_start, 0, sizeof(drag_drop->drop_start));
         memset(&drag_drop->drop_end, 0, sizeof(drag_drop->drop_end));
     }
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "doc_state_set_drag_drop_target");
@@ -4308,6 +4308,7 @@ static void state_bump_render_version(DocState* state) {
 
 void doc_state_mark_dirty(DocState* state) {
     if (!state) return;
+    state->full_repaint_requests++;
     if (state->is_dirty) return;
     state->is_dirty = true;
     state_bump_render_version(state);
@@ -4316,11 +4317,20 @@ void doc_state_mark_dirty(DocState* state) {
 
 void doc_state_request_repaint(DocState* state) {
     if (!state) return;
+    state->full_repaint_requests++;
     bool changed = !state->needs_repaint || !state->is_dirty;
     state->needs_repaint = true;
     state->is_dirty = true;
     if (changed) state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_request_repaint");
+}
+
+void doc_state_request_region_repaint(DocState* state) {
+    if (!state) return;
+    bool changed = !state->needs_repaint;
+    state->needs_repaint = true;
+    if (changed) state_bump_render_version(state);
+    state_assert_after_mutation(state, "doc_state_request_region_repaint");
 }
 
 void doc_state_mark_video_frame_pending(DocState* state) {
@@ -4359,6 +4369,7 @@ void doc_state_clear_render_flags(DocState* state) {
     state->is_dirty = false;
     state->needs_repaint = false;
     state->selection_layout_dirty = false;
+    state->presentation_damage.pending = false;
     dirty_clear(&state->dirty_tracker);
     if (changed) state_bump_render_version(state);
     state_assert_after_mutation(state, "doc_state_clear_render_flags");
@@ -4446,7 +4457,7 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
         hashmap_set(state->state_map, &entry);
     }
 
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->version++;
 
     log_debug("state_set: node=%p, name=%s, version=%llu", node, name, state->version);
@@ -4692,7 +4703,7 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
         view_state_log_scroll_transition(state, view, "scroll.position",
             old_x, old_y, old_max_x, old_max_y,
             h_pos, v_pos, pane->h_max_scroll, pane->v_max_scroll);
-        state->is_dirty = true;
+        state->full_repaint_requests++; state->is_dirty = true;
         state->needs_repaint = true;
         // sticky offsets depend on every scroller's position (CSS Position 3)
         if (h_pos != old_x || v_pos != old_y) {
@@ -4862,7 +4873,7 @@ bool scroll_state_tick_smooth_for_view(DocState* state, View* view, void* pane_p
 
 static void scroll_interaction_mark_dirty(DocState* state) {
     if (!state) return;
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
 }
@@ -5437,7 +5448,7 @@ void doc_state_open_dropdown(DocState* state, View* view) {
     form_control_open_dropdown(state, view);
     state->open_dropdown = view;
     doc_state_log_dropdown_owner_transition(state, old_owner, view);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5463,7 +5474,7 @@ void doc_state_close_dropdown(DocState* state, View* view) {
         doc_state_log_dropdown_owner_transition(state, old_owner, NULL);
     }
 
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5488,7 +5499,7 @@ void doc_state_set_dropdown_geometry(DocState* state,
     state->dropdown_y = y;
     state->dropdown_width = width;
     state->dropdown_height = height;
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5514,7 +5525,7 @@ void doc_state_open_context_menu(DocState* state, View* target,
 
     doc_state_log_context_menu_target_transition(state, old_target, target);
     doc_state_log_context_menu_hover_transition(state, old_hover, -1);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5533,7 +5544,7 @@ void doc_state_close_context_menu(DocState* state) {
 
     doc_state_log_context_menu_target_transition(state, old_target, NULL);
     doc_state_log_context_menu_hover_transition(state, old_hover, -1);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5551,7 +5562,7 @@ void doc_state_set_context_menu_hover(DocState* state, int hover_index) {
 
     state->context_menu_hover = hover_index;
     doc_state_log_context_menu_hover_transition(state, old_hover, hover_index);
-    state->is_dirty = true;
+    state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
@@ -5643,7 +5654,7 @@ void state_remove(DocState* state, void* node, const char* name) {
         }
 
         hashmap_delete(state->state_map, &query);
-        state->is_dirty = true;
+        state->full_repaint_requests++; state->is_dirty = true;
         state->version++;
 
         log_debug("state_remove: node=%p, name=%s", node, name);
@@ -5696,7 +5707,7 @@ DocState* state_set_immutable(DocState* state, void* node, const char* name, Ite
     };
     hashmap_set(new_state->state_map, &entry);
 
-    new_state->is_dirty = true;
+    new_state->full_repaint_requests++; new_state->is_dirty = true;
 
     log_debug("state_set_immutable: created version %llu", new_state->version);
     return new_state;
@@ -5734,7 +5745,7 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
         }
     }
 
-    new_state->is_dirty = true;
+    new_state->full_repaint_requests++; new_state->is_dirty = true;
 
     log_debug("state_remove_immutable: created version %llu", new_state->version);
     return new_state;
@@ -5797,14 +5808,15 @@ void state_end_batch(DocState* state) {
 
 static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
                                         float width, float height,
-                                        View* source) {
+                                        View* source, bool surface_space = false) {
     if (!tracker) return;
 
     if (tracker->full_repaint) return;  // already marked for full repaint
 
-    // clip to viewport — skip rects entirely outside visible area
+    // clip to viewport — skip rects entirely outside visible area; a surface-space
+    // rect is already relative to the visible area, so its band starts at zero
     if (tracker->viewport_height > 0) {
-        float vt = tracker->viewport_y;
+        float vt = surface_space ? 0.0f : tracker->viewport_y;
         float vb = vt + tracker->viewport_height;
         if (y + height < vt || y > vb) return;
         if (y < vt) { height -= (vt - y); y = vt; }
@@ -5858,6 +5870,11 @@ static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
 
 void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height) {
     dirty_mark_rect_with_source(tracker, x, y, width, height, nullptr);
+}
+
+void dirty_mark_surface_rect(DirtyTracker* tracker, float x, float y, float width, float height) {
+    if (!(width > 0.0f) || !(height > 0.0f)) return;
+    dirty_mark_rect_with_source(tracker, x, y, width, height, nullptr, true);
 }
 
 void dirty_mark_element(DocState* state, void* view_ptr) {

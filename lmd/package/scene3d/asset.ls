@@ -1,6 +1,7 @@
 // D7.2.4: the loader returns ordinary scene values; playback is owned by Radiant.
 fn prefixed(value, prefix) => prefix ++ "-" ++ string(value)
-fn rewrite(n, prefix, options) element {
+// shared with lambda.scene3d.motion, which compiles a character's body the same way
+pub fn rewrite(n, prefix, options) element {
     let kind = name(n)
     let attrs = map([for (k, v in n where k is string or k is symbol)
         (string(k), if (contains(["id", "geometry", "material", "texture", "skeleton"], string(k))) prefixed(v, prefix)

@@ -42,7 +42,7 @@
       }]],
   spread_photo: [0, 0],
   turned_for_page: [1, 2, 2, 4],
-  turn: [0, -22.5, -90, -180, -180],
+  turn: [0, -104.0625, -157.5, -180, -180],
   drag: [-45, -135, -180],
   completes: [true, false, true, false]
 }

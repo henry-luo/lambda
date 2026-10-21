@@ -782,7 +782,8 @@ static RenderFrameKey render_frame_key(UiContext* ui, ViewTree* tree, uint32_t b
     key.ui = ui; key.root = tree->root; key.scale = ui_context_raster_scale(ui);
     key.width = ui->surface->width; key.height = ui->surface->height;
     key.generations[10] = background;
-    key.generations[11] = transparent;
+    // a parity render with paint layers held or suspended must not replay a layered recording
+    key.generations[11] = (uint64_t)transparent | ((uint64_t)render_paint_layer_current_override() << 1);
     if (!doc) return key;
     key.generations[0] = doc->mutation_epoch;
     key.generations[1] = doc->style_content_epoch;
@@ -1413,6 +1414,48 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
     return result;
 }
 
+// Replays one region (device px) as a single tile and copies it into the surface. The tile's
+// own edges clip the drawing, so the region's pixels match a full replay exactly; a dirty-clip
+// replay instead blends through a vector clip mask, which shifts repeating-gradient phase and
+// rounding inside the region (Radiant_Design_Animation_Repaint §3 A2). False when no tile
+// worker is available (RADIANT_RENDER_THREADS=1) or allocation fails.
+static bool render_output_replay_region(RasterRenderContext* rdcon, DisplayList* display_list,
+                                        uint32_t canvas_bg, Bound region) {
+    ImageSurface* surface = rdcon->ui_context->surface;
+    int x0 = (int)fmaxf(0.0f, floorf(region.left)); // INT_CAST_OK: pixel index
+    int y0 = (int)fmaxf(0.0f, floorf(region.top)); // INT_CAST_OK: pixel index
+    int x1 = (int)fminf((float)surface->width, ceilf(region.right)); // INT_CAST_OK: pixel index
+    int y1 = (int)fminf((float)surface->height, ceilf(region.bottom)); // INT_CAST_OK: pixel index
+    if (x1 <= x0 || y1 <= y0) return true;
+    // The tile culls items by their recorded bounds, which can stop short of an antialiased
+    // fringe; replay a margin around the region so a culled neighbour's fringe still lands,
+    // then copy back only the region itself.
+    const int margin = 4;
+    int tx0 = x0 - margin, ty0 = y0 - margin;
+    int w = x1 - x0 + 2 * margin, h = y1 - y0 + 2 * margin;
+    uint32_t* pixels = (uint32_t*)mem_alloc((size_t)w * (size_t)h * sizeof(uint32_t), MEM_CAT_RENDER);
+    if (!pixels) return false;
+    for (size_t i = 0; i < (size_t)w * (size_t)h; i++) pixels[i] = canvas_bg;
+    Tile tile = {};
+    tile.x = (float)tx0; tile.y = (float)ty0; tile.w = (float)w; tile.h = (float)h;
+    tile.pixels = lam::up(pixels);
+    tile.pixel_w = w; tile.pixel_h = h; tile.stride = w;
+    TileJob job = {};
+    job.tile = lam::up(&tile);
+    job.display_list = lam::up(display_list);
+    job.raster_scale = rdcon->raster_scale;
+    job.bg_color = canvas_bg;
+    bool done = render_output_dispatch_jobs(&job, 1) > 0;
+    if (done) {
+        for (int y = y0; y < y1; y++) {
+            memcpy((uint8_t*)surface->pixels + (size_t)(y - surface->tile_offset_y) * surface->pitch + (size_t)x0 * 4,
+                pixels + (size_t)(y - ty0) * w + (x0 - tx0), (size_t)(x1 - x0) * 4);
+        }
+    }
+    mem_free(pixels);
+    return done;
+}
+
 static bool render_output_save_surface(ImageSurface* surface, const char* output_file,
         RenderOutputKind kind, int quality) {
     if (!surface || !output_file) {
@@ -1450,12 +1493,17 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         ? render_document_canvas_background(view_tree->root).c
         : render_output_canvas_background(view_tree->root);
     DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
-    RenderOutputClearResult clear_result =
-        render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
+    // A presentation-only frame (paint-only commit, §3 A1 of Radiant_Design_Animation_Repaint)
+    // records before it clears: its damage includes the new bounds the recording reveals,
+    // and the recording itself must see the whole tree, not just the old bounds.
+    bool presentation = state && !target->output_file && state->presentation_damage.pending &&
+        !state->is_dirty && !state->dirty_tracker.full_repaint;
+    RenderOutputClearResult clear_result = {};
+    if (!presentation) clear_result = render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
     bool selective = clear_result.selective;
 
     RenderFrameCache* cache = frame.storage_owner ? view_tree->render_frame_cache.get() : nullptr;
-    bool can_retain = cache && !selective && render_frame_can_retain(uicon);
+    bool can_retain = cache && !selective && !presentation && render_frame_can_retain(uicon);
     RenderFrameKey key = render_frame_key(uicon, view_tree, canvas_bg, target->transparent_background);
     bool reused = can_retain && cache->valid && cache->recording.get() == &display_list &&
         render_frame_key_equal(cache->key, key) &&
@@ -1468,6 +1516,12 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     else RENDER_METRIC_ADD(full_frame_reuses, 1);
 
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
+    if (state && !target->output_file) {
+        // every screen recording refreshes the tracked elements' painted bounds
+        presentation_damage_frame_begin(&state->presentation_damage);
+        rdcon.presentation_damage = lam::up(&state->presentation_damage);
+        rdcon.presentation_damage_list = lam::up((const DisplayList*)&display_list);
+    }
 
     uint64_t t_init = time_now_ns();
     measurement.checkpoint("setup_clear");
@@ -1504,6 +1558,34 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     if (!dl_validate_append(&display_list, &document_recording, &replay_recording, "render_output_overlays")) {
         return 1;
     }
+    if (state && !target->output_file) {
+        bool regions = presentation_damage_frame_end(state, uicon->document, rdcon.raster_scale, presentation);
+        if (presentation) {
+            // video blits after replay and an unbounded plane have no region: repaint in full
+            if (!regions || replay_recording.content().has_video) state->dirty_tracker.full_repaint = true;
+            if (!state->dirty_tracker.full_repaint && !dirty_has_regions(&state->dirty_tracker)) {
+                // nothing changed on screen (an idle paint-layer capture frame): keep every pixel
+                clear_result = {};
+                clear_result.selective = true;
+                rdcon.dirty_union = {};
+                rdcon.has_dirty_union = true;
+            } else {
+                clear_result = render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
+            }
+            selective = clear_result.selective;
+            state->presentation_damage.last_selective = selective;
+            state->presentation_damage.last_union = selective ? rdcon.dirty_union : Bound{};
+            if (selective) {
+                float share = (rdcon.dirty_union.right - rdcon.dirty_union.left) *
+                    (rdcon.dirty_union.bottom - rdcon.dirty_union.top) /
+                    fmaxf(1.0f, uicon->viewport_width * uicon->viewport_height);
+                log_info("[PRESENTATION_DAMAGE] union=(%.1f,%.1f,%.1f,%.1f) share=%.3f",
+                    rdcon.dirty_union.left, rdcon.dirty_union.top, rdcon.dirty_union.right,
+                    rdcon.dirty_union.bottom, share);
+            }
+        }
+    }
+    rdcon.presentation_damage = nullptr;
     uint64_t t_capture = time_now_ns();
     measurement.checkpoint("overlays_validate");
     struct CapturedResources {
@@ -1530,8 +1612,14 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     uint64_t t_replay_start = time_now_ns();
 
     int item_count = dl_item_count(&display_list);
-    RenderOutputReplayResult replay_result =
-        render_output_replay_display_list(&rdcon, replay_recording, canvas_bg, clear_result.replay_dirty);
+    RenderOutputReplayResult replay_result = {};
+    replay_result.thread_count = 1;
+    float region_scale = rdcon.raster_scale > 0.0f ? rdcon.raster_scale : 1.0f;
+    bool region_replayed = presentation && selective && render_output_replay_region(&rdcon, replay_recording.get(),
+        canvas_bg, {rdcon.dirty_union.left * region_scale, rdcon.dirty_union.top * region_scale,
+                    rdcon.dirty_union.right * region_scale, rdcon.dirty_union.bottom * region_scale});
+    if (!region_replayed)
+        replay_result = render_output_replay_display_list(&rdcon, replay_recording, canvas_bg, clear_result.replay_dirty);
 
     uint64_t t_replay_end = time_now_ns();
     measurement.checkpoint("replay");
@@ -1550,6 +1638,18 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     render_video_frames(replay_recording.content().has_video ? &display_list : nullptr,
         rdcon.ui_context->surface, rstate, rdcon.ui_context);
+    // a selective presentation frame wrote only its damage; anything else wrote everywhere
+    if (presentation && selective && !target->output_file) {
+        float s = rdcon.raster_scale > 0.0f ? rdcon.raster_scale : 1.0f;
+        Bound damage = {rdcon.dirty_union.left * s, rdcon.dirty_union.top * s,
+                        rdcon.dirty_union.right * s, rdcon.dirty_union.bottom * s};
+        Bound& r = uicon->present_rect;
+        if (!(r.right > r.left && r.bottom > r.top)) r = damage;
+        else r = {fminf(r.left, damage.left), fminf(r.top, damage.top),
+                  fmaxf(r.right, damage.right), fmaxf(r.bottom, damage.bottom)};
+    } else {
+        uicon->present_partial = false;
+    }
 
     uint64_t t_sync = time_now_ns();
     measurement.checkpoint("media_trace");

@@ -57,9 +57,14 @@ fn page_body(lib, book, ref, s, options) {
 // Leaf i: the front face shows its right-hand page, the back face (pre-rotated 180°) its next
 // left-hand page. Each face carries a shade the turn darkens toward the vertical.
 pub fn leaf(lib, book, i, s, options) => <div class:"bk-leaf", 'data-leaf':string(i), id:"bk-leaf-" ++ string(i),
-    style:"width:" ++ px(B.PAGE_W * s) ++ ";height:" ++ px(B.PAGE_H * s) ++ ";",
-    <div class:"bk-face bk-front", (page_body(lib, book, book.leaves[i].front, s, options)); <div class:"bk-shade bk-shade-front">>;
-    <div class:"bk-face bk-back", (page_body(lib, book, book.leaves[i].back, s, options)); <div class:"bk-shade bk-shade-back">>>
+    // a leaf always has a transform, so turning it replaces one and stays a paint-only write
+    style:"width:" ++ px(B.PAGE_W * s) ++ ";height:" ++ px(B.PAGE_H * s) ++ ";transform:rotateY(0deg);",
+    // each shade is its own plane over its face: its per-frame opacity then leaves the
+    // face's content, and so the face's retained raster, unchanged
+    <div class:"bk-face bk-front", (page_body(lib, book, book.leaves[i].front, s, options))>;
+    <div class:"bk-shade bk-shade-front">;
+    <div class:"bk-face bk-back", (page_body(lib, book, book.leaves[i].back, s, options))>;
+    <div class:"bk-shade bk-shade-back">>
 
 // spread bar entries: one per turned-leaf count, with the spread's first photo
 pub fn spread_bar(lib, book) => <div class:"bk-spreads",

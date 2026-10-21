@@ -27,6 +27,8 @@ struct NativeGlDraw {
     int side; // 0 front, 1 back, 2 double
     bool clockwise;
     bool depth_only = false;
+    // a data texture read on unit 1 as `palette` (the skinning palette)
+    NativeGlResource data = {};
 };
 struct NativeGlUniform { NativeGlResource program; int location; uint64_t generation; };
 
@@ -48,6 +50,12 @@ struct NativeGlSampler {
 };
 NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image,
     const NativeGlSampler& sampler = {});
+// A float data texture a shader reads with texelFetch: `height` records of
+// `width` RGBA32F texels, nearest-sampled and clamped. Contents arrive through
+// native_gl_data_texture_update, a whole number of records at a time.
+NativeGlResource native_gl_data_texture(NativeGlContext* context, unsigned width, unsigned height);
+bool native_gl_data_texture_update(NativeGlContext* context, NativeGlResource texture,
+    const float* rgba, unsigned rows);
 NativeGlResource native_gl_program(NativeGlContext* context, const char* vertex, const char* fragment);
 unsigned native_gl_uniform_count(NativeGlContext* context, NativeGlResource program);
 bool native_gl_uniform_info(NativeGlContext* context, NativeGlResource program, unsigned index,

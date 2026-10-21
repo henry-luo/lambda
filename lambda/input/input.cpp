@@ -2018,6 +2018,8 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"model/mtl", "mtl"},
     {"model/gltf+json", "gltf"},
     {"text/x-3d-model", "a3d"},
+    {"model/x-bvh", "bvh"},
+    {"model/x-fbx", "fbx"},
     {"application/json", "json"},
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
@@ -2352,6 +2354,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         }
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);
+        else if (strcmp(effective_type, "character") == 0)
+            input_character(input, source, source_len, flavor ? flavor->chars : nullptr);
+        else if (strcmp(effective_type, "fbx") == 0) input_fbx(input, source, source_len);
         else if (strcmp(effective_type, "xml") == 0 &&
                 ((flavor && (strcmp(flavor->chars, "strict") == 0 ||
                              strcmp(flavor->chars, "document") == 0)) ||

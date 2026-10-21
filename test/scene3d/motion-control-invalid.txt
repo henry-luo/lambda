@@ -1,0 +1,96 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <scene3d id: "valid", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "valid-group",
+        <skeleton id: "valid-skeleton",
+          <bone id: "valid-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "valid-a", duration: 1,
+          <keyframe-track path: "valid-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "valid-b", duration: 1, autoplay: false,
+          <keyframe-track path: "valid-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "valid-motion", state: 'b',
+          <motion-state name: 'a', clip: "valid-a">
+          <motion-state name: 'b', clip: "valid-b", loop: 'once', next: 'a'>>>>
+    <scene3d id: "missing", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "missing-group",
+        <skeleton id: "missing-skeleton",
+          <bone id: "missing-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "missing-a", duration: 1,
+          <keyframe-track path: "missing-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "missing-b", duration: 1, autoplay: false,
+          <keyframe-track path: "missing-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "missing-motion",
+          <motion-state name: 'a', clip: "missing-z">>>>
+    <scene3d id: "autoplay", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "autoplay-group",
+        <skeleton id: "autoplay-skeleton",
+          <bone id: "autoplay-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "autoplay-a", duration: 1,
+          <keyframe-track path: "autoplay-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "autoplay-b", duration: 1, autoplay: true,
+          <keyframe-track path: "autoplay-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "autoplay-motion",
+          <motion-state name: 'b', clip: "autoplay-b">>>>
+    <scene3d id: "shared", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "shared-group",
+        <skeleton id: "shared-skeleton",
+          <bone id: "shared-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "shared-a", duration: 1,
+          <keyframe-track path: "shared-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "shared-b", duration: 1, autoplay: false,
+          <keyframe-track path: "shared-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "shared-motion",
+          <motion-state name: 'a', clip: "shared-a">
+          <motion-state name: 'again', clip: "shared-a">>>>
+    <scene3d id: "duplicate", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "duplicate-group",
+        <skeleton id: "duplicate-skeleton",
+          <bone id: "duplicate-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "duplicate-a", duration: 1,
+          <keyframe-track path: "duplicate-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "duplicate-b", duration: 1, autoplay: false,
+          <keyframe-track path: "duplicate-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "duplicate-motion",
+          <motion-state name: 'a', clip: "duplicate-a">
+          <motion-state name: 'a', clip: "duplicate-b">>>>
+    <scene3d id: "next", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "next-group",
+        <skeleton id: "next-skeleton",
+          <bone id: "next-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "next-a", duration: 1,
+          <keyframe-track path: "next-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "next-b", duration: 1, autoplay: false,
+          <keyframe-track path: "next-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "next-motion",
+          <motion-state name: 'a', clip: "next-a", next: 'nowhere'>>>>
+    <scene3d id: "request", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "request-group",
+        <skeleton id: "request-skeleton",
+          <bone id: "request-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "request-a", duration: 1,
+          <keyframe-track path: "request-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "request-b", duration: 1, autoplay: false,
+          <keyframe-track path: "request-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "request-motion", state: 'z',
+          <motion-state name: 'a', clip: "request-a">>>>
+    <scene3d id: "loop", camera: "camera", width: 80, height: 60, style: "display:block",
+      <camera id: "camera", type: 'perspective', position: [0, 0, 3]>
+      <group id: "loop-group",
+        <skeleton id: "loop-skeleton",
+          <bone id: "loop-bone", position: [0, 0, 0], quaternion: [0, 0, 0, 1]>>
+        <animation-clip id: "loop-a", duration: 1,
+          <keyframe-track path: "loop-bone.quaternion", type: 'quaternion', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]>>
+        <animation-clip id: "loop-b", duration: 1, autoplay: false,
+          <keyframe-track path: "loop-bone.position", type: 'vector', interpolation: 'linear', times: [0, 1], values: [0, 0, 0, 0, 1, 0]>>
+        <motion-controller id: "loop-motion",
+          <motion-state name: 'a', clip: "loop-a", loop: 'bounce'>>>>>>

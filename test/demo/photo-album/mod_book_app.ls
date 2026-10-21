@@ -19,6 +19,10 @@ fn node(owner, id) => dom.get_element_by_id(owner, id)
 fn px(v) => string(round(v * 100) / 100) ++ "px"
 fn leaf_node(owner, i) => dom.get_element_by_id(owner, "bk-leaf-" ++ string(i))
 fn count(bs) => len(bs.book.leaves)
+// a turn's clock starts at the input's time stamp, or (without one) at its first frame; a frame
+// advances it by at most MAX_STEP_MS, so a slow frame slows the turn instead of skipping it
+let MAX_STEP_MS = 50.0
+fn turn_clock(now_ms) => {at:if (now_ms > 0.0) now_ms else null, elapsed:0.0}
 
 pn fit(owner) {
     let screen = dom.viewport_size(owner)
@@ -30,10 +34,11 @@ pn fit(owner) {
 // leaves near the open spread are displayed: the one under each side and the next one to turn
 fn near(bs, i) => i >= bs.turned - 2 and i <= bs.turned + 1
 
-// mounts leaves near the spread; mounted leaves stay (SLD3/SLD4 policy), off-spread ones are hidden
+// mounts leaves near the spread plus the next one beyond, so a turn starts without a mount (and
+// the layout it costs); mounted leaves stay (SLD3/SLD4 policy), off-spread ones are hidden
 pn mount(owner, ctx, bs) {
     let host = node(owner, "bk-leaves")
-    let missing = [for (i in max(0, bs.turned - 2) to min(count(bs) - 1, bs.turned + 1) where not contains(bs.mounted, i)) i]
+    let missing = [for (i in max(0, bs.turned - 2) to min(count(bs) - 1, bs.turned + 2) where not contains(bs.mounted, i)) i]
     if (len(missing) > 0) {
         let html = join([for (i in missing) format([BU.leaf(ctx.lib, bs.book, i, bs.scale, bs.options)], 'html')], "")
         dom.append_child(host, dom.parse_fragment(host, html))
@@ -41,20 +46,26 @@ pn mount(owner, ctx, bs) {
     return {*:bs, mounted:[*bs.mounted, *missing]}
 }
 
-// turned leaves stack on the left, later ones on top; unturned ones on the right, earlier on top
-fn rest_z(bs, i) => if (i < bs.turned) i + 1 else count(bs) - i
+// turned leaves stack on the left, later ones on top; unturned ones on the right, earlier on top.
+// The two leaves a turn can lift (each stack's top) already rest above the rest, so starting a
+// turn writes no z-index: an inline-style write would relay out and repaint the whole window.
+fn rest_z(bs, i) => if (i == bs.turned) count(bs) + 10 else if (i == bs.turned - 1) count(bs) + 9
+    else if (i < bs.turned) i + 1 else count(bs) - i
 
+// Per-frame transform and shading go through the presentation channel (RAD_16): such writes
+// repaint without layout, where an inline-style write relays out the book on every frame.
+// Same-value presentation writes cost nothing, so they need no compare.
 pn shade(owner, i, angle) {
     let a = abs(angle)
     let leaf = leaf_node(owner, i)
-    updates.style(dom.query_selector(leaf, ".bk-shade-front"), "opacity", string(round(SHADE * min(1.0, a / 90.0) * 100) / 100))
-    updates.style(dom.query_selector(leaf, ".bk-shade-back"), "opacity", string(round(SHADE * min(1.0, (180.0 - a) / 90.0) * 100) / 100))
+    dom.presentation_style_set_property(dom.query_selector(leaf, ".bk-shade-front"), "opacity", string(round(SHADE * min(1.0, a / 90.0) * 100) / 100))
+    dom.presentation_style_set_property(dom.query_selector(leaf, ".bk-shade-back"), "opacity", string(round(SHADE * min(1.0, (180.0 - a) / 90.0) * 100) / 100))
 }
 
 pn pose(owner, i, angle, z) {
     let leaf = leaf_node(owner, i)
     if (leaf == null) { return null }
-    updates.style(leaf, "transform", "rotateY(" ++ string(round(angle * 100) / 100) ++ "deg)")
+    dom.presentation_style_set_property(leaf, "transform", "rotateY(" ++ string(round(angle * 100) / 100) ++ "deg)")
     updates.style(leaf, "z-index", string(z))
     updates.style(leaf, "display", "block")
     shade(owner, i, angle)
@@ -112,25 +123,25 @@ pub pn restyle(owner, ctx, bs, options) {
 // ---------------------------------------------------------------- turns
 
 // starts (or queues) one turn; a turn runs from an angle, so a released drag continues from it
-pn begin(owner, ctx, bs, forward, seconds, from) {
+pn begin(owner, ctx, bs, forward, seconds, from, now_ms) {
     let i = if (forward) bs.turned else bs.turned - 1
     if (i < 0 or i >= count(bs)) { return bs }
-    let ready = mount(owner, ctx, {*:bs, turned:if (forward) bs.turned + 1 else bs.turned})
-    let shown = {*:ready, turned:bs.turned}
+    // settle mounted and posed the leaves a turn shows: these writes normally change nothing
+    let shown = mount(owner, ctx, bs)
     // the page the leaf uncovers must be displayed beneath it
     for (j in shown.mounted) { if (j >= i - 1 and j <= i + 1) { pose(owner, j, if (j < i or (j == i and not forward)) -180.0 else 0.0, rest_z(shown, j)) } }
-    let anim = {leaf:i, forward:forward, from:from, to:if (forward) -180.0 else 0.0, start:null, seconds:seconds}
-    pose(owner, i, from, count(bs) + 10)
+    let anim = {leaf:i, forward:forward, from:from, to:if (forward) -180.0 else 0.0, *:turn_clock(now_ms), seconds:seconds}
+    pose(owner, i, from, rest_z(shown, i))
     return {*:shown, anim:anim, frame:dom.request_frame(owner, "book_frame")}
 }
 
-pub pn turn(owner, ctx, bs, forward) {
+pub pn turn(owner, ctx, bs, forward, now_ms = 0.0) {
     if (bs.anim != null or bs.drag != null) { return {*:bs, queue:[*bs.queue, forward]} }
-    return begin(owner, ctx, bs, forward, TURN_SECONDS, if (forward) 0.0 else -180.0)
+    return begin(owner, ctx, bs, forward, TURN_SECONDS, if (forward) 0.0 else -180.0, now_ms)
 }
 
 // flips leaf by leaf to a spread, quickly
-pub pn jump(owner, ctx, bs, target) {
+pub pn jump(owner, ctx, bs, target, now_ms = 0.0) {
     let to = max(0, min(count(bs), target))
     let pending = bs.turned + len([for (f in bs.queue where f) f]) - len([for (f in bs.queue where not f) f]) +
         (if (bs.anim == null) 0 else if (bs.anim.forward) 1 else -1)
@@ -139,18 +150,18 @@ pub pn jump(owner, ctx, bs, target) {
     let queued = {*:bs, queue:[*bs.queue, *more]}
     if (queued.anim != null or len(queued.queue) == 0) { return queued }
     return begin(owner, ctx, {*:queued, queue:slice(queued.queue, 1, len(queued.queue))}, queued.queue[0], JUMP_SECONDS,
-        if (queued.queue[0]) 0.0 else -180.0)
+        if (queued.queue[0]) 0.0 else -180.0, now_ms)
 }
 
 // one animation frame at `now_ms`: sample the eased angle; at the end land the leaf and start any queued turn
 pub pn frame(owner, ctx, bs, now_ms) {
     let a0 = bs.anim
     if (a0 == null) { return bs }
-    // a turn's clock starts at its first frame
-    let a = if (a0.start == null) {*:a0, start:now_ms} else a0
-    let p = (now_ms - a.start) / (a.seconds * 1000.0)
+    let step = if (a0.at == null) 0.0 else min(MAX_STEP_MS, max(0.0, now_ms - a0.at))
+    let a = {*:a0, at:now_ms, elapsed:a0.elapsed + step}
+    let p = a.elapsed / (a.seconds * 1000.0)
     let angle = B.turn_angle(a.from, a.to, p)
-    pose(owner, a.leaf, angle, count(bs) + 10)
+    pose(owner, a.leaf, angle, rest_z(bs, a.leaf))
     if (p < 1.0) { return {*:bs, anim:a, frame:dom.request_frame(owner, "book_frame")} }
     // a leaf that lands on the left is turned
     let landed = if (a.to < -90.0) a.leaf + 1 else a.leaf
@@ -158,7 +169,7 @@ pub pn frame(owner, ctx, bs, now_ms) {
     if (len(done.queue) == 0) { return done }
     let next = done.queue[0]
     return begin(owner, ctx, {*:done, queue:slice(done.queue, 1, len(done.queue))}, next,
-        if (len(done.queue) > 1) JUMP_SECONDS else TURN_SECONDS, if (next) 0.0 else -180.0)
+        if (len(done.queue) > 1) JUMP_SECONDS else TURN_SECONDS, if (next) 0.0 else -180.0, now_ms)
 }
 
 // ---------------------------------------------------------------- drags
@@ -177,28 +188,26 @@ pub pn drag(owner, ctx, bs, evt) {
     let moved = d.moved or abs(evt.clientX - d.x) > 4.0
     if (not moved) { return bs }
     let leaf = if (d.forward) bs.turned else bs.turned - 1
-    let prepared = if (d.moved) bs else (
-        let ready = mount(owner, ctx, {*:bs, turned:if (d.forward) bs.turned + 1 else bs.turned}),
-        {*:ready, turned:bs.turned})
+    let prepared = if (d.moved) bs else mount(owner, ctx, bs)
     if (not d.moved) {
         for (j in prepared.mounted) { if (j >= leaf - 1 and j <= leaf + 1) { pose(owner, j, if (j < leaf or (j == leaf and not d.forward)) -180.0 else 0.0, rest_z(prepared, j)) } }
     }
     // the angle follows the pointer across the spread
     let travelled = if (d.forward) d.edge - evt.clientX else evt.clientX - d.edge
     let angle = B.drag_angle(d.forward, travelled, d.width)
-    pose(owner, leaf, angle, count(bs) + 10)
+    pose(owner, leaf, angle, rest_z(bs, leaf))
     return {*:prepared, drag:{*:d, moved:true, angle:angle}}
 }
 
 // release finishes the turn past the vertical, otherwise it falls back; a press without movement turns
-pub pn release(owner, ctx, bs) {
+pub pn release(owner, ctx, bs, now_ms = 0.0) {
     let d = bs.drag
     let ended = {*:bs, drag:null}
-    if (not d.moved) { return turn(owner, ctx, ended, d.forward) }
+    if (not d.moved) { return turn(owner, ctx, ended, d.forward, now_ms) }
     let leaf = if (d.forward) bs.turned else bs.turned - 1
     let finish = B.completes(d.forward, d.angle)
     let target = if (finish == d.forward) -180.0 else 0.0
-    let anim = {leaf:leaf, forward:d.forward, from:d.angle, to:target, start:null,
+    let anim = {leaf:leaf, forward:d.forward, from:d.angle, to:target, *:turn_clock(now_ms),
         seconds:TURN_SECONDS * max(0.2, abs(target - d.angle) / 180.0)}
     return {*:ended, anim:anim, frame:dom.request_frame(owner, "book_frame")}
 }

@@ -18,7 +18,6 @@ It is **not** a guide for writing Lambda Script programs. For the Lambda languag
 | Make | Build orchestration | Included with compiler toolchain |
 | Git | Source control | macOS: `brew install git`; Linux: `sudo apt install git` |
 | Node.js + npm | Tree-sitter CLI (`npx`) | macOS: `brew install node`; Linux: `sudo apt install nodejs npm` |
-| CMake | Some dependency builds | macOS: `brew install cmake`; Linux: `sudo apt install cmake` |
 | pkg-config | Library discovery | macOS: `brew install pkg-config`; Linux: `sudo apt install pkg-config` |
 | Python 3 | Build script generation | Usually pre-installed |
 | Premake5 | Generates Makefiles from config | macOS: `brew install premake`; Linux: download from premake.github.io |
@@ -66,12 +65,10 @@ These libraries and tools are required on every platform.
 |------|---------|
 | C/C++ compiler (GCC or Clang) | Build toolchain (C++17) |
 | Make | Build orchestration |
-| CMake | Dependency builds (RE2, ThorVG, etc.) |
 | Python 3 | Premake config generation (`utils/generate_premake.py`) |
-| Premake5 | Generates platform Makefiles from `build_lambda_config.json` |
+| Premake5 | Generates platform Makefiles from `build_lambda_config.json` and `build_deps_config.json` |
 | Node.js + npm | Tree-sitter CLI via `npx` for parser generation |
 | pkg-config | Library discovery |
-| Meson + Ninja | ThorVG build |
 | Git | Version control, dependency source cloning |
 | xxd | Binary data embedding |
 | ccache | Compiler cache (auto-used if available) |
@@ -84,8 +81,8 @@ These libraries and tools are required on every platform.
 | **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Optional Lambda reference grammar for the `lambda-cst` differential verifier |
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
-| **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Vendored at `lib/re2/` (`lib/re2/VENDOR.md`), built into `build_temp/re2_build/` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
+| **MIR** | Built from `lambda/mir/` with its Makefile | JIT compiler backend (Medium Internal Representation) |
+| **RE2** | Vendored at `lib/re2/`, built by the JSON-owned Premake `re2` target into `build/lib/<platform>/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
 | **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
@@ -124,11 +121,11 @@ Requires **Homebrew**. Most libraries installed via `brew install`:
 
 ```
 mbedtls@3  freetype  expat  glfw  libjpeg-turbo  giflib  libpng
-zlib  bzip2  pkg-config  cmake  meson  ninja  libevent  premake
+zlib  bzip2  pkg-config  libevent  premake
 ```
 
 Built from source in `mac-deps/`:
-- libcurl (with mbedTLS), nghttp2, ThorVG, Brotli, WOFF2, rpmalloc, MIR
+- libcurl (with mbedTLS), nghttp2, ThorVG, Brotli, rpmalloc; WOFF2 uses the vendored host sources.
 
 System frameworks: OpenGL, Cocoa, IOKit, CoreFoundation, CoreServices
 
@@ -144,25 +141,54 @@ libglfw3-dev  libpng-dev  libbz2-dev  libturbojpeg0-dev  libgif-dev
 libgl1-mesa-dev  libglu1-mesa-dev  libegl1-mesa-dev  gettext
 ```
 
-Built from source in `build_temp/`:
-- Google Test, utf8proc, RE2, ThorVG, WOFF2
+Source fallbacks use the dependency recipes for Google Test, utf8proc, mbedTLS
+and ThorVG. RE2 and WOFF2 are compiled from the vendored tree by the host build.
 
 ### Windows-Specific (`setup-windows-deps.sh`)
 
 Requires **MSYS2** with CLANG64 (preferred) or MINGW64 environment. Uses `pacman`:
 
 ```
-base-devel  mingw-w64-*-clang (or -gcc)   mingw-w64-*-cmake
-mingw-w64-*-ninja  mingw-w64-*-mpdecimal  mingw-w64-*-mbedtls
+base-devel  mingw-w64-*-clang (or -gcc)
+mingw-w64-*-mpdecimal  mingw-w64-*-mbedtls
 mingw-w64-*-freetype  mingw-w64-*-glfw    mingw-w64-*-libpng
 mingw-w64-*-libjpeg-turbo  mingw-w64-*-giflib  mingw-w64-*-nodejs
-mingw-w64-*-meson  mingw-w64-*-pkgconf    ccache  git  vim  jq
+mingw-w64-*-pkgconf    ccache  git  vim  jq
 ```
 
 Built from source in `win-native-deps/`:
-- libcurl (minimal, no HTTP/2), ThorVG, WOFF2
+- libcurl (minimal, no HTTP/2), ThorVG, utf8proc; WOFF2 uses the vendored host sources.
 
 ### Dependency Architecture
+
+`build_lambda_config.json` owns the host, runtime and test graph. Its
+`config_imports` loads `build_deps_config.json`, which owns RE2,
+image/archive source targets, their generated headers, and standalone source
+recipes for ThorVG, Brotli, utf8proc, nghttp2, Google Test, mbedTLS, libpq,
+MariaDB Connector/C and the optional Clang metadata tool. Both paths use
+`utils/generate_premake.py` (`PremakeGenerator`); `utils/build_config.py`
+(`load_build_config`) merges imports and rejects cycles or duplicate targets.
+Dependencies remain static libraries under D7.1.1; the RDB TLS and plugin
+profile retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
+
+```bash
+make build-dependency DEP=thorvg
+make build-dependency DEP=googletest ARGS='--source build_temp/googletest --prefix temp/gtest-install'
+make build-typemeta-extract
+make test-build-dependencies
+```
+
+The metadata utility uses `--type-filter`; LLVM owns the generic `--filter`
+option in the shared Clang/LLVM libraries.
+
+`utils/build_dependencies.py` configures and builds under
+`temp/dependency-build/<system>-<architecture>/<dependency>/`. Platform setup
+scripts fetch sources and invoke those recipes; only installation into a system
+prefix uses sudo. PostgreSQL retains its configure probes and Make/Perl header
+generation; compilation and archiving use Premake. Other generated headers use
+the upstream templates and compiler probes rather than cached platform results.
+MIR, Tree-sitter, curl, mpdecimal and the existing Makefile-based builds remain
+available without CMake, Meson or Ninja.
 
 All dependency paths are defined in `build_lambda_config.json`. The build pipeline is:
 
@@ -693,7 +719,7 @@ A fresh worktree has none of the ignored directories. Worktrees that Claude Code
 
 ```bash
 MAIN=<main checkout>
-ln -s "$MAIN/build_temp"   build_temp     # re2_build, utf8proc, jpeg-turbo (build_lambda_config.json)
+ln -s "$MAIN/build_temp"   build_temp     # utf8proc, generated image/archive config (build_lambda_config.json)
 ln -s "$MAIN/mac-deps"     mac-deps
 ln -s "$MAIN/node_modules" node_modules   # pinned tree-sitter CLI
 ln -s "$MAIN/ref"          ref
@@ -701,11 +727,11 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 ```
 
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
-- `build_temp/re2_build` is shared. A fresh checkout's newer `lib/re2` mtimes make `make` re-run CMake and Ninja in the shared directory. Before the first build, backdate the worktree's copies (e.g. `find lib/re2 -type f -exec touch -t 202601010000 {} +`).
+- RE2 is built directly from `lib/re2/` into each checkout's `build/lib/<platform>/<configuration>/libre2.a`; its objects and archives are not shared through `build_temp/` (GRP15).
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
 - Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
-- **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` runs `rm -rf build_temp/re2_build` through the link and deletes the shared RE2 build. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
+- **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` also cleans vendored MIR and Tree-sitter archives. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
 - The stash stack (`refs/stash`) is shared by every worktree. Prefer a WIP commit. If you do stash, use `git stash push -m <tag>` and `git stash apply <sha>`, never a bare `pop`.
 
 Removing a worktree:
@@ -738,7 +764,7 @@ git branch -d <branch>
   - Before timing, check the binary: `strings lambda.exe | grep -c 'VALIDATOR] validate_against_base_type'` prints `0` for release.
 - **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`), and `make build` does not rebuild them. After a layout change they read wrong offsets, with no link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.
 - **Archive relinking.** `utils/generate_premake.py` overrides premake's `ldDeps`, so every `.a` in a binary's `linkoptions` is a link prerequisite (`make test-premake-generator` checks this). If a binary seems to hold an old archive, check `grep '^ *LDDEPS' build/premake/<project>.make`.
-- **Archive configurations.** Utility, image-codec and archive-reader libraries live in `build/lib/<platform>/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises both profile switches and consumer execution.
+- **Archive configurations.** Utility, RE2, image-codec and archive-reader libraries live in `build/lib/<platform>/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises both profile switches and consumer execution.
 - **Tree-sitter CLI.** `package.json` pins `tree-sitter-cli` 0.25.10. The Lambda grammar needs 0.25+ (ABI 15), so run `npm install` in a checkout that still has an older CLI. The CLI caches compiled grammars by language name in a per-user cache. Parsing a scratch copy of the grammar can therefore swap the parser other checkouts see. Set `TREE_SITTER_LIBDIR=<own dir>` for each copy; `test/ts_s16_conformance.sh` already uses `temp/tree-sitter-lib`.
 
 ### 7.4 Test Gotchas

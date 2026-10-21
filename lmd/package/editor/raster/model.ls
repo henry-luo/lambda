@@ -5,6 +5,7 @@ import paths: lambda.editor.mod_source_pos
 import geometry: lambda.editor.draw.geometry
 import common: lambda.slide.common
 import affine: lambda.chart.svg_transform
+import guides: .guides
 
 pub fn value(v,fallback) => common.value(v,fallback)
 pub fn finite(v) => geometry.finite_number(v)
@@ -52,6 +53,7 @@ pub fn prepare(image) any^ {
 }
 pub fn validate(image) any^ {
     let checked = img.validate(image)^
+    let checked_guides = guides.validate(image)^
     let ids = identifiers(image)
     if (len(unique(ids)) != len(ids) or not all([for (id in ids) id is string and id != ""]))
         raise error("Raster: duplicate or invalid document identities")
@@ -136,6 +138,14 @@ pub fn unlocked_roots(st) any^ {
     let roots = selected_roots(st)^;
     if (locked(st.doc,[for (row in roots) row.path],true)) raise error("Raster: target layer is locked")
     else roots
+}
+pub fn selection_bounds(st) => if (len(st.selected)==0) null else
+    if (len(st.selected)==1) bounds(lookup(st.doc,st.selected[0]).node)
+    else bounds(img.stack([for (row in selected_roots(st)^) row.node]))
+pub fn owns_hit(st,id) {
+    let hit = lookup(st.doc,id);
+    hit != null and any([for (row in layers(st.doc) where row.id in st.selected)
+        paths.path_is_prefix(row.path,hit.path)])
 }
 pub fn bounds(node) {
     if (name(node) == 'stack') {

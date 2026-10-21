@@ -68,7 +68,8 @@ and the final tick. Playback state and frame pacing do not affect a batch run.
 The trace has a limit of one million sampled body records and 65536 events.
 
 Commands use `{type, body, value}` records. Supported types are `impulse`,
-`force`, `torque`, `velocity`, `teleport`, `target`, `wake` and `gravity`.
+`force`, `torque`, `velocity`, `angular_velocity`, `teleport`, `target`, `wake`
+and `gravity`.
 Teleport/target commands supply `position` and optionally `rotation` or
 `quaternion`. `point` supplies an application point; `local:true` selects
 body-local vector/point coordinates. An omitted point means centre of mass.
@@ -90,7 +91,12 @@ do not advance physics; live queries use the current scene world.
 Set `<physics state:'playing'>` for automatic fixed-step playback. The default
 is paused. The document owns the world and rendering consumes its poses;
 camera edits, repaint, resize and graphics-context recovery preserve simulation
-state (**D4.5.1v4 / S12.1.5v2**).
+state (**D4.5.1v4 / S12.1.5v2**). So do template re-renders. An authored edit
+overrides only what it changes: a new gravity, body position or velocity takes
+effect as a command, and damping, gravity scale and collider changes are applied
+in place, all without resetting the tick. Adding, removing or re-typing a body
+or collider, or changing the timestep, iterations or length scale, restarts the
+world from the new authored state.
 
 Import `lambda.physics.scene` for procedural `play`, `pause`, `reset`, `step`,
 `snapshot`, `events`, `command` and `query` helpers. These call the existing

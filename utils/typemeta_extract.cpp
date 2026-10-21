@@ -9,16 +9,17 @@
  *       $(llvm-config --cxxflags --ldflags --libs) \
  *       -lclang-cpp -lclang
  *
- * Or with CMake (see utils/CMakeLists.txt)
+ * Or: make build-typemeta-extract
  *
  * Usage:
  *   ./typemeta_extract lambda/lambda.h -- -std=c11 -I. > generated/typemeta_defs.c
- *   ./typemeta_extract --filter="String|List|Map" lambda/lambda.h radiant/view.hpp -- -std=c++17
+ *   ./typemeta_extract --type-filter="String|List|Map" lambda/lambda.h radiant/view.hpp -- -std=c++17
  */
 
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/AST/RecordLayout.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CommonOptionsParser.h"
@@ -46,7 +47,7 @@ using namespace llvm;
 static cl::OptionCategory ToolCategory("typemeta-extract options");
 
 static cl::opt<std::string> FilterPattern(
-    "filter",
+    "type-filter",  // LLVM itself registers the generic --filter option.
     cl::desc("Regex pattern for type names to include"),
     cl::value_desc("pattern"),
     cl::cat(ToolCategory));
@@ -76,6 +77,9 @@ static cl::opt<bool> Verbose(
 // ============================================================================
 // Type Information Structures
 // ============================================================================
+
+// local lookup keeps extraction records distinct from Clang's public TypeInfo.
+namespace lambda_typemeta {
 
 struct FieldInfo {
     std::string name;
@@ -328,7 +332,8 @@ public:
             // Check for bitfield
             if (field->isBitField()) {
                 fieldInfo.isBitfield = true;
-                fieldInfo.bitWidth = field->getBitWidthValue(*context_);
+                // evaluate the width expression across Clang Decl API versions.
+                fieldInfo.bitWidth = field->getBitWidth()->EvaluateKnownConstInt(*context_).getZExtValue();
                 fieldInfo.bitOffset = layout.getFieldOffset(fieldIndex) % 8;
                 fieldInfo.flags.push_back("FIELD_FLAG_BITFIELD");
             }
@@ -898,7 +903,10 @@ static void generateJSON(raw_ostream& os) {
 // Main
 // ============================================================================
 
+} // namespace lambda_typemeta
+
 int main(int argc, const char** argv) {
+    using namespace lambda_typemeta;
     auto expectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
     if (!expectedParser) {
         llvm::errs() << expectedParser.takeError();

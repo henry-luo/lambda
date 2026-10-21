@@ -946,6 +946,10 @@ scene or Three.js GPU resources.
 | Wavefront material library | `.mtl` | `model/mtl` | `<mtl …>` |
 | glTF JSON | `.gltf` | `model/gltf+json` | JSON map, without a wrapper |
 | ASCII Model3D | `.a3d` | `text/x-3d-model` | `<a3d …>` |
+| FBX 7.x, binary or ASCII | `.fbx` | `model/x-fbx` | `<fbx binary, version, …>` record tree |
+| BVH motion capture | `.bvh` | `model/x-bvh` | `<bvh <hierarchy …> <motion …>>` |
+
+FBX and BVH were added on 2026-10-21 by [Lambda_Pkg_Motion.md](../Lambda_Pkg_Motion.md) §3–§5: the binary FBX signature and the ASCII `; FBX` header, and BVH's leading `HIERARCHY`, are sniffed without a filename. Their scene path is not `scene3d-asset` but `input(source, {type: 'character'})`, converted by `lambda.scene3d.motion` (§15 below keeps its formats).
 
 Filename detection is case-insensitive and uses the URL pathname. A3D also
 has a distinctive `3dmodel` header followed by space or tab, with an optional
@@ -1319,9 +1323,10 @@ Resource limits include 64 MiB per glTF buffer or HTTP scene-asset response,
 vertices and 1,572,864 indices, retaining every triangle and attribute seam.
 Missing static glTF normals produce flat per-face normals (glTF §3.7.2.1),
 with zero-area faces omitted. Polygon corners remain bounded at 4,096,
-glTF nodes at 4,096 and hierarchy depth at 64. Native deformation retains 16 bones (including
-joint ancestors), four normalized influences per vertex, and two relative morph
-targets. Oversized animated primitives report a limit error. Singular matrices and zero-scale poses
+glTF nodes at 4,096 and hierarchy depth at 64. Native deformation retains 256 bones per
+skeleton (including joint ancestors; a float palette texture since 2026-10-21, Lambda_Pkg_Motion.md
+§9.1), four normalized influences per vertex, and two relative morph targets. A clip holds at most
+1,024 tracks. Oversized animated primitives report a limit error. Singular matrices and zero-scale poses
 are unsupported by the native transform path. These limits are separate from
 whether their raw data maps naturally into Lambda.
 

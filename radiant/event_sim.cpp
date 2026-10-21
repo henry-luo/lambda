@@ -17,6 +17,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
+#include "../lib/shell.h"
 #include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
@@ -2006,6 +2007,17 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         const char* actual = reader.get("save_actual").cstring();
         if (actual) ev->snapshot_actual_path = mem_strdup(actual, MEM_CAT_LAYOUT);
     }
+    else if (strcmp(type_str, "assert_damage_parity") == 0) {
+        ev->type = SIM_EVENT_ASSERT_DAMAGE_PARITY;
+        ev->damage_min_frames = reader.has("min_frames") ? reader.get("min_frames").asInt32() : 1;
+        ev->damage_min_selective = reader.has("min_selective") ? reader.get("min_selective").asInt32() : 1;
+    }
+    else if (strcmp(type_str, "assert_layer_parity") == 0) {
+        ev->type = SIM_EVENT_ASSERT_LAYER_PARITY;
+        ev->layer_min_frames = reader.has("min_frames") ? reader.get("min_frames").asInt32() : 1;
+        ev->layer_min_exact = reader.has("min_exact") ? reader.get("min_exact").asInt32() : 0;
+        ev->layer_max_mean = reader.has("max_mean") ? sim_number_as_float(reader.get("max_mean")) : 1.0f;
+    }
     else if (strcmp(type_str, "assert_pixel") == 0) {
         ev->type = SIM_EVENT_ASSERT_PIXEL;
         parse_target(reader, ev);
@@ -3194,15 +3206,163 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 
 // ===== Phase 7: assert_snapshot pixel comparison =====
 
+// Presentation damage in replays (Radiant_Design_Animation_Repaint §6): by default every
+// sim render is full, so goldens never depend on damage. RADIANT_SELECTIVE_SIM=1 lets a
+// presentation frame repaint only its damage; RADIANT_DAMAGE_VERIFY=1 also re-renders
+// that frame in full and compares the two surfaces pixel for pixel.
+// Outside the repainted union nothing may differ. Inside it, the region is replayed as a
+// tile at its own origin, and the scaled-image rasterizer steps its samples from that origin,
+// so isolated pixels may differ slightly; none may exceed the perceptual (YIQ) threshold that
+// assert_snapshot uses.
+struct SimDamageVerify { int frames, selective, mismatched_frames, worst_pixels, outside_pixels, perceptible_pixels, worst_delta; };
+static float pixel_yiq_distance(uint32_t rgba1, uint32_t rgba2);
+static SimDamageVerify sim_damage_verify = {};
+
+static int sim_damage_mode() {
+    static int mode = -1;
+    if (mode < 0) {
+        const char* verify = shell_getenv("RADIANT_DAMAGE_VERIFY");
+        const char* selective = shell_getenv("RADIANT_SELECTIVE_SIM");
+        mode = verify && strcmp(verify, "1") == 0 ? 2 : selective && strcmp(selective, "1") == 0 ? 1 : 0;
+    }
+    return mode;
+}
+
+static void sim_verify_presentation_frame(UiContext* uicon, DocState* state) {
+    ImageSurface* surface = uicon->surface;
+    if (!surface || !surface->pixels) return;
+    bool selective = state->presentation_damage.last_selective;
+    Bound region = state->presentation_damage.last_union;
+    float scale = state->presentation_damage.scale > 0.0f ? state->presentation_damage.scale : 1.0f;
+    int region_left = (int)floorf(region.left * scale), region_top = (int)floorf(region.top * scale); // INT_CAST_OK: pixel index
+    int region_right = (int)ceilf(region.right * scale), region_bottom = (int)ceilf(region.bottom * scale); // INT_CAST_OK: pixel index
+    size_t bytes = (size_t)surface->pitch * (size_t)surface->height;
+    uint8_t* selective_pixels = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
+    if (!selective_pixels) return;
+    memcpy(selective_pixels, surface->pixels, bytes);
+    doc_state_mark_dirty(state);
+    // the full render paints the same layers and captures none: this compares repaint scope only
+    render_paint_layer_override(PAINT_LAYER_HOLD_CAPTURES);
+    render_html_doc(uicon, uicon->document->view_tree, nullptr);
+    render_paint_layer_override(PAINT_LAYER_NORMAL);
+    doc_state_clear_render_flags(state);
+    int mismatched = 0, max_delta = 0, outside = 0, perceptible = 0;
+    int min_x = surface->width, min_y = surface->height, max_x = -1, max_y = -1;
+    for (int y = 0; y < surface->height; y++) {
+        const uint32_t* a = (const uint32_t*)(selective_pixels + (size_t)y * surface->pitch);
+        const uint32_t* b = (const uint32_t*)((const uint8_t*)surface->pixels + (size_t)y * surface->pitch);
+        for (int x = 0; x < surface->width; x++) {
+            if (a[x] == b[x]) continue;
+            mismatched++;
+            if (!selective || x < region_left || x >= region_right || y < region_top || y >= region_bottom) outside++;
+            else if (pixel_yiq_distance(a[x], b[x]) > 0.1f * 0.1f) perceptible++;
+            for (int c = 0; c < 32; c += 8) {
+                int d = abs((int)((a[x] >> c) & 0xFF) - (int)((b[x] >> c) & 0xFF));
+                if (d > max_delta) max_delta = d;
+            }
+            if (x < min_x) min_x = x;
+            if (x > max_x) max_x = x;
+            if (y < min_y) min_y = y;
+            if (y > max_y) max_y = y;
+        }
+    }
+    if (mismatched) log_info("event_sim: damage verify differences=%d outside_union=%d perceptible=%d box=(%d,%d)-(%d,%d) max_channel_delta=%d",
+        mismatched, outside, perceptible, min_x, min_y, max_x, max_y, max_delta);
+    mem_free(selective_pixels);
+    sim_damage_verify.frames++;
+    if (selective) sim_damage_verify.selective++;
+    if (max_delta > sim_damage_verify.worst_delta) sim_damage_verify.worst_delta = max_delta;
+    sim_damage_verify.outside_pixels += outside;
+    sim_damage_verify.perceptible_pixels += perceptible;
+    if (mismatched) {
+        sim_damage_verify.mismatched_frames++;
+        if (mismatched > sim_damage_verify.worst_pixels) sim_damage_verify.worst_pixels = mismatched;
+    }
+    if (outside || perceptible)
+        log_error("event_sim: damage verify FAIL - %d pixels differ outside the repainted union, %d perceptibly inside it",
+            outside, perceptible);
+}
+
+// RADIANT_LAYER_VERIFY=1 re-renders every frame that painted from a paint layer with layers
+// suspended, and compares (Radiant_Design_Animation_Repaint §6). Under a projection a layer
+// is a resampled bitmap: edges and fine textures land at another sub-pixel phase. Even a 1:1
+// placement differs at plane edges (the plane clip antialiases the layer's antialiased edge)
+// and where the live 3D path misplaces a mirrored repeating gradient (the layer, captured
+// unmirrored, matches a flat paint). So the frame's mean difference is bounded, and per-pixel
+// figures, 1:1 frames separately, are reported.
+struct SimLayerVerify { int frames, exact_frames, exact_worst_delta, worst_delta; double worst_fraction, worst_mean; };
+static SimLayerVerify sim_layer_verify = {};
+
+static bool sim_layer_verify_enabled() {
+    static int mode = -1;
+    if (mode < 0) {
+        const char* verify = shell_getenv("RADIANT_LAYER_VERIFY");
+        mode = verify && strcmp(verify, "1") == 0;
+    }
+    return mode == 1;
+}
+
+static void sim_verify_layer_frame(UiContext* uicon, DocState* state, bool exact) {
+    ImageSurface* surface = uicon->surface;
+    if (!surface || !surface->pixels) return;
+    size_t bytes = (size_t)surface->pitch * (size_t)surface->height;
+    uint8_t* layered = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
+    if (!layered) return;
+    memcpy(layered, surface->pixels, bytes);
+    doc_state_mark_dirty(state);
+    render_paint_layer_override(PAINT_LAYER_SUSPENDED);
+    render_html_doc(uicon, uicon->document->view_tree, nullptr);
+    render_paint_layer_override(PAINT_LAYER_NORMAL);
+    doc_state_clear_render_flags(state);
+    int perceptible = 0, max_delta = 0;
+    double total_delta = 0.0;
+    for (int y = 0; y < surface->height; y++) {
+        const uint32_t* a = (const uint32_t*)(layered + (size_t)y * surface->pitch);
+        const uint32_t* b = (const uint32_t*)((const uint8_t*)surface->pixels + (size_t)y * surface->pitch);
+        for (int x = 0; x < surface->width; x++) {
+            if (a[x] == b[x]) continue;
+            int pixel_delta = 0;
+            for (int c = 0; c < 32; c += 8) {
+                int d = abs((int)((a[x] >> c) & 0xFF) - (int)((b[x] >> c) & 0xFF));
+                if (d > pixel_delta) pixel_delta = d;
+            }
+            total_delta += pixel_delta;
+            if (pixel_delta > max_delta) max_delta = pixel_delta;
+            if (pixel_yiq_distance(a[x], b[x]) > 0.1f * 0.1f) perceptible++;
+        }
+    }
+    mem_free(layered);
+    double pixels = fmax(1.0, (double)surface->width * (double)surface->height);
+    double fraction = (double)perceptible / pixels, mean = total_delta / pixels;
+    sim_layer_verify.frames++;
+    if (exact) {
+        sim_layer_verify.exact_frames++;
+        if (max_delta > sim_layer_verify.exact_worst_delta) sim_layer_verify.exact_worst_delta = max_delta;
+    }
+    if (max_delta > sim_layer_verify.worst_delta) sim_layer_verify.worst_delta = max_delta;
+    if (fraction > sim_layer_verify.worst_fraction) sim_layer_verify.worst_fraction = fraction;
+    if (mean > sim_layer_verify.worst_mean) sim_layer_verify.worst_mean = mean;
+    log_info("event_sim: layer verify exact=%d perceptible=%d (%.4f%%) mean_delta=%.3f max_channel_delta=%d",
+        exact, perceptible, fraction * 100.0, mean, max_delta);
+}
+
 // Helper: force render the current surface
 void event_sim_render_surface(UiContext* uicon) {
     if (uicon->document && (uicon->document->view_tree || uicon->paged_view)) {
         DocState* state = (DocState*)uicon->document->state;
         // clock and intrinsic-size changes need layout before paint consumes their dirty flags.
         sim_reflow_if_pending(uicon->document, state);
-        if (state) doc_state_mark_dirty(state);
+        int mode = sim_damage_mode();
+        bool presentation = mode && state && state->presentation_damage.pending &&
+            !state->is_dirty && !state->dirty_tracker.full_repaint;
+        if (state && !presentation) doc_state_mark_dirty(state);
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) doc_state_clear_render_flags(state);
+        PaintLayerFrameStats layers = render_paint_layer_take_stats();
+        if (presentation && mode == 2) sim_verify_presentation_frame(uicon, state);
+        render_paint_layer_take_stats();
+        if (state && layers.hits && sim_layer_verify_enabled())
+            sim_verify_layer_frame(uicon, state, layers.resampled == 0);
     }
 }
 
@@ -4490,6 +4650,30 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: assert_pixel");
             assert_pixel_impl(ctx, uicon, ev);
             break;
+
+        case SIM_EVENT_ASSERT_DAMAGE_PARITY: {
+            const SimDamageVerify& v = sim_damage_verify;
+            bool passed = sim_damage_mode() == 2 && v.outside_pixels == 0 && v.perceptible_pixels == 0 &&
+                v.frames >= ev->damage_min_frames && v.selective >= ev->damage_min_selective;
+            if (!passed) log_error("event_sim: assert_damage_parity FAIL - verify=%d frames=%d selective=%d outside=%d perceptible=%d max_delta=%d",
+                sim_damage_mode() == 2, v.frames, v.selective, v.outside_pixels, v.perceptible_pixels, v.worst_delta);
+            else log_info("event_sim: assert_damage_parity PASS - frames=%d selective=%d differing_frames=%d max_delta=%d",
+                v.frames, v.selective, v.mismatched_frames, v.worst_delta);
+            sim_record_assertion(ctx, passed);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_LAYER_PARITY: {
+            const SimLayerVerify& v = sim_layer_verify;
+            bool passed = sim_layer_verify_enabled() && v.frames >= ev->layer_min_frames &&
+                v.exact_frames >= ev->layer_min_exact && v.worst_mean <= ev->layer_max_mean;
+            if (!passed) log_error("event_sim: assert_layer_parity FAIL - verify=%d frames=%d exact=%d exact_max_delta=%d worst_mean=%.3f worst_perceptible=%.4f%%",
+                sim_layer_verify_enabled(), v.frames, v.exact_frames, v.exact_worst_delta, v.worst_mean, v.worst_fraction * 100.0);
+            else log_info("event_sim: assert_layer_parity PASS - frames=%d exact=%d exact_max_delta=%d worst_mean=%.3f worst_perceptible=%.4f%% max_delta=%d",
+                v.frames, v.exact_frames, v.exact_worst_delta, v.worst_mean, v.worst_fraction * 100.0, v.worst_delta);
+            sim_record_assertion(ctx, passed);
+            break;
+        }
 
         case SIM_EVENT_ASSERT_PREEDIT: {
             View* elem = resolve_assert_element(ctx, uicon, ev, "assert_preedit");

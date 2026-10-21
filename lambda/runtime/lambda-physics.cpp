@@ -51,9 +51,10 @@ bool physics_commands_read(const PhysicsScene& scene,Item input,lam::ArrayList<P
     for(int64_t i=0;i<commands.asArray().length();i++) {
         ItemReader item=commands.asArray().get(i);auto field=[&](const char* name){return physics_read_field(item,name);};
         const char *kind=physics_read_text(field("type")),*id=physics_read_text(field("body"));PhysicsCommand c={};c.pose.rotation.w=1;
-        const char* names[]={"impulse","force","torque","teleport","velocity","wake","target","gravity"};unsigned index=0;
-        for(;index<8;index++)if(kind&&!strcmp(kind,names[index]))break;
-        if(index==8){*error="physics: unsupported command type";return false;}c.kind=(PhysicsCommandKind)index;
+        const char* names[]={"impulse","force","torque","teleport","velocity","wake","target","gravity","angular_velocity"};unsigned index=0;
+        const unsigned count=sizeof(names)/sizeof(names[0]);
+        for(;index<count;index++)if(kind&&!strcmp(kind,names[index]))break;
+        if(index==count){*error="physics: unsupported command type";return false;}c.kind=(PhysicsCommandKind)index;
         if(c.kind!=PHYSICS_GRAVITY){for(const auto& binding:scene.bindings)if(id&&!strcmp(id,binding.id))c.body=binding.identity;
             if(!c.body){*error="physics: command references an unknown body";return false;}}
         if(!physics_scene_vector(field("value"),{},&c.value)||!physics_scene_vector(field("point"),{},&c.point)||

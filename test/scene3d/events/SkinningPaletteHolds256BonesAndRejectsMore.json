@@ -1,0 +1,262 @@
+{
+  "name": "SkinningPaletteHolds256BonesAndRejectsMore",
+  "viewport": {
+    "width": 256,
+    "height": 300
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#chain65",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "rest65",
+      "source": "scene3d",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96,
+      "region": [
+        0,
+        0,
+        256,
+        96
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          0,
+          60
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "count": {
+        "min": 600
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96,
+      "region": [
+        150,
+        0,
+        30,
+        96
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          0,
+          60
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#chain65",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96,
+      "reference": "rest65",
+      "region": [
+        150,
+        0,
+        40,
+        96
+      ],
+      "count": {
+        "min": 40
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain65",
+      "width": 256,
+      "height": 96,
+      "reference": "rest65",
+      "region": [
+        0,
+        0,
+        150,
+        96
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#chain256",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "rest256",
+      "source": "scene3d",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96,
+      "region": [
+        0,
+        0,
+        256,
+        96
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          0,
+          60
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "count": {
+        "min": 600
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96,
+      "region": [
+        150,
+        0,
+        30,
+        96
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          0,
+          60
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#chain256",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96,
+      "reference": "rest256",
+      "region": [
+        150,
+        0,
+        40,
+        96
+      ],
+      "count": {
+        "min": 40
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#chain256",
+      "width": 256,
+      "height": 96,
+      "reference": "rest256",
+      "region": [
+        0,
+        0,
+        150,
+        96
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#chain257",
+      "width": 256,
+      "height": 96,
+      "success": false,
+      "diagnostic": "skeleton exceeds 256 bones"
+    }
+  ]
+}

@@ -69,25 +69,30 @@ class Document(HTMLParser):
         return self.body if self.body is not None else self.root
 
 
-def export(name, chunked=False):
-    case = name + ("-chunked" if chunked else "")
-    folder = ROOT / "temp/docbook-parity" / case
+def export_cases(names, chunked=False):
+    folders = {name: ROOT / "temp/docbook-parity" /
+               (name + ("-chunked" if chunked else "")) for name in names}
     # A stale page must not conceal a missing export or a removed chunk.
-    if folder.exists():
-        shutil.rmtree(folder)
-    script = ROOT / "temp/docbook-parity" / ("_" + case + ".ls")
+    for folder in folders.values():
+        if folder.exists():
+            shutil.rmtree(folder)
+    script = ROOT / "temp/docbook-parity" / ("_chunked.ls" if chunked else "_single.ls")
     script.parent.mkdir(parents=True, exist_ok=True)
+    fixtures = [[str(FIXTURES / (name + ".xml")), str(folder)]
+                for name, folder in folders.items()]
+    # Share package compilation across exports; each publication is still rebuilt.
     script.write_text(
         "import d: lambda.doc.docbook\npn main() {\n"
-        "    let source = d.read(" + json.dumps(str(FIXTURES / (name + ".xml"))) + ")^\n"
+        "  for (fixture in " + json.dumps(fixtures) + ") {\n"
+        "    let source = d.read(fixture[0])^\n"
         "    let result = d.convert(source, {unsupported:\"error\"" +
         (",output:\"chunked\"" if chunked else "") + "})^\n"
-        "    d.write(result," + json.dumps(str(folder)) + ")^\n}\n")
+        "    d.write(result, fixture[1])^\n  }\n}\n")
     run = subprocess.run([str(ROOT / "lambda.exe"), "run", str(script)], cwd=ROOT,
                          capture_output=True, text=True, timeout=60)
     if run.returncode:
         raise RuntimeError(run.stdout + run.stderr)
-    return folder
+    return folders
 
 
 def generated_ids(tree, seen=None):
@@ -155,7 +160,9 @@ def main():
     expected_dir = FIXTURES / "expected"
     expected_dir.mkdir(exist_ok=True)
     failures = 0
-    for name in args.case or CASES:
+    names = args.case or CASES
+    exports = export_cases(names, args.chunked)
+    for name in names:
         if args.chunked:
             expected = expected_dir / (name + "-chunked")
             if args.refresh:
@@ -188,7 +195,7 @@ def main():
             if not expected.exists():
                 raise SystemExit("Missing reference " + str(expected) + "; use --refresh")
             references = [expected]
-        actual = export(name, args.chunked)
+        actual = exports[name]
         publication_integrity(actual)
         if args.chunked and {p.name for p in references} != {p.name for p in actual.glob("*.html")}:
             failures += 1

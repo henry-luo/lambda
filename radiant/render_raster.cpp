@@ -213,7 +213,30 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
     // affine axis-aligned minification has the same pixel footprint as an ordinary CPU blit.
     float footprint_x = fabsf(inverse.e11 / inverse.e33) * width / sampling_rect.width;
     float footprint_y = fabsf(inverse.e22 / inverse.e33) * height / sampling_rect.height;
-    bool area_sample = mode == SCALE_MODE_LINEAR && !repeated_tile &&
+    // edge mode: the destination quad's edges carry their own coverage, so a projected
+    // layer needs no antialiasing clip; fringe pixels sample the clamped edge texel
+    bool edge_coverage = mode == SCALE_MODE_LINEAR_EDGE && !repeated_tile;
+    float edges[4][3] = {};
+    if (edge_coverage) {
+        float xs[4], ys[4];
+        const float cu[4] = {destination.x, destination.x + destination.width, destination.x + destination.width, destination.x};
+        const float cv[4] = {destination.y, destination.y, destination.y + destination.height, destination.y + destination.height};
+        for (int i = 0; i < 4 && edge_coverage; i++)
+            edge_coverage = rdt_matrix_project_point(&matrix, cu[i], cv[i], &xs[i], &ys[i]);
+        float area = 0.0f;
+        for (int i = 0; i < 4 && edge_coverage; i++) area += xs[i] * ys[(i + 1) % 4] - xs[(i + 1) % 4] * ys[i];
+        edge_coverage = edge_coverage && fabsf(area) > 0.01f;
+        for (int i = 0; i < 4 && edge_coverage; i++) {
+            float dx = xs[(i + 1) % 4] - xs[i], dy = ys[(i + 1) % 4] - ys[i];
+            float length = sqrtf(dx * dx + dy * dy);
+            if (length < 0.0001f) { edge_coverage = false; break; }
+            // signed distance to the edge line, positive inside whatever the winding
+            float sign = area > 0.0f ? 1.0f : -1.0f;
+            edges[i][0] = -dy / length * sign; edges[i][1] = dx / length * sign;
+            edges[i][2] = -(edges[i][0] * xs[i] + edges[i][1] * ys[i]);
+        }
+    }
+    bool area_sample = (mode == SCALE_MODE_LINEAR || mode == SCALE_MODE_LINEAR_EDGE) && !repeated_tile &&
         inverse.e12 == 0.0f && inverse.e21 == 0.0f && inverse.e31 == 0.0f && inverse.e32 == 0.0f &&
         (footprint_x > 1.0f || footprint_y > 1.0f);
     double x_scale = 1.0, y_scale = 1.0;
@@ -229,10 +252,22 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
         for (int row = row_begin; row < row_end; row++) {
             for (int column = 0; column < out_w; column++) {
                 float x = left + column + 0.5f, y = top + row + 0.5f;
+                float coverage = 1.0f;
+                if (edge_coverage) {
+                    float distance = INFINITY;
+                    for (int i = 0; i < 4; i++)
+                        distance = fminf(distance, edges[i][0] * x + edges[i][1] * y + edges[i][2]);
+                    if (distance <= -0.5f) continue;
+                    coverage = fminf(1.0f, distance + 0.5f);
+                }
                 float w = inverse.e31 * x + inverse.e32 * y + inverse.e33;
                 if (fabsf(w) <= 0.000001f) continue;
                 float u = (inverse.e11 * x + inverse.e12 * y + inverse.e13) / w;
                 float v = (inverse.e21 * x + inverse.e22 * y + inverse.e23) / w;
+                if (edge_coverage && isfinite(u) && isfinite(v)) {
+                    u = fminf(fmaxf(u, destination.x), nextafterf(destination.x + destination.width, destination.x));
+                    v = fminf(fmaxf(v, destination.y), nextafterf(destination.y + destination.height, destination.y));
+                }
                 if (!isfinite(u) || !isfinite(v) || u < destination.x || v < destination.y ||
                     u >= destination.x + destination.width || v >= destination.y + destination.height ||
                     matrix.e31 * u + matrix.e32 * v + matrix.e33 <= 0.00001f) continue;
@@ -261,6 +296,11 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
                 } else {
                     sample = render_pixel_sample_bilinear((const uint8_t*)pixels, width, height, stride * 4,
                         sx - 0.5f, sy - 0.5f, mode == SCALE_MODE_LINEAR_WRAP, true, straight_alpha);
+                }
+                if (coverage < 1.0f) {
+                    // premultiplied: every channel scales with coverage
+                    uint8_t* channel = (uint8_t*)&sample;
+                    for (int c = 0; c < 4; c++) channel[c] = (uint8_t)lroundf(channel[c] * coverage);
                 }
                 projected[(size_t)row * out_w + column] = sample;
             }
@@ -398,13 +438,13 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
                 src_color = raster_pixelated_sample(src, src_rect, dst_rect,
                     j, i, src_w, src_h,
                     pixelated_x_multiple, pixelated_y_multiple, straight_source);
-            } else if (scale_mode == SCALE_MODE_LINEAR && downscaling) {
+            } else if ((scale_mode == SCALE_MODE_LINEAR || scale_mode == SCALE_MODE_LINEAR_EDGE) && downscaling) {
                 float box_x0 = src_rect->x + (j - dst_rect->x) * x_ratio;
                 float box_y0 = src_rect->y + (i - dst_rect->y) * y_ratio;
                 float box_x1 = box_x0 + x_ratio;
                 float box_y1 = box_y0 + y_ratio;
                 src_color = raster_area_average(src, box_x0, box_y0, box_x1, box_y1, straight_source);
-            } else if (scale_mode == SCALE_MODE_LINEAR) {
+            } else if (scale_mode == SCALE_MODE_LINEAR || scale_mode == SCALE_MODE_LINEAR_EDGE) {
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
                 src_color = render_pixel_sample_bilinear(

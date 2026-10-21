@@ -6,6 +6,7 @@
 #include "../lib/mime-detect.h"
 #include "../lib/url.h"
 #include "../lib/strbuf.h"
+#include <zlib.h>
 
 class ModelInputTest : public ::testing::Test {
 protected:
@@ -537,4 +538,214 @@ TEST_F(ModelInputTest, SceneAssetMaterialDeclarationsAndClampOptionsResolveIndep
     EXPECT_EQ(clamped.get_attr("wrap-s").asFloat(),33071);EXPECT_EQ(clamped.get_attr("wrap-t").asFloat(),33071);
     Input* missing=parse("mtllib definitely_missing_loader_fixture.mtl\n","scene3d-asset","fixture.obj");
     ASSERT_NE(missing,nullptr);EXPECT_TRUE(missing->parse_failed);
+}
+
+// A minimal binary FBX writer for property-kind and malformed-record cases
+// (Lambda_Pkg_Motion.md §4.2, §4.3, §11).
+struct FbxTestWriter {
+    StrBuf* out = strbuf_new();
+    bool wide;
+    struct Record { size_t start, props; uint64_t count; size_t name; };
+    explicit FbxTestWriter(uint32_t version = 7400) : wide(version >= 7500) {
+        strbuf_append_str_n(out, "Kaydara FBX Binary  \0\x1a\0", 23); le(version, 4);
+    }
+    ~FbxTestWriter() { strbuf_free(out); }
+    size_t header() const { return wide ? 25 : 13; }
+    void le(uint64_t value, int bytes) { for (int i = 0; i < bytes; i++) strbuf_append_char(out, (char)(value >> (8 * i))); }
+    void patch(size_t at, uint64_t value, int bytes) { for (int i = 0; i < bytes; i++) out->str[at + i] = (char)(value >> (8 * i)); }
+    void zeros(size_t n) { for (size_t i = 0; i < n; i++) strbuf_append_char(out, 0); }
+    Record open(const char* name) {
+        Record r = {out->length, 0, 0, strlen(name)};
+        zeros(header()); strbuf_append_str(out, name); r.props = out->length;
+        return r;
+    }
+    void scalar(Record& r, char code, uint64_t bits, int bytes) { strbuf_append_char(out, code); le(bits, bytes); r.count++; }
+    void bytes(Record& r, char code, const char* data, size_t n) {
+        strbuf_append_char(out, code); le(n, 4); strbuf_append_str_n(out, data, n); r.count++;
+    }
+    void array(Record& r, char code, uint32_t count, const void* data, size_t n, uint32_t encoding = 0) {
+        strbuf_append_char(out, code); le(count, 4); le(encoding, 4); le(n, 4);
+        strbuf_append_str_n(out, (const char*)data, n); r.count++;
+    }
+    // ends the property list; children follow, then close()
+    size_t props_done(Record& r) { return out->length - r.props; }
+    void close(Record& r, size_t props_length, bool sentinel) {
+        if (sentinel) zeros(header());
+        int w = wide ? 8 : 4;
+        patch(r.start, out->length, w); patch(r.start + w, r.count, w); patch(r.start + 2 * w, props_length, w);
+        out->str[r.start + 3 * w] = (char)r.name;
+    }
+    void leaf(const char* name, int32_t value) {
+        Record r = open(name); scalar(r, 'I', (uint32_t)value, 4); close(r, props_done(r), false);
+    }
+    void end() { zeros(header()); }
+};
+
+TEST_F(ModelInputTest, FbxBinaryPreservesPropertyKindsAndRewritesObjectNames) {
+    FbxTestWriter fbx;
+    FbxTestWriter::Record r = fbx.open("Kinds");
+    double real = 0.25; float single = 0.5f; uint32_t single_bits; memcpy(&single_bits, &single, 4);
+    uint64_t real_bits; memcpy(&real_bits, &real, 8);
+    fbx.scalar(r, 'C', 1, 1); fbx.scalar(r, 'Y', (uint16_t)-7, 2); fbx.scalar(r, 'I', (uint32_t)-70000, 4);
+    fbx.scalar(r, 'F', single_bits, 4); fbx.scalar(r, 'D', real_bits, 8); fbx.scalar(r, 'L', 46186158000ull, 8);
+    fbx.bytes(r, 'S', "mixamorig:Hips\0\1Model", 21); fbx.bytes(r, 'S', "", 0);
+    fbx.bytes(r, 'R', "\x89PNG", 4); fbx.bytes(r, 'R', "", 0);
+    int32_t ints[3] = {0, 1, -3}; int64_t longs[2] = {0, 1539538600}; uint8_t flags[3] = {0, 2, 1};
+    double values[4] = {1.0, 2.0, 3.0, 4.0};
+    fbx.array(r, 'i', 3, ints, sizeof(ints)); fbx.array(r, 'l', 2, longs, sizeof(longs));
+    fbx.array(r, 'b', 3, flags, sizeof(flags));
+    uLongf packed_length = compressBound(sizeof(values)); Bytef packed[256];
+    ASSERT_EQ(compress(packed, &packed_length, (const Bytef*)values, sizeof(values)), Z_OK);
+    fbx.array(r, 'd', 4, packed, packed_length, 1);
+    size_t length = fbx.props_done(r);
+    fbx.leaf("Child", 5);
+    fbx.close(r, length, true); fbx.end();
+    Input* input = parse(fbx.out->str, nullptr, "kinds.fbx", fbx.out->length);
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    ElementReader root(input->root);
+    EXPECT_TRUE(root.hasTag("fbx")); EXPECT_TRUE(root.get_attr("binary").asBool());
+    EXPECT_EQ(root.get_attr("version").asInt(), 7400);
+    ElementReader kinds = root.findChildElement("Kinds");
+    ArrayReader props = kinds.get_attr("props").asArray();
+    ASSERT_EQ(props.length(), 14);
+    EXPECT_TRUE(props.get(0).asBool());
+    Item i16 = props.get(1).item(), i32 = props.get(2).item(), f32 = props.get(3).item();
+    EXPECT_EQ(NUM_SIZED_SUBTYPE(i16.item), NUM_INT16); EXPECT_EQ(props.get(1).asInt(), -7);
+    EXPECT_EQ(NUM_SIZED_SUBTYPE(i32.item), NUM_INT32); EXPECT_EQ(props.get(2).asInt(), -70000);
+    EXPECT_EQ(NUM_SIZED_SUBTYPE(f32.item), NUM_FLOAT32); EXPECT_DOUBLE_EQ(props.get(3).asFloat(), 0.5);
+    EXPECT_DOUBLE_EQ(props.get(4).asFloat(), 0.25);
+    EXPECT_EQ(props.get(5).getType(), LMD_TYPE_INT64); EXPECT_EQ(props.get(5).asInt(), 46186158000ll);
+    EXPECT_STREQ(props.get(6).asString()->chars, "Model::mixamorig:Hips");
+    EXPECT_TRUE(props.get(7).isNull());
+    EXPECT_EQ(props.get(8).getType(), LMD_TYPE_BINARY); EXPECT_TRUE(props.get(9).isNull());
+    const ArrayNumElemType kinds_expected[] = {ELEM_INT32, ELEM_INT64, ELEM_BOOL, ELEM_FLOAT64};
+    for (int i = 0; i < 4; i++) {
+        Item array = props.get(10 + i).item();
+        ASSERT_EQ(get_type_id(array), LMD_TYPE_ARRAY_NUM);
+        EXPECT_EQ(array.array_num->get_elem_type(), kinds_expected[i]);
+    }
+    EXPECT_EQ(props.get(10).asArray().get(2).asInt(), -3);
+    EXPECT_TRUE(props.get(12).asArray().get(1).asBool());
+    EXPECT_DOUBLE_EQ(props.get(13).asArray().get(3).asFloat(), 4.0);
+    EXPECT_EQ(kinds.findChildElement("Child").get_attr("props").asArray().get(0).asInt(), 5);
+}
+
+TEST_F(ModelInputTest, FbxBinaryRejectsMalformedRecordsArraysAndVersions) {
+    auto rejects = [&](FbxTestWriter& fbx, const char* reason, size_t length = SIZE_MAX) {
+        Input* input = parse(fbx.out->str, "fbx", nullptr, length == SIZE_MAX ? fbx.out->length : length);
+        ASSERT_NE(input, nullptr); EXPECT_TRUE(input->parse_failed) << reason;
+        ASSERT_NE(input->parse_error_message, nullptr) << reason;
+        EXPECT_NE(strstr(input->parse_error_message, reason), nullptr) << input->parse_error_message;
+    };
+    double values[4] = {1, 2, 3, 4};
+    uLongf packed_length = compressBound(sizeof(values)); Bytef packed[256];
+    ASSERT_EQ(compress(packed, &packed_length, (const Bytef*)values, sizeof(values)), Z_OK);
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.array(r, 'd', 3, packed, packed_length, 1);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "compressed array does not inflate to exactly its element count"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.array(r, 'd', 5, packed, packed_length, 1);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "compressed array does not inflate to exactly its element count"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.array(r, 'd', 3, values, sizeof(values));
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "raw array size does not match"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.array(r, 'd', 8388609, packed, packed_length, 1);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "array of 8388609 elements exceeds 8388608"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.array(r, 'd', 4, packed, packed_length, 2);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "unknown array encoding"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.scalar(r, 'Z', 0, 4);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "unknown property type code"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.scalar(r, 'I', 1, 4);
+      fbx.close(r, fbx.props_done(r) + 1, false); fbx.end();
+      rejects(fbx, "property list overruns the record"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.scalar(r, 'I', 1, 4); fbx.scalar(r, 'I', 2, 4);
+      size_t length = fbx.props_done(r); r.count = 1; fbx.close(r, length, false); fbx.end();
+      rejects(fbx, "property list length does not match"); }
+    { FbxTestWriter fbx; FbxTestWriter::Record r = fbx.open("A"); fbx.bytes(r, 'S', "abc", 3);
+      fbx.patch(r.props + 1, 400, 4); fbx.close(r, fbx.props_done(r), false); fbx.end();
+      rejects(fbx, "string data overruns its record"); }
+    { // a child whose end offset lies past its parent
+      FbxTestWriter fbx; FbxTestWriter::Record parent = fbx.open("Parent"); size_t length = fbx.props_done(parent);
+      FbxTestWriter::Record child = fbx.open("Child"); fbx.scalar(child, 'I', 1, 4); fbx.close(child, fbx.props_done(child), false);
+      fbx.close(parent, length, true); fbx.patch(child.start, fbx.out->length + 10, 4); fbx.end();
+      rejects(fbx, "record end offset outside its parent"); }
+    { // nested records that stop short of their parent's end
+      FbxTestWriter fbx; FbxTestWriter::Record parent = fbx.open("Parent"); size_t length = fbx.props_done(parent);
+      fbx.leaf("Child", 1); fbx.close(parent, length, true); fbx.zeros(4);
+      fbx.patch(parent.start, fbx.out->length, 4); fbx.end();
+      rejects(fbx, "nested records do not end at the record end"); }
+    { // 65 levels of nesting
+      FbxTestWriter fbx; FbxTestWriter::Record levels[65]; size_t lengths[65];
+      for (int i = 0; i < 65; i++) { levels[i] = fbx.open("N"); lengths[i] = fbx.props_done(levels[i]); }
+      for (int i = 64; i >= 0; i--) fbx.close(levels[i], lengths[i], true);
+      fbx.end();
+      rejects(fbx, "records nest deeper than 64"); }
+    { FbxTestWriter fbx; fbx.leaf("A", 1); fbx.end();
+      for (size_t cut : {(size_t)20, (size_t)30, fbx.out->length - 14, fbx.out->length - 1}) {
+          SCOPED_TRACE(cut);
+          Input* input = parse(fbx.out->str, "fbx", nullptr, cut);
+          ASSERT_NE(input, nullptr); EXPECT_TRUE(input->parse_failed);
+      } }
+    { FbxTestWriter fbx(6100); fbx.end(); rejects(fbx, "FBX 6.x and older use another object model"); }
+    { FbxTestWriter fbx(7800); fbx.end(); rejects(fbx, "newer than FBX 7.7"); }
+    { FbxTestWriter fbx(7500); FbxTestWriter::Record r = fbx.open("Wide"); fbx.scalar(r, 'I', 9, 4);
+      fbx.close(r, fbx.props_done(r), false); fbx.end();
+      Input* input = parse(fbx.out->str, "fbx", nullptr, fbx.out->length);
+      ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+      EXPECT_EQ(ElementReader(input->root).findChildElement("Wide").get_attr("props").asArray().get(0).asInt(), 9); }
+}
+
+TEST_F(ModelInputTest, FbxAsciiMapsNumbersArraysAndBareWordsAndRejectsMalformedText) {
+    const char* header = "; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\n";
+    char text[512];
+    snprintf(text, sizeof(text), "%sObjects:  {\n\tGeometry: 7, \"Geometry::Body\", \"Mesh\" {\n"
+        "\t\tVertices: *4 {\n\t\t\ta: 0,1,\n\t\t\t2.5,-3e1\n\t\t} \n\t\tShading: T ; comment\n\t}\n}\n", header);
+    Input* input = parse(text, nullptr, "scene.fbx");
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    ElementReader root(input->root);
+    EXPECT_FALSE(root.get_attr("binary").asBool()); EXPECT_EQ(root.get_attr("version").asInt(), 7400);
+    ElementReader geometry = root.findChildElement("Objects").findChildElement("Geometry");
+    EXPECT_EQ(geometry.get_attr("props").asArray().get(0).getType(), LMD_TYPE_INT);
+    Item vertices = geometry.findChildElement("Vertices").get_attr("props").asArray().get(0).item();
+    ASSERT_EQ(get_type_id(vertices), LMD_TYPE_ARRAY_NUM);
+    EXPECT_EQ(vertices.array_num->get_elem_type(), ELEM_FLOAT64);
+    EXPECT_DOUBLE_EQ(ItemReader(vertices.to_const()).asArray().get(3).asFloat(), -30.0);
+    EXPECT_TRUE(geometry.findChildElement("Shading").get_attr("props").asArray().get(0).isSymbol());
+    static const struct { const char* body; const char* reason; } invalid[] = {
+        {"A: *3 {\n a: 1,2\n}\n", "array has fewer values than its length"},
+        {"A: *1 {\n a: 1,2\n}\n", "array has more values than its length"},
+        {"A: 1.#INF\n", "malformed number"},
+        {"A: \"open\n", "unterminated string"},
+        {"A:  {\n B: 1\n", "unterminated record body"},
+        {"A: 1 2\n", "unexpected text after a record"},
+        {"}\n", "unmatched '}'"},
+    };
+    for (const auto& c : invalid) {
+        SCOPED_TRACE(c.body);
+        snprintf(text, sizeof(text), "%s%s", header, c.body);
+        Input* bad = parse(text, "fbx");
+        ASSERT_NE(bad, nullptr); EXPECT_TRUE(bad->parse_failed);
+        ASSERT_NE(bad->parse_error_message, nullptr);
+        EXPECT_NE(strstr(bad->parse_error_message, c.reason), nullptr) << bad->parse_error_message;
+    }
+    Input* unversioned = parse("; FBX 7.4.0 project file\nObjects:  {\n}\n", "fbx");
+    ASSERT_NE(unversioned, nullptr); EXPECT_TRUE(unversioned->parse_failed);
+    EXPECT_NE(strstr(unversioned->parse_error_message, "missing FBXHeaderExtension FBXVersion"), nullptr);
+}
+
+TEST_F(ModelInputTest, FbxDetectionUsesTheBinarySignatureAndTheAsciiHeader) {
+    MimeDetector* detector = mime_detector_init();
+    EXPECT_STREQ(detect_mime_from_filename(detector, "Character.FBX"), "model/x-fbx");
+    EXPECT_STREQ(detect_mime_from_content(detector, "Kaydara FBX Binary  \0\x1a\0\xe8\x1c\0\0", 27), "model/x-fbx");
+    EXPECT_STREQ(detect_mime_from_content(detector, "; FBX 7.4.0 project file\n", 25), "model/x-fbx");
+    EXPECT_STRNE(detect_mime_from_content(detector, "Kaydara FBX Binary  X", 21), "model/x-fbx");
+    EXPECT_STREQ(mime_extension_from_content_type("model/x-fbx"), ".fbx");
+    mime_detector_destroy(detector);
+    FbxTestWriter fbx; fbx.leaf("A", 1); fbx.end();
+    Input* input = parse(fbx.out->str, nullptr, nullptr, fbx.out->length);
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    EXPECT_TRUE(ElementReader(input->root).hasTag("fbx"));
 }
