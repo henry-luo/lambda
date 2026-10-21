@@ -5,7 +5,7 @@
 > changes. MathML's first delivery stage was added on 2026-10-14 in §11.
 > Remaining gaps are recorded in §10 and §11.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
-> **Formal linkage:** **D7.2.4v3 / D7.2.8** — package namespace, distribution and source-specific math policy;
+> **Formal linkage:** **D7.2.4v3 / D7.2.8 / D7.2.9** — package namespace, distribution, source-specific math policy and bundled font URLs;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
 > **D7.4.6 / S12.1.1v2** — declared host-function effects;
 > **D4.2.3 / D4.5.2 / D5.4.2–D5.4.4** — context ownership and retention;
@@ -626,12 +626,15 @@ geometry, with visible overflow for intentionally protruding ink. It carries
 useful text fallback, not MathML, speech, or a complete accessibility model.
 
 Ordinary encoded glyphs emit SVG text with the exact measured family, weight,
-style and size. Used bundled/supplied text faces accompany the SVG as embedded
-font declarations. Font-local unencoded variants and assembly pieces use
-outlines; rules and other geometry remain vector elements. Installed-font
-choices and unresolved platform fallback require matching resources in the
-viewer. Full-face embedding trades larger SVGs for portable declared fonts;
-font subsetting is not part of the current design.
+style and size. Under **D7.2.9** (USER, 2026-10-21), their `@font-face` rules
+reference the bundled font files by URL. Measurement still consumes IO-owned
+bytes under D7.1.2v2; serializing a formula does not base64-encode those bundled
+bytes again. Caller-supplied faces may provide a `src` URL alongside their
+measurement bytes; bytes-only custom faces retain their existing data URLs.
+Font-local unencoded variants and assembly pieces use outlines; rules and
+other geometry remain vector elements. Installed-font choices and unresolved
+platform fallback require matching resources in the viewer. Exported SVGs
+referencing bundled fonts require access to that package tree.
 
 MathLive class names, vlist DOM structure, CEIL@2 CSS rounding, and historical
 `lm_` HTML snapshots are not current output contracts. The renderer requires
@@ -879,8 +882,9 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   math package. That corpus completes in the current baseline, but this does
   not establish the timeout's cause or resolution. Neither an all-green
   baseline nor complete UI verification is claimed here.
-- Bound platform-font fallback and standalone portability. A smoke check for
-  external font URLs does not prove every resolved platform face is embedded.
+- Bound platform-font fallback and standalone portability. Under D7.2.9, the
+  corpus checks that bundled font URLs resolve to distributed font files;
+  relocated exports still require those resources to remain available.
   Ordinary-font measurements also retain the host's shaping limitations.
 - Broaden native painting, font-lifetime, installed-font, Linux and Windows
   coverage before claiming cross-platform equivalence. Performance evidence
@@ -1163,6 +1167,7 @@ On 2026-10-12 the older math notes under `vibe/latex/` were retired into this do
 | Math3 and Math4, through 2026-06-18 | Expanded the formula corpus from 206 to 921 and exposed the limits of case-tuned constants. Rule 15/18 and full-precision composition replaced major fraction/script tables. Historical HTML parity reached about 825/921, a different metric from the current smoke gate. |
 | Math5 box convergence | Removed competing raw/render/strut extent channels as producers acquired real measured boxes. The useful invariant is one full-precision box; ~~MathLive DOM and CEIL@2 emission as authority~~ was superseded. |
 | 2026-10-08–2026-10-09 | Moved production geometry to actual font facts with optional MATH, existing CMU/KaTeX distribution and supplied-font support. Removed STIX and the legacy MathLive renderer/tables/styles. SVG text with embedded fonts replaced ordinary-glyph outline-only painting. |
+| 2026-10-21 | D7.2.9 replaces per-formula bundled-font embedding with file URLs. Glyph measurement retains byte snapshots; bytes-only custom faces retain their existing embedding. Snapshot audits compare all content and geometry with only font source URLs normalized. |
 | 2026-10-09 | Added context-owned font snapshot reuse and corrected native SVG scrolling/hit-test cache lifetimes. Release comparisons retained output/target evidence; those host optimizations did not change math policy. |
 | 2026-10-09–2026-10-10 | Approved the CM TeX companion; audited scripts, fractions, spacing, accents, operators and delimiters against TeX. Added native PNG/pdfLaTeX comparison infrastructure and restored several missing command families. The later audit explicitly rejected successful rendering as sufficient conformance evidence. |
 | 2026-10-10 | Ratified TeX-first layout and no-new-font rules. Fixed CM symbol fallback, bracket annotation policy/geometry, vertical-arrow sizing, structural row separators and uppercase KaTeX logo handling. Removed the attempted STIX reintroduction and defined closed multiple integrals through existing-glyph TeX composition. Unsourced extension geometry remains listed in §10. |

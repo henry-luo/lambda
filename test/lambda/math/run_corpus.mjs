@@ -11,6 +11,7 @@ import { parse_lambda_json } from './lambda_math_renderer.mjs';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const TEMP_DIR = path.join(PROJECT_ROOT, 'temp');
+const BUNDLED_PACKAGE = path.resolve(PROJECT_ROOT, process.env.LAMBDA_HOME || 'lmd', 'package');
 
 function parseArgs(argv) {
   const opts = {
@@ -81,10 +82,19 @@ function checkGeometry(actual) {
     return 'nonfinite SVG geometry';
   if (/<link\b/.test(actual.html) || /class="lm_/.test(actual.html))
     return 'external stylesheet or legacy markup dependency';
-  // Text is intentional; declared font resources must travel with the SVG.
+  // D7.2.9: bundled fonts stay file resources; every emitted URL must resolve.
   const styles = [...actual.html.matchAll(/<style>([\s\S]*?)<\/style>/g)];
-  if (styles.some(([, css]) => [...css.matchAll(/url\(([^)]+)\)/g)].some(([, url]) => !url.startsWith('data:'))))
-    return 'external font URL';
+  for (const [, css] of styles) {
+    for (const [, raw] of css.matchAll(/url\(("(?:\\.|[^"\\])*"|[^)]+)\)/g)) {
+      let source;
+      try { source = JSON.parse(raw); } catch { return 'invalid quoted font URL'; }
+      if (typeof source !== 'string' || source.startsWith('data:')) return 'embedded bundled font';
+      const relative = path.relative(BUNDLED_PACKAGE, source);
+      if (!path.isAbsolute(source) || path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep) ||
+          !/\.(woff2?|ttf|otf)$/i.test(source) || !fs.existsSync(source))
+        return 'unavailable bundled font URL';
+    }
+  }
   const glyphs = [...actual.html.matchAll(/<text\b([^>]*)>/g)];
   if (glyphs.some(([, attrs]) => !/font-family="[^"]+"/.test(attrs) || !/font-size="[0-9.]+"/.test(attrs)))
     return 'text glyph missing measured font';

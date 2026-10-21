@@ -2,12 +2,15 @@
 import radiant
 import c: .common
 import symbols: .glyphs
+import font_files: lambda.doc.font
 
 pub let TEXT_FAMILY = "LambdaMusicText"
 pub fn prepare() map^ {
-    let base = sys.lambda.home# ++ "/package/"
-    let faces = [{font_family: "LambdaMusicSymbols", data: input(base ++ "music/fonts/Bravura.otf", 'binary')^},
-        {font_family: TEXT_FAMILY, data: input(base ++ "doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^}]
+    let base = font_files.resource_path("")
+    let symbol_path = base ++ "music/fonts/Bravura.otf"
+    let text_path = base ++ "doc/latex/fonts/Serif/cmunrm.woff2"
+    let faces = [{font_family: "LambdaMusicSymbols", src: symbol_path, data: input(symbol_path, 'binary')^},
+        {font_family: TEXT_FAMILY, src: text_path, data: input(text_path, 'binary')^}]
     let names = [for (k,v in symbols.codepoints) string(k)]
     let metrics = radiant.math_metrics({font_family: "LambdaMusicSymbols", font_size: 4.0},
         [for (n in names) symbols.codepoints[n]], faces)

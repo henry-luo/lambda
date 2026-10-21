@@ -64,8 +64,10 @@ paint servers and vector export retain geometry. Owned image resources keep
 retained replay independent of temporary SVG font contexts. No stroke expansion
 or global gamma change is used.
 
-Math emits `<text>` with the measured face/style and embeds the used bundled
-or supplied fonts. Only unencoded OpenType variants/assembly pieces retain
+Math emits `<text>` with the measured face/style. **D7.2.9** (USER,
+2026-10-21) makes used bundled faces URL references to the distributed font
+files; supplied bytes without a resource URL retain data-URL embedding.
+Only unencoded OpenType variants/assembly pieces retain
 paths; installed-font options still depend on viewer font availability.
 Font selection remains independent of rasterization: GitHub's observed STIX
 Two Math face has a different design from the CMU default.
@@ -82,8 +84,9 @@ coverage at 1×/2× with independent font-context density, pixel ownership after
 font-context destruction, and transformed/vector fallback. All 921 math corpus
 cases and the two updated document-math UI cases pass. The focused package
 run passed 66/67 cases; `latex_test_latex_phase3_corpus` still exceeds its
-60-second limit even when rerun alone. Full embedded font resources increase
-SVG size, especially with many formulas; no subsetting is implemented.
+60-second limit even when rerun alone. That original version embedded full
+font resources in every formula; D7.2.9 replaces that bundled-font policy
+with shared file references.
 
 The broad Radiant gate stopped at
 `SecondaryViewTest.NumberedSparseColumnsLeaveAutomaticTracksAndImplicitDeclarationsAtTheirSourceEndpoint`.
