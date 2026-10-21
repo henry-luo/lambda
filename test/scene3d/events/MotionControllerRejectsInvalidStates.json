@@ -1,0 +1,81 @@
+{
+  "name": "MotionControllerRejectsInvalidStates",
+  "viewport": {
+    "width": 120,
+    "height": 600
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#valid",
+      "width": 80,
+      "height": 60
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#missing",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#autoplay",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#shared",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#duplicate",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#next",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#request",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#loop",
+      "width": 80,
+      "height": 60,
+      "success": false,
+      "diagnostic": "invalid motion controller"
+    }
+  ]
+}

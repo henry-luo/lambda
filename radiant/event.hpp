@@ -75,6 +75,9 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     double elapsed_time);
 void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,const char* type,
     const char* clip,uint64_t action,double detail,double seconds);
+// a motion controller's state change (Lambda_Pkg_Motion.md §9.2): {controller, from, to, time}
+bool radiant_dispatch_scene_state_event(UiContext* uicon,DomElement* target,const char* controller,
+    const char* from,const char* to,double seconds);
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     const char* type, double detail, double seconds);
 bool radiant_queue_content_visibility_event(UiContext* uicon, DomElement* target,

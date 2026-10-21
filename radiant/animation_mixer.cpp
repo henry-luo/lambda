@@ -58,7 +58,7 @@ void animation_mixer_destroy(AnimationMixerState* mixer) {
     mem_free(mixer);
 }
 AnimationActionState* animation_mixer_action(AnimationMixerState* mixer, const AnimationClipView& clip) {
-    if (!mixer || mixer->updating || !clip.identity || !clip.channels || !clip.count || clip.count > 256 ||
+    if (!mixer || mixer->updating || !clip.identity || !clip.channels || !clip.count || clip.count > 1024 ||
         !isfinite(clip.duration) || clip.duration < 0) return nullptr;
     for (auto* action = mixer->actions; action; action = action->next)
         if (action->clip.identity == clip.identity) return action;
