@@ -63,6 +63,8 @@
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
+Item node_url_search_params_prototype(void);
+static bool js_activate_url_primitives(void);
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
 extern "C" Item js_get_intl_object_value(void);
@@ -138,7 +140,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
     {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
     {"Response", JS_HOST_GROUP_HEADERS}, {"performance", JS_HOST_GROUP_PERFORMANCE},
-    {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE}, {"MessageChannel", JS_HOST_GROUP_MESSAGING},
+    {"Performance", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE},
+    {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
     {"Option", JS_HOST_GROUP_OPTION}, {"OffscreenCanvas", JS_HOST_GROUP_CANVAS},
@@ -1555,6 +1558,10 @@ static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mar
     return ItemNull;
 }
 JS_FORWARD_STATIC_ITEM(js_performance_empty_entries, (void), js_array_new, (0))
+
+static Item js_performance_illegal_constructor(void) {
+    return js_throw_type_error("Illegal constructor");
+}
 
 static Item js_performance_empty_entries_2(Item name, Item type) {
     (void)type;
@@ -13744,7 +13751,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         // globalThis.performance shares the document clock used by rAF/events.
         {
             extern Item js_performance_observer_new(Item callback);
-            RootFrame performance_roots(5);
+            RootFrame performance_roots(8);
             // complete the existing MVP namespace when its public host family is observed.
             Item perf = mvp_lmd_realm_intrinsic("performance", 11);
             bool shared = get_type_id(perf) == LMD_TYPE_MAP;
@@ -13769,7 +13776,30 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             }
             timing_root.set(js_new_object());
             js_set_key_cstr(perf, "timing", timing_root.get());
-            js_set_key_cstr(global.get(), "performance", perf);
+            Rooted<Item> constructor_root(performance_roots, js_install_native_constructor(
+                global.get(), "Performance", js_performance_illegal_constructor));
+            Rooted<Item> prototype_root(performance_roots, js_new_object());
+            Rooted<Item> method_root(performance_roots, ItemNull);
+            js_set_function_name(constructor_root.get(), js_name_item("Performance"));
+            js_initialize_native_constructor_prototype(constructor_root.get(), prototype_root.get());
+            js_set_prototype(prototype_root.get(), js_get_intrinsic_prototype_for_class(JS_CLASS_EVENT_TARGET));
+            js_set_key_cstr(prototype_root.get(), "constructor", constructor_root.get());
+            js_set_key_default(prototype_root.get(), js_well_known_symbol_key(4), js_name_item("Performance"));
+            // MVP namespaces keep their traced prototype in the realm's private slot.
+            if (shared) JS_RETURN_IF_ERROR(mvp_lmd_set_prototype(perf_root.get(), prototype_root.get()));
+            else js_set_prototype(perf_root.get(), prototype_root.get());
+            // libraries capture IDL methods before using the instance. Keep one
+            // namespace and move its existing implementations to that prototype.
+            static const char* const methods[] = {
+                "now", "mark", "measure", "getEntries", "getEntriesByName", "getEntriesByType"
+            };
+            for (const char* name : methods) {
+                method_root.set(js_get_key_cstr(perf_root.get(), name));
+                js_set_key_cstr(prototype_root.get(), name, method_root.get());
+                if (shared) JS_RETURN_IF_ERROR(mvp_lmd_property_delete(perf_root.get(), js_name_item(name)));
+                else js_delete_property(perf_root.get(), js_name_item(name));
+            }
+            js_set_key_cstr(global.get(), "performance", perf_root.get());
             Item perf_observer = js_new_native_constructor(
                 js_performance_observer_new);
             observer_root.set(perf_observer);
@@ -13797,8 +13827,16 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
     case JS_HOST_GROUP_URL: {
         // globalThis.URLSearchParams
         {
-            js_install_native_constructor(global.get(), "URLSearchParams",
-                js_global_url_search_params_new);
+            if (!js_activate_url_primitives()) return ItemError;
+            RootFrame roots(2);
+            Rooted<Item> constructor(roots, js_install_native_constructor(global.get(),
+                "URLSearchParams", js_global_url_search_params_new));
+            Rooted<Item> prototype(roots, node_url_search_params_prototype());
+            JS_RETURN_IF_ERROR(prototype.get());
+            js_set_function_name(constructor.get(), js_name_item("URLSearchParams"));
+            JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+            js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+            js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
         }
 
         // globalThis.URL constructor
@@ -15038,6 +15076,18 @@ Item js_intrinsic_ctor_content_visibility_auto_state_change_event_construct_body
         JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
 }
 
+Item js_intrinsic_ctor_security_policy_violation_event_construct_body(Item, Item* args,
+        int argc, Item new_target, uint64_t*) {
+    if (argc < 1) return js_throw_type_error("SecurityPolicyViolationEvent requires a type argument");
+    RootFrame roots(2);
+    Rooted<Item> target(roots, new_target);
+    Rooted<Item> event(roots, js_ctor_security_policy_violation_event(args[0],
+        argc > 1 ? args[1] : make_js_undefined()));
+    JS_RETURN_IF_ERROR(event.get());
+    return js_apply_constructed_default_prototype(event.get(), target.get(),
+        JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT);
+}
+
 Item js_intrinsic_ctor_message_event_construct_body(Item callee, Item* args,
         int argc, Item new_target, uint64_t* result_home) {
     if (argc < 1) return js_throw_type_error("MessageEvent requires a type argument");
@@ -15245,6 +15295,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_STATIC_RANGE,
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
         JS_CLASS_MESSAGE_EVENT, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
+        JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -16000,14 +16051,18 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_function_root_item_if_needed(event_ctor, &event_ctor->prototype);
     }
     // Populate static methods as own properties for all constructors
-    if (ctor_id == JS_CTOR_MESSAGE_EVENT ||
+    if (ctor_id == JS_CTOR_EVENT_TARGET || ctor_id == JS_CTOR_MESSAGE_EVENT ||
+            ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT ||
             ctor_id == JS_CTOR_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT) {
         RootFrame roots(1);
         Rooted<Item> prototype(roots, js_new_object());
         js_initialize_native_constructor_prototype(fn_item, prototype.get());
         js_set_key_cstr(prototype.get(), "constructor", fn_item);
         js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
-        if (ctor_id == JS_CTOR_MESSAGE_EVENT) js_message_event_install_prototype(prototype.get());
+        if (ctor_id == JS_CTOR_EVENT_TARGET) js_event_target_install_methods(prototype.get());
+        else if (ctor_id == JS_CTOR_MESSAGE_EVENT) js_message_event_install_prototype(prototype.get());
+        else if (ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT)
+            js_security_policy_violation_event_install_prototype(prototype.get());
         else js_content_visibility_event_install_prototype(prototype.get());
     }
     js_populate_constructor_statics(fn_item, name, strlen(name));
@@ -16083,6 +16138,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT:
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
         case JS_CLASS_MESSAGE_EVENT:
+        case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT:
             return JS_CLASS_EVENT;
         case JS_CLASS_FOCUS_EVENT:
         case JS_CLASS_MOUSE_EVENT:

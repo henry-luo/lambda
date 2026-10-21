@@ -36,6 +36,7 @@
 #include "../lambda.hpp"
 #include "../../lib/math_utils.h"
 #include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/async.h"
 #include "../io/mark_builder.hpp"
@@ -7901,8 +7902,6 @@ extern "C" bool dom_css_element_matches_range(void* element_ptr,
     return out_of_range ? outside : !outside;
 }
 
-// Build and return a ValidityState plain JS object for the given element.
-
 // For a <select required> element, returns true iff no <option> is
 // "selected" with a non-empty value (i.e. the placeholder option requires
 // user to explicitly pick a non-empty one).
@@ -8988,17 +8987,9 @@ static bool dom_radio_group_has_checked(DomElement* element) {
 }
 
 typedef struct DomValiditySnapshot {
-    bool value_missing;
-    bool type_mismatch;
-    bool pattern_mismatch;
-    bool too_long;
-    bool too_short;
-    bool range_overflow;
-    bool range_underflow;
-    bool step_mismatch;
-    bool bad_input;
-    bool custom_error;
-    bool valid;
+#define DOM_VALIDITY_FIELD(name, js, field) bool field;
+#include "dom_validity_fields.def"
+#undef DOM_VALIDITY_FIELD
 } DomValiditySnapshot;
 
 static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
@@ -9209,31 +9200,31 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
     }
 
     return {value_missing, type_mismatch, pattern_mismatch, too_long,
-        too_short, range_overflow, range_underflow, step_mismatch, bad_input,
+        too_short, range_underflow, range_overflow, step_mismatch, bad_input,
         custom_error, valid};
 }
 
 static Item _build_validity_state(DomElement* elem) {
-    DomValiditySnapshot validity = dom_compute_validity(elem);
-    Item vs = js_new_object();
-    // Set Symbol.toStringTag = "ValidityState" so
-    // Object.prototype.toString.call(validity) === "[object ValidityState]"
-    dom_realm_set(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
-    auto _b = [](bool v) -> Item { return (Item){.item = b2it(v)}; };
-#define JS_DOM_VALIDITY_FIELDS(M) \
-    M("valueMissing", value_missing) M("typeMismatch", type_mismatch) \
-    M("patternMismatch", pattern_mismatch) M("tooLong", too_long) \
-    M("tooShort", too_short) M("rangeOverflow", range_overflow) \
-    M("rangeUnderflow", range_underflow) M("stepMismatch", step_mismatch) \
-    M("badInput", bad_input) M("customError", custom_error) M("valid", valid)
-#define JS_DOM_SET_VALIDITY_FIELD(name, value) dom_realm_set_cstr(vs, name, _b(validity.value));
-    JS_DOM_VALIDITY_FIELDS(JS_DOM_SET_VALIDITY_FIELD)
-#undef JS_DOM_SET_VALIDITY_FIELD
-#undef JS_DOM_VALIDITY_FIELDS
-    return vs;
+    // validity is a live view; retained getters must observe later control edits.
+    return dom_wrap_validity_state(elem);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_validity_item_is_valid, (Item flag), (((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL)))
 
+extern "C" Item dom_validity_state_flag(Item state, Item name) {
+    if (get_type_id(state) != LMD_TYPE_VMAP || !state.vmap ||
+        state.vmap->host_type != jube_iface_type_by_name("validity_state", 14) ||
+        !state.vmap->host_data) {
+        return dom_realm_throw_type_error("ValidityState getter called on incompatible receiver");
+    }
+    DomElement* elem = (DomElement*)state.vmap->host_data;
+    DomValiditySnapshot validity = dom_compute_validity(elem);
+    String* property = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : nullptr;
+    if (!property) return make_js_undefined();
+#define DOM_VALIDITY_FIELD(member, js, field) \
+    if (str_eq_const(property->chars, property->len, #js)) return (Item){.item = b2it(validity.field)};
+#include "dom_validity_fields.def"
+#undef DOM_VALIDITY_FIELD
+    return make_js_undefined();
+}
 static bool dom_is_constraint_control(DomElement* elem) {
     if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
     return str_icmp_cstr(elem->tag_name, "input") == 0 ||
@@ -9338,9 +9329,7 @@ static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
             if (dom_is_constraint_control(elem)) {
-                Item vs = _build_validity_state(elem);
-                Item vf = dom_realm_get_cstr(vs, "valid");
-                if (!dom_validity_item_is_valid(vf)) {
+                if (!dom_compute_validity(elem).valid) {
                     if (all_valid) *all_valid = false;
                     dom_dispatch_invalid_event(dom_wrap_element(elem));
                 }
@@ -9376,9 +9365,7 @@ static Item dom_check_or_report_validity(Item elem_item, bool report) {
     }
 
     if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
-    Item vs = _build_validity_state(elem);
-    Item valid_flag = dom_realm_get_cstr(vs, "valid");
-    bool is_valid = dom_validity_item_is_valid(valid_flag);
+    bool is_valid = dom_compute_validity(elem).valid;
     if (!is_valid) {
         dom_dispatch_invalid_event(elem_item);
     }
@@ -9392,8 +9379,7 @@ static DomElement* dom_first_invalid_control(DomNode* node) {
         if (!current->is_element()) continue;
         DomElement* elem = current->as_element();
         if (dom_is_constraint_control(elem)) {
-            Item state = _build_validity_state(elem);
-            if (!dom_validity_item_is_valid(dom_realm_get_cstr(state, "valid"))) {
+            if (!dom_compute_validity(elem).valid) {
                 return elem;
             }
         }

@@ -8,3 +8,4 @@ void node_url_runtime_attach(void* session);
 void node_url_runtime_reset(void* session);
 void node_url_runtime_detach(void* session);
 Item node_url_namespace(void);
+Item node_url_search_params_prototype(void);

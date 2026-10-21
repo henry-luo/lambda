@@ -34,6 +34,37 @@ The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map neve
 
 **Identity cache.** `dom_cached_node_wrapper` / `dom_cache_node_wrapper` in `dom_cssom.cpp` use a realm-owned hash index and collector-registered weak slots. Entries lease native node generations through the document registry, preserving repeated wrapper identity without rooting unreachable wrappers (D4.5.1v4). The document stub uses the Document interface, so `range.startContainer === document` holds.
 
+**Captured validation and event interfaces (verified 2026-10-21).**
+`HTMLInputElement.prototype.value` and `validity` are published before the first
+wrapper exists. `ValidityState` is a cached live native view over the input,
+with declared readonly flag getters and receiver validation (**D7.4.4**).
+Its weak identity cache and traced node owner preserve detached reads through
+collection (**D4.5.1v4, D5.3.3**). `dom_validity_fields.def` supplies the native
+snapshot, getter bindings and interface declarations from one flag catalog.
+`EventTarget` publishes its existing listener methods on its prototype;
+`SecurityPolicyViolationEvent` uses the native Event record and traced immutable
+payload, including readonly getters and normal Event inheritance. This adds the
+script interface, without claiming CSP policy enforcement. The corresponding
+`test/js/` fixtures exercise captured members in AST/MIR and forced-GC runs.
+
+**Geometry observer checkpoints (verified 2026-10-21).** Forced layout requests
+one deferred geometry sample per observer realm. Resize/Intersection observers
+compare the settled box after the current script's writes; temporary hide/read/
+restore/read sequences cannot publish intermediate sizes and feed their own
+callbacks. MutationObserver delivery remains separately queued. Realm-owned
+pending/sampling flags reset with observer state; callbacks and targets keep
+the existing precise roots (**D5.3.3**). The stable-checkpoint JS fixture agrees
+with Chrome and checks that a subsequent real size change still notifies.
+
+**Host namespace prototypes (verified 2026-10-21).** `Performance` links the
+existing clock/entry methods through its EventTarget-derived prototype. MVP
+namespaces use their own traced prototype/deletion protocol, preserving public
+identity and method overrides (**D6.2.2v2, D3.4.7**). The existing Performance
+Timeline remains partial; resource-buffer APIs and complete entry production
+remain outstanding. Global and Node `URLSearchParams` share the node-url-owned
+prototype and method identities, including iterator publication. No instance
+needs to exist before a library captures those methods.
+
 **Attribute nodes.** `DomAttr` is a document-owned node with independent namespace/name/value storage, an optional owner element, and a Node-derived `Attr` interface. `getAttributeNode`, `NamedNodeMap`, and attribute-node mutation methods share canonical native identity. Replacement detaches the old Attr without changing its value; attached `value` writes use ordinary mutation handling. A live Attr wrapper leases its owner, and adoption transfers registry leases while retaining the physical source pool. Removed attributes and their strings recycle through native retirement (D4.5.1v4); temporary MutationRecord fields use precise roots until the observer's pending list owns them (D5.3.3).
 
 **Document proxy & foreign docs.** Bare `document` resolves to a singleton branded VMap whose `host_data` is the active browsing-context `DomDocument*`. The Radiant declared interface publishes document operations as concrete callable properties; properties use `js_document_proxy_get_property`. `document.implementation.createHTMLDocument`/`createDocument` build branded foreign-document VMaps whose bridge swaps the active document around the same declared operations when needed.

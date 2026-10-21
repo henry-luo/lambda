@@ -864,3 +864,68 @@ the new descriptor case. The Premake profile-switch self-test, layout cast lint
 and diff checks also pass. Reports: `temp/session-unit-coverage/`. This addition
 changes tests/documentation only; the earlier broad engine gates and page timings
 are not rerun or presented as fresh measurements.
+
+## Online sweep repairs (2026-10-21)
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**, evaluator boundary
+**D5.4.1**, native interfaces **D7.4.4**. Acceptance: complete the 1,161-URL
+inventory, repair reproduced engine failures, replay affected URLs with a release
+host and run the owning regression gates. HTTP and authored-script failures stay
+visible; URLs and timeouts are unchanged.
+
+- **Container settlement:** classify fixed generated descendants before intrinsic
+  sizing; keep probe → commit monotonic. Incremental reflow starts from published
+  geometry and settles real changes without repeating bootstrap probes. Container
+  lookup skips ordinary ancestors before resolving inherited writing mode.
+- **Style validity:** retain per-element versions, inherited-value revisions and
+  context/resource keys. The document-wide `style_query_epoch` still invalidates
+  queries/publication, but no longer discards every resolved style on a local edit.
+- **Paired grid intrinsics:** measure each child's min/max contribution once for
+  both track-sizing queries. Separate track solves retain their geometry rollback;
+  the second solve consumes the existing `GridItemProp` pair. Eight nested grids
+  previously issued 513 requests; the regression bounds them at 11 and checks a
+  leaf-width mutation. This removes the exponential traversal seen on Basecamp.
+- **Resource owners:** cached SVG delivery uses its document before publication
+  and across shared UI contexts. Detached font discovery prefetches until the
+  manager has a UI owner. Fetch preloads retain bytes without image decoding.
+- **Owned shadows:** font-property copies clone mutable text-shadow lists into
+  their destination pool. Pseudo refresh/reset cannot free the parent's list.
+- **Observer checkpoints:** sample geometry once after synchronous writes settle.
+  Forced hide/read/restore/read sequences no longer queue intermediate sizes and
+  feed ResizeObserver callbacks back into themselves; real size changes notify.
+- **Native interfaces:** publish live ValidityState and captured input accessors,
+  existing Performance/EventTarget methods, the shared URLSearchParams prototype,
+  and the SecurityPolicyViolationEvent constructor. Performance Timeline remains
+  partial; this work does not claim CSP policy enforcement.
+- **Tokenizer/diagnostics:** end-tag attributes survive tokenization and are
+  ignored by tree construction per the [HTML rule](https://html.spec.whatwg.org/multipage/parsing.html#parse-error-end-tag-with-attributes).
+  The online detector also catches decoder, container, font-owner and allocator
+  errors when the viewer exits zero.
+- **RegExp compilation (D1.3 / D1.4v3):** valid Unicode email patterns exceeding
+  RE2's program budget use the existing spec matcher. The raw-pattern retry
+  previously hid that resource limit behind an unrelated syntax error.
+
+Focused qualification: 198 native text/layout cases, 175 core cases, 70 HTML
+cases and the online diagnostic detector pass. Six new JS fixtures agree with
+Chrome for the selected surface and pass AST/MIR forced-GC checks. The native
+document-realm regex case agrees with Node and passes both tiers under forced
+GC. Final Lambda and Test262 gates pass 5,897/5,897 and 40,261/40,261. Radiant
+qualification covers 6,270 cases: 6,125 full passes, 143 partial and two skipped.
+Five native groups initially failed to load after a module-profile refresh;
+relinking corrected their private-symbol bindings. The eight affected binaries
+pass 2,151 checks, and the 28-case scene-3D group also passes through the same
+runner. Original failing reports and clean retries are retained.
+
+The original release sweep completed all 1,161 URLs. Strict release replays cover
+214 affected URLs; 165 pass after retrying a transient Gentoo response. Fifteen
+of the 16 original timeout pages now pass. Todoist and Visitors still hit script
+watchdogs; missing web APIs, unresolved script exceptions and HTTP/authored
+content errors remain visible. Latest replays have no outer timeout or retained
+allocation. Page compatibility remains partial.
+
+Live repaired-page observations: Angular 2.471s, Gleap 103.612s, Authkit 0.547s,
+Basecamp 19.476s and Qonto 94.907s;
+all render, exit zero and retain no allocations. Gleap remains a performance
+target. These are diagnostic runs alongside the sweep/builds, not isolated
+benchmarks. Logs, metrics, frozen binaries/modules and provenance are under
+`temp/online-followup-20261021/`.

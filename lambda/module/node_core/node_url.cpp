@@ -30,7 +30,7 @@ struct NodeBlobUrlEntry {
 
 struct NodeUrlSessionState {
     JubePersistentValueSlots cache_values;
-    Item cache_items[2];
+    Item cache_items[3];
     ArrayList* blob_urls;
     int64_t blob_url_next_id;
 };
@@ -1575,31 +1575,9 @@ extern "C" Item js_url_search_params_new(Item init) {
     // as enumerable makes assert deep-equality compare implementation storage.
     js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
-    // set methods
-    auto usp_method = [&](const char* name, auto target, int adapter_arity) {
-        // Publishing through js_url_set_method keeps the key rooted across the
-        // function allocation. Building the key inline here let a GC inside
-        // jube_new_function() free it before the key reached the shape.
-        // URLSearchParams methods live on the prototype in Node; keeping these
-        // fallback own methods enumerable leaks per-instance functions.
-        js_url_set_method(obj, name, target, adapter_arity,
-            /*constructable=*/false, /*non_enumerable=*/true);
-    };
-    usp_method("append", js_usp_append, 2);
-    usp_method("delete", js_usp_delete, 2);
-    usp_method("get", js_usp_get, 1);
-    usp_method("getAll", js_usp_getAll, 1);
-    usp_method("has", js_usp_has, 2);
-    usp_method("set", js_usp_set, 2);
-    usp_method("sort", js_usp_sort, 0);
-    usp_method("toString", js_usp_toString, 0);
-    usp_method("forEach", js_usp_forEach, 2);
-    usp_method("keys", js_usp_keys, 0);
-    usp_method("values", js_usp_values, 0);
-    *entries_root = js_url_set_method(obj, "entries", js_usp_entries, 0, false, true).item;
-    *key_root = node_url_host->script->well_known_symbol("iterator").item;
-    js_set_key_default(obj, node_url_root_value(key_root), node_url_root_value(entries_root));
-    js_mark_non_enumerable(obj, node_url_root_value(key_root));
+    // one realm-owned prototype supports captured methods before any instance exists.
+    *key_root = node_url_search_params_prototype().item;
+    node_url_host->script->set_prototype(obj, node_url_root_value(key_root));
 
     // size as getter
     int64_t sz = js_array_length(entries);
@@ -1646,6 +1624,41 @@ static Item js_url_set_method(Item ns, const char* name, Target target,
     return fn;
 }
 
+Item node_url_search_params_prototype(void) {
+    if (!node_url_ensure_host()) return ItemError;
+    NodeUrlSessionState* state = node_url_state();
+    if (state->cache_items[2].item) return state->cache_items[2];
+    JubeScopedRoots roots(node_url_host, 3);
+    uint64_t* prototype = roots.slot(js_new_object());
+    uint64_t* method = roots.slot(ItemNull);
+    uint64_t* key = roots.slot(ItemNull);
+    if (!prototype || !method || !key) return ItemError;
+    auto install = [&](const char* name, auto target, int arity) {
+        return js_url_set_method(jube_root_item(prototype), name, target, arity, false, true);
+    };
+    install("append", js_usp_append, 2);
+    install("delete", js_usp_delete, 2);
+    install("get", js_usp_get, 1);
+    install("getAll", js_usp_getAll, 1);
+    install("has", js_usp_has, 2);
+    install("set", js_usp_set, 2);
+    install("sort", js_usp_sort, 0);
+    install("toString", js_usp_toString, 0);
+    install("forEach", js_usp_forEach, 2);
+    install("keys", js_usp_keys, 0);
+    install("values", js_usp_values, 0);
+    *method = install("entries", js_usp_entries, 0).item;
+    *key = node_url_host->script->well_known_symbol("iterator").item;
+    js_set_key_default(jube_root_item(prototype), jube_root_item(key), jube_root_item(method));
+    js_mark_non_enumerable(jube_root_item(prototype), jube_root_item(key));
+    *key = node_url_host->script->well_known_symbol("toStringTag").item;
+    *method = node_url_string("URLSearchParams").item;
+    js_set_key_default(jube_root_item(prototype), jube_root_item(key), jube_root_item(method));
+    js_mark_non_enumerable(jube_root_item(prototype), jube_root_item(key));
+    state->cache_items[2] = jube_root_item(prototype);
+    return state->cache_items[2];
+}
+
 Item node_url_namespace(void) {
     NodeUrlSessionState* state = node_url_state();
     if (!node_url_host || !state || !state->cache_values.session) return ItemNull;
@@ -1682,7 +1695,10 @@ Item node_url_namespace(void) {
     js_url_set_method(namespace_item, "urlToHttpOptions", js_url_to_http_options, 1);
 
     // URLSearchParams constructor
-    js_url_set_method(namespace_item, "URLSearchParams", js_url_search_params_new, 1, true);
+    *constructor_root = js_url_set_method(namespace_item, "URLSearchParams", js_url_search_params_new, 1, true).item;
+    *key_root = node_url_search_params_prototype().item;
+    node_url_host->script->function_set_prototype(node_url_root_value(constructor_root),
+        node_url_root_value(key_root));
 
     // default export
     Item default_key = make_string_item("default");
@@ -1718,7 +1734,8 @@ int node_url_init(const JubeHostAPI* host) {
             !host->script->new_object_with_class || !host->script->class_is ||
             !host->script->make_number || !host->script->object_create ||
             !host->script->type_of || !host->script->well_known_symbol ||
-            !host->script->iterator_prototype) return -1;
+            !host->script->iterator_prototype || !host->script->set_prototype ||
+            !host->script->function_set_prototype) return -1;
     node_url_host = host;
     return 0;
 }
@@ -1738,7 +1755,7 @@ void node_url_runtime_attach(void* session) {
     // counter between contexts.
     if (state->blob_url_next_id == 0) state->blob_url_next_id = 1;
     jube_persistent_value_slots_attach(&state->cache_values, session,
-        node_url_host->node->roots, state->cache_items, 2);
+        node_url_host->node->roots, state->cache_items, 3);
 }
 
 void node_url_runtime_reset(void* session) {

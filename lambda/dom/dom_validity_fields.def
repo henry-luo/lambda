@@ -1,0 +1,12 @@
+// shared ValidityState projection: declared name, WebIDL name, native flag.
+DOM_VALIDITY_FIELD(value_missing, valueMissing, value_missing)
+DOM_VALIDITY_FIELD(type_mismatch, typeMismatch, type_mismatch)
+DOM_VALIDITY_FIELD(pattern_mismatch, patternMismatch, pattern_mismatch)
+DOM_VALIDITY_FIELD(too_long, tooLong, too_long)
+DOM_VALIDITY_FIELD(too_short, tooShort, too_short)
+DOM_VALIDITY_FIELD(range_underflow, rangeUnderflow, range_underflow)
+DOM_VALIDITY_FIELD(range_overflow, rangeOverflow, range_overflow)
+DOM_VALIDITY_FIELD(step_mismatch, stepMismatch, step_mismatch)
+DOM_VALIDITY_FIELD(bad_input, badInput, bad_input)
+DOM_VALIDITY_FIELD(custom_error, customError, custom_error)
+DOM_VALIDITY_FIELD(valid, valid, valid)

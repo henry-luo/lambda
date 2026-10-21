@@ -4922,6 +4922,7 @@ static const JubeTypeDef radiant_types[] = {
     {#host, RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
 #include "../../input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
+    {"validity_state", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"attr", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
 };

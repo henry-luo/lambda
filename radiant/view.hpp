@@ -915,11 +915,16 @@ inline void font_prop_resolve_spacing(FontProp* font) {
         font->word_spacing_length * zoom + font->word_spacing_percent * font_prop_used_size(font) / 100.0f;
 }
 
-inline void font_prop_copy(FontProp* destination, const FontProp* source) {
+TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source);
+
+inline void font_prop_copy(FontProp* destination, const FontProp* source, Pool* pool) {
     if (!destination || !source || destination == source) return;
-    // A copied FontProp is another alias, so keep its cache entry pinned.
+    // copied font props own their mutable shadows independently (D4.5.1v4).
+    TextShadow* shadows = pool ? clone_text_shadows(pool, source->text_shadow) : nullptr;
+    if (pool) lam::free_owned_list(pool, destination->text_shadow);
     font_cache_unpin_handle(destination->font_handle);
     *destination = *source;
+    destination->text_shadow = lam::own(shadows);
     font_cache_pin_handle(destination->font_handle);
 }
 

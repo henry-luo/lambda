@@ -362,6 +362,12 @@ exports through the same bridge as MathML.
 
 ### SVG image resources (2026-10-02 verification)
 
+**2026-10-21 ownership correction (D4.5.1v4 / D4.1.4v5 / D4.5.2):** network
+delivery uses `load_document_image` with the resource manager's owning document.
+The UI's published document may still be null or belong to another document.
+The helper temporarily binds/restores that context, preserving SVG detection for
+extensionless cached files and the existing borrowed image-cache ownership.
+
 `render_svg_image` resolves the source URI in the document/resource context and
 uses the shared image cache and raster decoders, including GIF and static WebP.
 A single intrinsic-to-image-rectangle transform applies x/y and aspect fitting

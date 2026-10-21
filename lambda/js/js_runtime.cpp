@@ -17757,13 +17757,13 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     //     It consumes the normalized pattern here — before the RE2 named-group
     //     rewrite and (?m) prefix — and parses (?<name>...) natively.
     JsBtRegex* bt = nullptr;
+    JsBtFlags btflags;
+    btflags.ignore_case = compile_info.ignore_case;
+    btflags.multiline = compile_info.multiline;
+    btflags.dot_all = compile_info.dot_all;
+    btflags.unicode = has_unicode;
+    btflags.sticky = compile_info.sticky;
     if (route_to_bt) {
-        JsBtFlags btflags;
-        btflags.ignore_case = compile_info.ignore_case;
-        btflags.multiline = compile_info.multiline;
-        btflags.dot_all = compile_info.dot_all;
-        btflags.unicode = has_unicode;
-        btflags.sticky = compile_info.sticky;
         // `processed_pattern` contains RE2-only rewrites such as expanding
         // `\s` through `\p{Z}`. Keep the backtracker on the normalized
         // ECMAScript pattern, whose parser owns those syntax forms directly.
@@ -17857,18 +17857,26 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     if (!bt && !literal_fast && special_property_kind == 0) {
         re2 = new re2::RE2(processed_pattern, opts);
         if (!re2->ok()) {
+            bool size_limit = re2->error_code() == re2::RE2::ErrorPatternTooLarge;
             delete re2;
-            re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
-            if (!re2->ok()) {
-                std::string error = re2->error();
-                log_error("js regex compile error: /%.*s/%.*s: %s",
-                    pattern_len, pattern, flags_len, flags, error.c_str());
-                delete re2;
-                char msg[512];
-                snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
-                    pattern_len, pattern, flags_len, flags, error.c_str());
-                Item m = js_name_item(msg, strlen(msg));
-                return js_throw_syntax_error(m);
+            re2 = nullptr;
+            if (size_limit) {
+                // Unicode classes with bounded repetition can exceed RE2's
+                // program budget. Its limit does not make valid JS syntax invalid.
+                bt = js_bt_compile(effective_pattern, effective_pattern_len, btflags, js_input->pool);
+                if (!bt) return js_throw_range_error("RegExp matcher cannot compile size-limited pattern");
+            } else {
+                re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+                if (!re2->ok()) {
+                    log_error("js regex compile error: /%.*s/%.*s: %s",
+                        pattern_len, pattern, flags_len, flags, re2->error().c_str());
+                    char msg[512];
+                    snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
+                        pattern_len, pattern, flags_len, flags, re2->error().c_str());
+                    delete re2;
+                    Item m = js_name_item(msg, strlen(msg));
+                    return js_throw_syntax_error(m);
+                }
             }
         }
     }

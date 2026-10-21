@@ -8050,6 +8050,22 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
         return;
     }
 
+    radiant::LayoutDebugState debug = {};
+    radiant::layout_debug_init(&debug);
+    if (debug.enabled_categories & radiant::LAYOUT_DEBUG_CACHE) {
+        log_notice("[LAYOUT_PROFILE] mutation-flush: count=%d records=%d before=%d pending=%d",
+            mutations, doc->js.mutation_record_count, doc->js.reflow_pending_before_batch,
+            doc->state && doc->state->reflow_scheduler.pending);
+        for (int i = 0; i < doc->js.mutation_record_count && i < 8; i++) {
+            const DomJsMutationRecord& record = doc->js.mutation_records[i];
+            DomElement* element = record.target && record.target->is_element() ? record.target->as_element() : nullptr;
+            const char* style = element ? element->get_attribute("style") : nullptr;
+            log_notice("[LAYOUT_PROFILE] mutation-record: kind=%u property=%u target=%u tag=%s style=%.240s",
+                (unsigned)record.kind, (unsigned)record.presentation_property,
+                record.target_id, element ? element->node_name() : "", style ? style : "");
+        }
+    }
+
     uint64_t t0 = time_now_ns();
     if (active_frame_profile) pool_get_mem_stats(doc->document_pool, nullptr,
         &active_frame_profile->dom_before_commit, nullptr);

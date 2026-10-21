@@ -54,8 +54,9 @@ Html5Token* html5_token_create_eof(Arena* arena) {
 }
 
 void html5_token_add_attribute(Html5Token* token, String* name, Item value) {
-    if (token->type != HTML5_TOKEN_START_TAG) {
-        log_error("html5_token_add_attribute: token is not a start tag");
+    // end tags pass through the same attribute states; tree construction ignores their attributes.
+    if (token->type != HTML5_TOKEN_START_TAG && token->type != HTML5_TOKEN_END_TAG) {
+        log_error("html5_token_add_attribute: token is not a tag");
         return;
     }
 

@@ -74,6 +74,8 @@ struct JsObserverRuntimeState {
     int observer_count = 0;
     int observer_capacity = 0;
     bool delivery_scheduled = false;
+    bool geometry_sample_scheduled = false;
+    bool geometry_sampling = false;
     uint64_t roots_epoch = 0;
 };
 
@@ -458,7 +460,7 @@ static Item js_geometry_observer_observe(Item target_item) {
     // Geometry observation requires an initial sample even when observe() did
     // not dirty layout, but sampling waits until the current script's writes
     // settle so ResizeObserver reports the latest box once per checkpoint.
-    dom_schedule_microtask(dom_realm_new_function(js_geometry_observer_initial_sample));
+    dom_observers_post_layout();
     return make_js_undefined();
 }
 
@@ -844,7 +846,7 @@ static Item observer_new_intersection_entry(void) {
     return entry_root.get();
 }
 
-extern "C" void dom_observers_post_layout(void) {
+static void observer_sample_geometry(void) {
     // Host-driven layout can finish after the loader restored its JS context;
     // sampling is deferred until the retained runtime is installed by the pump.
     if (!context) return;
@@ -945,8 +947,31 @@ extern "C" void dom_observers_post_layout(void) {
     }
 }
 
+extern "C" void dom_observers_post_layout(void) {
+    if (!context || !js_active_runtime_state ||
+        !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
+    JsObserverRuntimeState* state = js_observer_runtime_state();
+    if (state->geometry_sampling || state->geometry_sample_scheduled) return;
+    bool observed = false;
+    for (int i = 0; i < observer_count; i++) {
+        if (observers[i]->kind != JS_OBSERVER_MUTATION && observers[i]->target_count) {
+            observed = true;
+            break;
+        }
+    }
+    if (!observed) return;
+    // forced geometry reads can expose temporary sizes inside one script turn.
+    // sample the settled box once, rather than queueing feedback from each read.
+    state->geometry_sample_scheduled = true;
+    dom_schedule_microtask(dom_realm_new_function(js_geometry_observer_initial_sample));
+}
+
 static Item js_geometry_observer_initial_sample(void) {
-    dom_observers_post_layout();
+    JsObserverRuntimeState* state = js_observer_runtime_state();
+    state->geometry_sample_scheduled = false;
+    state->geometry_sampling = true;
+    observer_sample_geometry();
+    state->geometry_sampling = false;
     return make_js_undefined();
 }
 
@@ -960,6 +985,8 @@ extern "C" void dom_observers_reset(void) {
     // which after the change would memset eight bytes through a pointer.
     observer_state_release_all(js_observer_runtime_state(), false);
     observer_delivery_scheduled = false;
+    js_observer_runtime_state()->geometry_sample_scheduled = false;
+    js_observer_runtime_state()->geometry_sampling = false;
 }
 
 #undef observers

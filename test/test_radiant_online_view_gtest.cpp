@@ -924,6 +924,8 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
         "ERROR: LeakSanitizer",
         "Segmentation fault",
         "Assertion failed",
+        "mempool: free pointer ",
+        "mempool: realloc pointer ",
         "Fatal error",
         "Failed to download HTML from URL",
         "Failed to load document",
@@ -931,7 +933,9 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
         "view: network resource failures detected",
         "network: download failed",
         "network: failed to load image",
+        "network: no UI context available for font loading",
         "Unsupported image format",
+        "IMAGE_IO: load ",
         "[BG-IMAGE] Failed",
         "resource_loaders: failed",
         "curl-multi: failed",
@@ -941,10 +945,13 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
         "execute_document_scripts: recovered from crash",
         "execute_document_scripts: post-dom exception",
         "execute_document_scripts: post-dom script task failed",
+        "execute_document_scripts: defer script task failed",
+        "execute_document_scripts: async-ready script task failed",
         "mir: undefined variable",
         "failed to resolve native fn/pn",
         "import of undefined item",
         "layout_flow_node: node visit budget",
+        "container-layout: size dependencies failed to converge",
         "stack cleanup: sigaltstack",
         "js-mir: unsupported",
         "memtrack: LEAK",
@@ -1060,6 +1067,32 @@ TEST(RadiantOnlineViewTest, GeneratedSaasLandingUrlsStayDiverse) {
         }
         EXPECT_LE(matches, 2u) << g_online_view_cases[index].url;
     }
+}
+
+TEST(RadiantOnlineViewTest, DetectsRendererErrorsEvenWhenViewSucceeds) {
+    RadiantOnlineViewResult result = {};
+    struct Case { char output[160]; const char* pattern; } cases[] = {
+        {"IMAGE_IO: load cached-file: unrecognized image signature\nview command completed with result: 0\n",
+            "IMAGE_IO: load "},
+        {"container-layout: size dependencies failed to converge after 8 passes\nview command completed with result: 0\n",
+            "container-layout: size dependencies failed to converge"},
+        {"network: no UI context available for font loading\nview command completed with result: 0\n",
+            "network: no UI context available for font loading"},
+        {"mempool: free pointer 0x123 is not owned by pool 2\nview command completed with result: 0\n",
+            "mempool: free pointer "},
+        {"mempool: realloc pointer 0x123 is not owned by pool 2\nview command completed with result: 0\n",
+            "mempool: realloc pointer "},
+        {"execute_document_scripts: defer script task failed: page.js\nview command completed with result: 0\n",
+            "execute_document_scripts: defer script task failed"},
+        {"execute_document_scripts: async-ready script task failed: page.js\nview command completed with result: 0\n",
+            "execute_document_scripts: async-ready script task failed"}
+    };
+    for (Case& entry : cases) {
+        result.output.data = entry.output;
+        EXPECT_STREQ(online_view_first_runtime_error(&result), entry.pattern);
+    }
+    result.output.data = nullptr;
+    EXPECT_EQ(online_view_first_runtime_error(&result), nullptr);
 }
 
 TEST(RadiantOnlineViewTest, LoadsExampleDotCom) {

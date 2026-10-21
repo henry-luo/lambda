@@ -52,7 +52,7 @@ struct CssResolvedStyle {
     CssGeometryContext context;
     lam::Own<CssUsedBox> used_box; // lazily allocated for dependent lengths
     CssFontKey parent_font, own_font;
-    uint64_t query_epoch, font_generation;
+    uint64_t font_generation;
     uint32_t style_version, layout_generation, revision, inherited_revision, parent_revision;
     const char* inherited_identity;
     const char* custom_identity;
@@ -265,8 +265,11 @@ static uint64_t css_font_generation(LayoutContext* context) {
 
 static CssStyleMiss css_style_input_change(LayoutContext* context, DomElement* element,
                                            const CssResolvedStyle* style) {
-    if (style->specified != element->specified_style || style->style_version != element->style_version ||
-        style->query_epoch != context->doc->style_query_epoch) return CSS_STYLE_CHANGED;
+    // the document query epoch advances for any element edit. Per-element
+    // versions and inherited/context keys already identify the affected styles.
+    if (style->specified != element->specified_style || style->style_version != element->style_version) {
+        return CSS_STYLE_CHANGED;
+    }
     DomElement* parent = css_style_parent(element);
     if (style->parent != parent || style->parent_revision != css_parent_revision(context, element) ||
         !css_font_keys_equal(style->parent_font, css_font_key(parent ? parent->font.get() : nullptr)))
@@ -538,7 +541,6 @@ void CssStyleRecordScope::commit() {
         element->web_animation_state()) css_style_unsupported(recording, CSS_STYLE_EFFECT);
     recording->specified = element->specified_style;
     recording->style_version = element->style_version;
-    recording->query_epoch = context->doc->style_query_epoch;
     recording->layout_generation = context->doc->view_tree->layout_generation;
     recording->parent = css_style_parent(element);
     recording->parent_revision = css_parent_revision(context, element);
