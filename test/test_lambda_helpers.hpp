@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include "../lambda/runtime/compiler_timing.hpp"
 #include "test_script_discovery.hpp"
+#include "test_process.h"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -582,11 +583,12 @@ inline void run_sub_batch(
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         // A failed script may leave stdout without a newline. In that case the
         // control marker shares the output line and must still close the result.
-        char* control = strchr(buffer, '\x01');
-        bool is_start = control && strncmp(control + 1, "BATCH_START ", 12) == 0;
-        bool is_end = control && strncmp(control + 1, "BATCH_END ", 10) == 0;
-        bool is_timing = control && strncmp(control + 1, "COMPILER_TIMING ", 16) == 0;
-        bool is_volume = control && strncmp(control + 1, "MIR_VOLUME ", 11) == 0;
+        const char* control = nullptr;
+        TestBatchControl kind = test_process_find_batch_control(buffer, strlen(buffer), &control);
+        bool is_start = kind == TEST_BATCH_START;
+        bool is_end = kind == TEST_BATCH_END;
+        bool is_timing = kind == TEST_BATCH_TIMING;
+        bool is_volume = kind == TEST_BATCH_VOLUME;
         if (is_start || is_end || is_timing || is_volume) {
             if (in_script && control > buffer) {
                 current_output.append(buffer, (size_t)(control - buffer));

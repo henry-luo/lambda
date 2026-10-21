@@ -54,6 +54,7 @@
 #endif
 
 #include "../lib/shell.h"
+#include "../lib/arraylist.h"
 
 namespace mir_check {
 
@@ -831,6 +832,26 @@ struct ProcessResult {
     std::string output;               // stdout with stderr merged in
 };
 
+// shared CLI argument ordering for single scripts and isolated test-batch runs.
+inline ShellResult run_lambda_command(const char* subcommand, const char* script_path,
+        bool mir_interp, bool quiet, const char* const* extra_args, const ShellOptions* options) {
+    ArrayList* args = arraylist_new(12);
+    arraylist_append(args, (void*)"./lambda.exe");
+    if (subcommand) arraylist_append(args, (void*)subcommand);
+    if (mir_interp) arraylist_append(args, (void*)"--mir-interp");
+    bool js = subcommand && strcmp(subcommand, "js") == 0;
+    if (quiet && js) arraylist_append(args, (void*)"--no-log");
+    if (script_path) arraylist_append(args, (void*)script_path);
+    if (quiet && !js) arraylist_append(args, (void*)"--no-log");
+    for (size_t i = 0; extra_args && extra_args[i]; i++) {
+        arraylist_append(args, (void*)extra_args[i]);
+    }
+    arraylist_append(args, nullptr);
+    ShellResult result = shell_exec("./lambda.exe", (const char**)args->data, options);
+    arraylist_free(args);
+    return result;
+}
+
 inline ProcessResult run_lambda_process(const std::string& script_path, const ProcessSpec& spec) {
     std::vector<ShellEnvEntry> env;
     for (size_t i = 0; i < spec.env.size(); i++) {
@@ -838,32 +859,19 @@ inline ProcessResult run_lambda_process(const std::string& script_path, const Pr
     }
     env.push_back(ShellEnvEntry{NULL, NULL});
 
-    std::vector<std::string> argv_storage;
-    argv_storage.push_back("./lambda.exe");
-    if (spec.language == LANG_JS) {
-        argv_storage.push_back("js");
-        if (spec.mir_interp) argv_storage.push_back("--mir-interp");
-        if (spec.quiet) argv_storage.push_back("--no-log");
-        argv_storage.push_back(script_path);
-    } else {
-        // a procedural script needs the `run` subcommand to execute main().
-        if (spec.procedural) argv_storage.push_back("run");
-        if (spec.mir_interp) argv_storage.push_back("--mir-interp");
-        argv_storage.push_back(script_path);
-        if (spec.quiet) argv_storage.push_back("--no-log");
-    }
+    ArrayList* extra_args = arraylist_new((int)spec.extra_args.size() + 1);
     for (size_t i = 0; i < spec.extra_args.size(); i++) {
-        argv_storage.push_back(spec.extra_args[i]);
+        arraylist_append(extra_args, (void*)spec.extra_args[i].c_str());
     }
-
-    std::vector<const char*> argv;
-    for (size_t i = 0; i < argv_storage.size(); i++) argv.push_back(argv_storage[i].c_str());
-    argv.push_back(NULL);
+    arraylist_append(extra_args, nullptr);
 
     ShellOptions shell_options = {0};
     shell_options.env = &env[0];
     shell_options.merge_stderr = true;
-    ShellResult shell_result = shell_exec("./lambda.exe", &argv[0], &shell_options);
+    const char* subcommand = spec.language == LANG_JS ? "js" : spec.procedural ? "run" : nullptr;
+    ShellResult shell_result = run_lambda_command(subcommand, script_path.c_str(), spec.mir_interp,
+        spec.quiet, (const char* const*)extra_args->data, &shell_options);
+    arraylist_free(extra_args);
 
     ProcessResult result;
     result.exit_code = shell_result.exit_code;
