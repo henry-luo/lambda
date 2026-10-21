@@ -85,7 +85,7 @@ These libraries and tools are required on every platform.
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
 | **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Vendored at `lib/re2/` (`lib/re2/VENDOR.md`), built into `build_temp/re2_build/` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
+| **RE2** | Vendored at `lib/re2/`, built by the JSON-owned Premake `re2` target into `build/lib/<platform>/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
 | **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
@@ -693,7 +693,7 @@ A fresh worktree has none of the ignored directories. Worktrees that Claude Code
 
 ```bash
 MAIN=<main checkout>
-ln -s "$MAIN/build_temp"   build_temp     # re2_build, utf8proc, jpeg-turbo (build_lambda_config.json)
+ln -s "$MAIN/build_temp"   build_temp     # utf8proc, generated image/archive config (build_lambda_config.json)
 ln -s "$MAIN/mac-deps"     mac-deps
 ln -s "$MAIN/node_modules" node_modules   # pinned tree-sitter CLI
 ln -s "$MAIN/ref"          ref
@@ -701,11 +701,11 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 ```
 
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
-- `build_temp/re2_build` is shared. A fresh checkout's newer `lib/re2` mtimes make `make` re-run CMake and Ninja in the shared directory. Before the first build, backdate the worktree's copies (e.g. `find lib/re2 -type f -exec touch -t 202601010000 {} +`).
+- RE2 is built directly from `lib/re2/` into each checkout's `build/lib/<platform>/<configuration>/libre2.a`; its objects and archives are not shared through `build_temp/` (GRP15).
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
 - Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
-- **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` runs `rm -rf build_temp/re2_build` through the link and deletes the shared RE2 build. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
+- **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` also cleans vendored MIR and Tree-sitter archives. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
 - The stash stack (`refs/stash`) is shared by every worktree. Prefer a WIP commit. If you do stash, use `git stash push -m <tag>` and `git stash apply <sha>`, never a bare `pop`.
 
 Removing a worktree:
@@ -738,7 +738,7 @@ git branch -d <branch>
   - Before timing, check the binary: `strings lambda.exe | grep -c 'VALIDATOR] validate_against_base_type'` prints `0` for release.
 - **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`), and `make build` does not rebuild them. After a layout change they read wrong offsets, with no link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.
 - **Archive relinking.** `utils/generate_premake.py` overrides premake's `ldDeps`, so every `.a` in a binary's `linkoptions` is a link prerequisite (`make test-premake-generator` checks this). If a binary seems to hold an old archive, check `grep '^ *LDDEPS' build/premake/<project>.make`.
-- **Archive configurations.** Utility, image-codec and archive-reader libraries live in `build/lib/<platform>/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises both profile switches and consumer execution.
+- **Archive configurations.** Utility, RE2, image-codec and archive-reader libraries live in `build/lib/<platform>/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises both profile switches and consumer execution.
 - **Tree-sitter CLI.** `package.json` pins `tree-sitter-cli` 0.25.10. The Lambda grammar needs 0.25+ (ABI 15), so run `npm install` in a checkout that still has an older CLI. The CLI caches compiled grammars by language name in a per-user cache. Parsing a scratch copy of the grammar can therefore swap the parser other checkouts see. Set `TREE_SITTER_LIBDIR=<own dir>` for each copy; `test/ts_s16_conformance.sh` already uses `temp/tree-sitter-lib`.
 
 ### 7.4 Test Gotchas

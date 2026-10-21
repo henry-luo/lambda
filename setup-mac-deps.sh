@@ -1112,9 +1112,8 @@ else
     fi
 fi
 
-# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md); the Makefile
-# builds it on demand into build_temp/re2_build, so there is nothing to fetch.
-if [ ! -f "lib/re2/CMakeLists.txt" ]; then
+# RE2 is compiled with the host and tests by the JSON-owned Premake target.
+if [ ! -f "lib/re2/re2/re2.cc" ]; then
     echo "❌ Vendored RE2 source missing at lib/re2 - required for regex support"
     exit 1
 fi

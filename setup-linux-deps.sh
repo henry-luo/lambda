@@ -777,44 +777,6 @@ is_elf_archive() {
     [ "$magic" = "7f454c46" ]
 }
 
-# Function to build RE2 for Linux from the vendored source in lib/re2 (see
-# lib/re2/VENDOR.md). Same out-of-tree directory and Ninja generator as the
-# Makefile's RE2 rule, so either may (re)build it without a generator clash.
-build_re2_for_linux() {
-    echo "Building RE2 for Linux..."
-
-    local RE2_SRC="lib/re2"
-    local RE2_BUILD="build_temp/re2_build"
-    local RE2_LIB="$RE2_BUILD/libre2.a"
-
-    if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
-        echo "✅ RE2 already built for Linux"
-        return 0
-    fi
-
-    if [ ! -f "$RE2_SRC/CMakeLists.txt" ]; then
-        echo "❌ Vendored RE2 source missing at $RE2_SRC"
-        return 1
-    fi
-
-    echo "Building RE2 from $RE2_SRC..."
-    mkdir -p "$RE2_BUILD"
-    cd "$RE2_BUILD"
-
-    if cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../../lib/re2 && \
-       cmake --build . -j$(nproc); then
-        if [ -f "libre2.a" ] && is_elf_archive "libre2.a"; then
-            echo "✅ RE2 built successfully"
-            cd - > /dev/null
-            return 0
-        fi
-    fi
-
-    echo "❌ RE2 build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build mbedTLS 3.6.5 for Linux (matches Homebrew version on Mac)
 build_mbedtls_for_linux() {
     local MBEDTLS_VERSION="3.6.5"
@@ -987,10 +949,9 @@ else
     fi
 fi
 
-# Build RE2 for Linux (from the vendored lib/re2 source; a Mac-built archive won't link)
-echo "Setting up RE2..."
-if ! build_re2_for_linux; then
-    echo "❌ RE2 build failed - required for regex support"
+# RE2 is compiled with the host and tests by the JSON-owned Premake target.
+if [ ! -f "lib/re2/re2/re2.cc" ]; then
+    echo "❌ Vendored RE2 source missing at lib/re2 - required for regex support"
     exit 1
 fi
 

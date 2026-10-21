@@ -50,11 +50,15 @@ def compiler_environment(tools, build):
     return env
 
 
-def dependency_archives(profile, tools, env, build, jobs):
+def dependency_archives(config, profile, tools, env, build, jobs):
     archives = []
     extra_sources = []
+    targets = {target['name']: target for target in config['targets']}
     for dependency in profile['dependencies']:
         extra_sources.extend(dependency.get('source_files', []))
+        # share the native source closure without importing native objects or flags.
+        if 'source_target' in dependency:
+            extra_sources.extend(targets[dependency['source_target']]['source_files'])
         archive = dependency.get('archive')
         if not archive:
             continue
@@ -116,7 +120,8 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
-    profile = json.loads((ROOT / 'build_lambda_config.json').read_text())['platforms']['lambda-wasm']
+    config = json.loads((ROOT / 'build_lambda_config.json').read_text())
+    profile = config['platforms']['lambda-wasm']
     compiler = compiler_path()
     if not compiler.is_file():
         raise RuntimeError('Emscripten is missing; set EMCC or EMSDK')
@@ -130,7 +135,7 @@ def main():
     # the build driver also runs on older system Python installations.
     version = subprocess.check_output([str(compiler), '--version'],
                                       env=env, text=True).splitlines()[0]
-    archives, extra_sources = dependency_archives(profile, tools, env, build, args.jobs)
+    archives, extra_sources = dependency_archives(config, profile, tools, env, build, args.jobs)
     sources = profile['source_files'] + extra_sources
     manifest = {'compiler': version, 'profile': 'lambda-wasm', 'sources': sources,
                 'profile_sha256': hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()}

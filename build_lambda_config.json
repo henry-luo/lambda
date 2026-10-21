@@ -276,8 +276,9 @@
       "version": "2023-03-01",
       "description": "RE2 regular expression library for string pattern matching",
       "include": "lib/re2",
-      "lib": "build_temp/re2_build/libre2.a",
-      "link": "static"
+      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/libre2.a",
+      "link": "static",
+      "build_target": "re2"
     },
     {
       "name": "psl",
@@ -456,6 +457,57 @@
     }
   ],
   "targets": [
+    {
+      "name": "re2",
+      "description": "Vendored RE2 source closure; built directly by Premake",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
+      "lang": "c++17",
+      "pic": true,
+      "source_files": [
+        "lib/re2/re2/bitmap256.cc",
+        "lib/re2/re2/bitstate.cc",
+        "lib/re2/re2/compile.cc",
+        "lib/re2/re2/dfa.cc",
+        "lib/re2/re2/filtered_re2.cc",
+        "lib/re2/re2/mimics_pcre.cc",
+        "lib/re2/re2/nfa.cc",
+        "lib/re2/re2/onepass.cc",
+        "lib/re2/re2/parse.cc",
+        "lib/re2/re2/perl_groups.cc",
+        "lib/re2/re2/prefilter.cc",
+        "lib/re2/re2/prefilter_tree.cc",
+        "lib/re2/re2/prog.cc",
+        "lib/re2/re2/re2.cc",
+        "lib/re2/re2/regexp.cc",
+        "lib/re2/re2/set.cc",
+        "lib/re2/re2/simplify.cc",
+        "lib/re2/re2/stringpiece.cc",
+        "lib/re2/re2/tostring.cc",
+        "lib/re2/re2/unicode_casefold.cc",
+        "lib/re2/re2/unicode_groups.cc",
+        "lib/re2/util/rune.cc",
+        "lib/re2/util/strutil.cc"
+      ],
+      "includes": [
+        "lib/re2"
+      ],
+      "source_sets": [
+        {
+          "platforms": [
+            "windows"
+          ],
+          "defines": [
+            "UNICODE",
+            "_UNICODE",
+            "STRICT",
+            "NOMINMAX",
+            "_CRT_SECURE_NO_WARNINGS",
+            "_SCL_SECURE_NO_WARNINGS"
+          ]
+        }
+      ],
+      "link": "static"
+    },
     {
       "name": "lambda-archive-readers",
       "description": "Libarchive memory readers with Lambda embedding and bounded codec hooks",
@@ -3246,12 +3298,7 @@
         },
         {
           "name": "re2",
-          "cmake_source": "lib/re2",
-          "cmake_flags": [
-            "-DRE2_BUILD_TESTING=OFF",
-            "-DBUILD_SHARED_LIBS=OFF"
-          ],
-          "archive": "temp/wasm-build/re2/libre2.a"
+          "source_target": "re2"
         }
       ],
       "debug": false

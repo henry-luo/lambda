@@ -6,7 +6,7 @@
 
 | Phase | Content | Where |
 |---|---|---|
-| G-pre | RE2 `2023-03-01` vendored in-tree, built out of tree with its own CMake; `make verify-re2-patches`; setup scripts no longer clone it | `lib/re2/`, `lib/re2/VENDOR.md`, `Makefile`, `setup-*-deps.sh`, `build_lambda_config.json` |
+| G-pre | RE2 `2023-03-01` vendored in-tree; since 2026-10-21 the JSON-owned Premake `re2` target builds profile-specific static archives (D7.1.1, GRP15), and WASM reuses its source closure; `make verify-re2-patches`; setup scripts only check for source | `lib/re2/`, `Makefile`, `setup-*-deps.sh`, `build_lambda_config.json`, `utils/build_wasm.py` |
 | G0 | Rare-byte prepared needle; `str_find` now anchors on the needle's rarest byte (measured byte-frequency table) | `lib/str.c` (`StrNeedle`, `str_needle_init`, `str_needle_find`, `str_byte_rank`) |
 | G1–G3 | Matcher (pattern assembly, never_nl, multi-line anchors, word/whole-line wrapping, unsupported-construct status), literal planner (tiers 0/1/2 from RE2's parse tree), line engine (CRLF, line numbers, code-point offsets, line text, invert, context, per-file limit, sink actions), streaming over `LineFramer` | `lib/grep/grep.h`, `grep_matcher.cpp`, `grep_literal.cpp`, `grep_searcher.cpp` |
 | G4 | Parallel walk on `ThreadPool` (dir and file jobs, searcher pool = one RE2 per worker), ignore layers (`.gitignore`/`.ignore` stack incl. the enclosing repository's, hidden entries, built-in directory list), caller filters, symlinks skipped, sorted delivery with deterministic total limit | `grep_walk.cpp`, `grep_ignore.cpp` |

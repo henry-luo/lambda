@@ -312,7 +312,9 @@ Why grep itself needs none:
 - a `make verify-re2-patches` target clones pristine upstream at the recorded commit, applies the patches and diffs the result against the tracked directory;
 - only what `libre2.a` needs is kept: `re2/*.cc` and `re2/*.h`, the parts of `util/` the library compiles, `LICENSE` and the upstream README. `re2/testing`, `re2/fuzzing`, the benchmarks, Bazel files and Python bindings are dropped. The kept source is about 0.8 MB.
 
-Location (USER, 2026-10-04): `lib/re2/`, beside the other vendored code `lib/` already holds (`lib/sqlite`, `lib/font/woff2`), because `lib/re2_glue.hpp` and `lib/grep` both depend on it and `lib/` may not depend on `lambda/`. The build change is in `build_lambda_config.json` (include path and library entry), the Makefile's `RE2_LIB` rule, and the clone steps of the three setup scripts, which are removed. CLAUDE.md rule 16's list of vendored directories gains the new path.
+Location (USER, 2026-10-04): `lib/re2/`, beside the other vendored code `lib/` already holds (`lib/sqlite`, `lib/font/woff2`), because `lib/re2_glue.hpp` and `lib/grep` both depend on it and `lib/` may not depend on `lambda/`. CLAUDE.md rule 16's list of vendored directories includes this path.
+
+Build ownership (USER, 2026-10-21; GRP15): `build_lambda_config.json` owns the explicit RE2 source closure and the Premake `re2` static target, consistent with D7.1.1's static-library packaging. Host and test consumers build that provider before linking `build/lib/<platform>/<configuration>/libre2.a`. Setup scripts only check for the vendored source. The WASM driver reuses the same source closure with its Emscripten flags; RE2 requires no CMake or Ninja step. Upstream source, version and patches remain governed by GRP16 and GRP9v2.
 
 Vendoring is phase G-pre in §10. It changes no RE2 source: the first vendored tree is byte-identical to the pinned tag, and the patch list starts empty.
 
