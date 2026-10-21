@@ -1,18 +1,48 @@
 # JS MVP integration implementation
 
 **Date:** 2026-10-21  
-**Authority:** **D8.1.3v28**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
+**Authority:** **D8.1.3v29**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
 **Design:** [JS MVP integration](../jube/JS_MVP_Integration.md)  
 **Status:** implementation and qualification in progress; integration is not closed.
+
+## AUTO default checkpoint (2026-10-22)
+
+**D8.1.3v29** corrects the tier-policy interpretation: AUTO is the default;
+activated MIR uses fast MVP. Focused selection/promotion checks pass 14/14.
+The Lambda baseline passes 7,863/8,010, including 840/840 MVP, 513/513 JS and
+322/322 MIR forced-GC cases. Its 147 failures are in Script Ownership tests;
+the first failing retained typed-array/property-helper case also fails alone,
+and later failures include stale module-layout errors after that case.
+
+WPT input events report 13 passed, 12 skipped and 7 failed. The native Promise
+policy fix removes the reproduced promotion crash; unfinished subtests remain
+under AUTO promotion, while forced AST and diagnostic promotion-disabled runs
+complete the typing case. These failures remain qualification limits; baseline
+expectations and promotion thresholds are unchanged.
+
+`make test262-baseline` exits successfully with 40,258/40,261 fully passing
+cases and three RegExp property-escape cases that pass only on isolated retry.
+There are no permanent failures, but this is not zero-retry qualification.
 
 ## Changes
 
 ### Common entry and ownership
 
-- `lambda/main.cpp` uses the ordinary JS command for MVP execution.
-  **D8.1.3v28** removes the redundant `--runtime=mvp-lmd` option from Script
-  and batch commands. File/eval/print, module selection, arguments and explicit
-  AST/AUTO policy use the same parser and execution path.
+- **D8.1.3v29** keeps AUTO as JavaScript's default tier policy. Unset, empty
+  and `auto` selectors start supported units in AST; whole-unit fallback,
+  eligible hot promotion and explicit `mir` use the fast MVP MIR engine.
+  `ast` forces the interpreter. The common backend helper applies this policy
+  to Script, module, document and batch entry points.
+- `lambda/main.cpp` retains removal of the redundant `--runtime=mvp-lmd`
+  option. File/eval/print, module selection and arguments use the same parser
+  and execution path. MIR performance checks explicitly select `mir`.
+- Historical captures below used the then-current MIR default. They remain
+  evidence for those binaries and are not measurements of the corrected AUTO
+  default.
+- AUTO satellites that adopt native Promise intrinsics retain the native job
+  policy. Installing MVP callbacks during promotion left suspended AST
+  activations with a null MVP job owner; preserving the existing policy fixes
+  that ownership mismatch (**D5.3–D5.4**, **D8.1.3v29**).
 - `-p` prints the actual Script completion after execution. It no longer
   changes the source grammar by wrapping the program in `console.log(...)`.
   The common entry uses the former explicit MVP value formatter, including

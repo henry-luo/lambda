@@ -8,7 +8,7 @@
 > `Lambda_Design_Compile_Pipeline.md` (LC3.1–LC3.8, the Lambda front-end
 > budget). Everything here is an implementation of the shared pipeline
 > contract (**D8.2.4v2**, **D8.2.5v3**) and the revised default-backend
-> clause of **D8.1.3v19**.
+> clause of **D8.1.3v29**: AUTO remains the default; activated MIR uses fast MVP.
 > **Role**: the design home for the *cost* of the LambdaJS compile pipeline
 > and for the structural alignment of the two front ends: which stages exist,
 > what each walks, where the time goes, which analyses the two languages
@@ -17,11 +17,11 @@
 > `Lambda_Design_JS_Unified.md`; the JS AST backend by
 > `Lambda_Design_Ast_Interpreter.md` and **D8.1.3v19**.
 > **Scope**: parse-build → bind → validate → index → analyze/plan → lower →
-> finalize → prelink → link, in the default MIR lane and the AST/AUTO lane.
+> finalize → prelink → link, in the activated MIR lane and the default AST/AUTO lane.
 > Out of scope: execution speed of generated code, the MIR cache tiers
 > (D8.5), the vendored MIR code generator (rule 16: never patched, only
 > steered by policy).
-> **Formal anchors**: D8.1.3v19 (JS front end, explicit boxed AST backend,
+> **Formal anchors**: D8.1.3v29 (JS front end, explicit boxed AST backend,
 > AUTO default), D8.1.1v13 (Lambda AUTO tier), D8.2.2 (variance tiers),
 > D8.2.4v2 (one indexed compilation unit; no new private core-child walks),
 > D8.2.5v3 (typed pass manager; facts on the AST), D8.4.1v2 (no inline

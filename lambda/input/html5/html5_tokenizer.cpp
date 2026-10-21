@@ -491,6 +491,10 @@ static Html5Token* html5_emit_current_tag(Html5Parser* parser) {
     if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
         html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
     }
+    if (token->type == HTML5_TOKEN_END_TAG && token->attr_count) {
+        // HTML LS tokenization reports this recoverable author error when the token is emitted.
+        log_warn("html5: end-tag-with-attributes ignored on </%s>", token->tag_name->chars);
+    }
     return token;
 }
 

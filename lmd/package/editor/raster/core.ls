@@ -15,6 +15,7 @@ import artwork: .artwork
 import styles: .styles
 import channels: .channels
 import arrange: .arrange
+import guides: .guides
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -29,6 +30,7 @@ pub fn open_session(image) any^ {
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
         target:"pixels",selection:null,crop:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
+        guides_visible:true,snap_enabled:false,straighten_axis:"horizontal",
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
         background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
@@ -125,11 +127,6 @@ fn edit_node(st,command) any^ {
         if (not (command.blend in ['normal','multiply','screen','overlay','darken','lighten','difference','exclusion',
             "normal","multiply","screen","overlay","darken","lighten","difference","exclusion"])) raise error("Raster: unsupported blend mode")
         else img.with_properties(node,{blend:command.blend})^)
-    else if (command.id == "layer.transform") (
-        if (name(node) != 'layer') raise error("Raster: transform one layer")
-        else (let matrix = transforms.command_matrix(node,command)^,
-            if (matrix == transforms.identity and node.transform == null) node
-            else img.with_properties(node,{transform:if (matrix == transforms.identity) null else matrix})^))
     else if (command.id == "layer.rasterize") (
         if (name(node) != 'layer') raise error("Raster: rasterize one layer") else transforms.rasterize(st,node)^)
     else if (command.id == "mask.add") (
@@ -149,6 +146,10 @@ fn edit_node(st,command) any^ {
 pub fn apply_command(st,command) any^ {
     let id = command.id;
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
+    else if (starts_with(id,"guide.")) guides.run_command(st,command)^
+    else if (id == "layer.transform") transforms.run_command(st,command)^
+    else if (id == "layer.straighten") transforms.run_command(st,
+        transforms.straighten(st,command.start,command.end,model.value(command.axis,"horizontal"))^)^
     else if (starts_with(id,"retouch.")) retouch.run_command(st,command)^
     else if (starts_with(id,"effect.")) effects.run_command(st,command)^
     else if (starts_with(id,"style.")) styles.run_command(st,command)^
@@ -173,8 +174,8 @@ pub fn apply_command(st,command) any^ {
             raise error("Raster: crop requires a nonempty rectangle inside the canvas")
         else {
             let moved = img.replace_at(st.doc,model.root_path(st.doc),model.translated(img.composition(st.doc),-rect[0],-rect[1])^)^;
-            {*:st,doc:channels.resized(img.with_properties(moved,{width:rect[2]-rect[0],height:rect[3]-rect[1]})^,
-                rect[2]-rect[0],rect[3]-rect[1],false,[rect[0],rect[1]])^,selection:null}
+            {*:st,doc:guides.resized(channels.resized(img.with_properties(moved,{width:rect[2]-rect[0],height:rect[3]-rect[1]})^,
+                rect[2]-rect[0],rect[3]-rect[1],false,[rect[0],rect[1]])^,1,1,[rect[0],rect[1]])^,selection:null}
         }
     }
     else if (id == "layer.insert" or id == "layer.new") {
@@ -267,8 +268,10 @@ pub fn apply_command(st,command) any^ {
         let coverage = if (st.selection == null) null else if (id == "document.resize_image")
             img.resize(st.selection,dimensions.width,dimensions.height)^
             else img.reframe(st.selection,[0,0,dimensions.width,dimensions.height])^;
-        {*:st,doc:channels.resized(img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,
-            dimensions.width,dimensions.height,id == "document.resize_image")^,selection:coverage}
+        {*:st,doc:guides.resized(channels.resized(img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,
+            dimensions.width,dimensions.height,id == "document.resize_image")^,
+            if (id == "document.resize_image") dimensions.width/st.doc.width else 1,
+            if (id == "document.resize_image") dimensions.height/st.doc.height else 1)^,selection:coverage}
     }
     else if (id in ["layer.align","layer.distribute"]) arrange.run_command(st,command)^
     else edit_node(st,command)^

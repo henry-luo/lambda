@@ -456,6 +456,17 @@ not bypass analysis with an entry admitted under a different policy. Existing
 literal/property/class fast paths must prove their eligibility independently;
 the number of requested captures is not an eligibility test.
 
+**2026-10-21 direct-compiler size limit (D1.3, D1.4v3).** If an analyzed RE2
+candidate fails with `ErrorPatternTooLarge`, refine the selection to the existing
+spec matcher using the normalized JavaScript source and original flags. Unicode
+property expansion combined with bounded repetition can exceed RE2's program
+budget for a valid expression. Retrying its raw JS spelling in RE2 instead hid
+that limit behind an unrelated `\u` syntax error. Publish/cache the successful
+backtracker route once; a failed compile remains an explicit `RangeError`, and
+execution keeps the existing distinct resource-exhaustion completion. The
+document-realm email-pattern regression exercises this native route, Unicode
+separators, nonmatches and flags; standalone MVP RegExp uses a separate matcher.
+
 ### 9.2 Preserve match outcomes
 
 The internal matching API needs distinct outcomes for `MATCH`, `NO_MATCH`,

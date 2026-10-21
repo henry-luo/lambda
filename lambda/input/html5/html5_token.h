@@ -13,7 +13,7 @@ enum Html5TokenType {
     HTML5_TOKEN_EOF
 };
 
-// One start-tag attribute: the name is token scratch (the element interns its
+// One tag-token attribute: the name is token scratch (the element interns its
 // own key), the value is the Item the element keeps (ITEM_NULL when empty).
 typedef struct Html5Attr {
     String* name;
@@ -34,7 +34,7 @@ typedef struct Html5Token {
 
     // For start/end tag tokens
     String* tag_name;
-    Html5Attr* attrs;       // start tag attributes in source order, first of each name
+    Html5Attr* attrs;       // tag attributes in source order, first of each name
                             // (in the token's arena, capacity 4 then powers of two)
     bool self_closing;
     // markup name id of tag_name, cached by html5_token_tag_id. It sits in

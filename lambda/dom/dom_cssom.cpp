@@ -71,7 +71,7 @@ static void cssom_collection_detach(Item wrapper);
 
 enum CssomCacheKind { CSSOM_CACHE_SHEET, CSSOM_CACHE_RULE,
     CSSOM_CACHE_DECLARATION, CSSOM_CACHE_RULE_LIST, CSSOM_CACHE_SHEET_LIST, CSSOM_CACHE_NODE,
-    CSSOM_CACHE_INLINE_STYLE, CSSOM_CACHE_COMPUTED_STYLE };
+    CSSOM_CACHE_INLINE_STYLE, CSSOM_CACHE_COMPUTED_STYLE, CSSOM_CACHE_VALIDITY_STATE };
 struct CssomWrapperCache;
 struct CssomWrapperEntry {
     void* native;
@@ -444,6 +444,17 @@ extern "C" Item dom_cssom_wrap_element_style(void* native_elem, void* payload, b
     return cssom_wrap_host(payload, computed ? radiant_dom_computed_style_host_type()
         : radiant_dom_inline_style_host_type(), computed ? CSSOM_CACHE_COMPUTED_STYLE
         : CSSOM_CACHE_INLINE_STYLE, owner, elem->doc);
+}
+
+extern "C" Item dom_wrap_validity_state(void* native_elem) {
+    DomElement* elem = (DomElement*)native_elem;
+    if (!elem) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, dom_cached_node_wrapper(elem));
+    const void* brand = jube_iface_type_by_name("validity_state", 14);
+    // reuse the same traced owner edge and teardown detachment as live style views.
+    return brand ? cssom_wrap_host(elem, brand, CSSOM_CACHE_VALIDITY_STATE,
+        owner.get(), elem->doc) : ItemNull;
 }
 
 static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet) {

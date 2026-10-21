@@ -13,8 +13,8 @@ unmodified from these upstream releases by `utils/build-rdb-deps.sh`
 
 ## Build options
 
-- libpq (meson): `--buildtype=release -Ddefault_library=static -Db_staticpic=true -Dssl=none -Dgssapi=disabled -Dldap=disabled -Dlibcurl=disabled -Dicu=disabled -Dreadline=disabled -Dzlib=disabled -Dlz4=disabled -Dzstd=disabled -Dnls=disabled -Dlibxml=disabled -Dlibxslt=disabled -Dpam=disabled -Dbonjour=disabled -Dselinux=disabled -Dsystemd=disabled -Duuid=none`
-- Connector/C (cmake): `-DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DWITH_SSL=OFF -DWITH_EXTERNAL_ZLIB=OFF -DWITH_CURL=OFF -DWITH_UNIT_TESTS=OFF -DCLIENT_PLUGIN_DIALOG=OFF -DCLIENT_PLUGIN_AUTH_GSSAPI_CLIENT=OFF -DCLIENT_PLUGIN_REMOTE_IO=OFF -DCLIENT_PLUGIN_MYSQL_CLEAR_PASSWORD=OFF -DCLIENT_PLUGIN_MYSQL_OLD_PASSWORD=OFF -DCLIENT_PLUGIN_CLIENT_ED25519=OFF`
+- libpq: Premake profile `libpq` in `build_deps_config.json`
+- Connector/C: Premake profile `mariadb` in `build_deps_config.json`
 
 ## Relinking against a modified Connector/C (LGPL-2.1 section 6)
 

@@ -7,6 +7,7 @@ set -e
 
 SCRIPT_DIR="$(pwd)"
 source "$SCRIPT_DIR/utils/setup_thorvg.sh"
+source "$SCRIPT_DIR/utils/setup_build_deps.sh"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
 MACOS_DEPLOYMENT_TARGET="${LAMBDA_MACOS_DEPLOYMENT_TARGET:-${MACOSX_DEPLOYMENT_TARGET:-15.0}}"
@@ -133,15 +134,9 @@ else
     echo "Warning: package.json not found, skipping npm install"
 fi
 
-# Check for cmake (needed for some dependencies)
-if ! command -v cmake >/dev/null 2>&1; then
-    echo "Installing cmake..."
-    if command -v brew >/dev/null 2>&1; then
-        brew install cmake
-    else
-        echo "Error: cmake is required. Install it manually or install Homebrew first."
-        exit 1
-    fi
+# Premake also compiles dependencies; install it before any source build.
+if ! command -v premake5 >/dev/null 2>&1; then
+    brew install premake || exit 1
 fi
 
 # Check for pkg-config (needed for dependency discovery)
@@ -151,19 +146,6 @@ if ! command -v pkg-config >/dev/null 2>&1; then
         brew install pkg-config
     else
         echo "Error: pkg-config is required. Install it manually or install Homebrew first."
-        exit 1
-    fi
-fi
-
-# Check for meson and ninja (needed for ThorVG)
-if ! command -v meson >/dev/null 2>&1; then
-    echo "Installing meson and ninja..."
-    if command -v brew >/dev/null 2>&1; then
-        brew install meson ninja
-    elif command -v pip3 >/dev/null 2>&1; then
-        pip3 install --user meson ninja
-    else
-        echo "Error: meson is required for ThorVG. Install it manually or install Homebrew first."
         exit 1
     fi
 fi
@@ -366,95 +348,9 @@ build_thorvg_v1_0_pre34_for_mac() {
         }
     fi
 
-    # Check for meson build system
-    if [ -f "meson.build" ]; then
-        # Check if meson is available
-        if ! command -v meson >/dev/null 2>&1; then
-            echo "Installing meson via pip3..."
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user meson ninja || {
-                    echo "Failed to install meson via pip3"
-                    cd - > /dev/null
-                    return 1
-                }
-                # Add user bin to PATH if not already there
-                export PATH="$HOME/.local/bin:$PATH"
-            else
-                echo "pip3 not found, trying Homebrew..."
-                if command -v brew >/dev/null 2>&1; then
-                    brew install meson ninja
-                else
-                    echo "Cannot install meson - no pip3 or Homebrew available"
-                    cd - > /dev/null
-                    return 1
-                fi
-            fi
-        fi
-
-        # Clean previous build directory to ensure fresh configuration
-        rm -rf build-mac
-        mkdir -p build-mac
-
-        echo "Configuring ThorVG with Meson..."
-        # CRITICAL: Build with ONLY SW engine (no GL) to avoid OpenGL symbol conflicts
-        # The GL engine includes GLAD which defines GL functions as global variables,
-        # causing bus errors at runtime when system OpenGL tries to use them.
-        if meson setup build-mac \
-            --buildtype=release \
-            --default-library=static \
-            -Dengines=sw \
-            -Dloaders=svg,ttf,png,jpg,lottie \
-            -Dsavers= \
-            -Dbindings=capi \
-            -Dtools= \
-            -Dtests=false \
-            -Dsimd=true \
-            -Dthreads=true; then
-
-            # Patch out problematic assertion flag for newer macOS SDKs
-            echo "Patching build configuration for macOS compatibility..."
-            sed -i.bak 's/-D_LIBCPP_ENABLE_ASSERTIONS=1//g' build-mac/build.ninja
-
-            echo "Building ThorVG v1.0-pre34..."
-            if ninja -C build-mac; then
-                echo "ThorVG v1.0-pre34 built in mac-deps/thorvg/build-mac/"
-                # No installation needed - library stays in mac-deps directory
-
-                # Verify build
-                if [ -f "build-mac/src/libthorvg.a" ] && [ -f "inc/thorvg.h" ]; then
-                    # Verify text API is available
-                    if nm "build-mac/src/libthorvg.a" | grep -q "tvg_text_new" &&
-                        thorvg_archive_has_lottie "build-mac/src/libthorvg.a"; then
-                        # Verify no GL symbols
-                        if ! nm "build-mac/src/libthorvg.a" | grep -q "glClearColor"; then
-                            echo "✅ ThorVG v1.0-pre34 built successfully"
-                            echo "   - Text API: ✓ Available"
-                            echo "   - GL symbols: ✓ None (no conflicts)"
-                            echo "   - Location: mac-deps/thorvg/build-mac/src/libthorvg.a"
-                            cd - > /dev/null
-                            return 0
-                        else
-                            echo "❌ ThorVG contains GL symbols (should not happen with sw-only build)"
-                            cd - > /dev/null
-                            return 1
-                        fi
-                    else
-                        echo "❌ ThorVG text API or Lottie loader not available"
-                        cd - > /dev/null
-                        return 1
-                    fi
-                fi
-            fi
-        fi
-    else
-        echo "❌ ThorVG meson.build not found - unsupported build system"
-        cd - > /dev/null
-        return 1
-    fi
-
-    echo "❌ ThorVG v1.0-pre34 build failed"
-    cd - > /dev/null
-    return 1
+    cd "$SCRIPT_DIR"
+    build_premake_dependency thorvg "$SCRIPT_DIR/mac-deps/thorvg" "$SCRIPT_DIR/mac-deps/thorvg/build-mac" src || return 1
+    thorvg_archive_has_lottie "$SCRIPT_DIR/mac-deps/thorvg/build-mac/src/libthorvg.a"
 }
 
 # Function to build Brotli for Mac (required by WOFF2)
@@ -494,43 +390,7 @@ build_brotli_for_mac() {
         cd - > /dev/null
     fi
 
-    cd mac-deps/brotli
-
-    # Clean previous builds
-    rm -rf out 2>/dev/null || true
-    mkdir -p out
-
-    echo "Configuring Brotli with CMake..."
-    local macos_sdk_path
-    macos_sdk_path="$(xcrun --show-sdk-path)"
-    cd out
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
-        -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
-        -DBROTLI_DISABLE_TESTS=ON \
-        ..; then
-
-        echo "Building Brotli..."
-        if make -j$(sysctl -n hw.ncpu); then
-            # Verify the build
-            if [ -f "libbrotlidec.a" ] && [ -f "libbrotlicommon.a" ]; then
-                if nm "libbrotlidec.a" | grep -q "BrotliDecoderDecompress"; then
-                    echo "✅ Brotli built successfully"
-                    echo "   - libbrotlidec.a: ✓ Available"
-                    echo "   - libbrotlicommon.a: ✓ Available"
-                    echo "   - Location: mac-deps/brotli/out/"
-                    cd "$SCRIPT_DIR"
-                    return 0
-                fi
-            fi
-        fi
-    fi
-
-    echo "❌ Brotli build failed"
-    cd "$SCRIPT_DIR"
-    return 1
+    build_premake_dependency brotli "$SCRIPT_DIR/mac-deps/brotli" "$SCRIPT_DIR/mac-deps/brotli/out" .
 }
 
 # Stage Brotli under one prefix because curl's configure expects lib/ and include/.
@@ -544,7 +404,7 @@ stage_brotli_for_curl() {
     fi
 
     echo "Staging Brotli for libcurl..."
-    if ! cmake --install "$SCRIPT_DIR/mac-deps/brotli/out" --prefix "$brotli_prefix"; then
+    if ! python3 "$SCRIPT_DIR/utils/build_dependencies.py" brotli --source "$SCRIPT_DIR/mac-deps/brotli" --prefix "$brotli_prefix" --install-only; then
         echo "❌ Could not stage Brotli for libcurl"
         return 1
     fi
@@ -568,92 +428,7 @@ curl_supports_web_features() {
 }
 
 # Function to build WOFF2 for Mac
-build_woff2_for_mac() {
-    echo "Building WOFF2 for Mac..."
-    cd "$SCRIPT_DIR"
-
-    # Check if already built
-    if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && [ -f "mac-deps/woff2/out/libwoff2common.a" ]; then
-        # Verify the library has expected symbols
-        if nm "mac-deps/woff2/out/libwoff2dec.a" 2>/dev/null | grep -q "ConvertWOFF2ToTTF"; then
-            echo "✅ WOFF2 already built and verified"
-            return 0
-        else
-            echo "WOFF2 found but missing expected symbols, rebuilding..."
-            rm -rf mac-deps/woff2 2>/dev/null || true
-        fi
-    fi
-
-    # Ensure Brotli is built first
-    if [ ! -f "mac-deps/brotli/out/libbrotlidec.a" ]; then
-        echo "Brotli not found, building first..."
-        if ! build_brotli_for_mac; then
-            echo "❌ Cannot build WOFF2 without Brotli"
-            return 1
-        fi
-    fi
-
-    # Create mac-deps directory if it doesn't exist
-    mkdir -p mac-deps
-
-    # Clone woff2 if not exists (use google/woff2 official repo)
-    if [ ! -d "mac-deps/woff2" ]; then
-        echo "Cloning WOFF2 repository..."
-        cd mac-deps
-        git clone --recursive https://github.com/google/woff2.git woff2 || {
-            echo "Warning: Could not clone WOFF2 repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-
-    cd mac-deps/woff2
-
-    # Clean previous builds
-    rm -rf out 2>/dev/null || true
-    mkdir -p out
-
-    echo "Configuring WOFF2 with CMake..."
-    cd out
-
-    # Point to our locally built Brotli
-    BROTLI_DIR="$SCRIPT_DIR/mac-deps/brotli"
-    local macos_sdk_path
-    macos_sdk_path="$(xcrun --show-sdk-path)"
-
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
-        -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-        -DBROTLIDEC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
-        -DBROTLIDEC_LIBRARIES="$BROTLI_DIR/out/libbrotlidec.a;$BROTLI_DIR/out/libbrotlicommon.a" \
-        -DBROTLIENC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
-        -DBROTLIENC_LIBRARIES="$BROTLI_DIR/out/libbrotlienc.a;$BROTLI_DIR/out/libbrotlicommon.a" \
-        ..; then
-
-        echo "Building WOFF2..."
-        if make -j$(sysctl -n hw.ncpu); then
-            # Verify the build
-            if [ -f "libwoff2dec.a" ] && [ -f "libwoff2common.a" ]; then
-                if nm "libwoff2dec.a" | grep -q "ConvertWOFF2ToTTF"; then
-                    echo "✅ WOFF2 built successfully"
-                    echo "   - libwoff2dec.a: ✓ Available"
-                    echo "   - libwoff2common.a: ✓ Available"
-                    echo "   - Location: mac-deps/woff2/out/"
-                    cd "$SCRIPT_DIR"
-                    return 0
-                fi
-            fi
-        fi
-    fi
-
-    echo "❌ WOFF2 build failed"
-    cd "$SCRIPT_DIR"
-    return 1
-}
+# WOFF2 is compiled from lib/font/woff2 by the main Premake target.
 
 # Function to build Google Test for Mac
 build_gtest_for_mac() {
@@ -669,7 +444,7 @@ build_gtest_for_mac() {
     if [ ! -d "build_temp/googletest" ]; then
         cd build_temp
         echo "Cloning Google Test repository..."
-        git clone https://github.com/google/googletest.git || {
+        git clone --depth 1 --branch v1.17.0 https://github.com/google/googletest.git || {
             echo "Warning: Could not clone Google Test repository"
             cd - > /dev/null
             return 1
@@ -677,39 +452,7 @@ build_gtest_for_mac() {
         cd - > /dev/null
     fi
 
-    cd "build_temp/googletest"
-
-    # Create build directory
-    mkdir -p build-mac
-    cd build-mac
-
-    echo "Configuring Google Test with CMake..."
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DGTEST_FORCE_SHARED_CRT=OFF \
-        -DBUILD_GMOCK=ON \
-        -DINSTALL_GTEST=ON \
-        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
-        ..; then
-
-        echo "Building Google Test..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing Google Test to system location (requires sudo)..."
-            sudo make install
-
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
-                echo "✅ Google Test built successfully"
-                cd "$SCRIPT_DIR"
-                return 0
-            fi
-        fi
-    fi
-
-    echo "❌ Google Test build failed"
-    cd "$SCRIPT_DIR"
-    return 1
+    build_premake_dependency googletest "$SCRIPT_DIR/build_temp/googletest" "$SYSTEM_PREFIX" lib yes
 }
 
 # Function to build nghttp2 for Mac
@@ -738,91 +481,7 @@ build_nghttp2_for_mac() {
         cd - > /dev/null
     fi
 
-    cd mac-deps/nghttp2
-
-    # Prefer CMake if available, fallback to autotools if configure exists
-    if [ -f "CMakeLists.txt" ]; then
-        echo "Configuring nghttp2 with CMake..."
-        mkdir -p build-mac
-        cd build-mac
-        if cmake -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_STATIC_LIBS=ON \
-            -DENABLE_LIB_ONLY=ON \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_INSTALL_PREFIX="$(pwd)/../" ..; then
-            echo "Building nghttp2 (CMake)..."
-            if make -j$(sysctl -n hw.ncpu); then
-                echo "Installing nghttp2 (CMake)..."
-                if make install; then
-                    echo "✅ nghttp2 built successfully (CMake)"
-                    cd "$SCRIPT_DIR"
-                    return 0
-                fi
-            fi
-        fi
-        cd - > /dev/null
-    elif [ -f "configure" ]; then
-        echo "Configuring nghttp2 (autotools)..."
-        if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
-            --enable-static --disable-shared \
-            --disable-app --disable-hpack-tools \
-            --disable-examples --disable-python-bindings \
-            --disable-failmalloc --without-libxml2 \
-            --without-jansson --without-zlib \
-            --without-libevent-openssl --without-libcares \
-            --without-openssl --without-libev \
-            --without-cunit --without-jemalloc; then
-            echo "Building nghttp2 (autotools)..."
-            if make -j$(sysctl -n hw.ncpu); then
-                echo "Installing nghttp2 (autotools)..."
-                if make install; then
-                    echo "✅ nghttp2 built successfully (autotools)"
-                    cd - > /dev/null
-                    return 0
-                fi
-            fi
-        fi
-        cd - > /dev/null
-    elif [ -f "configure.ac" ]; then
-        echo "Generating configure script for nghttp2..."
-        if command -v autoreconf >/dev/null 2>&1; then
-            autoreconf -i
-            if [ -f "configure" ]; then
-                echo "Configuring nghttp2 (autotools with autoreconf)..."
-                if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
-                    --enable-static --disable-shared \
-                    --disable-app --disable-hpack-tools \
-                    --disable-examples --disable-python-bindings \
-                    --disable-failmalloc --without-libxml2 \
-                    --without-jansson --without-zlib \
-                    --without-libevent-openssl --without-libcares \
-                    --without-openssl --without-libev \
-                    --without-cunit --without-jemalloc; then
-                    echo "Building nghttp2 (autotools)..."
-                    if make -j$(sysctl -n hw.ncpu); then
-                        echo "Installing nghttp2 (autotools)..."
-                        if make install; then
-                            echo "✅ nghttp2 built successfully (autotools)"
-                            cd - > /dev/null
-                            return 0
-                        fi
-                    fi
-                fi
-            fi
-        else
-            echo "❌ autoreconf not found - cannot generate configure script"
-        fi
-        cd - > /dev/null
-    else
-        echo "❌ No supported build system found for nghttp2 (no CMakeLists.txt or configure)"
-        cd - > /dev/null
-        return 1
-    fi
-
-    echo "❌ nghttp2 build failed"
-    cd - > /dev/null
-    return 1
+    build_premake_dependency nghttp2 "$SCRIPT_DIR/mac-deps/nghttp2" "$SCRIPT_DIR/mac-deps/nghttp2"
 }
 
 # Function to build libcurl with HTTP/2 support for Mac (using mbedTLS)
@@ -1096,25 +755,10 @@ else
     fi
 fi
 
-# Build WOFF2 for Mac (required for WOFF2 font decompression)
-echo "Setting up WOFF2..."
-if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && \
-   [ -f "mac-deps/woff2/out/libwoff2common.a" ] && \
-   mac_archive_matches_deployment_target "mac-deps/woff2/out/libwoff2dec.a" && \
-   mac_archive_matches_deployment_target "mac-deps/woff2/out/libwoff2common.a"; then
-    echo "WOFF2 already available"
-else
-    if ! build_woff2_for_mac; then
-        echo "❌ WOFF2 build failed - required for font decompression"
-        exit 1
-    else
-        echo "✅ WOFF2 built successfully"
-    fi
-fi
+# WOFF2 is part of the Lambda source build; no external archive is needed.
 
-# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md); the Makefile
-# builds it on demand into build_temp/re2_build, so there is nothing to fetch.
-if [ ! -f "lib/re2/CMakeLists.txt" ]; then
+# RE2 is compiled with the host and tests by the JSON-owned Premake target.
+if [ ! -f "lib/re2/re2/re2.cc" ]; then
     echo "❌ Vendored RE2 source missing at lib/re2 - required for regex support"
     exit 1
 fi
@@ -1127,30 +771,14 @@ if [ -f "$UTF8PROC_LIB" ] && mac_archive_matches_deployment_target "$UTF8PROC_LI
 else
     echo "Building utf8proc from source..."
     mkdir -p build_temp
-    if [ ! -d "build_temp/utf8proc" ] || [ ! -f "build_temp/utf8proc/CMakeLists.txt" ]; then
+    if [ ! -d "build_temp/utf8proc" ] || [ ! -f "build_temp/utf8proc/utf8proc.c" ]; then
         rm -rf build_temp/utf8proc
         if ! git clone --depth 1 https://github.com/JuliaStrings/utf8proc.git build_temp/utf8proc; then
             echo "❌ Failed to clone utf8proc - required for Unicode support"
             exit 1
         fi
     fi
-    rm -rf build_temp/utf8proc/build
-    mkdir -p build_temp/utf8proc/build
-    cd build_temp/utf8proc/build
-    macos_sdk_path="$(xcrun --show-sdk-path)"
-    if cmake .. \
-       -DCMAKE_BUILD_TYPE=Release \
-       -DBUILD_SHARED_LIBS=OFF \
-       -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
-       -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
-       -DUTF8PROC_INSTALL=OFF \
-       -DUTF8PROC_ENABLE_TESTING=OFF && \
-       cmake --build . -j$(sysctl -n hw.ncpu); then
-        echo "✅ utf8proc built successfully"
-    else
-        echo "❌ utf8proc build failed"
-        exit 1
-    fi
+    build_premake_dependency utf8proc "$SCRIPT_DIR/build_temp/utf8proc" "$SCRIPT_DIR/build_temp/utf8proc/build" . || exit 1
     cd "$SCRIPT_DIR"
 fi
 
@@ -1284,8 +912,8 @@ echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_P
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Brotli: $([ -f "mac-deps/brotli/out/libbrotlidec.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- WOFF2: $([ -f "mac-deps/woff2/out/libwoff2dec.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- RE2: $([ -f "lib/re2/CMakeLists.txt" ] && echo "✓ Vendored (lib/re2)" || echo "✗ Missing")"
+echo "- WOFF2: compiled from lib/font/woff2 by Premake"
+echo "- RE2: $([ -f "lib/re2/re2/re2.cc" ] && echo "✓ Vendored (lib/re2)" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "build_temp/utf8proc/build/libutf8proc.a" ] && echo "✓ Built" || echo "✗ Missing")"
 # Clone GNU Bash test suite (optional, for bash transpiler conformance tests)
 if [ ! -d "ref/bash" ]; then

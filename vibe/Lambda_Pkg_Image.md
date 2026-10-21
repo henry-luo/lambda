@@ -415,6 +415,17 @@ composition, flattening, and layer/stack/frame insertion, removal or reordering.
 Edits that preserve source pixels can instead add/modify ordinary `effect`
 and `mask` descriptors. Baking effects or flattening is explicit.
 
+The implemented RGBA8 tone profile shares `adjust` and retained-effect kernels
+(**S9.1.2 / S9.2.2**). Levels uses input `black`/`white`, `gamma`, and ordered
+`output_black`/`output_white` endpoints. `curves` maps optional `rgb`, `r`, `g`,
+`b` channels to 2–32 finite normalized `[input,output]` points, with strictly
+increasing inputs from 0 to 1. Exact linear segments apply after the color matrix,
+master before channel curves, followed by output endpoints. Alpha is preserved.
+Options own their bounded native point arrays across background job copies
+(**D4.5.2**); color/blur caches include tone settings while geometry stays reusable.
+This profile does not claim smooth spline curves, dedicated adjustment layers,
+high-depth storage or color-managed processing.
+
 Procedural operations on `var` values support repeated brush strokes,
 region writes, fills, clearing, stamping and channel replacement without
 unnecessary intermediate full-image copies (**S12.1.1v3**). Brushes are

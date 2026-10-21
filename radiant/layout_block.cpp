@@ -5,6 +5,7 @@
 #include "render.hpp"
 #include "event.hpp"
 #include "radiant.hpp"
+#include "network_integration.h"
 
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
@@ -18,6 +19,7 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/network/network_resource_manager.h"
 #include "../lambda/dom/dom.h"
 
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -1398,7 +1400,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
 
-static void refresh_pseudo_element_style(DomElement* parent,
+static void refresh_pseudo_element_style(LayoutContext* lycon, DomElement* parent,
                                          DomElement* pseudo,
                                          PseudoStyleKind kind,
                                          FontProp* parent_font) {
@@ -1408,7 +1410,7 @@ static void refresh_pseudo_element_style(DomElement* parent,
     if (parent_font && pseudo->font) {
         // Generated boxes inherit the originating element's computed font;
         // retained view storage must be refreshed before the pseudo cascade.
-        font_prop_copy(pseudo->font, parent_font);
+        font_prop_copy(pseudo->font, parent_font, layout_prop_pool(lycon));
     }
     // CSS generated boxes borrow the owner's pseudo cascade; rebind retained
     // nodes after a stylesheet recascade before resolving their display.
@@ -1442,7 +1444,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->font = nullptr;
     if (parent_font) {
         pseudo_elem->font = lam::view_prop((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
-        if (pseudo_elem->font) font_prop_copy(pseudo_elem->font, parent_font);
+        if (pseudo_elem->font) font_prop_copy(pseudo_elem->font, parent_font, layout_prop_pool(lycon));
     }
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
     pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
@@ -1452,7 +1454,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->display.inner = CSS_VALUE_FLOW;
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (pseudo_styles && pseudo_styles->tree) {
-        refresh_pseudo_element_style(parent, pseudo_elem,
+        refresh_pseudo_element_style(lycon, parent, pseudo_elem,
             is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER,
             parent_font);
     }
@@ -1517,7 +1519,7 @@ DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool 
     }
     // generated boxes keep their own font storage, refreshed from the note's
     if (note->font && !pseudo->font) pseudo->font = lam::view_prop((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
-    refresh_pseudo_element_style(note, pseudo, kind, note->font);
+    refresh_pseudo_element_style(lycon, note, pseudo, kind, note->font);
     return pseudo;
 }
 
@@ -5002,6 +5004,11 @@ void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
     uicon->document = lam::up(doc);
     uicon->viewport_width = iframe_width;
     uicon->viewport_height = iframe_height;
+    if (doc->resource_manager) {
+        // the detached loader has no font owner; bind it before delivering cached faces.
+        resource_manager_set_ui_context(doc->resource_manager, uicon);
+        radiant_discover_document_font_resources(doc);
+    }
     process_document_font_faces(uicon, doc);
     layout_update_document(uicon, doc);
     // resizing preserves the existing session; load handlers initialize it only once.
@@ -5517,12 +5524,12 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {
-            refresh_pseudo_element_style(element, block->pseudo->before,
+            refresh_pseudo_element_style(lycon, element, block->pseudo->before,
                 PSEUDO_STYLE_BEFORE, element->font);
             insert_pseudo_into_rendered_tree(element, block->pseudo->before, true);
         }
         if (block->pseudo->after) {
-            refresh_pseudo_element_style(element, block->pseudo->after,
+            refresh_pseudo_element_style(lycon, element, block->pseudo->after,
                 PSEUDO_STYLE_AFTER, element->font);
             insert_pseudo_into_rendered_tree(element, block->pseudo->after, false);
         }

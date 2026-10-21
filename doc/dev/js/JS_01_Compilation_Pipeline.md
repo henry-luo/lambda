@@ -3,7 +3,7 @@
 > **Last verified against tree:** 2026-10-21 (integration in progress; qualification is recorded separately).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** D8.1.3v28, D8.2.3, D8.5.1v2 and D5.3/D5.4.
+> **Authority:** D8.1.3v29, D8.2.3, D8.5.1v2 and D5.3/D5.4.
 > **Primary sources:** `lambda/js/js_execution.cpp`, `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, `lambda/js/js_code_cache.cpp`, `lambda/js/js_source_module.cpp` and `lambda/js/js_compile_recovery.cpp`.
 
 ## 1. Engines and public entry points
@@ -14,9 +14,11 @@ have been removed. Public `transpile_js_to_mir*` names remain host APIs;
 they select MVP for MIR execution. `transpile_js_module_to_mir` uses the same
 engine selection for modules.
 
-`lambda.exe js app.js` selects MVP by default. The redundant
-`--runtime=mvp-lmd` option is removed from Script and batch commands
-(**D8.1.3v28**); `JS_EXEC_BACKEND` retains explicit AST/AUTO policy. A terminal
+`lambda.exe js app.js` defaults to AUTO (**D8.1.3v29**). Unset, empty and
+`JS_EXEC_BACKEND=auto` selectors begin supported units in AST; unsupported
+units and eligible hot definitions use fast MVP MIR. Explicit `mir` selects
+whole-unit MVP MIR, and `ast` forces the interpreter. The redundant
+`--runtime=mvp-lmd` option remains removed from Script and batch commands. A terminal
 CLI Script preserves closed-unit planning unless its source or host dependencies
 require the complete realm. Document, module and later-Script entries still
 use broad realm admission; finer effect analysis remains in progress.
@@ -25,7 +27,7 @@ Script completion using MVP value formatting after the timed body.
 See the [integration record](../../../vibe/impl/JS_MVP_Integration.md)
 for the remaining work and qualification.
 
-Explicit AST and AUTO execution retain the shared interpreter. AUTO function
+Default AUTO and explicit AST execution retain the shared interpreter. AUTO function
 and loop promotion compile through MVP. Dynamic source (`eval`, Function-family
 constructors and string timer handlers) remains interpreted. Direct eval on both
 tiers resolves live `JsInterpEnv` cells and validates context through the shared

@@ -34,6 +34,8 @@ bool dom_is_rule_style_decl(Item item);
 
 /** Retain the owner node and detach inline/computed payloads at document teardown. */
 Item dom_cssom_wrap_element_style(void* elem, void* payload, bool computed);
+/** Live native validity view, sharing the node lease and weak wrapper cache. */
+Item dom_wrap_validity_state(void* elem);
 
 typedef struct DomComputedStyleHost {
     void* elem;

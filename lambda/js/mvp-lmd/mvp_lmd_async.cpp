@@ -130,7 +130,8 @@ Item mvp_lmd_promise_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         Item result = mvp_lmd_library_class_adopt(state->promise, state->promise_values,
             js_get_constructor(js_name_item("Promise", 7)));
         if (item_is_error(result)) return result;
-        js_promise_set_host_ops(&promise_ops, program);
+        // adopted native Promises keep their job policy: AUTO promotion must
+        // not install MVP callbacks into suspended AST activations.
         return ItemNull;
     }
     Item result = mvp_lmd_library_class_initialize(program, state, state->promise,

@@ -7,8 +7,13 @@
 #include "../radiant/audio.hpp"
 #include "../radiant/speech.hpp"
 #include "../radiant/event.hpp"
+#include "../radiant/network_integration.h"
+#include "../radiant/resource_loaders.h"
+#include "../radiant/css_resolved_style.hpp"
+#include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_cssom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/core/mark_reader.hpp"
@@ -18,6 +23,7 @@
 #include "../lib/str.h"
 #include "../lib/font/font.h"
 #include "../lib/hash.h"
+#include "../lib/file.h"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
@@ -297,6 +303,20 @@ TEST_F(RadiantTextQuery, CrossDocumentNavigationFinishesMicrotasksWithoutDrainin
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
 }
 
+TEST_F(RadiantTextQuery, UnicodeEmailPatternSurvivesDirectMatcherResourceLimit) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        var email = /[\p{L}\p{M}\p{N}._%+'-]{1,64}(?:[@\uFF20\uFE6B]|%40)[\p{L}\p{M}\p{N}.\u3002\uFF0E\uFF61-]{1,255}[.\u3002\uFF0E\uFF61][\p{L}\p{M}][\p{L}\p{M}\p{N}-]{1,62}/giu;
+        var samples = ['henry@example.com', 'hénry＠例子．公司', 'a﹫b｡com', 'not-an-email'];
+        var matches = samples.map(function(sample) { email.lastIndex = 0; return email.test(sample); });
+        document.getElementById('result').setAttribute('data-matches', JSON.stringify(matches));
+        document.getElementById('result').setAttribute('data-flags', email.flags);
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    // the document realm exercises native matcher routing, unlike the CLI's MVP RegExp.
+    EXPECT_STREQ(result->get_attribute("data-matches"), "[true,true,true,false]");
+    EXPECT_STREQ(result->get_attribute("data-flags"), "giu");
+}
+
 TEST_F(RadiantTextQuery, FragmentNavigationRetainsCurrentDocumentTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
@@ -324,12 +344,119 @@ TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
             #result::before { content:'generated'; display:block; height:30px }
         }
     </style><div id="container"><div id="result"></div></div>)HTML"), nullptr);
-    // probe flow suppresses generated effects; that uncontained height is not a query input.
+    // generated content's uncontained height is not a size-query input.
     for (unsigned pass = 0; pass < 2; ++pass) {
         layout_html_doc(&ui, document, pass != 0);
         expect_box("container", 0, 0, 120, 30);
         expect_box("result", 0, 0, 120, 30);
     }
+}
+
+TEST_F(RadiantTextQuery, CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments) {
+    ASSERT_NE(load_script_source("<div id='result'><img id='image'></div>"), nullptr);
+    DomElement* image = dom_find_element_by_id(document->root->as_element(), "image");
+    ASSERT_NE(image, nullptr);
+    char path[] = "temp/radiant_network_svg_owner.cache";
+    ASSERT_EQ(write_text_file_atomic(path,
+        "<svg xmlns='http://www.w3.org/2000/svg' width='23' height='17'>"
+        "<rect width='23' height='17' fill='red'/></svg>"), 0);
+    ASSERT_EQ(radiant_init_network_support(document, nullptr, nullptr), 0);
+    resource_manager_set_ui_context(document->resource_manager, &ui);
+    DomDocument other = {};
+    char url[] = "https://example.test/extensionless-image";
+    NetworkResource resource = {};
+    resource.url = url;
+    resource.local_path = path;
+    resource.type = RESOURCE_IMAGE;
+    resource.state = STATE_CACHED;
+    resource.manager = document->resource_manager;
+    for (DomDocument* published : {static_cast<DomDocument*>(nullptr), &other}) {
+        ui.document = lam::up(published);
+        process_image_resource(&resource, image);
+        EXPECT_EQ(ui.document.get(), published);
+        EXPECT_TRUE(resource.image_surface_borrowed);
+        EXPECT_NE(resource.image_surface, nullptr);
+        if (resource.image_surface) {
+            EXPECT_EQ(resource.image_surface->format, IMAGE_FORMAT_SVG);
+            EXPECT_EQ(resource.image_surface->width, 23);
+            EXPECT_EQ(resource.image_surface->height, 17);
+            ASSERT_NE(image->embed, nullptr);
+            EXPECT_EQ(image->embed->img.get(), resource.image_surface);
+        }
+    }
+    ui.document = lam::up(document);
+    file_delete(path);
+}
+
+TEST_F(RadiantTextQuery, DetachedFontDiscoveryDeliversCachedFacesAfterTheHostBinds) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        @font-face { font-family:DetachedFixture; src:url(https://example.test/detached.ttf) }
+        #result { font-family:DetachedFixture }
+    </style><div id="result">A</div>)HTML"), nullptr);
+    EnhancedFileCache* cache = enhanced_cache_create("temp/detached_font_cache", 1024 * 1024, 10);
+    ASSERT_NE(cache, nullptr);
+    ASSERT_EQ(radiant_init_network_support(document, nullptr, cache), 0);
+    document->resource_manager->owns_file_cache = true;
+    size_t length = 0;
+    lam::Temp<char> bytes(read_binary_file("test/ui/svg_font_assets/rectangle.ttf", &length));
+    ASSERT_NE(bytes.get(), nullptr);
+    const char* url = "https://example.test/detached.ttf";
+    lam::Temp<char> path(enhanced_cache_store(cache, url, bytes.get(), length, nullptr));
+    ASSERT_NE(path.get(), nullptr);
+    document->resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+    DocumentJsHostConfig detached = {};
+    document_apply_js_host_config(document, &detached);
+    resource_manager_set_ui_context(document->resource_manager, nullptr);
+    radiant_discover_document_font_resources(document);
+    NetworkResource* resource = resource_manager_load(document->resource_manager,
+        url, RESOURCE_FONT, PRIORITY_HIGH, nullptr);
+    ASSERT_NE(resource, nullptr);
+    EXPECT_EQ(resource->state, STATE_CACHED);
+    EXPECT_EQ(resource->on_complete, nullptr);
+    EXPECT_FALSE(font_face_family_registered(ui.font_ctx, "DetachedFixture"));
+
+    layout_iframe_embedded_doc(&ui, document, 320, 200);
+    EXPECT_EQ(document->resource_manager->ui_context, &ui);
+    EXPECT_TRUE(font_face_family_registered(ui.font_ctx, "DetachedFixture"));
+    EXPECT_TRUE(resource->processed);
+    EXPECT_EQ(ui.document.get(), document);
+
+    DocumentJsHostConfig attached = {};
+    attached.ui_context = &ui;
+    document_apply_js_host_config(document, &detached);
+    EXPECT_EQ(document->resource_manager->ui_context, nullptr);
+    document_apply_js_host_config(document, &attached);
+    EXPECT_EQ(document->resource_manager->ui_context, &ui);
+}
+
+TEST_F(RadiantTextQuery, FetchPreloadRetainsBytesWithoutImageDecodingOrScriptExecution) {
+    ASSERT_NE(load_script_source(R"HTML(<link rel="preload" as="fetch"
+        href="https://example.test/preload.js"><div id="result"></div>)HTML"), nullptr);
+    EnhancedFileCache* cache = enhanced_cache_create("temp/raw_preload_cache", 1024 * 1024, 10);
+    ASSERT_NE(cache, nullptr);
+    ASSERT_EQ(radiant_init_network_support(document, nullptr, cache), 0);
+    document->resource_manager->owns_file_cache = true;
+    const char* url = "https://example.test/preload.js";
+    const char* source = "document.getElementById('result').setAttribute('data-executed','yes')";
+    lam::Temp<char> path(enhanced_cache_store(cache, url, source, strlen(source), nullptr));
+    ASSERT_NE(path.get(), nullptr);
+    document->resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+    radiant_discover_document_resources(document);
+    NetworkResource* resource = resource_manager_prefetch(document->resource_manager, url, PRIORITY_NORMAL);
+    ASSERT_NE(resource, nullptr);
+    EXPECT_EQ(resource->type, RESOURCE_PREFETCH);
+    EXPECT_EQ(resource->owner_element, nullptr);
+    EXPECT_EQ(resource->image_surface, nullptr);
+    EXPECT_TRUE(resource->processed);
+    size_t length = 0;
+    lam::Temp<char> bytes(resource_manager_copy_resource_content(
+        document->resource_manager, url, PRIORITY_NORMAL, &length));
+    ASSERT_NE(bytes.get(), nullptr);
+    EXPECT_EQ(length, strlen(source));
+    EXPECT_EQ(memcmp(bytes.get(), source, length), 0);
+    DomElement* result = dom_find_element_by_id(document->root->as_element(), "result");
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->get_attribute("data-executed"), nullptr);
 }
 
 TEST_F(RadiantTextQuery, NestedMicrotaskNavigationDefersDiscardedDocumentTimers) {
@@ -388,6 +515,87 @@ TEST_F(RadiantTextQuery, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishe
             ASSERT_TRUE(layout_update_document(&ui, document));
         }
         EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    }
+}
+
+TEST_F(RadiantTextQuery, ContainerSettlementKeepsCommittedGeometryWithFixedPseudoDescendants) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body { margin:0; font:16px Arial }
+        #row { display:flex; width:120px; align-items:flex-start; min-height:100vh }
+        #panel footer::after { content:''; position:fixed; top:0; left:0;
+            width:100vw; height:100vh; visibility:hidden; opacity:0 }
+        #result { container-type:inline-size; position:relative }
+        #content { height:10px }
+        @container (min-width:100px) { #content { height:30px } }
+    </style><div id="row"><div><div></div></div><div id="panel"><footer>
+        <div id="result"><div id="content"></div></div>
+    </footer></div></div>)HTML"), nullptr);
+    // a fixed generated descendant cannot supply the auto-sized flex item's intrinsic width.
+    layout_html_doc(&ui, document, false);
+    expect_box("result", 0, 0, 0, 10);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    uint64_t layouts = document->view_tree->document_layout_count;
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+
+    DomElement* panel = dom_find_element_by_id(document->root->as_element(), "panel");
+    ASSERT_NE(panel, nullptr);
+    ASSERT_TRUE(panel->set_attribute("style", "width:200px;flex:none"));
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    expect_box("result", 0, 0, 200, 30);
+    ASSERT_TRUE(panel->remove_attribute("style"));
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    expect_box("result", 0, 0, 0, 10);
+}
+
+TEST_F(RadiantTextQuery, IncrementalContainerReflowKeepsUnchangedSiblingStyles) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<style>body{margin:0}
+        #container{container-type:inline-size;width:300px}
+        #result{height:20px}.cold{height:3px}
+        @container(min-width:250px){#result{color:rgb(1,2,3)}}
+        </style><div id="container"><div id="result"></div>)HTML");
+    for (unsigned i = 0; i < 40; i++) strbuf_append_str(source, "<div class='cold'>text</div>");
+    strbuf_append_str(source, "</div>");
+    DomElement* result = load_script_source(source->str);
+    strbuf_free(source);
+    ASSERT_NE(result, nullptr);
+    layout_html_doc(&ui, document, false);
+    expect_box("result", 0, 0, 300, 20);
+    uint64_t layouts = document->view_tree->document_layout_count;
+    ASSERT_TRUE(dom_cssom_set_inline_property(result, "height", "30px"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    expect_box("result", 0, 0, 300, 30);
+    EXPECT_EQ(document->view_tree->document_layout_count, layouts + 1);
+    // a committed query context must not force cold resolution of forty clean siblings.
+    EXPECT_LT(g_style_resolve_full, 10);
+}
+
+TEST_F(RadiantTextQuery, PseudoFontsOwnInheritedTextShadowsAcrossRetainedReset) {
+    DomElement* result = load_script_source(R"HTML(<style>
+        #result{text-shadow:1px 2px 3px red,4px 5px 6px blue}
+        #result::before{content:'before'}#result::after{content:'after'}
+        </style><div id="result"><span id="child">text</span></div>)HTML");
+    ASSERT_NE(result, nullptr);
+    for (unsigned pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, false);
+        ASSERT_NE(result->font, nullptr);
+        ASSERT_NE(result->pseudo, nullptr);
+        TextShadow* original = result->font->text_shadow;
+        ASSERT_NE(original, nullptr);
+        DomElement* copies[] = {result->pseudo->before, result->pseudo->after};
+        for (DomElement* copy : copies) {
+            ASSERT_NE(copy, nullptr);
+            ASSERT_NE(copy->font, nullptr);
+            TextShadow* shadow = copy->font->text_shadow;
+            ASSERT_NE(shadow, nullptr) << copy->node_name();
+            EXPECT_NE(shadow, original);
+            ASSERT_NE(shadow->next, nullptr);
+            EXPECT_NE(shadow->next.get(), original->next.get());
+            EXPECT_FLOAT_EQ(shadow->offset_x, 1.0f);
+            EXPECT_FLOAT_EQ(shadow->next->offset_x, 4.0f);
+            EXPECT_GT(pool_allocation_size(document->view_tree->prop_pool, shadow), 0u);
+        }
     }
 }
 

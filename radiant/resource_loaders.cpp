@@ -224,7 +224,9 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     if ((source_is_svg || cached_file_is_svg) && res->manager && res->manager->ui_context) {
         // SVG resources, including extensionless URLs cached as .cache files,
         // must bypass raster probes that report ordinary SVG content as errors.
-        img_surface = load_image((UiContext*)res->manager->ui_context, res->local_path);
+        // delivery can precede publication or belong to a foreign document sharing this UI.
+        img_surface = load_document_image(res->manager->document,
+            (UiContext*)res->manager->ui_context, res->local_path);
         if (img_surface) {
             res->image_surface_borrowed = true;
         }
@@ -255,7 +257,8 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
                 // Cached SVGs have hashed .cache names, so the generic raster
                 // decoder cannot infer their format; use Radiant's content-aware
                 // image loader and borrow the UI cache surface.
-                img_surface = load_image((UiContext*)res->manager->ui_context, res->local_path);
+                img_surface = load_document_image(res->manager->document,
+                    (UiContext*)res->manager->ui_context, res->local_path);
                 if (img_surface) {
                     res->image_surface_borrowed = true;
                 }
@@ -368,9 +371,11 @@ static void request_network_layout_update(NetworkResourceManager* mgr,
     DocState* state = (DocState*)mgr->document->state;
     if (needs_reflow) {
         state->needs_reflow = true;
+        state->full_repaint_requests++;
         state->is_dirty = true;
         log_debug("network: triggered document reflow from resource completion");
     } else if (needs_repaint) {
+        state->full_repaint_requests++;
         state->is_dirty = true;
         log_debug("network: triggered document repaint from resource completion");
     }

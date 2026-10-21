@@ -6,6 +6,7 @@ set -e
 
 SCRIPT_DIR="$(pwd)"
 source "$SCRIPT_DIR/utils/setup_thorvg.sh"
+source "$SCRIPT_DIR/utils/setup_build_deps.sh"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
 
@@ -93,7 +94,7 @@ install_if_missing() {
     local description="${2:-$package}"
     # For certain packages, check if the command is available first
     case "$package" in
-        "cmake"|"git"|"curl"|"wget"|"python3"|"xxd"|"clang"|"nodejs"|"npm")
+        "git"|"curl"|"wget"|"python3"|"xxd"|"clang"|"nodejs"|"npm")
             local command_name="$package"
             if [ "$package" = "python3-pip" ]; then
                 command_name="pip3"
@@ -274,15 +275,6 @@ else
     echo "Warning: package.json not found, skipping npm install"
 fi
 
-# Check for cmake (needed for some dependencies)
-if command -v cmake >/dev/null 2>&1; then
-    echo "✅ cmake already available"
-else
-    echo "Installing cmake..."
-    sudo apt update
-    install_if_missing "cmake" "cmake"
-fi
-
 # Check for pkg-config (often needed for library detection)
 if ! command -v pkg-config >/dev/null 2>&1; then
     echo "Installing pkg-config..."
@@ -291,16 +283,60 @@ else
     echo "✅ pkg-config already available"
 fi
 
-# Check for meson (needed for building dependencies from source)
-if ! command -v meson >/dev/null 2>&1; then
-    echo "Installing meson..."
-    install_if_missing "meson" "meson"
-else
-    echo "✅ meson already available"
-fi
-
 # Install additional development tools if not present
 echo "Installing additional development dependencies..."
+
+
+
+# Install premake5 from source if not available
+if command -v premake5 >/dev/null 2>&1; then
+    echo "✅ premake5 already available"
+else
+    echo "Installing premake5 from source..."
+
+    # Install uuid-dev dependency for premake5 build
+    echo "Installing uuid-dev dependency for premake5..."
+    install_if_missing "uuid-dev" "uuid-dev"
+
+    PREMAKE_BUILD_DIR="build_temp/premake5"
+    if [ ! -d "$PREMAKE_BUILD_DIR" ]; then
+        mkdir -p build_temp
+        cd build_temp
+
+        # clone premake5 from source (works on all architectures)
+        echo "Cloning premake5 source..."
+        if git clone --recurse-submodules https://github.com/premake/premake-core.git premake5; then
+            echo "✅ premake5 source cloned"
+        else
+            echo "❌ Failed to clone premake5"
+            exit 1
+        fi
+
+        cd "$SCRIPT_DIR"
+    else
+        echo "✅ premake5 build directory already exists"
+    fi
+
+    # a source tree can survive a disposable container while its installed
+    # binary is gone, so check the binary before skipping the rebuild/install.
+    PREMAKE_BINARY="$PREMAKE_BUILD_DIR/bin/release/premake5"
+    if [ ! -x "$PREMAKE_BINARY" ]; then
+        echo "Building premake5..."
+        if (cd "$PREMAKE_BUILD_DIR" && make -f Bootstrap.mak linux); then
+            echo "✅ premake5 built successfully"
+        else
+            echo "❌ Failed to build premake5"
+            exit 1
+        fi
+    fi
+
+    if sudo cp "$PREMAKE_BINARY" /usr/local/bin/ && sudo chmod +x /usr/local/bin/premake5; then
+        echo "✅ premake5 installed successfully"
+    else
+        echo "❌ Failed to install premake5"
+        exit 1
+    fi
+fi
 
 
 
@@ -321,7 +357,7 @@ build_gtest_for_linux() {
     if [ ! -d "build_temp/googletest" ]; then
         cd build_temp
         echo "Cloning Google Test repository..."
-        git clone https://github.com/google/googletest.git || {
+        git clone --depth 1 --branch v1.17.0 https://github.com/google/googletest.git || {
             echo "Warning: Could not clone Google Test repository"
             cd - > /dev/null
             return 1
@@ -329,42 +365,7 @@ build_gtest_for_linux() {
         cd - > /dev/null
     fi
 
-    cd "build_temp/googletest"
-
-    # Create build directory
-    mkdir -p build
-    cd build
-
-    echo "Configuring Google Test with CMake..."
-    if cmake -DCMAKE_BUILD_TYPE=Release \
-             -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
-             -DBUILD_GMOCK=ON \
-             -DBUILD_GTEST=ON \
-             -DGTEST_CREATE_SHARED_LIBRARY=OFF \
-             ..; then
-
-        echo "Building Google Test..."
-        if make -j$(nproc); then
-            echo "Installing Google Test to system location (requires sudo)..."
-            sudo make install
-
-            # Update library cache
-            sudo ldconfig
-
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
-                echo "✅ Google Test built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-
-    echo "❌ Google Test build failed"
-    cd - > /dev/null
-    cd - > /dev/null
-    return 1
+    build_premake_dependency googletest "$SCRIPT_DIR/build_temp/googletest" "$SYSTEM_PREFIX" lib yes
 }
 
 # check the same include search path that the build compiler uses.
@@ -598,7 +599,7 @@ cleanup_intermediate_files() {
     find . -name "*.o" -type f -delete 2>/dev/null || true
 
     # Clean dependency build files but keep source and built libraries
-    # Only clean cmake/meson build caches, not source trees
+    # only clean disposable build caches, not source trees
     rm -rf build_temp/mbedtls-*/build 2>/dev/null || true
     rm -f  build_temp/mbedtls-*.tar.bz2 2>/dev/null || true
 
@@ -650,35 +651,9 @@ build_thorvg_v1_0_pre34_for_linux() {
     fi
     cd - > /dev/null
 
-    # Build in mac-deps/thorvg/build-linux (mirroring Mac's build-mac)
+    cd "$SCRIPT_DIR"
+    build_premake_dependency thorvg "$THORVG_SRC" "$THORVG_SRC/build-linux" src || return 1
     cd "$THORVG_SRC"
-    rm -rf build-linux
-    mkdir -p build-linux
-
-    # SVG <image> elements may embed PNG/JPEG data, so their loaders must be linked.
-    echo "Configuring ThorVG with Meson..."
-    if ! meson setup build-linux \
-        --buildtype=plain \
-        --default-library=static \
-        -Dengines=sw \
-        -Dloaders=svg,ttf,png,jpg,lottie \
-        -Dsavers= \
-        -Dbindings=capi \
-        -Dtools= \
-        -Dtests=false \
-        -Dsimd=true \
-        -Dthreads=true; then
-        echo "❌ ThorVG meson setup failed"
-        cd - > /dev/null
-        return 1
-    fi
-
-    echo "Building ThorVG v1.0-pre34..."
-    if ! ninja -C build-linux; then
-        echo "❌ ThorVG ninja build failed"
-        cd - > /dev/null
-        return 1
-    fi
 
     # Install library and headers
     echo "Installing ThorVG to $LIB_DIR..."
@@ -777,44 +752,6 @@ is_elf_archive() {
     [ "$magic" = "7f454c46" ]
 }
 
-# Function to build RE2 for Linux from the vendored source in lib/re2 (see
-# lib/re2/VENDOR.md). Same out-of-tree directory and Ninja generator as the
-# Makefile's RE2 rule, so either may (re)build it without a generator clash.
-build_re2_for_linux() {
-    echo "Building RE2 for Linux..."
-
-    local RE2_SRC="lib/re2"
-    local RE2_BUILD="build_temp/re2_build"
-    local RE2_LIB="$RE2_BUILD/libre2.a"
-
-    if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
-        echo "✅ RE2 already built for Linux"
-        return 0
-    fi
-
-    if [ ! -f "$RE2_SRC/CMakeLists.txt" ]; then
-        echo "❌ Vendored RE2 source missing at $RE2_SRC"
-        return 1
-    fi
-
-    echo "Building RE2 from $RE2_SRC..."
-    mkdir -p "$RE2_BUILD"
-    cd "$RE2_BUILD"
-
-    if cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../../lib/re2 && \
-       cmake --build . -j$(nproc); then
-        if [ -f "libre2.a" ] && is_elf_archive "libre2.a"; then
-            echo "✅ RE2 built successfully"
-            cd - > /dev/null
-            return 0
-        fi
-    fi
-
-    echo "❌ RE2 build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build mbedTLS 3.6.5 for Linux (matches Homebrew version on Mac)
 build_mbedtls_for_linux() {
     local MBEDTLS_VERSION="3.6.5"
@@ -845,27 +782,7 @@ build_mbedtls_for_linux() {
     fi
 
     tar xjf "$TARBALL" -C build_temp/ 2>/dev/null || true
-    mkdir -p "$BUILD_DIR/build"
-    cd "$BUILD_DIR/build"
-
-    if cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$MBEDTLS_INSTALL" \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DENABLE_TESTING=OFF \
-        -DENABLE_PROGRAMS=OFF \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DMBEDTLS_FATAL_WARNINGS=OFF && \
-       cmake --build . -j$(nproc) && \
-       sudo cmake --install .; then
-        echo "✅ mbedTLS $MBEDTLS_VERSION installed to $MBEDTLS_INSTALL"
-        cd - > /dev/null
-        return 0
-    fi
-
-    echo "❌ mbedTLS build failed"
-    cd - > /dev/null
-    return 1
+    build_premake_dependency mbedtls "$SCRIPT_DIR/$BUILD_DIR" "$MBEDTLS_INSTALL" lib yes
 }
 
 echo "Found native compiler: $(which gcc)"
@@ -987,10 +904,9 @@ else
     fi
 fi
 
-# Build RE2 for Linux (from the vendored lib/re2 source; a Mac-built archive won't link)
-echo "Setting up RE2..."
-if ! build_re2_for_linux; then
-    echo "❌ RE2 build failed - required for regex support"
+# RE2 is compiled with the host and tests by the JSON-owned Premake target.
+if [ ! -f "lib/re2/re2/re2.cc" ]; then
+    echo "❌ Vendored RE2 source missing at lib/re2 - required for regex support"
     exit 1
 fi
 
@@ -1018,57 +934,6 @@ for dep in "${APT_DEPS[@]}"; do
     fi
 done
 
-# Install premake5 from source if not available
-if command -v premake5 >/dev/null 2>&1; then
-    echo "✅ premake5 already available"
-else
-    echo "Installing premake5 from source..."
-
-    # Install uuid-dev dependency for premake5 build
-    echo "Installing uuid-dev dependency for premake5..."
-    install_if_missing "uuid-dev" "uuid-dev"
-
-    PREMAKE_BUILD_DIR="build_temp/premake5"
-    if [ ! -d "$PREMAKE_BUILD_DIR" ]; then
-        mkdir -p build_temp
-        cd build_temp
-
-        # clone premake5 from source (works on all architectures)
-        echo "Cloning premake5 source..."
-        if git clone --recurse-submodules https://github.com/premake/premake-core.git premake5; then
-            echo "✅ premake5 source cloned"
-        else
-            echo "❌ Failed to clone premake5"
-            exit 1
-        fi
-
-        cd "$SCRIPT_DIR"
-    else
-        echo "✅ premake5 build directory already exists"
-    fi
-
-    # a source tree can survive a disposable container while its installed
-    # binary is gone, so check the binary before skipping the rebuild/install.
-    PREMAKE_BINARY="$PREMAKE_BUILD_DIR/bin/release/premake5"
-    if [ ! -x "$PREMAKE_BINARY" ]; then
-        echo "Building premake5..."
-        if (cd "$PREMAKE_BUILD_DIR" && make -f Bootstrap.mak linux); then
-            echo "✅ premake5 built successfully"
-        else
-            echo "❌ Failed to build premake5"
-            exit 1
-        fi
-    fi
-
-    if sudo cp "$PREMAKE_BINARY" /usr/local/bin/ && sudo chmod +x /usr/local/bin/premake5; then
-        echo "✅ premake5 installed successfully"
-    else
-        echo "❌ Failed to install premake5"
-        exit 1
-    fi
-fi
-
-
 # Install Google Test for Linux (prefer apt package over building from source)
 echo "Verifying Google Test installation..."
 if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev; then
@@ -1078,48 +943,11 @@ else
     if sudo apt install -y libgtest-dev libgmock-dev; then
         echo "✅ Google Test installed successfully via apt"
 
-        # On Ubuntu, the gtest package only installs source files, we need to build them
-        echo "Building Google Test libraries from apt-installed sources..."
-        if [ -d "/usr/src/gtest" ]; then
-            cd /usr/src/gtest
-            sudo cmake CMakeLists.txt
-            sudo make
-
-            # Copy libraries to standard location
-            sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || {
-                echo "Trying alternative build approach..."
-                sudo mkdir -p build
-                cd build
-                sudo cmake ..
-                sudo make
-                sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
-            }
-
-            # Build gmock too if available
-            if [ -d "/usr/src/gmock" ]; then
-                cd /usr/src/gmock
-                sudo cmake CMakeLists.txt
-                sudo make
-                sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || {
-                    echo "Trying alternative gmock build approach..."
-                    sudo mkdir -p build
-                    cd build
-                    sudo cmake ..
-                    sudo make
-                    sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
-                }
-            fi
-
-            sudo ldconfig
-            cd "$SCRIPT_DIR"
-            echo "✅ Google Test libraries built from apt sources"
+        # Source-only distro packages use the same recipe as downloaded releases.
+        if [ -d /usr/src/googletest ]; then
+            build_premake_dependency googletest /usr/src/googletest "$SYSTEM_PREFIX" lib yes || exit 1
         else
-            echo "❌ Google Test source not found at /usr/src/gtest, trying build from source..."
-            if ! build_gtest_for_linux; then
-                echo "Warning: Google Test build failed"
-            else
-                echo "Google Test built successfully"
-            fi
+            build_gtest_for_linux || exit 1
         fi
     else
         echo "❌ Failed to install Google Test via apt, trying build from source..."

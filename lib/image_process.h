@@ -17,6 +17,8 @@ typedef bool (*ImageWriteRow)(void*, int64_t, const double*);
 bool image_box_filter(int64_t width, int64_t height, int64_t channels, int64_t kernel,
     ImageReadRow read, ImageWriteRow write, void* user, const bool* cancelled = nullptr);
 
+enum { IMAGE_TONE_CHANNELS = 4, IMAGE_TONE_POINTS = 32 };
+
 struct ImageProcessOptions {
     int turns = 0;
     bool flip_x = false, flip_y = false, compare = false, uncropped = false;
@@ -26,9 +28,15 @@ struct ImageProcessOptions {
     double shadows = 0, highlights = 0, intensity = 1;
     // rows are [R,G,B,offset]; presets are supplied as data by the caller.
     double matrix[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
+    double output_black = 0, output_white = 1;
+    // channels are master RGB, red, green and blue; plain arrays survive async option copies.
+    double curves[IMAGE_TONE_CHANNELS][IMAGE_TONE_POINTS][2] = {};
+    uint64_t curve_counts[IMAGE_TONE_CHANNELS] = {};
     double vignette = 0, softness = 0, sharpen = 0;
     int output_width = 0, output_height = 0;
 };
+
+bool image_process_tone_valid(const ImageProcessOptions& options);
 
 struct ImageProcessSource {
     const uint8_t* pixels = nullptr;

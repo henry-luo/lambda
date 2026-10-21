@@ -358,7 +358,7 @@ pn book_restyle(owner, bs) {
     return BK.restyle(owner, CTX, bs, options)
 }
 
-pn book_command(owner, st, action) {
+pn book_command(owner, st, action, now_ms) {
     let bs = st.book
     if (action == "book-close") {
         updates.show(owner, "book", false)
@@ -366,7 +366,7 @@ pn book_command(owner, st, action) {
         dom.focus_set(home(owner, st), false)
         return {*:st, book:null}
     }
-    if (action == "book-next" or action == "book-prev") { return {*:st, book:BK.turn(owner, CTX, bs, action == "book-next")} }
+    if (action == "book-next" or action == "book-prev") { return {*:st, book:BK.turn(owner, CTX, bs, action == "book-next", now_ms)} }
     return st
 }
 
@@ -503,7 +503,7 @@ pn command(owner, st, action, now_ms = 0.0) {
     if (action == "film-scope" or action == "film-selection") { return open_film(owner, st, slice(action, 5, len(action))) }
     if (starts_with(action, "film-") and st.film != null) { return film_command(owner, st, action, now_ms) }
     if (action == "book-scope" or action == "book-selection") { return open_book(owner, st, slice(action, 5, len(action))) }
-    if (starts_with(action, "book-") and st.book != null) { return book_command(owner, st, action) }
+    if (starts_with(action, "book-") and st.book != null) { return book_command(owner, st, action, now_ms) }
     if (action == "collage-scope" or action == "collage-selection") { return open_collage(owner, st, slice(action, 8, len(action))) }
     if (starts_with(action, "collage-") and st.collage != null) { return collage_command(owner, st, action) }
     if (starts_with(action, "slideshow-")) { return open_sheet(owner, st, slice(action, 10, len(action))) }
@@ -754,11 +754,11 @@ on click(evt) {
     if (session.book != null and not session.viewer.open) {
         let spread = dom.closest(evt.target, "[data-spread]")
         if (spread != null) {
-            session = {*:session, book:BK.jump(owner, CTX, session.book, int(dom.get_attribute(spread, "data-spread")) ^ { 0 })}
+            session = {*:session, book:BK.jump(owner, CTX, session.book, int(dom.get_attribute(spread, "data-spread")) ^ { 0 }, evt.time_stamp)}
             return 'handled'
         }
         let button = dom.closest(evt.target, "[data-action]")
-        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action")) }
+        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action"), evt.time_stamp) }
         return 'handled'
     }
     if (session.collage != null) {
@@ -1001,7 +1001,7 @@ on pointerup(evt) {
         return 'prevent-default'
     }
     if (session.book != null and session.book.drag != null) {
-        session = {*:session, book:BK.release(owner_of(evt), CTX, session.book)}
+        session = {*:session, book:BK.release(owner_of(evt), CTX, session.book, evt.time_stamp)}
         return 'prevent-default'
     }
     if (session.collage != null and session.collage.drag != null) {
@@ -1032,9 +1032,9 @@ on keydown(evt) {
     if (session.book != null and not session.viewer.open) {
         let action = if (key == "Escape") "book-close" else if (key == "ArrowRight" or key == "PageDown" or key == " ") "book-next"
             else if (key == "ArrowLeft" or key == "PageUp") "book-prev" else ""
-        if (action != "") { session = dispatch(owner, session, action); return 'prevent-default' }
+        if (action != "") { session = dispatch(owner, session, action, evt.time_stamp); return 'prevent-default' }
         if (key == "Home" or key == "End") {
-            session = {*:session, book:BK.jump(owner, CTX, session.book, if (key == "Home") 0 else len(session.book.book.leaves))}
+            session = {*:session, book:BK.jump(owner, CTX, session.book, if (key == "Home") 0 else len(session.book.book.leaves), evt.time_stamp)}
             return 'prevent-default'
         }
         return 'pass'

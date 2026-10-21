@@ -5072,7 +5072,7 @@ static FontProp* paged_flow_font(PagedFlowState* state, FontProp* source) {
     FontProp* copy = (FontProp*)arena_alloc(arena, sizeof(FontProp));
     if (!copy) return nullptr;
     memset(copy, 0, sizeof(FontProp));
-    font_prop_copy(copy, source);
+    font_prop_copy(copy, source, nullptr);
     copy->text_shadow = nullptr;
     copy->family = lam::up(source->family ? (char*)pool_dup_n(composition->pool, source->family, strlen(source->family)) : nullptr);
     copy->platform_fallback_family = lam::up(source->platform_fallback_family

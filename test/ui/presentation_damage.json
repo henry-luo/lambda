@@ -1,0 +1,301 @@
+{
+  "name": "Presentation damage: selective paint-only frames match full renders (translate, opacity, preserve-3d, off-screen entry, mixed frames)",
+  "html": "test/ui/presentation_damage.ls",
+  "viewport": {
+    "width": 900,
+    "height": 560
+  },
+  "env": [
+    {
+      "key": "RADIANT_DAMAGE_VERIFY",
+      "value": "1"
+    }
+  ],
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "mouse_move",
+      "x": 290,
+      "y": 80
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "mouse_move",
+      "x": 880,
+      "y": 540
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_damage_parity",
+      "min_frames": 30,
+      "min_selective": 30
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.getElementById('card')).transform.length>0 && document.getElementById('label').style.color.length>0"
+    }
+  ]
+}

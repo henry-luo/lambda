@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from build_config import load_build_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,11 +51,15 @@ def compiler_environment(tools, build):
     return env
 
 
-def dependency_archives(profile, tools, env, build, jobs):
+def dependency_archives(config, profile, tools, env, build, jobs):
     archives = []
     extra_sources = []
+    targets = {target['name']: target for target in config['targets']}
     for dependency in profile['dependencies']:
         extra_sources.extend(dependency.get('source_files', []))
+        # share the native source closure without importing native objects or flags.
+        if 'source_target' in dependency:
+            extra_sources.extend(targets[dependency['source_target']]['source_files'])
         archive = dependency.get('archive')
         if not archive:
             continue
@@ -78,15 +83,7 @@ def dependency_archives(profile, tools, env, build, jobs):
                             f'-j{jobs}', dependency['make_target']],
                            log, dep_env, source)
             else:
-                destination = build / name
-                flags = ' '.join(profile['flags'])
-                run_logged([str(tools / 'emcmake'), 'cmake', '-S',
-                            str(ROOT / dependency['cmake_source']), '-B',
-                            str(destination), '-DCMAKE_BUILD_TYPE=MinSizeRel',
-                            f'-DCMAKE_C_FLAGS={flags}', f'-DCMAKE_CXX_FLAGS={flags}',
-                            *dependency.get('cmake_flags', [])], log, env)
-                run_logged(['cmake', '--build', str(destination),
-                            '--parallel', str(jobs)], log, env)
+                raise RuntimeError(f'no source build recipe for WASM dependency {name}')
         archives.append(str(archive))
     return archives, extra_sources
 
@@ -116,7 +113,8 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
-    profile = json.loads((ROOT / 'build_lambda_config.json').read_text())['platforms']['lambda-wasm']
+    config = load_build_config(ROOT / 'build_lambda_config.json')
+    profile = config['platforms']['lambda-wasm']
     compiler = compiler_path()
     if not compiler.is_file():
         raise RuntimeError('Emscripten is missing; set EMCC or EMSDK')
@@ -130,7 +128,7 @@ def main():
     # the build driver also runs on older system Python installations.
     version = subprocess.check_output([str(compiler), '--version'],
                                       env=env, text=True).splitlines()[0]
-    archives, extra_sources = dependency_archives(profile, tools, env, build, args.jobs)
+    archives, extra_sources = dependency_archives(config, profile, tools, env, build, args.jobs)
     sources = profile['source_files'] + extra_sources
     manifest = {'compiler': version, 'profile': 'lambda-wasm', 'sources': sources,
                 'profile_sha256': hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()}

@@ -1127,7 +1127,12 @@ static bool rdt_fill_linear_gradient_analytic(RdtVector* vec, RdtPath* path,
     RdtMatrix frame = transform ? *transform : rdt_matrix_identity();
     if (gradient_transform) frame = rdt_matrix_multiply(&frame, gradient_transform);
     // projective gradients retain the backend path until inverse-perspective sampling is shared.
-    if (frame.e31 != 0.0f || frame.e32 != 0.0f || frame.e33 != 1.0f) return false;
+    // The backend's own tolerance decides: a composed 3D transform that cancels to a
+    // translation (a back face under a turned leaf) leaves ~1e-18 of perspective residue,
+    // which must not move it onto a rasteriser with a different stripe phase.
+    if (matrix_is_projective(&frame)) return false;
+    frame.e31 = frame.e32 = 0.0f;
+    frame.e33 = 1.0f;
     RdtMatrix inverse;
     if (!rdt_matrix_invert_affine(&frame, &inverse)) return false;
     RdtVectorImpl* impl = vec->impl;
@@ -1478,6 +1483,31 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
                     uint64_t resource_identity, ScaleMode scale_mode) {
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* impl = vec->impl;
+    // A 1:1 image at a whole-pixel translation (a paint layer at rest) maps samples to
+    // pixels exactly: composite the source directly under rectangular clips, without
+    // resampling it into a projection buffer first.
+    float copy_x, copy_y;
+    Bound copy_clip;
+    // a source inside the target (a canvas drawn onto itself) must go through a separate buffer
+    const uint8_t* target_begin = (const uint8_t*)impl->pixels;
+    const uint8_t* target_end = target_begin + (size_t)impl->stride * 4 * (size_t)impl->height;
+    const uint8_t* source_begin = (const uint8_t*)pixels;
+    const uint8_t* source_end = source_begin + (size_t)src_stride * 4 * (size_t)(src_h > 0 ? src_h : 0);
+    bool aliased = source_begin < target_end && target_begin < source_end;
+    if (!aliased && rdt_image_is_pixel_copy(transform, src_w, src_h, dst_x, dst_y, dst_w, dst_h, &copy_x, &copy_y) &&
+        vector_raster_clip_rect(impl, copy_x, copy_y, dst_w, dst_h, &copy_clip)) {
+        tvg_flush_batch_scene(impl, &RenderPipelineMetrics::flush_cpu);
+        ImageSurface source = {}, target = {};
+        source.pixels = (void*)pixels;
+        source.width = src_w; source.height = src_h; source.pitch = src_stride * 4;
+        source.alpha_mode = straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
+        target.pixels = impl->pixels; target.width = impl->width; target.height = impl->height;
+        target.pitch = impl->stride * 4; target.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+        Rect destination = {copy_x - impl->tile_offset_x, copy_y - impl->tile_offset_y, dst_w, dst_h};
+        RasterPaintContext raster = raster_paint_context(&target, &copy_clip, nullptr, 0);
+        raster_blit_surface_scaled(&raster, &source, nullptr, &destination, SCALE_MODE_NEAREST, opacity);
+        return;
+    }
     if (transform || scale_mode != SCALE_MODE_LINEAR) {
         // Use the shared pixel-center sampler for affine and projective images;
         // native picture scaling otherwise disagrees with CPU image blits.

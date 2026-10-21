@@ -30,7 +30,6 @@ ifeq ($(OS),Darwin)
 	PREMAKE_HEADLESS_FILE := premake5.headless.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
 	MACOS_DEPLOYMENT_TARGET ?= $(or $(MACOSX_DEPLOYMENT_TARGET),15.0)
-	MACOS_CMAKE_FLAGS := -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(shell xcrun --show-sdk-path)
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.lin.lua
@@ -229,15 +228,11 @@ TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javasc
 TREE_SITTER_BASH_LIB = lambda/tree-sitter-bash/libtree-sitter-bash.a
 TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typescript.a
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
-# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md), pinned to the last
-# release before upstream required Abseil. It is built out of tree with its own
-# CMake so the vendored directory stays clean. Like MIR, the patches under
+# RE2 is built by the JSON-owned Premake target; these identify its vendored
+# source for patch verification. Like MIR, the patches under
 # patches/re2-*.patch are ALREADY APPLIED to the vendored source.
 RE2_SRC_DIR = lib/re2
-RE2_BUILD_DIR = build_temp/re2_build
-RE2_LIB = $(RE2_BUILD_DIR)/libre2.a
 RE2_UPSTREAM_COMMIT = 3a8436ac436124a57a4e22d5c8713a2d42b381d7
-RE2_SOURCES = $(wildcard $(RE2_SRC_DIR)/re2/*.cc $(RE2_SRC_DIR)/re2/*.h $(RE2_SRC_DIR)/util/*.cc $(RE2_SRC_DIR)/util/*.h)
 
 # MIR JIT library. The source is vendored in-tree at lambda/mir (see
 # lambda/mir/VENDOR.md) and built in place, so the path is the same on every
@@ -336,40 +331,6 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 $(TREE_SITTER_RUBY_LIB): $(RUBY_GRAMMAR_JS) $(RUBY_SCANNER_C)
 	$(call ts_generate,ruby,--abi 14)
 	$(call ts_lib_build,ruby,)
-
-# Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
-# On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
-# with -stdlib=libc++ (matching the rest of the build) instead of defaulting
-# to GCC/libstdc++, which would cause an ABI mismatch at link time.
-$(RE2_LIB): $(RE2_SOURCES)
-	@echo "Building re2 library from vendored source ($(RE2_SRC_DIR))..."
-	@mkdir -p $(RE2_BUILD_DIR)
-	@# CMake needs a single executable for CMAKE_*_COMPILER; if ccache is in
-	@# use, $(CC)/$(CXX) is "ccache gcc"/"ccache g++" — split into launcher
-	@# + real compiler so cmake's compiler-ID probe works. MSYS2's ccache
-	@# cannot resolve the Windows absolute compiler path emitted into Ninja
-	@# rules, so RE2 must use the compiler directly on that platform.
-	@# The source path is relative so MSYS2's native cmake needs no path
-	@# translation (build_temp/re2_build -> ../../lib/re2).
-	@cd $(RE2_BUILD_DIR) && \
-		RE2_CC="$(firstword $(filter-out ccache,$(CC)))" ; \
-		RE2_CXX="$(firstword $(filter-out ccache,$(CXX)))" ; \
-		RE2_LAUNCHER="$(if $(filter yes,$(IS_MSYS2)),,$(filter ccache,$(firstword $(CC))))" ; \
-		cmake ../../$(RE2_SRC_DIR) \
-			-DCMAKE_C_COMPILER="$$RE2_CC$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
-			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
-			-DCMAKE_C_COMPILER_LAUNCHER="$$RE2_LAUNCHER" \
-			-DCMAKE_CXX_COMPILER_LAUNCHER="$$RE2_LAUNCHER" \
-			-DCMAKE_CXX_FLAGS="$(if $(filter /clang64/bin/clang++,$(CXX)),-stdlib=libc++,) -O2" \
-			$(MACOS_CMAKE_FLAGS) \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-			-DBUILD_SHARED_LIBS=OFF \
-			-DRE2_BUILD_TESTING=OFF \
-			-Wno-dev \
-			-G Ninja 2>&1 | tail -3 && \
-		ninja -j$(JOBS)
-	@echo "re2 library built: $(RE2_LIB)"
 
 # Build MIR JIT library from the vendored source at lambda/mir.  The default
 # build produces only libmir.a; the C2MIR reference driver is opt-in below.
@@ -766,7 +727,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(RE2_LIB) $(MIR_LIB)
+build: $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -815,7 +776,7 @@ test-js-parser-diff:
 
 
 # Debug build
-debug: $(RE2_LIB) $(MIR_LIB)
+debug: $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@# debug and release share lambda.exe; force the debug-profile relink when
 	@# a newer non-profile host would otherwise satisfy the target timestamp.
@@ -851,7 +812,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(RE2_LIB) $(MIR_LIB)
+build-release-compile: $(MIR_LIB)
 	@# debug and release share lambda.exe; force the release relink when a
 	@# newer debug-profile host would otherwise satisfy the target timestamp.
 	@rm -f lambda.exe
@@ -877,7 +838,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(RE2_LIB) $(MIR_LIB)
+build-release-profile: $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -894,7 +855,7 @@ build-release-profile: $(RE2_LIB) $(MIR_LIB)
 
 # Explicit AddressSanitizer debug build. The output is separate from the normal
 # lambda.exe host so switching sanitizer coverage does not replace the fast host.
-build-debug-asan: $(RE2_LIB) $(MIR_LIB)
+build-debug-asan: $(MIR_LIB)
 	@echo "Building debug_asan version using Premake build system..."
 	@echo "Optimizations: -Og with symbols, frame pointers, AddressSanitizer"
 	$(call toolchain_verify)
@@ -1008,6 +969,17 @@ build-node-crypto: build build-windows-host-import
 # does the TLS, so neither client library is built with one.
 build-rdb-deps:
 	utils/build-rdb-deps.sh
+
+.PHONY: build-dependency build-typemeta-extract test-build-dependencies
+build-dependency:
+	@test -n "$(DEP)" || { echo "Usage: make build-dependency DEP=thorvg [ARGS=...]"; exit 1; }
+	$(PYTHON) utils/build_dependencies.py $(DEP) --jobs $(JOBS) $(ARGS)
+
+build-typemeta-extract:
+	$(PYTHON) utils/build_dependencies.py typemeta-extract --jobs $(JOBS) $(ARGS)
+
+test-build-dependencies:
+	$(PYTHON) utils/test_build_deps.py
 
 build-rdb-drivers: build
 	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
@@ -1575,7 +1547,6 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-bash/libtree-sitter-bash.a lambda/tree-sitter-bash/src/*.o
 	@rm -f lambda/tree-sitter-typescript/libtree-sitter-typescript.a lambda/tree-sitter-typescript/src/*.o
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
-	@rm -rf $(RE2_BUILD_DIR)
 	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
 
@@ -1693,7 +1664,7 @@ test-lambda-full: test-lambda-baseline
 test-gc-rooting-core: build
 	@mkdir -p temp
 	@echo "Running LambdaJS JIT exact-root forced-GC gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXEC_BACKEND=mir \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
 	@echo "Running LambdaJS AST functional RegExp replacement exact-root gate..."
@@ -3191,9 +3162,8 @@ build-lambda-static: build-radiant
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back
 # into test-lambda-baseline transitively.
-# input runners link these archives directly, so declare them here to make a
-# clean focused build materialize every linker input before the test link.
-build-input-baseline: build-lambda-data $(RE2_LIB)
+# source-built external archives are ordered by the generated Premake graph.
+build-input-baseline: build-lambda-data
 	@echo "Building input baseline test executables..."
 	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
 

@@ -1,0 +1,531 @@
+{
+  "name": "Photo album book: page turns repaint only the turning leaf's damage, matching full renders",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "viewport": {
+    "width": 1400,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#book-button"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 300
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_damage_parity",
+      "min_frames": 60,
+      "min_selective": 60
+    }
+  ],
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    },
+    {
+      "key": "RADIANT_DAMAGE_VERIFY",
+      "value": "1"
+    }
+  ]
+}

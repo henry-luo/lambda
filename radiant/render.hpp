@@ -1078,6 +1078,11 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags);
 void dl_item_free_owned_payload(DisplayItem* item);
 bool dl_reference_fragment(DisplayList* list, DisplayPayloadOwner* owner, Bound bounds);
 bool dl_supports_premultiplied_capture(const DisplayList* list);
+// A content fingerprint of a recording: equal fingerprints paint equal pixels, given equal
+// glyph-cache generations (glyph buffers compare by identity; images by their pixels). False
+// when an op's pixels are not determined by the list alone (pictures, fragments, live media,
+// borrowed filters).
+bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint);
 bool dl_supports_vector_translation(const DisplayList* list, int first = 0, int end = -1);
 // caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.
 bool dl_trim_empty_arena(DisplayList* list);
@@ -2238,6 +2243,19 @@ typedef struct RasterRenderContext : RenderContext {
     // Suppresses automatic per-block display-list markers while a caller records
     // a wider element subtree marker around replaced/layer content.
     int element_marker_suppression_depth;
+
+    // Presentation damage: tracked elements' recorded bounds are noted at their marker
+    // end, in the frame's own list only (offscreen captures use other coordinate spaces).
+    lam::Up<PresentationDamage> presentation_damage;
+    lam::Up<const DisplayList> presentation_damage_list;
+
+    // Paint layers (render_paint_layer.cpp): set while a layer's subtree is recorded
+    // offscreen, so nothing inside nests another layer; this frame's captures and hits.
+    bool paint_layer_capturing;
+    lam::Up<ViewBlock> paint_layer_root;  // the captured root: its own opacity is drawn, not captured
+    int paint_layer_captures;
+    int paint_layer_revalidations;
+    int paint_layer_hits;
 } RasterRenderContext;
 
 struct RenderFrameScope {
@@ -2264,6 +2282,30 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 typedef struct RenderElementMarkerScope {
     int begin_index;
 } RenderElementMarkerScope;
+
+// Paint layers (render_paint_layer.cpp, Radiant_Design_Animation_Repaint §4): paints a
+// flat subtree moved by a presentation transform from its retained raster. False when the
+// caller must record it live (first paint of new content, ineligible content, no budget).
+// `record` runs the block's ordinary paint pipeline, which the capture reuses offscreen.
+typedef void (*RenderBlockRecordFn)(RasterRenderContext*, ViewBlock*,
+                                    void (*content)(RasterRenderContext*, ViewBlock*));
+bool render_paint_layer_try(RasterRenderContext* rdcon, ViewBlock* block,
+                            void (*content)(RasterRenderContext*, ViewBlock*),
+                            RenderBlockRecordFn record, struct Css3dPaintContext* context);
+// parity checks repaint a frame with the same layers and no new captures (damage parity),
+// or with layers suspended (layer parity); stats count layer paints since the last take,
+// and those whose placement resampled the layer
+enum PaintLayerOverride { PAINT_LAYER_NORMAL, PAINT_LAYER_HOLD_CAPTURES, PAINT_LAYER_SUSPENDED };
+struct PaintLayerFrameStats { int hits, resampled; };
+void render_paint_layer_override(PaintLayerOverride value);
+PaintLayerOverride render_paint_layer_current_override();
+PaintLayerFrameStats render_paint_layer_take_stats();
+// layers that wait for a capture the window can do while idle, and the idle frame doing it
+bool render_paint_layers_pending(DomDocument* document);
+void render_paint_layers_idle_frame(DomDocument* document);
+// replays a layer recording into `surface` as exact straight or premultiplied RGBA
+bool render_layer_rasterize(DisplayList* recording, ScratchArena* scratch, float scale,
+                            ImageSurface* surface, const char* label);
 
 bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block);
 bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block);

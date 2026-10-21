@@ -4,7 +4,7 @@ import registry: .commands
 import paint: .paint
 pub fn supported(id:string) => id in ["text.update","vector.update"] or starts_with(id,"style.") or starts_with(id,"effect.") or starts_with(id,"paint.") or starts_with(id,"pixels.") or
     starts_with(id,"selection.") or starts_with(id,"mask.") or starts_with(id,"retouch.") or
-    id in ["layer.select","layer.move","tool.configure","layer.rename","layer.opacity","layer.visibility","layer.lock","layer.blend","layer.transform","layer.rasterize"]
+    id in ["layer.select","layer.move","tool.configure","layer.rename","layer.opacity","layer.visibility","layer.lock","layer.blend","layer.transform","layer.straighten","layer.rasterize"]
 fn portable(value,depth=0) => if (depth>32) false
     else if (value is map) all([for (key,v in value) portable(v,depth+1)])
     else if (value is array) len(value)<=65536 and all([for (v in value) portable(v,depth+1)])

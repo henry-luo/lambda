@@ -173,7 +173,7 @@ def expect_profile_isolated_archives(module) -> None:
         fail('premake5 not found')
     generator = linux_validation_generator(module)
     providers = []
-    for name in ('archive-readers', 'image-codecs'):
+    for name in ('archive-readers', 'image-codecs', 're2'):
         library = generator.external_libraries[name]
         target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
         providers.append((name, target, library['lib']))
@@ -245,6 +245,41 @@ def expect_profile_isolated_archives(module) -> None:
                         fail(f'{name} {profile} build overwrote the {previous} archive')
 
 
+def expect_re2_source_build(module) -> None:
+    for platform_name in ('linux', 'macos', 'windows'):
+        generator = (module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'windows')
+                     if platform_name == 'windows' else linux_validation_generator(module))
+        generator.use_linux_config = platform_name == 'linux'
+        generator.use_macos_config = platform_name == 'macos'
+        library = generator.external_libraries['re2']
+        target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
+        sources = target['source_files']
+        vendored_sources = {path.relative_to(ROOT).as_posix()
+                            for path in (ROOT / 'lib/re2').rglob('*.cc')}
+        if set(sources) != vendored_sources or len(sources) != len(set(sources)):
+            fail(f'{platform_name} RE2 target omits or duplicates vendored library sources')
+        generator._generate_complex_library(target)
+        emitted = '\n'.join(generator.premake_content)
+        if 'language "C++"' not in emitted or '"-std=c++17"' not in emitted or \
+                '"-fPIC"' not in emitted:
+            fail(f'{platform_name} RE2 .cc sources lost their C++17/PIC compilation policy')
+        if platform_name == 'windows' and '"NOMINMAX"' not in emitted:
+            fail('Windows RE2 source build lost its Windows-header compatibility defines')
+        # Check direct test links as well as dependencies reached through Lambda archives.
+        for dependencies, libraries in (([], ['re2']), (['lambda-data'], [])):
+            generator.premake_content = []
+            generator._generate_single_test('test_re2_provider', 'lib/test_grep_gtest.cpp',
+                                            dependencies, '', '', ['gtest', 'gtest_main', *libraries])
+            emitted = '\n'.join(generator.premake_content)
+            if not re.search(r'dependson \{[^}]*"re2"', emitted):
+                fail(f'{platform_name} test can link RE2 before its source target builds')
+        generator.premake_content = []
+        generator.generate_main_program()
+        emitted = '\n'.join(generator.premake_content)
+        if not re.search(r'dependson \{[^}]*"re2"', emitted) or library['lib'] not in emitted:
+            fail(f'{platform_name} host lost the source-built RE2 archive dependency')
+
+
 def expect_image_source_build(module) -> None:
     for architecture in ('arm64', 'x86_64'):
         generator = linux_validation_generator(module, architecture)
@@ -291,6 +326,7 @@ def main() -> int:
     closure = generator._executable_external_dependencies({'libraries': ['archive-readers']})
     if not {'archive-readers', 'archive-iconv', 'lzma', 'zstd', 'bzip2'}.issubset(closure):
         fail('source-built archive consumers lost their codec/charset link requirements')
+    expect_re2_source_build(module)
     expect_image_source_build(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")

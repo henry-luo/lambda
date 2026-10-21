@@ -157,6 +157,8 @@ enum SimEventType {
     SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
     SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
     SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
+    SIM_EVENT_ASSERT_DAMAGE_PARITY, // verify selective presentation frames matched full renders
+    SIM_EVENT_ASSERT_LAYER_PARITY,  // verify frames painted from paint layers matched direct paints
     SIM_EVENT_ASSERT_STATE_DUMP, // compare in-memory Mark state dump against fixture
     SIM_EVENT_ASSERT_RECONCILE_MODE, // verify last DOM-mutation reconcile mode/reason
     SIM_EVENT_ASSERT_FILE,       // verify a local file's existence / content (edit-mode saves)
@@ -374,6 +376,12 @@ struct SimEvent {
     int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;
     float pixel_search_radius;  // logical pixels around a glyph sample point
     bool pixel_force_render;
+    // assert_damage_parity: verified presentation frames, of which at least this many selective
+    int damage_min_frames;
+    int damage_min_selective;
+    int layer_min_frames;
+    int layer_min_exact;
+    float layer_max_mean;
     // Phase 7: advance_time fields
     int advance_steps;           // number of tick steps (0 = auto from ms/16)
     // Phase 7: assert_style animated flag

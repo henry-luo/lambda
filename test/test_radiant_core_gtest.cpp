@@ -1047,6 +1047,33 @@ protected:
     }
 };
 
+TEST_F(IncrementalCssTest, NestedGridIntrinsicPairMeasuresEachSubtreeOnce) {
+    DomElement* grid = target;
+    constexpr unsigned grid_depth = 8;
+    for (unsigned depth = 0; depth < grid_depth; depth++) {
+        set_property(grid, "display", "grid");
+        set_property(grid, "grid-template-columns", "auto");
+        grid = append_intrinsic_child(grid);
+    }
+    set_property(grid, "display", "block");
+    DomElement* first = append_intrinsic_child(grid);
+    DomElement* second = append_intrinsic_child(grid);
+    set_property(first, "display", "inline-block");
+    set_property(first, "width", "40px");
+    set_property(second, "display", "inline-block");
+    set_property(second, "width", "60px");
+    for (unsigned pass = 0; pass < 2; pass++) {
+        if (pass) set_property(second, "width", "80px");
+        tree.measurement_cache_generation++;
+        uint64_t requests = context.profiler.intrinsic_requests;
+        IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, target);
+        EXPECT_FLOAT_EQ(sizes.min_content, pass ? 80.0f : 60.0f);
+        EXPECT_FLOAT_EQ(sizes.max_content, pass ? 120.0f : 100.0f);
+        // each grid consumes the child's min/max pair once, independent of nesting depth.
+        EXPECT_LE(context.profiler.intrinsic_requests - requests, grid_depth + 3u);
+    }
+}
+
 TEST_F(IncrementalCssTest, IntrinsicFlowReusesOnlyGeometryIndependentSubtrees) {
     DomElement* child = append_intrinsic_child();
     set_property(child, "width", "80px");

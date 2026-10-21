@@ -78,7 +78,7 @@ static InlineProp* ensure_inline_prop(DomElement* element, Pool* pool,
     return element->in_line;
 }
 
-static TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source) {
+TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source) {
     TextShadow* first = nullptr;
     TextShadow* last = nullptr;
     while (source && pool) {
@@ -215,10 +215,7 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
     if (value && lycon) {
         if (was_absent && lycon->font.style) {
             // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
-            font_prop_copy(value, lycon->font.style);
-            // The inherited FontProp snapshot owns its mutable text-shadow chain;
-            // sharing the parent's list would make retained reset double-free it.
-            value->text_shadow = lam::own(clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow));
+            font_prop_copy(value, lycon->font.style, prop_pool(lycon));
         }
         if (!value->family && lycon->ui_context) {
             // reset-in-place keeps this allocation; restore its inherited or initial family too.

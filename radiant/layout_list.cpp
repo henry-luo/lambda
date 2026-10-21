@@ -913,8 +913,9 @@ static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, uns
 }
 
 bool layout_prepare_generated_effects(LayoutContext* context, DomNode* root) {
-    if (!context || context->paged || context->css_query_probe ||
-        context->generated_effects_prepared) return true;
+    // probes also need generated boxes classified before intrinsic sizing;
+    // otherwise fixed pseudo descendants can become provisional flex contributions.
+    if (!context || context->paged || context->generated_effects_prepared) return true;
     int budget = context->node_limit - context->node_count;
     bool supported = view_geometry_walk_dom_tree(root, [](DomNode* node, void* data) {
         if (--*(int*)data < 0) return false;
