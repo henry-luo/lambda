@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 static void print_name(ufbx_string name) {
     putchar('"');
@@ -25,13 +26,22 @@ static void print_name(ufbx_string name) {
 }
 static void print_vec(ufbx_vec3 v) { printf("[%.9f,%.9f,%.9f]", v.x, v.y, v.z); }
 static long key_units(double metres) { return lround(metres * 100000.0); }
+// a mesh may share its bone's name (Quaternius' robot); nodes are keyed by name, and the
+// converter's joint is the bone
+static int bone_named(const ufbx_scene* scene, ufbx_string name) {
+    for (size_t i = 0; i < scene->nodes.count; i++) {
+        const ufbx_node* node = scene->nodes.data[i];
+        if (node->bone && node->name.length == name.length && !memcmp(node->name.data, name.data, name.length)) return 1;
+    }
+    return 0;
+}
 
 static void dump_scene(const ufbx_scene* scene, const ufbx_scene* rest) {
     printf("{\"nodes\":{");
     int first = 1;
     for (size_t i = 0; i < scene->nodes.count; i++) {
         const ufbx_node* node = scene->nodes.data[i];
-        if (node->is_root || !node->name.length) continue;
+        if (node->is_root || !node->name.length || (!node->bone && bone_named(scene, node->name))) continue;
         if (!first) putchar(',');
         first = 0;
         print_name(node->name);

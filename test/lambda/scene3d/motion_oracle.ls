@@ -17,12 +17,16 @@ let offsets_bvh = motion.load(dir ++ "offsets.bvh", {scale: 0.01})^;
 
 "2 FBX joints agree with ufbx in every case";
 let cases = [["jump.fbx", "jump"], ["jump-ascii.fbx", "jump"], ["jump-7500.fbx", "jump"], ["rig.fbx", "curl"], ["rig.fbx", "wave"],
-    ["rig.fbx", "sway"], ["kenney/characterMedium.fbx", null], ["kenney/jump.fbx", "Root|Jump"]]
+    ["rig.fbx", "sway"], ["kenney/characterMedium.fbx", null], ["kenney/jump.fbx", "Root|Jump"],
+    ["cube-pets/animal-cat.fbx", "walk"], ["cube-pets/animal-cat.fbx", "dance"],
+    ["robot/Robot.fbx", null], ["robot/Robot.fbx", "RobotArmature|Robot_Dance"], ["robot/Robot.fbx", "RobotArmature|Robot_Wave"]]
+// FBXLoader keys every curve linearly, so files whose clips need cubic keys are compared with ufbx only
+fn curved(cs) => cs[0] == "rig.fbx" or starts_with(cs[0], "cube-pets")
 let loaded = map([for (f in unique([for (cs in cases) cs[0]])) (f, motion.load(dir ++ f)^)]);
 [for (cs in cases) [o.id_of(cs), o.agrees([for (s, p in oracle.ufbx[o.id_of(cs)].nodes) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, false)])]];
 
 "3 and with FBXLoader where it evaluates the same curves";
-[for (cs in cases where cs[0] != "rig.fbx") [o.id_of(cs), o.agrees([for (s, p in oracle.three.fbx[o.id_of(cs)]) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, true)])]];
+[for (cs in cases where not curved(cs)) [o.id_of(cs), o.agrees([for (s, p in oracle.three.fbx[o.id_of(cs)]) o.joint_drift(loaded[cs[0]], cs[1], float(s), p, true)])]];
 // FBXLoader keys every curve linearly and re-slerps Euler turns: it ignores
 // constant and cubic keys, which ufbx and the converter honour
 fn mid(cs) => if (cs[1] == "sway") "0.7" else "0.5";
@@ -30,9 +34,9 @@ fn mid(cs) => if (cs[1] == "sway") "0.7" else "0.5";
     [o.id_of(cs), o.joint_drift(loaded[cs[0]], cs[1], float(mid(cs)), oracle.three.fbx[o.id_of(cs)][mid(cs)], true) > 0.001]];
 
 "4 skinned vertices agree with ufbx and FBXLoader";
-[for (cs in cases where motion.body_of(loaded[cs[0]]) != null)
+[for (cs in cases where motion.body_of(loaded[cs[0]]) != null and not starts_with(cs[0], "cube-pets"))
     [o.id_of(cs), [for (s, w in oracle.ufbx[o.id_of(cs)].skin) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
-[for (cs in cases where cs[0] != "rig.fbx" and oracle.three.skinned[o.id_of(cs)] != null)
+[for (cs in cases where not curved(cs) and oracle.three.skinned[o.id_of(cs)] != null)
     [o.id_of(cs), [for (s, w in oracle.three.skinned[o.id_of(cs)]) o.skin_drift(loaded[cs[0]], cs[1], float(s), w, 1)]]];
 
 "5 a rigid prop rides its joint as ufbx places it";
@@ -53,4 +57,8 @@ let apose = motion.load(dir ++ "apose.fbx", {rig: 'mixamo'})^
 // the A-pose is one rig with the jump, so attach would copy; call retarget directly
 let moved = motion.retarget(motion.clips_of(cmu)[0], cmu, apose)^
 let bent = <character source: 'fbx', units: 'm', *[motion.skeleton_of(apose), moved]>;
-o.agrees([for (s, p in oracle.three.retarget["apose#jump"]) o.joint_drift(bent, "jump", float(s), p, true)])
+o.agrees([for (s, p in oracle.three.retarget["apose#jump"]) o.joint_drift(bent, "jump", float(s), p, true)]);
+
+"7 Kenney's Cube Pets: a rigid rig with weighted tangents, each part placed as ufbx places it";
+[for (cs in cases where starts_with(cs[0], "cube-pets"))
+    [o.id_of(cs), o.agrees([for (s, w in oracle.ufbx[o.id_of(cs)].static) o.rigid_drift(loaded[cs[0]], cs[1], float(s), w, 3)])]]

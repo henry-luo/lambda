@@ -1,8 +1,8 @@
 {
-  "name": "MixamoCharacterDancesTheRetargetedSamba",
+  "name": "MixamoCharacterDancesAndJumps",
   "viewport": {
-    "width": 240,
-    "height": 340
+    "width": 1100,
+    "height": 900
   },
   "input_turn_ms": 0,
   "event_interval_ms": 0,
@@ -11,8 +11,8 @@
       "type": "scene3d",
       "op": "snapshot",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320
+      "width": 480,
+      "height": 240
     },
     {
       "type": "scene3d",
@@ -25,20 +25,20 @@
       "name": "one",
       "source": "scene3d",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320
+      "width": 480,
+      "height": 240
     },
     {
       "type": "assert_surface",
       "source": "scene3d",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320,
+      "width": 480,
+      "height": 240,
       "region": [
         0,
         0,
-        240,
-        320
+        480,
+        240
       ],
       "rgba": [
         [
@@ -55,7 +55,7 @@
         ]
       ],
       "count": {
-        "min": 1500
+        "min": 800
       }
     },
     {
@@ -65,28 +65,20 @@
       "seconds": 5
     },
     {
-      "type": "snapshot_surface",
-      "name": "five",
-      "source": "scene3d",
-      "target": "#dancer-view",
-      "width": 240,
-      "height": 320
-    },
-    {
       "type": "assert_surface",
       "source": "scene3d",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320,
+      "width": 480,
+      "height": 240,
       "region": [
         0,
         0,
-        240,
-        320
+        480,
+        240
       ],
       "reference": "one",
       "count": {
-        "min": 500
+        "min": 300
       }
     },
     {
@@ -99,13 +91,13 @@
       "type": "assert_surface",
       "source": "scene3d",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320,
+      "width": 480,
+      "height": 240,
       "region": [
         0,
         0,
-        240,
-        320
+        480,
+        240
       ],
       "reference": "one",
       "count": {
@@ -113,12 +105,64 @@
       }
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#play-leap"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#dancer-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#dancer-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dance"
+      },
+      "attribute": "data-state",
+      "equals": "leap"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "reference": "one",
+      "count": {
+        "min": 300
+      }
+    },
+    {
       "type": "capture_surface",
       "source": "scene3d",
       "target": "#dancer-view",
-      "width": 240,
-      "height": 320,
-      "file": "temp/mixamo/dancer-1s.png"
+      "width": 480,
+      "height": 240,
+      "file": "temp/mixamo/dancer-jump.png"
     }
   ]
 }
