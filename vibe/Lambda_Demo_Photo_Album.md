@@ -1,10 +1,10 @@
 # Photo Album Demo — Proposal
 
 **Status:** Proposal, 2026-10-20. M0 (corpus preparation), M1 (browsing and
-viewer), M2 (slideshow) and M3 (collage) are implemented; see the
-[M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20),
-[M2](#m2-checkpoint--2026-10-21) and [M3](#m3-checkpoint--2026-10-21)
-checkpoints. M4 and M5 are not started. This
+viewer), M2 (slideshow), M3 (collage) and M4 (album book) are implemented; see
+the [M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20),
+[M2](#m2-checkpoint--2026-10-21), [M3](#m3-checkpoint--2026-10-21) and
+[M4](#m4-checkpoint--2026-10-21) checkpoints. M5 is not started. This
 document proposes a new demo application. It introduces no language or runtime
 rulings.
 
@@ -407,10 +407,12 @@ not repeat.
   darkens the leaf as it approaches 90° and lightens it after, which reads as
   curvature.
 - Radiant has no depth sorting for intersecting planes. The leaf never
-  intersects the page stack; instead the turning leaf's `z-index` swaps at 90°.
-- The turn is driven by the Lambda track sampler, not a CSS transition. CSS
-  transitions do not yet cover `transform` (see the transitions row in
-  [HTML_CSS_SVG_Support.md](../doc/HTML_CSS_SVG_Support.md)).
+  intersects the page stack; the turning leaf stays on top for the whole turn
+  (as built: no swap at 90° is needed, because each face hides its back).
+- The turn is sampled by the album's own frame callback, not a CSS transition.
+  CSS transitions do not yet cover `transform` (see the transitions row in
+  [HTML_CSS_SVG_Support.md](../doc/HTML_CSS_SVG_Support.md)). Progress runs on
+  frame timestamps, so headless replays are deterministic.
 
 **Interaction.**
 
@@ -523,7 +525,7 @@ the milestone that first needs it, and fixed at its root if real.
 | G2 | Does Radiant bound image-cache memory when the viewer pages through hundreds of 1280 px photos? | M1 | **Measured, real.** The window's image cache has no budget or eviction. Needs an ownership-aware eviction design in Radiant. See the M1 checkpoint. |
 | G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | **Resolved: no gap.** See the M3 checkpoint. |
 | G4 | Can the slide player seek continuously for a scrubber, and play a deck with its chrome hidden? | M5 | Extend the slide package's player API. |
-| G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | Fix 3D paint or invalidation in Radiant. |
+| G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | **Real for text, fixed.** Glyphs on a projected plane were bounded before the perspective divide and mostly dropped; fixed in `radiant/glyph_sampling.hpp`. Hit testing verified mid-turn. See the M4 checkpoint. |
 | G6 | Can `lambda.map` draw an offline basemap for the Places view? | M5 | Use the bundled world-outline fallback; a basemap is out of scope. |
 
 ## 6. Milestones and acceptance
@@ -727,7 +729,7 @@ resolution. The `photo_album` UI suite now has six replays.
 M3 is implemented: `mod_collage.ls` (model, layouts, edits, history, credits),
 `mod_collage_ui.ls` (canvas and editor markup) and `mod_collage_app.ls` (editor
 procedures and export). **Collage** opens from the toolbar (the first 30 photos
-shown) and the selection bar. Nothing is committed yet.
+shown) and the selection bar.
 
 **Delivered.** Six templates: grid, mosaic, magazine, scrapbook, heart and
 circle (clip-path masks over a mosaic). Four canvas shapes, spacing, corners,
@@ -771,3 +773,59 @@ Default decks are unchanged pixel for pixel.
 - Unsigned-byte pixel values wrap on subtraction (`226 - 227` is 255); compare
   them as `int`s.
 
+## M4 checkpoint — 2026-10-21
+
+M4 is implemented: `mod_book.ls` (pagination, leaves, spreads and turn maths as
+pure values), `mod_book_ui.ls` (pages, leaves, spread bar and shell markup) and
+`mod_book_app.ls` (mounting, frame-driven turns, drags and jumps). **Album
+book** opens from the toolbar (the photos shown, up to 240) and the selection
+bar. Nothing is committed yet.
+
+**Delivered.**
+
+- Four cloth or leather covers with an embossed title, cream or black paper,
+  page-edge stacks that grow with the pages on each side.
+- Eight templates of one to four prints. Prints have white borders, photo
+  corners, a small hand-placed tilt and a handwritten date and album caption.
+- One chapter per year, each opening on a right-hand page; a title page, page
+  numbers and an end page that pads the count to whole leaves.
+- Page turn by arrow keys, Page Up/Down, Space, Home/End, the Previous and Next
+  buttons, a click on either page, or a drag. A drag follows the pointer and
+  release completes the turn past the vertical or falls back.
+- A spread bar of thumbnails; a jump flips the leaves in between quickly.
+- Double-clicking a print opens the viewer over the book, paging through the
+  book's photos; closing it returns to the book.
+- Leaves mount near the open spread and stay mounted; far ones are hidden.
+
+**Acceptance.** The M4 row passes. `tests/album_book` paginates 100 fixture
+photos (cycled) into 54 pages on 29 leaves and checks that no two adjacent
+pages share a template, chapters start on right-hand pages, and all 100
+entries print once, inside their pages. `test/ui/photo_album/book.json`
+(30 assertions) covers the cover, key and click turns, a mid-turn angle and hit
+test, spread jumps, mount limits, a drag that reverts and one that completes, a
+left turn, the viewer round trip, paper and cover changes and closing.
+
+**G5 — real for text, fixed at the root.** Glyphs drawn on a plane under
+`perspective` were bounded with the affine part of the matrix only, so most of a
+turning page's text was clipped away. `glyph_draw_transformed_coverage_bitmap`
+now bounds the glyph after the homogeneous divide, as its inverse sampling
+already did, and samples the clip when a glyph crosses w = 0.
+`RenderOutputParity.TextInPerspectivePlaneKeepsItsGlyphs` guards it. Image and
+box painting on the leaf were already correct, and hit testing mid-turn picks
+the turning leaf. Damage bounds were checked only through headless renders, not
+in a live window.
+
+**Findings.**
+
+- `mod_publish`'s `updates.markup` skips a region whose markup is unchanged, so
+  children mounted into it later survive a rebuild. The book clears its leaf
+  host on every rebuild.
+- Animations sampled with `clock()` follow wall time, which headless replays do
+  not advance with the document timeline. The book and the viewer's open
+  animation now use the frame event's `time_stamp`.
+- A select's choice can arrive as an `input` event; the book handles both
+  `input` and `change`.
+- Leaf transforms read back lowercased (`rotatey(...)`) from the style
+  attribute.
+- The new toolbar button narrowed the heading enough to wrap the status line;
+  the status now stays on one line and the search box shrinks first.

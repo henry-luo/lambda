@@ -11,6 +11,8 @@ import ui: .mod_ui
 import D: .mod_deck
 import C: .mod_collage
 import CA: .mod_collage_app
+import BK: .mod_book_app
+import B: .mod_book
 import slide: lambda.slide
 import slide_html: lambda.slide.html
 
@@ -31,7 +33,7 @@ let SHOW_CHROME = 172.0
 let INITIAL = {mode:"library", album:"", query:"", favorites:[], selected:[], anchor:0, focus:0,
     target:160.0, width:0.0, height:0.0, top:0.0, ids:LIB.order, lay:null, rows:[], heads:[],
     layout_frame:0, band:null, scrub:null, pan:null, swallow_click:false, active:false, opening:null,
-    sheet:null, show:false, collage:null, collage_edit:null,
+    sheet:null, show:false, collage:null, collage_edit:null, book:null,
     viewer:{open:false, id:0, zoom:1.0, x:0.0, y:0.0, info:false, strip:true}}
 
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "album")
@@ -125,7 +127,9 @@ pn reveal(owner, st, id) {
 
 // ---------------------------------------------------------------- viewer
 
-fn viewer_index(st) => index_of(st.ids, st.viewer.id) or 0
+// the viewer steps through its own list when opened from the book, otherwise the grid's scope
+fn vids(st) => st.viewer.ids or st.ids
+fn viewer_index(st) => index_of(vids(st), st.viewer.id) or 0
 
 // The open animation grows the photo from its tile. The stage is still hidden when it starts, so
 // its box is derived from the viewport and the viewer chrome sizes in photo-album.css.
@@ -151,12 +155,13 @@ pn begin_open(owner, st) {
     let image = node(owner, "viewer-image")
     updates.style(image, "transform", box_transform(from.x, from.y, from.s))
     updates.style(image, "opacity", "0.6")
-    return {*:st, opening:{id:st.viewer.id, start:clock(), from:from, frame:dom.request_frame(owner, "album_open")}}
+    return {*:st, opening:{id:st.viewer.id, start:null, from:from, frame:dom.request_frame(owner, "album_open")}}
 }
-pn step_open(owner, st) {
-    let a = st.opening
+// progress runs on frame timestamps (the document timeline) from the animation's first frame
+pn step_open(owner, st, now_ms) {
+    let a = if (st.opening.start == null) {*:st.opening, start:now_ms} else st.opening
     let image = node(owner, "viewer-image")
-    let p = min(1.0, (clock() - a.start) / OPEN_SECONDS)
+    let p = min(1.0, (now_ms - a.start) / (OPEN_SECONDS * 1000.0))
     // the animation yields to any viewer change: another photo, zoom or close
     if (p >= 1.0 or not st.viewer.open or st.viewer.id != a.id or st.viewer.zoom != 1.0) {
         updates.style(image, "opacity", "1")
@@ -186,7 +191,7 @@ pn publish_viewer(owner, st) {
     if (st.opening == null) updates.style(image, "transform", box_transform(v.x, v.y, v.zoom))
     updates.attr(owner, "data-zoomed", v.zoom > 1.0)
     updates.text(owner, "viewer-title", p.title)
-    updates.text(owner, "viewer-subtitle", string(viewer_index(st) + 1) ++ " of " ++ string(len(st.ids)) ++ " · " ++ L.date_label(p))
+    updates.text(owner, "viewer-subtitle", string(viewer_index(st) + 1) ++ " of " ++ string(len(vids(st))) ++ " · " ++ L.date_label(p))
     updates.text(owner, "viewer-zoom-label", if (v.zoom == 1.0) "Fit" else string(round(v.zoom * 100)) ++ "%")
     updates.attr(node(owner, "viewer-favorite"), "aria-pressed", contains(st.favorites, v.id))
     updates.attr(node(owner, "viewer-info"), "aria-pressed", v.info)
@@ -194,21 +199,22 @@ pn publish_viewer(owner, st) {
     updates.show(owner, "viewer-info-panel", v.info)
     if (v.info) region(owner, "viewer-info-panel", format([ui.info(LIB, p)], 'html'))
     updates.show(owner, "filmstrip", v.strip, "flex")
-    if (v.strip) region(owner, "filmstrip", format([ui.filmstrip(LIB, st.ids, v.id)], 'html'))
+    if (v.strip) region(owner, "filmstrip", format([ui.filmstrip(LIB, vids(st), v.id)], 'html'))
     let at = viewer_index(st)
     updates.attr(node(owner, "viewer-prev"), "aria-disabled", at == 0)
-    updates.attr(node(owner, "viewer-next"), "aria-disabled", at >= len(st.ids) - 1)
+    updates.attr(node(owner, "viewer-next"), "aria-disabled", at >= len(vids(st)) - 1)
     // neighbours load into hidden images so the next step shows a decoded photo
-    let nearby = [for (j in [at + 1, at - 1] where j >= 0 and j < len(st.ids)) L.photo(LIB, st.ids[j])]
+    let nearby = [for (j in [at + 1, at - 1] where j >= 0 and j < len(vids(st))) L.photo(LIB, vids(st)[j])]
     region(owner, "prefetch", join([for (q in nearby where q.has_photo) format([<img src:q.photo_src,alt:"">], 'html')], ""))
     return null
 }
 
-fn open_viewer(st, id) => {*:st, focus:id, viewer:{*:st.viewer, open:true, id:id, zoom:1.0, x:0.0, y:0.0}}
+fn open_viewer(st, id) => {*:st, focus:id, viewer:{*:st.viewer, open:true, id:id, zoom:1.0, x:0.0, y:0.0, ids:null}}
 fn step(st, delta) {
     let at = viewer_index(st)
-    let next = max(0, min(len(st.ids) - 1, at + delta));
-    if (len(st.ids) == 0) st else open_viewer(st, st.ids[next])
+    let ids = vids(st)
+    let next = max(0, min(len(ids) - 1, at + delta));
+    if (len(ids) == 0) st else {*:open_viewer(st, ids[next]), viewer:{*:open_viewer(st, ids[next]).viewer, ids:st.viewer.ids}}
 }
 fn viewer_zoom(st, level) {
     let zoom = max(1.0, min(8.0, level));
@@ -325,6 +331,39 @@ pn collage_control(owner, st, id, value, final) {
     return {*:st, collage:CA.preview(owner, CTX, cs, model), collage_edit:start}
 }
 
+// ---------------------------------------------------------------- album book
+
+pn open_book(owner, st, source) {
+    let ids = slice(if (source == "selection") [for (id in st.ids where contains(st.selected, id)) id] else st.ids, 0, B.MAX_PHOTOS)
+    if (len(ids) == 0) { return st }
+    updates.show(owner, "book", true, "flex")
+    updates.attr(owner, "data-book", true)
+    let bs = BK.start(owner, CTX, ids, L.scope_title(LIB, st.mode, st.album, st.query))
+    dom.focus_set(node(owner, "book"), false)
+    return {*:st, book:bs, viewer:{*:st.viewer, open:false}}
+}
+
+// the cover and paper selects restyle the book; either input or change may report a selection
+fn book_select(id) => id == "bk-cover" or id == "bk-paper"
+pn book_restyle(owner, bs) {
+    let options = {cover:[for (c in B.COVERS) c.key][dom.selected_index(node(owner, "bk-cover")) or 0],
+        paper:[for (p in B.PAPERS) p.key][dom.selected_index(node(owner, "bk-paper")) or 0]}
+    if (options == bs.options) { return bs }
+    return BK.restyle(owner, CTX, bs, options)
+}
+
+pn book_command(owner, st, action) {
+    let bs = st.book
+    if (action == "book-close") {
+        updates.show(owner, "book", false)
+        updates.attr(owner, "data-book", false)
+        dom.focus_set(node(owner, "port"), false)
+        return {*:st, book:null}
+    }
+    if (action == "book-next" or action == "book-prev") { return {*:st, book:BK.turn(owner, CTX, bs, action == "book-next")} }
+    return st
+}
+
 // ---------------------------------------------------------------- publish
 
 pn publish(owner, st) {
@@ -380,6 +419,8 @@ fn select_tile(st, id, toggle_key, extend) {
 }
 
 pn command(owner, st, action) {
+    if (action == "book-scope" or action == "book-selection") { return open_book(owner, st, slice(action, 5, len(action))) }
+    if (starts_with(action, "book-") and st.book != null) { return book_command(owner, st, action) }
     if (action == "collage-scope" or action == "collage-selection") { return open_collage(owner, st, slice(action, 8, len(action))) }
     if (starts_with(action, "collage-") and st.collage != null) { return collage_command(owner, st, action) }
     if (starts_with(action, "slideshow-")) { return open_sheet(owner, st, slice(action, 10, len(action))) }
@@ -425,6 +466,10 @@ pn after_favorites(owner, before, st) {
 pn dispatch(owner, st, action) {
     let next = after_favorites(owner, st, command(owner, st, action))
     let published = publish(owner, next)
+    if (st.viewer.open and not next.viewer.open and next.book != null) {
+        dom.focus_set(node(owner, "book"), false)
+        return published
+    }
     if (st.viewer.open and not next.viewer.open) {
         let shown = reveal(owner, published, st.viewer.id)
         dom.focus_set(node(owner, "port"), false)
@@ -519,9 +564,14 @@ on album_scroll(evt) {
     if (top != session.top) { session = mount(evt.target, {*:session, top:top}) }
     return 'handled'
 }
+on book_frame(evt) {
+    if (evt.event_phase != 2 or session.book == null or evt.detail != session.book.frame) { return 'pass' }
+    session = {*:session, book:BK.frame(evt.target, CTX, session.book, evt.time_stamp)}
+    return 'handled'
+}
 on album_open(evt) {
     if (evt.event_phase != 2 or session.opening == null or evt.detail != session.opening.frame) { return 'pass' }
-    session = step_open(evt.target, session)
+    session = step_open(evt.target, session, evt.time_stamp)
     return 'handled'
 }
 on album_layout(evt) {
@@ -531,6 +581,7 @@ on album_layout(evt) {
 }
 on resize(evt) {
     let owner = owner_of(evt)
+    if (owner != null and session.book != null) { session = {*:session, book:BK.restyle(owner, CTX, session.book, session.book.options)} }
     if (owner != null and session.collage != null) { session = {*:session, collage:CA.preview(owner, CTX, session.collage, session.collage.model)} }
     if (owner != null and session.active and session.layout_frame == 0) {
         session = {*:session, layout_frame:dom.request_frame(owner, "album_layout")}
@@ -544,6 +595,16 @@ on click(evt) {
         return 'prevent-default'
     }
     let owner = owner_of(evt)
+    if (session.book != null and not session.viewer.open) {
+        let spread = dom.closest(evt.target, "[data-spread]")
+        if (spread != null) {
+            session = {*:session, book:BK.jump(owner, CTX, session.book, int(dom.get_attribute(spread, "data-spread")) ^ { 0 })}
+            return 'handled'
+        }
+        let button = dom.closest(evt.target, "[data-action]")
+        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action")) }
+        return 'handled'
+    }
     if (session.collage != null) {
         if (dom.closest(evt.target, "#collage") == null) { return 'prevent-default' }
         let template = dom.closest(evt.target, "[data-collage-template]")
@@ -590,6 +651,13 @@ on click(evt) {
 }
 on dblclick(evt) {
     let owner = owner_of(evt)
+    let print = dom.closest(evt.target, "[data-photo]")
+    if (session.book != null and print != null and not session.viewer.open) {
+        let opened = open_viewer(session, int(dom.get_attribute(print, "data-photo")) ^ { 0 })
+        session = publish(owner, {*:opened, viewer:{*:opened.viewer, ids:session.book.book.ids}})
+        dom.focus_set(node(owner, "viewer"), false)
+        return 'prevent-default'
+    }
     let tile = dom.closest(evt.target, ".tile")
     if (tile != null and not session.viewer.open) {
         session = begin_open(owner, publish(owner, open_viewer(session, int(dom.get_attribute(tile, "data-id")) ^ { 0 })))
@@ -605,6 +673,10 @@ on dblclick(evt) {
 on input(evt) {
     let owner = owner_of(evt)
     let id = dom.get_attribute(evt.target, "id")
+    if (session.book != null and book_select(id)) {
+        session = {*:session, book:book_restyle(owner, session.book)}
+        return 'handled'
+    }
     if (session.collage != null) {
         let value = if (id == "cl-caption") dom.get_state(evt.target, "value") else string(dom.range_value(evt.target))
         if (id != "cl-aspect" and id != "cl-credits") { session = collage_control(owner, session, id, value, false) }
@@ -623,8 +695,12 @@ on input(evt) {
 }
 // a control's change ends its edit: the collage history records it once
 on change(evt) {
-    if (session.collage == null) { return 'pass' }
     let owner = owner_of(evt)
+    if (session.book != null and book_select(dom.get_attribute(evt.target, "id"))) {
+        session = {*:session, book:book_restyle(owner, session.book)}
+        return 'handled'
+    }
+    if (session.collage == null) { return 'pass' }
     let id = dom.get_attribute(evt.target, "id")
     let value = if (id == "cl-credits") dom.get_state(evt.target, "checked")
         else if (id == "cl-gutter" or id == "cl-radius" or id == "cl-border") string(dom.range_value(evt.target))
@@ -663,6 +739,13 @@ on pointerdown(evt) {
     if (evt.button != 0) { return 'pass' }
     session = {*:session, swallow_click:false}
     let owner = owner_of(evt)
+    if (session.book != null and not session.viewer.open) {
+        if (dom.closest(evt.target, "#bk-book") == null) { return 'pass' }
+        session = {*:session, book:BK.press(owner, session.book, evt)}
+        dom.focus_set(node(owner, "book"), false)
+        if (session.book.drag != null) dom.set_pointer_capture(node(owner, "book"), evt.pointerId)
+        return 'prevent-default'
+    }
     if (session.collage != null) {
         if (dom.closest(evt.target, "#cl-stage,#cl-tray") == null) { return 'pass' }
         session = {*:session, collage:CA.press(owner, CTX, session.collage, evt)}
@@ -696,6 +779,10 @@ on pointerdown(evt) {
 }
 on pointermove(evt) {
     let owner = owner_of(evt)
+    if (session.book != null and session.book.drag != null) {
+        session = {*:session, book:BK.drag(owner, CTX, session.book, evt)}
+        return 'prevent-default'
+    }
     if (session.collage != null and session.collage.drag != null) {
         session = {*:session, collage:CA.move(owner, CTX, session.collage, evt)}
         return 'prevent-default'
@@ -728,6 +815,10 @@ on pointermove(evt) {
     return 'pass'
 }
 on pointerup(evt) {
+    if (session.book != null and session.book.drag != null) {
+        session = {*:session, book:BK.release(owner_of(evt), CTX, session.book)}
+        return 'prevent-default'
+    }
     if (session.collage != null and session.collage.drag != null) {
         session = {*:session, collage:CA.release(owner_of(evt), CTX, session.collage, evt), swallow_click:session.collage.drag.moved}
         return 'prevent-default'
@@ -744,6 +835,17 @@ on keydown(evt) {
     let owner = owner_of(evt)
     let key = evt.key
     let modifier = evt.metaKey or evt.ctrlKey
+    // a viewer opened over the book keeps its own keys (its branch below)
+    if (session.book != null and not session.viewer.open) {
+        let action = if (key == "Escape") "book-close" else if (key == "ArrowRight" or key == "PageDown" or key == " ") "book-next"
+            else if (key == "ArrowLeft" or key == "PageUp") "book-prev" else ""
+        if (action != "") { session = dispatch(owner, session, action); return 'prevent-default' }
+        if (key == "Home" or key == "End") {
+            session = {*:session, book:BK.jump(owner, CTX, session.book, if (key == "Home") 0 else len(session.book.book.leaves))}
+            return 'prevent-default'
+        }
+        return 'pass'
+    }
     if (session.collage != null) {
         if (key == "Escape") { session = dispatch(owner, session, "collage-close"); return 'prevent-default' }
         if (dom.closest(evt.target, "input,textarea,select") != null) { return 'pass' }
@@ -769,7 +871,9 @@ on keydown(evt) {
         if (action != "") { session = dispatch(owner, session, action); return 'prevent-default' }
         if (key == "0") { session = publish(owner, viewer_zoom(session, 1.0)); return 'prevent-default' }
         if (key == "Home" or key == "End") {
-            session = publish(owner, open_viewer(session, if (key == "Home") session.ids[0] else session.ids[last]))
+            let ids = vids(session)
+            let opened = open_viewer(session, if (key == "Home") ids[0] else ids[last])
+            session = publish(owner, {*:opened, viewer:{*:opened.viewer, ids:session.viewer.ids}})
             return 'prevent-default'
         }
         return 'pass'

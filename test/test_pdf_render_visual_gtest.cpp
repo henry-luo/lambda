@@ -5199,6 +5199,46 @@ TEST(RenderOutputParity, BackfacesRespectThreeDimensionalContextsInRasterAndSvg)
     }
 }
 
+// Text inside a perspective plane is bounded after the homogeneous divide; an affine-only glyph
+// bound sampled a sliver of each projected glyph and lost the text mid page-turn.
+static size_t count_dark_pixels(const ImageData& image) {
+    size_t dark = 0;
+    for (size_t i = 0; i < (size_t)image.width * image.height; i++) {
+        const uint8_t* p = image.pixels + i * 4;
+        if (p[0] < 100 && p[1] < 100 && p[2] < 100) dark++;
+    }
+    return dark;
+}
+
+TEST(RenderOutputParity, TextInPerspectivePlaneKeepsItsGlyphs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* page = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".book{position:absolute;left:40px;top:40px;width:600px;height:300px;perspective:1600px}"
+        ".leaf{position:absolute;left:300px;top:0;width:300px;height:300px;transform-style:preserve-3d;transform-origin:0 50%%}"
+        ".face{position:absolute;inset:0;backface-visibility:hidden;font:bold 40px Arial;line-height:60px;padding:20px}</style>"
+        "<div class=book><div class=leaf style='transform:%s'><div class=face>MMMM<br>WWWW<br>HHHH</div></div></div>";
+    char flat_html[1024], turned_html[1024];
+    snprintf(flat_html, sizeof(flat_html), page, "none");
+    snprintf(turned_html, sizeof(turned_html), page, "rotateY(-55deg)");
+    const char* flat_png = "temp/render_output_parity/perspective_text_flat.png";
+    const char* turned_png = "temp/render_output_parity/perspective_text_turned.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/perspective_text_flat.html", flat_png, flat_html));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/perspective_text_turned.html", turned_png, turned_html));
+    ImageData flat = {}, turned = {};
+    ASSERT_TRUE(load_png_rgba(flat_png, &flat));
+    ASSERT_TRUE(load_png_rgba(turned_png, &turned));
+    size_t flat_ink = count_dark_pixels(flat);
+    size_t turned_ink = count_dark_pixels(turned);
+    ASSERT_GT(flat_ink, 2000u);
+    // a -55deg plane is foreshortened to roughly half its width; the glyphs keep their ink
+    EXPECT_GT(turned_ink * 100, flat_ink * 30) << "flat " << flat_ink << " turned " << turned_ink;
+    EXPECT_LT(turned_ink, flat_ink);
+    image_free(flat.pixels);
+    image_free(turned.pixels);
+}
+
 TEST(RenderOutputParity, IndividualThreeDimensionalTransformsReuseFunctionMatrices) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
