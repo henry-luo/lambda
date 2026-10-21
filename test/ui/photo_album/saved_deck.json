@@ -1,0 +1,17 @@
+{
+  "name": "A slideshow saved by the photo album plays standalone as a .slides document",
+  "html": "test/demo/photo-album/tests/fixture_slideshow.slides",
+  "viewport": {"width": 1280, "height": 860},
+  "events": [
+    {"type": "advance_time", "ms": 1200},
+    {"type": "assert_script", "js": "/^1 \\/ 18$/.test(document.querySelector('.slide-status').textContent)"},
+    {"type": "assert_script", "js": "const i=document.querySelector('[data-slide-active] img');!!i && i.naturalWidth>0"},
+    {"type": "assert_script", "js": "/Fixture trip/.test(document.querySelector('[data-slide-active]').textContent)"},
+    {"type": "click", "target": {"selector": "[data-slide-command='next']"}},
+    {"type": "advance_time", "ms": 900},
+    {"type": "assert_script", "js": "/^2 \\/ 18$/.test(document.querySelector('.slide-status').textContent)"},
+    {"type": "click", "target": {"selector": "[data-slide-tool='console']"}},
+    {"type": "assert_script", "js": "const n=document.querySelector('.slide-notes').textContent;/Lambda test fixture/.test(n) && /CC0 1\\.0/.test(n)"},
+    {"type": "capture_surface", "source": "page", "file": "temp/photo_album/saved_deck.png"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Photo album without downloaded photos shows the fetch banner and colour placeholders",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [{"key": "PHOTO_ALBUM_DIR", "value": "test/demo/photo-album/tests/no_photos"}],
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".banner strong"}, "equals": "The photos are not downloaded yet."},
+    {"type": "assert_script", "js": "/_fetch\\.py/.test(document.querySelector('.banner code').textContent)"},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "6 photos"},
+    {"type": "assert_script", "js": "const ts=document.querySelectorAll('#grid .tile');ts.length===6 && !document.querySelector('#grid .tile img') && Array.from(ts).every(t=>/background-color/.test(t.getAttribute('style')))"},
+    {"type": "dblclick", "target": {"selector": "#tile-3"}},
+    {"type": "assert_attribute", "target": {"selector": "#album"}, "attribute": "data-viewer", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#viewer-title"}, "equals": "Red fox"},
+    {"type": "assert_script", "js": "!document.querySelector('#prefetch img')"},
+    {"type": "capture_surface", "source": "page", "file": "temp/photo_album/no_photos.png"}
+  ]
+}

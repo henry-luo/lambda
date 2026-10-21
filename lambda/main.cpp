@@ -2468,6 +2468,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"scene3d", "test/demo/scene3d/index.html"},
     {"chart", "test/demo/chart/index.html"},
     {"cityscape", "test/demo/cityscape/cityscape.ls"},
+    {"photo-album", "test/demo/photo-album/photo-album.ls"},
     {"slides", "test/demo/slides/northstar.slides"},
     {"wordcloud", "test/demo/wordcloud.ls"},
 };
