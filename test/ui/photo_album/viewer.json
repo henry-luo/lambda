@@ -1,0 +1,291 @@
+{
+  "name": "Photo album viewer: open, step, info, zoom, favorite, filmstrip and keyboard return",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#tile-20"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_script",
+      "js": "const s=document.getElementById('viewer-image').style;s.opacity==='1' && /translate\\(0px, ?0px\\) scale\\(1\\)/.test(s.transform)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-title"
+      },
+      "equals": "Frozen lake II"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-subtitle"
+      },
+      "equals": "1 of 24 · 22 December 2023"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('viewer-image').getAttribute('src').endsWith('/photos/0020-fixture-weather.jpg')"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#viewer-prev"
+      },
+      "attribute": "aria-disabled",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#filmstrip .strip-tile').length===15 && document.querySelector('#filmstrip [aria-current=true]').getAttribute('data-strip')==='20'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#prefetch img').length===1"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-title"
+      },
+      "equals": "Red fox II"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-subtitle"
+      },
+      "equals": "2 of 24 · 15 November 2023"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#prefetch img').length===2"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-title"
+      },
+      "equals": "Frozen lake II"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-subtitle"
+      },
+      "contains": "24 of 24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#viewer-next"
+      },
+      "attribute": "aria-disabled",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "key_press",
+      "key": "i"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#viewer-info"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-info-panel h2"
+      },
+      "equals": "Frozen lake II"
+    },
+    {
+      "type": "assert_script",
+      "js": "/Lambda test fixture/.test(document.getElementById('viewer-info-panel').textContent) && /CC0 1.0/.test(document.getElementById('viewer-info-panel').textContent) && /Fog, snow and ice/.test(document.getElementById('viewer-info-panel').textContent)"
+    },
+    {
+      "type": "key_press",
+      "key": "="
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-zoom-label"
+      },
+      "equals": "150%"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-zoomed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "/scale\\(1\\.5\\)/.test(document.getElementById('viewer-image').style.transform)"
+    },
+    {
+      "type": "key_press",
+      "key": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#viewer-zoom-label"
+      },
+      "equals": "Fit"
+    },
+    {
+      "type": "key_press",
+      "key": "f"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#viewer-favorite"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#favorite-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#filmstrip [data-strip='10']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('viewer-image').getAttribute('src').endsWith('/photos/0010-fixture-cities.jpg')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#viewer-strip"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('filmstrip').style.display==='none'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/photo_album/viewer.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#port"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tile-20"
+      },
+      "attribute": "data-favorite",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tile-10"
+      },
+      "attribute": "data-focused",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#grid [data-focused=true]').getAttribute('data-id')!=='10'"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('viewer-subtitle').textContent.startsWith('4 of 24')"
+    }
+  ]
+}

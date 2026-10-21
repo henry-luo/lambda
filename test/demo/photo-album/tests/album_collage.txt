@@ -1,0 +1,94 @@
+{
+  tiled: [["grid", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["mosaic", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["magazine", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["heart", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["circle", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]]],
+  grid_cols: [[0, 0, 666.67], [666.67, 0, 666.67], [1333.33, 0, 666.67], [0, 666.67, 666.67], [666.67, 666.67, 666.67], [1333.33, 666.67, 666.67], [0, 1333.33, 2000]],
+  masks: ["circle(50% at 50% 50%)", "polygon(50% 29%, 50.1% 2"],
+  scrapbook: [7, true],
+  moved_print: [10, 20, 300, 5],
+  shuffled: true,
+  bands: [220, 70, 240],
+  gutters: [[20, 1470], [1510, 1470], 20],
+  swap: true,
+  assign_present: true,
+  assign_new: 999,
+  crop: [2, 0.8, 0, 4],
+  undo: [true, 1, true, null],
+  settings: ["grid", "mosaic", 80, "wide"],
+  valid: [true, false, false],
+  credits_line: "Photos: Lambda test fixture (CC0 1.0) · Lambda test fixture (CC0 1.0)",
+  credits_text: "Collage\n\nFrozen lake II — Lambda test fixture (CC0 1.0)\nRed fox II — Lambda test fixture (CC0 1.0)\n"
+}

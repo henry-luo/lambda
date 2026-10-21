@@ -1,16 +1,17 @@
 {
   "schema_version": 1,
-  "description": "D8.2.4-D8.2.6: a boxed object producer does not narrow its return to a Number; its formal caller uses the Item callable entry.",
+  "description": "D8.2.4-D8.2.6: a boxed object producer does not narrow its return to a Number; its formal caller uses the Item callable entry. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
         "call\tmvp_lmd_object_new",
-        "call\tmap_shape_set"
+        "mov\ti64:({{r}}),"
       ],
       "forbid": [
         "it2d",
-        "d2i"
+        "d2i",
+        "call\tmap_shape_set"
       ]
     },
     {

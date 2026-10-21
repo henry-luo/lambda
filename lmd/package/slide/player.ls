@@ -1,5 +1,6 @@
 import c: .common
 import sampler: .sample
+import clock: .clock
 
 pub fn initial_state(plan, options = {}) => {slide: 0, cue: -1, time_ms: 0.0,
     phase: 'waiting', paused: false, anchor_ms: 0.0, anchor_time: 0.0,
@@ -131,7 +132,8 @@ pub fn reduce(plan, ps, event) map^ {
     } else if (command == "seek") {
         let address = sampler.address(plan, event.address)^;
         {*: activate(plan, stop_autoplay(ps), address.slide, false), cue: address.cue, time_ms: address.time_ms}
-    } else raise c.fail("player", "unknown command " ++ c.as_text(command))
+    } else if (command == "seek_time") clock.seek(plan, ps, event.position_ms, now_ms)^
+    else raise c.fail("player", "unknown command " ++ c.as_text(command))
 }
 
 pub fn needs_frame(ps) => (ps.phase != 'waiting' or ps.autoplay) and not ps.paused

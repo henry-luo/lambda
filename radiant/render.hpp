@@ -4334,6 +4334,10 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 // paged: lay the document out as a page flow for that composition (layout_paged.cpp)
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow,
                      struct PagedFlowState* paged = nullptr);
+// shared continuous-document checkpoint; true means a current geometry snapshot exists.
+bool layout_update_document(UiContext* uicon, DomDocument* doc);
+void layout_publish_document_geometry(UiContext* uicon, DomDocument* doc);
+void layout_invalidate_document_geometry(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 void view_pool_reset_retained(ViewTree* tree);
 void view_pool_release_detached_subtree(DomNode* root);

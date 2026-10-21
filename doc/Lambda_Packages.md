@@ -33,6 +33,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
 18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
 19. [doc.ebook — EPUB reader](#19-docebook--epub-reader)
+20. [doc.diff — Git and patch review](#20-docdiff--git-and-patch-review)
+21. [doc.readability — Article extraction](#21-docreadability--article-extraction)
 
 ---
 
@@ -45,6 +47,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
 | `doc.diff` | `lambda.doc.diff` | Initial unified review profile | Grammar-based patch parsing, local Git comparisons, virtual review and complete static HTML | `lambda view change.patch`; also `.diff`, `layout` and `render` |
+| `doc.readability` | `lambda.doc.readability` | Library; passes Mozilla's 130 test pages | Port of Mozilla Readability.js 0.6.0: a page's main article, title, byline, excerpt and site metadata, and the `readerable` check | None; import from a Lambda script |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -63,7 +66,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
-| `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
+| `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, a deck clock with host control, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
@@ -1537,6 +1540,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
@@ -1980,3 +1984,30 @@ diff.repository(".", {mode: "unstaged"})^
 
 Open that script with `lambda view review.ls`, or open `.patch`/`.diff` directly.
 See [Git and patch review](Lambda_Diff.md) for the API, options, model and limits.
+
+## 21. doc.readability — Article extraction
+
+`lambda.doc.readability` finds the main article of a web page, as Firefox Reader View does: it is a port of Mozilla Readability.js 0.6.0 that passes all 130 of Mozilla's test pages. `parse` takes an HTML string or a parsed document and returns the article as an element (`content`) and as HTML (`html`), with its `title`, `byline`, `excerpt`, `site_name`, `published_time`, `lang`, `dir`, `text` and `length`, or `null` when the page has no content. `readerable` is Readability's quick check that a page is worth parsing. Both are pure; `read` loads a file first (D7.2.4v3/D7.2.6).
+
+```lambda no-run
+import rd: lambda.doc.readability
+let page = input("article.html", 'html')^
+let article = rd.parse(page, {url: "https://example.com/news/article.html"})^;
+[article.title, article.byline, article.excerpt]
+article.html   // the article as HTML; article.content is the same as an element
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `url` | none | The document URL; links and image sources become absolute against it (or a `<base href>`) |
+| `char_threshold` | 500 | Text an article needs before the extraction stops relaxing its rules |
+| `top_candidates` | 5 | Top candidates compared when choosing the article container |
+| `max_elems` | 0 | Raise an error for pages with more elements (0: no limit) |
+| `classes_to_preserve`, `keep_classes` | `[]`, `false` | Class names kept on the article (`page` always), or keep them all |
+| `disable_json_ld` | `false` | Ignore JSON-LD metadata |
+| `link_density_modifier` | 0 | Added to the link-density limits for removing link-heavy blocks |
+| `allowed_video` | YouTube, Vimeo and others | A string pattern for embeds that are kept |
+
+`readerable(source, {min_content_length: 140, min_score: 20})` accepts the same thresholds as `isProbablyReaderable`. Design, fidelity rules and limits: [Lambda_Pkg_Readability.md](../vibe/Lambda_Pkg_Readability.md).
+
+`./lambda.exe demo readability` shows both functions at work: a browser window whose reader icon swaps each page for its extracted article ([demo guide](../test/demo/readability/README.md)).

@@ -1,0 +1,860 @@
+{
+  "source": "Lambda synthetic fixture",
+  "generator": "test/demo/photo-album/_fixture.ls",
+  "width": 450,
+  "albums": [
+    {
+      "key": "landscapes",
+      "title": "Landscapes",
+      "count": 6
+    },
+    {
+      "key": "cities",
+      "title": "Cities",
+      "count": 6
+    },
+    {
+      "key": "animals",
+      "title": "Animals",
+      "count": 6
+    },
+    {
+      "key": "weather",
+      "title": "Fog, snow and ice",
+      "count": 6
+    }
+  ],
+  "photos": [
+    {
+      "id": 1,
+      "file": "0001-fixture-landscapes.jpg",
+      "title": "Morning ridge",
+      "description": "Synthetic gradient 1 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2019-01-01T06:30:00",
+      "width": 360,
+      "height": 240,
+      "color": "#ac8367",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 40,
+        "lon": -3
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 1,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 2,
+      "file": "0002-fixture-cities.jpg",
+      "title": "Harbour lights",
+      "description": "Synthetic gradient 2 for the Cities album.",
+      "album": "cities",
+      "taken": "2020-06-08T07:30:00",
+      "width": 240,
+      "height": 360,
+      "color": "#5b964a",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 2,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 3,
+      "file": "0003-fixture-animals.jpg",
+      "title": "Red fox",
+      "description": "Synthetic gradient 3 for the Animals album.",
+      "album": "animals",
+      "taken": "2021-11-15T08:30:00",
+      "width": 300,
+      "height": 300,
+      "color": "#848b7e",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 42,
+        "lon": 1
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 3,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 4,
+      "file": "0004-fixture-weather.jpg",
+      "title": "Snowy pass",
+      "description": "Synthetic gradient 4 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2022-04-22T09:30:00",
+      "width": 384,
+      "height": 216,
+      "color": "#9cb2ba",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Snow",
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 4,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 5,
+      "file": "0005-fixture-landscapes.jpg",
+      "title": "Old town",
+      "description": "Synthetic gradient 5 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2023-09-01T10:30:00",
+      "width": 320,
+      "height": 240,
+      "color": "#b9a357",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 44,
+        "lon": 5
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 5,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 6,
+      "file": "0006-fixture-cities.jpg",
+      "title": "River bend",
+      "description": "Synthetic gradient 6 for the Cities album.",
+      "album": "cities",
+      "taken": "2019-02-08T11:30:00",
+      "width": 450,
+      "height": 150,
+      "color": "#6bb63b",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 6,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 7,
+      "file": "0007-fixture-animals.jpg",
+      "title": "Heron",
+      "description": "Synthetic gradient 7 for the Animals album.",
+      "album": "animals",
+      "taken": "2020-07-15T12:30:00",
+      "width": 360,
+      "height": 240,
+      "color": "#766f8c",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 46,
+        "lon": 9
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 7,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 8,
+      "file": "0008-fixture-weather.jpg",
+      "title": "Frozen lake",
+      "description": "Synthetic gradient 8 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2021-12-22T13:30:00",
+      "width": 240,
+      "height": 360,
+      "color": "#acceaa",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 8,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 9,
+      "file": "0009-fixture-landscapes.jpg",
+      "title": "Market street",
+      "description": "Synthetic gradient 9 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2022-05-01T14:30:00",
+      "width": 300,
+      "height": 300,
+      "color": "#ae8765",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 48,
+        "lon": 13
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 9,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 10,
+      "file": "0010-fixture-cities.jpg",
+      "title": "Dune crest",
+      "description": "Synthetic gradient 10 for the Cities album.",
+      "album": "cities",
+      "taken": "2023-10-08T15:30:00",
+      "width": 384,
+      "height": 216,
+      "color": "#5d9a48",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 10,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 11,
+      "file": "0011-fixture-animals.jpg",
+      "title": "Owl",
+      "description": "Synthetic gradient 11 for the Animals album.",
+      "album": "animals",
+      "taken": "2019-03-15T16:30:00",
+      "width": 320,
+      "height": 240,
+      "color": "#868f7c",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 50,
+        "lon": 17
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 11,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 12,
+      "file": "0012-fixture-weather.jpg",
+      "title": "Fog bank",
+      "description": "Synthetic gradient 12 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2020-08-22T17:30:00",
+      "width": 450,
+      "height": 150,
+      "color": "#9fb5b8",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Snow",
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 12,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 13,
+      "file": "0013-fixture-landscapes.jpg",
+      "title": "Morning ridge II",
+      "description": "Synthetic gradient 13 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2021-01-01T06:30:00",
+      "width": 360,
+      "height": 240,
+      "color": "#baa755",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 52,
+        "lon": 21
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 13,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 14,
+      "file": "0014-fixture-cities.jpg",
+      "title": "Harbour lights II",
+      "description": "Synthetic gradient 14 for the Cities album.",
+      "album": "cities",
+      "taken": "2022-06-08T07:30:00",
+      "width": 240,
+      "height": 360,
+      "color": "#6db839",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 14,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 15,
+      "file": "0015-fixture-animals.jpg",
+      "title": "Red fox II",
+      "description": "Synthetic gradient 15 for the Animals album.",
+      "album": "animals",
+      "taken": "2023-11-15T08:30:00",
+      "width": 300,
+      "height": 300,
+      "color": "#78738a",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 54,
+        "lon": 25
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 15,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 16,
+      "file": "0016-fixture-weather.jpg",
+      "title": "Snowy pass II",
+      "description": "Synthetic gradient 16 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2019-04-22T09:30:00",
+      "width": 384,
+      "height": 216,
+      "color": "#add0a8",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 16,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 17,
+      "file": "0017-fixture-landscapes.jpg",
+      "title": "Old town II",
+      "description": "Synthetic gradient 17 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2020-09-01T10:30:00",
+      "width": 320,
+      "height": 240,
+      "color": "#b08b63",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 56,
+        "lon": 29
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 17,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 18,
+      "file": "0018-fixture-cities.jpg",
+      "title": "River bend II",
+      "description": "Synthetic gradient 18 for the Cities album.",
+      "album": "cities",
+      "taken": "2021-02-08T11:30:00",
+      "width": 450,
+      "height": 150,
+      "color": "#5f9e46",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 18,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 19,
+      "file": "0019-fixture-animals.jpg",
+      "title": "Heron II",
+      "description": "Synthetic gradient 19 for the Animals album.",
+      "album": "animals",
+      "taken": "2022-07-15T12:30:00",
+      "width": 360,
+      "height": 240,
+      "color": "#88937a",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 58,
+        "lon": 33
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 19,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 20,
+      "file": "0020-fixture-weather.jpg",
+      "title": "Frozen lake II",
+      "description": "Synthetic gradient 20 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2023-12-22T13:30:00",
+      "width": 240,
+      "height": 360,
+      "color": "#a1bab7",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Snow",
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 20,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 21,
+      "file": "0021-fixture-landscapes.jpg",
+      "title": "Market street II",
+      "description": "Synthetic gradient 21 for the Landscapes album.",
+      "album": "landscapes",
+      "taken": "2019-05-01T14:30:00",
+      "width": 300,
+      "height": 300,
+      "color": "#bcab53",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 60,
+        "lon": 37
+      },
+      "keywords": [
+        "Landscapes"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 21,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 22,
+      "file": "0022-fixture-cities.jpg",
+      "title": "Dune crest II",
+      "description": "Synthetic gradient 22 for the Cities album.",
+      "album": "cities",
+      "taken": "2020-10-08T15:30:00",
+      "width": 384,
+      "height": 216,
+      "color": "#518254",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 1",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Cities"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 22,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 23,
+      "file": "0023-fixture-animals.jpg",
+      "title": "Owl II",
+      "description": "Synthetic gradient 23 for the Animals album.",
+      "album": "animals",
+      "taken": "2021-03-15T16:30:00",
+      "width": 320,
+      "height": 240,
+      "color": "#7a7788",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 2",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": {
+        "lat": 62,
+        "lon": 41
+      },
+      "keywords": [
+        "Animals"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 23,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    },
+    {
+      "id": 24,
+      "file": "0024-fixture-weather.jpg",
+      "title": "Fog bank II",
+      "description": "Synthetic gradient 24 for the Fog, snow and ice album.",
+      "album": "weather",
+      "taken": "2022-08-22T17:30:00",
+      "width": 450,
+      "height": 150,
+      "color": "#aed3a6",
+      "camera": {
+        "make": "Fixture",
+        "model": "Gradient 3",
+        "lens": "",
+        "focal_mm": 35,
+        "aperture": 8,
+        "exposure": "1/250",
+        "iso": 100
+      },
+      "gps": null,
+      "keywords": [
+        "Fog, snow and ice"
+      ],
+      "author": "Lambda test fixture",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_url": "",
+      "url": "",
+      "pageid": 24,
+      "source_sha1": "",
+      "sha1": null,
+      "bytes": null
+    }
+  ]
+}

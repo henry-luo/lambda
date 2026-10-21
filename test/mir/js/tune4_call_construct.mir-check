@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D6.2.2v2: member Get precedes the formal call. Construction passes an explicit newTarget through its distinct route, without ambient pending-newTarget state.",
+  "description": "D6.2.2v2: member Get precedes the formal call. Construction passes an explicit newTarget through its distinct route, without ambient pending-newTarget state. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect_seq": [
         {
-          "pattern": "call\tmvp_lmd_property_get_fixed"
+          "pattern": "call\tmvp_lmd_class_property_fixed"
         },
         {
           "pattern": "call\tmvp_lmd_signature,"

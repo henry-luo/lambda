@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v25, D8.2.4-D8.2.6, D5.3/D5.4: formal MIR physical contract for BoxedBodyClosedNumberLocalKeepsDynamicArgumentsGeneric. The original JS operations and output/differential assertions remain in test_js_opt_gtest.cpp; retired LJS runtime counter expectations are replaced by exact source-scope lowering checks.",
+  "description": "D8.1.3v27, D8.2.4-D8.2.6, D5.3/D5.4: formal MIR physical contract for BoxedBodyClosedNumberLocalKeepsDynamicArgumentsGeneric. The original JS operations and output/differential assertions remain in test_js_opt_gtest.cpp; retired LJS runtime counter expectations are replaced by exact source-scope lowering checks. The terminal CLI plan keeps closed binding facts; counts cover that default entry. Known-Number relational comparisons retain complete ToNumber fallback without a separate ToPrimitive stage (D8.4.1v2).",
   "checks": [
     {
       "in_func": "mvp_lmd_program",
@@ -10,7 +10,7 @@
       ],
       "count": {
         "call\tmvp_lmd_object_new": 1,
-        "call\tmvp_lmd_primitive_to_number": 6,
+        "call\tmvp_lmd_primitive_to_number": 2,
         "call\tmvp_lmd_throw": 1,
         "call\towned_item_slot_store": 4
       }
@@ -22,7 +22,7 @@
       ],
       "count": {
         "dadd\t": 2,
-        "call\tmvp_lmd_to_primitive": 1,
+        "call\tmvp_lmd_to_primitive": 0,
         "call\tmvp_lmd_primitive_to_number": 1
       }
     },
@@ -45,7 +45,7 @@
       ],
       "count": {
         "dadd\t": 1,
-        "call\tmvp_lmd_primitive_to_number": 1,
+        "call\tmvp_lmd_primitive_to_number": 0,
         "call\towned_item_slot_store": 1
       }
     },

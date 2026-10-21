@@ -1,0 +1,40 @@
+{
+  count: 24,
+  downloaded: 20,
+  newest: ["2023-12-22T13:30:00", "2023-11-15T08:30:00", "2023-10-08T15:30:00", "2023-09-01T10:30:00", "2022-08-22T17:30:00"],
+  order_is_desc: true,
+  albums: [["landscapes", 6, 5, 2019, 2023], ["cities", 6, 10, 2019, 2023], ["animals", 6, 15, 2019, 2023], ["weather", 6, 20, 2019, 2023]],
+  thumb_sources: ["file:///corpus/thumbs/0001-fixture-landscapes.jpg", "file:///corpus/photos/0003-fixture-animals.jpg", ""],
+  album_scope: [10, 14, 18, 22, 2, 6],
+  favorites: [10, 3, 17],
+  snow: [20, 24, 4, 8, 12, 16],
+  frozen: [20, 8],
+  two_words: [3],
+  none: [],
+  titles: ["Library", "Fog, snow and ice", "Favorites", "Search: “snow”"],
+  labels: ["December 2023", "22 December 2023", "13:30"],
+  camera: {
+    body: "Fixture Gradient 2",
+    lens: "",
+    exposure: "35 mm · ƒ/8 · 1/250 s · ISO 100"
+  },
+  items: [{
+      id: 20,
+      aspect: 0.6666666666666666,
+      key: "2023-12",
+      label: "December 2023"
+    }, {
+      id: 15,
+      aspect: 1,
+      key: "2023-11",
+      label: "November 2023"
+    }, {
+      id: 10,
+      aspect: 1.7777777777777777,
+      key: "2023-10",
+      label: "October 2023"
+    }],
+  year_items: ["2023", "2023", "2023"],
+  status: ["24 photos", "1 photo · 2 selected"],
+  bad_ids: "rejected"
+}

@@ -347,6 +347,8 @@ float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
+bool layout_flow_is_context_independent(DomElement* element, bool include_height = false);
+bool layout_box_is_context_independent(DomElement* element, bool include_height = false);
 bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
 bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElement* element);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
@@ -781,10 +783,14 @@ struct IntrinsicWidthCacheEntry {
     bool context_independent;
 };
 struct CssResolvedStyle;
+struct IntrinsicHeightCache;
+struct FlexMeasuredFlow;
 // tier-2: selected-view pool, with independently invalidated sizing and CSS state.
 struct LayoutCache {
     // computed CSS outlives individual measurement contexts, unlike size results.
     lam::Own<CssResolvedStyle> resolved_style;
+    lam::Own<IntrinsicHeightCache> intrinsic_heights;
+    lam::Own<FlexMeasuredFlow> measured_flex_flow;
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
     // Percentage terms and content-only requests each need a distinct result;
@@ -801,6 +807,8 @@ struct LayoutCache {
 
 inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     cache->resolved_style = nullptr;
+    cache->intrinsic_heights = nullptr;
+    cache->measured_flex_flow = nullptr;
     cache->final_layout.valid = false;
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
@@ -815,11 +823,19 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
 }
 
 inline void layout_cache_clear(LayoutCache* cache) {
-    // size-query invalidation does not retire the separately owned computed CSS.
+    // intrinsic heights and computed CSS carry their own complete input keys.
     CssResolvedStyle* resolved = cache->resolved_style;
+    IntrinsicHeightCache* heights = cache->intrinsic_heights;
+    FlexMeasuredFlow* flow = cache->measured_flex_flow;
     layout_cache_init(cache, cache ? cache->generation : 0);
     cache->resolved_style = lam::own(resolved);
+    cache->intrinsic_heights = lam::own(heights);
+    cache->measured_flex_flow = lam::own(flow);
 }
+
+void intrinsic_height_cache_release(LayoutCache* cache, Pool* pool);
+void flex_measured_flow_release(LayoutCache* cache, Pool* pool);
+void flex_measured_flow_invalidate(DomElement* element);
 
 inline int layout_cache_compute_slot(
     KnownDimensions known_dimensions,
@@ -1592,6 +1608,9 @@ typedef struct LayoutProfiler {
     double intrinsic_inclusive_ms;
     double intrinsic_exclusive_ms;
     uint64_t intrinsic_miss_reasons[6];
+    uint64_t height_requests, height_cache_hits, height_computations, height_uncacheable;
+    uint64_t flex_flow_measures, flex_flow_reuses;
+    uint64_t height_stores, height_unstable, height_version_misses, height_key_misses[6];
     uint64_t scope_calls[LAYOUT_PROFILE_BUCKET_COUNT];
     double scope_total_ms[LAYOUT_PROFILE_BUCKET_COUNT];
     double scope_self_ms[LAYOUT_PROFILE_BUCKET_COUNT];
@@ -2796,7 +2815,7 @@ CssEnum layout_flex_direction(ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
 float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
                                         float percentage_containing_width = -1.0f);
-bool flex_height_is_parent_constrained(ViewBlock* container,
+bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch);
 
@@ -3450,9 +3469,13 @@ typedef struct MeasurementCacheEntry {
     float content_height;
     float context_width;
     uint32_t generation;
+    bool has_height;
 } MeasurementCacheEntry;
 
-void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+void measure_flex_child_content(LayoutContext* lycon, DomNode* child, bool width_only = false);
+bool flex_measure_completed_flow(LayoutContext* lycon, ViewElement* item,
+    FlexContainerLayout* parent, float content_width, float* height);
+void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item);
 // FlexRetainedPass: qualify a clean item for replay in this pass, then replay
 // or record its hypothetical cross size and content pass memos.
 bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
@@ -3460,6 +3483,7 @@ bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
 bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
                                 float* height);
 void flex_retained_forget_content(DomElement* element);
+void flex_retained_forget_containing_content(DomNode* node);
 void flex_retained_record_cross(LayoutContext* lycon, ViewElement* item, float width,
                                 float height);
 bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
@@ -3470,7 +3494,8 @@ void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout,
                                     bool width_only = false);
-void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
+void store_in_measurement_cache(DomNode* node, float width, float height, float content_width,
+    float content_height, float context_width = -1, bool has_height = true);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache(ViewTree* tree);
 void destroy_measurement_cache(ViewTree* tree);
@@ -3825,6 +3850,8 @@ typedef struct LayoutContext {
     lam::Up<radiant::CssResolvedStyle> css_style_recording;
     // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
     lam::Up<DomElement> measurement_root;
+    // a completed natural-size query precedes the root's final flex stretch.
+    lam::Up<ViewBlock> natural_flex_height_root;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -3935,7 +3962,9 @@ float layout_block_given_content_size(ViewBlock* block, bool horizontal);
 float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal);
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
-bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block);
+bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context = nullptr);
+bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,
+    LayoutContext* context = nullptr);
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
@@ -4383,6 +4412,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size);
 // or the pass pool where a focused test has no view tree.
 Pool* layout_prop_pool(LayoutContext* lycon);
 // shared sizing consumers also accept discrete animation endpoints.
+const CssValue* layout_css_fit_content_function_limit(const CssValue* value);
 void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
                             const CssValue* value, LayoutAxis axis);
 void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
@@ -5300,7 +5330,6 @@ size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
 bool layout_text_edge_has_whitespace(const char* text, bool end);
 bool layout_element_edge_has_whitespace(DomNode* element, bool end);
 // DomNode style resolution
-void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 CssEnum layout_element_css_all_reset_keyword(DomElement* element);
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
@@ -5673,7 +5702,11 @@ struct LayoutMeasurementRootScope {
 
     LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
         : lycon(l), claimed(l && root && !l->measurement_root) {
-        if (claimed) lycon->measurement_root = lam::Up<DomElement>(root);
+        if (claimed) {
+            // intrinsic style materialization also rewrites live boundary state.
+            flex_retained_forget_containing_content(root);
+            lycon->measurement_root = lam::Up<DomElement>(root);
+        }
     }
     ~LayoutMeasurementRootScope() {
         if (claimed) lycon->measurement_root = nullptr;

@@ -1,0 +1,234 @@
+{
+  "name": "Photo album tile zoom keeps its anchor; rubber-band selection, scrubber and viewer pan",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('port');p.scrollTop=500;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('port').getBoundingClientRect();const mid=p.y+p.height/2;const ts=Array.from(document.querySelectorAll('#grid .tile')).map(t=>({t,r:t.getBoundingClientRect()})).filter(o=>o.r.y<=mid&&o.r.y+o.r.height>=mid);globalThis.anchorId=ts.length?ts[0].t.getAttribute('data-id'):'';globalThis.anchorHeight=ts.length?ts[0].r.height:0"
+    },
+    {
+      "type": "assert_script",
+      "js": "anchorId!==''"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('zoom').value==='220'"
+    },
+    {
+      "type": "assert_script",
+      "js": "const t=document.getElementById('tile-'+anchorId);const p=document.getElementById('port').getBoundingClientRect();const r=t&&t.getBoundingClientRect();!!r && r.height>anchorHeight && r.y<=p.y+p.height/2+1 && r.y+r.height>=p.y+p.height/2-1"
+    },
+    {
+      "type": "key_press",
+      "key": "-"
+    },
+    {
+      "type": "key_press",
+      "key": "-"
+    },
+    {
+      "type": "key_press",
+      "key": "-"
+    },
+    {
+      "type": "key_press",
+      "key": "-"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('zoom').value==='80' && document.querySelectorAll('#grid .tile').length===24"
+    },
+    {
+      "type": "script",
+      "js": "const t=document.querySelector('#grid .tile');globalThis.smallId=t.getAttribute('data-id');globalThis.smallTop=t.getBoundingClientRect().y"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#grid .tile').setAttribute('data-small','1')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-small='1']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('selection-bar').style.display!=='none' && Math.abs(document.getElementById('tile-'+smallId).getBoundingClientRect().y-smallTop)<0.5"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "[data-small='1']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "const t=document.getElementById('tile-'+anchorId);const p=document.getElementById('port').getBoundingClientRect();const r=t.getBoundingClientRect();r.y+r.height>=p.y && r.y<=p.y+p.height"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('zoom').value==='160'"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('port');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 900,
+        "offset_y": 60
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 300,
+        "offset_y": 140
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!!document.getElementById('band')"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#grid",
+        "offset_x": 300,
+        "offset_y": 140
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('band')"
+    },
+    {
+      "type": "assert_script",
+      "js": "const ids=Array.from(document.querySelectorAll('#grid .tile[aria-selected=true]')).map(t=>t.getAttribute('data-id'));ids.join(',')==='10,5'"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scrubber",
+        "offset_x": 12,
+        "offset_y": 600
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('port').scrollTop>300"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#tile-1",
+        "offset_x": 120,
+        "offset_y": 20
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "="
+    },
+    {
+      "type": "key_press",
+      "key": "="
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#viewer-stage",
+        "offset_x": 400,
+        "offset_y": 350
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#viewer-stage",
+        "offset_x": 4000,
+        "offset_y": 350
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#viewer-stage",
+        "offset_x": 4000,
+        "offset_y": 350
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const m=/translate\\(([-0-9.]+)px/.exec(document.getElementById('viewer-image').style.transform);const w=document.getElementById('viewer-stage').getBoundingClientRect().width;!!m && Number(m[1])>0 && Number(m[1])<=w*(2.25-1)/2+1"
+    }
+  ]
+}

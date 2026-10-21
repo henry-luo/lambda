@@ -51,6 +51,13 @@
 char* js_skip_ecma_whitespace(char* start, char* end);
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
+Item js_suspended_function_intrinsic(bool generator, bool asynchronous, bool constructor);
+Item js_get_constructor_intrinsic_prototype(Item constructor);
+Item js_get_regexp_string_iterator_proto();
+Item js_get_array_iterator_proto();
+Item js_get_string_iterator_proto();
+Item js_get_map_iterator_proto();
+Item js_get_set_iterator_proto();
 extern "C" JsFunction* js_alloc_gc_function_object(void);
 // JC14: the body entry finalization publishes for `fn`'s current metadata.
 JsBodyEntry js_function_select_body_entry(const JsFunction* fn);
@@ -95,6 +102,9 @@ bool js_ta_define_own_numeric_index(Item object, Item key, Item desc,
 // low-density writes such as `arr[999999] = ...` sparse instead of
 // dense-filling almost one million holes.
 #define SPARSE_GAP_MAX 1000000
+
+// own storage writes also serve internal lexical cells, without prototype dispatch.
+void js_array_store_owned(Array* array, int64_t index, Item value);
 
 // Forward declarations for Unicode normalization (implemented in utf_string.cpp)
 extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);

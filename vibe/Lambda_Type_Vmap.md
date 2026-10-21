@@ -35,7 +35,7 @@ This design is excellent for structured data (JSON objects, parsed HTML attribut
 
 ### Performance Impact
 
-Profiling of `readability2.ls` (see `Readability_Tune.md`) revealed that **O(n²) redundant `get_inner_text` calls** dominate runtime. A memoization cache keyed on Element pointers would reduce this to O(n) — but Lambda has no runtime type that supports this pattern today.
+Profiling of the 2026-02 Readability port, `readability2.ls` (see [Lambda_Pkg_Readability.md Appendix A](Lambda_Pkg_Readability.md#appendix-a-history-the-2026-02-port)), revealed that **O(n²) redundant `get_inner_text` calls** dominate runtime. A memoization cache keyed on Element pointers would reduce this to O(n) — but Lambda has no runtime type that supports this pattern today.
 
 ---
 

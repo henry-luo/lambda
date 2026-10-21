@@ -82,6 +82,29 @@ hidden inside formatting-context files.
 
 ## Target module design
 
+**Execution architecture extension (2026-10-20, adopted; implementation in
+progress):** [CSS Cascade §3.47](Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs)
+and **VR15** replace execution-count invalidation with stable computed-style
+inputs and cached sizing/layout queries. Ownership remains **D4.5.1v4 /
+D4.1.4v5 / D4.5.2**. These changes extend the behavior-neutral extraction plan
+below; the legacy height estimator remains an estimate until its consumers
+migrate to retained results.
+
+The common document path resolves styles before measurement, obtains necessary
+min/max contributions once, then flows each box at its final constraints.
+`layout(box, constraints)` returns reusable geometry and boundary/overflow
+state; a size-only consumer can use that same result. Normal block flow must
+not recursively premeasure the subtree it is about to flow. Flex/grid resolve
+required constraints before requesting child layout, retaining results where
+measurement and final constraints agree. Distinct CSS sizing policies remain
+distinct queries; algorithm-defined cyclic-percentage and stretch behavior
+must not be replaced by a generic repeat-until-stable loop.
+
+Keep active results across A→B→A queries and preserve clean styles across
+geometry resets. One dependency scheduler serves script geometry reads and
+presentation; unchanged reads do no additional flow. See
+[implementation milestones](../impl/Radiant_Impl_Retained_Layout.md).
+
 ```text
 layout_flow_node
   -> prepare role-specific view state
@@ -113,6 +136,45 @@ measurement run mode. Its contribution operation returns content-box intrinsic
 sizes. One shared finalizer then applies pseudo/box extras, min/max keywords,
 and content-vs-border-box conversion. This prevents a grid early return or a
 new flex special case from bypassing constraints.
+
+Milestone 3a freezes computed box geometry and evaluates
+percentage bindings into a separate used-box record. Provisional horizontal
+view kinds and prop allocation no longer trigger the cascade. Committed reuse
+checks its containing constraints before preserving assigned layout sizes;
+ratio transfer and cyclic intrinsic contributions use shared sizing policy.
+Vertical flow still owns inline constraints in mutable props and keeps its
+legacy adapter until retained flow results replace those reads (**VR15**;
+selected-view ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+
+The first milestone-3b consumer removes speculative height from row-flex
+preparation, with explicit validity for partial measurements. At the assigned
+width, independent horizontal block/inline subtrees share completed natural
+cross-size flow with final flow. Their view-owned fragments and baselines
+survive while trial layouts and changed descendant inputs invalidate reuse.
+The shared dependency predicate excludes percentage-dependent geometry and
+unmigrated formatting contexts; generated effects/resources also keep the
+existing path. Independent fragment storage for multiple constraints and
+general subtree flow remain pending (**VR15**).
+Scalar height estimates omit ambient space labels only after the shared subtree
+proof establishes that the explicit wrapping width supplies the constraint.
+Real width changes and dependent descendants retain distinct queries.
+
+Continuous CSSOM reads, task checkpoints and presentation use one document-update
+entry point (**VR15**). Its selected-tree publication validates input revisions
+and environment before borrowing geometry. Loader root publication preserves
+that tree; real resets restore authored table runs/first-letter text and refresh
+retained list/pseudo owners. Complete geometry and lifecycle state publish before
+observer sampling. This removes duplicate document flow, independently of the
+remaining per-query fragment-storage migration (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+Ordinary invalidation retains its view pool; retained pool ownership does not
+extend flex sizing work or scalar-cache validity beyond their measurement pass.
+General flex estimator/ancestor-height fidelity remains open (**VR15**).
+
+Eligible nested flex subtrees also share natural-size flow at their assigned
+inline width. The query owns an unconstrained root before final stretch; final
+reuse validates its block constraint because nested flex placement can depend
+on height. Percentage gaps and percentage/stretch bases retain their existing
+path until sizing-policy dependencies are represented (**VR15**).
 
 ## Execution plan
 

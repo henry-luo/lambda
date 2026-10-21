@@ -119,6 +119,11 @@ static Item reflect_operation(Context*, MvpLmdProgram*, Item* args, uint64_t cou
 Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!state->mutable_prototypes) return ItemNull;
     Item& object = state->values[LMD_LIBRARY_REFLECT];
+    if (state->native_callable_values) {
+        // use the existing namespace before allocating any duplicate method wrappers.
+        object = js_get_reflect_object_value();
+        return object;
+    }
     object = mvp_lmd_object_new(state->object_shape, 0);
     if (item_is_error(object)) return object;
     Item tag = mvp_lmd_named_set(object, Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},

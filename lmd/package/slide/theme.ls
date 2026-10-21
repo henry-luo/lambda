@@ -23,6 +23,24 @@ pub fn resolve(spec, path = "theme") map^ {
     {*: defaults, *: if (custom) map([for (key, value in spec where value != null) (string(key), value)]) else {}}
 }
 
+// Player chrome tokens for the `ui` option and deck attribute; `control_border` becomes the CSS
+// custom property --slide-ui-control-border, read by the chrome rules in html.css.
+pub let ui_tokens = ["page", "background", "border", "text", "muted", "control", "control_border", "control_hover",
+    "control_hover_border", "control_active", "accent", "accent_hover", "accent_active", "accent_text", "shadow", "font", "radius"]
+
+// Declarations for a `ui` map. Each value is one CSS value: no ";", "{" or "}" may end the declaration early.
+pub fn ui_style(ui, path = "ui") string^ {
+    if (ui == null) { "" }
+    else if (not (ui is map)) raise c.fail(path, "expected map")
+    else {
+        let checked_attrs = c.attributes(ui, ui_tokens, path)^
+        let invalid = [for (key, value in ui where value != null and (not (value is string) or len(value) == 0 or
+            contains(value, ";") or contains(value, "{") or contains(value, "}"))) string(key)];
+        if (len(invalid) > 0) raise c.fail(path, invalid[0] ++ " must be a nonempty CSS value without ; { or }")
+        else join([for (key, value in ui where value != null) "--slide-ui-" ++ replace(string(key), "_", "-") ++ ":" ++ value ++ ";"], "")
+    }
+}
+
 pub fn background(scene) => c.value(scene.source.background, scene.palette.background)
 
 // layouts supply bounds only; explicitly authored coordinates always win.

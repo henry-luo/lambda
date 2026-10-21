@@ -390,6 +390,7 @@ struct JsCliRunArgs {
     size_t source_len;
     const char* filename;
     uint64_t* result_home;
+    bool module;
     Item result;
 };
 
@@ -409,7 +410,7 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     }
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
-        run_args->result_home);
+        run_args->result_home, run_args->module);
     if (js_runtime_state_for(eval_context)) js_runtime_state_shutdown(eval_context);
     // Restore this worker's host signal stack before pthread teardown.
     lambda_stack_cleanup();
@@ -421,7 +422,7 @@ static void* js_cli_run_on_stack_thread(void* arg) {
 
 static Item js_cli_transpile_with_execution_stack(
     Runtime* runtime, const char* source, size_t source_len, const char* filename,
-    uint64_t* result_home) {
+    uint64_t* result_home, bool module = false) {
     JsCliRunArgs run_args;
     memset(&run_args, 0, sizeof(run_args));
     run_args.runtime = runtime;
@@ -429,17 +430,18 @@ static Item js_cli_transpile_with_execution_stack(
     run_args.source_len = source_len;
     run_args.filename = filename;
     run_args.result_home = result_home;
+    run_args.module = module;
     run_args.result = ItemNull;
 
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) {
         log_error("js-cli-stack: pthread_attr_init failed");
-        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home, module);
     }
     if (pthread_attr_setstacksize(&attr, JS_EXECUTION_STACK_SIZE) != 0) {
         log_error("js-cli-stack: pthread_attr_setstacksize failed");
         pthread_attr_destroy(&attr);
-        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home, module);
     }
 
     pthread_t thread;
@@ -447,7 +449,7 @@ static Item js_cli_transpile_with_execution_stack(
     pthread_attr_destroy(&attr);
     if (create_rc != 0) {
         log_error("js-cli-stack: pthread_create failed");
-        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home, module);
     }
     int join_rc = pthread_join(thread, NULL);
     if (join_rc != 0) {
@@ -2466,7 +2468,9 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"scene3d", "test/demo/scene3d/index.html"},
     {"chart", "test/demo/chart/index.html"},
     {"cityscape", "test/demo/cityscape/cityscape.ls"},
+    {"photo-album", "test/demo/photo-album/photo-album.ls"},
     {"slides", "test/demo/slides/northstar.slides"},
+    {"readability", "test/demo/readability/readability.ls"},
     {"wordcloud", "test/demo/wordcloud.ls"},
 };
 
@@ -2752,24 +2756,28 @@ static int lambda_main_impl(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "js") == 0) {
         log_debug("Entering JavaScript command handler");
 
+        // compatibility selectors do not turn help or an empty invocation into a file run.
+        int js_first_argument = 2;
+        while (js_first_argument < argc &&
+                (strcmp(argv[js_first_argument], "--runtime=mvp-lmd") == 0 ||
+                 strcmp(argv[js_first_argument], "--no-log") == 0)) js_first_argument++;
         // Check for help first
-        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+        if (js_first_argument < argc && (strcmp(argv[js_first_argument], "--help") == 0 ||
+                strcmp(argv[js_first_argument], "-h") == 0)) {
             printf("Lambda JavaScript Transpiler v1.0\n\n");
             printf("Usage: %s js [file.js] [--document page.html]\n", argv[0]);
             printf("       %s js -e <script>\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'js' command runs the JavaScript transpiler.\n");
-            printf("  If no file is provided, it runs built-in test cases.\n");
             printf("  If a file is provided, it transpiles and executes the JavaScript.\n");
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
-            fputs("  --runtime=mvp-lmd      Explicit MVP MIR selector (MIR is the default)\n", stdout);
+            fputs("  --runtime=mvp-lmd       Alias for the default MVP engine\n", stdout);
             fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
             printf("\nExamples:\n");
-            printf("  %s js                             # Run built-in tests\n", argv[0]);
             printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
             printf("  %s js -e \"console.log(1)\"          # Evaluate inline JavaScript\n", argv[0]);
             printf("  %s js script.js --document page.html  # Run JS with DOM access\n", argv[0]);
@@ -2784,61 +2792,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
         }
 
-        for (int selector = 2; selector < argc; selector++) {
-            if (strcmp(argv[selector], "--runtime=mvp-lmd") != 0) continue;
-            const char* source = NULL;
-            const char* filename = NULL;
-            char* loaded = NULL;
-            size_t length = 0;
-            bool print = false;
-            bool timing = false;
-            bool module = false;
-            bool invalid = false;
-            const char** script_arguments = (const char**)mem_calloc((size_t)argc + 2, sizeof(char*), MEM_CAT_JS_RUNTIME);
-            if (!script_arguments) { runtime_cleanup(&runtime); return lambda_main_finish(1); }
-            int script_argc = 2;
-            script_arguments[0] = argv[0];
-            for (int arg = 2; arg < argc; arg++) {
-                if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
-                if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
-                if (strcmp(argv[arg], "--module") == 0) { module = true; continue; }
-                if ((!strcmp(argv[arg], "-e") || !strcmp(argv[arg], "--eval") ||
-                     !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
-                    print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
-                    source = argv[++arg]; length = strlen(source);
-                } else if (filename) script_arguments[script_argc++] = argv[arg];
-                else if (argv[arg][0] == '-') invalid = true;
-                else filename = argv[arg];
-            }
-            if (!source && filename && !invalid &&
-                    file_read_all(filename, MEM_CAT_JS_RUNTIME, &loaded, &length)) source = loaded;
-            if (invalid || !source || (filename && !loaded)) {
-                fputs("MVP-Lmd accepts a script file, -e source, or -p source\n", stderr);
-                mem_free(script_arguments); mem_free(loaded); runtime_cleanup(&runtime); return lambda_main_finish(1);
-            }
-            double execution_ms = 0;
-            script_arguments[1] = filename ? filename : "[eval]";
-            MvpLmdHost host = {script_argc, script_arguments, stdout};
-            MvpLmdOptions options = {filename, module};
-            MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, length, timing ? &execution_ms : NULL, &host, &options);
-            const char* error = mvp_lmd_diagnostic(execution);
-            if (error) { fputs(error, stderr); fputc('\n', stderr); }
-            else if (print) {
-                Pool* output_pool = pool_create();
-                String* output = format_mark(output_pool, mvp_lmd_result(execution));
-                if (output) { fwrite(output->chars, 1, output->len, stdout); fputc('\n', stdout); }
-                pool_destroy(output_pool);
-            }
-            int status = error ? 1 : 0;
-            if (!error && timing) {
-                char report[64];
-                snprintf(report, sizeof(report), "__TIMING__:%.6f\n", execution_ms);
-                fputs(report, stdout);
-            }
-            mvp_lmd_destroy(execution); mem_free(script_arguments); mem_free(loaded);
-            runtime_cleanup(&runtime); return lambda_main_finish(status);
-        }
-
         JsDocumentSession js_document_session;
         js_document_session_init(&js_document_session);
 
@@ -2848,7 +2801,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool js_had_error = false;
         int js_exit_code = 0;
 
-        if (argc >= 3) {
+        if (js_first_argument < argc) {
             // Parse arguments: js [options] file.js [--document page.html]
             const char* js_file = NULL;
             const char* html_file = NULL;
@@ -2856,6 +2809,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             bool eval_mode = false;
             bool print_eval_result = false;
             bool input_type_module = false;
+            bool execution_timing = false;
             bool unhandled_rejections_strict = false;
             bool tls_min_v13 = false;
             bool tls_max_v12 = false;
@@ -2868,7 +2822,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) {
                     force_interactive = true;
-                } else if (strcmp(argv[i], "--input-type=module") == 0) {
+                } else if (strcmp(argv[i], "--runtime=mvp-lmd") == 0) {
+                    // the compatibility spelling follows the ordinary backend policy.
+                } else if (strcmp(argv[i], "--timing") == 0) {
+                    execution_timing = true;
+                } else if (strcmp(argv[i], "--input-type=module") == 0 ||
+                           strcmp(argv[i], "--module") == 0) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                            strcmp(argv[i], "--js-runtime=legacy") == 0) {
@@ -2946,14 +2905,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             char* js_source = NULL;
             if (eval_mode) {
                 js_file = "[eval]";
-                if (print_eval_result) {
-                    js_source_len = strlen(eval_source_arg) + 13;
-                    js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
-                    snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
-                } else {
-                    js_source_len = strlen(eval_source_arg);
-                    js_source = mem_dup_n(eval_source_arg, js_source_len, MEM_CAT_SYSTEM);
-                }
+                js_source_len = strlen(eval_source_arg);
+                js_source = mem_dup_n(eval_source_arg, js_source_len, MEM_CAT_SYSTEM);
                 js_source[js_source_len] = '\0';
             } else if (input_type_module && !js_file) {
                 js_file = "[stdin]";
@@ -2964,7 +2917,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
             } else {
-                if (!js_file) js_file = argv[2];  // fallback
+                if (!js_file) js_file = argv[js_first_argument];  // fallback
                 js_source = js_load_script_source_from_cache(
                     js_file, "js-cli", input_type_module ? "module" : "classic",
                     input_type_module, &js_source_len);
@@ -3046,7 +2999,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 for (int i = 2; i < argc && js_exec_argc_store < 32; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
-                    if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strcmp(argv[i], "--input-type=module") == 0 ||
+                        strcmp(argv[i], "--module") == 0 ||
+                        strcmp(argv[i], "--runtime=mvp-lmd") == 0 ||
+                        strcmp(argv[i], "--timing") == 0) continue;
                     if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
@@ -3083,7 +3039,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 for (int i = 2; i < argc && js_argc_store < 64; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
-                    if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strcmp(argv[i], "--input-type=module") == 0 ||
+                        strcmp(argv[i], "--module") == 0 ||
+                        strcmp(argv[i], "--runtime=mvp-lmd") == 0 ||
+                        strcmp(argv[i], "--timing") == 0) continue;
                     if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
@@ -3122,6 +3081,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 js_mir_volume_counters_reset();
             }
 
+            // the CLI owns a single Script turn; document/interactive realms remain open.
+            runtime.js_terminal_script = !html_file && !force_interactive && !input_type_module;
 #if !defined(_WIN32)
             if (force_interactive && eval_mode) {
                 // Node's `-i -e` prints the interactive prompt before evaluating
@@ -3131,12 +3092,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
             uint64_t result_home = 0;
             Item result = html_file
-                ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file, &result_home)
+                ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file,
+                    &result_home, input_type_module)
                 : js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, js_file,
-                                                        &result_home);
+                    &result_home, input_type_module);
 #else
             uint64_t result_home = 0;
-            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file, &result_home);
+            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file,
+                &result_home, input_type_module);
 #endif
             // The JS compiler may execute on a dedicated native-stack thread.
             // Rebind the Runtime-owned capsule before caller-thread checks
@@ -3148,6 +3111,21 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     log_error("js-document-result: failed to acquire Runtime owner");
                     result = ItemError;
                 }
+            }
+            if (print_eval_result && !item_is_error(result)) {
+                // preserve MVP completion formatting without changing the timed Script body.
+                Pool* output_pool = pool_create();
+                String* output = output_pool ? format_mark(output_pool, result) : NULL;
+                if (output) {
+                    fwrite(output->chars, 1, output->len, stdout);
+                    fputc('\n', stdout);
+                } else result = ItemError;
+                if (output_pool) pool_destroy(output_pool);
+            }
+            if (execution_timing && !item_is_error(result)) {
+                char report[64];
+                snprintf(report, sizeof(report), "__TIMING__:%.6f\n", runtime.js_execution_ms);
+                fputs(report, stdout);
             }
             if (runtime.dom_doc && !item_is_error(result)) {
                 // The document fast path executes without the CLI worker's

@@ -12,6 +12,7 @@ fn presenter_options(deck, options) {
         *: if (deck.autostart != null) {autostart: deck.autostart} else {},
         *: if (deck.reduced_motion != null) {reduced_motion: deck.reduced_motion} else {},
         *: if (deck.autoplay_dwell_ms != null) {autoplay_dwell_ms: deck.autoplay_dwell_ms} else {},
+        *: if (deck.ui != null) {ui: deck.ui} else {},
         // relative images and fonts resolve against the deck file, not the working directory
         *: if (deck.base_uri == null and options.source_path != null)
             {base_uri: paths.dirname(options.source_path) ++ "/"} else {}}

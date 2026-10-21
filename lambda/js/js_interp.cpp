@@ -7241,36 +7241,38 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
     return script;
 }
 
-Item js_interp_host_global_lexical(const JsInterpHostOps* ops, JsInterpEnv* environments,
+Item js_interp_host_global_lexical(const JsInterpHostOps* ops, JsGlobalEnvironment* environment,
         Item key, Item value, int operation, bool* found) {
     *found = false;
     if (get_type_id(key) != LMD_TYPE_STRING) return ItemNull;
-    JsInterpHostScope profile(ops);
     operation &= ~JS_INTERP_HOST_SCRIPT;
-    for (JsInterpEnv* env = environments; env; env = env->outer) {
-        NameEntry* entry = js_interp_env_find_name(env, key.get_string());
-        if (!entry) continue;
-        // Script var names participate in lexical declaration checks; reads remain live global properties.
-        if (!entry->is_lexical && operation != JS_INTERP_HOST_CHECK_DECLARE_LEXICAL) continue;
-        *found = true;
-        if (operation == JS_INTERP_HOST_HAS || operation == JS_INTERP_HOST_HAS_LEXICAL)
-            return Item{.item = ITEM_TRUE};
-        if (operation == JS_INTERP_HOST_DELETE) return Item{.item = ITEM_FALSE};
-        if (operation == JS_INTERP_HOST_CHECK_DECLARE && value.item == ITEM_TRUE)
-            return Item{.item = ITEM_FALSE};
-        if (operation != JS_INTERP_HOST_GET && operation != JS_INTERP_HOST_SET)
-            return ops->fail(JS_INTERP_HOST_SYNTAX);
-        Item current = js_interp_binding_slot_read(env, entry);
-        if (current.item == ITEM_JS_TDZ) return ops->fail(JS_INTERP_HOST_REFERENCE);
-        if (operation == JS_INTERP_HOST_GET) return current;
-        if (entry->is_const) return ops->fail(JS_INTERP_HOST_TYPE);
-        return js_interp_binding_slot_store(env, entry, value);
-    }
-    return ItemNull;
+    int index = js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key);
+    if (index < 0 && operation == JS_INTERP_HOST_CHECK_DECLARE_LEXICAL)
+        index = js_global_environment_find(environment, JS_GLOBAL_BINDING_OBJECT_VAR, key);
+    JsGlobalBinding* binding = js_global_environment_binding_at(environment, index);
+    if (!binding) return ItemNull;
+    // a missing lexical needs only the realm directory; enter the hosted
+    // interpreter profile when the binding operation actually uses it.
+    JsInterpHostScope profile(ops);
+    *found = true;
+    if (operation == JS_INTERP_HOST_HAS || operation == JS_INTERP_HOST_HAS_LEXICAL)
+        return Item{.item = ITEM_TRUE};
+    if (operation == JS_INTERP_HOST_DELETE) return Item{.item = ITEM_FALSE};
+    if (operation == JS_INTERP_HOST_CHECK_DECLARE && value.item == ITEM_TRUE)
+        return Item{.item = ITEM_FALSE};
+    if (operation != JS_INTERP_HOST_GET && operation != JS_INTERP_HOST_SET)
+        return ops->fail(JS_INTERP_HOST_SYNTAX);
+    Item current = js_global_environment_read_binding(environment, binding, Item{.item = ITEM_JS_TDZ});
+    if (current.item == ITEM_JS_TDZ) return ops->fail(JS_INTERP_HOST_REFERENCE);
+    if (operation == JS_INTERP_HOST_GET) return current;
+    if (binding->immutable) return ops->fail(JS_INTERP_HOST_TYPE);
+    js_global_environment_write_binding(environment, binding, value);
+    return value;
 }
 
 Item js_interp_execute_host_source(const JsInterpHostOps* ops, const char* source,
-        size_t length, const char* filename, bool indirect_eval, JsInterpEnv** script_environment) {
+        size_t length, const char* filename, bool indirect_eval, JsInterpEnv** script_environment,
+        JsGlobalEnvironment* global_environment) {
     if (!ops || !context || !context->heap || !source) return ItemError;
     JsInterpHostScope profile(ops);
     Item failure = ItemNull;
@@ -7302,6 +7304,17 @@ Item js_interp_execute_host_source(const JsInterpHostOps* ops, const char* sourc
         if (*script_environment) heap_unregister_gc_object_root(*script_environment);
         *script_environment = environment.env;
         environment.registered = false;
+        // the realm index names the existing environment slots; closures keep using those same cells.
+        for (NameEntry* entry = script->global_scope->first; entry; entry = entry->next) {
+            Item key = js_interp_name_key(entry->name);
+            bool linked = entry->is_lexical
+                ? js_global_environment_link_storage(global_environment, key, entry->is_const,
+                    (Item*)(void*)environment.env->slots, environment.env->slot_count, entry->slot,
+                    (environment.env->host_cells & JS_INTERP_CELL_ALL) != 0)
+                : js_global_environment_upsert(global_environment, JS_GLOBAL_BINDING_OBJECT_VAR,
+                    key, ItemNull, false, -1, UINT32_MAX);
+            if (!linked) return ops->fail(JS_INTERP_HOST_MEMORY);
+        }
     }
     JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);
     return result.kind == JS_INTERP_NORMAL ? completion.get() : result.value;

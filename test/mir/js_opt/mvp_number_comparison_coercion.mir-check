@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D8.4.2v2: a known Number operand excludes string ordering. Reuse complete ToNumber conversion on the other operand without a separate object-conversion guard; preserve operand order and thrown values.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "count": {
+        "call\tmvp_lmd_to_primitive": 0,
+        "call\tmvp_lmd_primitive_to_number": 8
+      }
+    }
+  ]
+}

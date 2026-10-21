@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "D8.1.3v27/D8.4.1v2: Script function declarations have non-configurable object bindings. Read the live property without a possible-later-lexical lookup; retain callable reassignment and generic call dispatch.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f3",
+      "expect": ["ret\t"],
+      "count": {
+        "call\tmvp_lmd_dynamic_global": 0,
+        "call\tmvp_lmd_class_property": 1
+      }
+    }
+  ]
+}

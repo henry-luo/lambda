@@ -4985,6 +4985,13 @@ static void resolve_flex_components(DomElement* element, LayoutContext* lycon) {
     }
 }
 
+// legacy consumers keep their view-typed adapter until they own retained computed state.
+static ViewBlock* css_property_box(LayoutContext* context) {
+    ViewSpan* span = lam::view_require_element(context->view);
+    return radiant::css_resolved_style_cache_allowed(context, context->view->as_element())
+        ? lam::unsafe_view_block_api_span(span) : lam::view_as_block(span);
+}
+
 bool layout_compute_scroll_keyword_axes(LayoutContext* lycon, StyleTree* style,
         bool vertical, bool overscroll, CssEnum inherited_x, CssEnum inherited_y,
         CssEnum* out_x, CssEnum* out_y) {
@@ -5013,7 +5020,7 @@ bool layout_compute_scroll_keyword_axes(LayoutContext* lycon, StyleTree* style,
 }
 
 static void resolve_scroll_keyword_axes(DomElement* element, LayoutContext* lycon, bool overscroll) {
-    ViewBlock* block = lam::view_as_block(lycon->view);
+    ViewBlock* block = css_property_box(lycon);
     if (!block || !element->specified_style) return;
     DomElement* parent = dom_parent_element(element);
     const ScrollProp* inherited = parent ? parent->scroll() : &SCROLL_PROP_DEFAULT;
@@ -5074,7 +5081,7 @@ static void resolve_resize(DomElement* element, LayoutContext* lycon) {
 
 static void resolve_overflow_clip_margin(DomElement* element,
                                          LayoutContext* lycon) {
-    ViewBlock* block = lam::view_as_block(lycon->view);
+    ViewBlock* block = css_property_box(lycon);
     if (!block || !element->specified_style) return;
     CssDeclaration* declaration = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_OVERFLOW_CLIP_MARGIN);
@@ -5696,7 +5703,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             lycon->cascade_priority_count = collector.count;
         }
     }
-    ViewBlock* existing_multicol_view = lam::view_as_block(lycon->view);
+    ViewBlock* existing_multicol_view = css_property_box(lycon);
     if (existing_multicol_view && existing_multicol_view->multicol_prop()) {
         // Retained recascade must recompute currentColor after color changes.
         existing_multicol_view->multicol_prop()->rule_color_is_current = true;
@@ -5864,7 +5871,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         resolve_css_property(CSS_PROPERTY_TEXT_JUSTIFY,
                              text_justify_winner, lycon);
     }
-    ViewBlock* multicol_view = lam::view_as_block(lycon->view);
+    ViewBlock* multicol_view = css_property_box(lycon);
     if (multicol_view && multicol_view->multicol_prop() &&
         multicol_view->multicol_prop()->rule_color_is_current) {
         multicol_view->multicol_prop()->rule_color = get_current_color(lycon);
@@ -5908,7 +5915,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         // CSS Tables 3 §2.1: replaced principal boxes retain authored sizing.
         if ((is_row_or_rowgroup || is_column) &&
             !layout_element_is_replaced(dom_elem)) {
-            ViewBlock* block = lam::view_as_block(span);
+            ViewBlock* block = css_property_box(lycon);
             if (block && block->blk) {
                 if (block->block()->given_width >= 0) {
                     block->blk->given_width = -1;
@@ -5932,7 +5939,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     bool is_html_table = (dom_elem->tag_id == MARKUP_NAME_TABLE) ||
         (dom_elem->tag_name && strcmp(dom_elem->tag_name, "table") == 0);
     if (is_html_table && di == CSS_VALUE_TABLE) {
-        ViewBlock* block = lam::view_as_block(span);
+        ViewBlock* block = css_property_box(lycon);
         if (block && block->blk) {
             CssDeclaration* box_sizing_decl = style_tree ? style_tree_get_declaration(style_tree, CSS_PROPERTY_BOX_SIZING) : nullptr;
             if (!box_sizing_decl) {
@@ -6093,12 +6100,9 @@ void resolve_css_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         *percentage = NAN;
         return;
     }
-    if (is_maximum && prop_id == CSS_PROPERTY_MAX_WIDTH &&
-        value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        value->data.function->name &&
-        strcmp(value->data.function->name, "fit-content") == 0 &&
-        value->data.function->arg_count >= 1 && value->data.function->args[0]) {
-        const CssValue* limit = value->data.function->args[0];
+    const CssValue* limit = is_maximum && prop_id == CSS_PROPERTY_MAX_WIDTH
+        ? layout_css_fit_content_function_limit(value) : nullptr;
+    if (limit) {
         float resolved = resolve_length_value(lycon, prop_id, limit);
         *constraint = isnan(resolved) ? (is_maximum ? -1.0f : 0.0f) : resolved;
         *constraint_type = CSS_VALUE_FIT_CONTENT;
@@ -6287,7 +6291,7 @@ static void css_apply_list_style_component(LayoutContext* lycon, ViewSpan* span,
     }
 }
 
-static const CssValue* css_fit_content_function_limit(const CssValue* value) {
+const CssValue* layout_css_fit_content_function_limit(const CssValue* value) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
         !value->data.function->name ||
         strcmp(value->data.function->name, "fit-content") != 0 ||
@@ -6336,7 +6340,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
 void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
                                   const CssValue* value,
                                   LayoutAxis axis) {
-    const CssValue* fit_limit = css_fit_content_function_limit(value);
+    const CssValue* fit_limit = layout_css_fit_content_function_limit(value);
     bool horizontal = axis == LAYOUT_AXIS_X;
     CssPropertyCode axis_property = horizontal ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     float size = -1.0f;
@@ -8717,7 +8721,8 @@ void css_apply_computed_property(CssPropertyCode prop_id,
     bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
     bool vertical_block_start_is_right = layout_element_writing_mode(current_element) == WM_VERTICAL_RL;
     ViewSpan* span = lam::view_require_element(lycon->view);
-    ViewBlock* block = lam::view_as_block(span);
+    // computed properties belong to the element before a provisional view acquires its box role (VR15).
+    ViewBlock* block = css_property_box(lycon);
     CssEnum specified_direction = layout_specified_keyword(
         current_element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
     bool inline_direction_rtl = specified_direction == CSS_VALUE_RTL ||

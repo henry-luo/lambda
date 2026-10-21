@@ -1019,8 +1019,15 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     DomText* text = parent->append_text("Original");
     ASSERT_NE(text, nullptr);
 
-    // Update text content
+    uint32_t revision = parent->intrinsic_input_revision;
+    // character edits retain the node and invalidate containing measurement queries.
     EXPECT_TRUE(dom_text_set_content(text, "Updated"));
+    EXPECT_EQ(parent->first_child, text);
+    EXPECT_EQ(parent->last_child, text);
+    EXPECT_EQ(text->prev_sibling, nullptr);
+    EXPECT_EQ(text->next_sibling, nullptr);
+    EXPECT_NE(parent->intrinsic_input_revision, revision);
+    EXPECT_TRUE(parent->layout_dirty);
 
     // Verify DomText updated
     EXPECT_STREQ(text->text, "Updated");

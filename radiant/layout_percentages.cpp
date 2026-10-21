@@ -202,8 +202,35 @@ bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
         value == CSS_VALUE_UNSET || value == CSS_VALUE_REVERT;
 }
 
-bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block) {
-    if (!containing_block || containing_block->height <= 0.0f) return false;
+bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,
+                                                                 LayoutContext* context) {
+    if (!containing_block) return false;
+    const BlockContext* parent_context = context ? context->block.parent.get() : nullptr;
+    FlexContainerLayout* flex = context ? context->flex_container.get() : nullptr;
+    if (parent_context && parent_context->flow_box == containing_block &&
+        parent_context->given_height >= 0.0f &&
+        containing_block->parent_item_kind() != DomElement::PARENT_ITEM_FLEX) {
+        // detached/page constraints are definite even when the DOM ancestor's CSS height is auto.
+        return true;
+    }
+    if (parent_context && parent_context->flow_box == containing_block &&
+        parent_context->given_height >= 0.0f &&
+        layout_used_preferred_aspect_ratio(containing_block) > 0.0f) return true;
+    if (containing_block->flex_item() &&
+        !layout_view_is_abs_or_fixed(containing_block) && flex && parent_context &&
+        parent_context->flow_box == containing_block && parent_context->given_height >= 0.0f &&
+        containing_block->parent_view() == flex->container) {
+        // post-flex constraints are definite even when the item's CSS height is auto;
+        // unrelated outer flex state must not define this containing block's percentages.
+        bool definite = is_main_axis_horizontal(flex)
+            ? flex_item_will_stretch_cross_axis(containing_block, flex)
+            : flex->main_axis_available_size_is_definite;
+        if (definite) return true;
+    }
+    // a ratio-transferred block height supplies a definite percentage basis
+    // while its final auto height may still grow around its content.
+    if (containing_block->blk && containing_block->block()->aspect_ratio_auto_height) return true;
+    if (containing_block->height <= 0.0f) return false;
     // A table-cell used height is established by row/table sizing even when its
     // own CSS height is auto; percentage descendants use that content box.
     if (containing_block->view_type == RDT_VIEW_TABLE_CELL) return true;
@@ -235,6 +262,30 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
     return containing_block->fi->main_size_from_flex;
 }
 
+bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context) {
+    if (!block) return true;
+    // css 2.1 §10.5 exempts abspos percentages from the auto-height
+    // ancestor rule; a resolved viewport must not revert to its ratio.
+    if (layout_view_is_abs_or_fixed(block)) return false;
+    if (block->block()->percentage_height_resolved_late) {
+        // A positioned percentage can become definite after its containing
+        // block finishes; retain that used-value definiteness for descendants.
+        return false;
+    }
+    // A percentage block size is automatic while its containing block is auto;
+    // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
+    ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
+    bool is_root_percentage_height = !containing_block && block->doc &&
+        (block->doc->root == static_cast<DomNode*>(block) ||
+         (block->doc->view_tree && block->doc->view_tree->root == static_cast<View*>(block)));
+    if (!is_root_percentage_height &&
+        (layout_block_has_automatic_size(containing_block, false) &&
+         !layout_percentage_height_basis_is_algorithmically_definite(containing_block, context))) {
+        return true;
+    }
+    return false;
+}
+
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return true;
     LayoutAxisRefs axis(block->block_mut(), horizontal);
@@ -246,25 +297,7 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
         ? layout_specified_physical_size_declaration(block->as_element(), horizontal) : nullptr;
     if (specified_size && specified_size->value) {
         if (!horizontal && specified_size->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-            // css 2.1 §10.5 exempts abspos percentages from the auto-height
-            // ancestor rule; a resolved viewport must not revert to its ratio.
-            if (layout_view_is_abs_or_fixed(block)) return false;
-            if (block->block()->percentage_height_resolved_late) {
-                // A positioned percentage can become definite after its containing
-                // block finishes; retain that used-value definiteness for descendants.
-                return false;
-            }
-            // A percentage block size is automatic while its containing block is auto;
-            // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
-            ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
-            bool is_root_percentage_height = !containing_block && block->doc &&
-                block->doc->view_tree &&
-                block->doc->view_tree->root == static_cast<View*>(block);
-            if (!is_root_percentage_height &&
-                (layout_block_has_automatic_size(containing_block, false) &&
-                 !layout_percentage_height_basis_is_algorithmically_definite(containing_block))) {
-                return true;
-            }
+            if (layout_percentage_height_is_automatic(block)) return true;
         }
         return layout_css_size_is_automatic(block, horizontal);
     }

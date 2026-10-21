@@ -1,0 +1,329 @@
+{
+  "name": "Photo album book: cover, page turns by key, click, drag and spread bar; viewer over the book",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1400,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#book-button"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#bk-position"
+      },
+      "equals": "Cover"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#bk-leaf-0 .bk-front .bk-emboss').textContent==='Library' && document.getElementById('bk-prev').hasAttribute('disabled')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#bk-bar [data-spread]').length===document.querySelectorAll('#bk-bar .bk-spread').length && document.querySelector(\"#bk-bar [data-spread='0']\").getAttribute('aria-current')==='true'"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "/rotatey\\(-180deg\\)/i.test(document.getElementById('bk-leaf-0').style.transform) && document.querySelector('#bk-leaf-1 .bk-front .bk-title').textContent==='Library'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bk-next"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 200
+    },
+    {
+      "type": "assert_script",
+      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-1').style.transform);const a=m&&Number(m[1]);a<-5&&a>-175"
+    },
+    {
+      "type": "assert_script",
+      "js": "const b=document.getElementById('bk-book').getBoundingClientRect();const h=document.elementFromPoint(b.x+b.width*0.62,b.y+b.height*0.5);!!h && !!h.closest('.bk-leaf')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#bk-position"
+      },
+      "equals": "2–3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-spread='5']"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1500
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "5"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#bk-bar [data-spread='5']\").getAttribute('aria-current')==='true' && document.querySelectorAll('#bk-leaves .bk-leaf').length>=5"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#bk-leaves .bk-leaf')).filter(l=>l.style.display!=='none').length<=4"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 1050,
+        "offset_y": 600
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 850,
+        "offset_y": 560
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-5').style.transform);const a=m&&Number(m[1]);a<-10&&a>-90"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 850,
+        "offset_y": 560
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "5"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 1050,
+        "offset_y": 600
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 250,
+        "offset_y": 560
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-5').style.transform);Number(m[1])<-90"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#bk-book",
+        "offset_x": 250,
+        "offset_y": 560
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "6"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#book"
+      },
+      "attribute": "data-turned",
+      "equals": "5"
+    },
+    {
+      "type": "script",
+      "js": "const b=Array.from(document.querySelectorAll('#bk-bar [data-spread]')).find(b=>Number(b.getAttribute('data-spread'))>=2&&b.querySelector('img'));b.setAttribute('data-photo-spread','1');globalThis.photoSpread=b.getAttribute('data-spread')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-photo-spread='1']"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 2000
+    },
+    {
+      "type": "script",
+      "js": "const t=Number(document.getElementById('book').getAttribute('data-turned'));const p=document.querySelector('#bk-leaf-'+t+' .bk-front [data-photo], #bk-leaf-'+(t-1)+' .bk-back [data-photo]');p.setAttribute('data-test','1');globalThis.printId=p.getAttribute('data-photo')"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "[data-test='1']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('viewer-image').getAttribute('src').indexOf('/photos/'+String(printId).padStart(4,'0'))>=0 && / of 24 · /.test(document.getElementById('viewer-subtitle').textContent)"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('book').getAttribute('data-turned')===photoSpread"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#bk-paper"
+      },
+      "value": "black"
+    },
+    {
+      "type": "assert_script",
+      "js": "const t=document.getElementById('book').getAttribute('data-turned');/#1d1c1a/.test(document.querySelector('#bk-leaf-'+t+' .bk-front .bk-paper').getAttribute('style'))"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/photo_album/book.png"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "advance_time",
+      "ms": 6000
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#bk-position"
+      },
+      "equals": "Back"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('bk-next').hasAttribute('disabled')"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('book').style.display==='none'"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#port"
+      }
+    }
+  ]
+}

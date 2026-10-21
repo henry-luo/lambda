@@ -991,6 +991,7 @@ struct DomElement : DomNode {
     lam::Up<const char> id;      // Element ID attribute (cached)
     lam::OwnArr<const char*> class_names;  // Array of class names (cached)
     int class_count;             // Number of classes
+    uint32_t intrinsic_input_revision; // subtree dirty notifications; fills existing pointer padding
     lam::Shared<StyleTree> specified_style;  // Specified values from CSS rules (AVL tree)
     lam::Own<DomElementExt> ext; // rare DOM/view state, allocated lazily from doc pool
     // we do not store computed_style;
@@ -1095,14 +1096,25 @@ struct DomElement : DomNode {
     }
 
     bool needs_style_recompute() const { return flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE); }
+    void invalidate_intrinsic_inputs() {
+        // text and style edits both invalidate every containing size/flow query.
+        for (DomNode* node = this; node; node = node->parent) {
+            if (node->is_element()) {
+                DomElement* element = node->as_element();
+                element->intrinsic_input_revision++;
+                element->set_has_cached_intrinsic_widths(false);
+            }
+        }
+    }
     void set_needs_style_recompute(bool value) {
         set_flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE, value);
         // A style mutation may change intrinsic contributions before the next
         // retained layout generation; do not reuse its provisional measurement.
         if (value) {
-            set_has_cached_intrinsic_widths(false);
             // explicit invalidation also expires computed CSS before layout commits.
             style_version++;
+            // anonymous-node initialization must not expire unrelated subtree queries.
+            invalidate_intrinsic_inputs();
         }
     }
     bool styles_resolved() const { return flag(ELMT_FLAG_STYLES_RESOLVED); }

@@ -1,53 +1,50 @@
 {
   "schema_version": 1,
-  "description": "D5.4, D6.2.2v2: formal calls return one Item and publish the scalar home separately. Callers snapshot that home immediately; recursive open globals keep their guarded entry.",
+  "description": "D8.1.3v27, D6.2.2v2, D8.4.3v2: native direct calls return value and explicit error separately and test the error before use. The inlined boxed body retains destination-owned scalar publication.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",
       "expect": [
         "call\tmvp_lmd_throw",
-        "mov\ti64:152(runtime),",
-        "ret\t{{r}}"
+        "ret\t{{r}}, {{r}}"
       ],
       "forbid": [
         "js_native_throw",
         "lambda_item_adopt_scalar_home",
-        "ret\t{{r}}, {{r}}"
+        "mov\ti64:152(runtime),"
       ]
     },
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
-        "call\tlambda_stack_is_exhausted",
-        "call\tmvp_lmd_signature,",
-        "mov\ti64:152(runtime),"
+        "bstart\t",
+        "ublt\t",
+        "ret\t{{r}}, {{r}}"
       ],
       "expect_seq": [
+        "call\tmvp_lmd_f1_signature, mvp_lmd_f1, {{r:value}}, {{r:error}}",
         {
-          "pattern": "call\tmvp_lmd_signature,"
+          "pattern": ", {{r:error}}, 72057594037927936",
+          "next_line": true
         },
-        {
-          "pattern": "mov\t{{r}}, i64:152(runtime)"
-        }
+        "dadd\t{{r}}, {{r:value}}"
       ],
       "forbid": [
         "js_native_throw",
         "lambda_item_adopt_scalar_home",
-        "ret\t{{r}}, {{r}}"
+        "mov\ti64:152(runtime),",
+        "call\tmvp_lmd_signature,"
       ]
     },
     {
       "in_func": "mvp_lmd_f5",
       "expect_seq": [
-        {
-          "pattern": "call\tmvp_lmd_signature,"
-        },
-        {
-          "pattern": "mov\t{{r}}, i64:152(runtime)"
-        }
+        "call\tmvp_lmd_object_new",
+        "mov\ti64:152(runtime),"
       ],
       "forbid": [
-        "lambda_item_adopt_scalar_home"
+        "lambda_item_adopt_scalar_home",
+        "call\tmvp_lmd_f4_signature"
       ]
     }
   ]

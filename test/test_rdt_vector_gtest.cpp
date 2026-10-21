@@ -7025,31 +7025,37 @@ TEST(PaintOwnership, SvgPhasesKeepForeignHtmlInsideItsSubscene) {
     DomElement* node = dom_find_element_by_id(ui->document->root, "scene"); ASSERT_NE(node, nullptr);
     ASSERT_TRUE(radiant_stack_is_context(node));
     ASSERT_TRUE(node->is_block());
-    const struct { RadiantPaintPhase phase; bool host_schedule, blue_boundary, red_content; } visits[] = {
-        {RADIANT_PAINT_BLOCK_BACKGROUNDS, true, false, false},
-        {RADIANT_PAINT_FOREGROUND, true, true, true},
-        {RADIANT_PAINT_BLOCK_BACKGROUNDS, false, true, false}
+    struct PhaseProbe {
+        RadiantPaintPhase phase;
+        bool parent_stack;
+        uint8_t outside[3], inside[3];
     };
-    for (const auto& visit : visits) {
-        SCOPED_TRACE(visit.host_schedule);
-        SCOPED_TRACE(visit.phase);
+    const PhaseProbe probes[] = {
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, false, {0, 0, 255}, {0, 0, 255}},
+        {RADIANT_PAINT_FOREGROUND, false, {255, 255, 255}, {255, 0, 0}},
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, true, {255, 255, 255}, {255, 255, 255}},
+        {RADIANT_PAINT_FOREGROUND, true, {0, 0, 255}, {255, 0, 0}}
+    };
+    for (const PhaseProbe& probe : probes) {
+        SCOPED_TRACE(static_cast<unsigned>(probe.phase));
+        SCOPED_TRACE(probe.parent_stack);
         RenderProfiler profiler = {}; RasterRenderContext context;
         RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
-        context.paint_phase = visit.phase;
+        context.paint_phase = probe.phase;
         for (size_t i = 0; i < (size_t)ui->surface->width * ui->surface->height; i++)
             ((uint32_t*)ui->surface->pixels)[i] = 0xffffffffu;
-        // the host schedules a complete SVG atom; direct producer visits still honor partial phases.
-        if (visit.host_schedule) render_children(&context, static_cast<View*>(node));
-        else render_block_view(&context, lam::view_require_block(node));
+        // SVG 2 §3.4.1 makes the outer SVG atomic to its parent; its producer still owns partial phases.
+        if (probe.parent_stack) render_children(&context, static_cast<View*>(node));
+        else if (probe.phase == RADIANT_PAINT_BLOCK_BACKGROUNDS)
+            render_block_view(&context, lam::view_require_block(node));
+        else render_inline_svg(&context, lam::view_require_block(node));
         PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
         ASSERT_TRUE(dl_validate(frame.list(), nullptr));
         dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip, &context.scratch, 1, nullptr);
         test_radiant_expect_surface_pixel(ui->surface, 40, 45,
-            visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
-        if (!visit.red_content) {
-            test_radiant_expect_surface_pixel(ui->surface, 80, 45,
-                visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
-        } else test_radiant_expect_surface_pixel(ui->surface, 80, 45, 255, 0, 0);
+            probe.outside[0], probe.outside[1], probe.outside[2]);
+        test_radiant_expect_surface_pixel(ui->surface, 80, 45,
+            probe.inside[0], probe.inside[1], probe.inside[2]);
     }
     render_export_session_end(&session); rdt_engine_term();
 }

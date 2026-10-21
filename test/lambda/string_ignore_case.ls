@@ -19,3 +19,9 @@
 "3.2"; [replace("ÉÉÉ", "é", "e", {ignore_case: true, limit: 2})]
 "3.3"; [replace("aAa", "a", "-", {ignore_case: true, last: 1})]
 "3.4"; [replace('ÉCOLE', "é", "e", {ignore_case: true})]
+
+'4. a negated set excludes the case variants of what it complements'
+"4.1"; (find("xs-_", \(!"\a"), {ignore_case: true}) |> ~.value)
+"4.2"; (find(" has-shares ", \(!"\a" "share" !"\a"), {ignore_case: true}) |> ~.value)
+"4.3"; (find("ſK1", \(!("a" to "z")), {ignore_case: true}) |> ~.value)
+"4.4"; [replace("Ab1-", \(!("a" to "z")), "_", {ignore_case: true})]

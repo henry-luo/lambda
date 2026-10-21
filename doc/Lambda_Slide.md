@@ -69,9 +69,12 @@ The active layer carries `data-slide-active`. Static exports (`snapshot`,
 | `sample(plan, playback)^` | Deterministic object visuals for the selected slide/build. |
 | `needs_frame(playback)` | Whether an unpaused cue, transition or autoplay dwell needs another frame. |
 | `diagnostic(plan, playback, frame_token = 0)` | IDs, time, phase, generation, active cue tracks and frame token. |
+| `timeline(deck, options = {})^` | The deck clock under autoplay: `{duration_ms, slides: [{id, start_ms, end_ms}]}` (see [Deck clock and host control](#deck-clock-and-host-control)). |
+| `position(plan, playback)` | The deck time a playback state shows, in milliseconds. |
 
-`options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion` and
-`autostart`, plus `autoplay_dwell_ms` (default 3000). Dimensions and the dwell
+`options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion`,
+`autostart`, `controls` and `ui` (see [Player chrome](#player-chrome)), plus
+`autoplay_dwell_ms` (default 3000). Dimensions and the dwell
 interval are positive finite numbers; flags are booleans. Instance
 IDs are nonempty ASCII letters/digits/underscore/hyphen. Embedded players use
 their configured dimensions; automatic viewport fitting belongs to `page`.
@@ -79,6 +82,69 @@ their configured dimensions; automatic viewport fitting belongs to `page`.
 The compiler rejects unknown attributes, duplicate IDs, missing effect targets,
 invalid numeric values, unsupported effects, and overlapping parallel writers
 to the same target/channel. Diagnostics name the slide/cue/source path.
+
+### Player chrome
+
+The controls, presenter console, overview and page background read their colors,
+font and corner radius from `--slide-ui-*` CSS custom properties. Unset tokens
+keep the built-in look. A host can set them in its own stylesheet, or pass a
+`ui` map in `options`; a `ui` attribute on `<presentation>` is the deck's
+default, so a `.slides` file keeps its look under `lambda view`. Option values
+win over deck values, token by token.
+
+```lambda
+slide.player(deck, {instance: "show", ui: {accent: "#0a84ff", background: "#1b1c1f",
+    control: "rgba(255,255,255,0.08)", font: "-apple-system, Arial, sans-serif", radius: "7px"}})^
+```
+
+| Token (`ui` key) | Styles |
+|---|---|
+| `page` | Standalone page background |
+| `background`, `border` | Control bar, console and overview surface; their borders |
+| `text`, `muted` | Primary and secondary chrome text |
+| `control`, `control_border`, `control_hover`, `control_hover_border`, `control_active` | Buttons, slide picker and their states |
+| `accent`, `accent_hover`, `accent_active`, `accent_text` | Next button, focus rings, speed value, timer and headings; text on the accent |
+| `shadow` | Button `box-shadow` value |
+| `font`, `radius` | Chrome font family; button and box corner radius |
+
+Key `control_border` sets `--slide-ui-control-border`. Values are single CSS
+values: empty strings and values containing `;`, `{` or `}` are rejected, as are
+unknown keys. Slide content keeps using deck themes; `ui` styles only the chrome.
+
+### Deck clock and host control
+
+Autoplay lays a deck out as one clock. Each slide runs its incoming transition,
+its entry cues, then a dwell before every click build and before the next slide;
+the last slide ends with its final build. `timeline(deck, options)` returns that
+layout, with reduced motion snapping builds and skipping transitions, and
+`position(plan, playback)` reads a playback state's place on it. The reducer's
+`{command: 'seek_time', position_ms: ...}` moves to a deck time and keeps
+autoplay, pause and speed as they were; past the end it parks on the final build.
+
+An embedded host can run the player without its own controls and drive it:
+
+```lambda no-run
+// no-run: a fragment of a host view; `deck` and `player_node` come from the host
+slide.player(deck, {instance: "film", width: 960.0, height: 540.0, controls: false})^
+
+// later, from any handler in the host
+dom.dispatch(player_node, {type: "slide_command", bubbles: false,
+    detail: {command: "seek_time", position_ms: 12000.0}})
+```
+
+- `controls: false` keeps the control bar mounted but hidden, removes the
+  floating **Toolbar** button and ignores the H key. A click on the stage
+  belongs to the host and does not advance the deck.
+- A `slide_command` event's `detail` is a reducer event without `time_ms`; the
+  event's own time stamp is used. Accepted commands are `play`, `pause`,
+  `resume`, `next`, `previous`, `restart`, `end`, `jump`, `seek`, `seek_time`
+  and `speed`.
+- The player root publishes `data-slide-duration`, and, with `data-slide-time`
+  at each command or build boundary, `data-slide-position` and
+  `data-slide-position-at`: the deck time and the frame time it was sampled at.
+  While `data-slide-autoplay` is `true` and `data-slide-paused` is not, a host
+  extrapolates `position + (now − position-at) × data-slide-rate` on its own
+  frame timestamps, so a scrubber needs no per-frame attribute writes.
 
 ## Authoring elements
 
