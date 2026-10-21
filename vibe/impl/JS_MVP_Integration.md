@@ -1,7 +1,7 @@
 # JS MVP integration implementation
 
 **Date:** 2026-10-21  
-**Authority:** **D8.1.3v27**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**  
+**Authority:** **D8.1.3v28**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
 **Design:** [JS MVP integration](../jube/JS_MVP_Integration.md)  
 **Status:** implementation and qualification in progress; integration is not closed.
 
@@ -9,12 +9,13 @@
 
 ### Common entry and ownership
 
-- `lambda/main.cpp` normalizes `--runtime=mvp-lmd` into the ordinary JS
-  command. File/eval/print, module selection, arguments and explicit AST/AUTO
-  policy use the same parser and execution path.
+- `lambda/main.cpp` uses the ordinary JS command for MVP execution.
+  **D8.1.3v28** removes the redundant `--runtime=mvp-lmd` option from Script
+  and batch commands. File/eval/print, module selection, arguments and explicit
+  AST/AUTO policy use the same parser and execution path.
 - `-p` prints the actual Script completion after execution. It no longer
   changes the source grammar by wrapping the program in `console.log(...)`.
-  Both selectors use the former explicit MVP value formatter, including
+  The common entry uses the former explicit MVP value formatter, including
   quoted strings and structured array output.
 - A CLI Script with no document or subsequent interactive turn supplies a
   terminal-entry lifetime fact. The compiler consumes that fact once.
@@ -773,7 +774,7 @@ campaign and final aggregate verification follow the completed changes.
 | MVP/public execution unit suite | V70 passes 828/828 MVP cases (`mvp-v70.json`), repeated in the full Lambda aggregate alongside 215/215 Script/AUTO and 510/510 public JS cases |
 | Optimization / MIR contracts | V70 passes 116/116 optimization contracts, 36/36 JS MIR, 251/251 Lambda MIR and 20/20 unchanged debug size-ratchet cases in the aggregate. V60's release/default-profile Lambda failure remains recorded above |
 | Default vs explicit entry equivalence | V70 passes 136/136 pairs (272 invocations) under unset, MIR, AST and AUTO policies; `entry-v70/results.json` |
-| Performance protection gates | V70's 17 micro rows all have correct output; after retained-sample extensions, the geometric mean is 0.99665× with a 0.99982× one-sided 95% upper bound. Sixteen row bounds meet 1.03×; `js_micro/lit` remains inconclusive at 1.05512× despite equal 0.127 ms medians. The complete 71-row standard and 142-row Lambda peer campaign is running against the pinned V70 release; incomplete and interrupted captures do not qualify |
+| Performance protection gates | V70's 17 micro rows all have correct output; after retained-sample extensions, the geometric mean is 0.99665× with a 0.99982× one-sided 95% upper bound. Sixteen row bounds meet 1.03×; `js_micro/lit` remains inconclusive at 1.05512× despite equal 0.127 ms medians. Its standard campaign was stopped after the merge, with 64 completed JS rows retained. V71 qualifies the merged source independently; incomplete and interrupted captures do not qualify |
 | Lambda baseline | V70 completes **7,917/7,917**: 5,805 runtime and 2,112 input tests, with zero failures, partial results or skips. This includes 319/319 forced-GC cases and all 20 unchanged debug MIR size limits. Source and all 42 executable/native-module inputs remain unchanged; `qualification-v70-lambda.json` and `lambda-baseline-v70/`. Earlier failed attempts remain archived |
 | Radiant baseline | V70 completes with required native access: **5,997 passed, zero failed, 146 partial and 2 skipped** out of 6,145 reported cases, matching V44's counts. This includes 32/32 input-event WPT, 646/646 UI automation and 196/196 vector cases. Source and all 28 executable/native-module inputs remain unchanged. `qualification-v70-radiant.json` and `radiant-baseline-v70/` retain the evidence; earlier attempts remain archived |
 | Test262 baseline | V70: **40,261/40,261 fully passed**, zero retries, partial results, failures or lost batches; the same 2,652 exclusions and backend routing remain. Source, all 16 executable/native-module inputs and configuration hashes are stable. The corpus is clean at `673e9bacbe28590f501e2dcd817aadcc31899191`. `qualification-v70-test262.json`, `test262-v70/` and `test262-v70-corpus-status.json` retain the result; earlier attempts remain archived |
@@ -797,15 +798,529 @@ in both lanes. Equal medians do not close its uncertainty gate.
 `micro-v70/literal-uncertainty-review.json` records byte-identical control
 and candidate MIR and a finite extension to 196 total pairs, retaining all
 49 existing pairs.
-`full-performance-v70.json` records the subsequent full standard/Lambda
-campaign, with the same release/native-module hashes and frozen source
-inventory. Its population includes the long jq rows and both historical
-Lambda coverage failures.
-`performance-tail-v70.json` queues the literal extension, separate phase
-measurements and the three original normal-entry recovery comparisons after
-that campaign finishes. It checks source/binary provenance before starting
-and does not run these captures concurrently with the full population.
-Queued or completed captures alone do not constitute performance acceptance.
+`full-performance-v70.json` retains the subsequent incomplete standard
+campaign. The merge changed 60 of V70's pinned source inputs; that campaign
+cannot qualify the merged revision. On the user's instruction to rebuild and
+qualify the merge, the verified V70 dispatcher, benchmark child and queued
+follow-up processes were stopped. `v70-superseded.json` and
+`v70-stop-process-review.json` record the reason and exact processes; the 64
+completed JS rows and every earlier sample remain archived. The Lambda peer
+population and queued V70 follow-ups did not run.
+
+### Merged revision V71
+
+V71 freezes merge `f3ec82c3471d914082268989225bff283aaaaabb` under
+**D8.1.3v27**. `make build-release-compile CC=gcc CXX=g++` succeeds; the
+archived release SHA-256 is
+`e6fbc06a90787666c7bcf92c4344046e0756339380f3f0dab5c74deaaa4d9f5e`.
+The private `modules-v71` bundle rebuilds all four selected native modules in
+release mode. `source-v71.json` expands the inventory to 16,552 production
+and test-source/fixture inputs, including new files introduced by the merge;
+the release build leaves every captured input unchanged.
+
+`entry-v71/results.json` passes all **136/136** default/explicit pairs under
+unset, MIR, AST and AUTO policies. The unchanged aggregate gates ran through
+`regressions-v71.json` until its release-prebuild check stopped the campaign.
+Their binary inventories
+are derived from the current runner selection, including the renamed Lambda
+runtime test executable; this changes provenance capture, not suite selection
+or expectations.
+
+| V71 gate | Current result |
+|---|---|
+| Lambda baseline | **7,952/7,952 passed**: 5,840 runtime and 2,112 input cases; zero failures, partial results or skips. All 16,552 source/fixture inputs and 42 executable/module/inventory inputs remain unchanged; `qualification-v71-lambda.json` |
+| Radiant baseline | **6,074 passed, zero failed, 146 partial and two skipped** out of 6,222; source and all 29 binary/module/inventory inputs remain unchanged. Includes 220/220 vector, 662/662 UI automation and 32/32 input-event cases; `qualification-v71-radiant.json` |
+| Test262 baseline | Did not start: the release-restoration hash check rejected a rebuild using the debug archive-reader library |
+
+The V71 prebuild exposed a build-profile defect before Test262: both profiles
+wrote `build/lib/liblambda-archive-readers.a`. Debug rebuilt that archive, and
+the subsequent release link reused it because its timestamp was newer than
+the release objects. `shared-archive-profile-v71.json` verifies the archived
+`archive_acl.o` exactly matches the debug object and differs from release.
+The rebuilt host's hash is
+`fe18c6021b8741622485edb3c422b73ecb0f02d3c0a5f61f55bac9b9306788eb`;
+V71 remains incomplete, with both successful aggregate gates retained and
+no claimed Test262 or performance result.
+
+### Profile-isolated rebuild V72
+
+V72 applies a narrow build correction on the same merge: image-codec and
+archive-reader outputs and every configured consumer now resolve through
+`build/lib/<platform>/<configuration>/`. No vendor or runtime source changes.
+The exact configuration and regression-test delta is retained in
+`source-delta-v72.patch` and `source-delta-v72.json`, alongside the full
+16,552-input source pin. This preserves **D8.1.3v27**'s release qualification
+requirement instead of accepting a mixed-profile build.
+
+The new native regression in `utils/test_premake_generator.py` builds and
+executes consumers through debug → release → debug → release for each
+archive. Before the correction it fails because release overwrites debug;
+afterward the complete generator self-test passes. An actual archive-profile
+switch followed by a full release rebuild preserves both release archives
+and the executable byte-for-byte (`release-profile-roundtrip-v72.json`). The
+verified V72 executable hash is identical to the original V71 pin above.
+
+Fresh V72 entry and aggregate qualification follows the corrected build
+configuration. `performance-workflow-v72.json` serializes the release captures
+after successful aggregate qualification. V71's stopped workflow and failed
+release preflight remain recorded separately.
+
+| V72 gate | Current result |
+|---|---|
+| Entry | **136/136** default/explicit pairs pass; pinned executable unchanged |
+| Lambda baseline | **7,952/7,952 passed**, zero failures, partial results or skips; all source and 42 binary/module/inventory inputs unchanged. Includes 319/319 forced-GC, 828/828 MVP, 116/116 optimization, 36/36 JS MIR and 20/20 debug size-ratchet cases; `qualification-v72-lambda.json` |
+| Radiant baseline | **6,074 passed, zero failed, 146 partial and two skipped** out of 6,222; all source and 29 binary/module/inventory inputs unchanged. Includes 220/220 vector, 662/662 UI automation and 32/32 input-event cases; `qualification-v72-radiant.json` |
+| Release restoration | Full aggregate debug builds followed by `build-release-compile` reproduce the pinned release hash exactly; the V71 profile mismatch is fixed |
+| Test262 baseline | **40,261/40,261 fully passed**, zero failures, partial results, retries or lost batches; the same 2,652 exclusions and routing. All source, 16 binary/module inputs and configuration hashes remain unchanged; `qualification-v72-test262.json`. Corpus is clean before and after at `673e9bacbe28590f501e2dcd817aadcc31899191` |
+| Micro execution performance | **17/17 row limits pass**. Geometric mean **0.99559×**, one-sided 95% upper **1.00051×** against the archived fast MVP control. Three uncertain rows extend from seven to 49 pairs with every initial sample retained; `micro-v72/extended49.json` and `micro-v72/report49.json`. Source, executable and module inputs remain unchanged |
+| Complete performance population | Superseded by the requested CLI removal before completion: **61/71 JS rows** retained, all completed outputs correct. Lambda peers had not started. `v72-superseded.json` records the verified process stop; this incomplete campaign does not qualify V73 |
+
+`regressions-v72.json` completes all three aggregate gates and restores the
+root release to the archived hash. This qualifies correctness for the merged
+source plus the recorded archive-profile correction. Release performance
+acceptance remains pending. The separate short-capture workflow first waits
+for two low-load observations, 30 seconds apart, after the aggregate workers
+and background indexing settle; it records those observations and leaves
+performance unqualified if the host remains busy.
+
+All three MIR/output diagnostics pass, and default/explicit candidate opcode
+censuses agree exactly. The standalone Fibonacci and matrix kernels retain
+the control's function census; common timing/output host dispatch changes the
+driver functions. The separate 21-row phase capture has correct outputs.
+Its minimal probe has nearly equal compile and residual medians; the three
+canonical host probes record about 1.0–1.25 ms more residual wall time.
+That includes setup, teardown, I/O and instrumentation, and is not a pure
+startup measurement or a completed startup-performance gate.
+The three recovery probes also have matching output against Result52's former
+normal entry (`recovery-v72.json`); these supporting comparisons do not replace
+the full fast-control protection gate.
+
+The merge migrates four Lambda peer scripts (`jq_mix` and `jq_records`, typed
+and untyped) to **S14.1.1v2** grouping. `lambda-peer-manifest-v72.json` retains
+all 142 identities, the same 140 historical performance-protected rows and
+the same checksum expectations. Those four rows pair archived control
+sources with the migrated candidate sources; every imported helper is
+verified unchanged against the control revision. Both source closures,
+individual hashes and exact diffs are retained in
+`lambda-peer-sources-v72/`. Their timings include the grouping migration and
+are explicitly distinguished from comparisons using identical source.
+
+`performance-workflow-v72.json` waits for successful aggregate qualification
+before serializing MIR diagnostics, the 17 microbenchmarks, separate phase
+measurements, normal-entry recovery comparisons, all 71 standard JS workloads
+and all 142 Lambda peers. A finite uncertainty extension retains all initial
+micro observations. For a standard/Lambda row whose valid paired interval
+still crosses the 3% limit, one additional 14-pair capture may extend it to
+21 pairs; the original capture/report remain immutable and the merged report
+still covers the entire fixed population. Reproducible regressions, failures
+and incomplete captures prevent acceptance; queued work alone does not
+establish any performance result. The final standalone report is written as
+`Merged_Qualification_v72.md` only after the release captures complete.
+
+### Remove the redundant runtime selector: V73
+
+**D8.1.3v28** (2026-10-21, USER) removes `--runtime=mvp-lmd` from
+`js` and `js-test-batch`; the ordinary entry already selects MVP. The option
+is absent from help and fails before guest execution. Explicit
+`JS_EXEC_BACKEND=ast|auto|mir` policy is preserved. Optimization fixtures and
+MIR sidecars use the ordinary command; the redundant standalone test switch
+is deleted. Test262 worker launches drop only the obsolete argument, with
+the same sources, routing, expectations, timeouts and retry policy.
+
+Active benchmark callers use the default entry. Tools that compare archived
+binaries retain their historical explicit fast selector on the **archived
+control only**. This distinction is necessary: dropping it from an old
+control would silently replace the fast preservation baseline with the slow
+default baseline.
+
+The pinned release is
+`temp/js_mvp_integration/lambda-unified-v73.exe`, SHA-256
+`92175460309fa421ff9dae0c34e31d28bbd4ab6243d6afcae876cd172d07fdc4`.
+`source-v73.json` and `source-delta-v73.patch` retain the complete production
+and fixture inputs and exact uncommitted delta. The initial source pin,
+created before fixing the archived-control caller, is retained separately
+under `initial-pin-v73/` and was never used for qualification. No MVP
+compiler, runtime or vendor source changes accompany the CLI removal.
+
+`entry-v73/results.json` passes **136/136** ordinary-entry cases and rejects
+the removed selector in all 136 corresponding invocations. This covers unset,
+MIR, AST and AUTO policies with a stable pinned executable. The separate
+native CLI regression also checks batch rejection and help output.
+During the V73 Lambda aggregate, the complete public JS suite passes
+**511/511**, including `RemovedRuntimeSelectorIsRejected`; optimization
+contracts pass **116/116** with their unchanged emission expectations.
+The full V73 Lambda/input baseline completes **7,953/7,953**, with zero
+failures, partial results or skips and all 16,552 source and 42 binary/module
+inputs unchanged (`qualification-v73-lambda.json`).
+`regressions-v73.json` runs fresh aggregate qualification;
+`performance-workflow-v73.json` waits for successful aggregates before
+capturing the same 17 micro, 71 standard JS and 142 Lambda peer populations.
+V72's passing aggregate and micro results remain evidence for V72, and are
+not relabeled as V73 results.
+
+#### Why the previous performance update showed about 1%
+
+There are two comparison questions under **D8.1.3v28**:
+
+| Comparison | Purpose | Current evidence |
+|---|---|---|
+| Current default vs archived **fast explicit MVP** | Preserve the rewritten MVP's speed through integration | V72 micro: all 17 limits pass, geometric mean 0.99559×; the stopped standard capture retains 61 correct rows |
+| Current default vs archived **slow default** | Measure the gain delivered to ordinary JS execution | Fresh seven-pair recovery probes below, with matching expected output |
+
+Fresh V72 release A/B measurements in `recovery-v72.json` use the same
+canonical scripts and archived Result52 executable, with no runtime selector
+on either command. They exclude compilation and process startup:
+
+| Workload | Former default ms | Integrated default ms | Speedup |
+|---|---:|---:|---:|
+| r7rs/fib | 43.00133 | 0.85867 | **50.08×** |
+| kostya/matmul | 4907.89542 | 5.30246 | **925.59×** |
+| larceny/array1 | 282.29492 | 0.27254 | **1035.79×** |
+
+The large gains are present. The previous status emphasized preservation
+against the already-fast MVP control. In the archived build, the integrated
+public path already used the MVP compiler, but broad shared-realm admission
+weakened direct-call and numeric/storage proofs; the standalone fast path
+retained them. The integrated default now preserves the closed-unit facts
+and native kernels while using canonical ownership. These three probes are
+supporting evidence, not a full-suite speedup claim. Remaining per-row
+regressions against fast MVP and startup/setup costs still require review.
+The final qualification report must include both baseline comparisons explicitly.
+
+### Performance root fixes and focused acceptance: V74–V78
+
+V73's complete Lambda/input gate passes, but its Radiant aggregate and
+queued timing workflow are stopped before production source changes.
+`v73-superseded.json` and `v73-superseded-processes.json` retain the exact
+scope and verified process identities. The separate Lambda-opus baseline is
+left running. V73's completed source-specific result is not relabeled as V74.
+
+Under **D8.1.3v28** and **D5.3–D5.4**, the current host initialization
+still creates the entire canonical process namespace for an unobserved,
+closed `process.stdout.write(value)` use. That constructs `env`, configuration,
+report and other objects that the script never observes. The release
+`stdio-setup-diagnostic-v73/` changes only output calls in a diagnostic copy;
+its heap counters show substantially less retained/mark work when the
+namespace is absent. These loaded-host timings are not acceptance evidence.
+
+V74 reuses `process_stdio_only`'s stronger proof and the existing canonical
+`js_process_stdout_write` / `js_process_stderr_write` kernels. A valid unit
+emits direct calls, evaluates the argument once, and leaves the unused
+namespace lazy. A function containing the write must have closed callers;
+an escaping callable retains ordinary property resolution and sees later
+writer replacement. Prepared/shared realms, native imports, dynamic source,
+reflection, unknown nonnumeric keys, timers/promises, coercion callbacks,
+custom output sinks and unsupported argument shapes keep complete handling.
+There is no partial or duplicate process object. A later host factory creates
+the same complete canonical object with its original descriptor order.
+
+The revcomp MIR review also exposes computed object reads going through the
+host-capable property import. V74 extends the existing own-data lookup to
+computed keys only when the carrier kind is known to be an object/map.
+The existing map-kind, nominal-family, own-field, accessor, offset and lazy
+global guards remain in place. **D3.4.6**'s shared field decoder reads the
+present own data; every miss uses the complete property operation. Key
+conversion is not replayed, and inherited/accessor/proxy effects remain ordered.
+This reuses the existing lookup shape and adds no execution-populated cache.
+
+The complete native MVP suite passes **834/834** in `mvp-v74d.json`.
+The new coverage checks lazy process identity after a terminal turn,
+single argument evaluation, throwing arguments, shadowed `process`, escaping
+writer mutation, computed own reads and key/getter/proxy effect order.
+The initial `mvp-v74c.json` retains one incorrect new emission expectation:
+the callback-capable miss uses the more general property import. Its corrected
+expectation still requires that complete miss path; all semantic expectations
+remain unchanged. The earlier terminal-fact diagnostic is also retained;
+that test now observes the host factory rather than executing an additional
+Script after declaring the first turn terminal.
+
+The V74 release SHA-256 is
+`e19bac2e5f586e033207db053ff06b05b2f79fab8f6f101a90a742bab122c010`.
+`entry-v74/results.json` passes all **136** ordinary-entry cases and all
+removed-selector checks, with a stable executable. The private release
+module bundle, `source-v74.json` and `source-delta-v74.patch` retain exact
+inputs. No Radiant, vendor, GC or native-stack policy source changes are made.
+The required fresh gates are Lambda/input and Test262; V72's full Radiant
+result remains the last completed merged-revision Radiant evidence.
+
+V74's aggregate and queued timing workflow were stopped before the custom
+argument correction below; `v74-superseded.json` retains the verified process
+scope. No V74 aggregate or performance acceptance is claimed.
+
+V75 additionally requires the host argument tuple to match the canonical
+bootstrap before eliding process setup. Custom embedder arguments retain the
+existing full initialization so later host factories observe the published
+`process.argv`. Normal CLI execution already supplies the canonical tuple.
+The updated complete native MVP suite passes **834/834** in `mvp-v75.json`,
+including the new custom-argument subcase. This preserves **D8.1.3v28**'s
+shared host state and **D5.3–D5.4**'s ownership boundaries.
+
+V75's frozen release SHA-256 is
+`c147951dea48c99a6ad8abc4efffb927979eeaeb228beddd6d3cd42ab3d539ef`.
+`source-v75.json`, `source-delta-v75.patch` and `modules-v75/` pin the source
+and release native modules. All **136** ordinary CLI cases and their
+removed-selector rejection checks pass in `entry-v75/results.json` with a
+stable executable. The aggregate then exposes an extra own-field decoder in
+`JsOpt.TypedArrayStoresUseGuardedNumericKeyLeaf`: the new computed-key head
+also covered a proven numeric key on a boxed typed carrier. Guest output is
+correct, but the existing emission contract fails **115/116**. The failure
+and MIR are retained under `numeric-emission-v75/`; the aggregate and timing
+queue are stopped in `v75-superseded.json` before source changes. V75 has no
+aggregate or performance acceptance.
+
+V76 restricts the new computed own-field head to unresolved nonnumeric keys.
+Literal and proven Number keys keep their existing indexed handling; named
+own-field heads are unchanged. This preserves **D8.4.1v2–D8.4.3v2**'s local
+specialization while retaining the complete property miss. The existing
+typed-array emission expectation remains unchanged.
+The complete focused suites pass **834/834 MVP**, **116/116 optimization**
+and **511/511 general JS** cases in `mvp-v76.json`, `opt-v76.json` and
+`js-v76.json`. Fresh aggregate and release timing gates remain required.
+V76's release SHA-256 is
+`b46043e800d09656a68024117437154cd085bb9c13610183a3c9e6303955be5b`.
+Its private module bundle and source inventory are pinned, and all **136**
+CLI and removed-selector checks pass. `regressions-v76.json` records the fresh
+Lambda/input and Test262 qualification; the serialized performance workflow
+waits for those gates before collecting timings.
+`qualification-v76-lambda.json` passes **7,959/7,959**: **5,847** runtime
+and **2,112** input cases, with no failures, partials, skips, source drift or
+binary drift. The **319/319** forced-GC cases are included. Test262 and release
+performance acceptance remain pending.
+
+V76's seven-worker Test262 attempt is rejected: **40,259/40,261** fully
+pass, while the two Unicode 10.0 class-identifier AST cases cross the existing
+three-second slow gate and pass only on retry. There are no crash exits,
+lost results or batch kills. `qualification-v76-test262.json` and the original
+timing/partial artifacts retain the unsuccessful attempt. The generated
+partial-results input is restored only after matching its exact pre-run hash.
+No test population, routing policy, expectation or time limit is changed.
+
+V77 is a fresh qualification attempt with **identical production source and
+identical release bytes** to V76. It reuses the stable **7,959/7,959** archived
+Lambda/input gate after checking every archived evidence hash and equality of
+the complete source inventories. The full Test262 runner uses its existing
+`--jobs=3` option, with the same baseline, async list, catalog check and time
+limits. Acceptance still requires **40,261/40,261** with zero retries and no
+configuration drift; a recovered individual retry cannot qualify the run.
+
+V77 also leaves the same two cases non-fully-passing and is rejected. Reducing
+workers does not resolve the issue. The gate uses process CPU time when
+available; wall-load observations alone cannot establish its cause.
+`unicode-batch-diagnostic-v77/` retains the exact 600-case neighborhood, both
+release comparisons, the separate pair, and canonical-source raw protocol.
+These diagnostic passes do not replace the failed aggregate attempts.
+
+Source review finds quadratic private-name lookup in the AST interpreter:
+`js_interp_class_private_declare` checks each new declaration against every
+previous pair, and field-key resolution scans the same table again. The
+affected class has **8,327** private fields. V78 uses the existing canonical
+collection hash storage for interpreter-created private-name tables. Its
+internal factory avoids constructor/prototype lookup, so a replaced `Map`
+global cannot become observable. The same `JsInterpEnv` Item word retains the
+table, and the existing collection GC visitor owns its keys and values under
+**D5.3–D5.4**. Compiled direct-eval bridges keep their existing pair format;
+lookup accepts both carriers without adding another environment.
+The regression covers a large class, nested private shadowing, getter/setter
+identity, escaped closures, direct eval and forced GC on AST and MIR entries
+under **D8.1.3v28**. Fresh focused and aggregate gates are required for V78.
+The first focused check (`private-env-focused-v78.json`) detects that the
+direct-eval bridge must enumerate the new carrier too. Its corrected path
+reuses the canonical collection cursor, retains insertion order and binds
+outer environments before inner environments. The original expectations
+remain unchanged. `private-env-focused-v78b.json` passes both AST and MIR;
+the complete suites pass **834/834 MVP**, **513/513 general JS** and
+**116/116 optimization** in the corresponding V78 artifacts. No release
+timing or aggregate acceptance is inferred from those focused passes.
+The V78 release is pinned as
+`82a7abeeccc8e1deac6c1f1d77f86d11e138ac37573d021ead4ef31950eefa56`,
+with **16,554** source inputs and private release modules. All **136** CLI
+and removed-selector checks pass. The canonical-source release diagnostic
+reduces CPU time for the escaped/plain Unicode class pair from
+**3.447/3.406 s** to **0.178/0.181 s**; both return success. The before/after
+protocol, source and binary hashes remain in
+`unicode-batch-diagnostic-v77/private-environment-fix-v78.json`. This is
+root-cause evidence for the slow gate, not a benchmark-population result.
+V78 starts fresh Lambda/input and Test262 gates; it does not reuse the V76
+Lambda gate because the runtime source has changed.
+`qualification-v78-lambda.json` passes **7,961/7,961**: **5,849** runtime
+and **2,112** input cases, with zero failures, partials or skips and unchanged
+source/binary inputs. The **319/319** forced-GC cases are included. Fresh
+Test262 and release performance gates remain pending.
+`qualification-v78-test262.json` subsequently passes **40,261/40,261**,
+with **2,652** unchanged exclusions, zero failures or partials, zero retries
+or lost batches, and stable source, binary, configuration and corpus inputs.
+The configured routing remains **34,334 AST / 5,895 MIR / 293 module /
+2 slow**; this is not an all-MIR run. `regressions-v78.json` qualifies both
+required runtime gates. The stale earlier batch-kill diagnostic is excluded
+from fresh evidence. The unchanged quiet-host preflight subsequently passes.
+No complete performance population is accepted yet.
+
+The next frozen workflow will wait for fresh gates and a quiet host, then
+run the unchanged micro/phase/recovery captures. Before the expensive full
+capture, `qualify_focused.py` measures fib, matmul, array1, base64 and revcomp
+against the archived fast MVP. The reporter selects either execution or
+wall time explicitly. It uses the existing 95% bounds and 3% row limit;
+the fixed end-to-end probe population also applies the existing 1% geometric
+mean limit. One finite 14-pair extension retains all initial pairs for an
+uncertain row; a confirmed regression is not blindly repeated. These five
+probes are additional early checks, not a replacement population.
+
+A failed or inconclusive focused check holds the full capture for review.
+A passing check proceeds to all **71 JS** and **142 Lambda** identities,
+including every long jq workload and both historical Lambda coverage failures.
+All source migrations, output oracles, protection membership and full-suite
+limits stay unchanged. No performance acceptance is claimed before the
+complete populations and the compile/startup review finish.
+
+V78's fresh focused capture holds the full run. All outputs, source hashes,
+executable hashes and module inputs remain correct and stable. The initial
+seven alternating pairs remain in the retained evidence; uncertain rows receive
+the declared finite extension to 21 pairs. Candidate/control ratios are:
+
+| Workload | Execution median ratio | Execution 95% upper | Wall median ratio | Wall 95% upper |
+|---|---:|---:|---:|---:|
+| fib | 1.01047 | 1.01812 | 0.80895 | 0.84865 |
+| matmul | 1.00162 | 1.02015 | 0.84850 | 0.85417 |
+| array1 | 0.99574 | 1.02626 | 0.77081 | 0.77993 |
+| base64 | **1.04903** | **1.05227** | 0.86286 | 0.87293 |
+| revcomp | 1.00201 | 1.02188 | **1.10316** | **1.11224** |
+
+The focused wall geometric mean is 0.87181, upper 0.87851, but that does
+not excuse either failing row. The separate 17-row micro capture has a
+0.99613 geometric mean, upper 1.00078; escaped field retyping is still
+1.02728 with upper **1.03302** after the retained finite 49-pair extension.
+It leaves that row unresolved. No further blind timing extension is accepted.
+The complete 71-row JS and 142-row Lambda captures have not started.
+
+`focused-qualification-v78.json`, `micro-v78/report49.json` and
+`performance-workflow-v78.json` retain these decisions. Instrumented counters
+and native samples are diagnostic only. Base64's encoder MIR matches the
+archived fast control; both native join bodies have 534 instructions. Their
+instruction shapes and internal branch targets match after reviewed address
+relocations, including three address-page low offsets. The initial normalizer
+also removed small immediates and is insufficient alone; the stricter review is
+retained in `native-code-compare-v78/comparison-reviewed-relocations.json`.
+This does not assert equivalence of relocated external callees. Sampling
+finds shared joining, ASCII classification and GC work hot. Candidate/control
+GC mark totals are 1.073/0.738 ms in the diagnostic capture, despite fewer
+candidate collections (7/12). These facts do not establish the cause of the
+entire execution difference. Revcomp retains execution parity; phase counters
+identify extra emission and host setup costs for further investigation.
+
+#### Cold host operations and shared kernel work: V79–V81
+
+V79 extends the existing complete `mvp_lmd_property_read` to cold operations
+beside native host values. Its former `primitives` admission requirement made
+these operations emit every carrier branch even when no such specialization
+could amortize compilation. Function bodies, loop operations, known shapes,
+deferred keys and existing numeric consumers retain their lowering
+(**D8.4.1v2–D8.4.3v2**). Revcomp's entry shrinks from 3,620 to 3,283 MIR
+instructions; its 1,951-instruction function remains unchanged. The five-row
+seven-pair V79/V78 diagnostic has correct outputs and stable inputs; revcomp
+wall medians are 42.638/44.476 ms, ratio 0.95867, upper 0.98886.
+
+V80 applies the existing shared invocation to cold host calls as well. The
+catalog excludes names which can still produce an internal builtin method
+token; computed names keep their existing dispatch. Callee capture, receiver
+and argument snapshots still precede invocation, and repeated operations keep
+their direct and guarded heads. The fresh five-row seven-pair V80/V78 screen
+has correct outputs and stable inputs. Revcomp wall medians are
+**40.507/44.429 ms**, ratio **0.91173**, upper **0.92285**; execution medians
+are 4.052/4.102 ms. This is a diagnostic comparison with V78, not the final
+archived-fast acceptance run. The focused cold-property/call and compact-entry
+native checks pass **16/16**. Full correctness and performance gates are still
+required for subsequent shared changes.
+
+V81 addresses work identified in the native samples. Shared string joining
+reuses its established String classification to read length and ASCII metadata,
+instead of calling a general text classifier for each String. Symbol handling,
+native-lane reads, overflow checks, exact input roots and allocation/copy order
+remain in the existing kernel (**D2.6.5v4**, **D5.3–D5.4**). This removes a
+measured hot cost; it is not an attribution of V78's entire base64 difference.
+Unicode, separator, empty and coercing join cases cover the metadata boundary.
+
+The core runtime shape tree moves from the optional extension linked list to
+the existing indexed capsule directory (**D3.4.3**, **D5.4.2–D5.4.4**).
+Type-changing field writes reach that owner repeatedly in the escaped-retyping
+profile. Indexed ownership removes lookup work that grows with optional host
+registrations, without a TLS pointer cache, alternate tree, or new lifetime.
+The original tree pool destructor and explicit heap-reset release remain its
+only retirement path; the new regression checks repeated access and idempotent
+release/recreation. This shared change requires fresh Lambda, GC, Test262,
+native-module and release performance qualification before acceptance.
+
+The V81 release SHA-256 is
+`2cdeeffe1401e5929672e1745e0e6b04aaf7e4046d06dbfb76c62bf5f040fca1`.
+Its source snapshot retains **16,554** inputs and the source delta includes
+the untracked private-environment fixture and golden. The private release
+module bundle is rebuilt after the context layout change. Native qualification
+passes **837/837** MVP cases and **41/41** value/shape cases. Ordinary entry
+and removed-selector checks pass all **136** cases against this exact binary.
+
+The separate pre-qualification seven-pair screen has correct outputs and
+stable inputs. Base64 execution is **10.123/11.456 ms**, ratio **0.88366**,
+upper **0.92339**, against archived fast MVP. Escaped retyping is
+**5.060/5.094 ms**, ratio **0.99333**, upper **1.00831**. These two rows pass
+this screen; the complete 17-row micro and five-row focused screens still
+contain uncertainty. Revcomp execution is 4.036/3.812 ms, ratio 1.05889,
+with a two-sided lower bound 0.99585 and upper 1.09479; its wall ratio is
+1.02673, upper 1.04561. Neither result is accepted from seven pairs.
+The retained artifacts are `pre-qualification-focused-v81.json` and
+`pre-qualification-micro-v81/`; they do not replace final qualification.
+Fresh Lambda/input and Test262 gates are running. The queued final workflow
+waits for those gates and the unchanged quiet-host preflight before its fresh
+micro, phase, recovery, focused and complete-population captures.
+The fresh Lambda/input gate subsequently passes **7,965/7,965**, with zero
+failures, partials or skips and unchanged source/binary inputs. This includes
+**319/319** forced-GC cases, **116/116** optimization checks,
+**251/251** MIR emission checks and **215/215** script lifecycle cases.
+`qualification-v81-lambda.json` retains the complete result. The release
+rebuild matches the pinned V81 SHA-256 exactly. Test262 is running the same
+**40,261** configured cases with **2,652** exclusions and the unchanged
+AST/MIR/module/slow routing; it is not yet accepted.
+`qualification-v81-test262.json` subsequently passes **40,261/40,261** with
+the same **2,652** exclusions, zero failures or partials, zero retries or
+lost batches, and unchanged source, binary, configuration and corpus inputs.
+The stale earlier batch-kill file is recorded and excluded from fresh
+evidence. `regressions-v81.json` qualifies both required runtime gates.
+The final quiet-host capture passes **17/17** microbenchmark row gates;
+its geometric mean is **0.99132×**, with one-sided 95% upper **0.99609×**.
+All five focused wall-time gates pass. Their geometric mean is **0.83428×**,
+upper **0.84896×**, against archived fast MVP. Focused execution passes
+four of five rows: base64 is **0.91177×** (upper **0.92312×**), while
+revcomp remains inconclusive after the declared 21-pair extension:
+**1.04633×**, one-sided upper **1.10782×**, two-sided lower **0.99064×**.
+Its wall ratio is **1.01708×**, upper **1.02832×**. Every initial and
+additional observation remains in `focused-extended21-v81.json`.
+
+`performance-workflow-v81.json` retains the focused review stop. Following
+that review, `full-capture-plan-v81.json` records a separate complete capture
+of all **71 JS** and **142 Lambda** identities on the unchanged V81 release.
+Collecting those required populations does not waive the unresolved focused
+execution gate or change the row/geometric-mean limits. The finite full-run
+extension retains all original pairs. Full performance acceptance remains
+pending until both complete populations and the focused gate qualify.
+
+Revcomp diagnostics show additional precise GC ownership checks, but the
+pooled-name hypothesis accounts for only five foreign pooled strings. A
+private negative-range-filter prototype reduces exact large-object lookups
+without a demonstrated timing benefit. Neither diagnostic changes production
+GC ownership or the frozen V81 source (**D4.1.1v2**, **D5.3–D5.4**).
+
+At 15:06 on 2026-10-21, the complete capture has **61/71** JS rows with
+correct output. The initial seven pairs identify a `kostya/json_gen`
+execution regression: **1.04223×**, upper **1.04877×**, two-sided lower
+**1.03407×**. This row remains failed; faster rows do not offset its limit.
+The first `jq_mix` candidate warm-up is still running, before measured pairs.
+`jq-mix-warmup-v81/inspection.json` records a one-second stack inspection
+of that unmeasured warm-up, with unchanged log phase before and after.
+The checked identical-text symbol map shows execution in shared shape
+transitions and allocation; this sample is not acceptance timing or an
+attribution of the candidate/control difference. Earlier control coverage
+captures took 7–12 minutes per invocation on the long jq rows.
+The full campaign runs under `caffeinate -is`. Once both populations finish,
+`finish_acceptance_review.py` produces complete wall-time reports and a
+combined review which retains every failed or unresolved gate.
 
 The first V55 optimization invocation selected the release CLI and failed
 107 trace-dependent cases because release does not emit the required profile.
@@ -1155,3 +1670,41 @@ correctness gates above; performance acceptance remains pending.
 No milestone is accepted until its correctness and performance exit gates in
 the design document pass. In particular, the full protected population includes
 the long jq workloads; a timeout cannot remove them from the final report.
+
+### Shared Unicode cursor follow-up (2026-10-21)
+
+**D5.3.3 / D5.3.5 / D5.4**: MVP character reads, normalized slice/substring
+ranges and String-owned UTF-16 length reads now use the existing realm-owned
+native string helpers. MIR keeps its ASCII length fast path and imports the
+non-allocating cached length helper with a GC-pointer argument contract. Raw
+regex buffer views retain their separate offset conversion.
+
+Previously, every non-ASCII character read restarted a UTF-16 iterator at byte
+zero, and every token range rescanned the complete source for its length and
+prefix. Mixed-Unicode tokenization could therefore be quadratic. The shared
+cursor retains codepoint boundaries, returns individual surrogate halves and
+roots source strings in the existing epoch-guarded cache range. Regression
+coverage exercises adjacent/backward reads, ranges through astral/lone
+surrogates, collection and replacement runtimes.
+
+This does not activate a different browser backend. An experimental eager MVP
+browser entry spent its sampled time in MIR linking/register allocation and
+peaked at 8.6 GiB on Kafka's bundled scripts. The established browser AST
+adapter is retained; changing that policy requires separate performance
+qualification under **D8.1.3v28**.
+
+
+**RegExp protocol allocation:** flag inspection now reads the existing
+`JsPropertyDescriptor` representation directly instead of materializing a
+guest Map and then reading its `get`/`value` fields. Getter/data policy is
+unchanged (**D6.2.2v2**); existing protocol-override regressions remain required.
+
+**Release scaling evidence:** a mixed-Unicode source scanned with `charCodeAt`,
+UTF-16 `length` and one-unit `substring` takes 3,060→4 ms at 32,768 ASCII
+prefix units and 12,297→5 ms at 65,536 units. Before/after checksums agree,
+including the euro/astral suffix. These are single isolated kernel trials with
+millisecond clock resolution, not browser load measurements; source doubling
+exposes the old prefix-rescan growth. Artifacts:
+`temp/notion-kafka-tuning/unicode-scaling.json`. The complete 838-case MVP suite
+and 319 forced-GC cases pass; the new cursor test also covers backward reads,
+lone surrogates, collection and replacement runtimes.

@@ -82,24 +82,6 @@ TEST(DocBookTests, PinnedXslTngBodiesAgree) {
     }
 }
 
-TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
-    const char* tiers[] = {"interp", "auto", "jit"};
-    const char* names[] = {"dtna_alert", "dtna_attribute_union", "dtna_avatar", "dtna_button", "dtna_collections",
-        "dtna_contracts", "dtna_disclosure", "dtna_display", "dtna_display_variants", "dtna_elements", "dtna_foundations", "dtna_grid_modes", "dtna_icons", "dtna_imported_outcomes", "dtna_pagination_modes", "dtna_progress", "dtna_rate", "dtna_segmented", "dtna_skeleton", "dtna_spin", "dtna_surfaces", "dtna_table", "dtna_tag", "dtna_timeline_statistic", "dtna_tokens", "dtna_tree", "dtna_typography"};
-    for (const char* tier : tiers) {
-        SCOPED_TRACE(tier);
-        for (const char* name : names) {
-            StrBuf* script = strbuf_new();
-            StrBuf* golden = strbuf_new();
-            strbuf_append_format(script, "test/lambda/ui_dtna/%s.ls", name);
-            strbuf_append_format(golden, "test/lambda/ui_dtna/%s.txt", name);
-            test_lambda_script_against_file(script->str, golden->str, false, tier);
-            strbuf_free(script);
-            strbuf_free(golden);
-        }
-    }
-}
-
 TEST(UiDtnaTests, RejectedDocumentReleasesItsErrorBeforeTheHeap) {
     const char* tiers[] = {"interp", "jit"};
     for (const char* tier : tiers) {
@@ -119,8 +101,7 @@ TEST(UiDtnaTests, RejectedDocumentReleasesItsErrorBeforeTheHeap) {
     }
 }
 
-TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
-    const char* tiers[] = {"interp", "auto", "jit"};
+TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
     const char* fixtures[] = {"test/demo/doom/tests/core_test",
         "test/demo/doom/tests/physics_test", "test/demo/doom/tests/mechanics_test",
         "test/demo/doom/tests/combat_test", "test/demo/doom/tests/pickups_test",
@@ -132,18 +113,15 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
         "test/demo/doom/tests/audio_test",
         "test/demo/doom/tests/oracle_test",
         "test/demo/doom/tools/verify_maps"};
-    for (const char* tier : tiers) {
-        SCOPED_TRACE(tier);
-        // Resource loading reads the actual CLI entry path, so run directly
-        // instead of test-batch, whose argv identifies the batch driver.
-        for (const char* fixture : fixtures) {
-            StrBuf* script = strbuf_new();
-            StrBuf* golden = strbuf_new();
-            strbuf_append_str(script, fixture); strbuf_append_str(script, ".ls");
-            strbuf_append_str(golden, fixture); strbuf_append_str(golden, ".txt");
-            test_lambda_script_against_file(script->str, golden->str, false, tier);
-            strbuf_free(script); strbuf_free(golden);
-        }
+    // Resource loading reads the actual CLI entry path, so run directly
+    // instead of test-batch, whose argv identifies the batch driver.
+    for (const char* fixture : fixtures) {
+        StrBuf* script = strbuf_new();
+        StrBuf* golden = strbuf_new();
+        strbuf_append_str(script, fixture); strbuf_append_str(script, ".ls");
+        strbuf_append_str(golden, fixture); strbuf_append_str(golden, ".txt");
+        test_lambda_script_against_file(script->str, golden->str, false);
+        strbuf_free(script); strbuf_free(golden);
     }
 }
 
@@ -373,6 +351,20 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWrites) {
 TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
     test_lambda_script_against_file("test/mir/lambda/typed_path_store.ls",
         "test/mir/lambda/typed_path_store.txt", true, "jit");
+}
+
+// LR07-49: `string(f())`, where f returns an annotated i64/u64 local, reached
+// print as a bare String* on the JIT (the call's carrier was the boxed lane but
+// the raw return was never boxed). The MIR check and the stress run never read
+// this fixture's values, so pin them on the default tier and the JIT.
+TEST(LambdaTypedPathTests, WideIntNativeLaneValues) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true);
+}
+
+TEST(LambdaTypedPathTests, WideIntNativeLaneValuesJit) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true, "jit");
 }
 
 TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {

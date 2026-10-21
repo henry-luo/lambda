@@ -1,5 +1,6 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
+#include "lambda/js/js_host_hooks.h"
 #include "lambda/js/js_interp.hpp"
 #include "lambda/js/js_transpiler.hpp"
 #include "lambda/js/js_execution_internal.hpp"
@@ -83,6 +84,82 @@ TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
     EXPECT_EQ(js_string_equal(prefix.get(), ascii.get()), 0);
     EXPECT_EQ(js_string_equal(ascii.get(), ascii.get()), 1);
     EXPECT_EQ(js_strict_equal(ascii.get(), prefix.get()).item, ITEM_FALSE);
+}
+
+TEST_F(JsFormalMir, MixedUnicodeReadsRetainTheirCursorAcrossCompiledCallsAndCollection) {
+    ASSERT_EQ(run(R"JS(
+        const mixedSource=('ab\u20ac\u{1f600}\ud800z').repeat(1024);
+        function readMixed(i){return mixedSource.charCodeAt(i)}
+        function rangeMixed(i){return mixedSource.substring(i,i+3)}
+        mixedSource.length===7168 && readMixed(7002)===0x20ac &&
+            rangeMixed(7003)==='\ud83d\ude00\ud800';
+    )JS").item, ITEM_TRUE);
+    // the source is held by the realm's precise cache root range, including after GC.
+    ASSERT_NE(js_active_runtime_state, nullptr);
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    EXPECT_EQ(caches->utf16_positions[0].length, 7168);
+    EXPECT_GE(caches->utf16_positions[0].unit_offset, 7000);
+    heap_gc_collect();
+    EXPECT_EQ(run(R"JS(
+        readMixed(7004)===0xde00 && readMixed(7003)===0xd83d &&
+            rangeMixed(7004)==='\ude00\ud800z' && mixedSource.at(-2)==='\ud800' &&
+            mixedSource.codePointAt(7003)===0x1f600 && mixedSource['length']===7168;
+    )JS").item, ITEM_TRUE);
+    reset_runtime();
+    EXPECT_EQ(run("const replacement='é😀';replacement.length===3&&replacement.charCodeAt(2)===0xde00").item,
+        ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, UnicodeCursorEvictionAndCollectionPreserveInterleavedCompiledReads) {
+    ASSERT_EQ(run(R"JS(
+        const cursorSources=Array.from({length:6},(_,i)=>
+            (String.fromCharCode(0x100+i)+'\u{1f600}x').repeat(32));
+        function cursorRead(source,index){return source.charCodeAt(index)}
+        function cursorRound(reverse){
+            for(let i=0;i<cursorSources.length;i++){
+                let s=cursorSources[i];
+                if(s.length!==128||cursorRead(s,124)!==(reverse?0x105-i:0x100+i)||
+                    cursorRead(s,125)!==0xd83d||cursorRead(s,126)!==0xde00||
+                    cursorRead(s,127)!==120||cursorRead(s,2)!==0xde00)return false;
+            }
+            return true;
+        }
+        cursorRound();
+    )JS").item, ITEM_TRUE);
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    for (unsigned slot = 0; slot < JS_UTF16_POSITION_CACHE_CAPACITY; ++slot) {
+        ASSERT_EQ(get_type_id(caches->utf16_sources[slot]), LMD_TYPE_STRING);
+        EXPECT_EQ(caches->utf16_positions[slot].length, 128);
+        EXPECT_LE(caches->utf16_positions[slot].unit_offset, 2);
+    }
+    heap_gc_collect();
+    EXPECT_EQ(run("cursorSources.reverse();cursorRound(true)").item, ITEM_TRUE);
+    // restore source order after probing evicted entries through a different traversal.
+    EXPECT_EQ(run("cursorSources.reverse();cursorRound()").item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, MutableUnicodeBuffersBypassImmutableLengthAndPositionCaches) {
+    ASSERT_FALSE(item_is_error(run("true")));
+    RootFrame roots(1);
+    Rooted<String*> buffer(roots, heap_strcpy("\xc3\xa9x", 3));
+    ASSERT_NE(buffer.get(), nullptr);
+    buffer.get()->is_buffer = 1;
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 2);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), 'x');
+    memcpy(buffer.get()->chars, "\xe2\x82\xac", 3);
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 1);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 0), 0x20ac);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), -1);
+    heap_gc_collect();
+    memcpy(buffer.get()->chars, "\xc3\xa9x", 3);
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 2);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), 'x');
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    for (unsigned slot = 0; slot < JS_UTF16_POSITION_CACHE_CAPACITY; ++slot)
+        EXPECT_NE(caches->utf16_sources[slot].item, s2it(buffer.get()));
 }
 
 TEST_F(JsFormalMir, ScalarLoopRegionsRetainOpenScriptBindingsAndLifetime) {
@@ -4265,6 +4342,94 @@ TEST_F(JsMvpLmd, ClosedStdioKeepsUnrelatedFunctionPropertyPlans) {
                   "process.stdout.write('');read({value:42},'value')===42", &host).item, ITEM_TRUE);
 }
 
+TEST_F(JsMvpLmd, ClosedDirectStdioUsesCanonicalKernelsWithoutProcessSetup) {
+    MvpLmdHost host = {};
+    EXPECT_EQ(run("let effects=0;function text(){effects++;return ''}"
+                  "process.stdout.write(text())===true&&process['stderr']['write']('')===true&&effects===1",
+                  &host).item, ITEM_TRUE);
+    EXPECT_TRUE(!js_runtime_state.process || js_runtime_state.process->object.item == 0 ||
+                js_runtime_state.process->object.item == ITEM_NULL);
+    char* mir = dump("temp/mvp_lmd_direct_stdio.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tjs_process_stdout_write\n"), nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tjs_process_stderr_write\n"), nullptr);
+    mem_free(mir);
+
+    const char* arguments[] = {"embedded-host", "retained-argument"};
+    host.argc = 2; host.argv = arguments;
+    EXPECT_EQ(run("process.stdout.write('');true", &host).item, ITEM_TRUE);
+    Item process = js_get_process_object_value();
+    Item argv = js_get_key_cstr(process, "argv");
+    ASSERT_EQ(get_type_id(argv), LMD_TYPE_ARRAY);
+    ASSERT_EQ(argv.array->length, 2);
+    EXPECT_STREQ(argv.array->items[0].get_string()->chars, arguments[0]);
+    EXPECT_STREQ(argv.array->items[1].get_string()->chars, arguments[1]);
+}
+
+TEST_F(JsMvpLmd, ClosedDirectStdioPreservesArgumentFailureAndShadowing) {
+    MvpLmdHost host = {};
+    EXPECT_EQ(run("let effects=0,marker={},caught=false;"
+                  "function text(){effects++;throw marker}"
+                  "try{process.stdout.write(text())}catch(error){caught=error===marker}"
+                  "effects===1&&caught", &host).item, ITEM_TRUE);
+    EXPECT_EQ(run("process.stdout.write('');"
+                  "function local(process){return process.stdout.write(41)}"
+                  "local({stdout:{write(value){return value+1}}})===42", &host).item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, TerminalDirectStdioKeepsLazyCanonicalProcessIdentity) {
+    runtime.js_terminal_script = true;
+    EXPECT_EQ(run("process.stdout.write('')&&process.stderr.write('')").item, ITEM_TRUE);
+    EXPECT_TRUE(!js_runtime_state.process || js_runtime_state.process->object.item == 0 ||
+                js_runtime_state.process->object.item == ITEM_NULL);
+    RootFrame roots(1);
+    Rooted<Item> process(roots, js_get_process_object_value());
+    ASSERT_EQ(get_type_id(process.get()), LMD_TYPE_MAP);
+    heap_gc_collect();
+    EXPECT_EQ(js_get_process_object_value().item, process.get().item);
+    // a terminal turn excludes another Script; later host factories still expose the complete canonical object.
+    EXPECT_EQ(get_type_id(js_get_key_cstr(process.get(), "env")), LMD_TYPE_MAP);
+    EXPECT_EQ(get_type_id(js_get_key_cstr(process.get(), "stdout")), LMD_TYPE_MAP);
+}
+
+TEST_F(JsMvpLmd, EscapingStdioFunctionObservesCanonicalWriterReplacement) {
+    MvpLmdHost host = {};
+    Item value = run("function emit(){return process.stdout.write('')}emit", &host);
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+    RootFrame roots(3);
+    Rooted<Item> function(roots, value), stream(roots, js_get_key_cstr(js_get_process_object_value(), "stdout")),
+        replacement(roots, js_new_native_function(+[](Item) { return Item{.item = ITEM_FALSE}; }));
+    js_set_key_cstr(stream.get(), "write", replacement.get());
+    heap_gc_collect();
+    uint64_t result_home = 0;
+    Item result = js_call_function_into(function.get(), make_js_undefined(), NULL, 0, &result_home);
+    EXPECT_EQ(result.item, ITEM_FALSE);
+}
+
+TEST_F(JsMvpLmd, ComputedObjectOwnReadsKeepGuardedStorageBesideHostValues) {
+    MvpLmdHost host = {};
+    EXPECT_EQ(run("const data={a:40,b:2};function read(owner,key){return owner[key]}"
+                  "let sum=0;for(let i=0;i<4;i++)sum+=read(data,i%2?'b':'a');"
+                  "process.pid>0&&sum===84", &host).item, ITEM_TRUE);
+    char* mir = dump("temp/mvp_lmd_computed_own_read.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\ttypemap_hash_lookup_key\n"), nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_class_property\n"), nullptr);
+    mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, ComputedObjectOwnReadsPreserveKeyAndGetterEffects) {
+    MvpLmdHost host = {};
+    EXPECT_EQ(run("let effects='';function read(owner,key){return owner[key]}"
+                  "const own={a:40},inherited=Object.create({a:2});"
+                  "const accessor={get a(){effects+='G';return 3}};"
+                  "const proxy=new Proxy({a:4},{get(owner,key){effects+='P';return owner[key]}});"
+                  "const key={toString(){effects+='K';return 'a'}};"
+                  "let values=[read(own,key),read(inherited,key),read(accessor,key),read(proxy,key)];"
+                  "process.pid>0&&values.join(',')==='40,2,3,4'&&effects==='KKKGKP'", &host).item, ITEM_TRUE);
+}
+
 TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_TRUE(create_dir("temp"));
     FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);
@@ -5419,6 +5584,14 @@ TEST_F(JsMvpLmd, ArrayStringBuiltinInferenceAndRowSwaps) {
     error("function f(){const a=1;let b=2;[b,a]=[4,5];return b}f()", "TypeError");
     error("function f(){[a]=[1];let a}f()", "ReferenceError");
 }
+TEST_F(JsMvpLmd, SharedStringJoinRetainsAsciiAndUnicodeMetadata) {
+    boolean("let a=['a','b'].join('|');a==='a|b'&&a.length===3&&a[2]==='b'");
+    boolean("let a=['a','b'].join('€');a.length===3&&a[1]==='€'&&a[2]==='b'");
+    boolean("let a=['€','😀'].join('');a.length===3&&a[0]==='€'&&a.charCodeAt(1)===0xd83d&&a.charCodeAt(2)===0xde00");
+    boolean("let a=['','a',''].join('');a==='a'&&a.length===1&&[].join('')===''");
+    boolean("let a=['a',null,undefined,7].join('|');a==='a|||7'");
+}
+
 TEST_F(JsMvpLmd, OrdinaryArrayHolesFillAndJoin) {
     boolean("let a=new Array(3);a[1]=undefined;!(0 in a)&&(1 in a)&&a[0]===undefined&&"
         "a.join('|')==='||'&&Object.keys(a).join(',')==='1'");
@@ -10819,6 +10992,40 @@ TEST_F(JsMvpLmd, ColdPropertyReadKeepsFunctionLowering) {
     const char* outlined = strstr(body, "mvp_lmd_property_read");
     EXPECT_TRUE(!outlined || outlined > end);
     mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, ColdHostPropertyReadRetainsRepeatedDispatch) {
+    MvpLmdHost host = {0, NULL, stdout};
+    const char* source = R"JS(
+        let arguments = process.argv;
+        function choose(flag) { return flag ? {x: 7} : 'text'; }
+        function read(value) { return value.x; }
+        let value = choose(arguments.length === 0);
+        value.x === 7 && read(value) === 7;
+    )JS";
+    EXPECT_EQ(run(source, &host).item, ITEM_TRUE);
+    char* mir = dump("temp/mvp_lmd_cold_host_property.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_property_read"), nullptr);
+    const char* body = strstr(mir, "mvp_lmd_f2:\tfunc");
+    ASSERT_NE(body, nullptr);
+    const char* end = strstr(body, "\tendfunc");
+    ASSERT_NE(end, nullptr);
+    const char* outlined = strstr(body, ", mvp_lmd_property_read,");
+    EXPECT_TRUE(!outlined || outlined > end);
+    mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, ColdHostCallsPreserveReceiverArgumentsAndBuiltinTokens) {
+    MvpLmdHost host = {0, NULL, stdout};
+    const char* sources[] = {
+        "let args=process.argv;let effects='',object={get run(){effects+='g';return function(v){return this===object&&v===3}}};object.run((effects+='a',3))&&effects==='ga'",
+        "let args=process.argv;let object={run(v){return v}},saved=object.run(5e-324);gc();saved===5e-324",
+        "let args=process.argv;let effects='',object={run:1},caught=false;try{object.run((effects+='a',3))}catch(e){caught=e instanceof TypeError}caught&&effects==='a'",
+        "let args=process.argv;let key='join',array=['a','b'];array[key]('-')==='a-b'&&array.slice(1)[0]==='b'",
+        "let args=process.argv;function choose(flag){return flag?'abcd':[]}let value=choose(args.length===0);value.slice(1)==='bcd'&&value.toUpperCase()==='ABCD'"
+    };
+    for (const char* source : sources) EXPECT_EQ(run(source, &host).item, ITEM_TRUE) << source;
 }
 
 TEST_F(JsMvpLmd, DynamicFieldCallBoundaryOrdinary) {

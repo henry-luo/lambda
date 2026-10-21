@@ -1,0 +1,115 @@
+{
+  "name": "BvhJumpDrivesMannequinThroughCharacterSchema",
+  "viewport": {
+    "width": 200,
+    "height": 260
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#jumper-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#jumper-view",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "rest",
+      "source": "scene3d",
+      "target": "#jumper-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#jumper-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ]
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#jumper-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#jumper-view",
+      "width": 200,
+      "height": 240,
+      "reference": "rest",
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#jumper-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ]
+      ],
+      "count": {
+        "min": 300
+      }
+    }
+  ]
+}

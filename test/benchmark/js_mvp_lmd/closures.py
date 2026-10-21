@@ -83,7 +83,7 @@ def main():
             'console.log(result);console.log("__TIMING__:"+elapsed);\n')
         untyped, _ = mir_script_variants(spec)
         ls = out / (stem + '.ls'); shutil.copy2(untyped, ls)
-        commands = {'mvp': [str(binary), 'js', '--runtime=mvp-lmd', '--no-log', '--timing', '-p', js.read_text()],
+        commands = {'mvp': [str(binary), 'js', '--no-log', '--timing', '-p', js.read_text()],
                     'node': ['node', str(node)], 'lambda_untyped': [str(binary), 'run', '--no-log', str(ls)]}
         golden = Path(untyped).with_suffix('.txt')
         # JetStream ports validate internally and do not all ship golden output files.

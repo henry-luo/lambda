@@ -168,6 +168,12 @@ fn divide(a: int, b: int) int^DivisionError { ... }
 
 // May fail with multiple error types
 fn load(path: string) Config ^ ParseError | IOError { ... }
+
+// the named types above; a type may follow its first use (S11.4.12)
+type Config = {name: string}
+type DivisionError = error
+type ParseError = error
+type IOError = error
 ```
 
 > **Note:** The error type after `^` is restricted to `error`, identifiers, or unions of these. Complex type expressions (maps, arrays) are not allowed — define a named type instead.
@@ -681,6 +687,7 @@ fn process_file(path: string) ProcessedData^ {
     let parsed = (for (line in lines) parse_line(line)^)
     aggregate(parsed)
 }
+type ProcessedData = {rows: int}
 ```
 
 ### Error Wrapping
@@ -695,6 +702,7 @@ fn load_config(path: string) Config^ {
     }
     parsed
 }
+type Config = map
 ```
 
 ### Procedural Script with Error Handling

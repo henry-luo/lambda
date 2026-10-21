@@ -5141,7 +5141,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 // movable scalar storage; publish a current number-home Item
                 // before later property/call allocations can compact it.
                 return borrowed_shape_value
-                    ? scalar_storage_read(ord_val, false) : ord_val;
+                    ? js_scalar_storage_read(ord_val, false) : ord_val;
             }
             if (st == JS_OWN_DELETED) {
                 own_found = true;
@@ -8714,7 +8714,7 @@ int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
     return units;
 }
 
-static int js_utf16_code_unit_at(String* string, int64_t index) {
+int js_string_utf16_code_unit_at(String* string, int64_t index) {
     if (!string || index < 0) return -1;
     const char* chars = string->chars;
     int str_len = (int)string->len;
@@ -8743,9 +8743,9 @@ static int js_utf16_code_unit_at(String* string, int64_t index) {
 int64_t js_regex_advance_string_index_units(String* s, int64_t index, bool full_unicode) {
     if (!s || index < 0) return index + 1;
     if (!full_unicode) return index + 1;
-    int first = js_utf16_code_unit_at(s, index);
+    int first = js_string_utf16_code_unit_at(s, index);
     if (utf_is_high_surrogate((uint32_t)first)) {
-        int second = js_utf16_code_unit_at(s, index + 1);
+        int second = js_string_utf16_code_unit_at(s, index + 1);
         if (utf_is_low_surrogate((uint32_t)second)) return index + 2;
     }
     return index + 1;
@@ -9034,7 +9034,7 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
         if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
             // a consumer can allocate after this read, moving the array's
             // scalar tail. Its result needs a transient number home (D5.3.4).
-            return scalar_storage_read(arr->items[idx], false);
+            return js_scalar_storage_read(arr->items[idx], false);
         }
         if (!lookup_prototype) return make_js_undefined();
     }
@@ -19701,7 +19701,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 // ever arises as the second half of such a pair, so this is exact.
 static bool js_split_index_is_trailing_surrogate(String* s, int64_t index) {
     if (!s || s->is_ascii || index <= 0) return false;
-    int unit = js_utf16_code_unit_at(s, index);
+    int unit = js_string_utf16_code_unit_at(s, index);
     return utf_is_low_surrogate((uint32_t)unit);
 }
 
@@ -19961,7 +19961,7 @@ static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
 
 static Item js_collection_node_read_item(JsCollectionOrderNode* node,
         JsCollectionNodeSlot slot) {
-    return node ? owned_item_slot_read(node->slots,
+    return node ? js_owned_item_slot_read(node->slots,
         JS_COLLECTION_NODE_ITEM_COUNT, slot, false) : ItemNull;
 }
 
@@ -20214,8 +20214,12 @@ extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
     }
 }
 
+extern "C" Item js_map_collection_storage_new(void) {
+    return js_collection_create(JS_COLLECTION_MAP, JS_CLASS_MAP);
+}
+
 extern "C" Item js_map_collection_new(void) {
-    Item obj = js_collection_create(JS_COLLECTION_MAP, JS_CLASS_MAP);
+    Item obj = js_map_collection_storage_new();
     js_collection_link_prototype(obj, "Map", 3);
     return obj;
 }
@@ -20312,7 +20316,7 @@ JS_FORWARD_ITEM(js_map_collection_new_from, (Item iterable), js_collection_new_f
 static void js_async_hooks_queue_destroy(Item resource);
 static bool js_async_hooks_is_gc_tracker(Item resource);
 
-static const JsCollectionStorageOps js_collection_default_storage = {
+const JsCollectionStorageOps js_collection_default_storage = {
     [](Item object, int kind) { return js_collection_has_brand(object, kind, false); },
     [](Item object) { return (int64_t)hashmap_count(js_get_collection_data(object)->hmap); },
     [](int kind) { return kind == JS_COLLECTION_SET ? js_set_collection_new() : js_map_collection_new(); },
@@ -21758,11 +21762,11 @@ static Item js_string_matchall_get_flags(Item rx) {
         get_type_id(flags_val) == LMD_TYPE_STRING) {
         Item proto = js_get_regexp_prototype();
         if (get_type_id(proto) == LMD_TYPE_MAP) {
-            Item desc = js_object_get_own_property_descriptor(proto, flags_key);
-            if (get_type_id(desc) == LMD_TYPE_MAP) {
-                bool getter_found = false;
-                Item getter = js_map_shape_lookup(desc.map, "get", 3, &getter_found);
-                if (getter_found) {
+            // protocol reads need the descriptor fields, not a guest descriptor object per match.
+            JsPropertyDescriptor descriptor = {};
+            if (js_get_own_property_descriptor(proto, "flags", 5, &descriptor)) {
+                if (descriptor.flags & JS_PD_HAS_GET) {
+                    Item getter = descriptor.getter;
                     if (getter.item == ItemNull.item || getter.item == ITEM_JS_UNDEFINED ||
                         get_type_id(getter) == LMD_TYPE_UNDEFINED || get_type_id(getter) == LMD_TYPE_NULL) {
                         return make_js_undefined();
@@ -21771,8 +21775,8 @@ static Item js_string_matchall_get_flags(Item rx) {
                         return js_call_accessor_getter(getter, rx);
                     }
                 }
-                Item value = js_map_own_or(desc.map, "value", 5, ItemNull);
-                if (value.item != ItemNull.item) return value;
+                if ((descriptor.flags & JS_PD_HAS_VALUE) && descriptor.value.item != ItemNull.item)
+                    return descriptor.value;
             }
         }
     }
@@ -22522,7 +22526,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (!s || s->len == 0) return js_make_number(NAN);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
-        int code_unit = js_utf16_code_unit_at(s, target_idx);
+        int code_unit = js_string_utf16_code_unit_at(s, target_idx);
         return code_unit < 0 ? js_make_number(NAN) :
             (Item){.item = i2it((int64_t)code_unit)};
     }
@@ -22536,10 +22540,10 @@ static Item js_string_intrinsic_algorithm(Item str,
         double didx = js_get_number(idx_num);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return make_js_undefined();
-        int first = js_utf16_code_unit_at(s, target_idx);
+        int first = js_string_utf16_code_unit_at(s, target_idx);
         if (first < 0) return make_js_undefined();
         if (utf_is_high_surrogate((uint32_t)first)) {
-            int second = js_utf16_code_unit_at(s, target_idx + 1);
+            int second = js_string_utf16_code_unit_at(s, target_idx + 1);
             if (utf_is_low_surrogate((uint32_t)second)) {
                 int codepoint = 0x10000 +
                     (((first - 0xD800) << 10) | (second - 0xDC00));

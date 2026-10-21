@@ -1,9 +1,6 @@
 {
   "schema_version": 1,
   "description": "D3.3.4, D5.2.1v3, D8.2.6v2: callback-capable numeric consumers retain the element snapshot, inherited-index lookup and RHS Get before either operand's ToPrimitive. Fixed coercion is ineligible.",
-  "args": [
-    "--runtime=mvp-lmd"
-  ],
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

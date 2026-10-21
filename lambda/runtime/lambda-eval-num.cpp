@@ -945,12 +945,36 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
     return seq_finish_array({.array_num = rooted_result.get()});
 }
 
-Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out) {
+// S10.2.4: an element entering an accumulating reduction (sum, prod, cumsum,
+// cumprod). A narrow sized integer joins as `int`, so a u8 sum is 300 rather
+// than a wrapped 44; i64/u64 keep their lane and every other number is itself.
+Item lambda_reduction_element(Item element) {
+    if (get_type_id(element) != LMD_TYPE_NUM_SIZED) return element;
+    NumSizedType kind = element.get_num_type();
+    if (kind == NUM_FLOAT16 || kind == NUM_FLOAT32) return element;
+    return (Item){.item = i2it(element.get_num_sized_as_int64())};
+}
+
+// S10.2.4: an element entering a statistical reduction (avg, mean). Every
+// bounded number (int, sized integers, sized floats) joins as `float`, the
+// float accumulator NumPy, R and Julia use; integer and decimal stay exact.
+Item lambda_statistic_element(Item element) {
+    TypeId type = get_type_id(element);
+    if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64 &&
+            type != LMD_TYPE_UINT64 && type != LMD_TYPE_NUM_SIZED) return element;
+    double value = 0.0;
+    return item_try_to_double(element, &value) ? push_d(value) : element;
+}
+
+Item fn_numeric_fold(Item item, int multiply, int skip_null, int statistic,
+        int64_t* count_out) {
     GUARD_ERROR1(item);
     int64_t length = vector_length(item);
     if (length < 0) {
-        if (count_out) *count_out = IS_NUMERIC_ID(get_type_id(item)) ? 1 : 0;
-        return IS_NUMERIC_ID(get_type_id(item)) ? item : ItemError;
+        bool numeric = IS_NUMERIC_ID(get_type_id(item));
+        if (count_out) *count_out = numeric ? 1 : 0;
+        if (!numeric) return ItemError;
+        return statistic ? lambda_statistic_element(item) : lambda_reduction_element(item);
     }
 
     RootFrame roots(2);
@@ -975,6 +999,8 @@ Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out)
             log_error("numeric fold: non-numeric element at index %ld", i);
             return ItemError;
         }
+        element = statistic ? lambda_statistic_element(element) :
+                              lambda_reduction_element(element);
         if (count == 0) {
             accumulator.set(element);
         } else {
@@ -1265,15 +1291,15 @@ Item fn_max1(Item item_a) {
 
 Item fn_sum(Item item) {
     int64_t count = 0;
-    return fn_numeric_fold(item, 0, 0, &count);
+    return fn_numeric_fold(item, 0, 0, 0, &count);
 }
 
 Item fn_avg_skip_null(Item item, bool skip_null) {
     int64_t count = 0;
-    Item sum = fn_numeric_fold(item, 0, skip_null ? 1 : 0, &count);
+    Item sum = fn_numeric_fold(item, 0, skip_null ? 1 : 0, 1, &count);
     if (get_type_id(sum) == LMD_TYPE_ERROR || get_type_id(sum) == LMD_TYPE_NULL) return sum;
-    // Average is the scalar fold followed by the model's true division. Full
-    // sized lanes therefore enter decimal, while compact/int lanes enter float.
+    // the fold accumulated bounded numbers in float, so the mean is a float
+    // for every machine lane (S10.2.4); integer/decimal inputs stay exact
     return count == 0 ? ItemNull : fn_div(sum, (Item){.item = i2it(count)});
 }
 

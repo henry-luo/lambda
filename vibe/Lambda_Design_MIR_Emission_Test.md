@@ -392,6 +392,19 @@ Work items:
 - keep `LAMBDA_MIR_ROOT_MODE=write-through` as the bisection oracle when the
   sweep fails.
 
+**Execution budget (2026-10-21).** D5.3.1–D5.3.4 remain the rooting contract.
+The routine sweep keeps native/MIR-interpreter output parity for the reviewed
+scalar-only and `NO_GC` emission probes in `test/mir/gc_backend_parity.tsv`,
+with a per-fixture reason; they retain their independent MT1 checks. New
+fixtures default to full stress. `make test-mir-gc-stress-full` restores all
+schedules for every fixture. A stale or malformed classification fails the
+gate. Lambda emission fixtures may share bounded host processes through
+`test-batch`, retaining their separate compilation units and fresh per-script
+heaps/module state (D5.4.3). Every selected script must return exactly once,
+and crashes, missing results and teardown failures remain failures without
+retrying. JS and additional lifetime regressions retain process isolation;
+`LAMBDA_MIR_GC_BATCH_SIZE=1` is the standalone control.
+
 Invariant #8 (no redundant/over-root currency) remains a quality property in
 the active design. MT7 ratchets root-store counts and catches growth on its
 probe set, but it does not prove that every retained store is semantically

@@ -26,6 +26,7 @@ const char* scene3d_diagnostic(DomElement* root);
 bool scene3d_stats(DomElement* root, Scene3dStats* stats);
 void scene3d_collect(DomDocument* document);
 void scene3d_release_subtree(struct DomNode* root);
+void scene3d_follow_rebuild(DomDocument* document, struct DomNode* old_root, struct DomNode* new_root);
 void scene3d_context_lost(DomElement* root);
 void render_scene3d_content(RasterRenderContext* context, ViewBlock* view);
 bool scene3d_paint_content(PaintList* paint, UiContext* ui, ViewBlock* view, float x, float y);

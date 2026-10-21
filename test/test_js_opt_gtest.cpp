@@ -376,8 +376,7 @@ static const char* opt_executable() {
 static bool run_fixture_mode_backend(const char* name, const char* source,
                                      bool trace_enabled, const char* backend,
                                      TraceResult* trace, char* output,
-                                     size_t output_size, int timeout_ms = 30000,
-                                     bool standalone = false) {
+                                     size_t output_size, int timeout_ms = 30000) {
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
@@ -395,8 +394,7 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
     // MIR dumping is intentionally gated by --no-log. Keep logging enabled for
     // this child so the finalized artifact is available for the differential
     // contract below; the child writes diagnostics to its normal log sink.
-    // benchmark units are closed scripts; ordinary entry keeps the shared realm's globals reflective.
-    const char* args[] = {executable, "js", script_path, standalone ? "--runtime=mvp-lmd" : NULL, NULL};
+    const char* args[] = {executable, "js", script_path, NULL};
     ShellEnvEntry env[5] = {};
     int env_count = 0;
     // This suite contracts the finalized MIR lowering. AUTO now selects the
@@ -459,14 +457,14 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
 
 static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
                              TraceResult* trace, char* output, size_t output_size,
-                             int timeout_ms = 30000, bool standalone = false) {
+                             int timeout_ms = 30000) {
     return run_fixture_mode_backend(name, source, trace_enabled, NULL, trace,
-        output, output_size, timeout_ms, standalone);
+        output, output_size, timeout_ms);
 }
 
 static bool run_fixture(const char* name, const char* source, TraceResult* trace,
-                        char* output, size_t output_size, bool standalone = false) {
-    bool ok = run_fixture_mode(name, source, true, trace, output, output_size, 30000, standalone);
+                        char* output, size_t output_size) {
+    bool ok = run_fixture_mode(name, source, true, trace, output, output_size);
     if (ok) {
         // shared emission checks replace retired LJS trace hooks; retain the exact behavioral fixture.
         char script[512], sidecar[512];
@@ -479,10 +477,10 @@ static bool run_fixture(const char* name, const char* source, TraceResult* trace
 
 static void expect_trace_off_same(const char* name, const char* source,
                                   const char* trace_output,
-                                  const char* backend = NULL, bool standalone = false) {
+                                  const char* backend = NULL) {
     char output[4096];
     ASSERT_TRUE(run_fixture_mode_backend(name, source, false, backend, NULL,
-        output, sizeof(output), 30000, standalone));
+        output, sizeof(output), 30000));
     char normalized_trace_output[4096];
     char normalized_output[4096];
     normalize_child_output(trace_output, normalized_trace_output,
@@ -711,6 +709,40 @@ TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
     EXPECT_GT(trace.events[JS_OPT_REGEX_BULK_REPLACE_HIT][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_REGEX_BULK_MATCH_FALLBACK][2], 1u);
     expect_trace_off_same("regexp_bulk_protocol", source, output, "ast");
+}
+
+TEST(JsOpt, RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion) {
+    const char* source = R"JS(
+        var original=Object.getOwnPropertyDescriptor(RegExp.prototype,'flags');
+        var rx=/a/g, receivers=[];
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:function(){
+            receivers.push(this);return original.get.call(this);
+        }});
+        var matches=Array.from('aba'.matchAll(rx));
+        if(matches.length!==2||matches[0].index!==0||matches[1].index!==2||
+            receivers.indexOf(rx)===-1||receivers.some(function(x){return !(x instanceof RegExp)}))
+            throw new Error('flags getter lost receiver or iteration semantics');
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,value:'g'});
+        if(Array.from('aba'.matchAll(/a/g)).length!==2)throw new Error('flags data descriptor lost');
+        var marker={},caught;
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:function(){throw marker}});
+        try{'a'.matchAll(/a/g)}catch(error){caught=error}
+        if(caught!==marker)throw new Error('flags getter exception lost');
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:undefined});
+        caught=false;try{'a'.matchAll(/a/g)}catch(error){caught=error instanceof TypeError}
+        if(!caught)throw new Error('undefined flags getter bypassed');
+        Object.defineProperty(RegExp.prototype,'flags',original);
+        console.log('OPT_OK');
+    )JS";
+    for (const char* backend : {"ast", "mir"}) {
+        SCOPED_TRACE(backend);
+        TraceResult trace;
+        char output[4096];
+        ASSERT_TRUE(run_fixture_mode_backend("regexp_flags_descriptor", source, true,
+            backend, &trace, output, sizeof(output)));
+        expect_ok_output(output);
+        expect_trace_off_same("regexp_flags_descriptor", source, output, backend);
+    }
 }
 
 TEST(JsOpt, DenseArrayStoreTakesFastPath) {
@@ -1448,7 +1480,6 @@ struct MvpMirTuningCase {
     const char* name;
     const char* fixture;
     const char* source;
-    bool standalone = true;
 };
 
 // keep callback-free admission cases separate: reflection would disable their numeric proofs.
@@ -1523,7 +1554,7 @@ try { nullable(null); } catch (error) { nullError = error instanceof TypeError; 
 try { nullable(undefined); } catch (error) { undefinedError = error instanceof TypeError; }
 if (!nullError || !undefinedError) throw new Error("nullish property lost its error");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"NativeCallGuard", "mvp_native_call_guard", R"JS(
 const fs = require("fs");
 let effects = "";
@@ -1542,7 +1573,7 @@ caught = false;
 try { invoke(throwing, path); } catch (error) { caught = error === marker; }
 if (!caught || effects !== "AAGAAT") throw new Error("call completion replayed effects");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"DeclaredFunctionGlobalRead", "mvp_declared_function_global_read", R"JS(
 function dynamicNeighbor() { return eval("1"); }
 function helper(value) { return value + 1; }
@@ -1553,7 +1584,7 @@ if (dynamicNeighbor() !== 1 || first !== 42 || invoke() !== 43 ||
     Object.getOwnPropertyDescriptor(globalThis, "helper").configurable)
     throw new Error("declared function read lost live object binding");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"DenseLoopBesideEval", "mvp_local_dense_loop", R"JS(
 function dynamicNeighbor() { return eval("1"); }
 function sum(hole) {
@@ -1585,7 +1616,7 @@ try {
 if (dynamicNeighbor() !== 1 || dense !== 8 || sparse !== 8 || getterCalls !== 2 || !caught)
     throw new Error("local dense loop changed fallback effects");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"NumberComparisonCoercion", "mvp_number_comparison_coercion", R"JS(
 function compare(values, number) {
     const value = values[0];
@@ -1626,7 +1657,7 @@ if (!ordered(observed) || events !== "GRC") throw new Error("operand order");
 events = "";
 if (!reversed(observed) || events !== "LGC") throw new Error("reverse operand order");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"IntegralIndexBesideEval", "mvp_local_integral_index", R"JS(
 function dynamicNeighbor() { return eval("1"); }
 function sum(limit, hole) {
@@ -1666,7 +1697,7 @@ if (dynamicNeighbor() !== 1 || dense !== 60 || sparse !== 60 ||
     sum(-0, false) !== 0 || fractional(false) !== 10 || fractional(true) !== 7)
     throw new Error("local integer index lost fallback or fractional writes");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"OrderedLoopBesideEval", "mvp_local_ordered_loop", R"JS(
 function dynamicNeighbor() { return eval("1"); }
 function sum(mode, wipe) {
@@ -1702,7 +1733,7 @@ if (dynamicNeighbor() !== 1 || normal[0] !== 3 || normal[1] !== 6 ||
     !Number.isNaN(evaluated[0]) || !Number.isNaN(evaluated[1]))
     throw new Error("local ordered loop changed Number or eval effects");
 console.log("OPT_OK");
-)JS", false},
+)JS"},
     {"SourceConstructorLayout", "mvp_source_constructor_layout", R"JS(
 function create(a,b) { return new Record(a,b); }
 function Record(a,b) { this.a=a; this.b=b; }
@@ -1809,7 +1840,7 @@ function fill() {
 }
 if (!fill()) throw new Error('reflective global bypassed key fallback');
 console.log('OPT_OK');
-)JS", false},
+)JS"},
     {"UnknownArrayNumericConsumer", "mvp_unknown_array_numeric_consumer", R"JS(
 function product(a, b) { return a[0] * b[0]; }
 function difference(a, b) { return a[0] - b[0]; }
@@ -1870,9 +1901,9 @@ TEST_P(JsMvpMirOpt, EmissionAndSemantics) {
     const MvpMirTuningCase& test = GetParam();
     TraceResult trace;
     char output[4096];
-    ASSERT_TRUE(run_fixture(test.fixture, test.source, &trace, output, sizeof(output), test.standalone));
+    ASSERT_TRUE(run_fixture(test.fixture, test.source, &trace, output, sizeof(output)));
     expect_ok_output(output);
-    expect_trace_off_same(test.fixture, test.source, output, NULL, test.standalone);
+    expect_trace_off_same(test.fixture, test.source, output);
 }
 
 INSTANTIATE_TEST_SUITE_P(Tuning, JsMvpMirOpt, ::testing::ValuesIn(kMvpMirTuningCases),

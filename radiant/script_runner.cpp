@@ -2361,6 +2361,15 @@ static int document_snapshot_ready_predicate(void* user) {
     return document_snapshot_is_ready((const DomDocument*)user);
 }
 
+static bool document_pending_navigation_leaves_current_document(DomDocument* document) {
+    if (!document->pending_navigation_url || !document->pending_navigation_url[0] || !document->url)
+        return false;
+    Url* target = url_parse_with_base(document->pending_navigation_url, document->url);
+    bool leaves = target && url_is_valid(target) && !url_equals_without_fragment(target, document->url);
+    if (target) url_destroy(target);
+    return leaves;
+}
+
 extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
                                                   Pool* pool, Url* base_url,
                                                   DocumentScriptPhaseTiming* timing) {
@@ -2630,7 +2639,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_info("execute_document_scripts: JS execution completed successfully");
         // Capture settlement starts only after window.load has queued its tasks.
         js_event_loop_set_auto_close_after_load(true);
-        if (dom_is_host_driven_loop()) {
+        // finish the current task before deciding which document owns the next turn.
+        js_microtask_flush();
+        if (dom_is_host_driven_loop() || document_pending_navigation_leaves_current_document(dom_doc)) {
             // A long-lived host (Radiant `view`) pumps the event loop AFTER it
             // commits the first layout. Draining timers here — still inside the
             // loader, before @font-face processing and the first layout pass —
@@ -2640,8 +2651,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             // column resizers). Flush only microtasks and leave timers queued so
             // they run post-commit with real geometry (browser semantics: a
             // setTimeout(0) queued during load fires after layout).
-            js_microtask_flush();
-            log_info("execute_document_scripts: microtasks flushed; timers deferred to host loop");
+            // the loader retires a redirecting document before settling its old background jobs.
+            log_info("execute_document_scripts: microtasks flushed; timers deferred to host/navigation");
         } else {
             // readiness must finish before the ordinary snapshot drain closes pending timers.
             if (dom_doc->js.auto_close_event_loop && !document_snapshot_is_ready(dom_doc)) {

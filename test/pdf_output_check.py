@@ -233,6 +233,43 @@ def normalized_objects(objects):
     return normalized
 
 
+def matching_soft_mask_images(objects, expected):
+    """Compare native RGBA captures at their premultiplied 8-bit precision."""
+    matching = set()
+    for index, (actual, wanted) in enumerate(zip(objects, expected)):
+        header, separator, colors = actual.partition(b"\nstream\n")
+        wanted_header, _, wanted_colors = wanted.partition(b"\nstream\n")
+        if not separator or header != wanted_header or not re.search(rb"/Subtype /Image\b", header):
+            continue
+        if not re.search(rb"/ColorSpace /DeviceRGB\b", header) or not re.search(rb"/BitsPerComponent 8\b", header):
+            continue
+        mask = re.search(rb"/SMask ([0-9]+) 0 R\b", header)
+        if not mask or not 1 <= int(mask[1]) <= len(objects):
+            continue
+        mask_index = int(mask[1]) - 1
+        mask_header, mask_separator, alpha = objects[mask_index].partition(b"\nstream\n")
+        wanted_mask_header, _, wanted_alpha = expected[mask_index].partition(b"\nstream\n")
+        if not mask_separator or mask_header != wanted_mask_header or not re.search(
+                rb"/Subtype /Image\b.* /ColorSpace /DeviceGray\b.* /BitsPerComponent 8\b", mask_header):
+            continue
+        dimensions = [tuple(re.search(rb"/" + key + rb" ([0-9]+)\b", body)[1]
+                            for key in (b"Width", b"Height")) for body in (header, mask_header)]
+        count = int(dimensions[0][0]) * int(dimensions[0][1])
+        if dimensions[0] != dimensions[1] or count == 0 or not (
+                len(colors) == len(wanted_colors) == count * 3 and len(alpha) == len(wanted_alpha) == count):
+            continue
+        # native blur rounding can change alpha by one; unpremultiplication amplifies
+        # that into larger straight-RGB differences even when the painted color agrees.
+        if any(abs(a - b) > 1 for a, b in zip(alpha, wanted_alpha)):
+            continue
+        if any(abs((a * alpha[offset // 3] + 127) // 255 -
+                   (b * wanted_alpha[offset // 3] + 127) // 255) > 1
+               for offset, (a, b) in enumerate(zip(colors, wanted_colors))):
+            continue
+        matching.update((index, mask_index))
+    return matching
+
+
 def structure(path, kind, quiet=False):
     """The structural check selected by `kind`: a page count, "phase6", or None."""
     if kind == "phase6":
@@ -246,18 +283,22 @@ def check_semantics(path, kind):
 
 def compare_golden(path, golden, kind):
     """Check `path`, then require the same objects as the accepted golden PDF."""
-    objects = normalized_objects(check_semantics(path, kind))
-    expected = normalized_objects(structure(golden, kind, quiet=True))
     refresh = f"accept the new output with: python3 test/pdf_output_check.py {path} accept {golden}" + (
         f" {kind}" if kind else "")
+    compare_objects(check_semantics(path, kind), structure(golden, kind, quiet=True), refresh)
+    print(f"PDF_GOLDEN_CHECK: objects match {golden}")
+
+
+def compare_objects(objects, expected, refresh=""):
+    objects, expected = normalized_objects(objects), normalized_objects(expected)
     assert len(objects) == len(expected), (
         f"object count {len(objects)} differs from golden {len(expected)}; {refresh}")
+    matching_images = matching_soft_mask_images(objects, expected)
     for identifier, (actual, wanted) in enumerate(zip(objects, expected), 1):
-        if actual != wanted:
+        if actual != wanted and identifier - 1 not in matching_images:
             at = next((i for i, (a, b) in enumerate(zip(actual, wanted)) if a != b), min(len(actual), len(wanted)))
             raise AssertionError(f"object {identifier} differs from golden at byte {at}: "
                                  f"{actual[max(0, at - 20):at + 40]!r} vs {wanted[max(0, at - 20):at + 40]!r}; {refresh}")
-    print(f"PDF_GOLDEN_CHECK: {len(objects)} objects match {golden}")
 
 
 def accept_golden(path, golden, kind):

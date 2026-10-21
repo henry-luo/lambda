@@ -3,6 +3,7 @@
 #include "event.hpp"
 #include "layout.hpp"
 #include "layout_table.hpp"
+#include "render_metrics.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -121,14 +122,58 @@ static bool render_retained_dirty_source_inside(void* userdata, const DirtyRect*
     return dirty_source_in_view_subtree(source->document, source->root, dirty);
 }
 
-bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block) {
+static bool render_block_solid_box(RasterRenderContext* rdcon, ViewBlock* block, Rect* rect, Color* color) {
+    if (!rdcon || !block || !rdcon->html_box_cache_enabled || rdcon->paint_phase != RADIANT_PAINT_ALL ||
+        rdcon->element_marker_suppression_depth || rdcon->has_transform || rdcon->css3d_context ||
+        rdcon->block.has_clip_radius || rdcon->clip_shape_depth || rdcon->vector_clip_depth ||
+        (block->view_type != RDT_VIEW_BLOCK && block->view_type != RDT_VIEW_INLINE_BLOCK) ||
+        block->tag_id == MARKUP_NAME_HTML || block->tag_id == MARKUP_NAME_BODY || !block->parent ||
+        block->first_child || block->transform || block->scroller || block->embed ||
+        block->form_control() || block->vector_path() || block->custom_layout_paint_prop() ||
+        block->filter_prop() || block->backdrop_filter_prop() || block->layout_fragment_list() ||
+        view_visibility_is_hidden(block) ||
+        (block->position && block->positionp()->first_abs_child) ||
+        (block->blk && block->block()->list_style_type) ||
+        (block->in_line && (block->inl()->opacity != 1.0f ||
+            (block->inl()->mix_blend_mode && block->inl()->mix_blend_mode != CSS_VALUE_NORMAL)))) return false;
+    if (css_display_element_is_replaced(block)) return false;
+    // reuse is checked before the box opens its CSS clip scope; inspect the declaration as well.
+    if (render_clip_css_value(block)) return false;
+    const auto* bound = block->boundary();
+    if (!bound || bound->border || bound->mask || bound->box_shadow || bound->outline ||
+        !bound->background || !bound->background->color.a ||
+        !render_paint_background_is_simple(bound->background)) return false;
+    float scale = rdcon->raster_scale;
+    if (!isfinite(scale) || scale <= 0) return false;
+    *rect = render_geometry_block_border_rect(&rdcon->block, block, scale);
+    RdtMatrix density = rdt_matrix_scale(scale, scale);
+    float x = rect->x / scale, y = rect->y / scale;
+    float left, top, right, bottom;
+    // the ordinary background lowerer projects logical edges; admit only identical physical primitives.
+    if (!rdt_matrix_project_rect_bounds(&density, x, y, x + rect->width / scale,
+            y + rect->height / scale, &left, &top, &right, &bottom) ||
+        left != rect->x || top != rect->y || right - left != rect->width || bottom - top != rect->height) return false;
+    const Bound& clip = rdcon->block.clip;
+    // omit the redundant clip only when every touched pixel lies in its fully covered interior.
+    if (!isfinite(rect->x) || !isfinite(rect->y) || !isfinite(rect->width) || !isfinite(rect->height) ||
+        rect->width <= 0 || rect->height <= 0 ||
+        !(floorf(rect->x) >= ceilf(clip.left) && floorf(rect->y) >= ceilf(clip.top) &&
+          ceilf(rect->x + rect->width) <= floorf(clip.right) &&
+          ceilf(rect->y + rect->height) <= floorf(clip.bottom))) return false;
+    *color = bound->background->color;
+    return true;
+}
+
+bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block, bool allow_solid_box) {
     if (!rdcon || !block || !rdcon->dl || !rdcon->retained_dl_cache ||
         rdcon->paint_phase != RADIANT_PAINT_ALL ||
-        !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0 ||
+        rdcon->element_marker_suppression_depth > 0 ||
         rdcon->css3d_context) {
         return false;
     }
-    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
+    Rect solid_rect = {}; Color solid_color = {};
+    bool solid = allow_solid_box && render_block_solid_box(rdcon, block, &solid_rect, &solid_color);
+    if ((!solid && !rdcon->has_dirty_union) || render_block_has_visible_child_overflow(rdcon, block)) return false;
 
     uint32_t view_id = static_cast<View*>(block)->id;
     const RetainedDisplayListFragment* fragment =
@@ -152,6 +197,18 @@ bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* b
         retained_dl_cache_note_reuse_rejected_resources(rdcon->retained_dl_cache);
         return false;
     }
+
+    if (solid) {
+        // a failed complete-paint check requires fresh recording, including during selective repaint.
+        if (!retained_dl_append_solid_box(rdcon->dl, fragment, solid_rect, solid_color)) return false;
+        RENDER_METRIC_ADD(html_box_reuses, 1);
+        Bound canonical = retained_dl_fragment_marker_bounds(fragment);
+        if (solid_rect.x != canonical.left || solid_rect.y != canonical.top)
+            RENDER_METRIC_ADD(html_box_translations, 1);
+        retained_dl_cache_note_reuse_hit(rdcon->retained_dl_cache);
+        return true;
+    }
+    if (!rdcon->has_dirty_union) return false;
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block, s) * s;
@@ -216,6 +273,13 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!render_paint_phase_has_boundary(rdcon->paint_phase, view)) return;
     float s = rdcon->raster_scale;
     Rect rect = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&rdcon->block, view, s));
+    Rect solid_rect = {}; Color solid_color = {};
+    if (render_block_solid_box(rdcon, view, &solid_rect, &solid_color)) {
+        // this complete atomic box has no other paint; its canonical leaf needs no caller clip snapshot.
+        render_background(rdcon, view, rect, false);
+        RENDER_METRIC_ADD(html_box_recordings, 1);
+        return;
+    }
     if (!view->bound) { render_background(rdcon, view, rect); return; }
     if (render_paint_boundary_emit_fragmented_simple(rdcon->paint_list, view, rect)) {
         paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
@@ -375,7 +439,7 @@ typedef struct RenderBlockPaintResult {
     bool painted;
 } RenderBlockPaintResult;
 
-static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block) {
+static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block, bool allow_solid_box) {
     if (!rdcon || !block) {
         return true;
     }
@@ -397,7 +461,7 @@ static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block
     if (render_block_dirty_misses(rdcon, block)) {
         return true;
     }
-    if (render_block_try_retained_fragment(rdcon, block)) {
+    if (render_block_try_retained_fragment(rdcon, block, allow_solid_box)) {
         return true;
     }
     return false;
@@ -752,7 +816,8 @@ void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
     uint64_t rbv_start = time_now_ns();
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_BLOCK);
 
-    if (render_block_skip_paint(rdcon, block)) return;
+    // an external producer can start drawing after a formerly empty background-only recording.
+    if (render_block_skip_paint(rdcon, block, !content)) return;
 
     RenderBlockPaintResult result = {};
     Css3dPaintContext* enclosing = rdcon->css3d_context;

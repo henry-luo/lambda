@@ -25,5 +25,7 @@ type(0xFFFFFFFFFFFFFFFFu64)
 "=== expressions ==="
 band(0xFFFFFFFFu32, 0xFFu32)
 bor(0xD000, 0x008)
-0x7Fi8 + 0x01i8
-type(0x7Fi8 + 0x01i8)
+// a run-time operand: a literal-only overflow is a compile error (S4.1.5)
+let hex_max = 0x7Fi8
+hex_max + 0x01i8
+type(hex_max + 0x01i8)

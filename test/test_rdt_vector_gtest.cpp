@@ -4470,6 +4470,108 @@ TEST(RdtVectorTest, TranslucentRectanglesKeepOpaqueAlphaWithinNestedRectClips) {
     rdt_engine_term();
 }
 
+TEST(RdtVectorTest, OpaqueRectanglesUseExactRasterAndPreserveNativeCoverageFallback) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (bool fractional : {false, true}) for (bool negative : {false, true})
+    for (float offset : {0.0f, 5.0f, 5.5f}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(fractional);
+        SCOPED_TRACE(negative);
+        SCOPED_TRACE(offset);
+        uint32_t actual[128 * 64] = {}, expected[128 * 64] = {};
+        auto draw = [&](uint32_t* pixels, bool native) {
+            RdtVector vector = {}; rdt_vector_init(&vector, pixels, 128, 64, 128);
+            rdt_vector_set_tile_offset_x(&vector, offset); rdt_vector_set_tile_offset_y(&vector, offset);
+            rdt_vector_begin_batch(&vector);
+            for (unsigned index = 0; index < 8; index++) {
+                float x = ((negative ? -3 : 3) + (fractional ? .25f : 0) + (float)index * 7) * density;
+                float y = (4 + (fractional ? .5f : 0)) * density;
+                float w = (fractional ? 3.5f : 3) * density, h = (fractional ? 4.5f : 4) * density;
+                if (native) test_radiant_fill_native_rect(&vector, x, y, w, h, Color{0xff2040e0u});
+                else rdt_fill_rect(&vector, x, y, w, h, Color{0xff2040e0u});
+            }
+            rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        };
+        draw(expected, true);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); draw(actual, false); }
+        if (!fractional && offset != 5.5f) {
+            EXPECT_EQ(counters.native_shapes, 0u); EXPECT_EQ(counters.batch_flushes, 0u);
+        } else EXPECT_GT(counters.native_shapes, 0u);
+        EXPECT_EQ(counters.flush_cpu, 0u);
+        test_radiant_expect_pixels_equal(actual, expected, 128 * 64);
+        size_t painted = 0;
+        for (uint32_t pixel : actual) painted += pixel != 0;
+        EXPECT_GT(painted, 0u);
+    }
+    rdt_engine_term();
+}
+
+TEST(RdtVectorTest, OpaqueRectangleRasterKeepsClipAndPendingNativeBatchBoundaries) {
+    enum Case { PLAIN, RECT_CLIP, CURVED_CLIP, FRACTIONAL_CLIP, PENDING, SEALED_PENDING };
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (Case kind : {PLAIN, RECT_CLIP, CURVED_CLIP, FRACTIONAL_CLIP, PENDING, SEALED_PENDING}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(kind);
+        uint32_t actual[128 * 64] = {}, expected[128 * 64] = {};
+        auto draw = [&](uint32_t* pixels, bool native) {
+            RdtVector vector = {}; rdt_vector_init(&vector, pixels, 128, 64, 128);
+            rdt_vector_begin_batch(&vector);
+            if (kind == PENDING || kind == SEALED_PENDING)
+                rdt_fill_rounded_rect(&vector, 0, 0, 48 * density, 28 * density, 3 * density, 3 * density, Color{0xffff0000u});
+            RdtPath* clip = nullptr;
+            if (kind == RECT_CLIP || kind == CURVED_CLIP || kind == FRACTIONAL_CLIP || kind == SEALED_PENDING) {
+                clip = rdt_path_new(); ASSERT_NE(clip, nullptr);
+                if (kind == CURVED_CLIP) rdt_path_add_circle(clip, 24 * density, 14 * density, 22 * density, 12 * density);
+                else rdt_path_add_rect(clip, (kind == FRACTIONAL_CLIP ? 3.25f : 0) * density, 0,
+                    48 * density, 28 * density, 0, 0);
+                rdt_push_clip(&vector, clip, nullptr);
+            }
+            for (unsigned index = 0; index < 4; index++) {
+                float x = (2 + (float)index * 8) * density;
+                if (native) test_radiant_fill_native_rect(&vector, x, 10 * density, 4 * density, 4 * density, Color{0xff0000ffu});
+                else rdt_fill_rect(&vector, x, 10 * density, 4 * density, 4 * density, Color{0xff0000ffu});
+            }
+            if (clip) { rdt_pop_clip(&vector); rdt_path_free(clip); }
+            rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        };
+        draw(expected, true);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); draw(actual, false); }
+        if (kind == PLAIN || kind == RECT_CLIP) EXPECT_EQ(counters.native_shapes, 0u);
+        else EXPECT_GT(counters.native_shapes, 0u);
+        EXPECT_EQ(counters.flush_cpu, 0u); // opaque admission must not split an existing native submission.
+        test_radiant_expect_pixels_equal(actual, expected, 128 * 64);
+        size_t painted = 0;
+        for (uint32_t pixel : actual) painted += pixel != 0;
+        EXPECT_GT(painted, 0u);
+    }
+    rdt_engine_term();
+}
+
+TEST(RdtVectorTest, RectangleRasterRejectsNonFiniteDisplacementBeforeClamping) {
+    rdt_engine_init(0);
+    for (float offset : {NAN, INFINITY, -INFINITY}) for (bool vertical : {false, true})
+    for (Color color : {Color{0xff2040e0u}, Color{0x802040e0u}}) {
+        uint32_t pixels[32 * 32] = {};
+        RdtVector vector = {}; rdt_vector_init(&vector, pixels, 32, 32, 32);
+        if (vertical) rdt_vector_set_tile_offset_y(&vector, offset);
+        else rdt_vector_set_tile_offset_x(&vector, offset);
+        rdt_vector_begin_batch(&vector);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); rdt_fill_rect(&vector, 4, 4, 8, 8, color); }
+        EXPECT_EQ(counters.native_shapes, 1u);
+        size_t changed = 0;
+        for (uint32_t pixel : pixels) changed += pixel != 0;
+        EXPECT_EQ(changed, 0u);
+        // check admission without passing non-finite placement to the native renderer at submission.
+        rdt_vector_set_tile_offset_x(&vector, 0); rdt_vector_set_tile_offset_y(&vector, 0);
+        rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        EXPECT_NE(pixels[6 * 32 + 6], 0u);
+    }
+    rdt_engine_term();
+}
+
 TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     rdt_engine_init(0);
 
@@ -4493,9 +4595,9 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
 
     rdt_vector_begin_batch(&vector);
     rdt_push_clip(&vector, outer, nullptr);
-    // Many paints under one unchanged clip must share one composed mask.
+    // explicit paths keep this a native clip-mask test; exact rectangles can use the CPU fast path.
     for (int x = 0; x < 24; x += 2) {
-        rdt_fill_rect(&vector, (float)x, 0.0f, 2.0f, 12.0f, red);
+        test_radiant_fill_native_rect(&vector, (float)x, 0.0f, 2.0f, 12.0f, red);
     }
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 0u);
     rdt_vector_flush_batch(&vector);
@@ -4504,7 +4606,7 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     EXPECT_EQ(pixels[4 * 24 + 0], 0u);
 
     rdt_push_clip(&vector, inner, nullptr);
-    rdt_fill_rect(&vector, 0.0f, 0.0f, 24.0f, 12.0f, blue);
+    test_radiant_fill_native_rect(&vector, 0.0f, 0.0f, 24.0f, 12.0f, blue);
     rdt_pop_clip(&vector);
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 2u);
 
@@ -5930,11 +6032,13 @@ TEST(PaintOwnership, SelectiveFramesRefreshUnchangedIndexEntriesWithoutRepublish
     EXPECT_GT(counters.fragment_references, 0u); EXPECT_GT(stats.reused_captures, 0u);
     EXPECT_LT(counters.retained_index_publications, (size_t)stats.captured + stats.reused_captures);
     EXPECT_EQ(counters.retained_index_prune_checks, 1u);
-    EXPECT_EQ(counters.retained_membership_nodes, 1u);
-    EXPECT_EQ(counters.retained_membership_groups, 1u);
+    // the dirty empty sibling also qualifies through the exact solid-box admission.
+    EXPECT_EQ(counters.html_box_reuses, 1u);
+    EXPECT_EQ(counters.retained_membership_nodes, 2u);
+    EXPECT_EQ(counters.retained_membership_groups, 2u);
     EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
     EXPECT_GT(counters.retained_dirty_ancestry_queries, 0u);
-    EXPECT_EQ(stats.reused_captures, 257u);
+    EXPECT_EQ(stats.reused_captures, 258u);
     EXPECT_EQ(retained_dl_cache_get(state->retained_dl_cache, stable_view_id), entry);
     test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
     test_radiant_expect_surface_pixel(ui->surface, 30, 10, 0, 0, 255);
@@ -5976,6 +6080,206 @@ TEST(PaintOwnership, SelectiveFramesRejectDirtyAncestorsWithValidatedAndMissingS
     ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
     test_radiant_expect_surface_pixel(ui->surface, 30, 30, 255, 255, 0);
     render_export_session_end(&session); rdt_engine_term();
+}
+
+static const char* TEST_HTML_BOX_STYLE =
+    "display:inline-block;vertical-align:top;margin-left:8px;width:24px;height:16px;background:red;";
+
+static StrBuf* test_html_box_source(const char* decoration = "", const char* children = "",
+        const char* parent_style = "", const char* spacer_style = "height:8px") {
+    StrBuf* html = strbuf_new();
+    if (!html) return nullptr;
+    strbuf_append_str(html, "<html><body style='margin:0;"); strbuf_append_str(html, parent_style);
+    strbuf_append_str(html, "'><div id='spacer' style='"); strbuf_append_str(html, spacer_style);
+    strbuf_append_str(html, "'></div><div id='box' style='"); strbuf_append_str(html, TEST_HTML_BOX_STYLE);
+    strbuf_append_str(html, decoration); strbuf_append_str(html, "'>");
+    strbuf_append_str(html, children); strbuf_append_str(html, "</div></body></html>");
+    return html;
+}
+
+TEST(PaintOwnership, EmptyHtmlBoxesReuseCanonicalPaintAfterSiblingReflow) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) {
+        RenderExportSession session = {};
+        StrBuf* html = test_html_box_source(); ASSERT_NE(html, nullptr);
+        ASSERT_TRUE(render_export_session_begin_source(&session, html->str, 80, 80, false)); strbuf_free(html);
+        UiContext* ui = session.ui_context; auto* doc = ui->document.get(); auto* tree = doc->view_tree.get();
+        ui_context_set_device_scale(ui, density, density);
+        ui_context_create_surface(ui, (int)(80 * density), (int)(80 * density));
+        RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+        auto render = [&]() {
+            doc_state_mark_dirty(doc->state);
+            return render_output_render_view_tree_to_target(ui, tree, &target);
+        };
+        ASSERT_EQ(render(), 0);
+        auto* box = dom_find_element_by_id(doc->root, "box"); ASSERT_NE(box, nullptr);
+        auto* spacer = dom_find_element_by_id(doc->root, "spacer"); ASSERT_NE(spacer, nullptr);
+        DisplayList original;
+        ASSERT_TRUE(retained_dl_append_fragment(&original, retained_dl_cache_get(doc->state->retained_dl_cache, box->DomNode::id)));
+        const auto* canonical = original.front().draw_fragment.owner.get();
+        DisplayList placed;
+        for (const char* style : {"height:20.5px", "height:32px", "height:8px"}) {
+            ASSERT_TRUE(spacer->set_attribute("style", style));
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, spacer, spacer->parent, "style", nullptr);
+            layout_html_doc(ui, doc, false);
+            RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+            ASSERT_EQ(render(), 0);
+            EXPECT_EQ(counters.full_frame_reuses, 0u);
+            DisplayList current;
+            ASSERT_TRUE(retained_dl_append_fragment(&current,
+                retained_dl_cache_get(doc->state->retained_dl_cache, box->DomNode::id)));
+            EXPECT_EQ(current.front().draw_fragment.owner.get(), canonical); dl_destroy(&current);
+            EXPECT_EQ(counters.html_box_reuses, 1u); EXPECT_EQ(counters.html_box_recordings, 0u);
+            EXPECT_GT(retained_dl_cache_stats(doc->state->retained_dl_cache).reused_captures, 0u);
+            test_radiant_expect_surface_pixel(ui->surface, (unsigned)(10 * density),
+                (unsigned)((box->y + 4) * density), 255, 0, 0);
+            dl_clear(&placed);
+            ASSERT_TRUE(retained_dl_append_solid_box(&placed,
+                retained_dl_cache_get(doc->state->retained_dl_cache, box->DomNode::id),
+                {box->x * density, box->y * density, box->width * density, box->height * density},
+                box->boundary()->background->color));
+        }
+        ImageSurface* expected = image_surface_create(ui->surface->width, ui->surface->height); ASSERT_NE(expected, nullptr);
+        memcpy(expected->pixels, ui->surface->pixels, ui->surface->pitch * ui->surface->height);
+        render_export_session_end(&session);
+        EXPECT_TRUE(dl_validate(&original, nullptr)); dl_destroy(&original);
+        for (unsigned mode = 0; mode < 3; mode++) {
+            ImageSurface* replay = image_surface_create(expected->width, expected->height); ASSERT_NE(replay, nullptr);
+            memset(replay->pixels, 255, replay->pitch * replay->height);
+            DirtyRect dirty = {}; dirty.width = (float)replay->width; dirty.height = (float)replay->height;
+            test_radiant_replay_surface(&placed, replay, mode, &dirty);
+            EXPECT_EQ(memcmp(replay->pixels, expected->pixels, replay->pitch * replay->height), 0);
+            image_surface_destroy(replay);
+        }
+        image_surface_destroy(expected); dl_destroy(&placed);
+    }
+    rdt_engine_term();
+}
+
+TEST(PaintOwnership, HtmlBoxAdmissionFallsBackForChangedAndUnsupportedPaint) {
+    struct Case { const char* style; const char* children = ""; const char* parent_style = ""; bool scale_change = false; };
+    const Case cases[] = {{"background:blue"}, {"width:25px"}, {"opacity:.5"}, {"border-radius:4px"},
+        {"transform:translateX(.5px)"}, {"box-shadow:2px 2px 2px blue"}, {"clip-path:inset(2px)"},
+        {"margin-left:-.5px"}, {"background:linear-gradient(red,blue)"}, {"display:block"},
+        {"visibility:hidden"}, {"", "<span>x</span>"},
+        {"", "", "overflow:hidden;border-radius:8px;width:30px;height:25px"}, {"", "", "", true}};
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (const Case& test : cases) {
+        SCOPED_TRACE(test.style);
+        SCOPED_TRACE(test.children);
+        SCOPED_TRACE(test.parent_style);
+        SCOPED_TRACE(density);
+        RenderExportSession candidate = {}, reference = {};
+        StrBuf* html = test_html_box_source("", test.children); ASSERT_NE(html, nullptr);
+        ASSERT_TRUE(render_export_session_begin_source(&candidate, html->str, 80, 80, false)); strbuf_free(html);
+        UiContext* ui = candidate.ui_context; auto* doc = ui->document.get();
+        ui_context_set_device_scale(ui, density, density);
+        ui_context_create_surface(ui, (int)(80 * density), (int)(80 * density));
+        RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+        auto render = [&]() { doc_state_mark_dirty(doc->state); return render_output_render_view_tree_to_target(ui, doc->view_tree, &target); };
+        ASSERT_EQ(render(), 0);
+        auto* box = dom_find_element_by_id(doc->root, "box"); ASSERT_NE(box, nullptr);
+        auto* spacer = dom_find_element_by_id(doc->root, "spacer"); ASSERT_NE(spacer, nullptr);
+        StrBuf* style = strbuf_new(); ASSERT_NE(style, nullptr);
+        strbuf_append_str(style, TEST_HTML_BOX_STYLE); strbuf_append_str(style, test.style);
+        ASSERT_TRUE(box->set_attribute("style", style->str)); strbuf_free(style);
+        dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, box, box->parent, "style", nullptr);
+        ASSERT_TRUE(spacer->set_attribute("style", "height:20.5px"));
+        dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, spacer, spacer->parent, "style", nullptr);
+        if (*test.parent_style) {
+            style = strbuf_new(); ASSERT_NE(style, nullptr);
+            strbuf_append_str(style, "margin:0;"); strbuf_append_str(style, test.parent_style);
+            ASSERT_TRUE(box->parent->as_element()->set_attribute("style", style->str)); strbuf_free(style);
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, box->parent, box->parent->parent, "style", nullptr);
+        }
+        float current_density = test.scale_change ? density * 2 : density;
+        ui_context_set_device_scale(ui, current_density, current_density);
+        ui_context_create_surface(ui, (int)(80 * current_density), (int)(80 * current_density));
+        layout_html_doc(ui, doc, false);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); ASSERT_EQ(render(), 0); }
+        EXPECT_EQ(counters.full_frame_reuses, 0u); EXPECT_EQ(counters.html_box_reuses, 0u);
+        html = test_html_box_source(test.style, test.children, test.parent_style, "height:20.5px"); ASSERT_NE(html, nullptr);
+        ASSERT_TRUE(render_export_session_begin_source(&reference, html->str, 80, 80, false)); strbuf_free(html);
+        ui_context_set_device_scale(reference.ui_context, current_density, current_density);
+        ui_context_create_surface(reference.ui_context, ui->surface->width, ui->surface->height);
+        doc_state_mark_dirty(reference.ui_context->document->state);
+        ASSERT_EQ(render_output_render_view_tree_to_target(reference.ui_context,
+            reference.ui_context->document->view_tree, &target), 0);
+        EXPECT_EQ(memcmp(ui->surface->pixels, reference.ui_context->surface->pixels,
+            ui->surface->pitch * ui->surface->height), 0);
+        render_export_session_end(&reference); render_export_session_end(&candidate);
+    }
+    rdt_engine_term();
+}
+
+TEST(PaintOwnership, HtmlBoxAdmissionSkipsExternalContentAndHonorsFrameSetting) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    StrBuf* html = test_html_box_source(); ASSERT_NE(html, nullptr);
+    ASSERT_TRUE(render_export_session_begin_source(&session, html->str, 80, 80, false)); strbuf_free(html);
+    auto* ui = session.ui_context.get(); auto* tree = ui->document->view_tree.get();
+    RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+    ASSERT_EQ(render_output_render_view_tree_to_target(ui, tree, &target), 0);
+    auto* box = lam::view_require_block(dom_find_element_by_id(ui->document->root, "box")); ASSERT_NE(box, nullptr);
+    for (unsigned mode = 0; mode < 4; mode++) {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, tree, &profiler);
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        context.html_box_cache_enabled = mode != 2;
+        DirtyRect dirty = {}; DirtyTracker tracker = {};
+        if (mode == 3) {
+            // overlapping sibling damage cannot override a known color mismatch in the cached primitive.
+            Color blue = {}; blue.b = blue.a = 255;
+            box->boundary_mut()->background->color = blue;
+            dirty.x = box->x; dirty.y = box->y; dirty.width = box->width; dirty.height = box->height;
+            dirty.source_view_id = dom_find_element_by_id(ui->document->root, "spacer")->DomNode::id;
+            tracker.dirty_list = &dirty; context.dirty_tracker = lam::up(&tracker);
+            context.has_dirty_union = true;
+            context.dirty_union = {box->x, box->y, box->x + box->width, box->y + box->height};
+        }
+        if (mode == 1) {
+            render_block_view_content(&context, box, [](RasterRenderContext* raster, ViewBlock*) {
+                Color blue = {}; blue.b = blue.a = 255;
+                rc_fill_rect(raster, 10, 10, 4, 4, blue);
+            });
+        } else render_block_view(&context, box);
+        EXPECT_TRUE(dl_validate(frame.list(), nullptr));
+        EXPECT_EQ(counters.html_box_reuses, mode == 0 ? 1u : 0u);
+        bool content = false;
+        DisplayListCursor cursor(frame.list());
+        while (const auto* item = cursor.next())
+            content |= item->op == DL_FILL_RECT && item->fill_rect.color.b == 255;
+        EXPECT_EQ(content, mode == 1 || mode == 3); EXPECT_FALSE(cursor.failed);
+        if (mode == 2) EXPECT_GT(counters.path_clones, 0u);
+    }
+    render_export_session_end(&session); rdt_engine_term();
+}
+
+TEST(PaintOwnership, ClipElisionPreservesFractionalSolidBoxPixels) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (const char* color : {"red", "rgba(255,0,0,.5)"}) {
+        RenderExportSession sessions[2] = {};
+        for (unsigned control = 0; control < 2; control++) {
+            StrBuf* style = strbuf_new(); ASSERT_NE(style, nullptr);
+            strbuf_append_format(style, "margin-left:8.25px;width:24.5px;height:16.25px;background:%s;", color);
+            if (control) strbuf_append_str(style, "border:0 solid transparent");
+            StrBuf* html = test_html_box_source(style->str, "", "", "height:8.5px"); ASSERT_NE(html, nullptr);
+            strbuf_free(style);
+            ASSERT_TRUE(render_export_session_begin_source(&sessions[control], html->str, 80, 80, false)); strbuf_free(html);
+            auto* ui = sessions[control].ui_context.get();
+            ui_context_set_device_scale(ui, density, density);
+            ui_context_create_surface(ui, (int)(80 * density), (int)(80 * density));
+            RenderOutputTarget target = {}; render_output_target_init(&target, RENDER_OUTPUT_SCREEN, nullptr);
+            RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+            ASSERT_EQ(render_output_render_view_tree_to_target(ui, ui->document->view_tree, &target), 0);
+            EXPECT_EQ(counters.html_box_recordings, control ? 0u : 1u);
+        }
+        auto* surface = sessions[0].ui_context->surface.get();
+        EXPECT_EQ(memcmp(surface->pixels, sessions[1].ui_context->surface->pixels, surface->pitch * surface->height), 0);
+        render_export_session_end(&sessions[1]); render_export_session_end(&sessions[0]);
+    }
+    rdt_engine_term();
 }
 
 TEST(PaintOwnership, TextOverlayUsesSerialReplayWithATextFreeRetainedDocument) {
@@ -6233,14 +6537,8 @@ TEST(PaintOwnership, TranslatedVectorFragmentsMatchIndependentPlacementsAfterSou
     auto replay = [](DisplayList* list, uint32_t* pixels, unsigned mode) {
         for (size_t i = 0; i < 80 * 80; i++) pixels[i] = 0xffd0c0b0u;
         ImageSurface surface = {}; surface.pixels = pixels; surface.width = surface.height = 80; surface.pitch = 80 * 4;
-        ScratchArena scratch = {}; RdtVector vector = {};
-        rdt_vector_init(&vector, pixels, 80, 80, 80);
-        Bound viewport = {0, 0, 80, 80};
         DirtyRect rect = {}; rect.x = 10; rect.y = 12; rect.width = 44; rect.height = 40;
-        DirtyTracker dirty = {}; dirty.dirty_list = &rect;
-        if (mode == 1) dl_replay_tile(list, &vector, &surface, &scratch, 5, 7, 80, 80, 1);
-        else dl_replay(list, &vector, &surface, &viewport, &scratch, 1, mode == 2 ? &dirty : nullptr);
-        rdt_vector_destroy(&vector); scratch_release(&scratch);
+        test_radiant_replay_surface(list, &surface, mode, &rect, 5, 7);
     };
     for (unsigned mode = 0; mode < 3; mode++) for (unsigned repeat = 0; repeat < 2; repeat++) {
         SCOPED_TRACE(mode);
@@ -6594,47 +6892,63 @@ TEST_F(SvgVectorCacheTest, PublishedFrameOutlivesVectorRegistryAndDocument) {
 }
 
 TEST_F(SvgVectorCacheTest, HtmlCaptureSharesWarmSvgCommandsAcrossBothCacheTeardowns) {
-    ASSERT_NO_FATAL_FAILURE(open(
-        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
-        "<defs><linearGradient id='g'><stop stop-color='blue'/><stop offset='1' stop-color='green'/></linearGradient></defs>"
-        "<rect x='15' width='90' height='30' fill='red'/><path d='M5 40h90v20H5z' fill='url(#g)'/>"
-        "</svg></body></html>"));
-    ASSERT_NO_FATAL_FAILURE(paint());
-    DisplayList assembled;
-    uint32_t expected[160 * 120];
-    Pool* owner_pool = pool_create(); ASSERT_NE(owner_pool, nullptr);
-    auto* consumer = retained_dl_cache_create(owner_pool); ASSERT_NE(consumer, nullptr);
-    {
-        RenderProfiler profiler = {}; RasterRenderContext context;
-        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
-        int begin = dl_begin_element(frame.list(), 49010, 0, 0, 160, 120);
-        context.block.clip = {0, 0, 70, 120};
-        render_inline_svg(&context, lam::view_require_block(svg));
-        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
-        dl_end_element(frame.list(), begin);
-        memset(ui->surface->pixels, 255, sizeof(expected));
-        Bound viewport = {0, 0, 160, 120};
-        dl_replay(frame.list(), &context.vec, ui->surface, &viewport, &context.scratch, 1, nullptr);
-        test_radiant_expect_surface_pixel(ui->surface, 60, 10, 255, 0, 0);
-        test_radiant_expect_surface_pixel(ui->surface, 80, 10, 255, 255, 255);
-        memcpy(expected, ui->surface->pixels, sizeof(expected));
-        counters = {}; RenderPipelineMetricsScope probe(&counters);
-        DisplayResourceSummary* resources = nullptr;
-        ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, frame.list(), frame.list()->item_count(), &resources, &assembled));
-        EXPECT_EQ(counters.retained_foreign_chunks, 1u);
-        EXPECT_TRUE(dl_resources_current(&assembled, 0, 0));
-        dl_resource_summary_destroy(resources);
+    for (float placement : {0.0f, 13.25f}) {
+        ASSERT_NO_FATAL_FAILURE(open(
+            "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+            "<defs><linearGradient id='g'><stop stop-color='blue'/><stop offset='1' stop-color='green'/></linearGradient></defs>"
+            "<rect x='15' width='90' height='30' fill='red'/><svg x='5' y='40' width='55' height='20' overflow='hidden'>"
+            "<path d='M0 0h90v20H0z' fill='url(#g)'/></svg>"
+            "</svg></body></html>"));
+        ASSERT_NO_FATAL_FAILURE(paint());
+        DisplayList assembled;
+        uint32_t expected[3][160 * 120];
+        DirtyRect dirty = {}; dirty.x = 10; dirty.y = 12; dirty.width = 44; dirty.height = 40;
+        Bound clip = {0, 0, 70, 120};
+        Pool* owner_pool = pool_create(); ASSERT_NE(owner_pool, nullptr);
+        auto* consumer = retained_dl_cache_create(owner_pool); ASSERT_NE(consumer, nullptr);
+        {
+            RenderProfiler profiler = {}; RasterRenderContext context;
+            RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+            int begin = dl_begin_element(frame.list(), 49010, 0, 0, 160, 120);
+            context.block.clip = clip;
+            context.has_transform = placement != 0;
+            context.transform = rdt_matrix_translate(placement, placement * 0.5f);
+            render_inline_svg(&context, lam::view_require_block(svg));
+            PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+            dl_end_element(frame.list(), begin);
+            for (unsigned mode = 0; mode < 3; mode++) {
+                memset(ui->surface->pixels, 255, sizeof(expected[mode]));
+                test_radiant_replay_surface(frame.list(), ui->surface, mode, &dirty, 5, 7);
+                if (mode == 0) {
+                    test_radiant_expect_surface_pixel(ui->surface, 60, 10, 255, 0, 0);
+                    test_radiant_expect_surface_pixel(ui->surface, 80, 10, 255, 255, 255);
+                    if (!placement) test_radiant_expect_surface_pixel(ui->surface, 65, 50, 255, 255, 255);
+                }
+                memcpy(expected[mode], ui->surface->pixels, sizeof(expected[mode]));
+            }
+            counters = {}; RenderPipelineMetricsScope probe(&counters);
+            DisplayResourceSummary* resources = nullptr;
+            ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, frame.list(), frame.list()->item_count(), &resources, &assembled));
+            EXPECT_EQ(counters.retained_foreign_chunks, 1u);
+            EXPECT_TRUE(dl_resources_current(&assembled, 0, 0));
+            dl_resource_summary_destroy(resources);
+        }
+        memcpy(ui->surface->pixels, expected[0], sizeof(expected[0]));
+        ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(placement, placement * 0.5f, nullptr, &clip));
+        if (placement) { render_export_session_end(&session); ui = nullptr; svg = nullptr; }
+        retained_dl_cache_destroy(consumer); pool_destroy(owner_pool);
+        if (ui) { render_export_session_end(&session); ui = nullptr; svg = nullptr; }
+        ASSERT_TRUE(dl_validate(&assembled, nullptr));
+        ImageSurface* surface = image_surface_create(160, 120); ASSERT_NE(surface, nullptr);
+        for (unsigned mode = 0; mode < 3; mode++) {
+            SCOPED_TRACE(placement);
+            SCOPED_TRACE(mode);
+            memset(surface->pixels, 255, sizeof(expected[mode]));
+            test_radiant_replay_surface(&assembled, surface, mode, &dirty, 5, 7);
+            EXPECT_EQ(memcmp(expected[mode], surface->pixels, sizeof(expected[mode])), 0);
+        }
+        image_surface_destroy(surface); dl_destroy(&assembled);
     }
-    retained_dl_cache_destroy(consumer); pool_destroy(owner_pool);
-    render_export_session_end(&session); ui = nullptr; svg = nullptr;
-    ASSERT_TRUE(dl_validate(&assembled, nullptr));
-    ImageSurface* surface = image_surface_create(160, 120); ASSERT_NE(surface, nullptr);
-    memset(surface->pixels, 255, sizeof(expected));
-    RdtVector vector = {}; rdt_vector_init(&vector, (uint32_t*)surface->pixels, 160, 120, surface->pitch / 4);
-    ScratchArena scratch = {}; Bound viewport = {0, 0, 160, 120};
-    dl_replay(&assembled, &vector, surface, &viewport, &scratch, 1, nullptr);
-    EXPECT_EQ(memcmp(expected, surface->pixels, sizeof(expected)), 0);
-    rdt_vector_destroy(&vector); scratch_release(&scratch); image_surface_destroy(surface); dl_destroy(&assembled);
 }
 
 TEST_F(SvgVectorCacheTest, FontAndImageEpochsInvalidateOtherwiseStablePaint) {

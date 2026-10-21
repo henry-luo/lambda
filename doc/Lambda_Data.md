@@ -125,10 +125,12 @@ Lambda treats empty strings as real `string` values. The empty symbol literal
 
 **Sized numeric types** use a postfix suffix on numeric literals. Types `i8` through `u32` and `f16`/`f32` are packed inline in the 64-bit `Item` representation (zero heap allocation). Types `i64`, `u64`, and `f64` are heap-allocated.
 
-**Overflow behavior**: Sized integer arithmetic follows a Go-like fixed-width model and wraps deterministically in the result width:
+**Overflow behavior**: Sized integer arithmetic follows a Go-like fixed-width model and wraps deterministically in the result width at run time. A constant expression built only from sized literals must fit its type, so `127i8 + 1i8`, like `128i8`, is a compile error (**S4.1.5**):
 ```lambda
-127i8 + 1i8    // -128 (wraps)
-255u8 + 1u8    // 0 (wraps)
+let small = 127i8
+small + 1i8    // -128 (wraps)
+let byte = 255u8
+byte + 1u8     // 0 (wraps)
 ```
 
 **Special float values**:
@@ -1149,11 +1151,16 @@ Lambda performs limited implicit coercion:
 Sized integer arithmetic follows a Go-like fixed-width model:
 
 ```lambda
-// Same-width compact arithmetic preserves width and wraps
-127i8 + 1i8                 // -128i8
-255u8 + 1u8                 // 0u8
-2147483647i32 + 1i32        // -2147483648i32
-4294967295u32 + 1u32        // 0u32
+// Same-width compact arithmetic preserves width and wraps at run time
+// (`127i8 + 1i8` with literal operands is a compile error, S4.1.5)
+let i8_max = 127i8
+let u8_max = 255u8
+let i32_max = 2147483647i32
+let u32_max = 4294967295u32
+i8_max + 1i8                // -128i8
+u8_max + 1u8                // 0u8
+i32_max + 1i32              // -2147483648i32
+u32_max + 1u32              // 0u32
 
 // Mixed widths promote to the wider participating width
 42i8 + 1000i16              // i16 result (1042)
@@ -1165,7 +1172,7 @@ Sized integer arithmetic follows a Go-like fixed-width model:
 42i8 + 100                  // int result (142)
 100i32 + 3.14               // float result (103.14)
 1i64 + 1                    // integer result (exact 2)
-1u64 + 0.5                  // decimal result (exact 1.5)
+1u64 + 0.5                  // float result (a bounded integer meets float in float)
 
 // All sized types are compatible with number
 42i8 is number              // true

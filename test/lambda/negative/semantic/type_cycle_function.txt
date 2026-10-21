@@ -1,0 +1,1 @@
+type 'R' refers to itself through no structural position

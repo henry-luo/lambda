@@ -29,7 +29,7 @@ Lambda procedures run concurrently as **tasks**: lightweight children started wi
 
 ## Overview
 
-- Concurrency is available only inside a `pn`: `start` and the other task operations are built-in procedures, and calling one from `fn` context is error E224 (S13.1.1v2).
+- Concurrency is available only inside a `pn`: `start` and the other task operations are built-in procedures, and calling one from `fn` context is error E224 (S13.1.1v3).
 - A task is started with `start(target, args, options)` and yields an opaque **handle**. Handles compare by identity; only the concurrency built-ins operate on them (S13.1.3v2).
 - Tasks share nothing mutable: a started procedure may not capture a `var`, and tasks communicate by message and by immutable values (S13.1.4).
 - Failures are values: waiting on a task yields its result or its error, including cancellation and timeouts (S13.1.5).
@@ -74,11 +74,12 @@ pn main() { both() }
 
 ## Structured Scope
 
-A started handle is owned by the nearest lexical block (S13.3.1):
+A started handle is owned by the nearest lexical block (S13.3.1v2):
 
 - **Normal exit joins.** When the block ends, it waits for its children.
 - **Error exit cancels, then joins.** When an error leaves the block, its children are cancelled first.
 - **Returning a handle transfers it** to the caller. Storing or sending a handle grants the capability to wait on it or send to it, not ownership.
+- **A document can own a task.** In a document's handlers and templates, `start(target, args, {owner: 'document'})` makes the document the owner, so the task outlives the handler that started it; the document cancels it, then joins it, when the window closes or navigates away. To reach the task later, keep its handle in the view's state. Not yet implemented (see [Implementation Status](#implementation-status)).
 
 ```lambda
 pn noisy(n) {
@@ -359,7 +360,7 @@ See [Lambda_Modules.md](Lambda_Modules.md) for importing JavaScript modules and 
 
 | Function | Result | Behavior |
 |----------|--------|----------|
-| `start(target, args = [], options = {})` | handle | Start a child procedure without blocking. `target` is a `pn`, `args` an array. `options.mode` is `'task'` (default); `'thread'` and `'process'` are compile error E501, *not implemented yet*. |
+| `start(target, args = [], options = {})` | handle | Start a child procedure without blocking. `target` is a `pn`, `args` an array. `options.mode` is `'task'` (default); `'thread'` and `'process'` are compile error E501, *not implemented yet*. `options.owner: 'document'` (S13.3.1v2) is also *not implemented yet*. |
 | `wait(handle)` | `T^E` | Park until the task finishes; yield its value or its error. |
 | `wait(handle, timeout: ms)` | `T^E` | As above, but give up after `ms` with error 310; the task keeps running. |
 | `select(h1, h2, …, timeout: ms)` | `handle^E` | Park until one handle completes and yield it. |
@@ -383,3 +384,4 @@ Error codes: 310 *task wait timed out*, 319 *task cancelled*, 320 *task mailbox 
 | Parallel stream pipelines | Not yet implemented; streams themselves are pending (S13.4.2, S14.3) |
 | Value-producing handler over a procedure call | Should be a compile error (S7.6.7v4); currently compiles and yields `null` |
 | Capture rule for procedure arrows passed to `start` | Not yet enforced (S13.1.4) |
+| Document-owned tasks, `start(…, {owner: 'document'})` | Not yet implemented (S13.3.1v2); the option is rejected as an unknown name |

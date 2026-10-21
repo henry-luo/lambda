@@ -777,9 +777,11 @@ static float flex_auto_container_content_extent(LayoutContext* lycon,
     return extent;
 }
 
-bool flex_height_is_parent_constrained(ViewBlock* container,
+bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch) {
+    // natural cross-size flow precedes parent stretch; its provisional box is not a constraint.
+    if (context && context->natural_flex_height_root == container) return false;
     if (!container || !container->fi || !container->parent ||
         !container->parent->is_element()) return false;
     DomElement* parent_element = container->parent->as_element();
@@ -845,7 +847,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     FlexContainerLayout* flex_layout = lycon->flex_container;
 
     bool has_explicit_height = layout_axis_has_given_size(flex_container, false) ||
-        flex_height_is_parent_constrained(flex_container, true, true);
+        flex_height_is_parent_constrained(lycon, flex_container, true, true);
     bool is_actually_grid_item = (flex_container->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
                                   flex_container->gi &&
                                   flex_container->gi->computed_grid_row_start > 0;
@@ -1008,62 +1010,126 @@ namespace radiant {
 struct FlexMeasuredFlowKey {
     CssFontKey font;
     AvailableSpace available_space;
+    CssGeometryContext geometry_context;
     const char* text;
     size_t length;
     uint64_t style_epoch, mutation_epoch, font_generation;
     uint32_t generation, style_revision, input_revision;
-    float width, viewport_width, viewport_height, root_font_size, raster_scale;
+    float width, block_constraint, viewport_width, viewport_height, root_font_size, raster_scale;
     CssEnum text_wrap_style;
+    bool provisional_parent_block;
 };
 
-// tier-2: the selected view owns the memo and its live subtree geometry.
-// another trial layout invalidates the memo before rewriting those fragments.
-struct FlexMeasuredFlow {
+// tier-2: completed queries own their fragments independently of the live subtree.
+struct FlexFlowEntry {
     FlexMeasuredFlowKey key;
     SizeF content;
     float height, first_baseline, last_baseline;
-    bool valid;
+    bool natural;
+    lam::Own<LayoutFlowResult> fragments;
+    lam::Own<FlexFlowEntry> next;
 };
 
+struct FlexMeasuredFlow {
+    lam::Own<FlexFlowEntry> first;
+    FlexFlowEntry* live;
+    uint32_t generation;
+    unsigned count;
+};
+
+static void flex_flow_entries_release(FlexMeasuredFlow* cache, Pool* pool) {
+    while (cache->first) {
+        lam::Own<FlexFlowEntry> entry = cache->first;
+        cache->first = entry->next;
+        layout_flow_result_release(pool, entry->fragments.get());
+        entry->fragments = nullptr;
+        lam::free_owned(pool, entry);
+    }
+    cache->live = nullptr;
+    cache->count = 0;
+}
+
 void flex_measured_flow_release(LayoutCache* cache, Pool* pool) {
-    if (cache) lam::free_owned(pool, cache->measured_flex_flow);
+    if (!cache || !cache->measured_flex_flow) return;
+    flex_flow_entries_release(cache->measured_flex_flow, pool);
+    lam::free_owned(pool, cache->measured_flex_flow);
 }
 
 void flex_measured_flow_invalidate(DomElement* element) {
     if (element && element->layout_cache && element->layout_cache->measured_flex_flow)
-        element->layout_cache->measured_flex_flow->valid = false;
+        element->layout_cache->measured_flex_flow->live = nullptr;
 }
 
 static bool flex_flow_subtree_is_independent(LayoutContext* context, DomNode* node,
-                                            int depth, int* remaining) {
+                                            int depth, int* remaining, bool* has_flex,
+                                            bool flex_child = false, bool abs_contained = false) {
     if (depth >= MAX_LAYOUT_DEPTH || --*remaining < 0) return false;
     if (!node->is_element()) return node->is_text() || node->is_comment();
     DomElement* element = node->as_element();
+    if (layout_display_is_none(element->display)) return true;
+    if (context->generated_effects_prepared && node->view_type == RDT_VIEW_MARKER)
+        return element->marker_prop() != nullptr;
     ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    bool flex = element->display.inner == CSS_VALUE_FLEX;
+    bool grid = element->display.inner == CSS_VALUE_GRID;
+    bool table = element->table_prop() || element->cell_prop() ||
+        is_table_internal_display(element->display.inner);
+    bool replaced = layout_element_is_replaced(element);
+    if (flex || grid || table) *has_flex = true;
+    uint8_t contract = LAYOUT_QUERY_ASSIGNED_INLINE_SIZE |
+        (context->generated_effects_prepared ? LAYOUT_QUERY_ORDERED_EFFECTS : 0);
     if (!css_resolved_style_input_revision(context, element) ||
-        !layout_flow_is_context_independent(element, true) ||
-        element->display.list_item ||
-        element->form_control() || element->scroller || element->embed ||
+        !((flex || grid || table || replaced) ? layout_box_is_context_independent(element, true, contract)
+               : layout_flow_is_context_independent(element, true, contract)) ||
+        (element->display.list_item && !context->generated_effects_prepared) ||
+        element->form_control() || (element->embed && !flex && !grid && !replaced) ||
         element->transform || element->shadow_root_element() ||
-        layout_is_mathml_root(element) || layout_generated_pseudo(element, nullptr, nullptr) ||
-        layout_is_html_list_container_tag(element->tag()) ||
+        layout_is_mathml_root(element) ||
+        (!context->generated_effects_prepared && (layout_generated_pseudo(element, nullptr, nullptr) ||
+         layout_is_html_list_container_tag(element->tag()))) ||
         (block->blk && (block->block()->line_clamp || block->block()->line_clamp_inherited ||
-            block->block()->counter_reset || block->block()->counter_increment ||
-            block->block()->counter_set || block->block()->content_visibility_skipped))) return false;
-    // even unmaterialized pseudos can consume counters, quotes or first-line state during flow.
+            (!context->generated_effects_prepared && (block->block()->counter_reset ||
+             block->block()->counter_increment || block->block()->counter_set)) ||
+            block->block()->content_visibility_skipped))) return false;
+    // percentage gaps and dependent bases distinguish intrinsic and final definite sizing
+    // even when both passes happen to produce the same numeric block size.
+    const FlexProp* style = flex && element->embed ? element->embedp()->flex.get() : nullptr;
+    if (style && (style->row_gap_is_percent || style->column_gap_is_percent)) return false;
+    const GridProp* grid_style = grid && element->embed ? element->embedp()->grid.get() : nullptr;
+    if (grid_style && (grid_style->row_gap_is_percent || grid_style->column_gap_is_percent)) return false;
+    if (flex_child) {
+        CssFlexBasisValue basis = {};
+        // assigned inline size determines row bases; column percentages retain their block-size policy.
+        ViewBlock* owner = element->parent && element->parent->is_element()
+            ? lam::unsafe_view_block_element_storage(element->parent->as_element()) : nullptr;
+        CssEnum direction = owner ? layout_flex_direction(owner) : CSS_VALUE__UNDEF;
+        bool inline_basis = direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE;
+        bool dependent = element->flex_item() &&
+            (element->flex_item()->flex_basis_is_percent || element->flex_item()->flex_basis_is_stretch);
+        dependent = dependent || (css_prop_compute_declared_flex_basis(element, &basis) &&
+            (basis.is_percent || basis.is_stretch));
+        if (dependent && !inline_basis) return false;
+    }
+    // generated text is immutable after the ordered stage; first-line/letter still transform flow.
     for (unsigned kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
-        if (element->pseudo_style(static_cast<PseudoStyleKind>(kind))) return false;
+        if (element->pseudo_style(static_cast<PseudoStyleKind>(kind)) &&
+            (!context->generated_effects_prepared || kind == PSEUDO_STYLE_FIRST_LETTER ||
+             kind == PSEUDO_STYLE_FIRST_LINE)) return false;
     }
     if (element->position) {
         const PositionProp* position = element->positionp();
-        if ((position->position != CSS_VALUE_STATIC && position->position != CSS_VALUE__UNDEF) ||
+        bool contained = position->position == CSS_VALUE_RELATIVE ||
+            (position->position == CSS_VALUE_ABSOLUTE && abs_contained);
+        if ((position->position != CSS_VALUE_STATIC && position->position != CSS_VALUE__UNDEF && !contained) ||
             (position->float_prop != CSS_VALUE_NONE && position->float_prop != CSS_VALUE__UNDEF) ||
             (position->clear != CSS_VALUE_NONE && position->clear != CSS_VALUE__UNDEF)) return false;
+        if (contained) abs_contained = true;
     }
     const char* custom_layout = custom_layout_name_for_element(element);
     if (custom_layout && custom_layout[0]) return false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (!flex_flow_subtree_is_independent(context, child, depth + 1, remaining)) return false;
+        if (!flex_flow_subtree_is_independent(context, child, depth + 1, remaining, has_flex,
+                                              flex, abs_contained)) return false;
     }
     return true;
 }
@@ -1083,25 +1149,27 @@ static bool flex_flow_key(LayoutContext* context, ViewBlock* item,
     CssResolvedSize preferred = {};
     if (!css_resolved_style_size(context, item, LAYOUT_AXIS_Y, &preferred) ||
         preferred.value >= 0.0f || preferred.percentage ||
-        !css_resolved_style_is_containing_block_independent(item)) return false;
+        !css_resolved_style_is_block_size_independent(item)) return false;
     int remaining = context->node_limit - context->node_count;
-    if (!flex_flow_subtree_is_independent(context, item, context->depth, &remaining)) return false;
+    bool has_flex = false;
+    if (!flex_flow_subtree_is_independent(context, item, context->depth, &remaining, &has_flex)) return false;
     // subtree dirty notifications advance input_revision through every ancestor.
     DomText* text = item->first_child->is_text() && !item->first_child->next_sibling
         ? item->first_child->as_text() : nullptr;
-    *key = {css_font_key(item->font), context->available_space,
+    *key = {css_font_key(item->font), context->available_space, css_geometry_context(context, item),
         text ? text->text.get() : nullptr, text ? text->length : 0,
         context->doc->style_query_epoch, context->doc->mutation_epoch,
         context->ui_context->font_ctx
             ? font_context_resource_generation(context->ui_context->font_ctx) : 0,
         context->doc->view_tree->measurement_cache_generation,
         css_resolved_style_input_revision(context, item), item->intrinsic_input_revision,
-        item->width, context->width, context->height, context->root_font_size,
-        ui_context_raster_scale(context->ui_context), context->block.text_wrap_style};
+        item->width, has_flex ? item->height : -1.0f, context->width, context->height, context->root_font_size,
+        ui_context_raster_scale(context->ui_context), context->block.text_wrap_style,
+        parent->block_size_is_provisional};
     return key->generation && key->style_revision;
 }
 
-static bool flex_flow_keys_equal(const FlexMeasuredFlowKey& a, const FlexMeasuredFlowKey& b) {
+static bool flex_flow_keys_equal(DomElement* item, const FlexMeasuredFlowKey& a, const FlexMeasuredFlowKey& b) {
     CacheEntry constraints = {};
     constraints.valid = true;
     constraints.available_space = a.available_space;
@@ -1111,24 +1179,75 @@ static bool flex_flow_keys_equal(const FlexMeasuredFlowKey& a, const FlexMeasure
         a.style_epoch == b.style_epoch && a.mutation_epoch == b.mutation_epoch &&
         a.font_generation == b.font_generation && a.generation == b.generation &&
         a.style_revision == b.style_revision && a.input_revision == b.input_revision &&
-        a.width == b.width && a.viewport_width == b.viewport_width &&
+        a.width == b.width && a.block_constraint == b.block_constraint &&
+        a.viewport_width == b.viewport_width &&
         a.viewport_height == b.viewport_height && a.root_font_size == b.root_font_size &&
-        a.raster_scale == b.raster_scale && a.text_wrap_style == b.text_wrap_style;
+        a.raster_scale == b.raster_scale && a.text_wrap_style == b.text_wrap_style &&
+        css_resolved_geometry_context_equal(item, a.geometry_context, b.geometry_context) &&
+        a.provisional_parent_block == b.provisional_parent_block;
 }
 
-static bool flex_replay_measured_flow(LayoutContext* context, ViewBlock* item,
-                                      FlexContainerLayout* parent) {
-    FlexMeasuredFlow* result = item && item->layout_cache
+static FlexFlowEntry* flex_replay_measured_flow(LayoutContext* context, ViewBlock* item,
+                                      FlexContainerLayout* parent, bool natural_query = false) {
+    FlexMeasuredFlow* cache = item && item->layout_cache
         ? item->layout_cache->measured_flex_flow.get() : nullptr;
     FlexMeasuredFlowKey key = {};
-    if (!result || !result->valid || !flex_flow_key(context, item, parent, &key) ||
-        !flex_flow_keys_equal(result->key, key)) return false;
-    // the cross axis may stretch after measurement; every retained descendant is independent of it.
-    item->content_width = result->content.width;
-    item->content_height = result->content.height;
-    item->block_mut()->first_line_baseline = result->first_baseline;
-    item->block_mut()->last_line_baseline = result->last_baseline;
-    context->profiler.flex_flow_reuses++;
+    if (!cache || !flex_flow_key(context, item, parent, &key)) return nullptr;
+    for (FlexFlowEntry* entry = cache->first; entry; entry = entry->next) {
+        FlexMeasuredFlowKey query = key;
+        // natural queries do not inherit the final stretch allocation of the root.
+        if (natural_query && entry->natural) query.block_constraint = entry->key.block_constraint;
+        if (!flex_flow_keys_equal(item, entry->key, query)) continue;
+        if (cache->live != entry && !layout_flow_result_apply(context, entry->fragments)) return nullptr;
+        cache->live = entry;
+        item->content_width = entry->content.width;
+        item->content_height = entry->content.height;
+        item->block_mut()->first_line_baseline = entry->first_baseline;
+        item->block_mut()->last_line_baseline = entry->last_baseline;
+        context->profiler.flex_flow_reuses++;
+        return entry;
+    }
+    return nullptr;
+}
+
+static bool flex_record_measured_flow(LayoutContext* context, ViewBlock* item,
+                                      FlexContainerLayout* parent, float height, bool natural) {
+    FlexMeasuredFlowKey key = {};
+    if (!flex_flow_key(context, item, parent, &key)) return false;
+    LayoutCache* owner = layout_pass_ensure_cache(context, item);
+    if (!owner) return false;
+    if (!owner->measured_flex_flow) owner->measured_flex_flow = lam::own(
+        (FlexMeasuredFlow*)pool_calloc(context->pool, sizeof(FlexMeasuredFlow)));
+    FlexMeasuredFlow* cache = owner->measured_flex_flow;
+    if (!cache) return false;
+    if (cache->generation != key.generation) {
+        flex_flow_entries_release(cache, context->pool);
+        cache->generation = key.generation;
+    }
+    lam::Own<FlexFlowEntry> entry = lam::own((FlexFlowEntry*)pool_calloc(context->pool, sizeof(FlexFlowEntry)));
+    if (!entry) return false;
+    entry->fragments = lam::own(layout_flow_result_capture(context, item));
+    if (!entry->fragments) { lam::free_owned(context->pool.get(), entry); return false; }
+    entry->key = key;
+    entry->content = {item->content_width, item->content_height};
+    entry->height = height;
+    entry->first_baseline = item->block()->first_line_baseline;
+    entry->last_baseline = item->block()->last_line_baseline;
+    entry->natural = natural;
+    entry->next = cache->first;
+    cache->first = entry;
+    cache->live = entry;
+    cache->count++;
+    if (cache->count > LAYOUT_CACHE_SIZE) {
+        FlexFlowEntry* previous = cache->first;
+        while (previous->next && previous->next->next) previous = previous->next;
+        lam::Own<FlexFlowEntry> expired = previous->next;
+        previous->next = nullptr;
+        layout_flow_result_release(context->pool, expired->fragments.get());
+        expired->fragments = nullptr;
+        lam::free_owned(context->pool.get(), expired);
+        cache->count--;
+    }
     return true;
 }
 
@@ -1142,35 +1261,28 @@ bool flex_measure_completed_flow(LayoutContext* context, ViewElement* element,
     if (!height || content_width <= 0.0f ||
         !radiant::flex_flow_key(context, item, parent, &key) ||
         content_width != layout_content_size_from_border_box(item, item->width, true)) return false;
-    radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(context, item);
-    if (!cache) return false;
-    if (!cache->measured_flex_flow) cache->measured_flex_flow = lam::own(
-        (radiant::FlexMeasuredFlow*)pool_calloc(context->pool, sizeof(radiant::FlexMeasuredFlow)));
-    radiant::FlexMeasuredFlow* result = cache->measured_flex_flow;
-    if (!result) return false;
-    if (radiant::flex_replay_measured_flow(context, item, parent)) {
+    if (radiant::FlexFlowEntry* result = radiant::flex_replay_measured_flow(context, item, parent, true)) {
         *height = result->height;
         return true;
     }
     float previous_height = item->height;
     FlexContainerLayout* previous_parent = context->flex_container;
+    ViewBlock* previous_natural_root = context->natural_flex_height_root;
     context->flex_container = lam::up(parent);
+    context->natural_flex_height_root = lam::up(item);
     item->height = layout_border_size_from_content_box(item, 0.0f, false);
     flex_retained_forget_content(item);
     layout_flex_item_content_pass(context, item);
     // a definite parent may stretch the used box; line sizing needs its natural content contribution.
     *height = layout_border_size_from_content_box(item, item->content_height, false);
     // budget-limited traversal is not a completed result that final flow can consume.
-    radiant::FlexMeasuredFlowKey completed_key = {};
     bool complete = context->node_count <= context->node_limit &&
-        radiant::flex_flow_key(context, item, parent, &completed_key);
-    *result = {completed_key, {item->content_width, item->content_height}, *height,
-        item->block()->first_line_baseline, item->block()->last_line_baseline,
-        complete};
+        radiant::flex_record_measured_flow(context, item, parent, *height, true);
     item->height = previous_height;
     context->flex_container = lam::up(previous_parent);
+    context->natural_flex_height_root = lam::up(previous_natural_root);
     context->profiler.flex_flow_measures++;
-    return result->valid;
+    return complete;
 }
 
 static void flex_update_item_scroller(ViewBlock* item) {
@@ -1178,6 +1290,21 @@ static void flex_update_item_scroller(ViewBlock* item) {
     // content_height excludes the content origin; scrollers compare against the border box.
     float scroll_height = layout_border_size_from_content_box(item, item->content_height, false);
     update_scroller(item, item->content_width, scroll_height);
+}
+
+static bool flex_content_reads_block_constraint(DomNode* node, unsigned depth) {
+    if (!node || !node->is_element() || depth >= MAX_LAYOUT_DEPTH) return false;
+    DomElement* element = node->as_element();
+    if (element->display.inner == CSS_VALUE_FLEX || element->display.inner == CSS_VALUE_GRID) return true;
+    if (element->blk) {
+        const BlockProp* block = element->block();
+        if (!isnan(block->given_height_percent) || !isnan(block->given_min_height_percent) ||
+            !isnan(block->given_max_height_percent)) return true;
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (flex_content_reads_block_constraint(child, depth + 1)) return true;
+    }
+    return false;
 }
 
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
@@ -1193,6 +1320,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     flex_retained_forget_content(flex_item);
     layout_flex_item_content_pass(lycon, flex_item);
     flex_retained_record_content(lycon, flex_item, parent_flex, final_width, final_height);
+    radiant::flex_record_measured_flow(lycon, flex_item, parent_flex,
+        layout_border_size_from_content_box(flex_item, flex_item->content_height, false), false);
 }
 
 static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item) {
@@ -1379,8 +1508,9 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         }
     }
 
-    if (flex_item->display.inner == CSS_VALUE_FLEX && flex_item->scroller) {
-        // nested flex bypasses block finalization; measure its laid-out children for scroll overflow.
+    if (flex_item->display.inner == CSS_VALUE_FLEX &&
+        (flex_item->scroller || lycon->natural_flex_height_root == flex_item)) {
+        // nested flex bypasses block finalization; publish its natural extent as well as scroll overflow.
         update_multipass_advance_y(lycon, flex_item);
     }
     if (flex_item->display.inner != RDT_DISPLAY_REPLACED &&
@@ -1755,6 +1885,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                   original_height_count, flex_container->node_name());
         original_height_count = 0;
     }
+    struct CompletedConstraint { ViewElement* item; float height; };
+    CompletedConstraint* completed = heights_scope.array_zero<CompletedConstraint>((size_t)original_height_count);
+    int completed_count = 0;
     int item_index = 0;
     flex_for_each_final_content_item(flex_container, flex,
         [&](ViewElement* item) {
@@ -1765,6 +1898,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         [&](ViewElement* item) {
             if (layout_view_is_abs_or_fixed(lam::view_require_block(item))) return;
             layout_flex_item_content(lycon, lam::view_require_block(item));
+            if (completed && completed_count < original_height_count)
+                completed[completed_count++] = {item, item->height};
         }, true);
 
     apply_anonymous_flex_text_geometry(flex);
@@ -1785,10 +1920,12 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             // CRITICAL FIX: Also check if this container is a flex item whose height was
             bool is_flex_item = has_flex_item_prop(flex_container) ||
                                 (flex_container->form_control());
-            if (!has_explicit_height && is_flex_item && flex_container->height > 0 &&
+            if (!has_explicit_height && lycon->natural_flex_height_root != flex_container &&
+                is_flex_item && flex_container->height > 0 &&
                 has_flex_item_prop(flex_container)) {
                 float fg = get_item_flex_grow(flex_container);
-                if (flex_container->fi->main_size_from_flex && fg > 0.0f) {
+                if (flex_container->fi->main_size_from_flex && fg > 0.0f &&
+                    !flex->block_size_is_provisional) {
                     has_explicit_height = true;  // Height was set by parent flex
                 }
             }
@@ -1839,6 +1976,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     ? layout_axis_border_box_extent(
                         flex_container, LAYOUT_AXIS_Y, recomputed_content_height)
                     : flex_container->height + y_shift;
+                if (flex->block_size_is_provisional) new_height = max(new_height, flex_container->height);
                 new_height = layout_apply_min_max_axis(flex_container, new_height, false, true);
                 flex_container->height = new_height;
                 if (flex) {
@@ -1856,7 +1994,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 
     if (flex && is_main_axis_horizontal(flex)) {
         bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
-        if (!has_explicit_height && !flex->has_definite_cross_size) {
+        if (!has_explicit_height && (!flex->has_definite_cross_size || flex->block_size_is_provisional)) {
             float actual_cross_height = flex_measured_cross_extent(flex, lycon, false);
             if (actual_cross_height > 0.0f) {
                 float actual_border_height = layout_axis_border_box_extent(
@@ -1889,7 +2027,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             [&](ViewElement* fi, float orig) {
                 bool has_explicit_height = fi->blk && fi->block_mut()->given_height >= 0;
                 bool is_definite_stretched = fi->fi && !has_explicit_height &&
-                    flex->has_definite_cross_size &&
+                    flex->has_definite_cross_size && !flex->block_size_is_provisional &&
                     flex_item_resolved_align_self(fi, flex->align_items) == ALIGN_STRETCH;
                 if (is_definite_stretched && fi->height != orig && orig > 0.5f) {
                     fi->height = orig;
@@ -1916,6 +2054,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 FlexLineCrossExtents extents = flex_line_cross_extents(flex);
                 float new_cross_axis_size = ((flex->wrap != WRAP_NOWRAP) &&
                     (flex->line_count > 1)) ? extents.total : extents.maximum;
+                if (flex->block_size_is_provisional) {
+                    // the allocated line can come from a taller sibling; content may enlarge it, not shrink it.
+                    new_cross_axis_size = max(new_cross_axis_size, flex->cross_axis_size);
+                }
                 float new_height = layout_axis_border_box_extent(
                     flex_container, LAYOUT_AXIS_Y, new_cross_axis_size);
                 float constrained_height = layout_apply_min_max_axis(flex_container, new_height, false, true);
@@ -1940,8 +2082,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // CRITICAL FIX: For row flex containers with auto height, recalculate container
     if (flex && is_main_axis_horizontal(flex)) {
         bool has_explicit_height = layout_axis_has_given_size(flex_container, false) ||
-            flex_height_is_parent_constrained(flex_container, false, true);
-        if (!has_explicit_height && flex_container->fi) {
+            flex_height_is_parent_constrained(lycon, flex_container, false, true);
+        if (!has_explicit_height && lycon->natural_flex_height_root != flex_container && flex_container->fi) {
             float fg = get_item_flex_grow(flex_container);
             if (fg > 0) {
                 has_explicit_height = true;
@@ -1981,6 +2123,16 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
             }
         }
+    }
+
+    for (int index = 0; index < completed_count; index++) {
+        ViewElement* item = completed[index].item;
+        if (fabsf(item->height - completed[index].height) <= FLEX_CONTENT_EPSILON ||
+            !flex_content_reads_block_constraint(item, 0)) continue;
+        // final line stretch is a new constraint only for content that actually reads block size.
+        float allocated_height = item->height;
+        layout_flex_item_content(lycon, lam::view_require_block(item));
+        item->height = allocated_height;
     }
 
     // flex stretch can replace a content-sized item's height after its abspos

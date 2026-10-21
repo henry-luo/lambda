@@ -487,9 +487,9 @@ def main():
     parser.add_argument("--language", choices=["lambda", "js"], default="lambda",
                         help="source language (default: lambda)")
     parser.add_argument("--control-js-runtime", choices=["formal", "legacy", "mvp", "mvp-lmd"], default="formal",
-                        help="control JS entry (formal default; legacy labels archived LJS binaries)")
+                        help="control JS entry (formal default; other selectors target archived binaries)")
     parser.add_argument("--candidate-js-runtime", choices=["formal", "legacy", "mvp", "mvp-lmd"], default="formal",
-                        help="candidate JS entry (formal default; legacy labels archived LJS binaries)")
+                        help="candidate JS entry (formal default; other selectors target archived binaries)")
     parser.add_argument("-s", "--suite", default=None, help="comma-separated suite filter")
     parser.add_argument("-b", "--bench", default=None, help="comma-separated benchmark filter")
     parser.add_argument(

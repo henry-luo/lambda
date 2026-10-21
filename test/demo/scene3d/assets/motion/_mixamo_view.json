@@ -1,0 +1,124 @@
+{
+  "name": "MixamoCharacterDancesTheRetargetedSamba",
+  "viewport": {
+    "width": 240,
+    "height": 340
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#dancer-view",
+      "seconds": 1
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "one",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        240,
+        320
+      ],
+      "rgba": [
+        [
+          120,
+          255
+        ],
+        [
+          0,
+          255
+        ],
+        [
+          0,
+          255
+        ]
+      ],
+      "count": {
+        "min": 1500
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#dancer-view",
+      "seconds": 5
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "five",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        240,
+        320
+      ],
+      "reference": "one",
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#dancer-view",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        240,
+        320
+      ],
+      "reference": "one",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#dancer-view",
+      "width": 240,
+      "height": 320,
+      "file": "temp/mixamo/dancer-1s.png"
+    }
+  ]
+}

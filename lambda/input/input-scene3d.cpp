@@ -254,11 +254,11 @@ bool asset_import_a3d(SceneAsset& a,Item input) {
     ElementReader vertex=source.findChildElement("vertices"),textmap=source.findChildElement("textmap"),rig=source.findChildElement("bones");
     for(int64_t i=0;i<vertex.childCount();i++) vertices.append(vertex.childAt(i).item());
     for(int64_t i=0;i<textmap.childCount();i++) uv.append(textmap.childAt(i).item());
-    if(vertices.size()>262144||rig.childCount()>16) return a.fail("A3D vertex/bone quota exceeded");
+    if(vertices.size()>262144||rig.childCount()>SCENE_ASSET_BONE_LIMIT) return a.fail("A3D vertex/bone quota exceeded");
     double scale=asset_number(source.get_attr("scale"),1);if(!isfinite(scale)||scale<=0) return a.fail("A3D scale must be positive");
     double scales[3]={scale,scale,scale};a.attr(a.root,"scale",a.array(scales,3));
     Item skeleton=a.element("skeleton"),skeleton_id=a.id("skeleton",0);a.attr(skeleton,"id",skeleton_id);
-    double initial_positions[16][3]={},initial_quaternions[16][4]={};
+    double initial_positions[SCENE_ASSET_BONE_LIMIT][3]={},initial_quaternions[SCENE_ASSET_BONE_LIMIT][4]={};
     for(int64_t i=0;i<rig.childCount();i++) {
         auto bone=rig.childAt(i).asElement();Item out=a.element("bone");a.attr(out,"id",a.id("bone",i));
         MapBuilder pose=a.ctx.builder.map();pose.put("position",bone.get_attr("position").item()).put("orientation",bone.get_attr("orientation").item());
@@ -278,7 +278,7 @@ bool asset_import_a3d(SceneAsset& a,Item input) {
             self(self,bone);
         }
     };visit(visit,skeleton);
-    int remap[16]={};for(size_t i=0;i<order.size();i++) remap[order[i]]=i;
+    int remap[SCENE_ASSET_BONE_LIMIT]={};for(size_t i=0;i<order.size();i++) remap[order[i]]=i;
     unsigned action_index=0;Item default_material=a.material();
     for(int64_t i=0;i<source.childCount();i++) {
         auto chunk=source.childAt(i).asElement();
@@ -299,7 +299,7 @@ bool asset_import_a3d(SceneAsset& a,Item input) {
             if(bones.empty()||!chunk.childCount()) return a.fail("A3D action requires a skeleton and frames");
             double duration=asset_number(chunk.get_attr("duration_ms"))/1000;if(!isfinite(duration)||duration<=0) return a.fail("A3D action duration must be positive");
             Item clip=a.element("animation-clip");a.attr(clip,"id",a.id("clip",action_index++));a.attr(clip,"label",a.text(chunk.get_attr("name").cstring()));a.attr(clip,"duration",a.number(duration));
-            lam::ArrayList<double> times,poses,rotations;double positions[16][3],quaternions[16][4];
+            lam::ArrayList<double> times,poses,rotations;double positions[SCENE_ASSET_BONE_LIMIT][3],quaternions[SCENE_ASSET_BONE_LIMIT][4];
             memcpy(positions,initial_positions,sizeof(positions));memcpy(quaternions,initial_quaternions,sizeof(quaternions));
             auto snapshot=[&](double time) {
                 times.append(time);for(size_t b=0;b<bones.size();b++) {for(double v:positions[b]) poses.append(v);for(double v:quaternions[b]) rotations.append(v);}

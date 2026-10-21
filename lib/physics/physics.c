@@ -131,6 +131,18 @@ static bool pmass(PhysicsWorld* w,size_t index,PhysicsError* e) {
     return true;
 }
 
+// descriptor checks shared by creation and reconfiguration; they normalize rotations in place.
+static bool pbody_valid(PhysicsBodyDesc* d) {
+    return d->id&&(unsigned)d->motion<=PHYSICS_KINEMATIC_VELOCITY&&ppose(&d->pose)&&pfinite(d->velocity)&&pfinite(d->angular_velocity)&&
+        !(d->motion==PHYSICS_FIXED&&(plen(d->velocity)>0||plen(d->angular_velocity)>0))&&
+        isfinite(d->linear_damping)&&d->linear_damping>=0&&isfinite(d->angular_damping)&&d->angular_damping>=0&&isfinite(d->gravity_scale);
+}
+static bool pcollider_valid(PhysicsColliderDesc* d) {
+    return d->id&&(unsigned)d->shape<=PHYSICS_BOX&&ppose(&d->pose)&&
+        (d->shape==PHYSICS_SPHERE?(isfinite(d->radius)&&d->radius>0):(pfinite(d->size)&&d->size.x>0&&d->size.y>0&&d->size.z>0))&&
+        isfinite(d->density)&&d->density>=0&&isfinite(d->friction)&&d->friction>=0&&isfinite(d->restitution)&&d->restitution>=0&&d->restitution<=1;
+}
+
 bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) {
     if(result)*result=NULL;
     if(!d||!result||!pfinite(d->gravity)||!isfinite(d->timestep)||d->timestep<=0||!isfinite(d->length_scale)||d->length_scale<=0||
@@ -153,18 +165,14 @@ bool physics_create(const PhysicsDesc* d,PhysicsWorld** result,PhysicsError* e) 
     }
     for(size_t i=0;i<d->body_count;i++) {
         PBody* b=&w->bodies[i];b->d=d->bodies[i];
-        if(!b->d.id||pbody(w,b->d.id)!=i||(unsigned)b->d.motion>PHYSICS_KINEMATIC_VELOCITY||!ppose(&b->d.pose)||!pfinite(b->d.velocity)||!pfinite(b->d.angular_velocity)||
-            (b->d.motion==PHYSICS_FIXED&&(plen(b->d.velocity)>0||plen(b->d.angular_velocity)>0))||
-            !isfinite(b->d.linear_damping)||b->d.linear_damping<0||!isfinite(b->d.angular_damping)||b->d.angular_damping<0||!isfinite(b->d.gravity_scale)) {
+        if(!pbody_valid(&b->d)||pbody(w,b->d.id)!=i) {
             pfail(w,e,"invalid or duplicate physics body",b->d.id);physics_destroy(w);return false;
         }
     }
     for(size_t i=0;i<d->collider_count;i++) {
         PCollider* c=&w->colliders[i];c->d=d->colliders[i];c->body=pbody(w,c->d.body);
         bool duplicate=false;for(size_t j=0;j<i;j++)duplicate|=w->colliders[j].d.id==c->d.id;
-        if(!c->d.id||duplicate||c->body==SIZE_MAX||(unsigned)c->d.shape>PHYSICS_BOX||!ppose(&c->d.pose)||
-            (c->d.shape==PHYSICS_SPHERE?(!isfinite(c->d.radius)||c->d.radius<=0):(!pfinite(c->d.size)||c->d.size.x<=0||c->d.size.y<=0||c->d.size.z<=0))||
-            !isfinite(c->d.density)||c->d.density<0||!isfinite(c->d.friction)||c->d.friction<0||!isfinite(c->d.restitution)||c->d.restitution<0||c->d.restitution>1) {
+        if(duplicate||c->body==SIZE_MAX||!pcollider_valid(&c->d)) {
             pfail(w,e,"invalid or duplicate physics collider",c->d.id);physics_destroy(w);return false;
         }
     }
@@ -348,7 +356,7 @@ bool physics_apply(PhysicsWorld* w,const PhysicsCommand* commands,size_t count,P
     if(!w||w->faulted||count>65536||(count&&!commands))return pfail(w,e,"invalid or faulted physics world",0);
     for(size_t i=0;i<count;i++) {
         PhysicsCommand c=commands[i];size_t index=pbody(w,c.body);
-        if((unsigned)c.kind>PHYSICS_GRAVITY||!pfinite(c.value)||(c.at_point&&!pfinite(c.point))||
+        if((unsigned)c.kind>PHYSICS_ANGULAR_VELOCITY||!pfinite(c.value)||(c.at_point&&!pfinite(c.point))||
             (c.kind!=PHYSICS_GRAVITY&&index==SIZE_MAX)||((c.kind==PHYSICS_TELEPORT||c.kind==PHYSICS_TARGET)&&!ppose(&c.pose))||
             (c.kind==PHYSICS_TARGET&&w->bodies[index].d.motion!=PHYSICS_KINEMATIC_POSITION))
             return pfail(w,e,"invalid physics command",c.body);
@@ -366,10 +374,47 @@ bool physics_apply(PhysicsWorld* w,const PhysicsCommand* commands,size_t count,P
         else if(c.kind==PHYSICS_FORCE){b->force=padd(b->force,value);b->torque=padd(b->torque,pcross(r,value));}
         else if(c.kind==PHYSICS_TORQUE)b->torque=padd(b->torque,value);
         else if(c.kind==PHYSICS_VELOCITY)b->d.velocity=value;
+        else if(c.kind==PHYSICS_ANGULAR_VELOCITY)b->d.angular_velocity=value;
         else if(c.kind==PHYSICS_TELEPORT){ppose(&c.pose);b->d.pose=c.pose;w->previous_count=0;}
         else if(c.kind==PHYSICS_TARGET){ppose(&c.pose);b->target=c.pose;b->target_set=true;}
     }
     if(!pupdate(w,e))return false;
+    PhysicsState updated;return physics_read(w,&updated,e);
+}
+bool physics_configure(PhysicsWorld* w,const PhysicsBodyDesc* bodies,size_t body_count,
+        const PhysicsColliderDesc* colliders,size_t collider_count,PhysicsError* e) {
+    if(!w||w->faulted||body_count!=w->d.body_count||collider_count!=w->d.collider_count||(body_count&&!bodies)||(collider_count&&!colliders))
+        return pfail(w,e,"invalid or faulted physics world",0);
+    for(size_t i=0;i<body_count;i++) {
+        PhysicsBodyDesc d=bodies[i];
+        if(d.id!=w->bodies[i].d.id||d.motion!=w->bodies[i].d.motion||!pbody_valid(&d))return pfail(w,e,"physics configuration changes a body's identity or motion",d.id);
+    }
+    for(size_t i=0;i<collider_count;i++) {
+        PhysicsColliderDesc d=colliders[i];
+        if(d.id!=w->colliders[i].d.id||d.body!=w->colliders[i].d.body||!pcollider_valid(&d))return pfail(w,e,"physics configuration changes a collider's identity or owner",d.id);
+    }
+    // mass properties can still reject the edit, so the previous configuration is kept until all succeed
+    PBody* bodies_before=mem_calloc(body_count+1,sizeof(PBody),MEM_CAT_EVAL);
+    PCollider* colliders_before=mem_calloc(collider_count+1,sizeof(PCollider),MEM_CAT_EVAL);
+    if(!bodies_before||!colliders_before){mem_free(bodies_before);mem_free(colliders_before);return pfail(w,e,"physics allocation failed",0);}
+    memcpy(bodies_before,w->bodies,body_count*sizeof(PBody));memcpy(colliders_before,w->colliders,collider_count*sizeof(PCollider));
+    for(size_t i=0;i<collider_count;i++){w->colliders[i].d=colliders[i];ppose(&w->colliders[i].d.pose);}
+    bool valid=true;
+    for(size_t i=0;i<body_count&&valid;i++) {
+        PBody* b=&w->bodies[i];
+        b->d.linear_damping=bodies[i].linear_damping;b->d.angular_damping=bodies[i].angular_damping;b->d.gravity_scale=bodies[i].gravity_scale;
+        b->mass=b->inverse_mass=0;b->com=pv(0,0,0);memset(b->inertia,0,sizeof(b->inertia));memset(b->inverse,0,sizeof(b->inverse));
+        valid=pmass(w,i,e);if(b->d.motion==PHYSICS_DYNAMIC)pwake(b);
+    }
+    if(valid)valid=pupdate(w,e);
+    if(!valid) {
+        memcpy(w->bodies,bodies_before,body_count*sizeof(PBody));memcpy(w->colliders,colliders_before,collider_count*sizeof(PCollider));
+        w->faulted=false;pupdate(w,NULL);
+    }
+    mem_free(bodies_before);mem_free(colliders_before);
+    if(!valid)return false;
+    // changed shapes invalidate the warm-start cache
+    w->previous_count=0;
     PhysicsState updated;return physics_read(w,&updated,e);
 }
 bool physics_read(PhysicsWorld* w,PhysicsState* out,PhysicsError* e) {

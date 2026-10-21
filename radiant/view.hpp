@@ -851,6 +851,18 @@ typedef struct ViewBlock ViewBlock;
 typedef struct TextShadow TextShadow;
 
 // tier-2: view-pool, rebuilt each relayout
+struct ComputedFontInputs {
+    const char* family;
+    const char* platform_fallback_family;
+    float font_size, used_zoom, initial_letter_computed_font_size;
+    CssEnum font_style, font_weight, font_variant, font_kerning;
+    int16_t font_weight_numeric;
+    float letter_spacing, word_spacing;
+    float letter_spacing_percent, letter_spacing_length, word_spacing_percent, word_spacing_length;
+    bool letter_spacing_is_percent, letter_spacing_is_set, word_spacing_is_percent, word_spacing_is_set;
+    bool font_size_from_medium;
+};
+
 struct FontProp {
     lam::Up<char> family;  // font family name
     float font_size;  // computed font size in CSS pixels
@@ -901,6 +913,7 @@ struct FontProp {
     uint32_t text_emphasis_mark;      // first codepoint of the computed mark, or zero
     Color text_emphasis_color;
     lam::Up<const char> platform_fallback_family; // platform family used for UA glyph fallback
+    lam::Shared<const ComputedFontInputs> computed_inputs; // immutable selected-tree CSS inputs; metrics stay owned here
 };
 
 size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity);
@@ -1101,6 +1114,7 @@ typedef struct FlexRetainedPass {
     uint8_t content_row_parent : 1;       // parent direction the content pass saw
     uint8_t content_definite_cross : 1;   // parent definite cross size the content pass saw
     uint8_t content_main_from_flex : 1;
+    uint8_t content_provisional_block : 1;
 } FlexRetainedPass;
 
 // FlexItemProp definition (needed by flex.hpp)
@@ -3182,6 +3196,7 @@ struct ViewTree {
     CanonicalPropStats canonical_stats;
     // Distinct computed font-family lists; strings live in prop_pool until tree teardown.
     lam::Own<struct CanonicalStrings> canonical_strings;
+    lam::Own<struct CanonicalFontInputs> canonical_fonts;
     lam::Own<TextRect> free_text_rects; // Reusable retained text fragments owned by prop_pool.
     lam::Up<View> root;
     HtmlVersion html_version;
@@ -3205,6 +3220,7 @@ struct ViewTree {
 
 uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
+const ComputedFontInputs* view_tree_canonical_font_inputs(ViewTree* tree, const FontProp* font);
 LAM_NODE_OF(ViewTree, NodeViewTree);
 // Element and text props live in the view tree's storage; Document-level nodes
 // hold them through lam::ViewProp / lam::ViewRef.

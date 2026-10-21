@@ -668,12 +668,21 @@ bool radiant_tick_document_animation_scheduler(DomDocument* document, double now
 static void tick_document_animation_tree(DomDocument* document,
                                          DocumentAnimationTick* tick);
 
-static bool tick_embedded_document_animation(View* view, void* context) {
-    DocumentAnimationTick* tick = (DocumentAnimationTick*)context;
+static bool tick_embedded_document_animation(View* view, void* user_data) {
+    DocumentAnimationTick* tick = (DocumentAnimationTick*)user_data;
     if (!view || !view->is_block() || !tick) return true;
     ViewBlock* block = lam::view_require_block(view);
     DomDocument* embedded = block->embed ? block->embedp()->doc : nullptr;
     if (embedded) {
+        if (tick->depth < MAX_IFRAME_DEPTH && embedded->js.host_ui_context &&
+            embedded->js.mutation_count > 0 &&
+            !dom_engine_layout_active(embedded) && (!context || context->execution_depth == 0)) {
+            // a parent callback can mutate its child's CSS; commit it at the same frame boundary.
+            EventContext event = {};
+            event.ui_context = (UiContext*)embedded->js.host_ui_context;
+            layout_event_document_reflow(&event, embedded, block);
+            tick->ticked = true;
+        }
         DocumentAnimationTick child = {
             tick->now, tick->depth + 1, true, tick->anchor_host_time, false, false
         };
@@ -7993,6 +8002,9 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
         // the same resolver layout uses writes the retained view prop
         resolve_css_property(record->presentation_property,
             style_tree_get_declaration(element->specified_style, record->presentation_property), &lycon);
+        // the admitted non-inherited writes now have committed computed values (VR15).
+        element->set_styles_resolved(true);
+        element->set_needs_style_recompute(false);
     }
     uint64_t t1 = time_now_ns();
     frame_profile_cascade_finished(doc);
@@ -8956,6 +8968,20 @@ void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,
         const char* clip,uint64_t action,double detail,double seconds) {
     RadiantTimingEventData data={type,clip,nullptr,seconds,detail,action};
     radiant_queue_timing_event(uicon,target,radiant_build_scene_timing_event,&data);
+}
+struct RadiantSceneStateEventData { const char* controller; const char* from; const char* to; double seconds; };
+static Item radiant_build_scene_state_event(void* userdata) {
+    auto* data=(RadiantSceneStateEventData*)userdata;
+    RootFrame roots(2);Rooted<Item> event(roots,js_create_event("statechange",false,false));
+    Rooted<Item> value(roots,make_string_item(data->controller));dom_realm_set_name(event.get(),"controller",value.get());
+    value.set(make_string_item(data->from));dom_realm_set_name(event.get(),"from",value.get());
+    value.set(make_string_item(data->to));dom_realm_set_name(event.get(),"to",value.get());
+    value.set(js_make_number(data->seconds));dom_realm_set_name(event.get(),"time",value.get());return event.get();
+}
+bool radiant_dispatch_scene_state_event(UiContext* uicon,DomElement* target,const char* controller,
+        const char* from,const char* to,double seconds) {
+    RadiantSceneStateEventData data={controller,from,to,seconds};
+    return radiant_queue_timing_event(uicon,target,radiant_build_scene_state_event,&data);
 }
 
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,

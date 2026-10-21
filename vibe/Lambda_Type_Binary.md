@@ -548,8 +548,8 @@ identity. Phase 6 extends that principle downward to storage ownership.
 | Value/view | Current byte ownership | Current view/lifetime rule | Target |
 |---|---|---|---|
 | Lambda `binary` | dedicated `Binary` header; runtime values retain `ByteStorage`, compiler/pool constants stay inline | storage-backed slices flatten to `(storage, offset, length)` | implemented |
-| Owned `ArrayNum` | separate GC data-zone allocation | movable unless pinned | retained as the measured fast path; no speculative wholesale migration |
-| `ArrayNum` view | explicitly tagged `ArrayNumShape` backing descriptor | GC views pin; handle views refresh; storage views retain | implemented; no ownership inference from `base` |
+| Owned `ArrayNum` | separate GC data-zone allocation | ~~movable unless pinned~~ movable: compaction relocates it (pinning retired by 2026-10-21) | retained as the measured fast path; no speculative wholesale migration |
+| `ArrayNum` view | explicitly tagged `ArrayNumShape` backing descriptor | ~~GC views pin~~ GC views are rebased onto the moved base buffer after compaction; handle views refresh; storage views retain | implemented; no ownership inference from `base` |
 | `JsArrayBuffer` | embedded stable `ByteBufferHandle` over retained `ByteStorage` | resize/detach/transfer/COW advance generation and release exactly once | implemented |
 | JS typed array / Buffer | generation-aware ArrayNum view over the buffer handle | reads resolve current storage; every non-shared writer prepares COW | implemented |
 
@@ -691,7 +691,8 @@ Convergence proceeds in two levels:
    the owner. This completes the binary ↔ JS ↔ ArrayNum storage triangle.
 2. **Profile-gated convergence:** large owned `ArrayNum` allocations may move
    from the GC data zone to `ByteStorage`, enabling cheap cross-isolate sharing
-   and eliminating permanent pinning for those arrays. Small/local arrays may
+   ~~and eliminating permanent pinning for those arrays~~ (pinning has since been
+   retired: compaction rebases GC views instead). Small/local arrays may
    retain the current GC data-zone fast path.
 
 The second level is not required to ship binary zero-copy interop. The 2026-07-15

@@ -655,6 +655,7 @@ bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
         retained->final_width != item->width || retained->final_height != item->height ||
         retained->content_row_parent != is_main_axis_horizontal(parent_flex) ||
         retained->content_definite_cross != parent_flex->has_definite_cross_size ||
+        retained->content_provisional_block != parent_flex->block_size_is_provisional ||
         retained->content_main_from_flex != item->fi->main_size_from_flex) return false;
     // a measurement since the item qualified may have re-resolved its subtree.
     if (!layout_retained_subtree_is_stable(static_cast<DomNode*>(item), true)) return false;
@@ -683,6 +684,7 @@ void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
     retained->final_height = final_height;
     retained->content_row_parent = is_main_axis_horizontal(parent_flex);
     retained->content_definite_cross = parent_flex->has_definite_cross_size;
+    retained->content_provisional_block = parent_flex->block_size_is_provisional;
     retained->content_main_from_flex = item->fi->main_size_from_flex;
     retained->laid_width = item->width;
     retained->laid_height = item->height;

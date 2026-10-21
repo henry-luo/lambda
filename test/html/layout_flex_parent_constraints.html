@@ -1,0 +1,19 @@
+<!doctype html>
+<style>
+@font-face { font-family: HeightMetrics; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 HeightMetrics; }
+.page { display: flex; width: 200px; }
+.main { display: flex; flex: 1; }
+.content { display: flex; flex-direction: column; justify-content: space-between; flex: 1; }
+.small { font-size: 10px; }
+.positioned { position: relative; }
+.sidebar { width: 20px; }
+.sidebar > div { height: 100%; }
+</style>
+<div id="result">
+  <div id="auto-page" class="page"><aside id="auto-sidebar" class="sidebar"><div id="auto-dependent">X</div></aside><div id="auto-main" class="main"><div id="auto-content" class="content"><article id="auto-article"><div class="positioned"><span id="auto-text" class="small">XX</span></div><div><span class="small">XX</span></div></article><footer id="auto-footer">XX</footer></div></div></div>
+  <div id="tall-page" class="page"><div id="tall-main" class="main"><div id="tall-content" class="content"><article id="tall-article"><div class="positioned"><span class="small">XX</span></div><div><span class="small">XX</span></div></article><footer id="tall-footer">XX</footer></div></div><div style="height:100px;width:10px"></div></div>
+  <div id="fixed-page" class="page" style="height:100px"><div id="fixed-main" class="main"><div id="fixed-content" class="content"><article id="fixed-article"><div class="positioned"><span class="small">XX</span></div><div><span class="small">XX</span></div></article><footer id="fixed-footer">XX</footer></div></div></div>
+  <div id="start-page" class="page" style="align-items:flex-start"><div id="start-main" class="main"><div id="start-content" class="content"><article><div class="positioned"><span class="small">XX</span></div><div><span class="small">XX</span></div></article><footer>XX</footer></div></div></div>
+  <div id="resource-page" class="page"><div id="resource-content" class="content"><div id="resource-text">XX</div><svg id="resource-svg" width="10" height="10" style="height:100%"><rect width="10" height="10"/></svg></div></div>
+</div>

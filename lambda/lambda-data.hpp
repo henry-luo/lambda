@@ -729,6 +729,8 @@ Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
 bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
     Item value);
 Item scalar_storage_read(Item item, bool immortal);
+// JS reading: an in-band i64/u64 may return as an inline int (one JS number type)
+Item js_scalar_storage_read(Item item, bool immortal);
 
 static inline Map* map_shape_field_to_map(void* map_data, const ShapeEntry* field) {
     return map_data && field ? *(Map**)map_field_ptr(map_data, field) : nullptr;
@@ -1709,6 +1711,7 @@ typedef struct Input {
     // Only the runtime tree sets `keeps_external_edges`; the table is lazy.
     bool keeps_external_edges;
     struct hashmap* external_edges;
+    struct RootTransitionIndexes* root_transition_indexes; // pool-owned indexes for high-fanout shape roots
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
@@ -1833,6 +1836,7 @@ TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* step
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset);
 Item array_num_read_item(ArrayNum* array, int64_t offset);
 double array_num_read_double(ArrayNum* arr, int64_t offset);
+int64_t array_num_read_int64_bits(ArrayNum* arr, int64_t offset);
 // shared rank validation for native consumers of strided numeric arrays.
 int array_num_get_shape_strides(ArrayNum* array, int64_t* shape, int64_t* strides);
 

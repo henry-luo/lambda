@@ -111,7 +111,7 @@ static bool flex_container_height_is_fixed(FlexContainerLayout* flex,
         container->gi && container->gi->computed_grid_row_start > 0;
     if (!fixed && is_grid_item && container->height > 0.0f) fixed = true;
     if (!fixed && container->height > 0.0f &&
-        flex_height_is_parent_constrained(container, true, row_axis ? false : true)) {
+        flex_height_is_parent_constrained(flex->lycon, container, true, row_axis ? false : true)) {
         fixed = true;
     }
     return fixed;
@@ -672,6 +672,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                   container->source_loc());
         return;
     }
+    FlexContainerLayout* parent_layout = lycon->flex_container;
     lycon->flex_container = lam::up(flex);
     flex->scratch_mark = mark;
     flex->lycon = lam::up(lycon);  // Store layout context for intrinsic sizing
@@ -788,7 +789,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool has_max_height = layout_positive_max_axis_or(container, false, 0.0f) > 0.0f;
     // is not definite; auto-height flex containers may carry cached intrinsic
     bool height_assigned_by_parent = false;
-    if (container->height > 0) {
+    if (container->height > 0 && lycon->natural_flex_height_root != container) {
         bool is_grid_item_col = (container->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
                                 container->gi && container->gi->computed_grid_row_start > 0;
         if (is_grid_item_col) {
@@ -823,6 +824,12 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
     }
+
+    // preserve final stretch/percentage semantics while allowing underestimated auto lines to grow.
+    flex->block_size_is_provisional = height_assigned_by_parent && !has_explicit_height &&
+        parent_layout && parent_layout->container == container->parent &&
+        is_main_axis_horizontal(parent_layout) &&
+        (parent_layout->block_size_is_provisional || !parent_layout->has_definite_cross_size);
 
     bool has_explicit_main = main_axis == LAYOUT_AXIS_X
         ? has_explicit_width : has_explicit_height;
@@ -1694,8 +1701,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // a clean item of an incremental pass replays its last measurement and content pass.
         flex_retained_item_begin(lycon, item, container_content_width, container_content_height);
         if (!(has_definite_w && has_definite_h)) {
-            bool width_only = is_main_axis_horizontal(flex_layout) &&
-                !layout_block_inline_axis_is_vertical(item_block);
+            // column bases query height after cross-width constraints are available too.
+            bool width_only = !layout_block_inline_axis_is_vertical(item_block);
             measure_flex_child_content(lycon, child, width_only);
         }
         // Step 3: Check if should skip (absolute, hidden)

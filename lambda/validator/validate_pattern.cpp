@@ -311,7 +311,8 @@ static ValidationResult* validate_list_occurrence(
         Type* fast_operand = unwrap_type(type_unary->operand);
         if (!fast_operand) return validation_verdict(false);
         if (list && fast_count > 0) {
-            TypeType fast_wrapper;
+            // stack bytes must not dispatch this wrapper as another type kind.
+            TypeType fast_wrapper = {};
             fast_wrapper.type_id = LMD_TYPE_TYPE;
             fast_wrapper.type = fast_operand;
             for (int i = 0; i < fast_count; i++) {

@@ -1,9 +1,6 @@
 {
   "schema_version": 1,
   "description": "D3.3.4, D5.2.1v3, S7.11.4; JC24: expand one native recursive body, preserve the scalar return ABI and stack guard, and keep one real self-call. Two arithmetic copies distinguish bounded expansion from no expansion or an unbounded copy.",
-  "args": [
-    "--runtime=mvp-lmd"
-  ],
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

@@ -14,17 +14,22 @@ fn runs(doc) {
   [for (k in content(para)) if (type(k) == string) k else name(k)]
 }
 
-// allocation between the parse and the first read of its text
-fn churn(n) => len([for (i in 1 to n) {a: i, b: "x"}])
+// forced collection needs allocations, not a large retained graph: scanning a
+// growing array at every allocation makes this ownership probe quadratic.
+fn churn() => len([for (i in 1 to 32) {a: i, b: "x"}])
 
 let emphasis = parse("Inline *x* and **y** then `z`.\n", {type: 'markdown', sourcepos: true}) ^ { null }
-let c1 = churn(20000);
+let c1 = churn();
 runs(emphasis);
 
 let math = parse("Inline $\\frac{1}{2}$ and $\\sqrt{x}$.\n", {type: 'markdown', sourcepos: true}) ^ { null }
-let c2 = churn(20000);
+let c2 = churn();
 runs(math);
 
+// an unmatched inline delimiter flushes text before falling back to literal
+// text, guaranteeing adjacent runs still reach the merge after parser changes.
+let literal = parse("Inline `unclosed [text\n", {type: 'markdown', sourcepos: true}) ^ { null }
+
 // the runs read the same after a second round of allocation
-let c3 = churn(20000);
-[runs(emphasis), runs(math)]
+let c3 = churn();
+[runs(emphasis), runs(math), runs(literal)]

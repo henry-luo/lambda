@@ -41,6 +41,8 @@ same trade §2.1 already makes for flex-`int` overflow, and a caller who needs e
 `integer` and `decimal` and can name them. Implementation: `lambda_numeric_classify` in
 `lambda/runtime/lambda-number.hpp` demotes the `DECIMAL` join back to `FLOAT` when neither
 operand was a true `integer`/`decimal`.
+
+**2026-10-21 sync note — division and modulo follow S4.5.** The formal spec governs two points that §3.3 stated differently. A computed zero divisor never raises: `/` follows IEEE, and `div`/`%` yield the domain's poison (S4.5.1–S4.5.3). And sized operands of `div`/`%` enter the non-sized domain before the operation (`i8`…`u32 → int`, `i64`/`u64 → integer`), as `/` already did (S4.5.3). Sized-lane selection and Go wrapping (§3.3.1) therefore cover `+ - *`, bitwise operations and shifts only (S4.4.4). The superseded sentences in §3.3–§3.4 are struck through in place. `lambda_numeric_classify` (`lambda/runtime/lambda-number.hpp`) already excludes `div`/`%` from the sized branch. Two more changes the same day: S4.1.5's "literal/constant overflow is a compile error" is now enforced for constant expressions (`200u8 + 100u8`, `-1u8`), matching §3.3's constants bullet, and array reductions over sized lanes widen — narrow lanes accumulate in `int`, means in `float` (S10.2.4; `vibe/Lambda_Typed_Array.md` §7.6).
  Flex-`int` result overflow deliberately remains `int → float` for practical performance, accepting correctly rounded precision loss at boundary cases.
 **Normative home:** this doc designs in the area owned by `../doc/Lambda_Formal_Semantics.md` **§4 Numerics** (§4.1 two-tier integers [C3] · §4.3 promotion lattice [C3] · §4.4 decimal tiers [C13] · §4.5 float↔decimal [C8.5a] · §4.7 division) and touches **§5 Equality** [C8], **§6 Ordering** [C11], **§9.2 Covariance** [C12]. Where v2 amends a section, the amendment flows back into the ADR when implemented; until then the ADR governs the language and this doc records the agreed direction.
 **Grounding:** `js_make_number` (`lambda/js/js_runtime_value.cpp`), the compact-int band (`INT53_MAX` in `lambda/lambda.h` = ±(2⁵³−1), deliberately the JS safe-integer band), the two libmpdec contexts (`g_fixed_ctx` decimal128 / `g_unlimited_ctx` arbitrary in `lambda/lambda-decimal.cpp`), the `NUM_SIZED` carriers and `EnumArrayNumElemType` (`lambda/lambda.h`), the scalar-home contract (`Lambda_Design_Stack_API.md`), and the Go spec (`go.dev/ref/spec#Numeric_types`, `#Integer_overflow`, `#Constants`, `#Conversions`).
@@ -137,11 +139,11 @@ Aliases are **accepted everywhere on input** (annotations, `is` targets, signatu
 
 ### 3.3 Arithmetic: Go-style, precisely
 
-Sized scalar arithmetic follows the Go spec — no UB, no overflow panic, no optimizer assumption that overflow cannot happen. *(Kin to the ADR's C3 "exact-until-float, Go-aligned machine tier" doctrine — the same Go alignment, applied to the sized family; division/remainder-by-zero returning `error()` matches ADR §4.7.)*
+Sized scalar arithmetic follows the Go spec — no UB, no overflow panic, no optimizer assumption that overflow cannot happen. *(Kin to the ADR's C3 "exact-until-float, Go-aligned machine tier" doctrine — the same Go alignment, applied to the sized family~~; division/remainder-by-zero returning `error()` matches ADR §4.7~~.)*
 
 - **Unsigned:** `+ - * <<` are modulo 2ⁿ: `255u8 + 1u8 → 0u8`; `0u8 - 1u8 → 255u8`.
-- **Signed:** overflow produces the deterministic two's-complement result: `127i8 + 1i8 → -128i8`; `-128i8 div -1i8 → -128i8`.
-- **Division/remainder by zero:** `error()` — never wraps, never panics, never yields a lane value.
+- **Signed:** overflow produces the deterministic two's-complement result: `127i8 + 1i8 → -128i8`~~; `-128i8 div -1i8 → -128i8`~~ (superseded: `div` enters `int` first, S4.5.3).
+- ~~**Division/remainder by zero:** `error()` — never wraps, never panics, never yields a lane value.~~ Superseded: a computed zero divisor never raises; `/` follows IEEE and `div`/`%` yield the domain's poison (S4.5.1–S4.5.3).
 - **Shifts:** negative counts → `error()`; non-negative counts compute mathematically, then truncate to the lane width: `1u8 << 8 → 0u8`.
 - **Constants:** exact constant evaluation does not wrap; a suffixed literal/constant expression must be representable in its declared type — `128i8`, `256u8` are compile-time errors.
 - **Conversions:** constant vs non-constant deliberately split (Go's rule): `u8(-1)` on a constant is a compile-time error; on a non-constant, sign/zero-extend then truncate with no overflow signal (`let x = -1; u8(x) → 255u8`). Float-sized conversions round to the destination IEEE format.
@@ -165,7 +167,8 @@ this mixed-width lane-selection extension:
 Examples: `i8 + u8 → i16`, `i32 + u32 → i64`, and `i64 + u64 → u64`.
 After selection, the operation—including overflow—uses the chosen fixed width;
 it does not promote to `int`, `integer`, `float`, or `decimal`. This rule covers
-`+`, `-`, `*`, integral `div`/`%`, bitwise operations, and shifts. Constants
+`+`, `-`, `*`, ~~integral `div`/`%`,~~ bitwise operations, and shifts (`div`/`%` enter the
+non-sized domain first, S4.5.3). Constants
 must still fit exactly; runtime results wrap as specified above. `/` is not an
 integer-lane operator in Lambda: it is true division and exits through the
 non-sized mapping in §3.3.2, consistent with ADR §4.7.
@@ -200,9 +203,10 @@ Consequences:
 For `/`, map every sized integer operand through this section even when both
 operands are sized; the selected non-sized domain controls the result:
 `i8 / u8` enters `int / int → float`, while `i64 / u64` enters
-`integer / integer → decimal`. Integral `div` and `%` stay in the selected
+`integer / integer → decimal`. ~~Integral `div` and `%` stay in the selected
 sized lane when both operands are sized, or in the selected `int`/`integer`
-domain after a sized/non-sized mix. A sized integer mixed with `f16`/`f32` is
+domain after a sized/non-sized mix.~~ Integral `div` and `%` map the same way
+and stay in the selected `int`/`integer` domain (S4.5.3). A sized integer mixed with `f16`/`f32` is
 category mixing rather than sized-integer arithmetic: map the integer as above,
 map the sized float to `float`, and use §2.5. Mixed sized floats where one
 exactly contains the other retain the wider sized-float lane
@@ -260,7 +264,7 @@ The case table (rows marked ✗ supersede earlier rulings/goldens):
 | `var xs: i8[]` passed to `pn f(var a: int[])` | **compile error** | `var`-borrow invariance (§9.2/C12) |
 | `type(1.0f64)` | `float` | canonical output (§3.2) |
 
-**Tests to pin:** trues — `1u8 is u16`, `42i8 is i16` (golden migration, W1), `2.5f32 is float`, `42i8 is int`, `5 is i64`, `1.0 is decimal`, `int is integer`, `[1i8] is [int]`; falses — `1.0 is f32`, `1i16 is f16`, `5 is u8`, `1i64 is float`, `[1.5] is [i8]`; compile-error negative — `var i8[]` argument to a `var int[]` parameter (`test/lambda/negative/semantic/`). Arithmetic pins — same-lane wrap (`255u8 + 1u8 → 0u8`), mixed-sized lane selection (`i8 + u8 → i16`, `i64 + u64 → u64`), sized/non-sized exit (`255u8 + 1 → int`, `i64 + int → integer`, `u64 + int → integer`), magnitude independence at both sides of `INT64_MAX`, symmetric `i64/u64 + float → decimal`, sized `div` remaining in its machine lane, and true division exiting (`i8 / u8 → float`, `i64 / u64 → decimal`).
+**Tests to pin:** trues — `1u8 is u16`, `42i8 is i16` (golden migration, W1), `2.5f32 is float`, `42i8 is int`, `5 is i64`, `1.0 is decimal`, `int is integer`, `[1i8] is [int]`; falses — `1.0 is f32`, `1i16 is f16`, `5 is u8`, `1i64 is float`, `[1.5] is [i8]`; compile-error negative — `var i8[]` argument to a `var int[]` parameter (`test/lambda/negative/semantic/`). Arithmetic pins — same-lane wrap (~~`255u8 + 1u8 → 0u8`~~ with a run-time operand: `let m = 255u8; m + 1u8 → 0u8`; the literal-only spelling is a compile error under S4.1.5, 2026-10-21), mixed-sized lane selection (`i8 + u8 → i16`, `i64 + u64 → u64`), sized/non-sized exit (`255u8 + 1 → int`, `i64 + int → integer`, `u64 + int → integer`), magnitude independence at both sides of `INT64_MAX`, ~~symmetric `i64/u64 + float → decimal`~~ `i64/u64 + float → float` (2026-07-29 amendment), ~~sized `div` remaining in its machine lane~~ sized `div` entering the non-sized domain (S4.5.3), and true division exiting (`i8 / u8 → float`, `i64 / u64 → decimal`).
 
 ### 3.5 Lane tags: one tag per representation
 

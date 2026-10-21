@@ -7,13 +7,17 @@
 
 namespace lambda {
 static constexpr size_t SCENE_ASSET_BUFFER_LIMIT = 64 * 1024 * 1024;
+// bones per skeleton, the native skinning palette's capacity (radiant/scene3d.cpp)
+static constexpr unsigned SCENE_ASSET_BONE_LIMIT = 256;
 // D4.1.3: imported values belong to the destination Input, including decoded buffers.
 struct SceneAsset {
     InputContext ctx;
     Item root, resources;
     unsigned serial = 0;
-    explicit SceneAsset(Input* input) : ctx(input) {
-        root = element("group"); resources = element("resources"); append(root, resources);
+    // a scene group gathers its resources first; a `<character>` has none
+    explicit SceneAsset(Input* input, const char* root_tag = "group") : ctx(input) {
+        root = element(root_tag); resources = ItemNull;
+        if (!strcmp(root_tag, "group")) { resources = element("resources"); append(root, resources); }
     }
     Item element(const char* tag) { return ctx.builder.createElement(tag); }
     Item text(const char* value) { return ctx.builder.createStringItem(value); }
@@ -30,6 +34,11 @@ struct SceneAsset {
         auto result = ctx.builder.array();
         for (size_t i = 0; i < count; i++) result.append(number(data[i]));
         return result.final();
+    }
+    // a packed float stream (a float ArrayNum), observably an ordinary array
+    Item floats(const double* data, size_t count) {
+        int64_t length = (int64_t)count;
+        return ctx.builder.createNumericArray(ELEM_FLOAT64, 1, &length, data);
     }
     Item id(const char* kind, unsigned index) {
         char value[80]; snprintf(value, sizeof(value), "asset-%s-%u", kind, index); return text(value);

@@ -12,6 +12,7 @@
 #include <string.h>
 #include <limits.h>
 #include <math.h>
+#include <new>
 #include "../lib/generation.h"
 #include "../lib/hashmap_typed.hpp"
 
@@ -187,46 +188,61 @@ static bool dl_translate_transform(RdtMatrix* matrix, bool* has_transform, float
     return true;
 }
 
+template<typename T>
+static size_t dl_copy_placed_payload(T& payload, const T& original) {
+    // start the active union member's lifetime; resource annotations copy borrowed handles, not leases.
+    new (&payload) T(original);
+    return sizeof(T);
+}
+
 const DisplayItem* DisplayListCursor::placed_item(const DisplayItem* source) {
     if (translate_x == 0 && translate_y == 0) return source;
     if (!dl_op_has_flags(source->op, DL_OP_FLAG_VECTOR_TRANSLATION)) { failed = true; return nullptr; }
-    // one cursor-local descriptor changes placement; every payload remains borrowed from its pinned owner.
-    translated = *source;
-    RENDER_METRIC_ADD(placement_command_copy_bytes, sizeof(DisplayItem));
+    // only the active union member is defined; small commands need no copy of the largest payload.
+    translated.op = source->op;
+    memcpy(translated.bounds, source->bounds, sizeof(source->bounds));
+    size_t copied_bytes = sizeof(source->op) + sizeof(source->bounds);
     bool valid = dl_translate_point(&translated.bounds[0], &translated.bounds[1], translate_x, translate_y) &&
         isfinite(translated.bounds[2]) && isfinite(translated.bounds[3]) &&
         isfinite(translated.bounds[0] + translated.bounds[2]) &&
         isfinite(translated.bounds[1] + translated.bounds[3]);
-    auto transform = [&](auto& payload) {
+    auto transform = [&](auto& payload, const auto& original) {
+        copied_bytes += dl_copy_placed_payload(payload, original);
         return dl_translate_transform(&payload.transform, &payload.has_transform, translate_x, translate_y);
+    };
+    auto rectangle = [&](auto& payload, const auto& original) {
+        copied_bytes += dl_copy_placed_payload(payload, original);
+        return dl_translate_point(&payload.x, &payload.y, translate_x, translate_y);
     };
     if (valid) switch (translated.op) {
         case DL_FILL_RECT:
-            valid = dl_translate_point(&translated.fill_rect.x, &translated.fill_rect.y, translate_x, translate_y);
+            valid = rectangle(translated.fill_rect, source->fill_rect);
             break;
         case DL_FILL_ROUNDED_RECT:
-            valid = dl_translate_point(&translated.fill_rounded_rect.x, &translated.fill_rounded_rect.y, translate_x, translate_y);
+            valid = rectangle(translated.fill_rounded_rect, source->fill_rounded_rect);
             break;
-        case DL_FILL_PATH: valid = transform(translated.fill_path); break;
-        case DL_STROKE_PATH: valid = transform(translated.stroke_path); break;
-        case DL_FILL_LINEAR_GRADIENT: valid = transform(translated.fill_linear_gradient); break;
-        case DL_FILL_RADIAL_GRADIENT: valid = transform(translated.fill_radial_gradient); break;
-        case DL_DRAW_IMAGE: valid = transform(translated.draw_image); break;
-        case DL_DRAW_PICTURE: valid = transform(translated.draw_picture); break;
-        case DL_PUSH_CLIP: valid = transform(translated.push_clip); break;
+        case DL_FILL_PATH: valid = transform(translated.fill_path, source->fill_path); break;
+        case DL_STROKE_PATH: valid = transform(translated.stroke_path, source->stroke_path); break;
+        case DL_FILL_LINEAR_GRADIENT: valid = transform(translated.fill_linear_gradient, source->fill_linear_gradient); break;
+        case DL_FILL_RADIAL_GRADIENT: valid = transform(translated.fill_radial_gradient, source->fill_radial_gradient); break;
+        case DL_DRAW_IMAGE: valid = transform(translated.draw_image, source->draw_image); break;
+        case DL_DRAW_PICTURE: valid = transform(translated.draw_picture, source->draw_picture); break;
+        case DL_PUSH_CLIP: valid = transform(translated.push_clip, source->push_clip); break;
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
+            copied_bytes += dl_copy_placed_payload(translated.element_marker, source->element_marker);
             valid = dl_translate_point(&translated.element_marker.marker_x,
                 &translated.element_marker.marker_y, translate_x, translate_y);
             break;
         case DL_POP_CLIP: break;
         default: valid = false; break;
     }
+    RENDER_METRIC_ADD(placement_command_copy_bytes, copied_bytes);
     if (!valid) { failed = true; return nullptr; }
     return &translated;
 }
 
-bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
+bool DisplayListCursor::push(const DisplayPayloadOwner* chunk, float edge_x, float edge_y) {
     if (!chunk || !chunk->commands || !chunk->command_spans || !chunk->span_count ||
         chunk->command_count <= 0 || depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT ||
         chunk->commands->size() > chunk->commands->capacity() || !chunk->commands->data()) {
@@ -235,8 +251,8 @@ bool DisplayListCursor::push(const DisplayPayloadOwner* chunk) {
     for (int i = 0; i < depth; i++) if (chunks[i].owner == chunk) {
         failed = true; return false;
     }
-    float dx = chunk->translate_x + (depth ? chunks[depth - 1].translate_x : 0);
-    float dy = chunk->translate_y + (depth ? chunks[depth - 1].translate_y : 0);
+    float dx = chunk->translate_x + edge_x + (depth ? chunks[depth - 1].translate_x : 0);
+    float dy = chunk->translate_y + edge_y + (depth ? chunks[depth - 1].translate_y : 0);
     if (!isfinite(dx) || !isfinite(dy)) { failed = true; return false; }
     chunks[depth++] = {chunk, 0, 0, 0, dx, dy};
     return true;
@@ -270,10 +286,11 @@ const DisplayItem* DisplayListCursor::next() {
                 failed = true; break;
             }
             frame.span++; frame.logical += span.child->command_count;
-            if (!push(span.child)) break;
+            if (!push(span.child, span.translate_x, span.translate_y)) break;
             continue;
         }
-        if (span.start < 0 || span.count <= 0 || span.start > owner->commands->item_count() ||
+        if (span.translate_x != 0 || span.translate_y != 0 ||
+            span.start < 0 || span.count <= 0 || span.start > owner->commands->item_count() ||
             span.count > owner->commands->item_count() - span.start) { failed = true; break; }
         if (frame.offset == span.count) { frame.offset = 0; frame.span++; continue; }
         if (frame.logical >= owner->command_count) { failed = true; break; }
@@ -731,9 +748,7 @@ static bool dl_validate_stream(DisplayListCursor& cursor, int end,
     while (const DisplayItem* item = cursor.next()) {
         int i = cursor.index;
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
-        const DisplayChunkValidation* chunk = cursor.owner && i == 0 &&
-            cursor.translate_x == 0 && cursor.translate_y == 0
-            ? retained_dl_chunk_validation(cursor.owner) : nullptr;
+        const DisplayChunkValidation* chunk = retained_dl_cursor_validation(cursor);
         if (chunk) {
             RENDER_METRIC_ADD(validation_chunk_checks, 1);
             // balanced immutable chunks preserve caller state, but their peaks still consume nesting space.

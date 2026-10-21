@@ -1,4 +1,6 @@
 #include "mvp_lmd_runtime.h"
+#include "../js_host_hooks.h"
+#include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../../lib/utf.h"
@@ -13,30 +15,19 @@ static int64_t string_bound(double value, int64_t length, bool relative) {
 }
 extern "C" Item mvp_lmd_string_range(Item value, double start, double end, int64_t slice) {
     String* string = value.get_string();
-    int64_t length = string->is_ascii ? string->len : utf8_to_utf16_length(string->chars, string->len);
+    int64_t length = js_string_utf16_length(string);
     int64_t first = string_bound(start, length, slice), last = string_bound(end, length, slice);
     if (!slice && first > last) { int64_t swap = first; first = last; last = swap; }
     if (last < first) last = first;
-    if (string->is_ascii) return fn_substring(value, Item{.item = i2it(first)}, Item{.item = i2it(last)});
-    RootFrame roots(1);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> source(roots, value);
-    size_t size = utf8_canonical_slice(string->chars, string->len, first, last - first, NULL);
-    if (size > INT_MAX - sizeof(String) - 1) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    String* result = (String*)heap_alloc(sizeof(String) + size + 1, LMD_TYPE_STRING);
-    if (!result) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    string = source.get().get_string();
-    utf8_canonical_slice(string->chars, string->len, first, last - first, result->chars);
-    result->len = size; result->flags = 0;
-    result->is_ascii = str_is_ascii(result->chars, size); result->chars[size] = 0;
-    return Item{.item = s2it(result)};
+    // prefix rescans per token made mixed-Unicode tokenization quadratic.
+    return js_str_substring_utf16(value, first, last);
 }
 extern "C" int64_t mvp_lmd_string_search(Item value, Item needle, double start, int64_t prefix) {
     String* string = value.get_string(); String* pattern = needle.get_string();
-    int64_t length = string->is_ascii ? string->len : utf8_to_utf16_length(string->chars, string->len);
+    int64_t length = js_string_utf16_length(string);
     int64_t first = string_bound(start, length, false);
     if (prefix == 2) {
-        first -= pattern->is_ascii ? pattern->len : utf8_to_utf16_length(pattern->chars, pattern->len);
+        first -= js_string_utf16_length(pattern);
         if (first < 0) return false;
     }
     int64_t result;
@@ -53,12 +44,12 @@ extern "C" Item mvp_lmd_string_pad(Item string, double length, Item filler, int6
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, string), fill(roots, filler), repeated(roots, ItemNull);
-    int64_t current = utf8_to_utf16_length(string.get_string()->chars, string.get_string()->len);
+    int64_t current = js_string_utf16_length(string.get_string());
     length = isnan(length) || length < 0 ? 0 : trunc(length);
     if (length <= current) return source.get();
     fill.set(filler.item == ITEM_JS_UNDEFINED ? Item{.item = s2it(get_ascii_char_string(' '))} : mvp_lmd_primitive_to_string(filler));
     if (item_is_error(fill.get())) return fill.get();
-    int64_t width = utf8_to_utf16_length(fill.get().get_string()->chars, fill.get().get_string()->len);
+    int64_t width = js_string_utf16_length(fill.get().get_string());
     if (!width) return source.get();
     if (!isfinite(length) || length > INT_MAX - sizeof(String) - 1) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     int64_t missing = (int64_t)length - current;
@@ -82,8 +73,8 @@ extern "C" Item mvp_lmd_string_split(Item value, Item separator, int64_t limit) 
     if (item_is_error(result.get())) return result.get();
     if (!limit) return result.get();
     if (absent) { array_push(result.get().array, source.get()); return result.get(); }
-    int64_t size = utf8_to_utf16_length(string->chars, string->len);
-    int64_t width = utf8_to_utf16_length(delimiter->chars, delimiter->len);
+    int64_t size = js_string_utf16_length(string);
+    int64_t width = js_string_utf16_length(delimiter);
     int64_t first = 0;
     while (result.get().array->length < limit) {
         if (!width && first == size) break;

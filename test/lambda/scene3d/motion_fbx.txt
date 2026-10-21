@@ -1,0 +1,21 @@
+"1 one conversion from binary 7.4, binary 7.5 and ASCII FBX"
+[[true, 'fbx', 'm', 22, [["jump", 30, 1, 31, 13]]], [true, 'fbx', 'm', 22, [["jump", 30, 1, 31, 13]]], [true, 'fbx', 'm', 22, [["jump", 30, 1, 31, 13]]]]
+"2 the three FBX files and the BVH agree at every key"
+[true, true, true]
+"3 the body splits by material, embeds its texture and skins every vertex"
+[["asset-material-1", 600, 300], ["asset-material-3", 24, 12]]
+[['material', "asset-material-1", "#cc9980", null], ['material', "asset-material-3", "#ffffff", "asset-texture-4"], ['texture', "asset-texture-4", null, null]]
+[true, 48, true]
+"4 skinned vertices match the reference"
+[true, true]
+"5 pivots, pre- and post-rotation, rotation orders, scaling and Z-up inches"
+[["curl", 61, 1], ["wave", 4, 2], ["wave-2", 2, 0], ["sway", 61, 1]]
+[[0, 0.5, 1, 2], true, true, true]
+[["Root", null], ["Upper", [1, 1, 1.5]], ["Lower", null], ["Hand", [1.5, 1.5, 1.5]], ["Finger1", null], ["Tip1", null], ["Finger2", [0.666667, 0.666667, 0.666667]], ["Tip2", null]]
+"6 rest differs from bind, five influences keep four, a prop rides the hand"
+[true, true]
+[["Upper", "Lower", "Hand", "Finger1"], ["Hand"], true, true]
+"7 the scene names bones, prefixes body resources and skins each mesh"
+[['skeleton', "hero-skeleton", null, null], ['resources', null, null, null], ['mesh', "hero-asset-mesh-0", "hero-skeleton", "hero-asset-material-1"], ['mesh', "hero-asset-mesh-2", "hero-skeleton", "hero-asset-material-3"], ['animation-clip', "hero-clip-0", null, null]]
+"8 malformed FBX is rejected with a specific diagnostic"
+[true, true, true, true, true, true, true, true, true, true, true, true, true]

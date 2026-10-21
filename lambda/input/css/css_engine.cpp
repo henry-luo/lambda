@@ -1669,6 +1669,8 @@ static bool css_container_absolute_leaf(void* data, const CssValue* value, doubl
     CssUnit unit = value->data.length.unit;
     double number = value->data.length.value;
     if (css_absolute_length_to_px(unit, number, result)) return true;
+    // a live container owns relative-unit semantics; constant lengths need no font walk.
+    if (context->metrics && context->metrics->resolve_value) return false;
     if (unit == CSS_UNIT_REM) {*result = number * context->engine->context.root_font_size; return true;}
     return css_viewport_length_to_px(unit, number, context->engine->context.viewport_width,
         context->engine->context.viewport_height, false, result);
@@ -1681,11 +1683,10 @@ static double css_container_read_value(void* data, CssMediaNumericKind kind, con
     if (!value) return NAN;
     const CssContainerMetrics* box = context->metrics;
     CssMathResult computed = {};
-    if (box->resolve_value) {
+    CssMathEvaluationContext math = {css_container_absolute_leaf, context, 1.0, false};
+    computed = css_math_evaluate(value, &math);
+    if (!computed.resolved && box->resolve_value) {
         if (!box->resolve_value(box->value_context, value, &computed)) return NAN;
-    } else {
-        CssMathEvaluationContext math = {css_container_absolute_leaf, context, 1.0, false};
-        computed = css_math_evaluate(value, &math);
     }
     if (kind == CSS_MEDIA_NUMERIC_RATIO)
         return computed.resolved && computed.type == CSS_MATH_NUMBER && computed.value >= 0.0 ? computed.value : NAN;
@@ -1748,13 +1749,7 @@ static bool css_evaluate_container_part(CssEngine* engine, DomElement* target,
     CssContainerMetrics box = {};
     if (!engine->container_provider(engine->container_context, target, name, context.axes, &box) ||
         !box.identity || !isfinite(box.width) || !isfinite(box.height)) return false;
-    uint64_t key = hash_combine_u64((uintptr_t)box.identity, box.generation);
-    uint64_t width = 0, height = 0;
-    memcpy(&width, &box.width, sizeof(width));
-    memcpy(&height, &box.height, sizeof(height));
-    key = hash_combine_u64(key, width);
-    key = hash_combine_u64(key, height);
-    key = hash_combine_u64(key, box.vertical);
+    uint64_t key = hash_combine_u64(css_container_geometry_key(&box, context.axes), box.generation);
     bool result = false;
     if (css_condition_cache_lookup(engine, CSS_CONDITION_CONTAINER, condition, &result, key)) return result;
     context.metrics = &box;
@@ -1787,13 +1782,31 @@ uint8_t css_container_type_axes(const CssValue* value) {
         : css_value_has_identifier(value, "inline-size") ? CSS_CONTAINER_INLINE : 0;
 }
 
+static uint8_t css_container_physical_axes(uint8_t axes, bool vertical) {
+    uint8_t result = axes & (CSS_CONTAINER_WIDTH | CSS_CONTAINER_HEIGHT);
+    if (axes & CSS_CONTAINER_INLINE) result |= vertical ? CSS_CONTAINER_HEIGHT : CSS_CONTAINER_WIDTH;
+    if (axes & CSS_CONTAINER_BLOCK) result |= vertical ? CSS_CONTAINER_WIDTH : CSS_CONTAINER_HEIGHT;
+    return result;
+}
+
 bool css_container_matches(const CssValue* names, uint8_t available_axes, bool vertical,
         const char* name, uint8_t requested_axes) {
-    uint8_t required = requested_axes & (CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK);
-    if (requested_axes & CSS_CONTAINER_WIDTH) required |= vertical ? CSS_CONTAINER_BLOCK : CSS_CONTAINER_INLINE;
-    if (requested_axes & CSS_CONTAINER_HEIGHT) required |= vertical ? CSS_CONTAINER_INLINE : CSS_CONTAINER_BLOCK;
+    uint8_t required = css_container_physical_axes(requested_axes, vertical);
+    uint8_t available = css_container_physical_axes(
+        available_axes & (CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK), vertical);
     // type keywords are insensitive; authored container names retain their spelling.
-    return (available_axes & required) == required && (!name || css_value_has_identifier(names, name, true));
+    return (available & required) == required && (!name || css_value_has_identifier(names, name, true));
+}
+
+uint64_t css_container_geometry_key(const CssContainerMetrics* metrics, uint8_t axes) {
+    uint8_t physical = css_container_physical_axes(axes, metrics->vertical);
+    uint64_t key = hash_combine_u64((uintptr_t)metrics->identity, physical);
+    key = hash_combine_u64(key, metrics->vertical);
+    if (physical & CSS_CONTAINER_WIDTH)
+        key = hash_combine_u64(key, hash_fnv1a_64(&metrics->width, sizeof(metrics->width)));
+    if (physical & CSS_CONTAINER_HEIGHT)
+        key = hash_combine_u64(key, hash_fnv1a_64(&metrics->height, sizeof(metrics->height)));
+    return key;
 }
 
 bool css_container_length_to_px(CssEngine* engine, DomElement* target,

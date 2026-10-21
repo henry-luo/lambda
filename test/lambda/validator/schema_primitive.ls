@@ -5,7 +5,7 @@ type PrimitiveTypes = {
     string_field: string,
     bool_field: bool,
     null_field: null,
-    char_field: char,
+    char_field: string,
     symbol_field: symbol,
     datetime_field: datetime,
     decimal_field: decimal,

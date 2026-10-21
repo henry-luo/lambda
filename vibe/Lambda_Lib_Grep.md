@@ -730,7 +730,7 @@ Checked on 2026-10-04, as the baseline for migrating to S17.8.1 (GRP28).
 
 | Where | Behavior today | Against S17.8.1 |
 |---|---|---|
-| `start(target, args, options)` (S13.1.1v2; `lambda/runtime/build_ast.cpp:2913`) | Options must be a map literal, and an unknown name is a compile-time error | Conforms: it is the compile-time arm |
+| `start(target, args, options)` (S13.1.1v3; `lambda/runtime/build_ast.cpp:2913`) | Options must be a map literal, and an unknown name is a compile-time error | Conforms: it is the compile-time arm |
 | `find`, `replace` options (`parse_find_replace_options`, `lambda/runtime/lambda-eval.cpp`) | Looks up `limit`, `last` and `ignore_case`; any other name is ignored silently | Missing both arms: no error for a literal, no warning for a value |
 | `input`, `output`, `fetch`, `cmd` and other functions with an options map | Not audited | Unknown |
 | `io.grep` (this doc) | Literal: compile-time error through the generic registry table `sys_func_option_names`; value: `log_warn` and ignored | Conforms (2026-10-04) |

@@ -1,5 +1,5 @@
 // Static AST auto-detection of nested numeric literals as N-D ArrayNum.
-// Phase 2b §1 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §4.2
 // Rule: when the AST builder sees a fully homogeneous nested literal
 // (all inner arrays same length and same numeric elem_type), the transpiler
 // emits a single N-D ArrayNum instead of an Array-of-arrays.

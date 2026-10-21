@@ -2887,6 +2887,9 @@ DisplayValue blockify_display(DisplayValue display) {
 
 DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node) {
     NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
+    // UA suppression is part of computed display before any layout adapter binds cached CSS.
+    if (tag_id == MARKUP_NAME_DIALOG && !dom_elem->has_attribute("open"))
+        return {CSS_VALUE_NONE, CSS_VALUE_NONE};
     if (dom_elem && dom_elem->is_parser_inserted_table_form()) {
         return {CSS_VALUE_NONE, CSS_VALUE_NONE};
     }

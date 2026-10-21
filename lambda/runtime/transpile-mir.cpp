@@ -32870,6 +32870,19 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         ((AstNode*)call_node)->type); \
             }
 
+        // LR07-49: a raw C return (String*, Symbol*, int64, double) under a
+        // call whose carrier is the boxed `any` lane must be boxed here.
+        // mir_call_may_defect reports `T | error` for a defect-capable operand
+        // even when no rejected join is built, and the raw word then reached
+        // Item consumers unboxed: `string(f())` handed print a bare String*.
+        // bool and DateTime returns are already boxed by their post-process.
+        #define POST_PROCESS_CARRIER(result) \
+            if (call_expr_tid == LMD_TYPE_ANY && c_ret_tid != LMD_TYPE_ANY && \
+                    c_ret_tid != LMD_TYPE_BOOL && c_ret_tid != LMD_TYPE_DTIME) { \
+                result = emit_box(mt, result, c_ret_tid); \
+                returned_boxed_item = true; \
+            }
+
         // Tune6 L3: native math lowering. The boxed fn_math_* wrappers are
         // element-wise over vectors, but their scalar branch is literally
         // push_d(sqrt(item_to_double(v))) — so for a statically-numeric scalar
@@ -32917,6 +32930,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
+            POST_PROCESS_CARRIER(result);
             RETURN_CALL_VALUE(result);
         }
 
@@ -32973,6 +32987,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
+            POST_PROCESS_CARRIER(result);
             RETURN_CALL_VALUE(result);
         }
 
@@ -33013,6 +33028,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
+            POST_PROCESS_CARRIER(result);
             RETURN_CALL_VALUE(result);
         }
     }

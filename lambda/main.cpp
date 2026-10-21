@@ -2756,11 +2756,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "js") == 0) {
         log_debug("Entering JavaScript command handler");
 
-        // compatibility selectors do not turn help or an empty invocation into a file run.
+        // logging options do not turn help or an empty invocation into a file run.
         int js_first_argument = 2;
         while (js_first_argument < argc &&
-                (strcmp(argv[js_first_argument], "--runtime=mvp-lmd") == 0 ||
-                 strcmp(argv[js_first_argument], "--no-log") == 0)) js_first_argument++;
+                strcmp(argv[js_first_argument], "--no-log") == 0) js_first_argument++;
         // Check for help first
         if (js_first_argument < argc && (strcmp(argv[js_first_argument], "--help") == 0 ||
                 strcmp(argv[js_first_argument], "-h") == 0)) {
@@ -2773,7 +2772,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
-            fputs("  --runtime=mvp-lmd       Alias for the default MVP engine\n", stdout);
             fputs("  --timing               MVP-Lmd execution time, excluding compilation\n", stdout);
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
@@ -2822,8 +2820,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) {
                     force_interactive = true;
-                } else if (strcmp(argv[i], "--runtime=mvp-lmd") == 0) {
-                    // the compatibility spelling follows the ordinary backend policy.
                 } else if (strcmp(argv[i], "--timing") == 0) {
                     execution_timing = true;
                 } else if (strcmp(argv[i], "--input-type=module") == 0 ||
@@ -3001,7 +2997,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0 ||
                         strcmp(argv[i], "--module") == 0 ||
-                        strcmp(argv[i], "--runtime=mvp-lmd") == 0 ||
                         strcmp(argv[i], "--timing") == 0) continue;
                     if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
@@ -3041,7 +3036,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0 ||
                         strcmp(argv[i], "--module") == 0 ||
-                        strcmp(argv[i], "--runtime=mvp-lmd") == 0 ||
                         strcmp(argv[i], "--timing") == 0) continue;
                     if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                         strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
@@ -4828,8 +4822,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (batch_timeout <= 0) batch_timeout = 10;
             } else if (strcmp(argv[i], "--no-hot-reload") == 0) {
                 hot_reload = false;
-            } else if (strcmp(argv[i], "--runtime=mvp-lmd") == 0) {
-                mvp_lmd = true;
+            } else if (strncmp(argv[i], "--runtime=", 10) == 0 ||
+                       strncmp(argv[i], "--js-runtime=", 13) == 0) {
+                fputs("invalid value for --runtime\n", stderr);
+                return lambda_main_finish(9);
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                 int level = atoi(argv[i] + 12);
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
@@ -4842,7 +4838,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         Runtime runtime;
         runtime_init(&runtime);
         lambda_stack_init();
-        if (mvp_lmd) hot_reload = false; // each MVP execution owns its context and heap.
+        if (mvp_lmd) hot_reload = false; // native MIR batches do not use AST hot reload.
 
 #ifndef _WIN32
         // Set up alternate signal stack for SIGSEGV/SIGBUS recovery.

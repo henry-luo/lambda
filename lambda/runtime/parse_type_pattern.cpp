@@ -1263,9 +1263,12 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         ident->type = (Type*)ref;
         return;
     }
+    // a later top-level alias resolves here, so this reference sees it complete
+    if (entry) lambda_ast_resolve_type_early(tp, entry->node);
     ident->entry = entry;
     if (ident->entry && ident->entry->node && ident->entry->node->type) {
         AstNode* def = ident->entry->node;
+        lambda_ast_note_type_reference(def);
         ident->type = def->type;
         // Type and pattern definitions are referenced through a plain TypeType
         // wrapper, exactly as resolve_identifier does. The wrap is load-bearing:
@@ -1288,11 +1291,10 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         record_unknown_base_type_span(tp, ident->source_span, w);
         ident->type = (Type*)&LIT_TYPE_ERROR;
     } else {
-        // stay lenient like resolve_identifier: an unresolved name defers to ANY
-        // so runtime paths (e.g. `?unknown` queries) degrade gracefully instead
-        // of failing the whole compilation
-        log_warn("type-pattern: unresolved type name '%.*s', using ANY", (int)w.length, w.str);
-        ident->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+        // S11.4.12: a type name that names nothing is E204, never `any`; a
+        // silent `any` voided the contract it was written in
+        record_unknown_base_type_span(tp, ident->source_span, w);
+        ident->type = (Type*)&LIT_TYPE_ERROR;
     }
 }
 
@@ -1480,14 +1482,25 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     }
     case LSF_TP_PATTERN_REF: {
         AstIdentNode* ident = (AstIdentNode*)node;
-        ident->entry = lookup_name(tp, (StrView){ident->name->chars, ident->name->len});
+        NameEntry* entry = lookup_name(tp, (StrView){ident->name->chars, ident->name->len});
+        // S11.4.12: a later top-level pattern resolves first, so patterns
+        // compile in dependency order
+        if (entry) lambda_ast_resolve_type_early(tp, entry->node);
+        ident->entry = entry;
         if (ident->entry && ident->entry->node) { ident->type = ident->entry->node->type; }
         // A name a pattern cannot use was lowered to nothing, so the pattern
-        // silently matched what was left, often only "". A pattern names only
-        // what is defined before it, so the name is decidable here.
+        // silently matched what was left, often only "". The name is
+        // decidable here: a top-level pattern is bound for the whole module,
+        // a local one from its declaration on.
         if (!ident->entry || !ident->entry->node) {
             record_semantic_error_span(tp, node->source_span, ERR_UNDEFINED_TYPE,
                 "`%.*s` is not defined before this pattern",
+                (int)ident->name->len, ident->name->chars);
+        } else if (lambda_ast_type_is_pending(ident->entry->node)) {
+            // still resolving: the pattern reaches itself, which no regular
+            // pattern can express
+            record_semantic_error_span(tp, node->source_span, ERR_TYPE_CYCLE,
+                "pattern `%.*s` refers to itself: a pattern cannot recurse",
                 (int)ident->name->len, ident->name->chars);
         } else if (!pattern_can_name(ident->entry->node)) {
             record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,

@@ -1,0 +1,7 @@
+"1 control appends a controller whose states name clip IDs"
+['motion-controller', "hero-motion", 'rise', 2, 0.25, [['jump', "hero-clip-0", null, null, null, null], ['flip', "hero-clip-2", null, null, null, 0.5], ['rise', "hero-clip-1", 'once', 'jump', 0.1, null]]]
+['jump', 'scene3d']
+"2 control rejects states it cannot resolve"
+["unknown clip", "autoplay clip", "duplicate names", "unknown next", "unknown request", "no states"]
+"3 the scene validator checks hand-written controllers"
+['scene3d', "shared clip", "bad loop", "bad request", "not a clip", "no states"]

@@ -1,5 +1,5 @@
 // View GC liveness — the view's base must survive GC cycles.
-// Phase 2b §2 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §8.4
 // Stress-test the GC tracer by allocating many short-lived arrays while
 // holding a view onto a base array. If the GC tracer doesn't mark the
 // view's base, the base buffer would be reclaimed and the view's data

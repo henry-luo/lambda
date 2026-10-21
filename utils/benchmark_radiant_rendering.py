@@ -18,6 +18,7 @@ from benchmark_process import run_measured
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ("vector", "deep", "mixed", "pressure-128", "pressure-512")
+WARM_CONTROLS = {"recording": "RADIANT_RECORDING_CACHE", "opaque-rectangles": "RADIANT_TVG_RECT_RASTER"}
 FONT = ROOT / "test/layout/data/font/LiberationSans-Regular.ttf"
 STAGES = ("setup_clear", "record_lower", "overlays_validate", "retained_capture",
           "replay", "media_trace", "encode_write", "teardown")
@@ -47,7 +48,12 @@ def svg_shapes(count, pressure=False):
 
 
 def fixture_source(name):
-    if name.startswith("pressure-"):
+    if name == "rectangles":
+        content = ('<style>.render-bench-box{display:inline-block;vertical-align:top;width:4px;'
+                   'height:4px;margin:0 1px 1px 0;background:red}</style>'
+                   '<div style="margin:20px 0 0 8px;width:640px;font-size:0">'
+                   + '<div class="render-bench-box"></div>' * 512 + '</div>')
+    elif name.startswith("pressure-"):
         content = svg_shapes(int(name.split("-")[1]), True)
     elif name == "deep":
         content = ('<div style="margin:1px;padding:1px;border:1px solid #4278ab">' * 48
@@ -135,6 +141,20 @@ def source_identity():
                     (Path(__file__).resolve(), ROOT / "utils/benchmark_process.py", FONT)})
 
 
+def render_environment(args, run, variant, profiled):
+    env = dict(os.environ, TMPDIR=str(ROOT / "temp"), RADIANT_RENDER_THREADS=str(args.threads),
+               MEMTRACK_MODE="STATS" if profiled else "OFF")
+    # a backend comparison must replay paint even when the complete recording is unchanged.
+    for key in ("RADIANT_RENDER_METRICS", "RADIANT_RECORDING_CACHE", "RADIANT_VIEW_TIMING_PATH"):
+        env.pop(key, None)
+    if args.mode == "warm":
+        env["RADIANT_RECORDING_CACHE"] = "off"
+        env[WARM_CONTROLS[args.warm_control]] = variant
+    if profiled:
+        env.update(RADIANT_RENDER_METRICS="1", LAMBDA_LOG_FILE=str(run / "native.log"))
+    return env
+
+
 def run_render(args, directory, name, scale, variant, binary, repeat=None, profiled=False):
     label = f"profile-{variant}" if profiled else f"run-{repeat:03d}-{variant}"
     run = directory / f"{name}-{scale}" / label
@@ -155,18 +175,10 @@ def run_render(args, directory, name, scale, variant, binary, repeat=None, profi
     else:
         command = [str(binary), "render", str(source), "-o", str(image), "-vw", "800",
                    "-vh", "600", "-s", str(scale), *options]
-    env = dict(os.environ, TMPDIR=str(ROOT / "temp"), RADIANT_RENDER_THREADS=str(args.threads),
-               MEMTRACK_MODE="STATS" if profiled else "OFF")
-    # normal samples exclude logging; separate profiles identify the work eliminated.
-    for key in ("RADIANT_RENDER_METRICS", "RADIANT_RECORDING_CACHE", "RADIANT_VIEW_TIMING_PATH"):
-        env.pop(key, None)
-    if args.mode == "warm":
-        env["RADIANT_RECORDING_CACHE"] = variant
-    if profiled:
-        env.update(RADIANT_RENDER_METRICS="1", LAMBDA_LOG_FILE=str(run / "native.log"))
+    env = render_environment(args, run, variant, profiled)
     (run / "command.json").write_text(json.dumps(dict(argv=command,
         environment={key: env.get(key) for key in ("TMPDIR", "RADIANT_RENDER_THREADS", "RADIANT_SVG_LAYER",
-            "RADIANT_RECORDING_CACHE", "RADIANT_RENDER_METRICS", "MEMTRACK_MODE", "LAMBDA_LOG_FILE")}), indent=2) + "\n")
+            "RADIANT_RECORDING_CACHE", "RADIANT_TVG_RECT_RASTER", "RADIANT_RENDER_METRICS", "MEMTRACK_MODE", "LAMBDA_LOG_FILE")}), indent=2) + "\n")
     with (run / "stdout.log").open("wb") as output:
         measured = run_measured(command, cwd=ROOT, env=env, stdout=output,
                                 stderr=subprocess.STDOUT, timeout=args.timeout)
@@ -221,7 +233,9 @@ def main():
     parser.add_argument("--executable", type=Path, default=ROOT / "lambda.exe")
     parser.add_argument("--control", type=Path, help="release control binary for cold comparisons")
     parser.add_argument("--mode", choices=("warm", "cold"), default="warm")
-    parser.add_argument("--fixtures", nargs="+", choices=FIXTURES, default=FIXTURES)
+    parser.add_argument("--fixtures", nargs="+", choices=(*FIXTURES, "rectangles"), default=FIXTURES)
+    parser.add_argument("--warm-control", choices=WARM_CONTROLS, default="recording",
+                        help="feature compared on/off in warm mode (backend controls disable whole-frame reuse)")
     parser.add_argument("--scales", nargs="+", type=int, choices=(1, 2), default=(1, 2))
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--frames", type=int, default=12)
@@ -239,6 +253,8 @@ def main():
         parser.error("use positive repeats/timeout, at least three frames, nonnegative threads and a warm-up shorter than the profile")
     if args.mode == "warm" and args.control:
         parser.error("--control applies to --mode cold; warm compares the same binary on/off")
+    if args.mode != "warm" and args.warm_control != "recording":
+        parser.error("--warm-control applies only to --mode warm")
     executable = args.executable.resolve()
     variants = {"off": executable, "on": executable} if args.mode == "warm" else {"candidate": executable}
     if args.control:
@@ -255,7 +271,7 @@ def main():
     report = dict(version=2, status="running", recorded_at=datetime.now(timezone.utc).isoformat(),
                   protocol="alternating-order fresh processes; 800x600; wall includes startup/warm-up/PNG encoding; "
                   "exit observation polls at 1 ms; OS caches uncontrolled; separate profiles include logging/allocation tracking",
-                  mode=args.mode, frames=args.frames, threads=args.threads,
+                  mode=args.mode, warm_control=args.warm_control, frames=args.frames, threads=args.threads,
                   warmup_frames=args.warmup_frames if args.mode == "warm" else 0,
                   normal_memtrack_mode="OFF", profile_memtrack_mode="STATS",
                   statistics="median/minimum/nearest-rank p95/maximum; ratios pair matching repeat indices",
@@ -265,7 +281,7 @@ def main():
                     "tracked process peak covers only enabled Lambda allocators; ThorVG allocation attribution is unobserved",
                     "these headless samples do not measure input-to-display latency"],
                   platform=platform.platform(), cpus=os.cpu_count(),
-                  environment={key: os.environ.get(key) for key in ("RADIANT_SVG_LAYER", "MEMTRACK_MODE")},
+                  environment={key: os.environ.get(key) for key in ("RADIANT_SVG_LAYER", "RADIANT_TVG_RECT_RASTER", "MEMTRACK_MODE")},
                   binaries={name: dict(path=str(binary), sha256=digest(binary)) for name, binary in variants.items()},
                   fixtures={name: digest(directory / (name + ".html")) for name in args.fixtures},
                   samples=[], profiles=[], summaries=[])

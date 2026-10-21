@@ -1,5 +1,5 @@
 // Vectorized scalar math sysfuncs over ArrayNum
-// Phase 2a §3 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §7.5
 // Covers: math.sqrt/log/exp/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/log2/log10/log1p/exp2/expm1/cbrt
 //         abs, round, floor, ceil, trunc, sign, neg (unary -), and the new clip()
 

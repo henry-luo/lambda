@@ -1,6 +1,7 @@
 """Check the measurement contracts that make rendering comparisons attributable."""
 
 import os
+import argparse
 import contextlib
 import io
 from pathlib import Path
@@ -104,6 +105,21 @@ def profile_text():
 
 
 class RenderingReceiptTest(unittest.TestCase):
+    def test_backend_comparison_does_not_enable_whole_frame_recording_reuse(self):
+        args = argparse.Namespace(threads=1, mode="warm", warm_control="opaque-rectangles")
+        with mock.patch.dict(os.environ, RADIANT_RECORDING_CACHE="on", RADIANT_RENDER_METRICS="1"):
+            for variant in ("off", "on"):
+                env = rendering.render_environment(args, rendering.ROOT / "temp", variant, False)
+                self.assertEqual(env["RADIANT_RECORDING_CACHE"], "off")
+                self.assertEqual(env["RADIANT_TVG_RECT_RASTER"], variant)
+                self.assertNotIn("RADIANT_RENDER_METRICS", env)
+                self.assertEqual(env["MEMTRACK_MODE"], "OFF")
+            args.warm_control = "recording"
+            env = rendering.render_environment(args, rendering.ROOT / "temp", "on", True)
+            self.assertEqual(env["RADIANT_RECORDING_CACHE"], "on")
+            self.assertEqual(env["RADIANT_RENDER_METRICS"], "1")
+            self.assertEqual(env["MEMTRACK_MODE"], "STATS")
+
     def test_existing_output_is_rejected_before_any_evidence_changes(self):
         with tempfile.TemporaryDirectory(dir=rendering.ROOT / "temp") as directory:
             directory = Path(directory)

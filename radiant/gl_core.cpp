@@ -550,6 +550,42 @@ NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface*
     return {};
 }
 
+NativeGlResource native_gl_data_texture(NativeGlContext* context, unsigned width, unsigned height) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT) {
+        native_gl_error(context, "invalid data texture dimensions"); return {};
+    }
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TEXTURE, (size_t)width * height * 4 * sizeof(float));
+    if (!slot) return {};
+    slot->width = width; slot->height = height;
+    NativeGlFunctions& gl = context->gl;
+    gl.GenTextures(1, &slot->name); gl.BindTexture(GL_TEXTURE_2D, slot->name);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (native_gl_check(context, "data texture allocation")) return {slot->id};
+    native_gl_release(context, {slot->id});
+#endif
+    return {};
+}
+
+bool native_gl_data_texture_update(NativeGlContext* context, NativeGlResource texture,
+        const float* rgba, unsigned rows) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    NativeGlSlot* slot = scope.valid ? native_gl_slot(context, texture, NATIVE_GL_TEXTURE) : nullptr;
+    if (!slot || !rgba || !rows || rows > slot->height) return false;
+    NativeGlFunctions& gl = context->gl;
+    gl.BindTexture(GL_TEXTURE_2D, slot->name);
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, slot->width, rows, GL_RGBA, GL_FLOAT, rgba);
+    return native_gl_check(context, "data texture update");
+#else
+    return false;
+#endif
+}
+
 NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsigned height, unsigned samples) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
@@ -601,7 +637,9 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     NativeGlSlot* program = native_gl_slot(context, draw->program, NATIVE_GL_PROGRAM);
     NativeGlSlot* vertices = native_gl_slot(context, draw->vertices, NATIVE_GL_VERTEX_ARRAY);
     NativeGlSlot* texture = draw->texture.id ? native_gl_slot(context, draw->texture, NATIVE_GL_TEXTURE) : nullptr;
-    if (!program || !vertices || (draw->texture.id && !texture) || draw->side < 0 || draw->side > 2) return false;
+    NativeGlSlot* data = draw->data.id ? native_gl_slot(context, draw->data, NATIVE_GL_TEXTURE) : nullptr;
+    if (!program || !vertices || (draw->texture.id && !texture) || (draw->data.id && !data) ||
+        draw->side < 0 || draw->side > 2) return false;
     uint32_t maximum = draw->count - 1;
     if (draw->indexed) {
         NativeGlSlot* indices = native_gl_slot(context, vertices->indices, NATIVE_GL_BUFFER);
@@ -625,6 +663,8 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
         }
     }
     NativeGlFunctions& gl = context->gl; gl.UseProgram(program->name); gl.BindVertexArray(vertices->name);
+    gl.ActiveTexture(GL_TEXTURE1); gl.BindTexture(GL_TEXTURE_2D, data ? data->name : 0);
+    GLint palette = gl.GetUniformLocation(program->name, "palette"); if (palette >= 0) gl.Uniform1i(palette, 1);
     gl.ActiveTexture(GL_TEXTURE0); gl.BindTexture(GL_TEXTURE_2D, texture ? texture->name : 0);
     GLint sampler = gl.GetUniformLocation(program->name, "image"); if (sampler >= 0) gl.Uniform1i(sampler, 0);
     if (draw->transparent) { gl.Enable(GL_BLEND); gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); }

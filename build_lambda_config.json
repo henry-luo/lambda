@@ -316,7 +316,7 @@
     {
       "name": "image-codecs",
       "description": "Image I/O codecs built by the Lambda source target",
-      "lib": "build/lib/liblambda-image-codecs.a",
+      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/liblambda-image-codecs.a",
       "include": "build_temp/image-config/include",
       "link": "static",
       "build_target": "lambda-image-codecs",
@@ -348,7 +348,7 @@
     {
       "name": "archive-readers",
       "description": "Pinned native archive reader source closure",
-      "lib": "build/lib/liblambda-archive-readers.a",
+      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/liblambda-archive-readers.a",
       "include": "lib/zip",
       "link": "static",
       "build_target": "lambda-archive-readers"
@@ -459,6 +459,7 @@
     {
       "name": "lambda-archive-readers",
       "description": "Libarchive memory readers with Lambda embedding and bounded codec hooks",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
       "lang": "c17",
       "pic": true,
       "single_project": true,
@@ -532,6 +533,7 @@
     {
       "name": "lambda-image-codecs",
       "description": "Explicit image I/O source closure; no upstream build system",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
       "lang": "c17",
       "pic": true,
       "single_project": true,
@@ -1265,6 +1267,7 @@
     {
       "name": "lambda-lib",
       "description": "Static general-purpose library layer",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
       "pic_linux": true,
       "lang": "c++17",
       "source_patterns": [
@@ -3004,6 +3007,9 @@
         "lambda/input/input-model.cpp",
         "lambda/input/input-scene3d.cpp",
         "lambda/input/input-scene3d-gltf.cpp",
+        "lambda/input/input-character.cpp",
+        "lambda/input/input-character-fbx.cpp",
+        "lambda/input/input-fbx.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-toml.cpp",
         "lambda/input/input-utils.cpp",

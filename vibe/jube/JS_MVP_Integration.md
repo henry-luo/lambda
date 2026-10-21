@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 
 **Status:** ratified by the user's implementation request; implementation and
-qualification in progress under **D8.1.3v27**.
+qualification in progress under **D8.1.3v28** (CLI refinement, 2026-10-21).
 
 Implementation progress and gate results:
 [JS MVP integration implementation](../impl/JS_MVP_Integration.md).
@@ -19,7 +19,8 @@ behavior at the smallest boundary that requires it.
 The user directs this rework in the following order:
 
 1. **Preserve the performance of the rewritten JS MVP.** The fast
-   `--runtime=mvp-lmd` behavior becomes the default for `lambda.exe js`.
+   former explicit MVP behavior becomes the default for `lambda.exe js`;
+   **D8.1.3v28** removes the redundant runtime option.
    Performance preservation is the first implementation milestone and a
    continuing acceptance gate for every subsequent milestone.
 2. **Make dynamic handling depend on actual semantic need.** Keep native
@@ -114,26 +115,25 @@ After this rework, under the same backend policy:
 
 ```bash
 ./lambda.exe js app.js
-./lambda.exe js --runtime=mvp-lmd app.js
 ```
 
-must select the same compiler plan, runtime environment and host behavior.
-The flag remains a compatibility spelling for the default MVP engine.
-It must not select a separate heap, globals implementation, lifetime contract
-or optimization privilege.
+selects the integrated MVP compiler plan, runtime environment and host behavior.
+Under **D8.1.3v28** (2026-10-21), the redundant `--runtime=mvp-lmd` option is
+removed from Script and batch commands. There is one public engine entry and
+one heap, globals implementation and lifetime contract.
 
 With no backend override, normal JS execution uses native MVP MIR, as
 **D8.1.3v26** already requires. Preserve explicit `JS_EXEC_BACKEND=ast` and
-`auto`; normalize both command forms before applying that policy. The runtime
-flag names the MIR engine and does not bypass an explicit backend policy.
-Document this precedence and cover it in CLI tests.
+`auto` through `JS_EXEC_BACKEND`; apply that policy at the common entry.
+CLI coverage must verify the ordinary command, backend-policy precedence and
+rejection of the removed runtime option.
 
 File, `-e`, `-p`, Script/Module, arguments, timing, errors and output formatting
 use one option parser and execution entry. CLI `-e` source is an entry unit;
 it must not be confused with an ECMAScript `eval` operation inside a program.
 DOM, batch, module and preamble callers enter the same execution service.
 
-| Aspect | Current normal entry | Current explicit MVP entry | Target |
+| Aspect | Baseline normal entry | Baseline explicit MVP entry | Target |
 |---|---|---|---|
 | Entry | Public runtime adapter | Standalone shortcut | One MVP execution service |
 | Execution context | Caller `Runtime` / `EvalContext` | Embedded, owned `EvalContext` | Canonical Lambda context; CLI obtains it once |
@@ -371,7 +371,7 @@ Measure these comparisons:
 | Comparison | Purpose |
 |---|---|
 | Candidate default vs archived fast explicit MVP | Required performance preservation |
-| Candidate default vs candidate explicit MVP | Entry equivalence; neither spelling has special optimizations |
+| Candidate default and removed-selector rejection | **D8.1.3v28** CLI contract across unset/MIR/AST/AUTO policy |
 | Candidate default vs archived normal Result52 | Quantify the recovered integration loss |
 | Candidate Lambda untyped/typed vs archived release | Protect the shared Lambda substrate from the unification |
 
@@ -415,7 +415,7 @@ loop speed by imposing the former public path's eager startup cost.
 
 | Boundary | Required cases |
 |---|---|
-| Entry | Both CLI spellings; unset/MIR/AST/AUTO policy; file/eval/print, arguments, Script and Module |
+| Entry | Ordinary CLI and rejection of the removed runtime option; unset/MIR/AST/AUTO policy; file/eval/print, arguments, Script and Module |
 | Globals | Multiple Scripts in one realm; `var` vs lexical declarations; TDZ/redeclaration; replaced functions/intrinsics before and during callbacks |
 | Native functions | Recursive numeric calls; callable escape; unknown argument types; receiver/construct behavior; coercion effects |
 | Objects and arrays | Shape change, accessors, proxy traps, prototype mutation, holes, out-of-bounds access, mixed element types and typed-buffer state changes |
@@ -439,7 +439,7 @@ them or establish that the rework passes.
 | Milestone | Deliverable | Exit gate |
 |---|---|---|
 | 0. Freeze evidence | Exact fast control, canonical source/output manifest, current failures, entry/MIR diagnostics and ownership inventory | Reproducible reference and fixed protection set |
-| 1. Recover the fast default | Both CLI spellings use MVP's fast planning with the shared owner; replace blanket host flags with sufficient binding/effect facts and guards | Three diagnostic rows plus the full protected population preserve fast performance; existing correctness gates pass |
+| 1. Recover the fast default | The ordinary CLI uses MVP's fast planning with the shared owner; replace blanket host flags with sufficient binding/effect facts and guards | Three diagnostic rows plus the full protected population preserve fast performance; existing correctness gates pass |
 | 2. Unify ownership and globals | Canonical context, realm cells, intrinsic identities and Script/code lifetime; remove standalone context/destructor and copy/import bridges | Identity, reentry and precise-GC checks pass; performance gates remain green |
 | 3. Unify host execution | One service path for modules, document callbacks, timers, jobs, preambles and explicit AST/AUTO integration | Shared-state and callback/lifetime tests pass without fast-path loss |
 | 4. Broaden dynamic behavior | Fix concrete unsupported/incorrect cases with local complete fallbacks, ordered by real usage and failures | Each feature has semantic, fallback and unaffected-performance evidence |
@@ -457,8 +457,8 @@ repair the shared design before proceeding.
 
 Final closure requires all of the following:
 
-- Default and explicit MVP commands have identical environment and planning
-  contracts.
+- The ordinary command uses the integrated MVP entry, preserves backend policy
+  overrides, and rejects the removed runtime option (**D8.1.3v28**).
 - Fast MVP performance survives normal CLI and host integration.
 - Each semantic binding/intrinsic has one owner and authoritative storage per
   realm; standalone and public execution no longer maintain parallel sets.
@@ -473,7 +473,7 @@ Final closure requires all of the following:
 Locations below were inspected at the source baseline in the header. Symbols
 are the durable anchors; line numbers will move during implementation.
 
-| Location | Current behavior / rework target |
+| Location | Baseline behavior / rework target |
 |---|---|
 | `lambda/main.cpp:2786`, explicit `--runtime=mvp-lmd` branch | Separate option parsing and standalone execution; normalize to the shared entry |
 | `lambda/js/js_execution.cpp:465`, `transpile_js_to_mir_core_profile_len` | Public MIR entry routes to MVP; preserve explicit AST/AUTO selection |

@@ -27,7 +27,7 @@ for name, oracle in expected.items():
     # Full JS and Node print through their normal host console; MVP prints its script result.
     printed = source.rstrip().removesuffix('work()') + 'console.log(work())'
     commands = {
-        'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '--runtime=mvp-lmd', '-p', source],
+        'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '-p', source],
         'lambda_js': ['./lambda.exe', 'js', '--no-log', '-e', printed],
         'node': ['node', '-e', printed],
     }

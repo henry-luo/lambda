@@ -1,5 +1,5 @@
 // Read-only views over ArrayNum
-// Phase 2b §2 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §8
 // Covers: subview() creation, indexing, iteration, arithmetic, reductions,
 //         vectorized math, view-of-view, mutation rejection, GC-safe lifetime.
 

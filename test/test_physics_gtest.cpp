@@ -118,3 +118,19 @@ TEST_F(PhysicsTest, CommandOverflowCannotPublishInfiniteVelocity) {
     EXPECT_DOUBLE_EQ(state.bodies[1].velocity.x,0);EXPECT_EQ(state.tick,0u);
     EXPECT_FALSE(physics_step(world,1,&state,&error));
 }
+TEST_F(PhysicsTest, ConfigureKeepsSimulatedStateAndRecomputesMass) {
+    create();step(30);PhysicsVec position=state.bodies[1].pose.position,velocity=state.bodies[1].velocity;
+    colliders[1].density=3;colliders[1].friction=.9;bodies[1].linear_damping=.5;
+    ASSERT_TRUE(physics_configure(world,bodies,2,colliders,2,&error))<<(error.message?error.message:"");
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_EQ(state.tick,30u);EXPECT_DOUBLE_EQ(state.bodies[1].mass,3);
+    EXPECT_DOUBLE_EQ(state.bodies[1].pose.position.y,position.y);EXPECT_DOUBLE_EQ(state.bodies[1].velocity.y,velocity.y);
+    // rejected edits, at validation or at mass recomputation, keep the previous configuration
+    bodies[1].motion=PHYSICS_FIXED;EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));
+    bodies[1].motion=PHYSICS_DYNAMIC;colliders[1].density=0;EXPECT_FALSE(physics_configure(world,bodies,2,colliders,2,&error));
+    ASSERT_TRUE(physics_read(world,&state,&error));EXPECT_DOUBLE_EQ(state.bodies[1].mass,3);step(1);
+}
+TEST_F(PhysicsTest, AngularVelocityCommandSetsSpin) {
+    desc.gravity={};create();PhysicsCommand c={};c.kind=PHYSICS_ANGULAR_VELOCITY;c.body=2;c.value={0,1,0};
+    ASSERT_TRUE(physics_apply(world,&c,1,&error));ASSERT_TRUE(physics_read(world,&state,&error));
+    EXPECT_DOUBLE_EQ(state.bodies[1].angular_velocity.y,1);
+}

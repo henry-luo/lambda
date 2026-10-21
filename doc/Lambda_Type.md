@@ -420,8 +420,8 @@ let person: {name: string, age: int} = {name: "Bob", age: 25}
 |------|---------|
 | `<tag>` | Element with tag |
 | `<tag attr: type>` | With attribute types |
-| `<tag content_type>` | With content type |
-| `<tag attr: type, content_type>` | With attribute and content types — `,` marks the boundary (S16.9.3) |
+| `<tag string*>` | With a content type (here `string*`) |
+| `<tag attr: type, string*>` | With attribute and content types — `,` marks the boundary (S16.9.3) |
 
 Examples:
 
@@ -432,6 +432,7 @@ type Article = <article title: string, author: string,
     string,           // Text content
     Section*          // Zero or more sections
 >
+type Section = <section title: string, string*>   // may follow its first use
 ```
 
 ---
@@ -518,6 +519,35 @@ let id: UserId = 12345
 let name: UserName = "alice"
 let pos: Point = (10.5, 20.5)
 ```
+
+### Recursive Types and Forward References
+
+A type may name itself, so recursive data needs no special syntax. An element type recurses through its content or attributes, a map type through its fields:
+
+```lambda
+type Tree = <tree label: string, (Tree | <leaf>)*>
+type Node = {value: int, next: Node?}
+
+let t = <tree label: "root", <leaf> <tree label: "child", <leaf>>>
+let n = {value: 1, next: {value: 2, next: null}}
+t is Tree        // true
+n is Node        // true
+```
+
+At a module's top level a type may also name a type declared later, or a type that names it back (S11.4.12). Declaration order does not matter there, as it does not for top-level functions, so a schema can be written root first:
+
+```lambda
+type Message = {subject: string, parts: Part[]}
+type Part = string | Message        // a part can nest a whole message
+```
+
+Three rules keep this well defined:
+
+- A recursive reference must pass through a structure: a map field, an element attribute or content slot, an array or list item, or a `that` predicate. Each level then consumes part of the value. `type A = B` with `type B = A`, or `type C = C | int`, is a compile error (E240), and so is any cycle among string patterns, which cannot recurse.
+- A type declared inside a block sees only the types declared before it in that block, itself included, as block-local functions do.
+- A type name that resolves to no declaration, import or base type is a compile error (E204).
+
+> **Not yet implemented.** A type whose body has a `that` predicate is still resolved in source order, so a function parameter or object field typed with it *before* its declaration is checked against an incomplete type and can be rejected; declare such a type before the code that uses it. A `grammar`, and the base of an object type (`type B : A`), must also come first.
 
 ### Object Types
 

@@ -192,6 +192,20 @@ void lambda_ast_leave_scope(Transpiler* tp, NameScope* scope);
 // keep a single binding identity.
 void lambda_ast_register_name(Transpiler* tp, AstNode* node);
 
+// S11.4.12: a reference resolved to a type alias whose body has not completed
+// holds the alias's pre-bound wrapper; note it so the completed type is
+// published through that wrapper once every declaration has resolved.
+void lambda_ast_note_type_reference(AstNode* definition);
+
+// Whether `definition` is a pre-bound type alias whose body has not completed.
+bool lambda_ast_type_is_pending(const AstNode* definition);
+
+// S11.4.12: resolve a top-level type alias at its first reference from earlier
+// in the module, so that reference sees the completed type. A no-op for any
+// other declaration, one already resolving, or a body with a `that` predicate
+// (its values bind in source order).
+void lambda_ast_resolve_type_early(Transpiler* tp, AstNode* definition);
+
 // Call-boundary validation belongs to semantic construction. The parser only
 // supplies a committed source span and already-built callee/argument nodes.
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,

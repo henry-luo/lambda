@@ -2,7 +2,7 @@
 #include "endian.h"
 #include "mem.h"
 #include "str.h"
-#include <zlib.h>
+#include "zlib_exact.h"
 
 struct PsdReader {
     const uint8_t* data;
@@ -123,15 +123,10 @@ static bool psd_plane(const uint8_t* bytes, size_t length, uint32_t width, uint3
         return length == 0 || (length == 1 && *bytes == 0);
     }
     if (compression != 2 && compression != 3) return false;
-    z_stream stream = {};
-    stream.next_in = (Bytef*)bytes; stream.avail_in = (uInt)length;
-    stream.next_out = output; stream.avail_out = (uInt)size;
-    if (inflateInit(&stream) != Z_OK) return false;
-    int status = inflate(&stream, Z_FINISH);
-    bool complete = status == Z_STREAM_END && stream.total_out == size &&
-        (stream.avail_in == 0 || (stream.avail_in == 1 && *stream.next_in == 0));
-    inflateEnd(&stream);
-    if (!complete) return false;
+    size_t used = 0;
+    if (!zlib_inflate_exact(bytes, length, output, size, &used)) return false;
+    // PSD channel data may carry one zero pad byte after the stream.
+    if (used != length && !(used + 1 == length && bytes[used] == 0)) return false;
     if (compression == 3) for (uint32_t y = 0; y < height; y++)
         for (uint32_t x = 1; x < width; x++) output[(size_t)y * width + x] += output[(size_t)y * width + x - 1];
     return true;

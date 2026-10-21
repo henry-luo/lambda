@@ -1294,6 +1294,121 @@ static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
     }
 }
 
+// syntax_flags of a literal that is the operand of a prefix `-`. A signed
+// decimal literal may spell 2^(b-1) only there (`-128i8`); bare, `128i8`
+// overflows i8 (S4.1.5).
+enum { LSF_LITERAL_NEGATED = 1u << 0 };
+
+typedef enum SizedConstStatus {
+    SIZED_CONST_NONE = 0,   // not a sized integer constant
+    SIZED_CONST_OK,
+    SIZED_CONST_OVERFLOW,   // a sub-expression overflowed; reported where it did
+} SizedConstStatus;
+
+static bool sized_lane_holds(LambdaNumericKind kind, __int128 value) {
+    int bits = lambda_numeric_sized_bits(kind);
+    if (bits <= 0) return false;
+    if (lambda_numeric_sized_is_unsigned(kind)) {
+        return value >= 0 && value <= (bits == 64 ? (__int128)UINT64_MAX :
+            ((__int128)1 << bits) - 1);
+    }
+    __int128 bound = (__int128)1 << (bits - 1);
+    return value >= -bound && value < bound;
+}
+
+// S4.1.5: the exact value and lane of a sized integer constant -- a sized
+// literal, or a parenthesized, negated, or `+ - *` combination of them, in the
+// lane S4.4.4 selects. Machine ints wrap only at run time; a constant that
+// leaves its lane is a compile error, as `256u8` already is.
+static SizedConstStatus ast_sized_constant(Transpiler* tp, AstNode* node,
+        __int128* value, LambdaNumericKind* kind) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    // the operator node being resolved has no type yet; only a leaf needs one
+    if (!node) return SIZED_CONST_NONE;
+    if (node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op != OPERATOR_NEG) return SIZED_CONST_NONE;
+        SizedConstStatus status = ast_sized_constant(tp, unary->operand, value, kind);
+        if (status != SIZED_CONST_OK) return status;
+        // a decimal 2^(b-1) operand was stored as its wrapped bits (`128i8`
+        // reads -128) because only its negation is in range
+        bool unsigned_lane = lambda_numeric_sized_is_unsigned(*kind);
+        int bits = lambda_numeric_sized_bits(*kind);
+        if (!unsigned_lane && *value == -((__int128)1 << (bits - 1))) {
+            AstNode* operand = unary->operand;
+            while (operand && operand->node_type == AST_NODE_PRIMARY &&
+                    ((AstPrimaryNode*)operand)->expr) {
+                operand = ((AstPrimaryNode*)operand)->expr;
+            }
+            if (operand && (operand->syntax_flags & LSF_LITERAL_NEGATED)) *value = -*value;
+        }
+        *value = -*value;
+        return sized_lane_holds(*kind, *value) ? SIZED_CONST_OK : SIZED_CONST_OVERFLOW;
+    }
+    if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
+                binary->op != OPERATOR_MUL) return SIZED_CONST_NONE;
+        __int128 left = 0, right = 0;
+        LambdaNumericKind left_kind = LAMBDA_NUM_INVALID, right_kind = LAMBDA_NUM_INVALID;
+        SizedConstStatus left_status = ast_sized_constant(tp, binary->left, &left, &left_kind);
+        SizedConstStatus right_status = ast_sized_constant(tp, binary->right, &right, &right_kind);
+        if (left_status == SIZED_CONST_OVERFLOW || right_status == SIZED_CONST_OVERFLOW) {
+            return SIZED_CONST_OVERFLOW;
+        }
+        if (left_status != SIZED_CONST_OK || right_status != SIZED_CONST_OK) {
+            return SIZED_CONST_NONE;
+        }
+        *kind = lambda_numeric_sized_integer_result(left_kind, right_kind);
+        bool beyond = binary->op == OPERATOR_ADD ? __builtin_add_overflow(left, right, value) :
+            binary->op == OPERATOR_SUB ? __builtin_sub_overflow(left, right, value) :
+            __builtin_mul_overflow(left, right, value);
+        return !beyond && sized_lane_holds(*kind, *value) ? SIZED_CONST_OK : SIZED_CONST_OVERFLOW;
+    }
+    if (node->node_type != AST_NODE_PRIMARY || !node->type || !node->type->is_literal) {
+        return SIZED_CONST_NONE;
+    }
+    *kind = lambda_numeric_kind_from_type(node->type);
+    if (!lambda_numeric_is_sized_integer(*kind)) return SIZED_CONST_NONE;
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return SIZED_CONST_NONE;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:  *value = item.get_int64(); return SIZED_CONST_OK;
+    case LMD_TYPE_UINT64: *value = item.get_uint64(); return SIZED_CONST_OK;
+    case LMD_TYPE_NUM_SIZED: *value = item.get_num_sized_as_int64(); return SIZED_CONST_OK;
+    default: return SIZED_CONST_NONE;
+    }
+}
+
+// The diagnostic for a sized constant `node` whose own operation leaves its
+// lane; silent when a sub-expression already overflowed (reported there).
+static bool reject_sized_constant_overflow(Transpiler* tp, AstNode* node) {
+    __int128 value = 0;
+    LambdaNumericKind kind = LAMBDA_NUM_INVALID;
+    if (ast_sized_constant(tp, node, &value, &kind) != SIZED_CONST_OVERFLOW) return false;
+    // report only when every operand is itself a valid constant
+    AstNode* operands[2] = {NULL, NULL};
+    if (node->node_type == AST_NODE_UNARY) {
+        operands[0] = ((AstUnaryNode*)node)->operand;
+    } else if (node->node_type == AST_NODE_BINARY) {
+        operands[0] = ((AstBinaryNode*)node)->left;
+        operands[1] = ((AstBinaryNode*)node)->right;
+    }
+    for (AstNode* operand : operands) {
+        __int128 ignored = 0;
+        LambdaNumericKind operand_kind = LAMBDA_NUM_INVALID;
+        if (operand && ast_sized_constant(tp, operand, &ignored, &operand_kind) ==
+                SIZED_CONST_OVERFLOW) return true;
+    }
+    record_semantic_error_span(tp, node->source_span, ERR_INVALID_NUMBER,
+        "sized integer constant expression overflows %c%d; machine integers wrap only at run time",
+        lambda_numeric_sized_is_unsigned(kind) ? 'u' : 'i', lambda_numeric_sized_bits(kind));
+    return true;
+}
+
 static Type* ast_called_type_target(AstNode* function) {
     function = ast_unwrap_primary_to_leaf(function);
     if (!function || !function->type) return NULL;
@@ -3603,7 +3718,10 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
         ast_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
     }
     else {
+        // a later top-level alias resolves here, so this reference sees it complete
+        lambda_ast_resolve_type_early(tp, entry->node);
         ast_node->entry = entry;
+        lambda_ast_note_type_reference(entry->node);
         if (entry->is_binder && entry->binder) {
             // A binder read is a first-class runtime type value. Its contained
             // type remains the written bound in type position (TG2/TG9), while
@@ -4234,13 +4352,17 @@ static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal)
         case NUM_UINT8:  return 0xFFULL;
         case NUM_UINT16: return 0xFFFFULL;
         case NUM_UINT32: return 0xFFFFFFFFULL;
+        // i64 (suffix sentinel 0xFF): a decimal literal had no limit, so
+        // `18446744073709551615i64` read back as -1
+        case 0xFF:       return decimal_literal ? 9223372036854775808ULL : UINT64_MAX;
         default:         return UINT64_MAX;
     }
 }
 
-// Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
+// Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64);
+// `negated` is set when the literal is the operand of a prefix `-`.
 static Type* build_lit_sized_integer_from_span(Transpiler* tp,
-        SourceSpan span) {
+        SourceSpan span, bool negated) {
     StrView source = source_span_text(tp, span);
     char* num_str = ast_copy_source_text(tp, source, span);
     if (!num_str) return &TYPE_ERROR;
@@ -4265,10 +4387,18 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
     }
     bool decimal_literal = sized_literal_is_decimal(num_str);
     uint64_t limit = sized_literal_limit(num_type, decimal_literal);
-    if (raw_value > limit) {
+    // S4.1.5: a signed decimal limit is 2^(b-1), which only `-128i8` may
+    // spell; a bare `128i8` had silently read back as -128
+    bool signed_lane = num_type == NUM_INT8 || num_type == NUM_INT16 ||
+        num_type == NUM_INT32 || num_type == 0xFF;
+    if (raw_value > limit ||
+            (decimal_literal && signed_lane && raw_value == limit && !negated)) {
         // sized constants are checked before packing so invalid source cannot silently truncate.
+        // i64/u64 use suffix sentinels the sized-type name table does not know
+        const char* lane_name = num_type == 0xFF ? "i64" : num_type == 0xFE ? "u64" :
+            get_num_sized_type_name(num_type);
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
-            "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
+            "sized integer literal '%s' overflows %s", num_str, lane_name);
         mem_free(num_str);
         return &TYPE_ERROR;
     }
@@ -4408,7 +4538,8 @@ static Type* build_literal_type_from_span(Transpiler* tp,
     case LAMBDA_AST_LITERAL_DECIMAL:
         return build_lit_decimal_from_span(tp, span);
     case LAMBDA_AST_LITERAL_SIZED_INTEGER:
-        return build_lit_sized_integer_from_span(tp, span);
+        return build_lit_sized_integer_from_span(tp, span,
+            literal && (literal->syntax_flags & LSF_LITERAL_NEGATED));
     case LAMBDA_AST_LITERAL_SIZED_FLOAT:
         return build_lit_sized_float_from_span(tp, span);
     case LAMBDA_AST_LITERAL_IMAGINARY:
@@ -4551,10 +4682,22 @@ static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
         return;
     }
     else if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+        // S4.1.5: `-1u8` is a constant that leaves its lane
+        if (ast_node->op == OPERATOR_NEG &&
+                reject_sized_constant_overflow(tp, (AstNode*)ast_node)) {
+            ast_node->type = &TYPE_ERROR;
+            return;
+        }
         ast_node->type = operand->type;
         return;
     }
     else if (IS_NUMERIC_ID(operand_type)) {
+        // S4.1.5: negating the i64 minimum is a constant outside the lane
+        if (operand_type == LMD_TYPE_INT64 && ast_node->op == OPERATOR_NEG &&
+                reject_sized_constant_overflow(tp, (AstNode*)ast_node)) {
+            ast_node->type = &TYPE_ERROR;
+            return;
+        }
         type_id = operand_type;
     }
     else if (operand_type != LMD_TYPE_ANY) {
@@ -8399,8 +8542,9 @@ bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
 // What the syntax phase hands the resolve pass besides the tree.
 struct LambdaSyntaxUnit {
     AstScript* root;
-    // top-level `fn`/`pn` declarations in source order: every body in the
-    // unit sees them, so they bind before the walk starts
+    // top-level `fn`/`pn`, type alias and object type declarations in source
+    // order: every body in the unit sees them, so they bind before the walk
+    // starts (S11.4.12 for the types)
     ArrayList* predeclared;
     // subtrees the tree does not hold but whose construction still resolves,
     // and syntax diagnostics, each resolved where its host node resolves
@@ -8520,7 +8664,20 @@ struct LambdaResolver {
     ShapeEntry* object_shape_tail;
     AstNode* object_method_tail;
     int object_byte_offset;
+    // S11.4.12: every pre-bound alias and its pre-bound wrapper, by index, for
+    // the cycle check and publication once the walk completes
+    ArrayList* prebound_aliases;
+    ArrayList* prebound_types;
+    // each wrapper's first payload, the placeholder record
+    ArrayList* prebound_placeholders;
+    // the module scope, where a top-level alias resolved early resolves
+    NameScope* module_scope;
 };
+
+// The resolver of the unit being resolved, for resolving a top-level alias at
+// its first earlier reference (S11.4.12). An import compiles its module inside
+// this one, so each resolve saves and restores it.
+static thread_local LambdaResolver* active_resolver = NULL;
 
 static bool syntax_parts_add(Transpiler* tp, LambdaSyntaxParts** parts_io,
         uint8_t kind, AstNode* node) {
@@ -8605,13 +8762,23 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         direct_refresh_recursive_type_layout(binary->right, visited);
     } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
-    } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
+    } else if ((type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) ||
+            type->type_id == LMD_TYPE_ELEMENT) {
         TypeMap* map = (TypeMap*)type;
         // Every record arm reached from a named union alias is a declared
         // contract, just like a directly named record. Marking only the outer
         // union left compiler-constructed member carriers unable to certify
         // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
-        map->is_trusted_contract = true;
+        if (type->type_id == LMD_TYPE_MAP) map->is_trusted_contract = true;
+        // a declared element's content pattern can reach records whose fields
+        // were laid out against the placeholder too
+        TypeList* content = type->type_id == LMD_TYPE_ELEMENT ?
+            ((TypeElmt*)type)->content_list : NULL;
+        for (int64_t i = 0; content && content->item_is_type_pattern && i < content->length; i++) {
+            if (content->item_is_type_pattern[i]) {
+                direct_refresh_recursive_type_layout(content->item_patterns[i].type, visited);
+            }
+        }
         bool changed_width = false;
         FOR_EACH_MAP_FIELD(map, field) {
             direct_refresh_recursive_type_layout(field->type, visited);
@@ -8633,14 +8800,18 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
 // Recursive fields were built against the pre-registered placeholder map.
 // Publish the completed shape through that same identity so function contracts
 // and self-references cannot split into placeholder and final maps.
+// `shared_definition` is set when the body is exactly another alias: its
+// wrapper and type-list slot belong to that alias and are left as they are.
 static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* alias,
-        TypeType* pre_type) {
+        TypeType* pre_type, bool shared_definition) {
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
-    if (lambda_type_is_union(actual)) {
+    if (lambda_type_is_union(actual) ||
+            (actual && actual->type_id == LMD_TYPE_ELEMENT)) {
         // Pattern references retain pre_type, so publish the completed union
-        // through that same wrapper rather than leaving an empty map behind.
+        // or element through that same wrapper rather than leaving an empty
+        // map behind: `type S = <s S*>` matched its own children against `{}`.
         pre_type->type = actual;
         alias->type = (Type*)pre_type;
         ArrayList* visited = arraylist_new(8);
@@ -8655,12 +8826,14 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     *pre_map = *actual_map;
     pre_map->struct_name = alias->name->chars;
     pre_map->is_trusted_contract = true;
-    if (pre_map->type_index >= 0 && pre_map->type_index < tp->type_list->length &&
-            tp->type_list->data[pre_map->type_index] == actual_map) {
-        tp->type_list->data[pre_map->type_index] = pre_map;
-    }
-    if (definition->type_id == LMD_TYPE_TYPE) {
-        ((TypeType*)definition)->type = (Type*)pre_map;
+    if (!shared_definition) {
+        if (pre_map->type_index >= 0 && pre_map->type_index < tp->type_list->length &&
+                tp->type_list->data[pre_map->type_index] == actual_map) {
+            tp->type_list->data[pre_map->type_index] = pre_map;
+        }
+        if (definition->type_id == LMD_TYPE_TYPE) {
+            ((TypeType*)definition)->type = (Type*)pre_map;
+        }
     }
     alias->type = (Type*)pre_type;
 }
@@ -9106,6 +9279,14 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
         // MIR lowering could obscure the source diagnostic (S3.3.4).
         record_semantic_error_span(tp, right->source_span, ERR_INVALID_OPERATION,
             "integral division or remainder by literal zero");
+        node->type = &TYPE_ERROR;
+        return;
+    }
+    // S4.1.5: `200u8 + 100u8` is a constant that leaves its lane, a compile
+    // error as `256u8` is; only run-time values wrap
+    if ((node->op == OPERATOR_ADD || node->op == OPERATOR_SUB ||
+            node->op == OPERATOR_MUL) &&
+            reject_sized_constant_overflow(tp, (AstNode*)node)) {
         node->type = &TYPE_ERROR;
         return;
     }
@@ -14283,7 +14464,15 @@ enum { LSF_VIEW_RETURN, LSF_VIEW_ERROR, LSF_VIEW_TAIL };
 // PREBOUND marks an alias bound when its name parsed, so a self-reference in
 // its body resolves to it (`type Node = {left: Node?}`).
 enum { LSF_ALIAS_TYPE, LSF_ALIAS_SPAN, LSF_ALIAS_TAIL };
-enum { LSF_ALIAS_PREBOUND = 1u << 0 };
+// PREDECLARED marks a top-level alias bound before the walk (S11.4.12), so a
+// reference anywhere in the module resolves to it. EARLY_REFERENCE marks one
+// referenced before its body completed: that reference holds the pre-bound
+// wrapper, which must carry the completed type.
+enum {
+    LSF_ALIAS_PREBOUND = 1u << 0,
+    LSF_ALIAS_PREDECLARED = 1u << 1,
+    LSF_ALIAS_EARLY_REFERENCE = 1u << 2,
+};
 
 // LSF_GRAMMAR tail: the body span inside the braces, which the grammar
 // loader parses when the declaration resolves (GM5v2).
@@ -14457,6 +14646,12 @@ static void syntax_count_header_depth(LambdaSyntaxSink* sink,
     }
 }
 
+// A declaration beginning outside every function, object and lexical scope.
+static bool syntax_at_top_level(const LambdaSyntaxSink* sink) {
+    return sink->header_function_depth == 0 && sink->header_object_depth == 0 &&
+        sink->header_lexical_depth == 0;
+}
+
 // The function node exists from FUNCTION_BEGIN: forward references inside its
 // own body bind to it, and its signature and body arrive in its syntax tail.
 static void syntax_function_begin(LambdaSyntaxSink* sink,
@@ -14475,8 +14670,7 @@ static void syntax_function_begin(LambdaSyntaxSink* sink,
     if (flags & LAMBDA_REDUCTION_FLAG_PUBLIC) facts |= LSF_FN_PUBLIC;
     if (flags & LAMBDA_REDUCTION_FLAG_COLOUR_POLY) facts |= LSF_FN_COLOUR_POLY;
     fn->syntax_aux = facts;
-    bool top_level_header = sink->header_function_depth == 0 &&
-        sink->header_object_depth == 0 && sink->header_lexical_depth == 0 &&
+    bool top_level_header = syntax_at_top_level(sink) &&
         (flags & LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER) != 0;
     sink->header_function_depth++;
     if (top_level_header && name.length &&
@@ -14533,6 +14727,10 @@ static void syntax_type_alias_begin(LambdaSyntaxSink* sink,
         LSF_ALIAS_TAIL);
     alias->syntax_flags |= LSF_ALIAS_PREBOUND;
     sink->pending_type_alias = alias;
+    // S11.4.12: a top-level type name binds for the whole module
+    if (syntax_at_top_level(sink) && !arraylist_append(sink->unit->predeclared, alias)) {
+        sink->failed = true;
+    }
 }
 
 static AstNode* syntax_type_stam(Transpiler* tp, SourceSpan span,
@@ -14566,9 +14764,20 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
             LSF_PATTERN_TAIL);
         pattern->name = name_pool_create_strview(tp->name_pool, alias_name);
         pattern->is_symbol = island->is_symbol;
+        // a bare island has no begin reduction; a top-level pattern still binds
+        // for the whole module (S11.4.12), so it gets its binding here
+        if (!pending && syntax_at_top_level(sink)) {
+            pending = build_declarator_syntax(tp, reduction->span, pattern->name,
+                LSF_TYPE_ALIAS, LSF_ALIAS_TAIL);
+            pending->syntax_flags |= LSF_ALIAS_PREBOUND;
+            if (!arraylist_append(sink->unit->predeclared, pending)) sink->failed = true;
+        }
         void** tail = syntax_tail((AstNode*)pattern, sizeof(AstPatternDefNode));
         tail[LSF_PATTERN_ISLAND] = island;
         tail[LSF_PATTERN_PREBOUND] = pending;
+        // the binding leads back to its definition, which an earlier reference
+        // may resolve first (S11.4.12)
+        if (pending) syntax_tail((AstNode*)pending, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE] = pattern;
         return syntax_type_stam(tp, reduction->span, (AstNode*)pattern, is_public);
     }
     // reuse the pre-bound declaration node so every self-reference captured
@@ -14615,6 +14824,11 @@ static void syntax_object_begin(LambdaSyntaxSink* sink,
     object->local_type_index = -1;
     syntax_tail_set_span(&syntax_tail((AstNode*)object,
         sizeof(AstObjectTypeNode))[LSF_OBJECT_BASE], reduction->detail_token.span);
+    // S11.4.12: a top-level object type's name binds for the whole module
+    if (syntax_at_top_level(sink) && object->name &&
+            !arraylist_append(sink->unit->predeclared, object)) {
+        sink->failed = true;
+    }
     sink->object_nodes[sink->type_object_depth++] = object;
     sink->completed_object = NULL;
 }
@@ -14809,6 +15023,16 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
         AstUnaryNode* unary = (AstUnaryNode*)build_operand_syntax(tp, span,
             AST_NODE_UNARY, sizeof(AstUnaryNode), LSF_UNARY, operand);
         unary->op_str = direct_token_text(tp, reduction->detail_token);
+        // the literal under a prefix `-` may spell a signed 2^(b-1) (`-128i8`)
+        AstNode* negated = operand;
+        while (negated && negated->node_type == AST_NODE_PRIMARY &&
+                negated->syntax_form != LSF_LITERAL && ((AstPrimaryNode*)negated)->expr) {
+            negated = ((AstPrimaryNode*)negated)->expr;
+        }
+        if (negated && negated->syntax_form == LSF_LITERAL &&
+                unary->op_str.length == 1 && unary->op_str.str[0] == '-') {
+            negated->syntax_flags |= LSF_LITERAL_NEGATED;
+        }
         return (AstNode*)unary;
     }
     }
@@ -15679,6 +15903,8 @@ static void resolver_predicate_end(LambdaResolver* r, AstFuncNode* fn,
 }
 
 static void resolver_type_alias_begin(LambdaResolver* r, AstDeclaratorNode* alias) {
+    // a top-level alias was already bound before the walk (S11.4.12)
+    if (alias->syntax_flags & LSF_ALIAS_PREDECLARED) return;
     Transpiler* tp = r->tp;
     alias->is_type_definition = true;
     TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
@@ -15690,6 +15916,79 @@ static void resolver_type_alias_begin(LambdaResolver* r, AstDeclaratorNode* alia
     pre_type->type = (Type*)pre_map;
     alias->type = (Type*)pre_type;
     lambda_ast_register_name(tp, (AstNode*)alias);
+    if (r->prebound_aliases && r->prebound_types && r->prebound_placeholders) {
+        arraylist_append(r->prebound_aliases, alias);
+        arraylist_append(r->prebound_types, pre_type);
+        arraylist_append(r->prebound_placeholders, pre_map);
+    }
+}
+
+bool lambda_ast_type_is_pending(const AstNode* definition) {
+    if (!definition || definition->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
+    const AstDeclaratorNode* alias = (const AstDeclaratorNode*)definition;
+    // an alias's `init` is set as its body completes
+    return alias->is_type_definition && !alias->init &&
+        (alias->syntax_flags & LSF_ALIAS_PREBOUND);
+}
+
+void lambda_ast_note_type_reference(AstNode* definition) {
+    if (lambda_ast_type_is_pending(definition)) {
+        ((AstDeclaratorNode*)definition)->syntax_flags |= LSF_ALIAS_EARLY_REFERENCE;
+    }
+}
+
+// Whether the source text in `span` holds `word` as a whole identifier.
+static bool source_span_has_word(const Transpiler* tp, SourceSpan span, const char* word) {
+    size_t length = strlen(word);
+    const char* text = tp->source + span.start_byte;
+    size_t size = lambda_source_span_length(span);
+    for (size_t i = 0; i + length <= size; i++) {
+        if (memcmp(text + i, word, length) != 0) continue;
+        bool left = i == 0 || !str_char_is_ident(text[i - 1]);
+        bool right = i + length == size || !str_char_is_ident(text[i + length]);
+        if (left && right) return true;
+    }
+    return false;
+}
+
+void lambda_ast_resolve_type_early(Transpiler* tp, AstNode* definition) {
+    LambdaResolver* r = active_resolver;
+    if (!r || r->tp != tp || r->failed || !r->module_scope || !definition ||
+            definition->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
+    AstDeclaratorNode* alias = (AstDeclaratorNode*)definition;
+    if (!(alias->syntax_flags & LSF_ALIAS_PREDECLARED) || alias->init) return;
+    AstNode* body = (AstNode*)syntax_tail(definition, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE];
+    if (!body) return;
+    bool pattern = body->syntax_form == LSF_PATTERN_DEF;
+    AstNode* target = pattern ? body : definition;
+    // the walk clears a node's form as it begins, so a cleared form is a
+    // declaration already resolving: a recursive reference keeps the wrapper
+    if (!pattern && target->syntax_form != LSF_TYPE_ALIAS) return;
+    // a `that` body reads values, which bind in source order (S11.4.11)
+    if (!pattern && source_span_has_word(tp, body->source_span, "that")) return;
+    NameScope* scope = tp->current_scope;
+    bool in_that = tp->in_that_clause;
+    tp->current_scope = r->module_scope;
+    tp->in_that_clause = false;
+    resolve_walk(r, target);
+    tp->current_scope = scope;
+    tp->in_that_clause = in_that;
+}
+
+// The pre-bound alias whose wrapper `type` is, or -1.
+static int resolver_prebound_index(const LambdaResolver* r, const Type* type) {
+    const ArrayList* types = r->prebound_types;
+    for (int i = 0; type && types && i < types->length; i++) {
+        if (types->data[i] == type) return i;
+    }
+    return -1;
+}
+
+// Whether `type` is the wrapper of an alias whose body has not completed.
+static bool resolver_is_pending_alias(const LambdaResolver* r, const Type* type) {
+    int index = resolver_prebound_index(r, type);
+    return index >= 0 &&
+        !((AstDeclaratorNode*)r->prebound_aliases->data[index])->init;
 }
 
 static void resolver_view_begin(LambdaResolver* r, AstViewNode* view) {
@@ -15756,9 +16055,10 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
     }
 }
 
-static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
-        StrView base_name) {
-    Transpiler* tp = r->tp;
+// The nominal type an object declaration names, published with its name. A
+// top-level declaration does this before the walk (S11.4.12): members fill the
+// same record in place, so an earlier reference keeps its identity.
+static TypeObject* resolver_object_declare(Transpiler* tp, AstObjectTypeNode* object) {
     TypeObject* object_type = (TypeObject*)pool_calloc(tp->pool,
         object->is_binary_schema ? sizeof(TypeBinarySchema) : sizeof(TypeObject));
     // D2.6.6v2 phase 2 (S2.1.1v3): a nominal type IS a map or an element; the
@@ -15783,14 +16083,22 @@ static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
     record->struct_kind = LMD_TYPE_MAP;  // refined at resolver_object_end
     object_type->nominal = record;
     object_type->is_nominal = 1;  // base-flag discriminator (D2.6.6v2 phase 2)
+    lambda_ast_register_name(tp, (AstNode*)object);
+    return object_type;
+}
 
+static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
+        StrView base_name) {
+    Transpiler* tp = r->tp;
+    TypeObject* object_type = object->type && object->type->type_id == LMD_TYPE_TYPE
+        ? (TypeObject*)((TypeType*)object->type)->type
+        : resolver_object_declare(tp, object);
     r->object_node = object;
     r->object_type = object_type;
     r->object_field_tail = NULL;
     r->object_shape_tail = NULL;
     r->object_method_tail = NULL;
     r->object_byte_offset = 0;
-    lambda_ast_register_name(tp, (AstNode*)object);
     r->object_scope = lambda_ast_enter_scope(tp, false);
     if (!object->is_binary_schema) resolver_object_copy_base(r, base_name);
     r->type_object_depth++;
@@ -16318,9 +16626,32 @@ static void resolve_pattern_def(Transpiler* tp, AstPatternDefNode* pattern) {
     } else {
         lambda_ast_register_name(tp, (AstNode*)pattern);
     }
+    // S11.4.12: a reference made before this definition holds the pre-bound
+    // wrapper, which now carries the pattern
+    if (pre_bound && (pre_bound->syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
+            pre_bound->type && pre_bound->type->type_id == LMD_TYPE_TYPE) {
+        ((TypeType*)pre_bound->type)->type = pattern->type;
+    }
 }
 
-static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias) {
+// The type an alias's pre-bound wrapper carries: its completed type, past one
+// plain TypeType carrier.
+static Type* alias_wrapper_payload(Type* type) {
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE &&
+            !type_is_global_meta_type(type) && ((TypeType*)type)->type) {
+        return ((TypeType*)type)->type;
+    }
+    return type;
+}
+
+// `shared` is set when the body is exactly a reference to another alias, and
+// `forward` when that alias's own body has not completed (`type A = B` before
+// `type B = …`, which resolves B first unless B is resolving or has a `that`
+// body): A then stands for B's pre-bound wrapper, and nothing is adopted from
+// B's placeholder now; the completed type reaches A's own wrapper once the walk
+// ends (S11.4.12).
+static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias,
+        bool shared, bool forward) {
     void** tail = syntax_tail((AstNode*)alias, sizeof(AstDeclaratorNode));
     AstNode* type_node = (AstNode*)tail[LSF_ALIAS_TYPE];
     bool prebound = (alias->syntax_flags & LSF_ALIAS_PREBOUND) != 0;
@@ -16330,8 +16661,18 @@ static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias) {
     alias->init = type_node;
     alias->type = type_node && type_node->type ? type_node->type : &TYPE_ANY;
     alias->is_type_definition = true;
-    if (pre_type) direct_adopt_pending_alias_map(tp, alias, pre_type);
-    direct_finalize_type_alias(tp, alias);
+    if (!forward) {
+        if (pre_type) direct_adopt_pending_alias_map(tp, alias, pre_type, shared);
+        direct_finalize_type_alias(tp, alias);
+        // S11.4.12: an earlier reference holds the pre-bound wrapper; publish
+        // the completed type through it now, so the code after this
+        // declaration sees it complete (maps, unions and elements adopted it)
+        if (pre_type && (alias->syntax_flags & LSF_ALIAS_EARLY_REFERENCE) &&
+                alias->type != (Type*)pre_type) {
+            Type* payload = alias_wrapper_payload(alias->type);
+            if (payload && payload != (Type*)pre_type) pre_type->type = payload;
+        }
+    }
     if (!prebound) lambda_ast_register_name(tp, (AstNode*)alias);
 }
 
@@ -17075,9 +17416,13 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_TYPE_ALIAS: {
         AstDeclaratorNode* alias = (AstDeclaratorNode*)node;
         if (alias->syntax_flags & LSF_ALIAS_PREBOUND) resolver_type_alias_begin(r, alias);
-        resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE]);
+        AstNode* body = (AstNode*)syntax_tail(node, sizeof(AstDeclaratorNode))[LSF_ALIAS_TYPE];
+        resolve_walk(r, body);
         resolve_diagnostics(r, node);
-        resolve_type_alias(tp, alias);
+        int target = body ? resolver_prebound_index(r, body->type) : -1;
+        resolve_type_alias(tp, alias,
+            target >= 0 && r->prebound_aliases->data[target] != alias,
+            body && resolver_is_pending_alias(r, body->type));
         break;
     }
     case LSF_OBJECT_TYPE: {
@@ -17276,12 +17621,31 @@ static AstNode* resolve_walk(LambdaResolver* r, AstNode* node) {
 
 // Top-level `fn`/`pn` declarations bind before any body resolves, so a
 // declaration cannot be mistaken for a same-spelled system function (for
-// example `gamma`) by an earlier body.
-static void resolver_predeclare_functions(LambdaResolver* r) {
+// example `gamma`) by an earlier body. Top-level type aliases and object types
+// bind here too, so a type may name a later type or one that names it back
+// (S11.4.12); their bodies still resolve in source order, where their `that`
+// predicates read the values declared before them.
+static void resolver_predeclare(LambdaResolver* r) {
     Transpiler* tp = r->tp;
     ArrayList* list = r->unit->predeclared;
     for (int i = 0; i < list->length; i++) {
-        AstFuncNode* fn = (AstFuncNode*)list->data[i];
+        AstNode* node = (AstNode*)list->data[i];
+        if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* alias = (AstDeclaratorNode*)node;
+            if (!lookup_declaration_in_current_scope(tp, alias->name, node)) {
+                resolver_type_alias_begin(r, alias);
+                alias->syntax_flags |= LSF_ALIAS_PREDECLARED;
+            }
+            continue;
+        }
+        if (node->node_type == AST_NODE_OBJECT_TYPE) {
+            AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+            if (!lookup_declaration_in_current_scope(tp, object->name, node)) {
+                resolver_object_declare(tp, object);
+            }
+            continue;
+        }
+        AstFuncNode* fn = (AstFuncNode*)node;
         uint16_t facts = fn->syntax_aux;
         NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
             (AstNode*)fn);
@@ -17295,6 +17659,129 @@ static void resolver_predeclare_functions(LambdaResolver* r) {
             ((TypeFunc*)existing->node->type)->is_public = (facts & LSF_FN_PUBLIC) != 0;
         }
     }
+}
+
+typedef struct TypeCycleWalk {
+    LambdaResolver* r;
+    uint8_t* state;  // per alias: 0 unvisited, 1 on the current path, 2 done
+    bool found;
+} TypeCycleWalk;
+
+static void resolver_type_cycle_visit(TypeCycleWalk* walk, int index);
+
+// S11.4.12: the aliases a type reaches without passing a structural position.
+// A map field, an element attribute or content slot, an array item and a
+// `that` body each consume one level of the value, so the walk stops there;
+// unions, intersections, exclusions, occurrences and function signatures do
+// not. An alias reached again on the current path closes an unguarded cycle.
+static void resolver_type_cycle_walk(TypeCycleWalk* walk, Type* type, int depth) {
+    if (!type || depth > 256 || type_is_global_meta_type(type)) return;
+    int target = resolver_prebound_index(walk->r, type);
+    // a reference that unwrapped the wrapper while its alias was resolving
+    // (a function type's return does) holds the placeholder record; it stands
+    // for the alias once the wrapper carries another type. A map alias adopts
+    // its placeholder in place, which is then that map, a structural stop.
+    for (int i = 0; target < 0 && i < walk->r->prebound_placeholders->length; i++) {
+        if (walk->r->prebound_placeholders->data[i] == type &&
+                ((TypeType*)walk->r->prebound_types->data[i])->type != type) target = i;
+    }
+    if (target >= 0) {
+        if (walk->state[target] == 0) {
+            resolver_type_cycle_visit(walk, target);
+        } else if (walk->state[target] == 1) {
+            AstDeclaratorNode* alias =
+                (AstDeclaratorNode*)walk->r->prebound_aliases->data[target];
+            record_semantic_error_span(walk->r->tp, alias->source_span, ERR_TYPE_CYCLE,
+                "type '%.*s' refers to itself through no structural position: "
+                "recursion must pass through a field, an attribute, element "
+                "content, an array item or a `that` predicate",
+                (int)alias->name->len, alias->name->chars);
+            walk->found = true;
+        }
+        return;
+    }
+    if (type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* fn = (TypeFunc*)type;
+        for (TypeParam* param = fn->param; param; param = param->next) {
+            resolver_type_cycle_walk(walk, param->contract_type ? param->contract_type
+                : param->full_type, depth + 1);
+        }
+        resolver_type_cycle_walk(walk, fn->return_contract ? fn->return_contract
+            : fn->returned, depth + 1);
+        return;
+    }
+    if (type->type_id != LMD_TYPE_TYPE) return;
+    switch (type->kind) {
+    case TYPE_KIND_SIMPLE:
+        resolver_type_cycle_walk(walk, ((TypeType*)type)->type, depth + 1);
+        break;
+    case TYPE_KIND_BINARY:
+        resolver_type_cycle_walk(walk, ((TypeBinary*)type)->left, depth + 1);
+        resolver_type_cycle_walk(walk, ((TypeBinary*)type)->right, depth + 1);
+        break;
+    case TYPE_KIND_UNARY:
+        // `T[]` is an array item; `T?`, `T*`, `T+`, `T{n}` and `!T` are not
+        if (((TypeUnary*)type)->op != OPERATOR_ARRAY) {
+            resolver_type_cycle_walk(walk, ((TypeUnary*)type)->operand, depth + 1);
+        }
+        break;
+    case TYPE_KIND_CONSTRAINED:
+        resolver_type_cycle_walk(walk, ((TypeConstrained*)type)->base, depth + 1);
+        break;
+    default:
+        break;
+    }
+}
+
+static void resolver_type_cycle_visit(TypeCycleWalk* walk, int index) {
+    AstDeclaratorNode* alias = (AstDeclaratorNode*)walk->r->prebound_aliases->data[index];
+    walk->state[index] = 1;
+    resolver_type_cycle_walk(walk, alias->init ? alias->init->type : NULL, 0);
+    walk->state[index] = 2;
+}
+
+// The completed type alias `index` stands for, past any chain of aliases that
+// are exactly another alias.
+static Type* resolver_alias_payload(LambdaResolver* r, int index, int depth) {
+    AstDeclaratorNode* alias = (AstDeclaratorNode*)r->prebound_aliases->data[index];
+    TypeType* pre_type = (TypeType*)r->prebound_types->data[index];
+    Type* definition = alias->init ? alias->init->type : NULL;
+    int target = resolver_prebound_index(r, definition);
+    if (target >= 0 && target != index && depth < 64) {
+        return resolver_alias_payload(r, target, depth + 1);
+    }
+    return alias->type == (Type*)pre_type ? pre_type->type
+        : alias_wrapper_payload(alias->type);
+}
+
+// S11.4.12, once every declaration has resolved: reject unguarded cycles,
+// publish each early-referenced alias's completed type through the wrapper
+// those references hold, and refresh layouts built against a placeholder.
+static void resolver_complete_types(LambdaResolver* r) {
+    ArrayList* aliases = r->prebound_aliases;
+    if (!aliases || !aliases->length) return;
+    Transpiler* tp = r->tp;
+    uint8_t* state = (uint8_t*)pool_calloc(tp->pool, (size_t)aliases->length);
+    TypeCycleWalk walk = {r, state, false};
+    for (int i = 0; i < aliases->length; i++) {
+        if (!state[i]) resolver_type_cycle_visit(&walk, i);
+    }
+    // a cyclic chain has no payload to publish, and the module fails anyway
+    if (walk.found) return;
+    for (int i = 0; i < aliases->length; i++) {
+        AstDeclaratorNode* alias = (AstDeclaratorNode*)aliases->data[i];
+        // a pattern definition publishes itself as it completes
+        if (!alias->init || !(alias->syntax_flags & LSF_ALIAS_EARLY_REFERENCE)) continue;
+        TypeType* pre_type = (TypeType*)r->prebound_types->data[i];
+        Type* payload = resolver_alias_payload(r, i, 0);
+        if (payload && payload != (Type*)pre_type) pre_type->type = payload;
+    }
+    ArrayList* visited = arraylist_new(16);
+    for (int i = 0; visited && i < aliases->length; i++) {
+        AstDeclaratorNode* alias = (AstDeclaratorNode*)aliases->data[i];
+        if (alias->init) direct_refresh_recursive_type_layout(alias->type, visited);
+    }
+    if (visited) arraylist_free(visited);
 }
 
 // ============================================================================
@@ -17378,8 +17865,19 @@ LambdaParseStatus lambda_rd_resolve_syntax(Transpiler* tp,
     LambdaResolver resolver = {};
     resolver.tp = tp;
     resolver.unit = unit;
-    resolver_predeclare_functions(&resolver);
+    resolver.prebound_aliases = arraylist_new(8);
+    resolver.prebound_types = arraylist_new(8);
+    resolver.prebound_placeholders = arraylist_new(8);
+    resolver.module_scope = tp->current_scope;
+    LambdaResolver* outer_resolver = active_resolver;
+    active_resolver = &resolver;
+    resolver_predeclare(&resolver);
     resolve_walk(&resolver, (AstNode*)unit->root);
+    if (!resolver.failed) resolver_complete_types(&resolver);
+    active_resolver = outer_resolver;
+    if (resolver.prebound_aliases) arraylist_free(resolver.prebound_aliases);
+    if (resolver.prebound_types) arraylist_free(resolver.prebound_types);
+    if (resolver.prebound_placeholders) arraylist_free(resolver.prebound_placeholders);
     if (tp->build_allocation_failed) resolver.failed = true;
     if (resolver.failed || !resolver.root) {
         log_error("direct AST resolve failure at=%u message=%s",

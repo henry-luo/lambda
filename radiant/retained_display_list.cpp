@@ -44,10 +44,16 @@ static void retained_budget_release(RetainedStorageBudget* budget) {
     }
 }
 using RetainedPaintSpan = DisplayCommandSpan;
+struct RetainedPlacementValidation {
+    size_t span_index;
+    DisplayChunkValidation validation;
+};
+using RetainedPlacementList = lam::ArrayList<RetainedPlacementValidation>;
 struct RetainedPaintChunk : DisplayPayloadOwner {
     Arena* arena = nullptr;
     DisplayList own;
     lam::ArrayList<RetainedPaintSpan> spans{MEM_CAT_RENDER, 0};
+    lam::Own<RetainedPlacementList> placements{};
     lam::Own<DisplayResourceSummary> resources{};
     DisplayChunkValidation validation{};
     bool validation_ready = false;
@@ -240,6 +246,9 @@ static void retained_chunk_destroy(DisplayPayloadOwner* owner) {
         dl_payload_owner_release(child);
     }
     dl_destroy(&chunk->own);
+    if (chunk->placements) {
+        chunk->placements->~RetainedPlacementList(); mem_free(chunk->placements);
+    }
     dl_resource_summary_destroy(chunk->resources);
     if (chunk->arena) mem_arena_destroy(chunk->arena);
     if (chunk->budget) {
@@ -568,6 +577,8 @@ static bool retained_dl_admit_chunk(RetainedDisplayListCache* cache, RetainedPai
     size_t bytes = sizeof(*chunk) + sizeof(RetainedDisplayListFragment) +
         chunk->own.capacity() * sizeof(DisplayItem) + chunk->spans.capacity() * sizeof(RetainedPaintSpan) +
         arena_total_allocated(chunk->arena) + dl_shared_array_bytes(&chunk->own);
+    if (chunk->placements) bytes += sizeof(RetainedPlacementList) +
+        chunk->placements->capacity() * sizeof(RetainedPlacementValidation);
     bytes += dl_resource_summary_bytes(chunk->resources);
     // a foreign lease pins its whole producer graph; reserve that liability in this cache too.
     for (size_t i = 0; i < chunk->spans.size(); i++) if (chunk->spans[i].child) {
@@ -617,12 +628,23 @@ static void retained_dl_touch_chunk(RetainedDisplayListCache* cache, DisplayPayl
     retained_dl_index_group(cache, chunk);
 }
 
+static bool retained_dl_add_placement(RetainedPaintChunk* chunk, const DisplayChunkValidation* validation) {
+    if (!validation) return true;
+    if (!chunk->placements) {
+        void* storage = mem_alloc(sizeof(RetainedPlacementList), MEM_CAT_RENDER);
+        if (!storage) return false;
+        chunk->placements = lam::own(new (storage) RetainedPlacementList(MEM_CAT_RENDER, 0));
+        // most captured parents contain one SVG placement; avoid the default sixteen-entry allocation.
+        if (!chunk->placements->reserve(1)) return false;
+    }
+    return chunk->placements->append({chunk->spans.size() - 1, *validation});
+}
+
+static bool retained_dl_approved_local_placement(const DisplayListCursor& cursor);
+
 static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* cache,
     DisplayListCursor* cursor, size_t depth, uint32_t key = 0) {
-    // a placement view cannot refresh the source publication or copy its unshifted raw descriptors.
-    if (cursor->translate_x != 0 || cursor->translate_y != 0) {
-        cursor->skip_element(); return nullptr;
-    }
+    bool translated = cursor->translate_x != 0 || cursor->translate_y != 0;
     const DisplayItem marker = *cursor->item;
     uint32_t view_id = key ? key : marker.element_marker.view_id;
     if (depth > DL_VALIDATE_ELEMENT_STACK_LIMIT) { cursor->skip_element(); return nullptr; }
@@ -633,9 +655,10 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         RetainedPaintChunk* existing = (RetainedPaintChunk*)scope;
         bool local = existing->budget == cache->budget;
         // zero-ID leaf subscenes expose no descendant view bindings; their parent budgets the lease.
-        bool foreign_leaf = depth > 0 && !key && existing->validation_ready &&
+        bool foreign_leaf = !local && depth > 0 && !key && existing->validation_ready &&
             !marker.element_marker.view_id && existing->span_count == 1 && !existing->command_spans[0].child;
-        if ((local || foreign_leaf) && ref_count_retain(&existing->refs)) {
+        bool local_placement = local && translated && retained_dl_approved_local_placement(*cursor);
+        if (((local && (!translated || local_placement)) || foreign_leaf) && ref_count_retain(&existing->refs)) {
             // immutable publications keep their identity when a mixed frame is captured again.
             if (local) retained_dl_touch_chunk(cache, existing);
             else RENDER_METRIC_ADD(retained_foreign_chunks, 1);
@@ -643,6 +666,8 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
             return existing;
         }
     }
+    // other placements cannot refresh a semantic publication or copy its unshifted raw descriptors.
+    if (translated) { cursor->skip_element(); return nullptr; }
     RetainedPaintChunk* chunk = (RetainedPaintChunk*)mem_alloc(sizeof(RetainedPaintChunk), MEM_CAT_RENDER);
     if (chunk) {
         new (chunk) RetainedPaintChunk();
@@ -657,16 +682,21 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         else dl_init(&chunk->own, chunk->arena);
     }
     bool retainable = true, copied = chunk != nullptr, first = true, closed = false;
+    bool placed_children = false;
     int commands = 0;
     do {
         const DisplayItem& item = *cursor->item;
         if (!first && item.op == DL_BEGIN_ELEMENT) {
+            float dx = cursor->translate_x, dy = cursor->translate_y;
+            const auto* placement = retained_dl_cursor_validation(*cursor);
             RetainedPaintChunk* child = retained_dl_capture_chunk(cache, cursor, depth + 1);
             if (!child) retainable = false;
-            if (!chunk || !child || !chunk->spans.append({child, 0, 0})) {
+            if (!chunk || !child || !chunk->spans.append({child, 0, 0, dx, dy})) {
                 dl_payload_owner_release(child);
                 if (child) copied = false;
             } else {
+                placed_children |= dx != 0 || dy != 0;
+                if ((dx != 0 || dy != 0) && !retained_dl_add_placement(chunk, placement)) copied = false;
                 bool local_child = child->budget == cache->budget;
                 if (local_child) __atomic_fetch_add(&child->parent_count, 1u, __ATOMIC_RELAXED);
                 if (!retained_resources_add_child(chunk, child)) copied = false;
@@ -708,6 +738,8 @@ static RetainedPaintChunk* retained_dl_capture_chunk(RetainedDisplayListCache* c
         retained_resources_finish(chunk->resources);
         // uncertified ad hoc captures keep the full validation path; child certificates compose here.
         chunk->validation_ready = dl_validate_chunk(chunk, nullptr, &chunk->validation);
+        // source certificates cover zero placement; changed transforms/pixel operations need successful validation.
+        if (placed_children && !chunk->validation_ready) copied = false;
     }
     bool budget_rejected = chunk && retainable && copied && !retained_dl_admit_chunk(cache, chunk);
     if (budget_rejected) { copied = false; cache->stats.budget_rejections++; }
@@ -978,6 +1010,9 @@ bool retained_dl_append_fragment(DisplayList* dst,
 
 struct RetainedPlacedChunk : DisplayPayloadOwner {
     DisplayCommandSpan child;
+    DisplayChunkValidation validation{}; // child summary, excluding this shell's graph level.
+    bool validation_ready = false;
+    bool capture_local = false; // set only after exact solid-box admission; the source stays canonical.
 };
 
 static void retained_placed_chunk_destroy(DisplayPayloadOwner* owner) {
@@ -986,8 +1021,49 @@ static void retained_placed_chunk_destroy(DisplayPayloadOwner* owner) {
     placed->~RetainedPlacedChunk(); mem_free(placed);
 }
 
-bool retained_dl_append_fragment_translated(DisplayList* dst,
-    const RetainedDisplayListFragment* fragment, float dx, float dy) {
+static bool retained_dl_approved_local_placement(const DisplayListCursor& cursor) {
+    if (cursor.depth < 2) return false;
+    const auto* enclosing = cursor.chunks[cursor.depth - 2].owner;
+    if (enclosing->destroy != retained_placed_chunk_destroy) return false;
+    const auto* placed = (const RetainedPlacedChunk*)enclosing;
+    return placed->capture_local && retained_dl_cursor_validation(cursor);
+}
+
+const DisplayChunkValidation* retained_dl_cursor_validation(const DisplayListCursor& cursor) {
+    if (!cursor.owner || cursor.index != 0) return nullptr;
+    if (cursor.translate_x == 0 && cursor.translate_y == 0)
+        return retained_dl_chunk_validation(cursor.owner);
+    if (cursor.depth < 2) return nullptr;
+    const auto& enclosing = cursor.chunks[cursor.depth - 2];
+    const auto* parent = enclosing.owner;
+    if (parent->destroy == retained_placed_chunk_destroy) {
+        const auto* placed = (const RetainedPlacedChunk*)parent;
+        // an outer placement must not reuse the shell's original finite-transform attestation.
+        return placed->validation_ready && placed->child.child == cursor.owner &&
+            cursor.translate_x == placed->translate_x && cursor.translate_y == placed->translate_y
+            ? &placed->validation : nullptr;
+    }
+    if (parent->destroy != retained_chunk_destroy || !enclosing.span) return nullptr;
+    const auto* chunk = (const RetainedPaintChunk*)parent;
+    size_t span_index = enclosing.span - 1;
+    if (!chunk->placements || span_index >= chunk->spans.size()) return nullptr;
+    const auto& span = chunk->spans[span_index];
+    if (span.child != cursor.owner || cursor.translate_x != span.translate_x ||
+        cursor.translate_y != span.translate_y) return nullptr;
+    // capture appends sparse attestations in span order; wide parents avoid a linear search per child.
+    const auto& placements = *chunk->placements;
+    size_t first = 0, end = placements.size();
+    while (first < end) {
+        size_t mid = first + (end - first) / 2;
+        if (placements[mid].span_index < span_index) first = mid + 1;
+        else end = mid;
+    }
+    return first < placements.size() && placements[first].span_index == span_index
+        ? &placements[first].validation : nullptr;
+}
+
+static bool retained_dl_append_fragment_at(DisplayList* dst,
+    const RetainedDisplayListFragment* fragment, float dx, float dy, bool capture_local) {
     if (!dst || !fragment || !fragment->chunk || !isfinite(dx) || !isfinite(dy)) return false;
     if (dx == 0 && dy == 0) return retained_dl_append_fragment(dst, fragment);
     Bound bounds = {fragment->bounds.left + dx, fragment->bounds.top + dy,
@@ -1003,10 +1079,40 @@ bool retained_dl_append_fragment_translated(DisplayList* dst,
     placed->command_spans = &placed->child; placed->span_count = 1;
     placed->command_count = fragment->chunk->command_count;
     placed->translate_x = dx; placed->translate_y = dy;
+    placed->capture_local = capture_local;
     placed->retained_bytes = fragment->chunk->retained_bytes > SIZE_MAX - sizeof(*placed)
         ? SIZE_MAX : sizeof(*placed) + fragment->chunk->retained_bytes;
     // translation must validate every command, including finite transforms and unsupported pixel operations.
-    bool ok = dl_validate_chunk(placed, nullptr, nullptr) && dl_reference_fragment(dst, placed, bounds);
+    bool ok = dl_validate_chunk(placed, nullptr, &placed->validation);
+    if (ok) {
+        // immutable publication happens only after the complete moved stream passes validation.
+        placed->validation.max_fragment_depth--;
+        placed->validation_ready = true;
+        ok = dl_reference_fragment(dst, placed, bounds);
+    }
     dl_payload_owner_release(placed);
     return ok;
+}
+
+bool retained_dl_append_fragment_translated(DisplayList* dst,
+    const RetainedDisplayListFragment* fragment, float dx, float dy) {
+    return retained_dl_append_fragment_at(dst, fragment, dx, dy, false);
+}
+
+bool retained_dl_append_solid_box(DisplayList* dst, const RetainedDisplayListFragment* fragment,
+    Rect current, Color color) {
+    const auto* chunk = fragment ? fragment->chunk : nullptr;
+    if (!chunk || !chunk->validation_ready || chunk->span_count != 1 ||
+        chunk->command_spans[0].child || chunk->own.size() != 3 ||
+        chunk->own[1].op != DL_FILL_RECT) return false;
+    const auto& marker = chunk->own.front().element_marker;
+    const auto& rect = chunk->own[1].fill_rect;
+    if (!marker.view_id || marker.semantics.attribute_count || marker.semantics.title ||
+        rect.color.c != color.c || rect.x != marker.marker_x || rect.y != marker.marker_y ||
+        rect.w != marker.marker_w || rect.h != marker.marker_h ||
+        rect.w != current.width || rect.h != current.height) return false;
+    float dx = current.x - rect.x, dy = current.y - rect.y;
+    // subtraction/addition can lose a small destination when the source position is very large.
+    if (rect.x + dx != current.x || rect.y + dy != current.y) return false;
+    return retained_dl_append_fragment_at(dst, fragment, dx, dy, true);
 }

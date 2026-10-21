@@ -81,17 +81,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_TABLE: {
             ViewTable* table = lam::unsafe_view_table_storage(node);
             table->ensure_table(lycon->doc->view_tree);
-            // Initialize defaults
-            table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
-            // CSS 2.1 Section 17.6.1: initial value for border-spacing is 0
-            table->tb->border_spacing_h = 0.0f;
-            table->tb->border_spacing_v = 0.0f;
-            table->tb->border_collapse = false; // default is separate borders
-            // Initialize anonymous box flags (CSS 2.1 Section 17.2.1)
-            table->tb->is_annoy_tbody = 0;
-            table->tb->is_annoy_tr = 0;
-            table->tb->is_annoy_td = 0;
-            table->tb->is_annoy_colgroup = 0;
+            // ensure_table initializes new storage; dispatch preserves an already computed table style.
             break;
         }
         case RDT_VIEW_TABLE_CELL: {

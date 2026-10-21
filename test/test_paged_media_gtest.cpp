@@ -3189,8 +3189,15 @@ TEST_F(SecondaryViewTest, UnimplementedContextsCannotPublishFlattenedPages) {
         EXPECT_FLOAT_EQ(box->rect.width, width); EXPECT_FLOAT_EQ(box->rect.height, height);
         EXPECT_EQ(occurrence_page(box), 1u); expect_source_range_coverage(tree, content);
         LayoutViewNode* text = source_glyph_text(tree, content, "context content"); ASSERT_NE(text, nullptr);
-        if (marker) EXPECT_GT(text->rect.x, box->rect.x);
-        else EXPECT_FLOAT_EQ(text->rect.x, 10.0f);
+        EXPECT_FLOAT_EQ(text->rect.x, 10.0f);
+        if (marker) {
+            // CSS Lists 3 §3.5: inline flow-root is a block container; its default marker stays outside.
+            LayoutViewNode* bullet = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true, true);
+            ASSERT_NE(bullet, nullptr);
+            EXPECT_NE(bullet, box);
+            EXPECT_TRUE(bullet->generated);
+            EXPECT_LE(bullet->rect.x + bullet->rect.width, text->rect.x);
+        }
         EXPECT_LE(text->rect.x + text->rect.width, box->rect.x + box->rect.width);
         expect_glyph_line_position(text, 10.0f, 12.0f);
     };

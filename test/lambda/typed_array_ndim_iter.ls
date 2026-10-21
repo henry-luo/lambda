@@ -1,5 +1,5 @@
 // N-D for-in iteration yields leading-axis slices (NumPy semantics).
-// Phase 2b §1 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §6.2
 // Rules:
 //   - 1-D for-in yields scalars (unchanged)
 //   - N-D for-in yields (ndim-1)-D views ("rows" for 2-D, "slabs" for 3-D)

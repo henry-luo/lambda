@@ -1618,9 +1618,39 @@ TEST_F(NegativeScriptTest, PatternUnknownNameIsUndefined) {
         "`dw` is not defined before this pattern");
 }
 
-TEST_F(NegativeScriptTest, PatternForwardReferenceIsUndefined) {
-    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_forward_reference.ls",
-        "`B` is not defined before this pattern");
+// S11.4.12: a top-level pattern may name a later one (type_forward_reference.ls),
+// but a pattern cannot recurse.
+TEST_F(NegativeScriptTest, PatternCycleIsE240) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_cycle.ls",
+        "pattern `A` refers to itself: a pattern cannot recurse");
+}
+
+// S11.4.12: a type cycle must pass through a structural position.
+TEST_F(NegativeScriptTest, TypeAliasCycleIsE240) {
+    ExpectErrorMessage("test/lambda/negative/semantic/type_cycle_alias.ls",
+        "type 'A' refers to itself through no structural position");
+}
+
+TEST_F(NegativeScriptTest, TypeOccurrenceCycleIsE240) {
+    ExpectErrorMessage("test/lambda/negative/semantic/type_cycle_occurrence.ls",
+        "type 'D' refers to itself through no structural position");
+}
+
+TEST_F(NegativeScriptTest, TypeFunctionCycleIsE240) {
+    ExpectErrorMessage("test/lambda/negative/semantic/type_cycle_function.ls",
+        "type 'R' refers to itself through no structural position");
+}
+
+// S11.4.12: an unknown type name is E204, never `any`; a block-local type is
+// visible from its declaration on.
+TEST_F(NegativeScriptTest, UnknownTypeNameIsE204) {
+    ExpectErrorMessage("test/lambda/negative/semantic/type_unknown_name.ls",
+        "unknown type 'Nope'");
+}
+
+TEST_F(NegativeScriptTest, BlockLocalTypeForwardReferenceIsE204) {
+    ExpectErrorMessage("test/lambda/negative/semantic/type_local_forward.ls",
+        "unknown type 'L2'");
 }
 
 TEST_F(NegativeScriptTest, PatternNameMustBeAPattern) {
@@ -2639,6 +2669,27 @@ TEST_F(NegativeScriptTest, SemanticError_SizedIntegerOverflow) {
 
 TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
+}
+
+// S4.1.5: a sized constant expression that leaves its lane is a compile error.
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantExpressionOverflow) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_constant_overflow.ls", false,
+        "sized integer constant expression overflows u8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantNegationOverflow) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_constant_negation.ls", false,
+        "sized integer constant expression overflows u8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedLiteralBareMinimum) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_literal_bare_min.ls", false,
+        "sized integer literal '128' overflows i8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedLiteralI64Range) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_literal_i64_range.ls", false,
+        "sized integer literal '18446744073709551615' overflows i64");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_FunctionArgumentLimit) {

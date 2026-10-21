@@ -12,7 +12,7 @@ pub fn format(ast, options = null) string^ => writer.format(ast, options)^
 pub fn to_mathml(ast, options = null) element^ => mathml.to_mathml(ast, options)^
 pub fn parse_mathml(source) element^ => mathml.parse_mathml(source)^
 
-// Options: display, color, font_family, fonts [{font_family, data: binary}],
+// Options: display, color, font_family, fonts [{font_family, data: binary, src?: string}],
 // font_size (CSS px, optional), base_uri (directory for relative images). Box dimensions remain in em.
 pub fn render_box(ast, options = null) map | error {
     if (mathml.is_mathml(ast)) mathml_layout.render(ast, options)^

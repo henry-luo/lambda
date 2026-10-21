@@ -427,7 +427,7 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
         if (state && (state->primitives || tid == LMD_TYPE_SYMBOL)) {
             if (tid == LMD_TYPE_STRING) {
                 int64_t index = mvp_lmd_string_key(name.get_string());
-                if (index == -1) return Item{.item = i2it(utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len))};
+                if (index == -1) return Item{.item = i2it(js_string_utf16_length(owner.get_string()))};
                 if (index >= 0) return mvp_lmd_string_at(owner, index, LMD_STRING_INDEX);
             }
             int kind = tid == LMD_TYPE_STRING ? LMD_PRIMITIVE_STRING : tid == LMD_TYPE_BOOL ? LMD_PRIMITIVE_BOOLEAN :
@@ -1400,7 +1400,7 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     seen.set(mvp_lmd_array_new(0));
     if (item_is_error(seen.get())) return seen.get();
     if (get_type_id(owner) == LMD_TYPE_STRING) {
-        int64_t length = utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len);
+        int64_t length = js_string_utf16_length(owner.get_string());
         for (int64_t i = 0; i < length; i++) {
             key.set(mvp_lmd_number_to_string(i));
             if (item_is_error(key.get())) return key.get();
@@ -1593,7 +1593,7 @@ extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign, It
         keys.set(mvp_lmd_object_project(input.get(), 5));
         if (item_is_error(keys.get())) return keys.get();
     }
-    int64_t length = type == LMD_TYPE_STRING ? utf8_to_utf16_length(input.get().get_string()->chars, input.get().get_string()->len) : keys.get().array->length;
+    int64_t length = type == LMD_TYPE_STRING ? js_string_utf16_length(input.get().get_string()) : keys.get().array->length;
     uint64_t home = 0;
     for (int64_t i = 0; i < length; i++) {
         key.set(type == LMD_TYPE_STRING ? mvp_lmd_number_to_string(i) : keys.get().array->items[i]);

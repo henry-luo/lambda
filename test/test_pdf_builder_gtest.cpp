@@ -175,7 +175,8 @@ TEST(PdfFileBuilder, RejectsDictionaryMetadataAllocationFailure) {
 
 // The written PDF is checked by an independent reader (test/pdf_output_check.py):
 // object offsets and stream lengths, the fixture's own semantics, and the same
-// objects as its accepted golden PDF with streams compared inflated. The golden
+// objects as its accepted golden PDF with streams inflated and paired raster
+// color/alpha samples compared at premultiplied 8-bit precision. The golden
 // was rendered and sampled with poppler when it was accepted (`accept` mode).
 TEST(PdfFileOutput, LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers) {
     const struct {
@@ -223,4 +224,14 @@ TEST(PdfFileOutput, LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers) {
             shell_result_free(&checked);
         }
     }
+}
+
+TEST(PdfFileOutput, GoldenComparisonRejectsPixelAndStructuralRegressions) {
+    const char* arguments[] = {"python3", "test/test_pdf_output_check.py", nullptr};
+    ShellOptions options = {};
+    options.timeout_ms = 30000;
+    ShellResult checked = shell_exec(arguments[0], arguments, &options);
+    EXPECT_FALSE(checked.timed_out);
+    EXPECT_EQ(checked.exit_code, 0) << (checked.stderr_buf ? checked.stderr_buf : "");
+    shell_result_free(&checked);
 }

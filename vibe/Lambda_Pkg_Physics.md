@@ -401,8 +401,11 @@ mutation: appearance-only changes preserve physics; an authored body pose
 change becomes a teleport that overrides its simulated pose and invalidates
 affected contacts; physical configuration changes update affected objects;
 structural edits add/remove bodies and invalidate dependent contacts/joints.
-Replacing a template-owned scene starts from its new authored state, respecting
-the higher-tier authority in **S12.1.5v2**. Runtime motion does not rewrite
+A template re-render that rebuilds the scene's DOM carries the world to the
+structurally corresponding nodes, as form controls keep their native edits, and
+classifies its authored changes as above: the template, the higher tier of
+**S12.1.5v2**, overrides only the state it changed. Replacing a template-owned
+scene with a different one starts from its new authored state. Runtime motion does not rewrite
 authored `position` attributes every tick.
 
 Native state contains copied scalars, geometry and stable IDs, not borrowed

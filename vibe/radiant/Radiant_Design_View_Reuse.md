@@ -1,9 +1,10 @@
 # Radiant Design: View Prop Sharing & Storage Reuse
 
 Status: **IMPLEMENTED** — decisions VR1–VR14 and phases R0–R7 completed 2026-07-18. The measured adoption set is retained reset/scratch separation, canonical `InlineProp` sharing, DOM liveness and arena retirement, tree-wide exact Inline interning, and canonical style epochs. Evidence-gated Font sharing and a custom `TextRect` cache were not adopted.
-**Extension (2026-10-20):** VR15 is adopted and being implemented; the earlier
-completion statement does not cover immutable computed-style separation or
-retained sizing/flow results.
+**Extension (2026-10-21):** VR15's common continuous-document paths are implemented
+and qualified: computed/used separation, retained sizing/flow, independently owned
+fragments and shared publication. Conservative adapters and release evidence are
+recorded in [the retained-layout implementation](../impl/Radiant_Impl_Retained_Layout.md).
 Scope: DOM node storage, view-prop lifecycle, layout/render scratch, canonical prop sharing, and per-element/canonical `specified_style` storage.
 Extends: `vibe/radiant/Radiant_Design_View_Struct.md` (DV1–DV16 complete).
 Related: `Radiant_Design_Memory.md`, `Radiant_Design_Robustness.md` (T7 stale pointers), `vibe/Lambda_Design_Memory_Model.md`, and the completed DOM/view impl plan's alias ledger and memory profile.
@@ -265,22 +266,30 @@ constraints only after its computed inputs and context match. Vertical and
 other unmigrated consumers keep their legacy adapters; retained flow queries
 must replace their mutable constraint reads before extending this boundary.
 
-Row-flex preparation requests width independently of height. Partial size
-entries carry explicit validity and upgrade in place. The first completed-flow
-consumer is a horizontal auto-height flex item with one ordinary text child:
-its natural cross-size query retains the view's text rectangles and baselines,
-and final flow consumes them without rebuilding the fragments. The final
-stretched height remains a placement constraint, separate from natural content
-height. Same-update keys include sizing, style/content and resource inputs;
-another trial layout invalidates the in-place geometry before writing it.
-The next consumer extends that live result to ordinary horizontal block/inline
-subtrees. Every descendant must have current computed inputs and no containing
-size dependency, ordered counter/quote/pseudo effect, resource, positioning or
-unmigrated formatting context. Text edits preserve sibling identity and advance
-ancestor intrinsic-input revisions, independently of CSS resolution. The result
-still describes one live geometry tree; another trial invalidates it. Multiple
-independently owned fragment results, dependent descendants and fragmented flow
-remain unmigrated (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+Row and column preparation request inline contributions without a speculative
+height at an unassigned width. A source-order generated-effects stage makes
+ordinary list, counter, quote and before/after output immutable during queries.
+Paged, shadow-projection, custom-layout and relevance/remembered-size effects
+retain their existing adapters. Preparation does not publish motion baselines or
+claim an immutable style record for uncached legacy consumers.
+
+Completed flow entries own their text rectangles, fragment unions, used boundary
+state, positioned links, table borders and grid track/placement output. Rewriting
+live geometry expires its association, not other constraint results. A→B→A replay
+restores A while preserving the root's external allocation. Generation and
+content/style/resource inputs invalidate stale results; teardown releases every
+owned payload (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+
+Assigned inline constraints also cover horizontal percentage lengths and row
+percentage bases; root containing inputs remain keyed. Block-size-dependent
+percentages, percentage gaps, first-line/letter transforms, fragmented flow and
+unmigrated SVG/form/vertical consumers retain conservative paths. Refined stretch
+updates content that reads block size instead of propagating a stale child height.
+
+Inherited computed output has a separate revision, including deferred value kind
+and transitive custom-property identity. Canonical immutable font selection and
+spacing inputs are separate from each element's mutable metrics/handle owner.
+Complex declaration-driven values remain conservatively keyed until normalized.
 
 Sizing and layout cache keys include every input read, with dependency-proven
 omissions only. Independent scalar-height estimates use their explicit wrapping
@@ -299,11 +308,27 @@ observer sampling. Restore authored table runs and split first-letter text
 before a real retained reset; refresh list/pseudo content through its retained
 owner. A paint-only commit cannot also satisfy an unrelated viewport/font
 change. Paged and explicit custom-layout lifecycle passes remain separate.
+A generated list marker may precede the existing content text; refreshing that
+content updates its text node instead of appending another copy. The host frame
+walk also commits foreign iframe writes through the shared checkpoint before
+sampling the child, without requiring parent layout.
 
 Pool survival does not extend pass-local sizing validity. Expire flex item
 intrinsic work on initialization,
 and expire unkeyed scalar entries at the measurement generation. A scalar
 contribution query restores the live boxes whose fragments it borrows (**VR15**).
+
+Natural-size flow of an eligible nested flex subtree precedes final stretch.
+Its root receives an explicit unconstrained block query instead of inheriting
+provisional parent geometry. Final reuse additionally validates the measured
+block constraint; a changed height can redistribute nested flex descendants.
+The same selected-view ownership and mutation/resource keys apply (**VR15**).
+
+The conservative path records when final stretch came from an estimated auto
+row line. Completed content may enlarge that provisional block size through
+nested row containers; it must preserve a taller sibling's allocated line size
+and authored constraints. Reuse keys distinguish that policy from definite
+parent sizing even at equal numeric dimensions (**VR15**).
 
 
 ---
