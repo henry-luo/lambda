@@ -731,9 +731,16 @@ bool radiant_tick_document_animations(DomDocument* document, double now,
     DocumentAnimationTick tick = {
         now, 0, tick_root, anchor_host_time, false, false
     };
+    DocState* state = document ? document->state : nullptr;
+    uint64_t full_requests = state ? state->full_repaint_requests : 0;
     tick_document_animation_tree(document, &tick);
-    if (tick.ticked && document && document->state) {
-        doc_state_request_repaint(document->state);
+    if (tick.ticked && state) {
+        // Frame callbacks whose only outcome was presentation damage keep their region
+        // repaint (Radiant_Design_Animation_Repaint §3 A2). Any full request during the
+        // tick (canvas, scene3d, CSS animation, a non-paint-only commit) repaints in full.
+        if (state->presentation_damage.pending && state->full_repaint_requests == full_requests)
+            doc_state_request_region_repaint(state);
+        else doc_state_request_repaint(state);
     }
     return tick.active;
 }
@@ -8003,9 +8010,27 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     frame_profile_cascade_finished(doc);
     // the batch's own reflow request is satisfied without layout
     doc_state_clear_reflow(state);
-    state->dirty_tracker.full_repaint = true;
-    doc_state_mark_dirty(state);
-    doc_state_request_repaint(state);
+    // ...and so is the dirtiness those requests caused, when nothing else dirtied the
+    // document since the batch began; a full repaint request in between keeps it
+    if (!doc->js.dirty_before_batch &&
+        state->full_repaint_requests == doc->js.full_repaint_requests_before_batch) state->is_dirty = false;
+    // Repaint only the written elements' old and new visual bounds when every one was
+    // painted before (Radiant_Design_Animation_Repaint §3 A1); otherwise repaint in full.
+    DomElement* targets[DOM_JS_MUTATION_RECORD_CAP];
+    int target_count = 0;
+    for (int i = 0; i < doc->js.mutation_record_count && target_count < DOM_JS_MUTATION_RECORD_CAP; i++) {
+        DomElement* element = doc->js.mutation_records[i].target->as_element();
+        bool seen = false;
+        for (int j = 0; j < target_count; j++) seen = seen || targets[j] == element;
+        if (!seen) targets[target_count++] = element;
+    }
+    if (presentation_damage_commit(state, doc, targets, target_count)) {
+        doc_state_request_region_repaint(state);
+    } else {
+        state->dirty_tracker.full_repaint = true;
+        doc_state_mark_dirty(state);
+        doc_state_request_repaint(state);
+    }
     evcon->need_repaint = true;
     to_repaint();
     uint64_t t3 = time_now_ns();

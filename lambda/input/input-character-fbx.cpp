@@ -151,6 +151,9 @@ static bool fbx_numbers(ElementReader record, lam::ArrayList<double>& out) {
     return true;
 }
 static bool fbx_child_numbers(ElementReader record, const char* tag, lam::ArrayList<double>& out) {
+    // a missing record reads as empty: callers reuse one array across records, and Mixamo
+    // writes a cluster for every bone in every mesh, most of them without Indexes or Weights
+    out.clear();
     ElementReader child = record.findChildElement(tag);
     return fbx_props(child).length() && fbx_numbers(child, out);
 }
@@ -209,7 +212,7 @@ typedef TypedHashMap<FbxIdEntry, HashMapIntegralMemberKeyOps<FbxIdEntry, &FbxIdE
 // a joint's static transform chain; T, R and S are the animatable values
 struct FbxNode {
     double t[3], r[3], s[3], roff[3], rp[3], pre[3], post[3], soff[3], sp[3];
-    int order;
+    int order, inherit;
 };
 struct FbxCurve { size_t first, count; };
 // one joint's animated Lcl property: up to three curves, else fallbacks
@@ -361,8 +364,21 @@ struct FbxCharacter {
         fbx_vector(model, "ScalingOffset", n->soff, 0); fbx_vector(model, "ScalingPivot", n->sp, 0);
         double order = fbx_value(model, "RotationOrder", 0), inherit = fbx_value(model, "InheritType", 1);
         if (order < 0 || order > 5) return fail_named("rotation order outside XYZ..ZYX (spheric XYZ is unsupported) on", objects[object].name);
-        if (inherit != 1) return fail_named("InheritType other than RSrs (1) on", objects[object].name);
+        if (inherit != 0 && inherit != 1 && inherit != 2) return fail_named("InheritType outside RrSs, RSrs and Rrs (0-2) on", objects[object].name);
         n->order = (int)order;  // INT_CAST_OK: rotation-order enum
+        n->inherit = (int)inherit;  // INT_CAST_OK: inherit-type enum
+        return true;
+    }
+    // InheritType RrSs (0) and Rrs (2) equal ordinary composition (RSrs, 1) while the immediate
+    // parent's local scale is uniform, as ufbx and the FBX SDK evaluate them; Rrs then cancels
+    // that scale (Maya's segment scale compensation). A non-uniform parent scale has no exact
+    // ordinary-hierarchy form and is refused.
+    bool inherited(const FbxNode& n, int object, const double* parent_scale, FbxMat* m) {
+        if (n.inherit == 1) return true;
+        double big = fmax(fabs(parent_scale[0]), fmax(fabs(parent_scale[1]), fabs(parent_scale[2])));
+        if (!(big > 0) || fabs(parent_scale[0] - parent_scale[1]) > 1e-6 * big || fabs(parent_scale[0] - parent_scale[2]) > 1e-6 * big)
+            return fail_named("non-uniform parent scale under InheritType RrSs or Rrs on", objects[object].name);
+        if (n.inherit == 2) for (int i = 0; i < 3; i++) for (int k = 0; k < 3; k++) m->m[i * 4 + k] /= parent_scale[0];
         return true;
     }
     // T · Roff · Rp · Rpre · R · Rpost⁻¹ · Rp⁻¹ · Soff · Sp · S · Sp⁻¹
@@ -378,13 +394,22 @@ struct FbxCharacter {
         FbxNode n;
         if (!node(object, &n)) return false;
         FbxMat m = local(n, n.t, n.r, n.s);
-        if (objects[object].parent >= 0) {
+        int up = objects[object].parent;
+        if (up >= 0) {
+            FbxNode p;
             FbxMat parent;
-            if (!world(objects[object].parent, &parent)) return false;
+            if (!node(up, &p) || !inherited(n, object, p.s, &m) || !world(up, &parent)) return false;
             m = parent * m;
         }
         *out = m;
         return true;
+    }
+    // a joint's rest local matrix, with its parent's rest scale applied by inheritance
+    bool rest_local(size_t j, FbxMat* m) {
+        const FbxNode& n = nodes[j];
+        *m = local(n, n.t, n.r, n.s);
+        int up = objects[joints[j]].parent;
+        return up < 0 || inherited(n, joints[j], nodes[objects[up].joint].s, m);
     }
 
     // ---- joints ---------------------------------------------------------------------
@@ -431,10 +456,11 @@ struct FbxCharacter {
     }
 
     Item joint_element(size_t j) {
-        const FbxNode& n = nodes[j];
         double t[3], s[3];
         CharacterQuat q;
-        if (!fbx_decompose(character(local(n, n.t, n.r, n.s)), t, &q, s)) {
+        FbxMat rest;
+        if (!rest_local(j, &rest)) return ItemNull;
+        if (!fbx_decompose(character(rest), t, &q, s)) {
             fail_named("joint rest transform has shear", objects[joints[j]].name);
             return ItemNull;
         }
@@ -1090,10 +1116,16 @@ struct FbxCharacter {
             const FbxNode& n = nodes[j];
             const FbxTrack* own[3] = {nullptr, nullptr, nullptr};
             for (const FbxTrack& track : tracks) if (track.joint == (int)j) own[track.property] = &track;  // INT_CAST_OK: joint index
-            if (!own[0] && !own[1] && !own[2]) continue;
+            // an Rrs joint also moves when its parent's scale does
+            int up = objects[joints[j]].parent, parent = up < 0 ? -1 : objects[up].joint;
+            const FbxTrack* parent_scale = nullptr;
+            if (parent >= 0 && n.inherit != 1) for (const FbxTrack& track : tracks) if (track.joint == parent && track.property == 2) parent_scale = &track;
+            if (!own[0] && !own[1] && !own[2] && !(parent_scale && n.inherit == 2)) continue;
             double rest_t[3], rest_s[3];
             CharacterQuat rest_q;
-            fbx_decompose(character(local(n, n.t, n.r, n.s)), rest_t, &rest_q, rest_s);
+            FbxMat rest;
+            if (!rest_local(j, &rest)) return false;
+            fbx_decompose(character(rest), rest_t, &rest_q, rest_s);
             lam::ArrayList<double> positions, quaternions, scales;
             bool moved = false, turned = false, sized = false;
             CharacterQuat previous = rest_q;
@@ -1102,9 +1134,14 @@ struct FbxCharacter {
                 if (own[0]) track_values(*own[0], curves, t, tv); else memcpy(tv, n.t, sizeof(tv));
                 if (own[1]) track_values(*own[1], curves, t, rv); else memcpy(rv, n.r, sizeof(rv));
                 if (own[2]) track_values(*own[2], curves, t, sv); else memcpy(sv, n.s, sizeof(sv));
-                double position[3], size[3];
+                double position[3], size[3], ps[3];
                 CharacterQuat q;
-                if (!fbx_decompose(character(local(n, tv, rv, sv)), position, &q, size)) return fail_named("animated transform has shear on", objects[joints[j]].name);
+                FbxMat m = local(n, tv, rv, sv);
+                if (parent >= 0) {
+                    if (parent_scale) track_values(*parent_scale, curves, t, ps); else memcpy(ps, nodes[parent].s, sizeof(ps));
+                    if (!inherited(n, joints[j], ps, &m)) return false;
+                }
+                if (!fbx_decompose(character(m), position, &q, size)) return fail_named("animated transform has shear on", objects[joints[j]].name);
                 q = character_quat_continue(previous, q);
                 previous = q;
                 double quaternion[4] = {q.x, q.y, q.z, q.w};

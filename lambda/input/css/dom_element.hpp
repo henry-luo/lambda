@@ -191,6 +191,11 @@ struct DomJsRuntime {
     int mutation_record_overflow;
     // a reflow was already requested when this batch recorded its first mutation
     bool reflow_pending_before_batch;
+    // the document was already dirty, and how many full repaints had been requested,
+    // when this batch recorded its first mutation (a paint-only commit withdraws only
+    // the dirtiness its own reflow requests caused)
+    bool dirty_before_batch;
+    uint64_t full_repaint_requests_before_batch;
     DomJsMutationRecord* mutation_records;
     int mutation_record_capacity;
     DomJsMutationRecord inline_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
@@ -275,6 +280,7 @@ struct DomDocumentServices {
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
     void* svg_geometry_cache; // document-owned immutable SVG path resources
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
+    void* paint_layer_registry;  // document-owned HTML paint layers (render_paint_layer.cpp)
     void* svg_filter_registry; // document-owned compiled SVG filter programs
     void* svg_animation_registry; // document-owned SMIL clocks and sampled values
     void* svg_use_resource_cache; // retained external-use DOM/style owners
@@ -288,7 +294,7 @@ struct DomDocumentServices {
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
-        svg_geometry_cache(nullptr), svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
+        svg_geometry_cache(nullptr), svg_layer_registry(nullptr), paint_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -985,9 +991,11 @@ struct DomElement : DomNode {
 
     // HTML/CSS style related
     NameId tag_id;               // Generated markup identity; custom tags use NAME_ID_NONE.
-    // Bumped by dom_mutation_notify on every mutation at or under an <svg> root, so the
-    // painter can tell an unchanged inline SVG (reusable raster layer) from a changed one.
-    uint32_t svg_layer_generation;
+    // Bumped by dom_mutation_notify on every element at or above a mutation, so the painter
+    // can tell an unchanged inline SVG or paint layer (a reusable raster) from a changed one.
+    // A non-inherited presentation write skips its own target: it moves or fades that
+    // element's raster without changing it (Radiant_Design_Animation_Repaint §4 B2).
+    uint32_t layer_generation;
     lam::Up<const char> id;      // Element ID attribute (cached)
     lam::OwnArr<const char*> class_names;  // Array of class names (cached)
     int class_count;             // Number of classes

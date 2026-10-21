@@ -8370,12 +8370,12 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 // rasterised once into a document-owned offscreen surface and drawn as one
 // image on the following frames, instead of re-walking its DOM, re-parsing
 // every path and re-rasterising every shape. The DOM bumps
-// DomElement::svg_layer_generation on any mutation under the root. A layer is
+// DomElement::layer_generation on any mutation under the root. A layer is
 // captured only on the second consecutive paint of identical content, so an
 // SVG that changes every frame never pays for a capture it would not reuse.
 
 struct SvgPaintStamp {
-    uint32_t generation;            // svg_layer_generation last painted
+    uint32_t generation;            // layer_generation last painted
     uint64_t document_epoch;        // host styles and cross-root resource mutations
     uint64_t interaction_generation; // selector state, plus scrolling when embedded HTML may be painted
     uint64_t animation_generation;  // SMIL samples change paint without changing DOM base attributes
@@ -8509,7 +8509,6 @@ static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_ele
                                   float viewport_width, float viewport_height, float scale,
                                   const SvgInitialPaint* paint, ImageSurface* surface) {
     int width = surface->width, height = surface->height;
-    size_t count = (size_t)width * (size_t)height;
     RENDER_METRIC_ADD(layer_recordings, 1);
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.svg_layer", "render.svg_layer.list_arena",
@@ -8563,7 +8562,23 @@ static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_ele
     rdcon->dirty_tracker = lam::up(saved_dirty_tracker);
     rdcon->has_dirty_union = saved_has_dirty_union;
 
-    bool ok = dl_validate_or_log(&dl, "render_svg_layer_capture");
+    bool ok = render_layer_rasterize(&dl, &scratch, scale, surface, "render_svg_layer_capture");
+    scratch_release(&scratch);
+    paint_list_destroy(&paint_list);
+    dl_destroy(&dl);
+    arenas.destroy();
+    return ok;
+}
+
+// Replays a layer recording into `surface`: premultiplied in one pass when every item
+// supports it, otherwise exact straight RGBA from a black and a white pass.
+bool render_layer_rasterize(DisplayList* recording, ScratchArena* scratch_arena, float scale,
+                            ImageSurface* surface, const char* label) {
+    DisplayList& dl = *recording;
+    ScratchArena& scratch = *scratch_arena;
+    int width = surface->width, height = surface->height;
+    size_t count = (size_t)width * (size_t)height;
+    bool ok = dl_validate_or_log(&dl, label);
     bool transparent = dl_supports_premultiplied_capture(&dl);
     lam::Temp<uint32_t> over_black, over_white;
     if (ok && !transparent) {
@@ -8601,10 +8616,6 @@ static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_ele
     if (ok && !transparent) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
         (uint32_t*)surface->pixels, count);
     surface->alpha_mode = transparent ? IMAGE_ALPHA_PREMULTIPLIED : IMAGE_ALPHA_STRAIGHT;
-    scratch_release(&scratch);
-    paint_list_destroy(&paint_list);
-    dl_destroy(&dl);
-    arenas.destroy();
     return ok;
 }
 
@@ -8687,7 +8698,7 @@ static uint64_t svg_layer_interaction_generation(DomDocument* document) {
 static SvgPaintStamp svg_paint_stamp(RasterRenderContext* rdcon, DomElement* element,
     const SvgInitialPaint* paint) {
     DomDocument* document = rdcon->ui_context->document;
-    return {element->svg_layer_generation, document->style_content_epoch,
+    return {element->layer_generation, document->style_content_epoch,
         svg_layer_interaction_generation(document), svg_animation_generation(document),
         font_context_glyph_cache_generation(rdcon->ui_context->font_ctx),
         font_context_resource_generation(rdcon->ui_context->font_ctx),

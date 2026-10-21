@@ -849,6 +849,38 @@ in a live window.
 - The new toolbar button narrowed the heading enough to wrap the status line;
   the status now stays on one line and the search box shrinks first.
 
+**Page-turn performance (2026-10-21).** A page turn felt late to start. It was
+measured with a release host on the full corpus at 1440 × 900, using
+`benchmark.py --book`.
+
+| Cause | Change | Effect |
+|---|---|---|
+| Each frame wrote the leaf's `transform` and shade `opacity` as inline style, so Radiant relaid out the document on every frame (26 ms). | Frames write through the presentation channel (`dom.presentation_style_set_property`, RAD_16); each leaf starts with `rotateY(0deg)`, so a turn replaces a transform. | Frame commits drop from 27 ms to 0.6 ms (paint-only). |
+| Every page's gutter shade was a blurred inset `box-shadow`, re-blurred at page size on every repaint (~35 ms a frame). | Use a 28 px gradient band instead. The spine shade on the back cover becomes a gradient over the cloth. | |
+| Near-invisible 1.8 %-alpha paper stripes cost ~25 ms a frame. | Removed. | |
+| Turns eased in from rest, and their clock started at the first frame, so the leaf barely moved for the first two or three frames. | Turns ease out (cubic), and their clock starts at the input's time stamp. | The leaf is at −112° 120 ms after the key. |
+| In a live Retina window, starting a turn mounted the next leaf and wrote inline `z-index`, so the first frames were full relayouts and repaints. Together with the click, they used up the 550 ms clock, and a turn showed 4–8 frames. | Mount one leaf ahead. Each stack's top leaf rests at its lifted `z-index`. The clock advances at most 50 ms per frame. Radiant tracks presentation-styled elements before their first write (Radiant_Design_Animation_Repaint, stage A). | First frame 3 ms after the click; 14–17 frames per turn, 47 ms apart. |
+| The library grid under the full-window book repainted every frame (about 14 thumbnails per frame, behind an opaque backdrop). | While the book is open, the sidebar and workspace are `visibility: hidden`. | Live 2× window: 77 → 42 ms; with Radiant's later layer fixes 33.5 ms (about 30 fps), 16–22 frames per turn. |
+| Each leaf's shades sat inside its faces, so their per-frame opacity would invalidate a face's retained raster (Radiant stage B paint layers). | Shades are sibling planes of the faces (`backface-visibility: hidden`; the back shade turned 180°). | Faces paint from layers; headless 1× frames 72–75 → 45 ms; live 2× window about 5% faster (Radiant_Design_Animation_Repaint, stage B checkpoint). |
+
+The frame gap within a turn fell from a 141 ms median to 55–61 ms.
+
+Changes that did not help:
+- Thumbnails instead of photos for prints: 88 → 85 ms. Prints keep the
+  1280 px photos.
+- Removing the photo drop shadows, the photo corners or the radial backdrop:
+  within noise.
+
+**Not met: the 16 ms frame target (§7).** What remains is Radiant
+re-rasterizing the whole window on each paint-only frame: the turning leaf's
+projected images, plus the static spread, bars and backdrop. The paint-only
+commit marks a full repaint. Two engine options:
+- damage-limited repaint for paint-only commits;
+- retained raster layers for the static spread.
+
+Either is a design decision for Radiant, not a demo change. A Retina window
+rasterizes four times the pixels, so it is slower than these 1× numbers.
+
 ## M5 checkpoint — 2026-10-21
 
 M5 is implemented:

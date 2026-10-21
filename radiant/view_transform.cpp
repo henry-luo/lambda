@@ -30,6 +30,22 @@ bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix) {
         normal_z != 0.0 && signbit(normal_z) != signbit(determinant);
 }
 
+bool rdt_matrix4_invert(const RdtMatrix4* matrix, RdtMatrix4* inverse) {
+    if (!matrix || !inverse) return false;
+    double cofactors[16];
+    double determinant = 0.0;
+    for (int row = 0; row < 4; row++)
+        for (int column = 0; column < 4; column++)
+            cofactors[row * 4 + column] = matrix4_cofactor(matrix, row, column);
+    for (int column = 0; column < 4; column++) determinant += matrix->values[column] * cofactors[column];
+    if (determinant == 0.0 || !isfinite(determinant)) return false;
+    // the inverse is the adjugate (transposed cofactors) over the determinant
+    for (int row = 0; row < 4; row++)
+        for (int column = 0; column < 4; column++)
+            inverse->values[row * 4 + column] = (float)(cofactors[column * 4 + row] / determinant);
+    return true;
+}
+
 namespace radiant {
 
 static void destroy_transform_length_terms(Pool* pool, TransformLengthTerm* terms) {

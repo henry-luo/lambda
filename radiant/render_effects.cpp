@@ -150,7 +150,10 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     group.mix_blend_mode = (block->in_line && block->inl()->mix_blend_mode &&
                             block->inl()->mix_blend_mode != CSS_VALUE_NORMAL)
                            ? block->inl()->mix_blend_mode : (CssEnum)0;
-    group.has_opacity_group = block->in_line &&
+    // a paint layer's root opacity is applied when its layer is drawn, so the layer stays
+    // valid while that opacity is animated (render_paint_layer.cpp)
+    bool layer_root = rdcon->paint_layer_capturing && rdcon->paint_layer_root == block;
+    group.has_opacity_group = block->in_line && !layer_root &&
         block->inl()->opacity < 1.0f && block->inl()->opacity >= 0.0f;
     group.opacity = group.has_opacity_group ? block->inl()->opacity : 1.0f;
     if (block->bound && block->boundary()->mask && block->boundary()->mask->radial_gradient) {

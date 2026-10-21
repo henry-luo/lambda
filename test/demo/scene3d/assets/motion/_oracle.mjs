@@ -6,12 +6,16 @@
 //
 //   UFBX_DUMP=temp/oracle/bin/ufbx_dump node test/demo/scene3d/assets/motion/_oracle.mjs
 //
+// With MIXAMO_DIR set it runs the local-only Mixamo check instead (§11): Mixamo
+// exports are never committed, so it reads them from that directory and writes
+// its oracle.json there, for test/lambda/scene3d/_mixamo_local.ls.
+//
 // Every position is in character space: metres, Y-up, +Z front.
 import { registerHooks } from 'node:module';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vendor = join(here, '../../vendor/three');
@@ -35,7 +39,8 @@ const SkeletonUtils = await import(pathToFileURL(join(vendor, 'addons/utils/Skel
 
 const round = x => Math.round(x * 1e9) / 1e9;
 const vec = v => [round(v.x), round(v.y), round(v.z)];
-const mm = (v, s) => [v.x, v.y, v.z].map(c => Math.round(c * s * 1000)).join(',');
+// 10 µm units: dense meshes place distinct vertices under a millimetre apart
+const key = (v, s) => [v.x, v.y, v.z].map(c => Math.round(c * s * 100000)).join(',');
 
 // a clip held on its last key, so sampling at its duration does not wrap to the start
 function play(mixer, clip) {
@@ -63,7 +68,7 @@ function sample(root, clip, times, scale, nodes) {
   if (action) mixer.uncacheRoot(root);
   return out;
 }
-// skinned vertices keyed by their bind-time position in millimetres
+// skinned vertices keyed by their bind-time position
 function skinned(root, clip, times, scale) {
   const meshes = [];
   root.traverse(o => { if (o.isSkinnedMesh) meshes.push(o); });
@@ -72,7 +77,7 @@ function skinned(root, clip, times, scale) {
   const keys = meshes.map(mesh => {
     const positions = mesh.geometry.attributes.position;
     return Array.from({ length: positions.count }, (_, i) =>
-      mm(new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld), scale));
+      key(new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld), scale));
   });
   const mixer = new THREE.AnimationMixer(root);
   const action = play(mixer, clip);
@@ -92,9 +97,11 @@ function skinned(root, clip, times, scale) {
   return out;
 }
 
-const read = name => readFileSync(join(here, name));
+const mixamo = process.env.MIXAMO_DIR;
+const root = mixamo ? resolve(mixamo) : here;
+const read = name => readFileSync(join(root, name));
 const buffer = name => { const b = read(name); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
-const fbx = name => new FBXLoader().parse(buffer(name), here + '/');
+const fbx = name => new FBXLoader().parse(buffer(name), root + '/');
 const unit = group => (group.userData.unitScaleFactor ?? 1) / 100;
 const bones = o => o.isBone;
 const frames = (count, rate) => Array.from({ length: count }, (_, k) => k / rate);
@@ -102,7 +109,7 @@ const frames = (count, rate) => Array.from({ length: count }, (_, k) => k / rate
 const oracle = { three: { bvh: {}, fbx: {}, skinned: {}, retarget: {} }, ufbx: {} };
 
 // BVH: the same files the converter reads, scaled from centimetres
-for (const [name, times] of [['jump', [0, 8 / 30, 0.5, 1]], ['offsets', [0, 0.5, 1]]]) {
+for (const [name, times] of mixamo ? [] : [['jump', [0, 8 / 30, 0.5, 1]], ['offsets', [0, 0.5, 1]]]) {
   const result = new BVHLoader().parse(read(name + '.bvh').toString());
   const group = new THREE.Group();
   group.add(result.skeleton.bones[0]);
@@ -110,7 +117,14 @@ for (const [name, times] of [['jump', [0, 8 / 30, 0.5, 1]], ['offsets', [0, 0.5,
 }
 
 // FBX: generated files and the CC0 character
-const fbxCases = [
+// the Mixamo exports Three.js r186 ships: a character with its dance, and a samba
+const mixamoTimes = [0, 1, 5, 10, 16];
+const fbxCases = mixamo ? [
+  ['mixamo.fbx', null, [0]],
+  ['mixamo.fbx', 'mixamo.com', mixamoTimes],
+  ['Samba Dancing.fbx', null, [0]],
+  ['Samba Dancing.fbx', 'mixamo.com', mixamoTimes],
+] : [
   ['jump.fbx', 'jump', [0, 8 / 30, 0.5, 1]],
   ['jump-ascii.fbx', 'jump', [0, 8 / 30, 0.5, 1]],
   ['jump-7500.fbx', 'jump', [0, 8 / 30, 0.5, 1]],
@@ -132,7 +146,7 @@ for (const [file, clipName, times] of fbxCases) {
 
 // SkeletonUtils.retargetClip with local offsets W_source⁰⁻¹ · W_target⁰, the
 // world-change-from-rest transfer of §8.4: the CMU-named jump onto the A-pose
-{
+if (!mixamo) {
   const source = new BVHLoader().parse(read('jump.bvh').toString());
   const holder = new THREE.Group();
   holder.add(source.skeleton.bones[0]);
@@ -164,9 +178,10 @@ for (const [file, clipName, times] of fbxCases) {
 const dump = process.env.UFBX_DUMP;
 if (dump && existsSync(dump)) {
   for (const [file, clipName, times] of fbxCases) {
-    const result = JSON.parse(execFileSync(dump, [join(here, file), ...times.map(String)], { maxBuffer: 1 << 28 }).toString());
+    const result = JSON.parse(execFileSync(dump, [join(root, file), ...times.map(String)], { maxBuffer: 1 << 30 }).toString());
     const key = file + (clipName ? '#' + clipName : '');
-    const stack = clipName ? result.stacks[clipName] : null;
+    // the first stack of that name, as FBXLoader's lookup and the converter's unsuffixed clip take it
+    const stack = clipName ? result.stacks.find(s => s.name === clipName) : null;
     oracle.ufbx[key] = stack ? { nodes: Object.fromEntries(Object.entries(stack.samples).map(([t, s]) => [t, s.nodes])),
       skin: Object.fromEntries(Object.entries(stack.samples).map(([t, s]) => [t, s.skin])),
       static: Object.fromEntries(Object.entries(stack.samples).map(([t, s]) => [t, s.static])) }
@@ -174,5 +189,5 @@ if (dump && existsSync(dump)) {
   }
 }
 
-writeFileSync(join(here, 'oracle.json'), JSON.stringify(oracle) + '\n');
+writeFileSync(join(root, 'oracle.json'), JSON.stringify(oracle) + '\n');
 console.log('oracle.json:', Object.keys(oracle.three.fbx).length, 'Three.js FBX cases,', Object.keys(oracle.ufbx).length, 'ufbx cases');

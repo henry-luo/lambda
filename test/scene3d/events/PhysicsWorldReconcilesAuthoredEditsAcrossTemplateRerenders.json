@@ -1,7 +1,7 @@
 {
-  "name": "PhysicsWorldSurvivesTemplateRerenderUntilAuthoredPhysicsChanges",
+  "name": "PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders",
   "viewport": {
-    "width": 240,
+    "width": 260,
     "height": 200
   },
   "input_turn_ms": 0,
@@ -85,14 +85,6 @@
       "js": "physicsState !== null && physicsState.tick === 60 && boxHeight() === fallen"
     },
     {
-      "type": "script",
-      "js": "physicsRead({operation:'step',ticks:1})"
-    },
-    {
-      "type": "assert_script",
-      "js": "physicsState !== null && physicsState.tick === 61 && boxHeight() < fallen"
-    },
-    {
       "type": "click",
       "target": {
         "selector": "#heavier"
@@ -105,6 +97,101 @@
       },
       "attribute": "data-gravity",
       "equals": "-19.62"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "script",
+      "js": "physicsRead({operation:'read'})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsState !== null && physicsState.tick === 60 && boxHeight() === fallen"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.speed = boxBody().velocity[1]; physicsRead({operation:'step',ticks:1})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsState !== null && physicsState.tick === 61 && Math.abs(boxBody().velocity[1] - speed + 19.62 / 120) < 1e-9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lift"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#lab"
+      },
+      "attribute": "data-lift",
+      "equals": "6"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "script",
+      "js": "physicsRead({operation:'read'})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsState !== null && physicsState.tick === 61 && boxHeight() === 6 && boxBody().velocity[1] < -4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dense"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#lab"
+      },
+      "attribute": "data-density",
+      "equals": "3"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#world",
+      "width": 160,
+      "height": 120
+    },
+    {
+      "type": "script",
+      "js": "physicsRead({operation:'read'})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsState !== null && physicsState.tick === 61 && boxHeight() === 6 && boxBody().mass === 3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#second"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#lab"
+      },
+      "attribute": "data-second",
+      "equals": "true"
     },
     {
       "type": "scene3d",
@@ -136,15 +223,7 @@
     },
     {
       "type": "assert_script",
-      "js": "physicsState !== null && physicsState.tick === 0 && boxHeight() === 4"
-    },
-    {
-      "type": "script",
-      "js": "physicsRead({operation:'step',ticks:60})"
-    },
-    {
-      "type": "assert_script",
-      "js": "physicsState !== null && physicsState.tick === 60 && boxHeight() < fallen"
+      "js": "physicsState !== null && physicsState.tick === 0 && physicsState.bodies.length === 3 && boxHeight() === 6 && boxBody().velocity[1] === 0"
     }
   ]
 }

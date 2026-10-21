@@ -121,7 +121,9 @@ let posed = parse(fbx(limb(1, "A", "") ++ skinned_mesh(10, 2, false) ++ bind_pos
 fn rejects(source, diagnostic) => parse(source, {type: 'character', flavor: 'fbx'}) ^ { contains(string(^.message), diagnostic) ^ { false } } ~ { "accepted" };
 [motion.validate(parse(fbx(limb(1, "A", ""), oo(1, 0)), {type: 'character', flavor: 'fbx'})^)^,
  motion.validate(posed)^ and abs(motion.joints(posed)[0].inverse_bind[12] + 0.02) < 1e-12,
- rejects(fbx(limb(1, "A", p("InheritType", "2")), oo(1, 0)), "InheritType other than RSrs"),
+ rejects(fbx(limb(1, "A", p("Lcl Scaling", "1,2,1")) ++ limb(2, "B", p("InheritType", "2")), oo(1, 0) ++ oo(2, 1)),
+    "non-uniform parent scale under InheritType RrSs or Rrs on 'B'"),
+ rejects(fbx(limb(1, "A", p("InheritType", "3")), oo(1, 0)), "InheritType outside RrSs, RSrs and Rrs"),
  rejects(fbx(limb(1, "A", p("RotationOrder", "6")), oo(1, 0)), "spheric XYZ is unsupported"),
  rejects(fbx(limb(1, "A", ""), oo(1, 9)), "connection names a missing object"),
  rejects(fbx(limb(1, "A", "") ++ limb(2, "B", ""), oo(1, 2) ++ oo(2, 1)), "cyclic"),

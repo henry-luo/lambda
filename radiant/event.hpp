@@ -2246,6 +2246,33 @@ typedef struct DirtyTracker {
 } DirtyTracker;
 
 /**
+ * Presentation damage (vibe/radiant/Radiant_Design_Animation_Repaint.md §3).
+ * Elements that receive presentation transform/opacity writes, with the visual
+ * bounds they were last painted at, so a paint-only frame can repaint only the
+ * union of each element's old and new bounds instead of the whole surface.
+ */
+#define PRESENTATION_DAMAGE_CAPACITY 32
+typedef struct PresentationDamageEntry {
+    DomNodeRef node;               // weak; validated before any read
+    Bound painted;                 // bounds at the last recorded frame (surface CSS px)
+    Bound recording;               // this recording's bounds (device px)
+    uint64_t last_write;           // tracker frame of the latest presentation write
+    bool has_painted;              // `painted` holds a recorded frame's bounds
+    bool recorded;                 // painted during the current recording
+    bool damaged;                  // written since the last render: repaint old and new bounds
+} PresentationDamageEntry;
+
+typedef struct PresentationDamage {
+    PresentationDamageEntry entries[PRESENTATION_DAMAGE_CAPACITY];
+    int count;
+    uint64_t frame;                // recordings completed
+    float scale;                   // raster scale of the last recording (device px per CSS px)
+    bool pending;                  // a presentation-only frame awaits its new bounds
+    bool last_selective;           // the last presentation frame repainted only its damage
+    Bound last_union;              // that frame's repainted union (surface CSS px)
+} PresentationDamage;
+
+/**
  * Reflow scope - determines extent of layout recalculation
  */
 typedef enum ReflowScope {
@@ -2720,7 +2747,9 @@ typedef struct DocState {
     bool is_dirty;                 // any state has changed
     bool needs_reflow;             // layout recalculation required
     bool needs_repaint;            // visual repaint required
+    uint64_t full_repaint_requests; // requests that force a full repaint (is_dirty), counted
     DirtyTracker dirty_tracker;
+    PresentationDamage presentation_damage;
     
     // Reflow scheduling
     ReflowScheduler reflow_scheduler;
@@ -3695,6 +3724,29 @@ void clipboard_copy_rich(const char* html, const char* plain_text);
  * Mark a rectangular region as needing repaint
  */
 void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height);
+// a rect in surface CSS px (what selective clear and replay consume), clipped to the
+// surface rather than the scrolled document viewport that dirty_mark_rect clips to
+void dirty_mark_surface_rect(DirtyTracker* tracker, float x, float y, float width, float height);
+// a repaint request that leaves `is_dirty` (which forces a full clear) untouched
+void doc_state_request_region_repaint(DocState* state);
+
+// presentation damage (presentation_damage.cpp)
+bool presentation_damage_enabled();
+// registers the written elements; true when every one has painted bounds and the
+// frame can repaint selectively (their old bounds are then marked dirty)
+bool presentation_damage_commit(DocState* state, DomDocument* doc, DomElement* const* targets, int count);
+void presentation_damage_frame_begin(PresentationDamage* damage);
+// marks surface-space CSS px as damaged, rounded out to whole device pixels plus one
+void presentation_damage_mark(DocState* state, const Bound& bounds);
+// tracks an element that carries presentation transform/opacity before its first write
+void presentation_damage_note_candidate(PresentationDamage* damage, DomElement* element);
+// notes a recorded element range's visual bounds when the element is tracked
+struct DisplayList;
+void presentation_damage_note_range(PresentationDamage* damage, const struct DisplayList* dl,
+                                    uint32_t view_id, int begin_index, int end_index);
+// stores this recording's bounds; for a presentation frame, marks the damaged
+// elements' new bounds. False when the frame must repaint in full instead.
+bool presentation_damage_frame_end(DocState* state, DomDocument* doc, float raster_scale, bool presentation_frame);
 
 /**
  * Mark an element as needing repaint (uses element's bounds)

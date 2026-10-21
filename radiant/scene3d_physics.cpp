@@ -114,19 +114,54 @@ Scene3dPhysics* scene3d_physics_create(DomElement* root,char* diagnostic,size_t 
 void scene3d_physics_destroy(Scene3dPhysics* state){
     if(!state)return;physics_scene_play(state,false);physics_destroy(state->world);state->~Scene3dPhysics();mem_free(state);
 }
+// bodies and colliders keep their identities, owners and motion types, and the world its stepping
+static bool physics_scene_same_structure(const PhysicsScene& before,const PhysicsScene& after){
+    if(after.bodies.size()!=before.bodies.size()||after.colliders.size()!=before.colliders.size()||after.bindings.size()!=before.bindings.size()||
+        after.desc.timestep!=before.desc.timestep||after.desc.iterations!=before.desc.iterations||after.desc.length_scale!=before.desc.length_scale)return false;
+    for(size_t i=0;i<after.bodies.size();i++)if(after.bodies[i].id!=before.bodies[i].id||after.bodies[i].motion!=before.bodies[i].motion)return false;
+    for(size_t i=0;i<after.colliders.size();i++)if(after.colliders[i].id!=before.colliders[i].id||after.colliders[i].body!=before.colliders[i].body)return false;
+    for(size_t i=0;i<after.bindings.size();i++)if(after.bindings[i].node!=before.bindings[i].node)return false;
+    return true;
+}
+// an authored edit reaches the running world instead of restarting it (Lambda_Pkg_Physics.md §6.2):
+// gravity, body poses and velocities become commands that override the simulated values, and
+// damping, gravity scale and collider changes are configured in place. The template is the higher
+// tier and overrides only what it changed (S12.1.5v2); a structural change restarts the world.
+static bool physics_scene_reconcile(Scene3dPhysics* state,PhysicsScene& current){
+    const PhysicsScene& before=state->scene;
+    if(!physics_scene_same_structure(before,current))return false;
+    lam::ArrayList<PhysicsCommand> commands;bool configure=false;
+    auto command=[&](PhysicsCommandKind kind,uint64_t body,PhysicsVec value,PhysicsPose pose){
+        PhysicsCommand c={};c.kind=kind;c.body=body;c.value=value;c.pose=pose;return commands.append(c);
+    };
+    PhysicsPose still={{0,0,0},{0,0,0,1}};
+    if(memcmp(&current.desc.gravity,&before.desc.gravity,sizeof(PhysicsVec))&&!command(PHYSICS_GRAVITY,0,current.desc.gravity,still))return false;
+    for(size_t i=0;i<current.bodies.size();i++) {
+        const PhysicsBodyDesc &was=before.bodies[i],&now=current.bodies[i];
+        if((memcmp(&now.pose,&was.pose,sizeof(PhysicsPose))&&!command(PHYSICS_TELEPORT,now.id,{},now.pose))||
+            (memcmp(&now.velocity,&was.velocity,sizeof(PhysicsVec))&&!command(PHYSICS_VELOCITY,now.id,now.velocity,still))||
+            (memcmp(&now.angular_velocity,&was.angular_velocity,sizeof(PhysicsVec))&&!command(PHYSICS_ANGULAR_VELOCITY,now.id,now.angular_velocity,still)))return false;
+        configure|=now.linear_damping!=was.linear_damping||now.angular_damping!=was.angular_damping||now.gravity_scale!=was.gravity_scale;
+    }
+    configure|=memcmp(current.colliders.data(),before.colliders.data(),current.colliders.size()*sizeof(PhysicsColliderDesc))!=0;
+    bool changed=configure||commands.size();PhysicsError error={};
+    if(changed&&state->world&&((configure&&!physics_configure(state->world,current.bodies.data(),current.bodies.size(),current.colliders.data(),current.colliders.size(),&error))||
+        (commands.size()&&!physics_apply(state->world,commands.data(),commands.size(),&error)))) {
+        log_debug("scene3d physics: authored edit restarts the world: %s",error.message?error.message:"");return false;
+    }
+    bool playing=current.playing!=before.playing;
+    // the moved arrays keep their buffers, so the descriptor's views stay valid
+    state->scene=static_cast<PhysicsScene&&>(current);
+    if(playing)physics_scene_play(state,state->scene.playing);
+    if(changed&&state->world){physics_read(state->world,&state->published,nullptr);state->generation++;
+        if(state->document->state)doc_state_request_repaint(state->document->state);}
+    return true;
+}
 bool scene3d_physics_matches(Scene3dPhysics* state,DomElement* root){
     if(!state||state->document!=root->doc)return false;if(state->epoch==root->doc->mutation_epoch)return true;
     PhysicsScene current;if(!physics_scene_compile(&current,physics_dom_source(),root))return false;
     // tracks added after initial compilation must obey the same transform ownership rule.
-    if(physics_scene_animation_conflict(current,root))return false;
-    if(current.bodies.size()!=state->scene.bodies.size()||current.colliders.size()!=state->scene.colliders.size()||
-        memcmp(current.bodies.data(),state->scene.bodies.data(),current.bodies.size()*sizeof(PhysicsBodyDesc))||
-        memcmp(current.colliders.data(),state->scene.colliders.data(),current.colliders.size()*sizeof(PhysicsColliderDesc))||
-        current.desc.timestep!=state->scene.desc.timestep||current.desc.iterations!=state->scene.desc.iterations||current.desc.length_scale!=state->scene.desc.length_scale||
-        memcmp(&current.desc.gravity,&state->scene.desc.gravity,sizeof(PhysicsVec)))return false;
-    for(size_t i=0;i<current.bindings.size();i++)if(current.bindings[i].node!=state->scene.bindings[i].node)return false;
-    state->scene.max_substeps=current.max_substeps;
-    if(current.playing!=state->scene.playing){state->scene.playing=current.playing;physics_scene_play(state,current.playing);}
+    if(physics_scene_animation_conflict(current,root)||!physics_scene_reconcile(state,current))return false;
     state->epoch=root->doc->mutation_epoch;return true;
 }
 // bindings hold raw node pointers, so only nodes still inside the old scene are dereferenced
@@ -139,8 +174,8 @@ static void physics_follow_bindings(lam::ArrayList<PhysicsBinding>& list,DomNode
     for(DomNode* c=node->as_element()->first_child;c;c=c->next_sibling)physics_follow_bindings(list,c,old_root,new_root);
 }
 // a template re-render rebuilds the scene's DOM: the world follows the corresponding
-// nodes and survives while the authored physics is unchanged, as form controls keep
-// native edits; changed authored physics fails the next match and restarts (S12.1.5v2)
+// nodes, as form controls keep native edits, and the next match reconciles any
+// authored change against it
 void scene3d_physics_follow_rebuild(Scene3dPhysics* state,DomNode* old_root,DomNode* new_root){
     if(!state)return;
     DomNode* scene=dom_node_ref_validate(state->document,state->root);if(!scene)return;

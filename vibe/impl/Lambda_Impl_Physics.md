@@ -31,17 +31,22 @@ the proposed dynamic AABB tree remains a performance extension. Warm starting
 uses sorted collider-pair manifolds, avoiding an all-contact quadratic scan.
 Sleeping is currently per body; full island management remains open.
 
-Topology is fixed after creation. Core commands cover forces/impulses,
-velocities, teleports, gravity, wake and kinematic targets. Persistent forces,
-object insertion/removal and material edits are later command extensions.
-Structural scene changes currently recreate the world; appearance/camera
-changes preserve matching physical descriptions. A template re-render that rebuilds
-the scene's DOM carries the world to the corresponding nodes and keeps it while
-the authored physics is unchanged; changed authored physics restarts it
-(**S12.1.5v2**).
+Topology is fixed after creation. Core commands cover forces/impulses, linear
+and angular velocities, teleports, gravity, wake and kinematic targets;
+`physics_configure` edits body damping, gravity scale and collider descriptors
+in place, recomputing mass properties and keeping simulated poses and
+velocities. Persistent forces and object insertion/removal are later
+extensions. Authored scene edits follow §6.2 of the design (**S12.1.5v2**):
+appearance and camera changes leave physics alone; gravity, body pose and
+velocity changes become commands; configuration changes are configured in
+place; structural changes (bodies or colliders added, removed or re-typed, or
+the world's timestep, iterations or length scale) recreate the world. A
+template re-render that rebuilds the scene's DOM carries the world to the
+corresponding nodes first, so the same classification applies to it.
 
 Presentation currently uses completed tick poses. Interpolated poses,
-tick-sampled kinematic animation, refined edit preservation, checkpoint/replay,
+tick-sampled kinematic animation, structural edits without a restart,
+checkpoint/replay,
 and explicit frozen-frame export controls remain open. Body animation tracks,
 CCD and joints are rejected instead of being ignored. The initial query API
 returns one hit per request; `aabb` is explicitly a broad-phase query.
@@ -87,9 +92,10 @@ nodes, contact events lost their target, and authored changes from the template
 never reached the world. `scene3d_physics_follow_rebuild` now moves the root
 and every binding to the structurally corresponding node, as the scene's
 animation already did, and forces the next match to recompile. The case
-`PhysicsWorldSurvivesTemplateRerenderUntilAuthoredPhysicsChanges` checks ticks,
-the presented pose after an unrelated re-render, and a restart when the
-template changes gravity.
+`PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders` checks ticks and
+the presented pose after an unrelated re-render; a template change of gravity,
+of a body's position and of a collider's density, each applied without
+resetting the tick; and a restart when the template adds a body.
 
 ## Verification
 

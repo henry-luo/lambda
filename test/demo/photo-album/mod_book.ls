@@ -128,8 +128,9 @@ pub fn spread_photo(book, turned) {
 // the turned-leaf count that shows a page
 pub fn turned_for_page(page) => int(floor((page + 1) / 2)) + 1
 
-// the eased angle of a turn at progress p: 0 is flat on the right, -180 flat on the left
-pub fn ease(p) => if (p < 0.5) 2.0 * p * p else 1.0 - 2.0 * (1.0 - p) * (1.0 - p)
+// the eased angle of a turn at progress p: 0 is flat on the right, -180 flat on the left.
+// A turn eases out (cubic): the leaf answers the click at once and settles as it lands.
+pub fn ease(p) => 1.0 - (1.0 - p) * (1.0 - p) * (1.0 - p)
 pub fn turn_angle(from, to, p) => from + (to - from) * ease(max(0.0, min(1.0, p)))
 
 // a drag: pointer distance from the grabbed edge over the spread width sets the angle

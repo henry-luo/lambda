@@ -1,7 +1,7 @@
 # Radiant — Paint IR, Display List & Backend Abstraction
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
-> **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6).
+> **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6); 2026-10-21 — paint layers (§6).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two retained rendering intermediate representations that sit between the layout/view tree and the pixel/vector backends: the target-neutral, semantic **PaintIR** and its raster-only lowering, the **DisplayList**. It describes why Radiant records draw commands into an immutable buffer and replays them separately (single-threaded, tiled-parallel, or via retained fragments), the record→replay data flow through the `rc_*` painter gateway, the `RenderBackend` vtable that SVG/PDF plug into by consuming PaintIR directly, and the supporting clip/transform/tile/retained-cache machinery. The per-feature painters (backgrounds, borders, glyphs), the raster surface, and PDF/SVG page assembly are [RAD_13](RAD_13_Render_Walk_Painters.md)'s and [RAD_14](RAD_14_SVG_Vector_Graph.md)'s subjects and are only cross-referenced here.
 >
@@ -84,6 +84,8 @@ The SVG lowering (`paint_ir_lower_svg` / `_stream`, `paint_ir.cpp:1966+`) is the
 
 `dl_replay` (`display_list_replay.cpp:48`) is the reference consumer. It validates the list, pushes a dirty clip via `dl_replay_push_dirty_clip` (`display_list_replay.cpp:58`), opens a ThorVG batch with `rdt_vector_begin_batch` (`:67`), then loops the items in a `switch(item->op)` (`:85`). Vector ops paint through `rdt_*` calls and stay batched; each pixel/effect op forces `rdt_vector_flush_batch` (e.g. `:141`, `:171`) so the surface is coherent before direct-pixel work, then hands off to a sibling file — `dl_replay_backdrop_*`, `dl_replay_shadow_*`, `dl_replay_apply_filter`, `dl_replay_box_blur_*`, `dl_replay_draw_glyph` (the `display_list_replay_*.cpp` family). The batch is closed with `rdt_vector_end_batch` (`:263`).
 
+A presentation-damage frame (RAD_16 §8) does not use the dirty clip. It replays its damage union as one tile (`render_output_replay_region` → `dl_replay_tile`), because the clip's vector mask shifts repeating-gradient and image rounding inside the region, whereas a tile's edges clip exactly. The dirty clip remains the fallback when no tile worker exists.
+
 **Dirty-clip skipping** makes a partial repaint cheap. When a `DL_BEGIN_ELEMENT` marker's bounds do not intersect the dirty region and its `matching_index` points forward, the loop jumps straight past the whole subtree by setting `i = item->element_marker.matching_index` (`display_list_replay.cpp:73-78`); individual skippable ops are filtered by `dl_replay_can_skip_item_for_dirty` (`display_list_replay.cpp:13`). This is what lets an incremental repaint touch only the changed elements while replaying a full recorded list. `dl_validate` (`render.hpp`) and `DisplayListValidationResult` (`render.hpp`) guard the clip/backdrop/shadow/element depth balance the skip logic relies on.
 
 ---
@@ -103,6 +105,8 @@ a view ID alone cannot represent that ownership.
 **Capture** runs after recording. `retained_dl_cache_capture` (`retained_display_list.cpp:360`) scans the recorded list for `DL_BEGIN_ELEMENT` markers and calls `retained_dl_cache_store_marker` (`:319`) for each; if the range is retainable (`dl_item_is_retainable_for_fragment`, `render.hpp`, per-item at `retained_display_list.cpp:312`) it deep-copies the item range into the per-view fragment via `retained_dl_copy_range` (`:186`), which re-deep-copies clip-shape polygons into the fragment's own arena (`retained_dl_copy_clip_shape_stack`, `:39`) so the fragment is independently immutable.
 
 **Lifetime** follows the arena ownership policy in **D4.5.1v4**. After capture, fragments whose `last_stored_epoch` does not match the completed frame are removed, releasing their display lists and arenas. Replaced view IDs therefore do not accumulate across reactive redraws. Current fragments, including markers copied by retained replay, remain available for the next frame.
+
+**Paint layers** (2026-10-21, [RAD_16 §8](RAD_16_Animation_Frame_Scheduling.md)) retain pixels rather than commands. A subtree moved by a presentation transform is captured into a surface and recorded as one image item. The surface is the item's resource owner: a fragment or frame recording that outlives a recapture reads it through its handle. The frame cache keys on the layer override, so a parity render without layers never replays a layered recording.
 
 **Reuse** happens on a later frame for clean subtrees. `retained_dl_append_fragment_for_dirty` (`retained_display_list.cpp:478`) re-injects a cached fragment into the new list, but only after two gates pass: `retained_dl_fragment_resources_valid` (`:424`) checks the stored video/glyph resource generations still match (a re-decoded image or re-shaped glyph invalidates the fragment), and the fragment must not intersect the `DirtyTracker`'s dirty rects (`:485-498`, consulting the caller-supplied `contains_view` predicate). The `RetainedDisplayListStats` counters (`render.hpp`) record capture/reuse hits and each rejection reason for diagnostics.
 
