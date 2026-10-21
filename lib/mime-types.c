@@ -67,6 +67,10 @@ MimePattern magic_patterns[] = {
     // BVH motion capture opens with its HIERARCHY section; no media type is registered
     {"HIERARCHY", 9, 0, 50, "model/x-bvh"},
     {"\xef\xbb\xbf" "HIERARCHY", 12, 0, 50, "model/x-bvh"},
+    // FBX: the binary signature includes its NUL; ASCII files open with a version comment
+    {"Kaydara FBX Binary  \0", 21, 0, 60, "model/x-fbx"},
+    {"; FBX ", 6, 0, 50, "model/x-fbx"},
+    {"\xef\xbb\xbf" "; FBX ", 9, 0, 50, "model/x-fbx"},
 
     // Plain text (fallback)
         // XML
@@ -294,6 +298,7 @@ MimeGlob glob_patterns[] = {
     {"*.gltf", "model/gltf+json"},
     {"*.a3d", "text/x-3d-model"},
     {"*.bvh", "model/x-bvh"},
+    {"*.fbx", "model/x-fbx"},
     {"*.3mf", "model/3mf"},
 
     // Executables

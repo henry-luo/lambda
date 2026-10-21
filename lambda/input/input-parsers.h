@@ -21,6 +21,8 @@ Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok, 
 // length-aware textual model dispatcher; returns false for unrelated formats.
 bool input_parse_model(Input* input, const char* source, size_t length, const char* type);
 void input_scene3d_asset(Input* input, const char* source, size_t length, const char* flavor);
+// FBX 7.x, binary or ASCII, as one raw <fbx> record tree (Lambda_Pkg_Motion.md §4)
+void input_fbx(Input* input, const char* source, size_t length);
 // the common <character> schema of lambda.scene3d.motion (Lambda_Pkg_Motion.md §7)
 void input_character(Input* input, const char* source, size_t length, const char* flavor);
 void parse_csv(Input* input, const char* csv_string);

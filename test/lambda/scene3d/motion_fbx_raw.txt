@@ -1,0 +1,13 @@
+"1 each file keeps its header"
+[['fbx', true, 7400, 7400], ['fbx', true, 7500, 7500], ['fbx', false, 7400, 7400]]
+"2 the three trees agree modulo numeric kinds"
+[true, true]
+"3 records keep their order and typed properties"
+[22, 69, ["Model::Hips", "Model::LeftUpLeg", "Model::LeftLeg"], ['Default', 'KeyVer', 'KeyTime', 'KeyValueFloat', 'KeyAttrFlags', 'KeyAttrDataFloat', 'KeyAttrRefCount']]
+[float, i32, array, array, array, array, array]
+[float, int, array, array, array, array, array]
+[i64, int, i64, f32, float]
+"4 empty strings are null and names use the ASCII spelling"
+[[1000006, "AnimCurve::", null], [1000004, "NodeAttribute::Hips", "LimbNode"]]
+"5 malformed ASCII is rejected at the parser"
+[2, "short array", "non-finite", "no version", "FBX 6"]

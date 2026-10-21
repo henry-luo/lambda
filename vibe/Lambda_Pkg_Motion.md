@@ -142,7 +142,7 @@ Binary FBX tags every property with a one-byte type code; the mapping preserves 
 | `C` | 1-byte boolean | `bool` |
 | `Y` | int16 | `i16` |
 | `I` | int32 | `i32` |
-| `L` | int64 (object IDs, KTime) | `int64` |
+| `L` | int64 (object IDs, KTime) | `i64` |
 | `F` / `D` | float32 / float64 | `f32` / `float` |
 | `S` | length-prefixed string | `string`; empty → `null`; invalid UTF-8 → `binary` with a warning |
 | `R` | raw bytes (embedded textures) | `binary`; empty → `null` (S2.2.2v2) |
