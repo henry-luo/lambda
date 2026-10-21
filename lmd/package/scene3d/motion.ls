@@ -205,10 +205,24 @@ fn hip_height(c) float^ {
     let heights = [for (k, m in rest) m[13]];
     origin(rest[root_joint(c).name])[1] - min(heights)
 }
+fn length3(p) => sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2])
+// each joint's world distance from its parent at rest: bone lengths, which a
+// rest that is itself a pose does not change
+fn world_bones(c) map^ {
+    let rest = pose(c)^;
+    map([for (j in joints(c)) for (child in content(j))
+        (child.name, length3([for (i in 0 to 2) origin(rest[child.name])[i] - origin(rest[j.name])[i]]))])
+}
+// root motion scales by leg length; a rig whose root sits at floor level has
+// none, and scales by its median bone-length ratio instead
 fn hip_ratio(source, target) float^ {
     let from = hip_height(source)^
-    let to = hip_height(target)^;
-    if (from > 1e-9 and to > 1e-9) to / from else 1.0
+    let to = hip_height(target)^
+    let a = world_bones(target)^
+    let b = world_bones(source)^
+    let ratios = sort([for (t, s in joint_map(source, target) where a[t] != null and b[s] != null and a[t] > 1e-12 and b[s] > 1e-12) a[t] / b[s]])
+    let fallback = if (len(ratios) == 0) 1.0 else ratios[len(ratios) div 2];
+    if (from > 0.05 * sum([for (k, v in b) v]) and to > 0.05 * sum([for (k, v in a) v])) to / from else fallback
 }
 
 // ---- moving clips between characters ----------------------------------------------
@@ -224,28 +238,59 @@ fn joint_map(source, target) map {
         else named(j);
     map([for (j in joints(target)) for (s in [source_of(j)] where s != null) (j.name, s)])
 }
-fn same_rest(source, target, pairs) bool {
-    let from = map([for (j in joints(source)) (j.name, j.quaternion)]);
-    all([for (j in joints(target) where pairs[j.name] != null)
-        abs(abs(qdot(j.quaternion, from[pairs[j.name]])) - 1) < 1e-9])
+// mapped bones below the roots as [target offset, source offset] in local units,
+// skipping bones too short to show a direction (controls, end sites)
+fn bone_pairs(source, target, pairs) array {
+    let from = map([for (j in joints(source)) (j.name, j.position)])
+    let roots = [for (j in content(skeleton_of(target))) j.name]
+    let mapped = [for (j in joints(target) where pairs[j.name] != null and not contains(roots, j.name)) [j.position, from[pairs[j.name]]]]
+    let lengths = sort([for (p in mapped) length3(p[0])])
+    let typical = if (len(lengths) == 0) 0.0 else lengths[len(lengths) div 2];
+    [for (p in mapped where length3(p[0]) >= 0.2 * typical and length3(p[1]) > 1e-12) p]
+}
+// the median ratio of local bone lengths: one rig, scaled or posed differently, keeps it
+fn size_ratio(source, target, pairs) float {
+    let ratios = sort([for (p in bone_pairs(source, target, pairs)) length3(p[0]) / length3(p[1])]);
+    if (len(ratios) == 0) 1.0 else ratios[len(ratios) div 2]
+}
+// a rig's local frames show in its bone offsets: when most mapped bones point
+// the same way, both files are one rig, perhaps posed or scaled differently, and
+// clips copy joint by joint; otherwise the local frames differ and clips must
+// retarget. Animated controls may disagree, so three bones in four suffice.
+fn same_frames(source, target, pairs) bool {
+    let bones = bone_pairs(source, target, pairs)
+    let agree = [for (p in bones where (p[0][0] * p[1][0] + p[0][1] * p[1][1] + p[0][2] * p[1][2]) / (length3(p[0]) * length3(p[1])) > 0.99) p];
+    len(bones) > 0 and len(agree) >= 0.75 * len(bones)
 }
 fn qdot(a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
 fn clip_named(k, label) element => rebuild(k, {*: fields(k), name: label}, [for (ch in content(k)) ch])
 
-// identical rest rotations: rename channels, scale root motion, and drop other
-// translation and scale unless `keep_translation`
+// one rig: rename channels and scale every translation by the rigs' size ratio
+// (a rig's hips and controls move too) unless `keep_translation: false` drops
+// translation and scale off the root. A property the clip leaves at the source's
+// rest holds that rest, which may itself be a pose, as a constant channel.
 fn copy_clip(k, source, target, pairs, options) element^ {
-    let back = map([for (b, s in pairs) (s, string(b))])
     let source_root = root_joint(source).name
-    let ratio = hip_ratio(source, target)^
-    let keep = options.keep_translation == true;
-    rebuild(k, fields(k), [for (ch in content(k) where back[ch.joint] != null)
-        (let root = ch.joint == source_root,
-         <channel joint: back[ch.joint],
-            *: (if (ch.position != null and root) {position: ch.position * ratio}
-                else if (ch.position != null and keep) {position: ch.position} else {}),
-            *: (if (ch.quaternion != null) {quaternion: ch.quaternion} else {}),
-            *: (if (ch.scale != null and keep) {scale: ch.scale} else {})>)])
+    let size = size_ratio(source, target, pairs)
+    let keep = options.keep_translation != false
+    let n = len(k.times)
+    let channels = map([for (ch in content(k)) (ch.joint, ch)])
+    let from = map([for (j in joints(source)) (j.name, j)])
+    let constant = (values) => [for (key in 0 to n - 1) *values];
+    rebuild(k, fields(k), [for (j in joints(target) where pairs[j.name] != null)
+        for (moved in [(let r = from[pairs[j.name]], let ch = channels[pairs[j.name]], let root = r.name == source_root,
+            let rest_scale = if (r.scale == null) [1.0, 1.0, 1.0] else r.scale,
+            let own_scale = if (j.scale == null) [1.0, 1.0, 1.0] else j.scale,
+            let position = if (ch != null and ch.position != null and (root or keep)) ch.position * size
+                else if ((root or keep) and max([for (i in 0 to 2) abs(r.position[i] * size - j.position[i])]) > 1e-9) constant(r.position * size) else null,
+            let quaternion = if (ch != null and ch.quaternion != null) ch.quaternion
+                else if (abs(abs(qdot(r.quaternion, j.quaternion)) - 1) > 1e-9) constant(r.quaternion) else null,
+            let scale = if (not keep) null else if (ch != null and ch.scale != null) ch.scale
+                else if (max([for (i in 0 to 2) abs(rest_scale[i] - own_scale[i])]) > 1e-9) constant(rest_scale) else null,
+            if (position == null and quaternion == null and scale == null) null
+            else <channel joint: j.name, *: (if (position != null) {position: position} else {}),
+                *: (if (quaternion != null) {quaternion: quaternion} else {}), *: (if (scale != null) {scale: scale} else {})>)]
+            where moved != null) moved])
 }
 
 // world rotations by composing local quaternions down the skeleton, at a key or at rest
@@ -313,7 +358,7 @@ pub fn attach(c, sources, options = {}) element^ {
          let checked = if (len(found) == 0) raise fail("attach source '" ++ string(label) ++ "' has no clip"),
          let pairs = joint_map(source, c),
          let checked_pairs = if (len(pairs) == 0) raise fail("attach source '" ++ string(label) ++ "' shares no joint with the character"),
-         let moved = if (same_rest(source, c, pairs)) copy_clip(found[0], source, c, pairs, options)^
+         let moved = if (same_frames(source, c, pairs)) copy_clip(found[0], source, c, pairs, options)^
              else retarget(found[0], source, c, options)^,
          clip_named(moved, string(label)))]
     let joined = rebuild(c, fields(c), [*content(c), *added])

@@ -84,7 +84,8 @@ def world_positions(frame):
     world = {}
     for name, parent, offset, order, _tip in SKELETON:
         position, angles = p[name]
-        local_t = position if position is not None else offset
+        # position channels add to OFFSET, as Three.js BVHLoader reads them
+        local_t = [offset[i] + position[i] for i in range(3)] if position is not None else offset
         rotation = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
         for axis in order:  # the first listed rotation is outermost
             rotation = mat_mul(rotation, axis_matrix(axis, angles.get(axis, 0.0)))
@@ -141,6 +142,7 @@ def write_bvh(path):
 KTIME = 46186158000  # ticks per second
 FBX_ROTATION_ORDER = {"XYZ": 0, "XZY": 1, "YZX": 2, "YXZ": 3, "ZXY": 4, "ZYX": 5}
 LINEAR, CUBIC, CONSTANT = 0x4, 0x8, 0x2
+USER, AUTO, CLAMP_PROGRESSIVE, TIME_INDEPENDENT = 0x400, 0x100, 0x4000, 0x2000
 
 
 def f32(value):
@@ -393,14 +395,19 @@ def write_fbx_ascii(path, scene, version):
             text = [repr(v) if code in "fd" else "%d" % v for v in values]
             rows = [",".join(text[i:i + 12]) for i in range(0, len(text), 12)]
             lines.append("%s%s: *%d {" % (pad, name, len(values)))
-            lines.append("%s\ta: %s" % (pad, (",\n" + pad + "\t").join(rows)))
+            # the FBX SDK starts each continuation line of a long array at column 0
+            lines.append("%s\ta: %s" % (pad, ",\n".join(rows)))
             lines.append(pad + "} ")
             return
         if len(properties) == 1 and properties[0][0] == "R":
             lines.append('%s%s: , "%s"' % (pad, name, base64.b64encode(properties[0][1]).decode()))
             return
-        head = "%s%s: %s" % (pad, name, ", ".join(fbx_text(c, v) for c, v in properties))
-        if not children and properties:
+        # like the SDK: ", " before a string, a bare "," before a number
+        values = "".join(("" if i == 0 else ", " if c in "SN" else ",") + fbx_text(c, v) for i, (c, v) in enumerate(properties))
+        head = "%s%s: %s" % (pad, name, values)
+        # the SDK gives every object record a body, even an empty one
+        is_object = depth == 1 and properties and properties[0][0] == "L"
+        if not children and properties and not is_object:
             lines.append(head)
             return
         lines.append(head.rstrip() + " {")
@@ -465,7 +472,7 @@ def material(scene, name, color):
 
 
 def skin(scene, geometry, mesh_model, bind_world, influences, joint_ids, joint_bind):
-    """influences: {joint name: {point: weight}}; binds are row-major 4x4."""
+    """influences: {joint name: {point: weight}}; binds are row-major 4x4 world matrices."""
     skin_id = scene.add("Deformer", "Deformer::Skin", "Skin", [("Version", [("I", 101)], [])])
     scene.oo(skin_id, geometry)
     column = lambda m: [float(m[r][c]) for c in range(4) for r in range(4)]  # FBX stores columns
@@ -474,7 +481,8 @@ def skin(scene, geometry, mesh_model, bind_world, influences, joint_ids, joint_b
             ("Version", [("I", 100)], []),
             ("Indexes", [("i", sorted(weights))], []),
             ("Weights", [("d", [float(weights[i]) for i in sorted(weights)])], []),
-            ("Transform", [("d", column(bind_world))], []),
+            # like Blender and the FBX SDK's files, Transform holds the mesh relative to the bone at bind
+            ("Transform", [("d", column(m4_mul(m4_inverse(joint_bind[name]), bind_world)))], []),
             ("TransformLink", [("d", column(joint_bind[name]))], [])])
         scene.oo(cluster, skin_id)
         scene.oo(joint_ids[name], cluster)
@@ -591,7 +599,8 @@ RIG = [  # name, parent, model type, chain properties
 ]
 RIG_SECOND = KTIME
 RIG_CURVES = {  # stack: {(joint, axis): keys [(tick, value, mode, right, left)]}
-    "curl": {("Lower", "X"): [(0, 0.0, CUBIC, 90.0, 0.0), (RIG_SECOND, 60.0, CUBIC, 0.0, -45.0), (2 * RIG_SECOND, 0.0, CUBIC, 0.0, 0.0)]},
+    # user tangents: the stored slopes are the tangents
+    "curl": {("Lower", "X"): [(0, 0.0, CUBIC | USER, 90.0, 0.0), (RIG_SECOND, 60.0, CUBIC | USER, 0.0, -45.0), (2 * RIG_SECOND, 0.0, CUBIC | USER, 0.0, 0.0)]},
     "wave": {("Finger1", "Y"): [(0, 0.0, LINEAR, 0, 0), (RIG_SECOND, 350.0, LINEAR, 0, 0), (2 * RIG_SECOND, 350.0, LINEAR, 0, 0)],
              ("Hand", "Z"): [(0, 0.0, CONSTANT, 0, 0), (RIG_SECOND, 45.0, CONSTANT, 0, 0), (2 * RIG_SECOND, 45.0, CONSTANT, 0, 0)]},
 }
@@ -659,7 +668,14 @@ def rig_scene():
     prop_geometry = mesh_geometry(scene, "Prop", prop_points, [(0, 1, 2, 3)])
     scene.oo(prop_geometry, prop)
 
-    for stack, curves in (("curl", RIG_CURVES["curl"]), ("wave", RIG_CURVES["wave"]), ("wave", {})):
+    # auto tangents are solved from neighbouring keys (FBX SDK, ufbx); only ufbx checks this stack
+    sway = {("Upper", "X"): [(0, 5.0, CUBIC | AUTO, 0, 0), (RIG_SECOND // 2, 30.0, CUBIC | AUTO, 0, 0),
+                             (RIG_SECOND, -10.0, CUBIC | AUTO, 0, 0), (2 * RIG_SECOND, 5.0, CUBIC | AUTO, 0, 0)],
+            ("Upper", "Z"): [(0, 20.0, CUBIC | AUTO | CLAMP_PROGRESSIVE | TIME_INDEPENDENT, 0, 0),
+                             (RIG_SECOND // 2, 50.0, CUBIC | AUTO | CLAMP_PROGRESSIVE | TIME_INDEPENDENT, 0, 0),
+                             (RIG_SECOND, 35.0, CUBIC | AUTO | CLAMP_PROGRESSIVE | TIME_INDEPENDENT, 0, 0),
+                             (2 * RIG_SECOND, 20.0, CUBIC | AUTO | CLAMP_PROGRESSIVE | TIME_INDEPENDENT, 0, 0)]}
+    for stack, curves in (("curl", RIG_CURVES["curl"]), ("wave", RIG_CURVES["wave"]), ("wave", {}), ("sway", sway)):
         layer = scene.stack(stack, 0, 2 * RIG_SECOND)
         by_joint = {}
         for (joint, axis), keys in curves.items():
@@ -728,7 +744,44 @@ def mixamo_scene(scale, hips_height, rest_rotations):
     return scene
 
 
+def write_offsets_bvh(path):
+    """A chain whose root OFFSET is nonzero and whose middle joint has position
+    channels: reading position channels as replacing OFFSET or adding to it differs."""
+    lines = ["HIERARCHY", "ROOT Root", "{", "  OFFSET 10.0000 20.0000 30.0000",
+             "  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation",
+             "  JOINT Slide", "  {", "    OFFSET 0.0000 10.0000 0.0000",
+             "    CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation",
+             "    JOINT Tip", "    {", "      OFFSET 0.0000 8.0000 0.0000", "      CHANNELS 3 Zrotation Xrotation Yrotation",
+             "      End Site", "      {", "        OFFSET 0.0000 5.0000 0.0000", "      }", "    }", "  }", "}",
+             "MOTION", "Frames: 3", "Frame Time: 0.50000000"]
+    rows = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [5, -2, 4, 30, 0, 10, 1, 3, -2, 0, 45, 0, 20, 0, 0],
+            [-3, 6, 1, -15, 20, 0, -2, 0, 5, 10, 0, 30, 0, -40, 15]]
+    lines += [" ".join("%.6f" % v for v in row) for row in rows]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def twisted_scene():
+    """The jump's T-pose under Mixamo names, every joint's local frame turned about Z:
+    the world skeleton is the same, but its bone offsets point other ways."""
+    scene = FbxScene(Y_UP_CM)
+    models, turn = {}, {}
+    for index, (name, parent, offset, _order, _tip) in enumerate(SKELETON):
+        turn[name] = 25.0 * (index % 5) - 40.0
+        base = turn[parent] if parent else 0.0
+        c, s_ = math.cos(math.radians(-base)), math.sin(math.radians(-base))
+        world = (0.0, 96.0, 0.0) if parent is None else offset
+        local = (c * world[0] - s_ * world[1], s_ * world[0] + c * world[1], world[2])
+        models[name] = scene.model("mixamorig:" + MIXAMO_OF.get(name, name), "LimbNode", models[parent] if parent else 0, [
+            P("InheritType", "enum", "", "", ("I", 1)),
+            vec("Lcl Translation", local, "Lcl Translation", "", "A"),
+            vec("Lcl Rotation", (0, 0, turn[name] - base), "Lcl Rotation", "", "A")])
+    return scene
+
+
 write_bvh(root / "jump.bvh")
+write_offsets_bvh(root / "offsets.bvh")
+write_fbx_binary(root / "twisted.fbx", twisted_scene(), 7400, compress=False)
 # the jump's legs reach 96 cm below the hips: the giant stands 1.5 times taller
 write_fbx_binary(root / "giant.fbx", mixamo_scene(1.5, 144.0, {}), 7400, compress=False)
 # an A-pose: the same proportions with the upper arms lowered 40 degrees at rest

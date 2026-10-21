@@ -9,7 +9,7 @@
 "4 skinned vertices match the reference"
 [true, true]
 "5 pivots, pre- and post-rotation, rotation orders, scaling and Z-up inches"
-[["curl", 61, 1], ["wave", 4, 2], ["wave-2", 2, 0]]
+[["curl", 61, 1], ["wave", 4, 2], ["wave-2", 2, 0], ["sway", 61, 1]]
 [[0, 0.5, 1, 2], true, true, true]
 [["Root", null], ["Upper", [1, 1, 1.5]], ["Lower", null], ["Hand", null], ["Finger1", null], ["Finger2", null]]
 "6 rest differs from bind, five influences keep four, a prop rides the hand"

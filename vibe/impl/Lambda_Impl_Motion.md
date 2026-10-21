@@ -20,8 +20,11 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 ## 2. Findings and deviations
 
 - **Rotation orders.** BVH lists rotation channels outermost first and FBX names `RotationOrder` by application, so BVH `Zrotation Xrotation Yrotation` is FBX `YXZ` (enum 3). The jump written both ways agrees to 2·10⁻⁸ m, the float32 rounding of FBX key values.
-- **BVH position channels (§13 decision 8)** replace `OFFSET` as proposed. They have not been compared with the pinned Three.js `BVHLoader`; see §4.
+- **BVH position channels (§13 decision 8)** add to `OFFSET`. The proposal said replace, pending `BVHLoader`; the pinned loader adds them (`frame.position + bone.offset`), and `offsets.bvh` shows the difference.
 - **FBX `L` properties** are Lambda `i64` values (the proposal's table said `int64`; corrected there).
+- **Cluster `Transform` is bone-relative.** ufbx reads it as `mesh_node_to_bone` and Blender writes `TransformLink⁻¹ · mesh world`; the SDK's `GetTransformMatrix` returns `TransformLink · Transform`. The converter first read the raw record as the absolute mesh bind, and the generator wrote it that way, so the two agreed with each other but not with real files. Kenney's character exposed it: its clusters' `Transform`s differ, while `TransformLink · Transform` agrees. Clusters that weight nothing (IK controls) no longer take part in the mesh-bind consistency check.
+- **Cubic tangents follow the SDK's modes**, ported from ufbx's solver: user tangents use the stored slopes; auto tangents are solved from the neighbouring keys, with the stored values only as auto bias, and clamp, progressive clamp and time-independent flags honoured; TCB keys use tension, continuity and bias.
+- **`attach` copies within one rig.** Kenney's jump file carries its own posed rest, so "same rest rotations" sent a same-rig clip to retargeting. One rig is now recognised by bone-offset directions (three bones in four, ignoring short control bones); the copy path keeps translations, scaled by the median bone-length ratio, and holds rest values the clip omits. Genuinely different local frames (the generated `twisted.fbx`) still retarget.
 - **Joint matching (§8.3 step 1).** Matching by name before role paired CMU `Spine` (chest) with Mixamo `Spine` (spine). Roles now win wherever both joints are tagged; names remain the fallback. Recorded in the proposal's Appendix C.
 - **`state` is a reserved word** in Lambda, so the state constructor is `motion.motion_state`, named after its element.
 - **Template re-renders rebuild their DOM subtree.** The proposal assumed a regenerated `<scene3d>` keeps its nodes. Radiant replaces a view's result subtree and preserves state through `*_follow_rebuild` hooks; `scene3d_follow_rebuild` now carries the entry, its GL context and its playback to the corresponding viewport, and invalidates the cached mutation epoch so the next compile reconciles. The animation source hash now covers content only; bindings still require their bone and mesh nodes to stay connected, so a structurally different rebuild restarts playback as before.
@@ -40,16 +43,16 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 | Milestone | Verified | Not verified |
 |---|---|---|
 | M0 | 256 bones render and a 257th is a diagnostic; Scene3D suite and native units pass; the palette texture is a counted GPU resource. | A separate 65-bone fixture (the 256-bone case covers the path). |
-| M1 | Goldens on interp, JIT and auto; world joint positions match an independent forward-kinematics pass within 1 µm; mannequin pixels change between frames. | Agreement with Three.js `BVHLoader`. |
+| M1 | Goldens on interp, JIT and auto; world joint positions match an independent forward-kinematics pass within 1 µm and the pinned `BVHLoader` within 0.1 µm (`jump.bvh`, `offsets.bvh`); mannequin pixels change between frames. | — |
 | M2 | Binary 7.4, binary 7.5 and ASCII trees agree modulo numeric kinds; every malformed-record case has a specific diagnostic; PSD tests pass. | — |
-| M3 | Output validates; BVH and the three FBX files agree at every key; joints, skinned vertices and a rigid prop match the generator's own FBX evaluator (pivots, pre/post rotation, rotation orders, non-uniform scale, Z-up inches, rest ≠ bind, five influences, cubic keys, a 350° Euler turn); a generated CC0 textured character renders and animates. | ufbx comparison; a third-party CC0 character; the local-only Mixamo check (no Mixamo files on this machine). |
-| M4 | Goldens on every tier; a CMU-named jump on a 1.5× Mixamo-named giant matches 1.5× the source world positions (feet stay on the ground); retargeting onto an A-pose reproduces the source's world rotation changes; every output validates. | Comparison with Three.js `SkeletonUtils`; real Mixamo and CMU files. |
+| M3 | Output validates; BVH and the three FBX files agree at every key; joints, skinned vertices and a rigid prop match the generator's own FBX evaluator and ufbx v0.23.1 within 0.04 µm (pivots, pre/post rotation, rotation orders, non-uniform scale, Z-up inches, rest ≠ bind, five influences, user, auto and Mixamo-style cubic keys, constant steps, a 350° Euler turn), and `FBXLoader` within 0.01 mm wherever it evaluates the same curves; Kenney's CC0 character (59 joints, 3,256 skinned vertices) matches both, renders with its skin and plays its own jump. | The local-only Mixamo check (no Mixamo files on this machine). |
+| M4 | Goldens on every tier; a CMU-named jump on a 1.5× Mixamo-named giant matches 1.5× the source world positions (feet stay on the ground); a rig with rotated local frames retargets to the source's exact world motion; `retarget` onto an A-pose matches `SkeletonUtils.retargetClip` within 0.2 µm; every output validates. | Real Mixamo and CMU files. |
 | M5 | Fixed-time captures through jump → flip → rise → jump; an unrelated re-render keeps playback; a new cue re-triggers; seek replays the request and its `next` chain; GPU bytes and resources are unchanged across transitions; invalid controllers fail natively and in `model.ls`. | — |
 
 ## 4. Open items
 
-- **Reference oracles.** The pinned Three.js 0.186.1 `BVHLoader`, `FBXLoader` and `SkeletonUtils`, and a ufbx test tool, need a download the user has not approved. The generator's independent evaluators stand in for now; decision 8 waits on `BVHLoader`.
-- **Third-party characters.** A CC0 character from Quaternius or Kenney, pinned with a hash, and the local-only Mixamo acceptance check.
+- **Mixamo.** The local-only check against downloaded Mixamo characters and clips still needs those files.
+- **`FBXLoader` differences.** Three.js keys every curve linearly and re-slerps Euler turns, so it differs from ufbx and the converter on constant steps, cubic keys and long Euler turns; `motion_oracle.ls` records where.
 - **Physics across template rebuilds.** `scene3d_follow_rebuild` carries animation, not `Scene3dPhysics`, which is still recreated when a view re-renders.
 - **Package import warnings.** Importing `lambda.scene3d.motion` logs shadow-lint warnings for `load` (as `lambda.scene3d.asset` already does).
 - **Later stages** remain as listed in the proposal's §12.
@@ -63,6 +66,8 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 | `test/lambda/scene3d/motion_fbx.ls` | Cross-format agreement, body, skinning, the rig, BindPose fallback, eleven malformed graphs |
 | `test/lambda/scene3d/motion_ops.ls` | Profiles, attach (copy and retarget), retarget, `rest_frame`, in_place, mirror, trim, misuse |
 | `test/lambda/scene3d/motion_control.ls` | `control`, `motion_state`, scene validation of controllers |
+| `test/lambda/scene3d/motion_oracle.ls` | BVH, FBX joints, skinned vertices, a rigid prop and retargeting against `BVHLoader`, `FBXLoader`, `SkeletonUtils` and ufbx |
 | `test/test_input_model_gtest.cpp` `Fbx*` | Binary property kinds, malformed records and arrays, ASCII errors, detection |
-| `test/scene3d/` cases | Palette, BVH mannequin, textured FBX body, controller playback, invalid controllers |
-| `test/demo/scene3d/assets/motion/_generate.py` | CC0 fixtures: jump (BVH, FBX ×3), rig, giant, A-pose, and the reference evaluations |
+| `test/scene3d/` cases | Palette, BVH mannequin, textured FBX body, Kenney's CC0 character, controller playback, invalid controllers |
+| `test/demo/scene3d/assets/motion/_generate.py` | CC0 fixtures: jump (BVH, FBX ×3), offsets, rig, giant, A-pose, twisted, and the reference evaluations |
+| `test/demo/scene3d/assets/motion/_oracle.mjs`, `_ufbx_dump.c` | `oracle.json` from the pinned Three.js addons and ufbx v0.23.1 |

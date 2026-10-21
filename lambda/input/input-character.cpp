@@ -72,8 +72,9 @@ static bool bvh_skeleton(SceneAsset& a, ElementReader source, Item parent,
 }  // namespace
 
 // §7.3: rest = OFFSET with identity rotation; rotation channels compose in the
-// listed order, the first outermost; position channels give the full local
-// translation, replacing OFFSET; a channel equal to rest at every key is omitted
+// listed order, the first outermost; position channels add to OFFSET, as the
+// pinned Three.js BVHLoader reads them (§13 decision 8); a channel equal to
+// rest at every key is omitted
 bool character_from_bvh(SceneAsset& a, Item raw, const char* clip_name) {
     ElementReader bvh(raw);
     ElementReader hierarchy = bvh.findChildElement("hierarchy");
@@ -122,7 +123,7 @@ bool character_from_bvh(SceneAsset& a, Item raw, const char* clip_name) {
             double position[3] = {joint.offset[0], joint.offset[1], joint.offset[2]};
             CharacterQuat q = {0, 0, 0, 1};
             for (unsigned i = 0; i < joint.channel_count; i++) {
-                if (joint.position_axis[i] >= 0) position[joint.position_axis[i]] = row[i];
+                if (joint.position_axis[i] >= 0) position[joint.position_axis[i]] += row[i];
                 else q = character_quat_mul(q, character_quat_axis((unsigned)joint.rotation_axis[i], row[i]));
             }
             q = character_quat_continue(previous, character_quat_normalized(q));

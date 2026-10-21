@@ -18,6 +18,12 @@
     "addons/postprocessing/EffectComposer.js": "4e079a5886152d7e529a59aef644e968ab4d32c6a33ce016b36bf29b2eac26f7",
     "addons/postprocessing/MaskPass.js": "7cd08eee9d5d6f5578beaddbdcbe9c384f6873810af27f22ab7db3ceeb127aa3",
     "addons/shaders/CopyShader.js": "a33057d5ac91c43304c186ac0e8816e62bb2ed471d3a00ff3018dfd5c0389718",
-    "addons/controls/OrbitControls.js": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b"
+    "addons/controls/OrbitControls.js": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b",
+    "addons/loaders/BVHLoader.js": "597e148c7afb516db8522ac0d0cb05f775c13aaf665623fa25b17abbcd55e3ba",
+    "addons/loaders/FBXLoader.js": "7fb8586158a2cf98477b2ee40a82ebec10a81040c70369bb177043375c355322",
+    "addons/utils/SkeletonUtils.js": "b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f",
+    "addons/libs/fflate.module.js": "209a4412eb48ce609edb4391992a792ffcc3983d30ee7e2b0b89a8c470f3cd8a",
+    "addons/curves/NURBSCurve.js": "bef2607618a7778455e71a1f0bd206951c382d313e2e245808cc7d3533d60fb6",
+    "addons/curves/NURBSUtils.js": "c6bd7c4137d585098923f189687898ea3e8762ea3ecbe255d749a56353894379"
   }
 }

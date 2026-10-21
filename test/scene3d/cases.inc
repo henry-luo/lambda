@@ -26,6 +26,7 @@
 {"SkinningPaletteHolds256BonesAndRejectsMore", "test/scene3d/skinning-palette.ls", "test/scene3d/events/SkinningPaletteHolds256BonesAndRejectsMore.json", 17},
 {"BvhJumpDrivesMannequinThroughCharacterSchema", "test/scene3d/motion-bvh.ls", "test/scene3d/events/BvhJumpDrivesMannequinThroughCharacterSchema.json", 7},
 {"FbxJumpSkinsTexturedBodyThroughCharacterSchema", "test/scene3d/motion-fbx.ls", "test/scene3d/events/FbxJumpSkinsTexturedBodyThroughCharacterSchema.json", 10},
+{"KenneyCharacterWearsItsSkinAndJumps", "test/scene3d/motion-kenney.ls", "test/scene3d/events/KenneyCharacterWearsItsSkinAndJumps.json", 9},
 {"MotionControllerCrossfadesChainsAndReplays", "test/scene3d/motion-control.ls", "test/scene3d/events/MotionControllerCrossfadesChainsAndReplays.json", 33},
 {"MotionControllerRejectsInvalidStates", "test/scene3d/motion-control-invalid.ls", "test/scene3d/events/MotionControllerRejectsInvalidStates.json", 8},
 {"TransparentSceneCompositesOverSvgAndAntialiasesEdges", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.html", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.json", 5},

@@ -16,7 +16,8 @@ static constexpr size_t FBX_JOINT_LIMIT = 1024, FBX_CLIP_LIMIT = 1024;
 static constexpr size_t FBX_VERTEX_LIMIT = 262144, FBX_CHANNEL_LIMIT = 8388608;
 // KeyAttrFlags bits
 static constexpr int64_t FBX_CONSTANT = 0x2, FBX_LINEAR = 0x4, FBX_CUBIC = 0x8, FBX_CONSTANT_NEXT = 0x100,
-    FBX_WEIGHTED = 0x3000000;
+    FBX_TANGENT_TCB = 0x200, FBX_TANGENT_USER = 0x400, FBX_CLAMP = 0x1000, FBX_TIME_INDEPENDENT = 0x2000,
+    FBX_CLAMP_PROGRESSIVE = 0x4000, FBX_WEIGHTED_RIGHT = 0x1000000, FBX_WEIGHTED_NEXT_LEFT = 0x2000000;
 enum FbxMode : uint8_t { MODE_CONSTANT, MODE_CONSTANT_NEXT, MODE_LINEAR, MODE_CUBIC };
 
 // ---- affine matrices: column-major, double precision -------------------------
@@ -230,7 +231,7 @@ struct FbxCharacter {
     lam::ArrayList<char> bound;          // bind set by a skin cluster
     bool skinned = false;
     Item resources = ItemNull;
-    lam::ArrayList<double> key_time, key_value, key_right, key_left;
+    lam::ArrayList<double> key_time, key_value, key_right, key_left;  // a key's outgoing and incoming slopes
     lam::ArrayList<uint8_t> key_mode;
     bool weighted_warned = false;
     lam::ArrayList<Item> material_ids;  // per FBX material, once created
@@ -811,22 +812,29 @@ struct FbxCharacter {
             if (bone_link < 0) continue;
             int joint = objects[links[bone_link].child].joint;
             ElementReader node = objects[cluster].node;
-            FbxMat transform, link;
-            if (!fbx_matrix(node, "Transform", &transform) && !pose_matrix(model, &transform))
-                return fail_named("skin cluster has no mesh bind transform:", objects[cluster].name);
-            if (!fbx_matrix(node, "TransformLink", &link) && !pose_matrix(links[bone_link].child, &link))
-                return fail_named("skin cluster has no joint bind transform:", objects[cluster].name);
-            if (!placed) { *placement = transform; placed = true; }
-            else if (fbx_difference(*placement, transform) > 1e-6) return fail_named("skin clusters disagree on the mesh bind transform of", objects[model].name);
+            // the file's Transform is the mesh relative to the bone at bind (ufbx's
+            // mesh_node_to_bone, Blender's TransformLink⁻¹ · mesh world); the SDK's
+            // GetTransformMatrix returns TransformLink · Transform, the mesh's bind world
+            FbxMat relative, link, mesh_bind;
+            bool linked = fbx_matrix(node, "TransformLink", &link) || pose_matrix(links[bone_link].child, &link);
+            if (!linked) return fail_named("skin cluster has no joint bind transform:", objects[cluster].name);
+            if (fbx_matrix(node, "Transform", &relative)) mesh_bind = link * relative;
+            else if (!pose_matrix(model, &mesh_bind)) return fail_named("skin cluster has no mesh bind transform:", objects[cluster].name);
+            fbx_child_numbers(node, "Indexes", indexes);
+            fbx_child_numbers(node, "Weights", weights);
+            // clusters that weight nothing (IK and control bones) cannot place the mesh
+            if (!indexes.empty()) {
+                if (!placed) { *placement = mesh_bind; placed = true; }
+                else if (fbx_difference(*placement, mesh_bind) > 1e-4)
+                    return fail_named("skin clusters disagree on the mesh bind transform of", objects[model].name);
+            }
             FbxMat inverse;
             if (!fbx_inverse(character(link), &inverse)) return fail_named("joint bind transform is singular:", objects[joints[joint]].name);
             // profile 1 keeps one bind per joint across every mesh
-            if (bound[joint] && fbx_difference(bind[joint], inverse) > 1e-6)
+            if (bound[joint] && fbx_difference(bind[joint], inverse) > 1e-4)
                 return fail_named("meshes bind joint with different poses:", objects[joints[joint]].name);
             bind[joint] = inverse;
             bound[joint] = 1;
-            fbx_child_numbers(node, "Indexes", indexes);
-            fbx_child_numbers(node, "Weights", weights);
             if (indexes.size() != weights.size()) return fail_named("skin cluster index and weight counts differ:", objects[cluster].name);
             for (size_t k = 0; k < indexes.size(); k++) {
                 if (indexes[k] < 0 || indexes[k] >= (double)points) return fail_named("skin cluster index out of range:", objects[cluster].name);
@@ -837,7 +845,7 @@ struct FbxCharacter {
                 influence.append(joint); influence.append(weights[k]);
             }
         }
-        if (!placed) return fail_named("skin has no clusters:", objects[model].name);
+        if (!placed) return fail_named("skin has no weighted clusters:", objects[model].name);
         size_t dropped = 0, unweighted = 0;
         int fallback = joint_above(model) >= 0 ? joint_above(model) : 0;
         for (size_t p = 0; p < points; p++) {
@@ -878,24 +886,101 @@ struct FbxCharacter {
         fbx_child_numbers(node, "KeyAttrRefCount", refs);
         out->first = key_time.size();
         out->count = times.size();
-        size_t attribute = 0, used = 0;
-        for (size_t k = 0; k < times.size(); k++) {
+        size_t attribute = 0, used = 0, n = times.size();
+        // the previous key's attribute holds this key's incoming slope
+        double carried_left = 0;
+        for (size_t k = 0; k < n; k++) {
             // KeyAttrRefCount runs give each attribute group a stretch of keys
             while (attribute < refs.size() && used >= refs[attribute]) { attribute++; used = 0; }
             used++;
             size_t at = attribute < flags.size() ? attribute : flags.empty() ? SIZE_MAX : flags.size() - 1;
             int64_t bits = at == SIZE_MAX ? FBX_LINEAR : (int64_t)flags[at];
-            uint8_t mode = bits & FBX_CUBIC ? MODE_CUBIC : bits & FBX_LINEAR ? MODE_LINEAR :
-                bits & FBX_CONSTANT ? (bits & FBX_CONSTANT_NEXT ? MODE_CONSTANT_NEXT : MODE_CONSTANT) : MODE_LINEAR;
-            if (mode == MODE_CUBIC && (bits & FBX_WEIGHTED) && !weighted_warned) {
-                a.ctx.addWarning("character: FBX weighted tangents are evaluated as unweighted cubic segments");
-                weighted_warned = true;
+            const double* stored = at != SIZE_MAX && at * 4 + 3 < data.size() ? data.data() + at * 4 : nullptr;
+            double t = times[k] / FBX_TICKS, value = values[k];
+            bool has_prev = k > 0, has_next = k + 1 < n;
+            double t0 = has_prev ? times[k - 1] / FBX_TICKS : t, v0 = has_prev ? values[k - 1] : value;
+            double t1 = has_next ? times[k + 1] / FBX_TICKS : t, v1 = has_next ? values[k + 1] : value;
+            double left = carried_left, right = stored ? stored[0] : 0, next_left = stored ? stored[1] : 0;
+            uint8_t mode;
+            if (bits & FBX_CONSTANT) {
+                mode = bits & FBX_CONSTANT_NEXT ? MODE_CONSTANT_NEXT : MODE_CONSTANT;
+                right = next_left = 0;
+            } else if (bits & FBX_CUBIC) {
+                mode = MODE_CUBIC;
+                if ((bits & (FBX_WEIGHTED_RIGHT | FBX_WEIGHTED_NEXT_LEFT)) && !weighted_warned) {
+                    a.ctx.addWarning("character: FBX weighted tangents are evaluated as unweighted cubic segments");
+                    weighted_warned = true;
+                }
+                if (bits & FBX_TANGENT_TCB) {
+                    // tension, continuity and bias in the stored data shape both slopes
+                    double incoming = has_prev ? (value - v0) / (t - t0) : 0, outgoing = has_next ? (v1 - value) / (t1 - t) : 0;
+                    double tension = stored ? stored[0] : 0, continuity = stored ? stored[1] : 0, bias = stored ? stored[2] : 0;
+                    double factor = has_prev && has_next ? 0.5 : 1.0;
+                    left = factor * (1 - tension) * ((1 + bias) * (1 - continuity) * incoming + (1 - bias) * (1 + continuity) * outgoing);
+                    right = factor * (1 - tension) * ((1 + bias) * (1 + continuity) * incoming + (1 - bias) * (1 - continuity) * outgoing);
+                    next_left = 0;
+                } else if (!(bits & FBX_TANGENT_USER)) {
+                    // auto tangents are solved from the neighbours; the stored slopes act only as auto bias
+                    if (has_prev && has_next) {
+                        if (fabs(left + right) <= 0.0001) left = right = auto_tangent(t0, t, t1, v0, value, v1, right, bits);
+                        else {
+                            double solved_left = auto_tangent(t0, t, t1, v0, value, v1, -left, bits);
+                            right = auto_tangent(t0, t, t1, v0, value, v1, right, bits);
+                            left = solved_left;
+                        }
+                    } else if (has_prev) left = right = edge_tangent(t0, t, v0, value, -left, bits);
+                    else if (has_next) left = right = edge_tangent(t, t1, value, v1, right, bits);
+                    else left = right = 0;
+                }
+            } else {
+                mode = MODE_LINEAR;
+                right = next_left = has_next ? (v1 - value) / (t1 - t) : 0;
             }
-            key_time.append(times[k]); key_value.append(values[k]); key_mode.append(mode);
-            key_right.append(at != SIZE_MAX && at * 4 + 1 < data.size() ? data[at * 4] : 0);
-            key_left.append(at != SIZE_MAX && at * 4 + 1 < data.size() ? data[at * 4 + 1] : 0);
+            key_time.append(times[k]); key_value.append(value); key_mode.append(mode);
+            key_right.append(right); key_left.append(left);
+            carried_left = next_left;
         }
         return true;
+    }
+    // an auto tangent from the neighbouring keys (after ufbx's ufbxi_solve_auto_tangent,
+    // which follows the FBX SDK): clamped keys flatten, time-dependent tangents blend
+    // the one- and two-sided slopes and lean toward `bias` percent of a side
+    static double auto_tangent(double t0, double t, double t1, double v0, double v, double v1, double bias, int64_t bits) {
+        if ((bits & FBX_CLAMP) && fmin(fabs(v0 - v), fabs(v1 - v)) <= 0) return 0;
+        double slope = (v1 - v0) / (t1 - t0);
+        if (!(bits & FBX_TIME_INDEPENDENT)) {
+            double incoming = (v - v0) / (t - t0), outgoing = (v1 - v) / (t1 - t), delta = (t - t0) / (t1 - t0);
+            slope = slope * 0.5 + (incoming * (1 - delta) + outgoing * delta) * 0.5;
+            double weight = fabs(bias) / 100;
+            if (weight > 0.0001) {
+                double target = bias > 0 ? outgoing : incoming, pull = target - slope;
+                slope = slope * (1 - weight) + target * weight;
+                double excess = weight - 5;
+                if (excess > 0) {
+                    double sign = fabs(pull) > 0.00001 ? pull : bias;
+                    slope += excess * excess * (sign > 0 ? 1 : -1) * 40;
+                }
+            }
+        }
+        if (bits & FBX_CLAMP_PROGRESSIVE) {
+            // never overshoot either neighbour within the tangents' one-third reach
+            double sign = slope >= 0 ? 1 : -1, magnitude = sign * slope;
+            double reach_left = (t - t0) / 3, reach_right = (t1 - t) / 3;
+            double max_left = reach_left > 0 ? sign * (v - v0) / reach_left : 0, max_right = reach_right > 0 ? sign * (v1 - v) / reach_right : 0;
+            if (!(max_left > 0)) max_left = 0;
+            if (!(max_right > 0)) max_right = 0;
+            slope = sign * fmin(magnitude, fmin(max_left, max_right));
+        }
+        return slope;
+    }
+    // the first or last key's auto tangent follows its one segment
+    static double edge_tangent(double t0, double t1, double v0, double v1, double bias, int64_t bits) {
+        if (bits & FBX_CLAMP_PROGRESSIVE) return 0;
+        if ((bits & FBX_CLAMP) && fabs(v1 - v0) <= 0) return 0;
+        double slope = (v1 - v0) / (t1 - t0);
+        double excess = fabs(bias) / 100 - 5;
+        if (!(bits & FBX_TIME_INDEPENDENT) && excess > 0) slope += excess * excess * (bias > 0 ? 1 : -1) * 40;
+        return slope;
     }
     double evaluate(const FbxCurve& c, double t) const {
         const double* time = key_time.data() + c.first;
@@ -911,7 +996,7 @@ struct FbxCharacter {
         case MODE_CONSTANT_NEXT: return value[hi];
         case MODE_CUBIC: {
             // Hermite with slopes in value per second
-            double seconds = span / FBX_TICKS, m0 = key_right[c.first + lo] * seconds, m1 = key_left[c.first + lo] * seconds;
+            double seconds = span / FBX_TICKS, m0 = key_right[c.first + lo] * seconds, m1 = key_left[c.first + hi] * seconds;
             double u2 = u * u, u3 = u2 * u;
             return (2 * u3 - 3 * u2 + 1) * value[lo] + (u3 - 2 * u2 + u) * m0 + (-2 * u3 + 3 * u2) * value[hi] + (u3 - u2) * m1;
         }

@@ -1,7 +1,8 @@
 // Motion M4: humanoid roles, attaching and retargeting clips, and clip
 // operations (Lambda_Pkg_Motion.md §8.2-§8.5). The CMU-named jump moves onto
-// Mixamo-named FBX skeletons: a 1.5x giant with the same rest rotations takes
-// the copy path, and an A-pose takes the retarget path.
+// Mixamo-named FBX skeletons. A 1.5x giant and an A-pose are the same rig as the
+// jump (their bone offsets match), so clips copy; a twisted rig has the same
+// world skeleton under rotated local frames, so clips retarget.
 import motion: lambda.scene3d.motion
 import h: lambda.scene3d.motion.humanoid
 
@@ -9,6 +10,7 @@ let dir = "test/demo/scene3d/assets/motion/"
 let cmu = motion.load(dir ++ "jump.bvh", {scale: 0.01, rig: 'cmu'})^
 let giant = motion.load(dir ++ "giant.fbx", {rig: 'mixamo'})^
 let apose = motion.load(dir ++ "apose.fbx", {rig: 'mixamo'})^
+let twisted = motion.load(dir ++ "twisted.fbx", {rig: 'mixamo'})^
 
 fn origin(m) => [m[12], m[13], m[14]];
 fn rotation(m) => [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
@@ -33,19 +35,23 @@ let copied = content(motion.clips_of(big)[0]);
     max([for (key in 0 to 30) (let a = motion.pose(cmu, "jump", key)^, let b = motion.pose(big, "leap", key)^,
         max([for (j in motion.joints(cmu)) gap(origin(b[role_name(big, j.humanoid)]), origin(a[j.name]) * 1.5)]))]) < 1e-9];
 
-"3 different rest rotations retarget each world rotation change from rest";
-let bent = motion.attach(apose, {leap: cmu})^
+"3 different local frames retarget each world rotation change from rest";
+let turned = motion.attach(twisted, {leap: cmu})^
+let posed = motion.attach(apose, {leap: cmu})^
 let rest_from = motion.pose(cmu)^
-let rest_to = motion.pose(apose)^
+let rest_to = motion.pose(twisted)^
 fn rotation_gap(key) {
     let a = motion.pose(cmu, "jump", key)^
-    let b = motion.pose(bent, "leap", key)^;
-    max([for (j in motion.joints(cmu)) (let n = role_name(bent, j.humanoid),
+    let b = motion.pose(turned, "leap", key)^;
+    max([for (j in motion.joints(cmu)) (let n = role_name(turned, j.humanoid),
         gap(delta(rotation(b[n]), rotation(rest_to[n])), delta(rotation(a[j.name]), rotation(rest_from[j.name]))))])
 }
-[[for (k in motion.clips_of(bent)) [k.name, len(k.times), len(content(k))]],
+// the twisted rig shares the jump's world skeleton, so retargeting reproduces its world motion
+[[for (k in motion.clips_of(turned)) [k.name, len(k.times), len(content(k))]],
     [for (key in [0, 8, 15, 30]) rotation_gap(key) < 1e-9],
-    max([for (key in 0 to 30) gap(origin(motion.pose(bent, "leap", key)^["mixamorig:Hips"]), origin(motion.pose(cmu, "jump", key)^["Hips"]))]) < 1e-9,
+    max([for (key in 0 to 30) (let a = motion.pose(cmu, "jump", key)^, let b = motion.pose(turned, "leap", key)^,
+        max([for (j in motion.joints(cmu)) gap(origin(b[role_name(turned, j.humanoid)]), origin(a[j.name]))]))]) < 1e-9,
+    [for (k in motion.clips_of(posed)) [k.name, len(content(k))]],
     (let k = motion.retarget(motion.clips_of(cmu)[0], cmu, apose)^, [name(k), k.name, len(content(k))])];
 // with `rest_frame`, a source key stands in for the rest pose: that key leaves the target at rest
 let framed = motion.retarget(motion.clips_of(cmu)[0], cmu, apose, {rest_frame: 15})^
