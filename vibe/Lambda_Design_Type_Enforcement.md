@@ -2396,6 +2396,37 @@ prevent a green aggregate. The revised error-handling document examples and
 tutorial chapter 6 pass their checks. Intentional MIR growth is recorded at
 the comparison/conditional probes in `test/mir/mir_budgets.json`.
 
+### TE-23 — A type name binds for its whole scope and never reads as `any` (decided 2026-10-21, user)
+
+**The ruling (S11.4.12).** At a module's top level every type declaration — alias, object type, binary layout, named string or symbol pattern, `grammar` — binds its name before any type expression in the module resolves, as top-level `fn`/`pn` do, so a type may name itself, a later type, or a type that names it back. A type declared in a block binds from its declaration to the end of the block. A reference cycle must pass through a structural position (a map field, an element attribute or content slot, an array or list item, or a `that` body); a cycle through aliases and type operators alone, any cycle among patterns, and a binary-layout cycle not broken by a native pointer field are E240. A name that resolves to no declaration, import or base type is E204, never `any`.
+
+**What forced the ruling.** The motion proposal's `<character>` schema ([Lambda_Pkg_Motion.md §6](Lambda_Pkg_Motion.md)) needs a self-recursive element type, `Joint`. Probing it found two defects. Self-recursive element types failed, because the pre-bound alias placeholder was published for maps and unions only; that was fixed the same day (`element_type_recursive.ls`). The second is this ruling's subject: every reference to a type declared later resolved to `any`, with only a log warning, and not only in mutual recursion:
+
+- `type Early = Later[]` before `type Later = int` made `["x"] is Early` true. A function annotation (`fn f(x: Later)`) and an object-type field (`type O { a: Later2 }`) degraded the same way.
+- `lambda validate` accepted `{"a": "x"}` against `type Document = {a: Later}` followed by `type Later = int`.
+- A census over the 230 files that declare a type alias found 29 forward references in 15 files: 13 validator schemas written root-first, plus the shipped `lmd/package/doc/eml_schema.ls` and `ics_schema.ls`. `eml_schema`'s `EmailPart` ↔ `MultipartContent` is genuine mutual recursion. Two more names were declared nowhere (`void`, `char`).
+- Unguarded self-cycles had arbitrary meanings: `type C = C` rejected every value, and `type D = D?` admitted only `null`.
+
+S11.4.1v3 makes an annotation a contract, not a hint, and SI3v2 makes Lambda strict by default. A contract that silently becomes `any` breaks both.
+
+**Three options.** (a) Type names are order-independent at a module's top level. (b) Declaration order, with a later-defined name as E204, which is what pattern islands already did. (c) The status quo. (a) won:
+
+- (c) is unsound and was never ruled; the code called it leniency for runtime paths.
+- (b) is sound but cannot express mutual recursion at all, so `eml_schema` would be inexpressible. It also forces every root-first schema to be rewritten leaves-first, the opposite of how schemas are written and read.
+- (a) follows an existing precedent: top-level `fn`/`pn` are predeclared before any body resolves (`resolver_predeclare_functions`), so mutually recursive functions already work.
+
+**Why blocks stay sequential.** Block-local functions do not see later siblings. A local type's `that` predicate can read block locals (S11.4.11), so hoisting a local type would let it be used before the locals its predicate reads are bound. Types follow functions: predeclared at the top level, sequential in blocks.
+
+**Why the cycle rule.** Forward references make `type A = B` with `type B = A` expressible, and a cycle with no structural step has no meaning: matching it never consumes the value. A structural position consumes one level, and a `that` body is an `fn` call per level (S11.4.11; `constrained_type_recursive.ls`). Patterns compile to regular expressions, which cannot recurse, so every pattern cycle is an error. A binary layout needs a finite size, so only a native pointer field (S11.5.4) breaks a layout cycle. Function types are deliberately not structural positions: recursion through signature comparison would need its own termination argument, so `type H = fn(H) int` is E240 until a case needs it.
+
+**Why patterns are included.** Named patterns are declared with the same `type` keyword; excluding them would leave one kind of type name under a different scope rule. The cost is on the implementation side: islands compile in dependency order instead of at their declaration. The 2026-09-27 island conformance, where a later-defined name is E204, is superseded for top-level names; an unknown name stays E204.
+
+**Why MAJOR (Formal Semantics 71.0.0).** Existing programs change: the two unknown names become E204, and the 15 forward-referencing files start checking contracts that were vacuous, which can reject data that passed before.
+
+**Implementation outline (not started).** Predeclare top-level type declarations as top-level functions are. Resolve type bodies after every name binds, publishing completed types through the pre-bound wrappers (the mechanism `direct_adopt_pending_alias_map` already uses for self-reference). Check the type reference graph for unguarded cycles (E240, a new `ERR_TYPE_CYCLE`). Replace `resolve_type_name`'s `any` fallback with E204. Compile pattern islands in dependency order. Fixtures: mutual recursion across maps, elements and unions; a root-first schema under `lambda validate`; E204 and E240 negatives; the two validator schemas with unknown names corrected.
+
+**Spec linkage.** TE-23 → S11.4.12* (Formal Semantics 71.0.0); the conformance gap is its Appendix A row.
+
 ## 8. Phasing
 
 Each phase gates on `make test-lambda-baseline` and `make test262-baseline` at 100% plus new

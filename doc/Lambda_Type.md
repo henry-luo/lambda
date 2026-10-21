@@ -519,6 +519,35 @@ let name: UserName = "alice"
 let pos: Point = (10.5, 20.5)
 ```
 
+### Recursive Types and Forward References
+
+A type may name itself, so recursive data needs no special syntax. An element type recurses through its content or attributes, a map type through its fields:
+
+```lambda
+type Tree = <tree label: string, (Tree | <leaf>)*>
+type Node = {value: int, next: Node?}
+
+let t = <tree label: "root", <leaf> <tree label: "child", <leaf>>>
+let n = {value: 1, next: {value: 2, next: null}}
+t is Tree        // true
+n is Node        // true
+```
+
+At a module's top level a type may also name a type declared later, or a type that names it back (S11.4.12). Declaration order does not matter there, as it does not for top-level functions, so a schema can be written root first:
+
+```lambda
+type Message = {subject: string, parts: Part[]}
+type Part = string | Message        // a part can nest a whole message
+```
+
+Three rules keep this well defined:
+
+- A recursive reference must pass through a structure: a map field, an element attribute or content slot, an array or list item, or a `that` predicate. Each level then consumes part of the value. `type A = B` with `type B = A`, or `type C = C | int`, is a compile error (E240), and so is any cycle among string patterns, which cannot recurse.
+- A type declared inside a block sees only the types declared before it in that block, itself included, as block-local functions do.
+- A type name that resolves to no declaration, import or base type is a compile error (E204).
+
+> **Not yet implemented.** Self-reference works today. A reference to a type declared *later* in the file still reads as `any`, with only a log warning, so `Message` above accepts any `parts` array; an unresolved name also reads as `any`, and cycles are not checked. Until S11.4.12 lands, declare a type before the types that use it.
+
 ### Object Types
 
 Object types are **nominally-typed maps** with optional methods, inheritance, default values, and constraints. Unlike map type aliases (`type T = {...}`), object types create a distinct runtime type checked by name.
