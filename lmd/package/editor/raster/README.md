@@ -78,12 +78,26 @@ Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
 are retained as shared backing until a touched tile detaches (**S9.2.2 /
 D4.1.4v5**). Layer affine transforms, eight blend modes, clipping chains and
 pass-through groups use the shared renderer. `layer.transform` accepts a matrix
-or a relative angle/scale around the current bounds; the Transform tool scales
-radially and Shift-drag rotates, with cancel/commit history. Pixel editing on a
+or a relative angle/scale around the current bounds. `transform.handle_gesture`
+accepts an eight-way resize handle or `"rotate"`, returning the same command.
+Opposite anchors stay fixed in document space; Shift constrains corner proportions
+or snaps rotation to 15°, and Alt scales about the center. Signed scales allow
+mirroring; their absolute magnitude is bounded to 0.001–4096. Hosts can provide
+`.raster-transform` controls with `data-raster-handle` values; interaction inputs
+carry `handle`, `shift` and `alt`. One unlocked leaf layer is supported, including
+an existing affine. The image gesture also scales radially and Shift-drag rotates,
+with shared cancel/commit history (**S9.1.2 / S9.2.2**). Pixel editing on a
 transformed source requires explicit `layer.rasterize`.
 
 `effect.add/update/toggle/remove/reorder` retain ordered adjustments/filters.
-The demo provides controls and a histogram. `lambda.image.project` preserves
+The demo provides Levels and RGB/channel Curves controls plus a histogram.
+`lambda.editor.raster.tone` validates and edits normalized curve drafts without
+changing documents. Curves have 2–32 strictly increasing input positions from
+0 to 1, with outputs in [0,1]. `insert/move/remove/with_points` retain other
+channels; endpoint inputs stay fixed and moves cannot cross neighbors. Apply
+through `effect.add/update` with `curves:{rgb:[[0,0],[1,1]],r:...,g:...,b:...}`.
+The shared image processor applies exact linear segments, then `output_black` /
+`output_white` endpoints; alpha is unchanged. `lambda.image.project` preserves
 these parameters, original pixel bytes, masks, locks and tree identities in a
 versioned `.photos` data file. High depth and color conversion remain later work. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor

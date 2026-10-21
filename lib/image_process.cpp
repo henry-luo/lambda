@@ -177,7 +177,50 @@ struct ImageProcessRun {
     double* previous;
     double* row;
     bool color_identity;
+    bool has_curves;
+    uint8_t curve_segments[IMAGE_TONE_CHANNELS][256];
 };
+bool image_process_tone_valid(const ImageProcessOptions& options) {
+    if (!isfinite(options.output_black) || !isfinite(options.output_white) ||
+        options.output_black<0 || options.output_white>1 || options.output_white<options.output_black) return false;
+    for (int channel=0;channel<IMAGE_TONE_CHANNELS;channel++) {
+        uint64_t count=options.curve_counts[channel];
+        if (count==0) continue;
+        if (count<2 || count>IMAGE_TONE_POINTS || options.curves[channel][0][0]!=0 ||
+            options.curves[channel][count-1][0]!=1) return false;
+        for (uint64_t point=0;point<count;point++) {
+            const double* p=options.curves[channel][point];
+            if (!isfinite(p[0]) || !isfinite(p[1]) || p[0]<0 || p[0]>1 || p[1]<0 || p[1]>1 ||
+                (point>0 && p[0]<=options.curves[channel][point-1][0])) return false;
+        }
+    }
+    return true;
+}
+static void image_prepare_curves(ImageProcessRun& run) {
+    for (int channel=0;channel<IMAGE_TONE_CHANNELS;channel++) {
+        uint64_t count=run.options->curve_counts[channel], segment=0;
+        if (count==0) continue;
+        run.has_curves=true;
+        for (int bucket=0;bucket<256;bucket++) {
+            double x=bucket/255.0;
+            while (segment+2<count && run.options->curves[channel][segment+1][0]<=x) segment++;
+            run.curve_segments[channel][bucket]=(uint8_t)segment;
+        }
+    }
+}
+static double image_curve_value(const ImageProcessRun& run, int channel, double value) {
+    uint64_t count=run.options->curve_counts[channel];
+    if (count==0) return value;
+    int bucket=(int)(value*255.0);
+    uint64_t segment=run.curve_segments[channel][bucket];
+    const double (*points)[2]=run.options->curves[channel];
+    // bucket lookup accelerates search without approximating narrow or nonmonotone curves.
+    while (segment>0 && points[segment][0]>value) segment--;
+    while (segment+2<count && points[segment+1][0]<=value) segment++;
+    const double* a=points[segment];
+    const double* b=points[segment+1];
+    return a[1]+(b[1]-a[1])*((value-a[0])/(b[0]-a[0]));
+}
 static void image_oriented_pixel(const ImageProcessRun& run, int y, int x, double* rgba) {
     auto& source=*run.source;
     auto& options=*run.options;
@@ -235,7 +278,9 @@ static void image_color_pixel(const ImageProcessRun& run, int y, int x, double* 
     for (int c=0;c<3;c++) {
         const double* matrix=o.matrix+c*4;
         double preset=rgb[0]*matrix[0]+rgb[1]*matrix[1]+rgb[2]*matrix[2]+matrix[3];
-        rgba[c]=image_clip(rgb[c]*(1-o.intensity)+preset*o.intensity);
+        double value=image_clip(rgb[c]*(1-o.intensity)+preset*o.intensity);
+        if (run.has_curves) value=image_curve_value(run,c+1,image_curve_value(run,0,value));
+        rgba[c]=image_clip(o.output_black+value*(o.output_white-o.output_black));
     }
 }
 static bool image_color_row(void* opaque, int64_t y, double* row) {
@@ -337,7 +382,7 @@ bool image_process(const ImageProcessSource& source, const ImageProcessOptions& 
     uint8_t* destination, size_t destination_bytes) {
     if (!result) return false;
     *result={};
-    if (image_cancelled(cancelled)) return false;
+    if (image_cancelled(cancelled) || !image_process_tone_valid(options)) return false;
     ImageProcessRun run={&source,&options,cache,result,cancelled};
     if (!image_process_extent(run)) return false;
     size_t output_bytes=(size_t)result->width*result->height*4;
@@ -345,10 +390,12 @@ bool image_process(const ImageProcessSource& source, const ImageProcessOptions& 
     double radians=math_degrees_to_radians_d(options.angle);
     run.cosine=cos(radians); run.sine=sin(radians);
     run.exposure=pow(2.0,options.exposure); run.exponent=1.0/options.gamma;
+    image_prepare_curves(run);
     ImageProcessOptions neutral;
     run.color_identity=options.compare || (options.exposure==0 && options.brightness==0 && options.contrast==1 &&
         options.saturation==1 && options.temperature==0 && options.gamma==1 && options.black==0 && options.white==1 &&
-        options.shadows==0 && options.highlights==0 && (options.intensity==0 || memcmp(options.matrix,neutral.matrix,sizeof(options.matrix))==0));
+        options.shadows==0 && options.highlights==0 && options.output_black==0 && options.output_white==1 &&
+        !run.has_curves && (options.intensity==0 || memcmp(options.matrix,neutral.matrix,sizeof(options.matrix))==0));
     size_t row_bytes=(size_t)run.width*4*sizeof(double), cache_bytes=row_bytes*run.height;
     if (cache) for (int stage=0;stage<3;stage++) {
         auto key=image_cache_key(options,stage);

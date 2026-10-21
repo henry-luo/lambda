@@ -2,7 +2,7 @@
 
 A native Lambda/Radiant layered raster editor. The initial implementation uses
 the shared image/PSD package and reusable `lambda.editor.raster` commands.
-Design and later milestones: [proposal](../../../vibe/Lambda_Demo_Photos.md),
+Design and later milestones: [proposal](../../../vibe/Lambda_Demo_Photo_Editor.md),
 [implementation record](../../../vibe/impl/Lambda_Impl_Photos.md).
 
 Run from this checkout:
@@ -103,11 +103,26 @@ maximum child-process RSS. It measures construction, repeated moves (including
 current eager validation/composition), and PSD encoding; it does not establish
 interactive display latency. Do not run `make release` in a worktree.
 
-Transforms and editable effects are available in the lower property dock. Drag
-with Transform (T) to scale radially; hold Shift at pointer-down to rotate. Numeric
+Transform (T) shows eight resize handles and a rotation handle for one unlocked
+layer. Resizing keeps the opposite edge/corner fixed, including on an already
+rotated layer. Shift preserves corner proportions or snaps rotation to 15°;
+Alt resizes about the center. Escape cancels; completion creates one undo item.
+Handles follow document-space bounds; group handles and perspective/warp remain
+outstanding. Dragging the image scales radially; Shift-drag rotates. Numeric
 controls apply relative angle/X/Y scale; reset/flip and explicit rasterization
 are available. Blend modes, clipping, group isolation and ordered effect controls
 share the headless command registry. The histogram reuses the presented raster.
+
+The lower Levels dock sets input black/white, midtone gamma and output black/white.
+Curves offers RGB master and separate red/green/blue channels. Click its graph to
+add a point, drag to move it, or enter normalized `[input,output]` pairs. Endpoints
+stay at input 0/1; interior points cannot cross their neighbors. Each curve uses
+2–32 points joined by straight segments. Channel changes keep drafts, Escape
+cancels an active graph drag, and Reset/Remove edit the draft. Add creates an
+editable effect; Apply updates the selected effect with one undo item. Drafts
+leave the image untouched until applied. Effects preserve source pixels and alpha,
+can be reordered/toggled, and survive projects and recorded actions
+(**S9.1.2 / S9.2.2**). Dedicated adjustment layers and smooth curves remain pending.
 
 Save defaults to `.photos`, preserving original samples and editable settings.
 A `.psd` destination remains supported for the qualified PSD subset; Export PSD

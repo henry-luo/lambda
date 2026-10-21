@@ -601,5 +601,13 @@ size, transparency/background and JPEG quality. Crop previews and export
 settings remain outside authored history; applying a crop or arranging layers
 commits through the shared command history (**S9.1.2 / S9.2.2 / S12.1.3**).
 Export derives pixels from the original snapshot and publishes atomically
-(**S12.1.1v3**). Transform handles, straighten, guides/rulers, curves/levels,
-dedicated adjustment layers and the larger M5 items remain outstanding.
+(**S12.1.1v3**).
+
+The 2026-10-21 increment adds eight anchored canvas resize handles and rotation
+for one unlocked leaf layer, with Shift proportions/15° snapping, centered Alt
+scaling and shared cancel/undo. Levels and RGB/channel piecewise-linear Curves
+are editable retained effects; graph/text drafts apply explicitly, preserve
+source samples/alpha and persist through projects/actions (**S9.1.2 / S9.2.2**).
+Straighten UI, guides/rulers, group/perspective transforms, smooth curves,
+dedicated adjustment layers and the larger M5 items remain outstanding. Actual
+verification is recorded in [the implementation record](impl/Lambda_Impl_Photos.md).
