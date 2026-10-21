@@ -9,6 +9,8 @@ import L: .mod_library
 import G: .mod_grid
 import ui: .mod_ui
 import D: .mod_deck
+import C: .mod_collage
+import CA: .mod_collage_app
 import slide: lambda.slide
 import slide_html: lambda.slide.html
 
@@ -19,6 +21,7 @@ let DIR_URL = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", DIR)
 let MANIFEST = input(DIR ++ "photos.json", 'json')^
 let PRESENT = [for (p in MANIFEST.photos) {photo:exists(DIR ++ "photos/" ++ p.file), thumb:exists(DIR ++ "thumbs/" ++ p.file)}]
 let LIB = L.build(MANIFEST, PRESENT, DIR_URL)^
+let CTX = {lib:LIB, dir:DIR, dir_url:DIR_URL}
 let FETCH = "python3 -I test/demo/photo-album/_fetch.py && ./lambda.exe run test/demo/photo-album/_thumbs.ls"
 let GAP = 4.0
 let ZOOM_LEVELS = [1.0, 1.5, 2.25, 3.4, 5.0, 8.0]
@@ -28,7 +31,7 @@ let SHOW_CHROME = 172.0
 let INITIAL = {mode:"library", album:"", query:"", favorites:[], selected:[], anchor:0, focus:0,
     target:160.0, width:0.0, height:0.0, top:0.0, ids:LIB.order, lay:null, rows:[], heads:[],
     layout_frame:0, band:null, scrub:null, pan:null, swallow_click:false, active:false, opening:null,
-    sheet:null, show:false,
+    sheet:null, show:false, collage:null, collage_edit:null,
     viewer:{open:false, id:0, zoom:1.0, x:0.0, y:0.0, info:false, strip:true}}
 
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "album")
@@ -273,6 +276,55 @@ pn close_show(owner, st) {
     return {*:st, show:false}
 }
 
+// ---------------------------------------------------------------- collage
+
+// a collage starts from the selection or the first photos shown, 2 to 30 of them
+pn open_collage(owner, st, source) {
+    let ids = slice(if (source == "selection") [for (id in st.ids where contains(st.selected, id)) id] else st.ids, 0, C.MAX_PHOTOS)
+    if (len(ids) < C.MIN_PHOTOS) { return st }
+    let title = L.scope_title(LIB, st.mode, st.album, st.query)
+    updates.show(owner, "collage", true, "flex")
+    let cs = CA.start(owner, CTX, ids, title)
+    // keyboard shortcuts reach the album only from focus inside it
+    dom.focus_set(node(owner, "collage"), false)
+    return {*:st, collage:cs, viewer:{*:st.viewer, open:false}}
+}
+
+pn collage_command(owner, st, action) {
+    let cs = st.collage
+    if (action == "collage-close") {
+        updates.show(owner, "collage", false)
+        dom.focus_set(node(owner, "port"), false)
+        return {*:st, collage:null, collage_edit:null}
+    }
+    if (action == "collage-undo" or action == "collage-redo") { return {*:st, collage:CA.undo(owner, CTX, cs, action == "collage-redo")} }
+    if (action == "collage-shuffle") { return {*:st, collage:CA.change(owner, CTX, cs, C.shuffle(cs.model))} }
+    var next = cs
+    var status = ""
+    if (action == "collage-save") { CA.save_model(owner, CTX, cs) ^ { status = "Could not save: " ++ ^.message } ~ { status = ~ } }
+    if (action == "collage-open") { CA.load_saved(owner, CTX, cs) ^ { status = ^.message } ~ { next = ~ } }
+    if (action == "collage-export") {
+        CA.export_image(owner, CTX, cs) ^ { status = "Could not export: " ++ ^.message }
+            ~ { status = "Exported " ++ slice(~.path, len(DIR), len(~.path)) ++ " (" ++ string(~.width) ++ " × " ++ string(~.height) ++ ") and its credits file" }
+    }
+    updates.text(owner, "cl-status", status)
+    return {*:st, collage:next}
+}
+
+// sliders and the caption edit live; history records each control once, when its edit ends
+pn collage_control(owner, st, id, value, final) {
+    let key = if (id == "cl-gutter") "gutter" else if (id == "cl-radius") "radius" else if (id == "cl-border") "border"
+        else if (id == "cl-caption") "caption" else if (id == "cl-aspect") "aspect" else if (id == "cl-credits") "credits" else ""
+    if (key == "") { return st }
+    let cs = st.collage
+    let start = if (st.collage_edit == null) cs.model else st.collage_edit
+    let typed = if (key == "caption" or key == "aspect") value else if (key == "credits") value == true
+        else int(round(float(value) ^ { 0.0 }))
+    let model = C.set(cs.model, key, typed)
+    if (final) { return {*:st, collage:CA.change(owner, CTX, {*:cs, model:start}, model), collage_edit:null} }
+    return {*:st, collage:CA.preview(owner, CTX, cs, model), collage_edit:start}
+}
+
 // ---------------------------------------------------------------- publish
 
 pn publish(owner, st) {
@@ -328,6 +380,8 @@ fn select_tile(st, id, toggle_key, extend) {
 }
 
 pn command(owner, st, action) {
+    if (action == "collage-scope" or action == "collage-selection") { return open_collage(owner, st, slice(action, 8, len(action))) }
+    if (starts_with(action, "collage-") and st.collage != null) { return collage_command(owner, st, action) }
     if (starts_with(action, "slideshow-")) { return open_sheet(owner, st, slice(action, 10, len(action))) }
     if (action == "show-cancel") { return {*:st, sheet:null} }
     if (action == "show-save") {
@@ -477,6 +531,7 @@ on album_layout(evt) {
 }
 on resize(evt) {
     let owner = owner_of(evt)
+    if (owner != null and session.collage != null) { session = {*:session, collage:CA.preview(owner, CTX, session.collage, session.collage.model)} }
     if (owner != null and session.active and session.layout_frame == 0) {
         session = {*:session, layout_frame:dom.request_frame(owner, "album_layout")}
     }
@@ -489,6 +544,20 @@ on click(evt) {
         return 'prevent-default'
     }
     let owner = owner_of(evt)
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#collage") == null) { return 'prevent-default' }
+        let template = dom.closest(evt.target, "[data-collage-template]")
+        let swatch = dom.closest(evt.target, "[data-collage-bg]")
+        if (template != null or swatch != null) {
+            let model = if (template != null) C.set(session.collage.model, "template", dom.get_attribute(template, "data-collage-template"))
+                else C.set(session.collage.model, "background", dom.get_attribute(swatch, "data-collage-bg"))
+            session = {*:session, collage:CA.change(owner, CTX, session.collage, model)}
+            return 'handled'
+        }
+        let button = dom.closest(evt.target, "[data-action]")
+        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action")) }
+        return 'handled'
+    }
     if (session.show and dom.closest(evt.target, ".show-bar") == null) { return 'pass' }
     if (session.sheet != null and dom.closest(evt.target, ".sheet") == null) { return 'prevent-default' }
     let nav = dom.closest(evt.target, "[data-nav]")
@@ -536,6 +605,11 @@ on dblclick(evt) {
 on input(evt) {
     let owner = owner_of(evt)
     let id = dom.get_attribute(evt.target, "id")
+    if (session.collage != null) {
+        let value = if (id == "cl-caption") dom.get_state(evt.target, "value") else string(dom.range_value(evt.target))
+        if (id != "cl-aspect" and id != "cl-credits") { session = collage_control(owner, session, id, value, false) }
+        return 'handled'
+    }
     if (id == "search") {
         session = rescope(owner, {*:session, query:dom.get_state(evt.target, "value")})
         return 'handled'
@@ -547,8 +621,25 @@ on input(evt) {
     }
     return 'pass'
 }
+// a control's change ends its edit: the collage history records it once
+on change(evt) {
+    if (session.collage == null) { return 'pass' }
+    let owner = owner_of(evt)
+    let id = dom.get_attribute(evt.target, "id")
+    let value = if (id == "cl-credits") dom.get_state(evt.target, "checked")
+        else if (id == "cl-gutter" or id == "cl-radius" or id == "cl-border") string(dom.range_value(evt.target))
+        else if (id == "cl-aspect") [for (a in C.ASPECTS) a.key][dom.selected_index(evt.target) or 0]
+        else dom.get_state(evt.target, "value")
+    session = collage_control(owner, session, id, value, true)
+    return 'handled'
+}
 on wheel(evt) {
     let owner = owner_of(evt)
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#cl-stage") == null) { return 'pass' }
+        session = {*:session, collage:CA.wheel(owner, CTX, session.collage, evt)}
+        return 'prevent-default'
+    }
     if (session.viewer.open) {
         if (dom.closest(evt.target, "#viewer-stage") == null) { return 'pass' }
         session = publish(owner, viewer_zoom(session, session.viewer.zoom * (if (evt.deltaY < 0) 1.15 else 1 / 1.15)))
@@ -572,6 +663,13 @@ on pointerdown(evt) {
     if (evt.button != 0) { return 'pass' }
     session = {*:session, swallow_click:false}
     let owner = owner_of(evt)
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#cl-stage,#cl-tray") == null) { return 'pass' }
+        session = {*:session, collage:CA.press(owner, CTX, session.collage, evt)}
+        dom.focus_set(node(owner, "collage"), false)
+        dom.set_pointer_capture(node(owner, "collage"), evt.pointerId)
+        return 'prevent-default'
+    }
     if (session.viewer.open) {
         if (session.viewer.zoom > 1.0 and dom.closest(evt.target, "#viewer-image") != null) {
             session = {*:session, pan:{x:evt.clientX, y:evt.clientY, ox:session.viewer.x, oy:session.viewer.y, pointer:evt.pointerId}}
@@ -598,6 +696,10 @@ on pointerdown(evt) {
 }
 on pointermove(evt) {
     let owner = owner_of(evt)
+    if (session.collage != null and session.collage.drag != null) {
+        session = {*:session, collage:CA.move(owner, CTX, session.collage, evt)}
+        return 'prevent-default'
+    }
     if (session.pan != null) {
         let pan = session.pan
         // the zoomed image may move by its overflow beyond the stage on each side, no further
@@ -626,6 +728,10 @@ on pointermove(evt) {
     return 'pass'
 }
 on pointerup(evt) {
+    if (session.collage != null and session.collage.drag != null) {
+        session = {*:session, collage:CA.release(owner_of(evt), CTX, session.collage, evt), swallow_click:session.collage.drag.moved}
+        return 'prevent-default'
+    }
     if (session.pan == null and session.scrub == null and session.band == null) { return 'pass' }
     session = end_gesture(owner_of(evt), session)
     return 'prevent-default'
@@ -638,6 +744,12 @@ on keydown(evt) {
     let owner = owner_of(evt)
     let key = evt.key
     let modifier = evt.metaKey or evt.ctrlKey
+    if (session.collage != null) {
+        if (key == "Escape") { session = dispatch(owner, session, "collage-close"); return 'prevent-default' }
+        if (dom.closest(evt.target, "input,textarea,select") != null) { return 'pass' }
+        if (modifier and lower(key) == "z") { session = dispatch(owner, session, if (evt.shiftKey) "collage-redo" else "collage-undo"); return 'prevent-default' }
+        return 'pass'
+    }
     if (session.show) {
         // the player owns its keys; Escape closes the show once the player has nothing of its own to dismiss
         let player = node(owner, "album-show")

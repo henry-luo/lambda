@@ -70,8 +70,9 @@ The active layer carries `data-slide-active`. Static exports (`snapshot`,
 | `needs_frame(playback)` | Whether an unpaused cue, transition or autoplay dwell needs another frame. |
 | `diagnostic(plan, playback, frame_token = 0)` | IDs, time, phase, generation, active cue tracks and frame token. |
 
-`options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion` and
-`autostart`, plus `autoplay_dwell_ms` (default 3000). Dimensions and the dwell
+`options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion`,
+`autostart` and `ui` (see [Player chrome](#player-chrome)), plus
+`autoplay_dwell_ms` (default 3000). Dimensions and the dwell
 interval are positive finite numbers; flags are booleans. Instance
 IDs are nonempty ASCII letters/digits/underscore/hyphen. Embedded players use
 their configured dimensions; automatic viewport fitting belongs to `page`.
@@ -79,6 +80,34 @@ their configured dimensions; automatic viewport fitting belongs to `page`.
 The compiler rejects unknown attributes, duplicate IDs, missing effect targets,
 invalid numeric values, unsupported effects, and overlapping parallel writers
 to the same target/channel. Diagnostics name the slide/cue/source path.
+
+### Player chrome
+
+The controls, presenter console, overview and page background read their colors,
+font and corner radius from `--slide-ui-*` CSS custom properties. Unset tokens
+keep the built-in look. A host can set them in its own stylesheet, or pass a
+`ui` map in `options`; a `ui` attribute on `<presentation>` is the deck's
+default, so a `.slides` file keeps its look under `lambda view`. Option values
+win over deck values, token by token.
+
+```lambda
+slide.player(deck, {instance: "show", ui: {accent: "#0a84ff", background: "#1b1c1f",
+    control: "rgba(255,255,255,0.08)", font: "-apple-system, Arial, sans-serif", radius: "7px"}})^
+```
+
+| Token (`ui` key) | Styles |
+|---|---|
+| `page` | Standalone page background |
+| `background`, `border` | Control bar, console and overview surface; their borders |
+| `text`, `muted` | Primary and secondary chrome text |
+| `control`, `control_border`, `control_hover`, `control_hover_border`, `control_active` | Buttons, slide picker and their states |
+| `accent`, `accent_hover`, `accent_active`, `accent_text` | Next button, focus rings, speed value, timer and headings; text on the accent |
+| `shadow` | Button `box-shadow` value |
+| `font`, `radius` | Chrome font family; button and box corner radius |
+
+Key `control_border` sets `--slide-ui-control-border`. Values are single CSS
+values: empty strings and values containing `;`, `{` or `}` are rejected, as are
+unknown keys. Slide content keeps using deck themes; `ui` styles only the chrome.
 
 ## Authoring elements
 

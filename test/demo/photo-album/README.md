@@ -37,6 +37,7 @@ colour, and a banner repeats the commands above.
 | Favorite | `F`, or the selection bar's **Add to Favorites**. |
 | Search | ⌘/Ctrl+F. Every word must match a title, description, keyword, album, camera, year or month. |
 | Albums | The sidebar's album list, or **Albums** for cover cards. |
+| Collage | **Collage** in the toolbar (the first 30 photos shown) or the selection bar. Pick a template and canvas, drag inside a cell to move the crop, scroll to zoom it, drag a photo onto another cell (or from the tray) to swap, and adjust spacing, corners, border, background and caption. In the scrapbook, drag prints and use their handles to rotate or resize. ⌘Z / ⇧⌘Z undo and redo. **Save** keeps the collage in `collages/`; **Export image** writes PNG or JPEG with a credits file. |
 | Slideshow | **Slideshow** in the toolbar (the photos shown), the selection bar (the selection) or the viewer (from that photo). Choose a name, theme, transition and pace, then **Present** or **Save as .slides**. Decks are saved in `slideshows/` and open with `lambda view`. In the show, the player's keys apply; Escape returns to the album. |
 | Viewer | Double-click a photo or press Enter. ←/→ step, Home/End jump, `I` shows info, `F` favorites, `=`/`-`/`0` zoom, drag pans a zoomed photo, Escape closes. |
 
@@ -48,6 +49,9 @@ colour, and a banner repeats the commands above.
 | `mod_library.ls` | The immutable library: ordering, albums, scopes and search |
 | `mod_grid.ls` | Justified row packing, the mounted row window, hit testing and zoom anchoring |
 | `mod_ui.ls` | Markup for the shell, grid rows, album cards, viewer and slideshow sheet |
+| `mod_collage.ls` | Collage model, template layouts, edits, history and credits |
+| `mod_collage_ui.ls` | Collage canvas markup (shared by the editor and exports) and the editor shell |
+| `mod_collage_app.ls` | Collage editor procedures: gestures, save/open and export through Radiant |
 | `mod_deck.ls` | Slideshow decks for `lambda.slide`: slide plan, layouts, notes and credits |
 | `photo-album.css` | Styles |
 | `mod_corpus.ls` | Thumbnail and colour building shared by `_thumbs.ls` and `_fixture.ls` |
@@ -68,6 +72,8 @@ directory, relative to the current directory.
 ./lambda.exe test/demo/photo-album/tests/album_library.ls
 ./lambda.exe test/demo/photo-album/tests/album_grid.ls
 ./lambda.exe test/demo/photo-album/tests/album_deck.ls
+./lambda.exe test/demo/photo-album/tests/album_collage.ls
+./lambda.exe run test/demo/photo-album/tests/proc/collage_export.ls
 ./test/test_ui_automation_gtest.exe --suite photo_album
 ```
 

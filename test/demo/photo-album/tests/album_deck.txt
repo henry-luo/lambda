@@ -2,7 +2,7 @@
   plan: ["title(20)", "captioned(20)", "full(15)", "full(10)", "full(5)", "grid(24,19,14,9)", "zoom(24)", "full(4)", "captioned(8)", "full(3)", "full(23)", "grid(18,13,22,17)", "zoom(18)", "full(12)", "full(7)", "captioned(2)", "full(21)", "credits(20,15,10,5,24,19,14,9,4,8,3,23,18,13,22,17,12,7,2,21)"],
   photos_in_plan: 20,
   compiled_slides: 18,
-  attributes: ['paper', true, 3000, 18],
+  attributes: ['paper', true, 3000, "#0a84ff", 18],
   postcard: true,
   transitions: ["none", 'push', 'push', 'push', 'push', 'push', 'morph', 'push', 'push', 'push', 'push', 'push', 'morph', 'push', 'push', 'push', 'push', 'fade'],
   first_photo: ["image:photo", "text:caption", "text:description", "text:meta", "shape:postcard-frame", "text:postcard-stamp"],

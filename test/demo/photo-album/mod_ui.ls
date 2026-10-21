@@ -2,6 +2,7 @@
 import L: .mod_library
 import G: .mod_grid
 import D: .mod_deck
+import CU: .mod_collage_ui
 
 let strokes = {
     library:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
@@ -14,6 +15,7 @@ let strokes = {
     plus:"M12 5v14 M5 12h14", minus:"M5 12h14",
     strip:"M3 7h18v10H3z M7 7v10 M12 7v10 M17 7v10",
     album:"M4 4h16v16H4z M4 15l5-5 4 4 3-3 4 4",
+    collage:"M3 3h8v11H3z M13 3h8v6h-8z M13 11h8v10h-8z M3 16h8v5H3z",
     play:"M4 5h16v11H4z M10 8.5v4.5l4-2.25z M9 20h6 M12 16v4"
 }
 pub fn icon(graphic, size = 20) => <svg width:string(size),height:string(size),viewBox:"0 0 24 24",'aria-hidden':"true",
@@ -126,6 +128,8 @@ pub fn tree(lib, command) => <div id:"album",class:"album",'data-mode':"library"
         <header class:"toolbar",
             <div class:"heading",<h1 id:"title","Library">;<p id:"status",role:"status","">>;
             <label class:"search",(icon("search", 16));<input id:"search",type:"search",placeholder:"Search titles, places, cameras, years",'aria-label':"Search photos">>;
+            <button id:"collage-button",type:"button",class:"pill secondary",'data-action':"collage-scope",title:"Collage of the photos shown (first 30)",
+                (icon("collage", 18));<span "Collage">>;
             <button id:"slideshow",type:"button",class:"pill",'data-action':"slideshow-scope",title:"Slideshow of the photos shown",
                 (icon("play", 18));<span "Slideshow">>;
             <div class:"zoom",(tool("zoom-out","Smaller tiles","minus"));
@@ -142,6 +146,7 @@ pub fn tree(lib, command) => <div id:"album",class:"album",'data-mode':"library"
             // floats over the grid: showing it must not move the photos under the pointer
             <div id:"selection-bar",class:"selection-bar",style:"display:none",
                 <span id:"selection-count","">;
+                <button type:"button",'data-action':"collage-selection",id:"selection-collage","Collage">;
                 <button type:"button",'data-action':"slideshow-selection",id:"selection-slideshow","Slideshow">;
                 <button type:"button",'data-action':"favorite-selected",id:"favorite-selected","Add to Favorites">;
                 <button type:"button",'data-action':"select-all","Select All">;
@@ -168,6 +173,8 @@ pub fn tree(lib, command) => <div id:"album",class:"album",'data-mode':"library"
             <aside id:"viewer-info-panel",class:"info",style:"display:none">>;
         <div id:"filmstrip",class:"filmstrip">>;
     (show_sheet());
+    (CU.editor());
+    <div id:"cl-ghost",class:"cl-ghost",style:"display:none",'aria-hidden':"true">;
     <div id:"show-layer",class:"show-layer",style:"display:none",role:"dialog",'aria-modal':"true",'aria-labelledby':"show-title",
         <header class:"show-bar",<h2 id:"show-title">;<span id:"show-saved",class:"show-saved">;
             (tool("show-close","Close slideshow (Esc)","close","show-close"))>;

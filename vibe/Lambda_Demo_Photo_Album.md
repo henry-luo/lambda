@@ -1,9 +1,10 @@
 # Photo Album Demo — Proposal
 
 **Status:** Proposal, 2026-10-20. M0 (corpus preparation), M1 (browsing and
-viewer) and M2 (slideshow) are implemented; see the
-[M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20) and
-[M2](#m2-checkpoint--2026-10-21) checkpoints. M3–M5 are not started. This
+viewer), M2 (slideshow) and M3 (collage) are implemented; see the
+[M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20),
+[M2](#m2-checkpoint--2026-10-21) and [M3](#m3-checkpoint--2026-10-21)
+checkpoints. M4 and M5 are not started. This
 document proposes a new demo application. It introduces no language or runtime
 rulings.
 
@@ -323,10 +324,11 @@ The collage editor composes 2 to 30 photos.
   text.
 - Undo and redo work over the collage model's history.
 
-**Model.** A collage is plain data: canvas size, template, cells with photo id,
-normalized crop and transform, and styling. Layout is a pure function from the
-model to absolutely positioned elements. The model is saved as a `.mark` file so
-a collage can be reopened.
+**Model.** A collage is plain data: canvas aspect, template, slots with photo id,
+focal point and zoom (and a scrapbook print box once moved), styling, caption,
+credits flag and a seed. Layout is a pure function from the model to rectangles
+in export pixels. The model is saved as `<corpus>/collages/<name>.mark` and
+reopened from the editor.
 
 **Export.** Export produces a PNG or JPEG at a chosen size, from 1080 px up to
 4096 px on the long edge. An optional credits line is added at the bottom, and
@@ -334,9 +336,9 @@ a sidecar text file lists every author and license. CC BY and CC BY-SA require
 the attribution if the collage is shared. Export renders the collage as a
 standalone HTML document with `radiant.export_document(html, path, {format:"png",
 width, height, local_resources:true})`, the same in-app path the Photo Studio
-demo uses for layered exports (`test/demo/photo/mod_io.ls`). JPEG output
-re-encodes that PNG with `load` and `save`. Whether it holds up at 4096 px with
-30 local photos is checked at M3 (§5, G3).
+demo uses for layered exports (`test/demo/photo/mod_io.ls`), with `format`
+`"png"` or `"jpeg"`. The export document is the editor's canvas markup at export
+scale with full-size photos, so it matches the screen by construction.
 
 ### 3.4 Memories film
 
@@ -519,7 +521,7 @@ the milestone that first needs it, and fixed at its root if real.
 |---|---|---|---|
 | G1 | Can a 1000-photo grid scroll and zoom smoothly with the thumbnail channel's 128-entry / 32 MiB cache, or with plain `<img>` thumbnails and the image cache? | M1 | **Measured, partly real.** Lambda work is about 1 ms per step; Radiant paint of the image tiles dominates. Precomputed 512 px thumbnails stay. See the M1 checkpoint. |
 | G2 | Does Radiant bound image-cache memory when the viewer pages through hundreds of 1280 px photos? | M1 | **Measured, real.** The window's image cache has no budget or eviction. Needs an ownership-aware eviction design in Radiant. See the M1 checkpoint. |
-| G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | Fix the export path's limits or resource loading in Radiant. |
+| G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | **Resolved: no gap.** See the M3 checkpoint. |
 | G4 | Can the slide player seek continuously for a scrubber, and play a deck with its chrome hidden? | M5 | Extend the slide package's player API. |
 | G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | Fix 3D paint or invalidation in Radiant. |
 | G6 | Can `lambda.map` draw an offline basemap for the Places view? | M5 | Use the bundled world-outline fallback; a basemap is out of scope. |
@@ -719,4 +721,53 @@ resolution. The `photo_album` UI suite now has six replays.
 - A master's objects compose beneath the slide's own objects.
 - Iterating an element with `for` yields its attribute values as well as its
   children; `content(el)` gives only the children.
+
+## M3 checkpoint — 2026-10-21
+
+M3 is implemented: `mod_collage.ls` (model, layouts, edits, history, credits),
+`mod_collage_ui.ls` (canvas and editor markup) and `mod_collage_app.ls` (editor
+procedures and export). **Collage** opens from the toolbar (the first 30 photos
+shown) and the selection bar. Nothing is committed yet.
+
+**Delivered.** Six templates: grid, mosaic, magazine, scrapbook, heart and
+circle (clip-path masks over a mosaic). Four canvas shapes, spacing, corners,
+white border, four backgrounds, a caption band and a credits line. A drag inside
+a cell pans its crop, the wheel zooms it, and dragging out onto another cell or
+from the tray swaps photos. Scrapbook prints move, rotate and resize from
+handles, and **Shuffle prints** re-deals them. Undo and redo (⌘Z, ⇧⌘Z) record a
+slider or caption edit once, when it ends. **Save** and **Open** keep collages
+as `.mark` files; **Export image** writes PNG or JPEG at 1080, 2048 or 4096 px
+with a `-credits.txt` file beside it. Both folders are git-ignored.
+
+**Acceptance.** The M3 row passes. `tests/album_collage` checks that grid,
+mosaic, magazine, heart and circle cover their area exactly with no overlaps for
+2, 7 and 30 photos, that scrapbook prints stay on the canvas, and swap, crop,
+history and settings. `tests/proc/collage_export` exports a collage through
+Radiant and checks pixels: gutters show the background and each cell centre
+matches its own photo within 3 levels. `test/ui/photo_album/collage.json`
+(30 assertions) covers the editor end to end.
+
+**G3 — resolved.** A 4096 × 2731 export of 30 real photos took 2.9–3.1 s for
+the mosaic and 1.6 s for the scrapbook, with a 570 MB peak, on the 2026-10-19
+release host under a load average of 20.
+
+**Slide player theming (M2 follow-up).** The slideshow now matches the album:
+`lambda.slide` gained `--slide-ui-*` chrome tokens and a validated `ui` option
+and deck attribute ([Player chrome](../doc/Lambda_Slide.md#player-chrome)).
+Album decks carry the viewer palette, so saved decks keep it under `lambda view`.
+Default decks are unchanged pixel for pixel.
+
+**Findings outside the demo.**
+
+- In a live, inserted region, a flex container whose single nowrap text
+  overflows with `overflow: hidden` paints nothing; the same markup renders in a
+  static export. The credits line uses a plain block instead.
+- `dom.set_state(el, "value", …)` applies to text controls only: selects use
+  `set_selected_index` and ranges `set_property` and `range_value`.
+- Events dispatched from script (`dispatchEvent(new Event('input'))`) do not
+  reach Lambda `on input` handlers; replays use real key input on sliders.
+- A keyboard event targeted at `<body>` does not reach a view rooted below it,
+  so the editor layer takes focus when it opens.
+- Unsigned-byte pixel values wrap on subtraction (`226 - 227` is 255); compare
+  them as `int`s.
 

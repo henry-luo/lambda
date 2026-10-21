@@ -20,7 +20,7 @@ let missing = D.deck({*:lib, photos:[for (p in lib.photos) {*:p, has_photo:false
     plan: [for (s in D.plan(lib, ids)) s.kind ++ "(" ++ join([for (id in s.ids) string(id)], ",") ++ ")"],
     photos_in_plan: len([for (s in D.plan(lib, ids), id in s.ids where s.kind != "credits" and s.kind != "title" and s.kind != "zoom") id]),
     compiled_slides: len(plan.slides),
-    attributes: [deck.theme, deck.autostart, deck.autoplay_dwell_ms, len(slides)],
+    attributes: [deck.theme, deck.autostart, deck.autoplay_dwell_ms, deck.ui.accent, len(slides)],
     postcard: [for (s in slides) len([for (o in content(s) where o is element and starts_with(o.id or "", "postcard-")) o])] == [for (s in slides) 2],
     transitions: [for (s in slides) s.transition or "none"],
     first_photo: objects(slides[1]),

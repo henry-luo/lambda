@@ -8,6 +8,12 @@ pub let H = 720
 pub let MAX_PHOTOS = 120
 pub let THEMES = [{key:"dark", title:"Gallery, dark"}, {key:"light", title:"Gallery, light"}, {key:"postcard", title:"Postcard"}]
 pub let TRANSITIONS = ["fade", "push", "slide"]
+// player chrome in the album viewer's palette (lambda.slide `ui` tokens); saved decks keep it standalone
+pub let ALBUM_UI = {page:"#111214", background:"#1b1c1f", border:"#2c2d31", text:"#f2f2f7", muted:"#a1a1a6",
+    control:"rgba(255,255,255,0.08)", control_border:"rgba(255,255,255,0.06)", control_hover:"rgba(255,255,255,0.16)",
+    control_hover_border:"rgba(255,255,255,0.12)", control_active:"rgba(255,255,255,0.04)",
+    accent:"#0a84ff", accent_hover:"#409cff", accent_active:"#0071e3", accent_text:"#ffffff", shadow:"none",
+    font:"-apple-system, \"Helvetica Neue\", Arial, sans-serif", radius:"7px"}
 
 fn portrait(p) => p.aspect < 0.9
 
@@ -129,7 +135,7 @@ pub fn deck(lib, options) {
     let postcard = options.theme == "postcard";
     <presentation id:"album", title:options.title, width:W, height:H,
         theme:if (options.theme == "dark") 'midnight' else 'paper',
-        autostart:true, autoplay_dwell_ms:options.dwell_ms,
+        autostart:true, autoplay_dwell_ms:options.dwell_ms, ui:ALBUM_UI,
         *[for (i, s in slides) (let built = slide_for(lib, s, i, options), if (postcard) framed(built) else built)]>
 }
 
@@ -146,9 +152,5 @@ fn resolve_child(c, base) => if (not (c is element)) c
     else c
 pub fn resolve_sources(deck, base) => <presentation *:map(deck), *[for (c in content(deck)) resolve_child(c, base)]>
 
-// file name for a deck title: its lower-case letter and digit runs joined by "-"
-type SlugWord = \(("a" to "z" | "0" to "9")+)
-pub fn file_name(title) {
-    let slug = slice(join([for (m in find(lower(title), SlugWord)) m.value], "-"), 0, 48);
-    (if (slug == "") "slideshow" else slug) ++ ".slides"
-}
+// file name for a deck title
+pub fn file_name(title) => L.slug(title, "slideshow") ++ ".slides"

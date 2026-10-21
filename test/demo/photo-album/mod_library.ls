@@ -98,3 +98,10 @@ pub fn status(lib, ids, selected) {
     string(total) ++ (if (total == 1) " photo" else " photos") ++
         (if (len(selected) > 0) " · " ++ string(len(selected)) ++ " selected" else "")
 }
+
+// file-name stem for a title: its lower-case letter and digit runs joined by "-", at most 48 characters
+type SlugWord = \(("a" to "z" | "0" to "9")+)
+pub fn slug(title, fallback) {
+    let stem = slice(join([for (m in find(lower(title or ""), SlugWord)) m.value], "-"), 0, 48);
+    if (stem == "") fallback else stem
+}
