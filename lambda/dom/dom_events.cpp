@@ -16,6 +16,7 @@
 #include "dom.h"
 #include "dom_selection.h"
 #include "../js/js_runtime.h"
+#include "../js/js_runtime_internal.hpp"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
 #include "../js/js_builtin_catalog.hpp"
@@ -1348,7 +1349,6 @@ void js_event_target_install_methods(Item target) {
 Item js_create_event_target(void) {
     RootFrame roots(1);
     Rooted<Item> target(roots, dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET));
-    js_event_target_install_methods(target.get());
     return target.get();
 }
 
@@ -1800,12 +1800,97 @@ static Item content_visibility_event_skipped(Item, Item receiver, Item*, int, ui
         : dom_realm_throw_type_error("Illegal ContentVisibilityAutoStateChangeEvent receiver");
 }
 
-void js_content_visibility_event_install_prototype(Item prototype) {
+static void install_event_payload_getters(Item prototype, const char* const* fields,
+        size_t count, JsNativeCallBody getter) {
     RootFrame roots(3);
-    Rooted<Item> object(roots, prototype), key(roots, js_name_item("skipped"));
-    Rooted<Item> getter(roots, js_new_native_payload_function(content_visibility_event_skipped, 0, 0));
-    js_set_function_name(getter.get(), key.get());
-    dom_realm_install_accessor(object.get(), key.get(), getter.get(), ItemNull, 0);
+    Rooted<Item> object(roots, prototype), key(roots, ItemNull), function(roots, ItemNull);
+    for (size_t slot = 0; slot < count; slot++) {
+        key.set(js_name_item(fields[slot]));
+        function.set(js_new_native_payload_function(getter, slot, 0));
+        js_set_function_name(function.get(), key.get());
+        dom_realm_install_accessor(object.get(), key.get(), function.get(), ItemNull, 0);
+    }
+}
+
+void js_content_visibility_event_install_prototype(Item prototype) {
+    static const char* const fields[] = {"skipped"};
+    install_event_payload_getters(prototype, fields, 1, content_visibility_event_skipped);
+}
+
+// CSP's Event subclass owns a traced immutable payload like MessageEvent (D5.3.3).
+static const char* const security_policy_event_fields[] = {
+    "blockedURI", "columnNumber", "disposition", "documentURI", "effectiveDirective",
+    "lineNumber", "originalPolicy", "referrer", "sample", "sourceFile", "statusCode", "violatedDirective"
+};
+
+static Item security_policy_event_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    Item payload = dom_event_host_payload(receiver, JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT);
+    if (get_type_id(payload) != LMD_TYPE_ARRAY)
+        return dom_realm_throw_type_error("Illegal SecurityPolicyViolationEvent receiver");
+    return js_elements_get_int(payload, js_fn_native((JsFunction*)callee.function)->target.bits);
+}
+
+void js_security_policy_violation_event_install_prototype(Item prototype) {
+    RootFrame roots(2);
+    Rooted<Item> object(roots, prototype), key(roots, ItemNull);
+    install_event_payload_getters(object.get(), security_policy_event_fields,
+        sizeof(security_policy_event_fields) / sizeof(security_policy_event_fields[0]),
+        security_policy_event_getter);
+    key.set(js_well_known_symbol_key(4));
+    dom_realm_set(object.get(), key.get(), js_name_item("SecurityPolicyViolationEvent"));
+    js_mark_non_writable(object.get(), key.get());
+    js_mark_non_enumerable(object.get(), key.get());
+}
+
+Item js_ctor_security_policy_violation_event(Item type_arg, Item init_arg) {
+    RootFrame roots(5);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg), value(roots, ItemNull);
+    Rooted<Item> payload(roots, ItemNull), event(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool absent = !init.get().item || get_type_id(init.get()) == LMD_TYPE_NULL ||
+        get_type_id(init.get()) == LMD_TYPE_UNDEFINED;
+    if (!absent && !js_is_object_value(init.get()))
+        return dom_realm_throw_type_error("Invalid SecurityPolicyViolationEventInit");
+    static const char* const flag_names[] = {"bubbles", "cancelable", "composed"};
+    bool flags[3] = {};
+    for (size_t flag = 0; !absent && flag < 3; flag++) {
+        value.set(read_init(init.get(), flag_names[flag]));
+        JS_RETURN_IF_ERROR(value.get());
+        flags[flag] = js_is_truthy(value.get());
+    }
+    payload.set(js_array_new(0));
+    // WebIDL dictionaries read inherited flags first, then members in name order.
+    for (const char* field : security_policy_event_fields) {
+        value.set(absent ? make_js_undefined() : read_init(init.get(), field));
+        JS_RETURN_IF_ERROR(value.get());
+        bool missing = get_type_id(value.get()) == LMD_TYPE_UNDEFINED;
+        if (!strcmp(field, "columnNumber") || !strcmp(field, "lineNumber") || !strcmp(field, "statusCode")) {
+            value.set(missing ? (Item){.item = i2it(0)} : js_to_number(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            uint32_t number = (uint32_t)js_to_int32(js_get_number(value.get()));
+            if (!strcmp(field, "statusCode")) number &= 0xffff;
+            value.set((Item){.item = i2it((int64_t)number)});
+        } else {
+            value.set(missing ? js_name_item(!strcmp(field, "disposition") ? "enforce" : "") : js_to_string(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            if (!strcmp(field, "disposition")) {
+                const char* text = fn_to_cstr(value.get());
+                if (strcmp(text, "enforce") && strcmp(text, "report"))
+                    return dom_realm_throw_type_error("Invalid SecurityPolicyViolationEvent disposition");
+            } else if (!strcmp(field, "blockedURI") || !strcmp(field, "documentURI") ||
+                    !strcmp(field, "referrer") || !strcmp(field, "sourceFile")) {
+                value.set(js_intrinsic_string_to_well_formed_body(ItemNull, value.get(), nullptr, 0, nullptr));
+                JS_RETURN_IF_ERROR(value.get());
+            }
+        }
+        JS_RETURN_IF_ERROR(js_array_push(payload.get(), value.get()));
+    }
+    event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), flags[0], flags[1],
+        flags[2], JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT));
+    JS_RETURN_IF_ERROR(event.get());
+    if (!dom_event_host_set_payload(event.get(), payload.get())) return ItemError;
+    return event.get();
 }
 
 enum MessageEventSlot {
@@ -1894,12 +1979,7 @@ static Item message_event_init(Item, Item receiver, Item* args, int argc, uint64
 void js_message_event_install_prototype(Item prototype) {
     RootFrame roots(3);
     Rooted<Item> object(roots, prototype), key(roots, ItemNull), function(roots, ItemNull);
-    for (int slot = 0; slot < MESSAGE_SLOT_COUNT; slot++) {
-        key.set(js_name_item(message_event_fields[slot]));
-        function.set(js_new_native_payload_function(message_event_getter, slot, 0));
-        js_set_function_name(function.get(), key.get());
-        dom_realm_install_accessor(object.get(), key.get(), function.get(), ItemNull, 0);
-    }
+    install_event_payload_getters(object.get(), message_event_fields, MESSAGE_SLOT_COUNT, message_event_getter);
     function.set(js_new_native_payload_function(message_event_init, 0, 1));
     js_set_function_name(function.get(), js_name_item("initMessageEvent"));
     dom_realm_set_cstr(object.get(), "initMessageEvent", function.get());

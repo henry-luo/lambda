@@ -200,6 +200,15 @@ Stateless document loaders — the LaTeX, PDF, TikZ, graph and math transforms, 
 
 Network resources are created in `view_doc_in_window_with_events_internal` only for HTTP/HTTPS documents (`window.cpp:1100`): `network_downloader_init_shared()` plus an `EnhancedFileCache` under `./temp/cache`, then `radiant_init_network_support(doc, NULL, file_cache)` wires the document's `resource_manager` and (in GUI mode) sets `network_wake_glfw` as the wake callback. Downloads run off-thread; completions are queued and drained on the UI thread each tick via `resource_manager_flush_layout_updates` ([§4](#4-the-main-loop-one-thread-pumping-three-event-sources)). Both the `BrowsingSession` and the document's resource manager *reference* these window-owned objects — a lifetime coupling flagged in [§8](#8-known-issues--future-improvements).
 
+**2026-10-21 scoped ownership correction (D4.5.1v4 / D4.5.2 / D5.4.1):**
+detached iframe and worker loading can discover font bytes without a UI font
+owner. Discovery prefetches those bytes and attaches face callbacks after the
+host binds; embedded layout binds the manager before rediscovery and font
+registration. Applying a host configuration also updates an existing manager.
+The detached script evaluator keeps its existing host policy. Image delivery
+uses the resource manager's document through `load_document_image`, because the
+UI's published document can still be null or belong to another load.
+
 ---
 
 ## 8. Known Issues & Future Improvements

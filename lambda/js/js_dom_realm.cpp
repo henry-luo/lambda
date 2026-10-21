@@ -566,6 +566,11 @@ static bool _element_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
 }
 
+static bool _input_receiver(Item receiver) {
+    return virtual_host_data(receiver) && virtual_host_type(receiver) ==
+        jube_iface_type_by_name("input_element", 13);
+}
+
 static bool _element_namespace_receiver(Item receiver, const char* expected) {
     void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
     const char* uri = element ? dom_element_namespace_uri(element) : nullptr;
@@ -673,6 +678,7 @@ static void _install_node_interface_members(Item global) {
     // captured URL accessors must exist on the declaring HTML prototypes.
     static const char* const href_members[] = {"href", NULL};
     static const char* const dataset_members[] = {"dataset", NULL};
+    static const char* const input_members[] = {"value", "validity", NULL};
     static const struct {
         const char* interface_name;
         const char* host_name;
@@ -697,6 +703,7 @@ static void _install_node_interface_members(Item global) {
         {"HTMLAreaElement", "html_element", _element_receiver, href_members},
         {"HTMLBaseElement", "html_element", _element_receiver, href_members},
         {"HTMLLinkElement", "html_element", _element_receiver, href_members},
+        {"HTMLInputElement", "input_element", _input_receiver, input_members},
     };
     RootFrame roots(1);
     Rooted<Item> prototype_root(roots, ItemNull);
@@ -814,6 +821,7 @@ extern "C" void dom_install_collection_globals(void) {
         // are object-like interfaces, not WebIDL collection carriers.
         if (i >= 2) _install_collection_iterator(global, collection_ifaces[i]);
     }
+    js_dom_install_interface(global, "ValidityState");
     // CSSStyleSheet is constructible unlike the other CSSOM collection interfaces.
     dom_install_value_constructor(global, "CSSStyleSheet",
         dom_cssom_stylesheet_constructor, true);
@@ -870,6 +878,7 @@ extern "C" void dom_install_collection_globals(void) {
     static const char* collection_records[] = {"node_list", "html_collection",
         "html_options_collection", "html_form_controls_collection", "radio_node_list"};
     for (const char* host : collection_records) _publish_interface_records(host, strlen(host));
+    _publish_interface_records("validity_state", 14);
     _install_nodelist_for_each(global);
     _install_collection_iterator(global, "RadioNodeList");
     _install_xpath_evaluator(global);

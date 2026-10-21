@@ -77,17 +77,44 @@ separate overlay (**S9.1.2 / S12.1.3**).
 Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
 are retained as shared backing until a touched tile detaches (**S9.2.2 /
 D4.1.4v5**). Layer affine transforms, eight blend modes, clipping chains and
-pass-through groups use the shared renderer. `layer.transform` accepts a matrix
-or a relative angle/scale around the current bounds. `transform.handle_gesture`
+pass-through groups use the shared renderer. `layer.transform` accepts an absolute
+local `matrix` for one leaf, or relative `angle`/`scale_x`/`scale_y` around the
+combined bounds of selected roots. `delta` is an explicit document-space affine;
+it composes onto leaf geometry and also supports groups/multiselection.
+Do not combine these forms. `transform.handle_gesture`
 accepts an eight-way resize handle or `"rotate"`, returning the same command.
 Opposite anchors stay fixed in document space; Shift constrains corner proportions
 or snaps rotation to 15°, and Alt scales about the center. Signed scales allow
 mirroring; their absolute magnitude is bounded to 0.001–4096. Hosts can provide
 `.raster-transform` controls with `data-raster-handle` values; interaction inputs
-carry `handle`, `shift` and `alt`. One unlocked leaf layer is supported, including
-an existing affine. The image gesture also scales radially and Shift-drag rotates,
+carry `handle`, `shift` and `alt`. Nested groups and multiple selected roots are
+supported, including existing affines and leaf masks. Selected ancestors suppress
+duplicate child edits. Locks anywhere in a target subtree reject atomically;
+group masks/effects/styles are explicitly outside this descendant-affine profile.
+The image gesture also scales radially and Shift-drag rotates,
 with shared cancel/commit history (**S9.1.2 / S9.2.2**). Pixel editing on a
 transformed source requires explicit `layer.rasterize`.
+
+`layer.straighten` accepts `{start:{x,y},end:{x,y},axis:"horizontal"|"vertical"}`.
+It aligns the reference by the shortest rotation about the selected bounds center,
+without changing canvas extent. The `straighten` tool uses the same command,
+gesture draft and undo path; `tool.configure.straighten_axis` selects the reference
+axis. Actions can capture/replay it (**S9.1.2 / S9.2.2 / S12.1.3**).
+
+`guide.add/update/remove/clear` edits `photos_guides` metadata. Add takes `axis`
+(`"x"` vertical or `"y"` horizontal) and integer `position`; update/remove takes
+the stable `guide` ID. Positions lie inside the canvas, with at most 64 guides.
+Guide edits dirty the project and share undo; `.photos` preserves them, while
+other image formats do not retain this editor metadata. Canvas resize drops
+outside guides, image resize scales them, and crop translates/clips them.
+`guide.configure` changes `visible` and `snap` booleans without authored history.
+Move inputs can carry a `guide` ID for a captured guide gesture. With snapping
+enabled, `guides.snap_move` checks selected edges/centers against canvas/visible
+guide coordinates within six screen pixels (`scale` maps document to screen).
+Alt bypasses snapping; moves retain the integral placement contract. Optional
+`.raster-guides` and `.raster-reference` hosts show guides, snap targets and the
+straighten reference. Guide-only metadata changes reuse cached composition;
+histograms follow the immutable raster rather than metadata edits.
 
 `effect.add/update/toggle/remove/reorder` retain ordered adjustments/filters.
 The demo provides Levels and RGB/channel Curves controls plus a histogram.

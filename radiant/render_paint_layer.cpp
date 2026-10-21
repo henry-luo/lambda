@@ -23,9 +23,11 @@ static const size_t PAINT_LAYER_MAX_BYTES = (size_t)48 << 20;         // one lay
 static const size_t PAINT_LAYER_TOTAL_MAX_BYTES = (size_t)256 << 20;  // per document
 // captures cost about two live paints each; spreading them keeps one frame from stalling
 static const int PAINT_LAYER_CAPTURES_PER_FRAME = 2;
-// a subtree painting no more than this many items (a shade's one gradient) is cheaper to
-// paint live than to resample as a full-size projected bitmap every frame
+// a subtree painting no more than this many cheap items (a shade's one two-stop gradient)
+// is cheaper to paint live than to resample as a full-size projected bitmap every frame;
+// an image or a many-stop gradient (a repeating texture) is never cheap
 static const int PAINT_LAYER_TRIVIAL_ITEMS = 2;
+static const int PAINT_LAYER_TRIVIAL_STOPS = 4;
 // a revalidation only records; a document-wide change (an inline style or layout anywhere)
 // revalidates every layer at once
 static const int PAINT_LAYER_REVALIDATIONS_PER_FRAME = 16;
@@ -363,9 +365,17 @@ static bool paint_layer_capture(RasterRenderContext* rdcon, ViewBlock* block,
     *fingerprinted = ok && dl_content_fingerprint(&dl, fingerprint);
     if (trivial) {
         int painting = 0;
-        for (int i = 0; i < dl.item_count(); i++)
-            if (dl_op_has_flags(dl.data()[i].op, DL_OP_FLAG_DIRTY_SKIPPABLE)) painting++;
-        *trivial = ok && painting <= PAINT_LAYER_TRIVIAL_ITEMS;
+        bool cheap = true;
+        for (int i = 0; i < dl.item_count(); i++) {
+            const DisplayItem& item = dl.data()[i];
+            if (!dl_op_has_flags(item.op, DL_OP_FLAG_DIRTY_SKIPPABLE)) continue;
+            painting++;
+            if (item.op == DL_DRAW_IMAGE || item.op == DL_DRAW_PICTURE ||
+                (item.op == DL_FILL_LINEAR_GRADIENT && item.fill_linear_gradient.stop_count > PAINT_LAYER_TRIVIAL_STOPS) ||
+                (item.op == DL_FILL_RADIAL_GRADIENT && item.fill_radial_gradient.stop_count > PAINT_LAYER_TRIVIAL_STOPS))
+                cheap = false;
+        }
+        *trivial = ok && cheap && painting <= PAINT_LAYER_TRIVIAL_ITEMS;
         if (*trivial) surface = nullptr;
     }
     if (surface) ok = ok && render_layer_rasterize(&dl, &scratch, scale, surface, "render_paint_layer_capture");

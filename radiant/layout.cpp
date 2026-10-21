@@ -5992,6 +5992,9 @@ static bool layout_provide_size_container(void* context, DomElement* target,
         ViewBlock* block = lam::view_as_block(ancestor);
         if (!block || !block->blk || block->display.outer == CSS_VALUE_NONE ||
             block->display.outer == CSS_VALUE_CONTENTS) continue;
+        // ordinary ancestors cannot answer size queries; avoid repeatedly walking
+        // their inherited writing-mode chain before reaching an eligible container.
+        if (axes && !block->block()->container_axes) continue;
         bool vertical = layout_element_inline_axis_is_vertical(ancestor);
         if (!css_container_matches(block->block()->container_names, block->block()->container_axes,
             vertical, name, axes)) continue;
@@ -6004,6 +6007,7 @@ static bool layout_provide_size_container(void* context, DomElement* target,
 struct LayoutContainerMeasurements {
     uint64_t key;
     size_t elements;
+    bool trace;
 };
 
 static bool layout_collect_container_measurements(DomNode* node, void* data) {
@@ -6029,11 +6033,19 @@ static bool layout_collect_container_measurements(DomNode* node, void* data) {
         const char* name = css_value_identifier_name(names->type == CSS_VALUE_TYPE_LIST ? names->data.list.values[i] : names);
         if (name) measurements->key = hash_combine_u64(measurements->key, hash_fnv1a_64_cstr(name));
     }
+    if (measurements->trace) {
+        const char* classes = element->get_attribute("class");
+        log_notice("[LAYOUT_PROFILE] container: node=%p tag=%s class=%.100s axes=%u width=%.3f height=%.3f font=%.3f key=%llu",
+            element, element->node_name(), classes ? classes : "", block->block()->container_axes,
+            box.width, box.height, element->font ? element->font->font_size : 0.0f,
+            (unsigned long long)measurements->key);
+    }
     return true;
 }
 
-static LayoutContainerMeasurements layout_container_measurements(DomNode* root) {
+static LayoutContainerMeasurements layout_container_measurements(DomNode* root, bool trace = false) {
     LayoutContainerMeasurements result = {};
+    result.trace = trace;
     view_geometry_walk_dom_tree(root, layout_collect_container_measurements, &result);
     return result;
 }
@@ -6322,7 +6334,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     bool visibility_dependencies = false;
     view_geometry_walk_dom_tree(root_node, content_visibility_has_declaration, &visibility_dependencies);
     // relevance measurement must settle before styles can create motion timelines.
-    lycon.css_query_probe = (engine && engine->container_dependencies) || visibility_dependencies;
+    // incremental reflow starts from the published query geometry. A fresh probe
+    // would discard settled styles/effects on every synchronous script read.
+    bool retained_query_geometry = doc->incremental_layout && doc->view_tree->root;
+    lycon.css_query_probe = !retained_query_geometry &&
+        ((engine && engine->container_dependencies) || visibility_dependencies);
 
     uint64_t t_init = time_now_ns();
     size_t container_pass = 0;
@@ -6355,7 +6371,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         if (engine) engine->context.vertical_viewport = layout_element_inline_axis_is_vertical(doc->root);
         bool container_dependencies = engine && engine->container_dependencies;
         LayoutContainerMeasurements current = container_dependencies
-            ? layout_container_measurements(root_node) : LayoutContainerMeasurements{};
+            ? layout_container_measurements(root_node, lycon.profiler.enabled &&
+                radiant::layout_debug_enabled(&lycon, radiant::LAYOUT_DEBUG_CACHE)) : LayoutContainerMeasurements{};
         bool stable = current.key == previous.key;
         if (lycon.profiler.enabled) {
             log_notice("[LAYOUT_PROFILE] settle: pass=%zu flow=%.1fms containers=%d stable=%d probe=%d visibility=%d elements=%zu previous=%llu current=%llu",
@@ -6389,12 +6406,15 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
                 log_notice("[LAYOUT_PROFILE] settle-cascade: pass=%zu elapsed=%.1fms",
                     flow_pass, time_elapsed_ms_f(cascade_start, time_now_ns()));
         }
+        // committed effects can refine provisional geometry; keep settling that
+        // geometry instead of returning to the probe that produced the old sizes.
+        bool next_query_probe = lycon.css_query_probe && container_dependencies && !stable;
         layout_cleanup(&lycon);
         view_pool_reset_retained(doc->view_tree);
         reset_float_prelaid_flags(root_node);
         layout_init(&lycon, doc, uicon);
         lycon.paged = lam::up(paged);
-        lycon.css_query_probe = container_dependencies && !stable;
+        lycon.css_query_probe = next_query_probe;
     }
 
     // the page flow composes its pages while the layout context is live

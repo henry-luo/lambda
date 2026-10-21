@@ -20,12 +20,15 @@ import batch: lambda.editor.raster.batch
 import exports: lambda.editor.raster.export
 import crop: lambda.editor.raster.crop
 import tone: lambda.editor.raster.tone
+import guides: lambda.editor.raster.guides
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
 let INITIAL = editor.open_session(editor.new_document()^ )^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photos")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
+// clearing a recovered error must also retire the same text from the status bar.
+fn clear_error(st) => {*:st,error:"",status:if (st.error != "" and st.status == st.error) "Ready" else st.status}
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
     effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_channel:"rgb",curve_point:1,curve_drag:null,
     painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
@@ -87,6 +90,14 @@ pn command(owner,st,action) any^ {
         raise error("Photos: stop action recording before file operations")
     if (action == "crop-cancel") { return {*:st,crop:null} }
     if (action == "crop-apply") { return crop.apply_draft(st)^ }
+    if (action == "guide-add") {
+        let position = float(field(owner,"guide-position"))
+        if (not model.finite(position) or position != floor(position)) raise error("Photos: guide position must be a whole pixel")
+        return editor.exec(st,{id:"guide.add",axis:field(owner,"guide-axis"),position:int(position)})^
+    }
+    if (action == "guide-show") { return editor.exec(st,{id:"guide.configure",visible:not st.guides_visible})^ }
+    if (action == "guide-snap") { return editor.exec(st,{id:"guide.configure",snap:not st.snap_enabled})^ }
+    if (action == "straighten-tool") { return editor.exec(st,{id:"tool.configure",tool:"straighten"})^ }
     if (action in ["curve-reset","curve-remove"]) {
         let curves = if (action == "curve-reset") tone.with_points(st.curve_draft,st.curve_channel,tone.identity)^
             else tone.remove(st.curve_draft,st.curve_channel,st.curve_point)^;
@@ -253,7 +264,9 @@ pn command(owner,st,action) any^ {
 }
 pn pointer_input(owner,evt) {
     let handle = dom.closest(evt.target,"[data-raster-handle]")
+    let guide = dom.closest(evt.target,"[data-raster-guide]")
     return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},handle:dom.get_attribute(handle,"data-raster-handle"),
+        guide:dom.get_attribute(guide,"data-raster-guide"),
         point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey,alt:evt.altKey}
 }
 pn curve_point(owner,evt) {
@@ -342,7 +355,7 @@ on click(evt) {
     let layer = dom.closest(evt.target,"[data-layer],[data-mask],[data-visibility]")
     let tool = dom.closest(evt.target,"[data-tool]")
     let tab = dom.closest(evt.target,"[data-tab]")
-    var next = {*:cancel_preview(owner,session),error:""}
+    var next = clear_error(cancel_preview(owner,session))
     let starting = next
     if (tab != null and tab != owner) {
         workspaces.activate(documents,dom.get_attribute(tab,"data-tab"),next) ^ { next = {*:next,error:^.message,status:^.message} }
@@ -370,7 +383,11 @@ on click(evt) {
     } else if (button != null) {
         var problem = null
         // S7.6.7v4: procedure handlers capture successful values in their statement arm.
-        command(owner,next,dom.get_attribute(button,"data-action")) ^ { problem = ^.message } ~ { next = ~ }
+        let action = dom.get_attribute(button,"data-action")
+        if (action == "guide-remove") {
+            editor.exec(next,{id:"guide.remove",guide:dom.get_attribute(button,"data-guide")}) ^ { problem = ^.message } ~ { next = ~ }
+        }
+        if (action != "guide-remove") { command(owner,next,action) ^ { problem = ^.message } ~ { next = ~ } }
         if (problem != null) { next = {*:next,error:problem,status:problem} }
     } else { return 'pass' }
     var close = false
@@ -403,7 +420,12 @@ on change(evt) {
         session = publish(owner,session,documents)
         return 'handled'
     }
-    var next = {*:session,error:""}
+    var next = clear_error(session)
+    if (id == "straighten-axis") {
+        editor.exec(next,{id:"tool.configure",straighten_axis:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        session = publish(owner,next,documents)
+        return 'handled'
+    }
     if (id in ["curve-channel","curve-points"]) {
         // switching channels must retain text drafts even before a native blur/change arrives.
         read_curves(owner,next) ^ { next = {*:next,error:^.message,status:^.message} }
@@ -451,15 +473,15 @@ on change(evt) {
 on pointerdown(evt) {
     let owner = owner_of(evt)
     if (evt.button == 0 and session.dialog == "" and dom.closest(evt.target,"#curve-chart") != null) {
-        var next = {*:session,error:""}
+        var next = clear_error(session)
         begin_curve(owner,next,evt) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
         session = publish(owner,next,documents)
         return 'prevent-default'
     }
     if (evt.button != 0 or session.dialog != "" or dom.closest(evt.target,"#stage") == null or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
     dom.focus_set(present.node(owner,"stage"),false)
-    var next = session
-    interaction.begin(session,pointer_input(owner,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    var next = clear_error(session)
+    interaction.begin(next,pointer_input(owner,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
     if (next.gesture != null) dom.set_pointer_capture(present.node(owner,"stage"),evt.pointerId)
     if (next.gesture.mode in ["brush","erase",*retouch.kinds]) { session = publish_preview(owner,next,documents) }
     else { session = publish(owner,next,documents) }

@@ -141,6 +141,7 @@ enum JsClass : uint8_t {
     JS_CLASS_MESSAGE_EVENT,
     JS_CLASS_XML_HTTP_REQUEST,
     JS_CLASS_FILE_READER,
+    JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -298,6 +299,9 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "FinalizationRegistry", 20)) return JS_CLASS_FINALIZATION_REGISTRY;
             if (!strncmp(nm, "CountQueuingStrategy", 20)) return JS_CLASS_COUNT_QUEUING_STRATEGY;
             break;
+        case 28:
+            if (!strncmp(nm, "SecurityPolicyViolationEvent", 28)) return JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT;
+            break;
         case 37:
             if (!strncmp(nm, "ContentVisibilityAutoStateChangeEvent", 37))
                 return JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT;
@@ -390,6 +394,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_RESPONSE: return "Response";
         case JS_CLASS_NAVIGATOR: return "Navigator";
         case JS_CLASS_MESSAGE_EVENT: return "MessageEvent";
+        case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT: return "SecurityPolicyViolationEvent";
         case JS_CLASS_XML_HTTP_REQUEST: return "XMLHttpRequest";
         case JS_CLASS_TYPE_ERROR: return "TypeError";
         case JS_CLASS_RANGE_ERROR: return "RangeError";

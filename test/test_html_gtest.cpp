@@ -8,6 +8,7 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/html5/html5_parser.h"
+#include "../lambda/input/html5/html5_tokenizer.h"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
 #include "../lib/mime-detect.h"
@@ -968,6 +969,37 @@ TEST_F(HtmlParserTest, TreeConstructionSequentialParsing) {
     EXPECT_TRUE(get_type_id(result1) == LMD_TYPE_ELEMENT);
     EXPECT_TRUE(get_type_id(result2) == LMD_TYPE_ELEMENT);
     EXPECT_TRUE(get_type_id(result3) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserTest, EndTagAttributesTokenizeWithoutChangingTheClosedElement) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    Html5Parser* parser = html5_parser_create(pool, input->arena, input);
+    ASSERT_NE(parser, nullptr);
+    Html5ParserScope scope(parser);
+    const char* source = "</DiV data-note='first' DATA-NOTE='duplicate' disabled>";
+    parser->html = source;
+    parser->length = strlen(source);
+    Html5Token* token = html5_tokenize_next(parser);
+    ASSERT_NE(token, nullptr);
+    EXPECT_EQ(token->type, HTML5_TOKEN_END_TAG);
+    EXPECT_STREQ(token->tag_name->chars, "div");
+    ASSERT_EQ(token->attr_count, 2u);
+    EXPECT_STREQ(token->attrs[0].name->chars, "data-note");
+    ASSERT_EQ(get_type_id(token->attrs[0].value), LMD_TYPE_STRING);
+    EXPECT_STREQ(it2s(token->attrs[0].value)->chars, "first");
+    EXPECT_STREQ(token->attrs[1].name->chars, "disabled");
+    EXPECT_EQ(html5_tokenize_next(parser)->type, HTML5_TOKEN_EOF);
+
+    Item result = parseHtml5Document("<div id='kept'>a</div id='wrong' data-note='discarded'>"
+        "<p id='next'>b</p>");
+    Element* div = findElementByTag(result, "div");
+    Element* next = findElementByTag(result, "p");
+    ASSERT_NE(div, nullptr);
+    ASSERT_NE(next, nullptr);
+    EXPECT_STREQ(ElementReader(div).get_attr_string("id"), "kept");
+    EXPECT_EQ(ElementReader(div).get_attr_string("data-note"), nullptr);
+    EXPECT_STREQ(ElementReader(next).get_attr_string("id"), "next");
 }
 
 TEST_F(HtmlParserTest, FragmentTokenScratchPreservesPublishedDataAndContinuation) {

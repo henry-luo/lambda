@@ -2151,6 +2151,8 @@ void document_apply_js_host_config(DomDocument* doc,
                                    const DocumentJsHostConfig* config) {
     if (!doc || !config) return;
     doc->js.host_ui_context = config->ui_context;
+    // a worker-created manager follows its document when the host takes ownership.
+    if (doc->resource_manager) resource_manager_set_ui_context(doc->resource_manager, config->ui_context);
     doc->js.host_driven_loop = config->host_driven_loop;
     doc->js.auto_close_event_loop = config->auto_close_event_loop;
     doc->js.virtual_clock_enabled = config->virtual_clock_enabled;

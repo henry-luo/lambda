@@ -44,6 +44,13 @@ starts from inherited font values, so repeated preparation cannot rescale monosp
 defaults. Closed-dialog suppression uses the same UA display helper as dispatch;
 cached geometry must not turn a hidden dialog into a block.
 
+Container-query probes also run that generated-box preparation: fixed pseudo
+descendants must be excluded from intrinsic contributions before either probe or
+committed flow measures them. Settlement moves from probe to committed flow once;
+changed committed geometry stays in that phase until stable (**VR15**). Container
+lookup skips ordinary ancestors before resolving inherited writing mode. See the
+[convergence follow-up](../../../vibe/radiant/Radiant_CSS_Cascade.md#container-query-convergence-follow-up-2026-10-21).
+
 ## 2. Where resolution is invoked
 
 Style resolution is driven from the layout descent in `layout.cpp`, once per element, in a fixed three-step order (`layout.cpp:824`, `:841`, `:858`):

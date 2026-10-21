@@ -72,6 +72,7 @@ static uint64_t dl_fingerprint_clip_shapes(uint64_t hash, const DlClipShapeStack
 // item copy; borrowed glyph-cache buffers and resource handles stay as identities.
 bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint) {
     if (!list || !fingerprint) return false;
+    ImageSurfaceReadScope read_scope;  // resolved image pixels stay valid while folded
     uint64_t hash = 0x9e3779b97f4a7c15ull;
     for (int index = 0; index < list->item_count(); index++) {
         const DisplayItem* source = &list->data()[index];
@@ -110,16 +111,20 @@ bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint) {
                 break;
             }
             case DL_DRAW_IMAGE: {
-                // frame-local pixels (a rasterised gradient image) are folded by content
-                const DlDrawImage& image = source->draw_image;
-                if (image.local_pixels) {
-                    if (image.src_w <= 0 || image.src_h <= 0 || image.src_stride < image.src_w) return false;
-                    for (int row = 0; row < image.src_h; row++)
-                        hash = dl_fingerprint_fold(hash, image.local_pixels.get() + (size_t)row * image.src_stride,
-                            (size_t)image.src_w * sizeof(uint32_t));
-                    clear(offsetof(DisplayItem, draw_image.local_pixels), sizeof(void*));
-                }
+                // images fold by the pixels they draw: a frame-local buffer (a rasterised
+                // gradient) or an owner recreated per recording (a rasterised text shadow)
+                // keeps its fingerprint while its pixels do
+                DlResolvedImage image = {};
+                if (!dl_draw_image_resolve(&source->draw_image, &image) || !image.pixels ||
+                    image.width <= 0 || image.height <= 0 || image.stride < image.width) return false;
+                for (int row = 0; row < image.height; row++)
+                    hash = dl_fingerprint_fold(hash, image.pixels.get() + (size_t)row * image.stride,
+                        (size_t)image.width * sizeof(uint32_t));
+                hash = dl_fingerprint_fold(hash, &image.straight_alpha, sizeof(image.straight_alpha));
+                clear(offsetof(DisplayItem, draw_image.local_pixels), sizeof(void*));
                 clear(offsetof(DisplayItem, draw_image.snapshot_lease), sizeof(void*));
+                clear(offsetof(DisplayItem, draw_image.resource), sizeof(source->draw_image.resource));
+                clear(offsetof(DisplayItem, draw_image.resource_generation), sizeof(source->draw_image.resource_generation));
                 break;
             }
             case DL_BLIT_SURFACE_SCALED:

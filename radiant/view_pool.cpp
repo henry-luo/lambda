@@ -979,7 +979,7 @@ void ViewTree::recycle_text_rects(TextRect* first) {
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     // inherit parent font styles
-    font_prop_copy(prop, lycon->font.style);  // including font family, size, weight, style, etc.
+    font_prop_copy(prop, lycon->font.style, layout_prop_pool(lycon));  // including font family, size, weight, style, etc.
     assert(prop->font_size >= 0);  // CSS allows font-size: 0
     return prop;
 }

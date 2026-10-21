@@ -136,6 +136,7 @@ Item dom_fp_text_content(Item n);
 Item dom_core_query_selector(Item n, Item selector);
 Item dom_core_query_selector_all(Item n, Item selector);
 Item dom_core_closest(Item n, Item selector);
+Item dom_validity_state_flag(Item state, Item name);
 Item dom_core_get_element_by_id(Item n, Item id_item);
 Item dom_fp_has_attribute(Item n, Item name);
 Item dom_fp_inner_html(Item n);

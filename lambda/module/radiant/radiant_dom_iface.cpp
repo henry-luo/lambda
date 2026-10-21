@@ -222,10 +222,15 @@ const char radiant_dom_interface_decl[] =
     "    begin_element: pn() any, begin_element_at: pn(a0: any) any,\n"
     "    end_element: pn() any, end_element_at: pn(a0: any) any\n"
     "}\n"
+    "type validity_state {\n"
+#define DOM_VALIDITY_FIELD(name, js, field) "    " #name ": bool,\n"
+#include "../../dom/dom_validity_fields.def"
+#undef DOM_VALIDITY_FIELD
+    "}\n"
     "type input_element : html_element {\n"
     "    read_only: bool, readonly: bool,\n"
     "    default_checked: bool, size: int, width: int, height: int,\n"
-    "    multiple: bool, checked: bool, 'type': string, value: string,\n"
+    "    multiple: bool, checked: bool, 'type': string, value: string, validity: validity_state,\n"
     "    value_as_number: float, value_as_date: any, files: any,\n"
     "    pattern: string, min: string, max: string, step: string, accept: string,\n"
     "    selection_start: int, selection_end: int, selection_direction: string,\n"
@@ -1324,6 +1329,30 @@ static const JubeMemberBind radiant_dom_svg_element_members[] = {
     BIND_CALL_JS("end_element_at", "endElementAt", radiant_dom_m4d_end_element_at),
 };
 
+#define DOM_VALIDITY_FIELD(name, js, field) \
+    static int radiant_validity_##name(Item receiver, Item* out) { \
+        *out = radiant_host_api->dom_catalog->validity_state_flag(receiver, \
+            (Item){.item = s2it(heap_create_name(#js))}); \
+        return 1; \
+    }
+#include "../../dom/dom_validity_fields.def"
+#undef DOM_VALIDITY_FIELD
+
+static const JubeMemberBind radiant_validity_members[] = {
+#define DOM_VALIDITY_FIELD(name, js, field) \
+    {#name, #js, radiant_validity_##name, NULL, NULL, NULL, JUBE_MEMBER_PROTOTYPE},
+#include "../../dom/dom_validity_fields.def"
+#undef DOM_VALIDITY_FIELD
+};
+
+static Item radiant_validity_prototype(void) {
+    return dom_realm_constructor_prototype("ValidityState");
+}
+
+static int radiant_input_validity_get(Item receiver, Item* out) {
+    return radiant_node_property(receiver, "validity", out);
+}
+
 static const JubeMemberBind radiant_dom_input_element_members[] = {
     // Keep this off HTMLElement so `readOnly in button` follows the IDL surface.
     BIND_FIELD_SET_JS("read_only", "readOnly", radiant_html_read_only_get, radiant_html_read_only_set),
@@ -1336,6 +1365,7 @@ static const JubeMemberBind radiant_dom_input_element_members[] = {
     BIND_FIELD_SET("checked", radiant_dom_m4c_get_checked, radiant_dom_m4c_checked_set),
     BIND_FIELD_SET("type", radiant_dom_input_type_get, radiant_dom_input_type_set),
     BIND_FIELD_SET("value", radiant_input_value_get, radiant_input_value_set),
+    BIND_FIELD("validity", radiant_input_validity_get),
     BIND_FIELD_SET_JS("selection_start", "selectionStart", radiant_dom_m4c_get_selectionStart, radiant_dom_m4c_selection_start_set),
     BIND_FIELD_SET_JS("selection_end", "selectionEnd", radiant_dom_m4c_get_selectionEnd, radiant_dom_m4c_selection_end_set),
     BIND_FIELD_SET_JS("selection_direction", "selectionDirection", radiant_dom_m4c_get_selectionDirection, radiant_dom_m4c_selection_direction_set),
@@ -1934,6 +1964,10 @@ static Item css_condition_prototype(void) {
 #undef CSS_RULE_INTERFACE
 
 extern const JubeTypeBinding radiant_dom_type_bindings[] = {
+    {"validity_state", NULL, radiant_validity_members,
+     (int32_t)(sizeof(radiant_validity_members) / sizeof(radiant_validity_members[0])),
+     NULL, NULL, NULL, NULL, radiant_validity_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
     {"range", NULL, radiant_range_members,
      (int32_t)(sizeof(radiant_range_members) / sizeof(radiant_range_members[0])),
      NULL, NULL, NULL, NULL, radiant_range_prototype_seed, NULL,

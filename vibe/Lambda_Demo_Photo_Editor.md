@@ -608,6 +608,11 @@ for one unlocked leaf layer, with Shift proportions/15° snapping, centered Alt
 scaling and shared cancel/undo. Levels and RGB/channel piecewise-linear Curves
 are editable retained effects; graph/text drafts apply explicitly, preserve
 source samples/alpha and persist through projects/actions (**S9.1.2 / S9.2.2**).
-Straighten UI, guides/rulers, group/perspective transforms, smooth curves,
-dedicated adjustment layers and the larger M5 items remain outstanding. Actual
+The subsequent canvas milestone adds descendant-affine group/multiselection
+transforms, horizontal/vertical reference-line straightening and project guides
+with screen-distance move snapping. These use the same source-preserving edits
+and gesture history (**S9.1.2 / S9.2.2 / S12.1.3**). Masked/filtered groups remain
+outside this transform profile. Rulers/grids/navigator, other-layer snapping,
+perspective/warp, smooth curves, dedicated adjustment layers and the larger M5
+items remain outstanding. Actual
 verification is recorded in [the implementation record](impl/Lambda_Impl_Photos.md).

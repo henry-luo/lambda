@@ -4249,7 +4249,7 @@ bool layout_font_shorthand_overrides_longhand(StyleTree* style,
 void layout_apply_pseudo_font(LayoutContext* lycon, StyleTree* style,
                               FontProp* base_font, FontProp* pseudo_font) {
     if (!lycon || !base_font || !pseudo_font) return;
-    font_prop_copy(pseudo_font, base_font);
+    font_prop_copy(pseudo_font, base_font, layout_prop_pool(lycon));
     pseudo_font->used_zoom = base_font->used_zoom;
     if (!style || !style->tree || !css_style_tree_has_font_property(style, false)) return;
 
@@ -4478,7 +4478,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
     if (has_placeholder_font_prop && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
-            font_prop_copy(placeholder_font, base_font);
+            font_prop_copy(placeholder_font, base_font, layout_prop_pool(lycon));
         }
     } else {
         form->placeholder_font = nullptr;

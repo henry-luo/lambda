@@ -182,7 +182,7 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         const char* as_type = link->get_attribute("as");
         if (!as_type) return;
 
-        ResourceType rtype = RESOURCE_IMAGE;  // default
+        ResourceType rtype;
         ResourcePriority prio = PRIORITY_NORMAL;
 
         if (strcmp(as_type, "style") == 0) {
@@ -197,10 +197,14 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         } else if (strcmp(as_type, "script") == 0) {
             rtype = RESOURCE_SCRIPT;
             prio = PRIORITY_NORMAL;
-        }
+        } else if (strcmp(as_type, "fetch") == 0) {
+            // fetch preloads hold opaque bytes; a JavaScript chunk is not an image.
+            rtype = RESOURCE_PREFETCH;
+        } else return;
 
         log_debug("network: discovered preload: %s (as=%s)", href, as_type);
-        queue_resolved_http_resource(doc, href, rtype, prio, link);
+        queue_resolved_http_resource(doc, href, rtype, prio,
+            rtype == RESOURCE_PREFETCH ? nullptr : link);
     }
 }
 
@@ -281,6 +285,9 @@ static void discover_document_font_resources(DomDocument* doc, bool attach_faces
         !doc->stylesheets || doc->stylesheet_count <= 0) {
         return;
     }
+    // detached/worker-loaded documents may prefetch bytes before a font owner
+    // is bound; attach face delivery when host-side discovery runs again.
+    attach_faces = attach_faces && doc->resource_manager->ui_context;
 
     for (int s = 0; s < doc->stylesheet_count; s++) {
         if (!doc->stylesheets[s]) continue;

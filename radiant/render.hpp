@@ -1079,8 +1079,9 @@ void dl_item_free_owned_payload(DisplayItem* item);
 bool dl_reference_fragment(DisplayList* list, DisplayPayloadOwner* owner, Bound bounds);
 bool dl_supports_premultiplied_capture(const DisplayList* list);
 // A content fingerprint of a recording: equal fingerprints paint equal pixels, given equal
-// glyph-cache and resource generations. False when an op's pixels are not determined by the
-// list alone (pictures, fragments, live media, borrowed filters).
+// glyph-cache generations (glyph buffers compare by identity; images by their pixels). False
+// when an op's pixels are not determined by the list alone (pictures, fragments, live media,
+// borrowed filters).
 bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint);
 bool dl_supports_vector_translation(const DisplayList* list, int first = 0, int end = -1);
 // caller must retire outstanding scratch marks before trimming an empty, exclusively owned arena.

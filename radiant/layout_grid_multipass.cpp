@@ -531,7 +531,10 @@ IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* co
         GridLayoutScope grid_scope(lycon, container);
         if (!lycon->grid_container) return result;
         resolve_grid_item_styles(lycon, container);
-        measure_grid_items(lycon, lycon->grid_container, true);
+        // both track queries use the same indefinite containing block. The first
+        // stores each child's min/max pair on its GridItemProp; measuring again
+        // for max-content doubles every descendant query at each nesting level.
+        if (minimum) measure_grid_items(lycon, lycon->grid_container, true);
         layout_grid_container(lycon, container, true);
         float extent = lycon->grid_container->content_width;
         if (minimum) result.min_content = extent;

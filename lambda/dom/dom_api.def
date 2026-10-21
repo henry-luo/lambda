@@ -800,6 +800,9 @@ DOM_OP(CORE, speech_command, media, 3, "pn(n: any, token: int, command: string) 
 DOM_OP(CORE, speech_info, media, 2, "fn(n: any, token: int) -> map|null", dom_engine_speech_info, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, audio_clock, media, 1, "fn(n: any) -> float", dom_engine_audio_clock, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 
+// live validation readers append a slot without moving existing module callbacks.
+DOM_RAW(validity_state_flag, forms, Item, (Item state, Item name), dom_validity_state_flag, DOM_F_NATIVE)
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

@@ -734,3 +734,49 @@ background load):
   one worker (RAD_12 §9 item 5) and the radial desk backdrop.
 - The live 3D path's mirrored-gradient offset (above).
 
+### The two open issues, fixed (2026-10-21)
+
+**Mirrored repeating-gradient offset.** This was not a layer defect.
+- The analytic gradient path accepted only matrices whose `e31`, `e32` and
+  `e33` were exactly affine. The vector backend calls a matrix projective only
+  above a 1e-6 tolerance (`matrix_is_projective`).
+- A back face under a −180° leaf composes to a translation with about 1e-18 of
+  perspective residue. That fell back to ThorVG's gradient, which places a 4 px
+  stripe period one pixel off.
+- `rdt_fill_linear_gradient_analytic` now uses the backend's tolerance and drops
+  the residue. The mirrored face matches a flat paint except its plane-clip edge
+  column.
+- Book layer parity improved: worst mean 2.85 → 0.77 while the endpaper was
+  live, and 1:1 frames 27 → 81.
+
+**First-turn spike** (first two frames 473 + 293 ms → about 245 + 49 ms; later
+turn starts unchanged at 60–85 ms):
+- **Fingerprint stability.** Revalidation kept reporting the cover face as
+  changed, because text-shadow rasters are new surfaces on every recording. The
+  fingerprint compared their handles. It now folds every image by the pixels it
+  draws (`dl_draw_image_resolve`, inside an image read scope), so identical
+  content keeps its layer.
+- **Trivial planes judged by cost.** A plane with at most two painting items
+  stays live only when they are cheap: no image, no gradient with more than 4
+  stops. The endpaper face (a background plus a 363-stop repeating texture) was
+  being kept live and re-rasterised analytically on every frame.
+- **Transformed box-shadow cache.** Shadows under a transform are rasterised at
+  record time (blur plus per-pixel border-box exclusion). A document-owned LRU
+  (`services.shadow_image_cache`: 64 entries, 64 MB) keys them by geometry
+  relative to their pixel origin and records them by handle, so re-recording a
+  face no longer re-blurs every photo shadow.
+
+**Left in the first turn:** about 245 ms of first-time work:
+- a relayout from the button's interaction state;
+- the first paint of the uncovered leaf, with its photo decodes;
+- the window replay.
+
+Idle frames could paint and capture the next leaf ahead of the first click;
+that is not done.
+
+**Note on measurements:** `origin/master` was merged on top of the stage A+B
+commit (d208dba92). Afterwards, frames in the same live-window test ran slower
+(median about 55 ms against 33 ms before, under similar load). In the merged
+tree, `photo_album_collage` fails its undo step in both debug and release, with
+or without these changes, so that failure belongs to the merge.
+

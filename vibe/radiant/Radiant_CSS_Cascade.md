@@ -2962,3 +2962,35 @@ absolute units. Only unresolved expressions ask the container's CSSOM numeric
 resolver for its font/custom-property context. Relative units retain that
 owner's semantics. Native regressions cover axis projection, height-only changes,
 aspect ratio, owner-generation changes and resolver call counts.
+
+**Online settlement repair:** probe → committed flow is monotonic. A committed
+geometry change refines that committed phase; it cannot restart a probe with
+different provisional effects. Both phases prepare generated boxes before
+intrinsic measurement, so a fixed pseudo descendant cannot become an in-flow
+flex contribution. Motion publication remains guarded during preparation and
+query probes. The reduced Angular regression checks zero intrinsic contribution,
+width mutation across a query threshold, restoration and repeated clean reads.
+Container lookup rejects ancestors without size containment before reading their
+inherited writing mode. `LAYOUT_PROFILE=1 LAYOUT_DEBUG=cache` additionally records
+each container's geometry to identify the dependency that prevents convergence.
+
+Incremental reflow starts from the previous published container geometry and
+committed effects; bootstrap probes are for layouts without that retained
+context. If real container dimensions change, the existing key comparison
+recascades and settles the committed flow. This avoids repeating a full probe
+for every script geometry read after a local style mutation (**D4.5.1v4**).
+
+Resolved-style validity uses the element's specified-style identity/version,
+inherited computed-value revision, font/resources and geometry context. It does
+not use the document-wide `style_query_epoch`: that epoch also advances on a
+single local edit and is retained for query/publication invalidation. Global
+recascades still revise every affected element; local CSSOM edits leave clean
+sibling styles reusable (**D4.5.1v4**).
+
+**VR15 intrinsic grid follow-up:** min/max track sizing consumes one paired
+child contribution for the same containing-block inputs. Keep the two track
+solves and their geometry rollback, but reuse the first solve's `GridItemProp`
+width pair in the second. Re-entering descendant measurement for both solves
+made nested grids exponential (513 requests at depth eight, now at most 11).
+The regression also changes a leaf width and checks both updated contributions;
+this sharing ends with the paired query, rather than bypassing mutation keys.
