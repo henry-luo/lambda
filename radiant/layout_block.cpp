@@ -1015,6 +1015,9 @@ static void pseudo_update_text(DomDocument* doc, DomText* text_node, const char*
 // the text of a synthetic box: its first text child takes `content`, added when missing
 static void pseudo_set_text(DomElement* pseudo_element, const char* content) {
     DomNode* first = pseudo_element->first_child;
+    // a retained list-item marker precedes its content; update that content instead of duplicating it.
+    if (first && pseudo_element->pseudo && first == pseudo_element->pseudo->marker)
+        first = first->next_sibling;
     if (first && first->is_text()) {
         pseudo_update_text(pseudo_element->doc, lam::dom_as<DOM_NODE_TEXT>(first), content);
     } else if (content[0]) {
@@ -1531,6 +1534,7 @@ static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
 
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element, bool apply_counters) {
+    if (lycon && lycon->generated_effects_prepared) return;
     if (!lycon || !lycon->counter_context || !pseudo_element ||
         !pseudo_element->parent || !pseudo_element->parent->is_element()) {
         return;
@@ -4999,10 +5003,12 @@ void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
     uicon->viewport_width = iframe_width;
     uicon->viewport_height = iframe_height;
     process_document_font_faces(uicon, doc);
-    layout_html_doc(uicon, doc, false);
+    layout_update_document(uicon, doc);
     // resizing preserves the existing session; load handlers initialize it only once.
     if (initial_load) radiant_dispatch_lambda_body_load(uicon, doc);
     else radiant_queue_template_render_events(doc, doc->root);
+    // load handlers can write the embedded viewport's CSS before its first presentation.
+    layout_update_document(uicon, doc);
     uicon->document = lam::up(parent_doc);
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
@@ -5502,6 +5508,11 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
+    if (lycon->generated_effects_prepared) {
+        if (create_first_letter && block->pseudo_style(PSEUDO_STYLE_FIRST_LETTER))
+            create_first_letter_pseudo(lycon, block);
+        return;
+    }
     block->pseudo = lam::view_prop(alloc_pseudo_content_prop(lycon, block));
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
@@ -8967,7 +8978,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     else { // auto height - will be determined by content
         bool parent_has_definite_height = pa_block && pa_block->given_height >= 0.0f;
-        if (parent_has_definite_height && block->is_element() &&
+        // flex owns natural cross-size queries after assigning widths; a block estimate here
+        // walks unrelated percentage-resource descendants before those constraints exist.
+        if (parent_has_definite_height && block->display.inner != CSS_VALUE_FLEX && block->is_element() &&
             layout_has_cyclic_percentage_replaced_descendant(block->as_element())) {
             float cyclic_intrinsic_height = layout_block_intrinsic_content_height(
                 lycon, block, content_width);
@@ -9856,11 +9869,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.first_line_max_ascender = 0;
     lycon->block.first_line_max_descender = 0;
     ViewBlock* block = lam::view_require_block(set_view(lycon,
-        display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE :
-        display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
-        display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
-        RDT_VIEW_BLOCK,
-        elmt));
+        layout_view_type_for_display(display, true), elmt));
     block->display = display;
     dom_node_resolve_style(elmt, lycon);
     if (block->blk) block->block_mut()->percentage_height_resolved_late = false;

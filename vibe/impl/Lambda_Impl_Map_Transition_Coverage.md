@@ -198,3 +198,30 @@ JavaScript `map_put_heap` fallbacks beyond the identity-key gate (array-index sh
 3. **Identity-key gates on the JavaScript and parser paths.** *Ruled 2026-10-06 (user): JavaScript symbols join the one name space under the §2.9 mapping (NI18, D3.4.4v4).* P0 lifts all four gates under a test262 gate.
 4. **Degradation past the budget.** Keep today's private copies (my recommendation, with the jq measurement in P1), or open a design for a hash-backed plain map past the budget now?
 5. **Fan-out.** *Ruled 2026-10-06 (user): decided by measurement, not by argument.* Whether the runtime tree's table edges drop the 16-edge cap, take a higher one, or keep it is P1.5's task: profile the benchmarks and the Lambda and JavaScript test corpora under each setting, then decide. Parser trees keep their caps regardless. *Measured and decided 2026-10-06 (P1.5): every cap stays. No workload reaches 16 below the root, and a wider root costs CPU in linear edge walks.*
+
+## 7. Root lookup indexing (2026-10-21)
+
+**D3.4.3v5 / D3.4.4v4 / D4.2.6**: retain the existing graph/fan-out budgets
+and child validation, but index high-fan-out root edges by the existing
+name-kind, spelling/record and value-type identity. Interior lists remain
+bounded linear scans. Name/type/kind hashes use the shared structural combiner,
+so name entropy reaches the low bits used for bucket selection; packing the name
+above bit 15 clustered same-type keys. Cached negative lookups avoid rescanning
+a full root at the graph budget. New head edges are indexed lazily; stale-child or allocation
+failure paths use the original scan.
+
+Each Input owns its index groups. A pool-owned cleanup record supports both
+ordinary and hand-assembled Inputs without capturing a stack Input address;
+explicit document retirement and pool retirement are idempotent. Native
+regressions cover pooled/unpooled string identity, value types, graph-budget
+hits/misses and independent owner teardown.
+
+Kafka's 107-document Lunr index exposed 961,105,866 transition-edge visits.
+The index reduces them to 20,476,490 without widening any cap. Its isolated AST
+index remains about 40 seconds, so the edge count alone does not explain the
+remaining JavaScript cost. See the retained-layout implementation record for
+page-level qualification.
+
+Qualification: all 43 item/shape cases and the 7,988-case Lambda/Input baseline
+pass, including independent Input retirement and 319 forced-GC cases. The final
+release consumer rebuild also passes the complete item/shape and MVP suites.

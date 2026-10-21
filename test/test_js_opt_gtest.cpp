@@ -711,6 +711,40 @@ TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
     expect_trace_off_same("regexp_bulk_protocol", source, output, "ast");
 }
 
+TEST(JsOpt, RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion) {
+    const char* source = R"JS(
+        var original=Object.getOwnPropertyDescriptor(RegExp.prototype,'flags');
+        var rx=/a/g, receivers=[];
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:function(){
+            receivers.push(this);return original.get.call(this);
+        }});
+        var matches=Array.from('aba'.matchAll(rx));
+        if(matches.length!==2||matches[0].index!==0||matches[1].index!==2||
+            receivers.indexOf(rx)===-1||receivers.some(function(x){return !(x instanceof RegExp)}))
+            throw new Error('flags getter lost receiver or iteration semantics');
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,value:'g'});
+        if(Array.from('aba'.matchAll(/a/g)).length!==2)throw new Error('flags data descriptor lost');
+        var marker={},caught;
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:function(){throw marker}});
+        try{'a'.matchAll(/a/g)}catch(error){caught=error}
+        if(caught!==marker)throw new Error('flags getter exception lost');
+        Object.defineProperty(RegExp.prototype,'flags',{configurable:true,get:undefined});
+        caught=false;try{'a'.matchAll(/a/g)}catch(error){caught=error instanceof TypeError}
+        if(!caught)throw new Error('undefined flags getter bypassed');
+        Object.defineProperty(RegExp.prototype,'flags',original);
+        console.log('OPT_OK');
+    )JS";
+    for (const char* backend : {"ast", "mir"}) {
+        SCOPED_TRACE(backend);
+        TraceResult trace;
+        char output[4096];
+        ASSERT_TRUE(run_fixture_mode_backend("regexp_flags_descriptor", source, true,
+            backend, &trace, output, sizeof(output)));
+        expect_ok_output(output);
+        expect_trace_off_same("regexp_flags_descriptor", source, output, backend);
+    }
+}
+
 TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     const char* source =
         // A tagged element array reaches the fused Set kernel; an empty

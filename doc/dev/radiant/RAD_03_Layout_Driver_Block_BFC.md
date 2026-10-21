@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the control-flow spine of Radiant's layout engine: the top-level driver (`layout_html_doc` → `layout_html_root` → recursive `layout_flow_node`) that dispatches every DOM node by its computed `display`, the four-function block-layout pipeline (`layout_block` → `layout_block_content` → `layout_block_inner_content` → `finalize_block_flow`), the unified `BlockContext` struct that fuses block layout state, the Block Formatting Context (BFC) hierarchy, and float management into one object, and the `LayoutContext` state that is threaded through every other layout module. It also covers CSS 2.1 §9.5 float avoidance, margin collapsing, the RAII context scopes that guarantee restore on early return, and the fuzzer-hardening guards.
 >
 > **Primary sources:** `radiant/layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`, `FloatBox`, run modes, guards, and debug declarations), `radiant/layout.cpp` (`layout_html_doc`/`layout_html_root`/`layout_flow_node`/`layout_init`), `radiant/layout_block.cpp` (the block pipeline + margin collapse, ~9000 lines), `radiant/block_context.cpp` (BFC establishment + float lists), `radiant/layout_pass.cpp` (measurement scopes + cache wrappers), and `radiant/layout_debug.cpp` (debug/profiling).
@@ -18,6 +20,21 @@ Concretely this layer owns: the top-level entry and its post-passes; the recursi
 The design rationale worth stating up front is the *unification* of three historically separate structs — a block-layout state, a float context, and a BFC object — into one `BlockContext` (the comment block at `layout.hpp:63-80`). Because float lists and the BFC origin travel with the block-layout cursor, a block can query "what horizontal space is available at this Y given the floats?" without walking a parallel data structure, and the cached `bfc_offset_x/y` avoid repeated parent-chain walks.
 
 ---
+
+### 1.1 Ordered generation and publication
+
+Before continuous-document flow, `layout_prepare_generated_effects` resolves
+source-order counter/quote operations and materializes list/before/after output
+(**VR15**). Queries consume that output without advancing effects again. The
+preparation stage borrows the shared root block defaults, preserves unplaced
+view types, and skips closed-details/noscript contents. Paged, shadow-projection
+and custom-layout documents retain their existing effect adapter.
+
+`layout_pass.cpp` separately owns reusable flow snapshots; scalar measurement
+restoration does not retire those results. Selected-view pools own every copied
+payload, with generation and input checks before publication (**D4.5.1v4 /
+D4.1.4v5 / D4.5.2**). See [the integrated implementation record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md)
+for acceptance and verification.
 
 ## 2. The state backbone: `LayoutContext`, `BlockContext`, `Linebox`
 

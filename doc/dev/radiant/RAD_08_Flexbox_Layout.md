@@ -2,6 +2,8 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 
+> **Scoped source refresh:** 2026-10-21 — retained computation and ownership additions below; integrated qualification is tracked in the implementation record.
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS Flexbox Level 1 implementation for `display:flex`/`inline-flex` containers (and, by reuse, for grid items). It explains why the implementation is split across three large files as a *pipeline*, not three rival implementations; the multi-pass rationale forced by the chicken-and-egg dependency between item sizing and content layout; the numbered ten-phase core algorithm with its faithful §9.7 grow/shrink resolution loop; the two caches that keep re-measurement affordable; and the alignment seam shared with grid.
 >
 > **Primary sources:** `radiant/layout.hpp` (the public flex surface, shared alignment declarations, and `MAX_FLEX_DEPTH`), `radiant/layout_flex.cpp` (the ~6.1k-line core: `layout_flex_container`, the phase pipeline, `resolve_flexible_lengths`, sizing/alignment primitives), `radiant/layout_flex_measurement.cpp` (PASS 1 content measurement + the measurement cache), `radiant/layout_flex_multipass.cpp` (the orchestrator: entry, pass sequencing, nested content, absolute children, auto margins), `radiant/layout_alignment.cpp` (shared alignment mechanics), and `radiant/view.hpp` (`FlexProp`, `FlexItemProp`).
@@ -22,6 +24,23 @@ Everything downstream (the DOM/view nodes it reads and writes, the box-model con
 Flex is entered from block layout: `layout_flex_content` is declared and called at `layout_block.cpp:1009`/`:4540`/`:4710`. All layout dimensions here are `float`, per the Radiant convention.
 
 ---
+
+### 1.1 Retained query results
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: row and column preparation
+request inline contributions before height at the assigned wrapping width.
+`flex_measure_completed_flow` and final flow share `FlexMeasuredFlow` entries;
+`LayoutFlowResult` owns copied fragments, placements and algorithm output rather
+than borrowing the live tree. Multiple entries restore A after B, including
+measurement probes that overwrite live geometry. Constraint, input, resource
+and generation keys guard replay. Natural content height stays separate from
+the root's final allocation. A refined final stretch updates block-dependent
+content while preserving definite/cyclic percentage policy.
+
+The ordered stage in `layout_list.cpp` resolves ordinary generated effects
+before sizing. Supported results include lists/pseudos, HTML images, contained
+positioning, tables, grids and horizontal percentages; conservative adapters and
+current qualification are listed in [the implementation record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md).
 
 ## 2. Why multi-pass — the chicken-and-egg
 

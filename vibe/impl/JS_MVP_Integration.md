@@ -1670,3 +1670,41 @@ correctness gates above; performance acceptance remains pending.
 No milestone is accepted until its correctness and performance exit gates in
 the design document pass. In particular, the full protected population includes
 the long jq workloads; a timeout cannot remove them from the final report.
+
+### Shared Unicode cursor follow-up (2026-10-21)
+
+**D5.3.3 / D5.3.5 / D5.4**: MVP character reads, normalized slice/substring
+ranges and String-owned UTF-16 length reads now use the existing realm-owned
+native string helpers. MIR keeps its ASCII length fast path and imports the
+non-allocating cached length helper with a GC-pointer argument contract. Raw
+regex buffer views retain their separate offset conversion.
+
+Previously, every non-ASCII character read restarted a UTF-16 iterator at byte
+zero, and every token range rescanned the complete source for its length and
+prefix. Mixed-Unicode tokenization could therefore be quadratic. The shared
+cursor retains codepoint boundaries, returns individual surrogate halves and
+roots source strings in the existing epoch-guarded cache range. Regression
+coverage exercises adjacent/backward reads, ranges through astral/lone
+surrogates, collection and replacement runtimes.
+
+This does not activate a different browser backend. An experimental eager MVP
+browser entry spent its sampled time in MIR linking/register allocation and
+peaked at 8.6 GiB on Kafka's bundled scripts. The established browser AST
+adapter is retained; changing that policy requires separate performance
+qualification under **D8.1.3v28**.
+
+
+**RegExp protocol allocation:** flag inspection now reads the existing
+`JsPropertyDescriptor` representation directly instead of materializing a
+guest Map and then reading its `get`/`value` fields. Getter/data policy is
+unchanged (**D6.2.2v2**); existing protocol-override regressions remain required.
+
+**Release scaling evidence:** a mixed-Unicode source scanned with `charCodeAt`,
+UTF-16 `length` and one-unit `substring` takes 3,060→4 ms at 32,768 ASCII
+prefix units and 12,297→5 ms at 65,536 units. Before/after checksums agree,
+including the euro/astral suffix. These are single isolated kernel trials with
+millisecond clock resolution, not browser load measurements; source doubling
+exposes the old prefix-rescan growth. Artifacts:
+`temp/notion-kafka-tuning/unicode-scaling.json`. The complete 838-case MVP suite
+and 319 forced-GC cases pass; the new cursor test also covers backward reads,
+lone surrogates, collection and replacement runtimes.

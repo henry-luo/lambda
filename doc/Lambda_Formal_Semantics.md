@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 71.0.0 (2026-10-21)
+**Spec version:** 71.1.1 (2026-10-21)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2209,13 +2209,13 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
 
 ### S13.1 Tasks and workers
 
-- **S13.1.1v2** `start` is a builtin `pn`, not a keyword. It uses ordinary call
+- **S13.1.1v3*** `start` is a builtin `pn`, not a keyword. It uses ordinary call
   grammar as `start(target, args = [], options = {})`, is legal only inside a
   `pn`, and requires `target` to resolve to a `pn`. `args` is an array; the
   compiler-recognized `options` literal accepts `mode: 'task' | 'thread' |
-  'process'` and defaults to `'task'`. Everything else (`wait`, `send`,
-  `receive`, `select`, `cancel`, `self`) is also a builtin `pn`.
-  **`async` and `await` do not exist.** [K12v2]
+  'process'`, defaulting to `'task'`, and `owner: 'document'` (S13.3.1v2).
+  Everything else (`wait`, `send`, `receive`, `select`, `cancel`, `self`) is
+  also a builtin `pn`. **`async` and `await` do not exist.** [K12v2, K30g]
 - **S13.1.2v2** Calls are **colorless**: `f(x)` synchronously yields the value
   and may suspend invisibly (`f(x)` ≡ `wait(start(f, [x]))` minus the handle);
   may-suspend-ness is inferred and never observable. Every Lambda `pn`
@@ -2255,10 +2255,14 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
 
 ### S13.3 Scope and cancellation
 
-- **S13.3.1** A started handle is a scoped resource owned by the nearest
+- **S13.3.1v2*** A started handle is a scoped resource owned by the nearest
   lexical block: normal exit **joins**; error exit **cancels then joins**;
-  ownership escapes only by `return` (visible in the type). Storing or
-  sending a handle grants capability, not ownership. [K30a/b]
+  ownership escapes only by `return` (visible in the type), or at the start
+  site by `owner: 'document'`, which makes the running document the owner:
+  the document cancels then joins the task when it is discarded. Storing or
+  sending a handle grants capability, not ownership; a handler that must
+  reach a document-owned task later keeps its handle in state that outlives
+  the handler (S12.1.3). [K30a/b, K30g]
 - **S13.3.2** Cancellation is an error value at park points (`'cancelled'`),
   unwinding by ordinary `^` propagation with auto-close cleanup on the
   path; cleanup runs cancellation-masked. Any holder may cancel; idempotent.
@@ -2919,11 +2923,11 @@ governs how an under-determined case here is resolved.
   spread, a map built from data — an unknown name is ignored: the call
   proceeds as if the field were absent, and a warning is issued. This is the
   convention for every system function that takes an options map; `start`,
-  whose options are a compiler-recognized literal (S13.1.1v2), is its
+  whose options are a compiler-recognized literal (S13.1.1v3), is its
   compile-time arm. *Why: a misspelt name in a literal is a bug the compiler
   can catch for free; a map that arrives as data may carry fields meant for
   someone else, and failing the call over them would make shared option maps
-  unusable.* [S13.1.1v2; GRP28]
+  unusable.* [S13.1.1v3; GRP28]
 
 ---
 
@@ -2991,6 +2995,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
+| S13.1.1v3, S13.3.1v2 | Ruled 2026-10-21 (user); the document-owner arm is not implemented. `start` does not yet accept `owner` (an unknown name in its literal options is a compile error, S17.8.1), and a document has no task scope to join at teardown. Block scope and return-escape are implemented as before. Design: [K30g](../vibe/Lambda_Design_Concurrency.md#108-open-items); first client: [`Lambda_Pkg_Archive.md`](../vibe/Lambda_Pkg_Archive.md) AR-E4a. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
@@ -3173,7 +3178,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S11 types | C7, C8.5c, C20; TE-1–TE-20, TE-23 (S11.4.12); OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |
-| S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
+| S13 concurrency | K11–K32; K30g (S13.3.1v2) | `Lambda_Design_Concurrency.md`, `Lambda_Pkg_Archive.md` (AR-O10) |
 | S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses.md`, `Lambda_IO_Zip.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§7 (39 decided points); RI1–RI3 | `Lambda_Design_Syntax.md`, `Lambda_Design_Repl_Interp.md` |

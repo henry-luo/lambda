@@ -1,5 +1,6 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
+#include "lambda/js/js_host_hooks.h"
 #include "lambda/js/js_interp.hpp"
 #include "lambda/js/js_transpiler.hpp"
 #include "lambda/js/js_execution_internal.hpp"
@@ -83,6 +84,82 @@ TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
     EXPECT_EQ(js_string_equal(prefix.get(), ascii.get()), 0);
     EXPECT_EQ(js_string_equal(ascii.get(), ascii.get()), 1);
     EXPECT_EQ(js_strict_equal(ascii.get(), prefix.get()).item, ITEM_FALSE);
+}
+
+TEST_F(JsFormalMir, MixedUnicodeReadsRetainTheirCursorAcrossCompiledCallsAndCollection) {
+    ASSERT_EQ(run(R"JS(
+        const mixedSource=('ab\u20ac\u{1f600}\ud800z').repeat(1024);
+        function readMixed(i){return mixedSource.charCodeAt(i)}
+        function rangeMixed(i){return mixedSource.substring(i,i+3)}
+        mixedSource.length===7168 && readMixed(7002)===0x20ac &&
+            rangeMixed(7003)==='\ud83d\ude00\ud800';
+    )JS").item, ITEM_TRUE);
+    // the source is held by the realm's precise cache root range, including after GC.
+    ASSERT_NE(js_active_runtime_state, nullptr);
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    EXPECT_EQ(caches->utf16_positions[0].length, 7168);
+    EXPECT_GE(caches->utf16_positions[0].unit_offset, 7000);
+    heap_gc_collect();
+    EXPECT_EQ(run(R"JS(
+        readMixed(7004)===0xde00 && readMixed(7003)===0xd83d &&
+            rangeMixed(7004)==='\ude00\ud800z' && mixedSource.at(-2)==='\ud800' &&
+            mixedSource.codePointAt(7003)===0x1f600 && mixedSource['length']===7168;
+    )JS").item, ITEM_TRUE);
+    reset_runtime();
+    EXPECT_EQ(run("const replacement='é😀';replacement.length===3&&replacement.charCodeAt(2)===0xde00").item,
+        ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, UnicodeCursorEvictionAndCollectionPreserveInterleavedCompiledReads) {
+    ASSERT_EQ(run(R"JS(
+        const cursorSources=Array.from({length:6},(_,i)=>
+            (String.fromCharCode(0x100+i)+'\u{1f600}x').repeat(32));
+        function cursorRead(source,index){return source.charCodeAt(index)}
+        function cursorRound(reverse){
+            for(let i=0;i<cursorSources.length;i++){
+                let s=cursorSources[i];
+                if(s.length!==128||cursorRead(s,124)!==(reverse?0x105-i:0x100+i)||
+                    cursorRead(s,125)!==0xd83d||cursorRead(s,126)!==0xde00||
+                    cursorRead(s,127)!==120||cursorRead(s,2)!==0xde00)return false;
+            }
+            return true;
+        }
+        cursorRound();
+    )JS").item, ITEM_TRUE);
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    for (unsigned slot = 0; slot < JS_UTF16_POSITION_CACHE_CAPACITY; ++slot) {
+        ASSERT_EQ(get_type_id(caches->utf16_sources[slot]), LMD_TYPE_STRING);
+        EXPECT_EQ(caches->utf16_positions[slot].length, 128);
+        EXPECT_LE(caches->utf16_positions[slot].unit_offset, 2);
+    }
+    heap_gc_collect();
+    EXPECT_EQ(run("cursorSources.reverse();cursorRound(true)").item, ITEM_TRUE);
+    // restore source order after probing evicted entries through a different traversal.
+    EXPECT_EQ(run("cursorSources.reverse();cursorRound()").item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, MutableUnicodeBuffersBypassImmutableLengthAndPositionCaches) {
+    ASSERT_FALSE(item_is_error(run("true")));
+    RootFrame roots(1);
+    Rooted<String*> buffer(roots, heap_strcpy("\xc3\xa9x", 3));
+    ASSERT_NE(buffer.get(), nullptr);
+    buffer.get()->is_buffer = 1;
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 2);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), 'x');
+    memcpy(buffer.get()->chars, "\xe2\x82\xac", 3);
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 1);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 0), 0x20ac);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), -1);
+    heap_gc_collect();
+    memcpy(buffer.get()->chars, "\xc3\xa9x", 3);
+    EXPECT_EQ(js_string_utf16_length(buffer.get()), 2);
+    EXPECT_EQ(js_string_utf16_code_unit_at(buffer.get(), 1), 'x');
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    for (unsigned slot = 0; slot < JS_UTF16_POSITION_CACHE_CAPACITY; ++slot)
+        EXPECT_NE(caches->utf16_sources[slot].item, s2it(buffer.get()));
 }
 
 TEST_F(JsFormalMir, ScalarLoopRegionsRetainOpenScriptBindingsAndLifetime) {

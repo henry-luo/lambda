@@ -2826,7 +2826,7 @@ static bool intrinsic_list_item_marker_is_inside(DomElement* element,
 }
 
 static void intrinsic_materialize_pseudo_content(LayoutContext* lycon, DomElement* element) {
-    if (!lycon || !element) return;
+    if (!lycon || !element || lycon->generated_effects_prepared) return;
 
     NameId tag = element->tag();
     ViewBlock* element_view = lam::unsafe_view_block_element_storage(element);
@@ -3253,14 +3253,19 @@ static float intrinsic_store_ratio_width_from_height(
     return aspect_width;
 }
 
-bool layout_box_is_context_independent(DomElement* element, bool include_height) {
-    if (!radiant::css_resolved_style_is_containing_block_independent(element)) return false;
+bool layout_box_is_context_independent(DomElement* element, bool include_height, uint8_t contract) {
+    bool independent = contract & LAYOUT_QUERY_ASSIGNED_INLINE_SIZE
+        ? radiant::css_resolved_style_is_block_size_independent(element)
+        : radiant::css_resolved_style_is_containing_block_independent(element);
+    if (!independent) return false;
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     // independent box lengths can share constraints; each formatting algorithm
     // still owns any additional inputs it reads, including flex block size.
-    if (element->display.outer == CSS_VALUE_LIST_ITEM || element->pseudo ||
-        layout_block_inline_axis_is_vertical(view) || is_multicol_container(view) ||
-        layout_used_preferred_aspect_ratio(view) > 0.0f) return false;
+    if (!(contract & LAYOUT_QUERY_ORDERED_EFFECTS) &&
+        (element->display.outer == CSS_VALUE_LIST_ITEM || element->pseudo)) return false;
+    if (layout_block_inline_axis_is_vertical(view) || is_multicol_container(view) ||
+        (!(contract & LAYOUT_QUERY_ASSIGNED_INLINE_SIZE) &&
+         layout_used_preferred_aspect_ratio(view) > 0.0f)) return false;
     // intrinsic/stretch keywords can read constraints outside ordinary CSS length bindings.
     for (unsigned axis = 0; axis < (include_height ? 2u : 1u); axis++) {
         bool horizontal = axis == 0;
@@ -3272,10 +3277,10 @@ bool layout_box_is_context_independent(DomElement* element, bool include_height)
     return true;
 }
 
-bool layout_flow_is_context_independent(DomElement* element, bool include_height) {
+bool layout_flow_is_context_independent(DomElement* element, bool include_height, uint8_t contract) {
     return element && (element->display.inner == CSS_VALUE_FLOW ||
         element->display.inner == CSS_VALUE_FLOW_ROOT) &&
-        layout_box_is_context_independent(element, include_height);
+        layout_box_is_context_independent(element, include_height, contract);
 }
 
 // tier-3: layout-transient, valid within one measurement generation
@@ -3406,7 +3411,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // before an anonymous table cell records the element's contribution.
     bool intrinsic_style_current = element->styles_resolved() &&
         !element->needs_style_recompute();
-    bool intrinsic_needs_resolved_style = !intrinsic_style_current;
+    bool intrinsic_needs_resolved_style = !intrinsic_style_current ||
+        element->measure_restyled();
     bool intrinsic_needs_multicol_style = element->specified_style &&
         (style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLUMNS) ||
          style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLUMN_COUNT) ||
@@ -5019,7 +5025,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_multicol = is_multicol_container(view_block);
     IntrinsicSizes multicol_spanner_sizes = {};
     bool intrinsic_list_item_scope = false;
-    if (lycon->counter_context &&
+    if (lycon->counter_context && !lycon->generated_effects_prepared &&
         view_block->display.outer == CSS_VALUE_LIST_ITEM &&
         intrinsic_list_item_has_table_ancestor(element)) {
         // CSS Lists 3: intrinsic sizing must use the list item's own counter

@@ -15,7 +15,7 @@ Swift is the one mainstream language built on *mutable value semantics* — and 
 | `var` params = inout borrow, exclusivity-checked (S9.1.3) | `inout` + Law of Exclusivity | writer-vs-writer exclusivity |
 | `var` params invariant (S9.2.1) | `inout` invariant | no covariant-write hole |
 | `pn` method needs `var` receiver | `mutating func` needs `var` | no mutation through a `let` |
-| error exit cancels-then-joins children (S13.3.1) | `TaskGroup` semantics | structured concurrency |
+| error exit cancels-then-joins children (S13.3.1v2) | `TaskGroup` semantics | structured concurrency |
 | cancellation cooperative, observed at park points (S13.3.2) | `Task` cancellation at suspension points | no preemptive kill |
 | must engage `T^E` at the call site (S7.6, S11.4.4) | `try` marking is mandatory | compiler-enforced error acknowledgment |
 
@@ -51,7 +51,7 @@ Both designs are internally coherent, and the difference traces back to divergen
 
 The actor models differ too: a Swift actor is a shared-memory object with an implicit, unbounded queue of awaited method calls; a Lambda task is an Erlang-style explicit actor — one bounded FIFO mailbox, `receive`/`select`, dispatch via `match` (S13.2.1). Lambda additionally makes backpressure a typed value — `send` never blocks and returns `ok^E` with `'mailbox_full'` as an error (S13.2.2) — where Swift actor mailboxes are unbounded with no backpressure story.
 
-Structured concurrency is where the two agree most: Lambda's block-scoped handles (normal exit joins, error exit cancels-then-joins, escape only by typed return — S13.3.1) mirror Swift's `TaskGroup` discipline. The difference is that Swift keeps `Task {}` as an unstructured escape hatch in wide use, while Lambda's only escape is the typed-return one.
+Structured concurrency is where the two agree most: Lambda's block-scoped handles (normal exit joins, error exit cancels-then-joins, escape only by typed return or to the document — S13.3.1v2) mirror Swift's `TaskGroup` discipline. The difference is that Swift keeps `Task {}` as an unstructured escape hatch in wide use, while Lambda's escapes both have an owner: the caller that receives the returned handle, or the document, which cancels then joins its tasks when it is discarded, as SwiftUI's `.task` modifier ties a task to a view.
 
 ## Errors and resources: same goals, different spellings
 

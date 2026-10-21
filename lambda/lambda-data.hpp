@@ -1711,6 +1711,7 @@ typedef struct Input {
     // Only the runtime tree sets `keeps_external_edges`; the table is lazy.
     bool keeps_external_edges;
     struct hashmap* external_edges;
+    struct RootTransitionIndexes* root_transition_indexes; // pool-owned indexes for high-fanout shape roots
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)

@@ -1,26 +1,136 @@
 # Retained computed style, sizing and layout
 
-**Status:** milestones 1–3a, the independent milestone-3b consumers and shared
-update/publication implemented and regression-qualified; general 3b and LLVM
-ancestor-height fidelity remain open, 2026-10-21.  
+**Status:** integrated continuous-document implementation qualified,
+2026-10-21. Conservative adapters are listed below. Later milestone sections
+retain earlier checkpoint history; the integrated outcome supersedes their pending lists.
 **Design:** [CSS Cascade §3.47](../radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs),
 [View Reuse VR15](../radiant/Radiant_Design_View_Reuse.md#vr15--computation-identity-follows-inputs-and-values-not-execution).  
 **Ownership:** D4.5.1v4 / D4.1.4v5 / D4.5.2; no formal ruling changes.
 
 ## Milestones
 
+### Integrated completion session
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: complete the remaining
+continuous-document retained-layout work in one session. Keep the existing
+qualified changes and use focused checks while implementing; run the required
+aggregate gates, full LLVM comparison and paired release timing after integration.
+
+- [x] Make column preparation demand-driven at its assigned inline width.
+- [x] Publish refined stretch constraints to dependent descendants without
+  rerunning unrelated flow; include LLVM's sidebar and definite/cyclic controls.
+- [x] Give retained flow results independent fragments and multiple constraint
+  entries, with A→B→A replay, invalidation and teardown coverage.
+- [x] Retain ordered generated effects with complete entry/output contracts;
+  migrate the common list/pseudo/resource/positioned/table/grid flex subtrees.
+- [x] Preserve computed-value identity across equivalent re-resolution and share
+  immutable font inputs while retaining element-owned mutation/used metrics.
+- [x] Qualify the integrated implementation: native regressions, Radiant baseline,
+  layout lint, complete LLVM geometry/work and isolated paired release trials.
+
+Implemented acceptance covers assigned-width column scheduling, final sidebar
+stretch, A→B→A width/height restoration, destructive measurement probes, empty
+text fragments, stale-input rejection and exact snapshot teardown. Native cases
+cover list numbering, nested quotes, generated counters, HTML images, contained
+absolute children, collapsed table borders, grid tracks and horizontal percentages.
+Font tests distinguish unitless/fixed leading, equivalent values and transitive variables.
+Ancestor replay also expires descendant live associations while preserving owned
+constraint entries: a child can replay B after its parent's A snapshot replaced
+the live fragments, without measuring B again.
+
+Conservative adapters remain for paged/shadow/custom lifecycle, relevance/remembered-size producers, fragmented and
+vertical flow, SVG/form roles, block-dependent percentages, percentage gaps,
+first-line/letter transforms and unnormalized computed expressions. These paths
+retain their existing behavior; this checkpoint does not claim universal CSS
+conformance or browser-equivalent loading speed. Current artifacts:
+`temp/retained-layout-completion/`.
+
+Preparation resolves computed inputs without starting motion or repeatedly applying
+UA font scaling. Intrinsic queries bind both element and view context; native
+controls retain their measurement-owned sizing state. Actual flow rebinds provisional
+used geometry, while table structure construction preserves the box already assigned
+by its caller. Shared UA display suppression keeps closed dialogs hidden on cached
+dispatch. Generated list items publish their implicit increment before counter-set
+and materialize a marker in the ordered stage.
+
+The existing host frame walk commits foreign iframe writes through the shared update
+checkpoint without laying out the parent. Paint-only commits also publish computed
+style validity. The EPUB resize assertion now expects a computed matrix, matching its
+initial-load assertion and [CSS Transforms 1 §4.2](https://www.w3.org/TR/css-transforms-1/#serialization-of-transforms).
+
+The paged formatting-context assertion now checks an outside marker for
+`inline flow-root list-item`, rather than requiring inline text indentation.
+[CSS Lists 3 §3.5](https://drafts.csswg.org/css-lists-3/#list-style-position-property)
+distinguishes block containers from inline boxes. Bundled Chromium 148 confirms
+box/text x=10px and computed `list-style-position: outside`; the retained-page
+test also requires the generated bullet before the text. Evidence:
+`temp/retained-layout-completion/browser-marker.{cjs,json}`.
+
+The complete LLVM capture preserves article geometry, text and style values.
+There are 42,951 equivalent font-weight spelling changes (`400` → `normal`),
+retained explicitly in `classification.json`; canonicalizing only that alias
+makes the full article subtree equal. The sole rendered geometry difference is
+the sidebar child height, 315,655.7 → 443,287.5px, now matching its stretched
+parent. The content height also equals its completed footer bottom.
+
+| Work across the same three document updates | Previous qualified release | Integrated release |
+|---|---:|---:|
+| Height requests | 770,551 | 340,416 |
+| Height computations | 733,176 | 300,578 |
+| Full CSS resolutions | 239,065 | 239,924 |
+| Parent-key invalidations | 2 | 0 |
+
+Height computations fall 59.0%; full CSS work is effectively flat (+0.4%).
+The page still performs three document updates; this does not establish universal
+once-only layout or browser-equivalent loading speed.
+
+Final release qualification passes: **6,095 passed, 143 recorded partial
+outcomes, 2 skipped, zero unexpected failures** (6,240 total). This includes
+184 native text/layout, 502 paged-media and all 3,294 layout-floor cases, plus
+UI/DOM, snapshots, render and input events. The separate core suite passes
+172/172. Layout integer-cast lint, document links and `git diff --check` pass.
+No layout reference, comparator or pass floor changed. The two corrected test
+expectations and their independent evidence are documented above.
+
+Live Example.com and LLVM homepage smoke tests pass 2/2. The actual online
+LangRef also renders and exits cleanly with `MEMTRACK_LIVE bytes=0 count=0`.
+These are focused online checks; the 1,161-URL online inventory was not rerun.
+
+Three interleaved, fresh-process release pairs use identical frozen offline
+LLVM assets with profiling disabled and no concurrent builds/tests:
+
+| Metric | Previous qualified release | Integrated release |
+|---|---:|---:|
+| Load time, trials (s) | 24.480 / 24.203 / 24.697 | 20.935 / 21.264 / 21.362 |
+| Median load time (s) | 24.480 | 21.264 |
+| Median peak RSS (MiB) | 765.0 | 831.8 |
+
+Median loading time falls **13.1%**; independently owned query fragments cost
+**66.8 MiB** of additional median peak RSS. All six loads render successfully.
+Queries retain at most `LAYOUT_CACHE_SIZE` entries per owner; mutable font
+metrics/handles remain element-owned. The conservative adapters above and the
+three document updates remain explicit limits.
+
+Evidence under `temp/retained-layout-completion/`: `baseline-qualified.log`,
+`baseline-qualified-output/`, `review-{native,core,paged}.log`, `online-final.log`,
+`live-langref.*`, `lint-final.log`, full before/after trees and profile logs,
+`comparison-after.json`, `classification{,-summary}.json`, `manifest.json`,
+`source.patch`, `source-fixtures/`, `trials.json` and `report.json`. The immutable
+source patch freezes the measured candidate before results-only documentation
+updates; final documentation is also preserved separately. Earlier failed
+experiments remain available.
+
 | Milestone | Outcome and acceptance | State |
 |---|---|---|
 | 1. Stable style inputs | Repeating a parent's resolution for layout storage/context does not invalidate descendants when computed inputs are unchanged. Font, variables, real style edits and unsupported effects still invalidate correctly. | implemented and qualified |
 | 2. Retained sizing queries | Repeated height requests and A→B→A constraints reuse results; changed width, percent bases, fonts, content/style versions and measurement policy miss correctly. | implemented and qualified for supported horizontal flow subtrees, including flex-item flow |
 | 3a. Computed box boundary | Provisional inline/block roles and new prop allocation do not rerun the cascade. Clean computed geometry is immutable; dependent used values have separate storage. | implemented and qualified for eligible horizontal boxes |
-| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | demand-driven row preparation, independent block/inline/nested-flex flow sharing and height-key normalization qualified; general query-owned results pending |
-| 4. Shared update/publication | Correct retained anonymous-table/list mutations; reuse current script-produced geometry at presentation and skip unchanged geometry reads. | implemented; regression gates pass, LLVM ancestor-height fidelity open |
+| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | implemented and qualified for ordinary horizontal block/inline/flex, lists/pseudos/images/positioning/table/grid and inline percentages, with independently owned fragments and multiple constraint entries |
+| 4. Shared update/publication | Correct retained anonymous-table/list mutations; reuse current script-produced geometry at presentation and skip unchanged geometry reads. | implemented and qualified for continuous-document publication, foreign iframe writes and dependent-child stretch propagation |
 
-Milestone 1 uses stable input identity as a conservative migration step, not
-complete computed-value equality. Milestone 2 must not claim reuse of line
-fragments while the legacy estimate path still returns only a scalar height.
-Keep such limitations explicit until the relevant consumer is migrated.
+Inherited output identity now compares normalized applied inputs separately from
+own input versions. Complex declaration-driven values remain conservative.
+Scalar intrinsic estimates remain distinct from query-owned fragment results.
 
 ## Milestone 3a: computed box boundary
 
@@ -44,7 +154,8 @@ Implemented and qualified for eligible horizontal selected-view boxes.
   Replaced-element height policy remains on its existing path.
 
 Pool ownership remains **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Secondary views,
-table/replaced/form/SVG roles and unsupported effects retain their adapters.
+form/SVG roles and unsupported effects retain their adapters; table and HTML
+replaced roles now retain typed computed/used sizing, including HTML dimension hints.
 Vertical flow still stores assigned inline constraints in mutable props; migrate
 that consumer with retained flow results before extending the computed-box
 boundary. Immutable font sharing, stable boxes/line fragments and loader
@@ -467,6 +578,71 @@ including the known ancestor-height mismatch, remain open. Full comparison and
 binary/input/source provenance: `geometry-report.json`, `manifest.json` and
 `source.patch`; native/lint evidence: `*-qualified.log`.
 
+## LLVM height ownership and repeated queries
+
+**VR15:** isolate the first disagreement between a flex item's natural height
+query and its completed content, then repair the owning stage. Preserve selected
+view ownership (**D4.5.1v4 / D4.5.2**). The owning stage is final flex-content
+reconciliation: provisional scalar heights were becoming final parent constraints
+despite completed descendant flow. Query widths, returned heights and enclosing
+flex stages isolate the disagreement, reproduced in a small native fixture.
+Acceptance: the reduced case's auto-height ancestors contain completed flow on
+initial and retained layout, while definite-height/cyclic controls stay correct;
+LLVM ancestors reflect their completed content without changing article geometry.
+Repeated-work evidence must identify the calling stage and actual computations.
+Scope excludes general ordered-effect replay and unrelated rendering fidelity.
+Verification: focused text/core cases and Chromium, full LLVM geometry/work
+comparison, then Radiant baseline and layout lint. Timing claims require three
+isolated release pairs. Artifacts: `temp/llvm-natural-flow/`.
+
+The trace isolates the overwrite: `.content` completes at 443,287.53px, but
+`.main` restores its 315,655.66px estimate as a definite stretched cross size.
+An initial attempt to change final axis-definiteness policy breaks the cyclic
+calc control and taller-sibling stretch; `rejected-axis.patch` and
+`axis-focused.log` preserve that rejected experiment. The implementation instead
+marks block sizes inherited from estimated auto row lines as provisional and
+propagates completed growth without changing percentage/stretch computation.
+Authored heights remain constraints, and a taller sibling's allocated line size
+cannot shrink during refinement. Retained content keys include that policy.
+
+The initial whole-page height query originates in block layout's percentage
+replaced-descendant fallback. Flex already owns natural contributions at its
+assigned widths; running that block fallback first walks 84,600 descendants at
+the wrong width. The flex path now skips it. Other expensive queries remain in
+flex cross sizing, column preparation at max-content width (11,716px), and flex
+basis at the assigned content width (863px). General query-owned results and
+ordered effects are still required to remove those repeated walks.
+
+Qualified: 179 native text/layout and 170 core tests pass, including the
+60px/100px mixed-font reproducer, taller-sibling and definite stretch, retained
+reflow, width/text mutation and percentage-SVG control. Chromium independently
+confirms these cases. LLVM height computations fall 817,928→733,176 (10.4%) and
+requests 855,303→770,551; document layouts remain three. Raw tree comparison is
+preserved: skipping the speculative query omits two unrendered subtrees (mobile
+header and a hidden theme toggle). The complete article subtree is identical;
+the rendered tree differs only in four parent heights, now 443,287.5px. The
+sidebar's nested percentage-height box remains stale, and existing font/footer
+differences from Chromium remain outside this milestone. Full release Radiant
+baseline: **6,089 passed, 143 existing partial outcomes, 2 skipped, zero unexpected
+failures** (6,234 total), including all 3,294 layout floors, 664 UI cases and
+32 input-event files. Layout integer-cast lint and diff checks pass; no reference,
+floor or comparator changed.
+
+Three isolated, interleaved release pairs use identical local LLVM assets.
+Load times are 25.093/25.372/25.084s before and 24.132/24.483/24.261s after:
+median **25.093→24.261s (3.3% faster)**. All six runs exit successfully and render.
+Median peak RSS is 760.6→763.8MiB; this phase does not improve memory usage.
+Raw full-tree comparison and rendered/hidden classification are preserved in
+`comparison-after.json` and `classification.json`; timing, binary/source/input
+provenance and gate evidence are in `report.json`, `manifest.json`,
+`benchmark-source.patch`, `source.patch` and `baseline.log`.
+
+Next: migrate preliminary column height measurement from max-content width to
+the assigned-width query, preserving automatic minima and definite/cyclic
+controls. Separately propagate a refined parent height to dependent children
+without replaying unrelated content; LLVM's sidebar supplies the acceptance case.
+General fragment ownership and ordered-effect contracts remain pending.
+
 ## Verification budget
 
 Use `test_radiant_core_gtest` for focused style/sizing invariants, then relevant
@@ -560,3 +736,131 @@ The previously measured release median was 47.319 s with four document layouts,
 2,573,534 recursive height calls and 1,178,513 full CSS resolutions, including
 828,676 parent-key misses. These are historical measurements, not a baseline
 measurement of the current binary.
+
+
+## Online Notion/Kafka follow-up (2026-10-21)
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Finite acceptance:
+Notion completes a fresh headless load; Kafka follows its redirect without
+running discarded-document background work; container-query changes, script
+microtasks, same-document timers and shape-owner retirement retain their
+behavior. Verify focused regressions, required Radiant/Lambda baselines, then
+isolated release page trials. No timing-dependent readiness shortcut is added.
+
+Notion repeatedly alternated query-probe and committed layout. Its inline-size
+container widths were stable, but convergence also hashed uncontained heights;
+generated/motion content changed those heights and triggered whole-document
+recascades. A shared axis-specific geometry key repairs the dependency identity.
+Container query constants also invoked ancestor font/custom-property resolution
+on every evaluation: absolute math now resolves before requesting that context.
+The provider and convergence collector share zoom-normalized content metrics.
+Gated per-pass settlement logs survive a root that never finishes layout.
+
+Kafka redirects `/documentation/` to `/43/getting-started/introduction/`.
+The old snapshot settlement built the 107-document Lunr search index in both
+documents. Settlement now completes the current microtask checkpoint, then
+leaves timers queued when the final pending navigation targets another
+document. The loader retires that old owner before following navigation.
+Fragment-only navigation still drains the current document's tasks; a
+microtask changing the pending target is observed before classification.
+
+The remaining index is real page JavaScript. It exposed almost a billion
+linear shape-edge visits; Input-owned root indexing reduces those visits while
+preserving identity, budgets and teardown (**D3.4.3v5 / D3.4.4v4 / D4.2.6**).
+RegExp protocol flag reads also use the existing unboxed descriptor helper
+instead of allocating guest descriptor objects (**D6.2.2v2**). Neither change
+removes or delays the final document's search-index task.
+
+An intermediate release (`descriptor-fixed.exe`) completes Notion in 9.049 s
+and Kafka in 40.479 s, versus the source-current baseline's Notion >240 s
+and Kafka 85.808 s. Kafka spends 38.502 s settling script tasks and 0.115 s
+in layout. This is progress, not browser-speed completion: retained closure
+execution/search indexing remains the Kafka bottleneck. An eager compiled
+backend experiment regresses to 162 s and peaks at 8.6 GiB during MIR linking;
+the established browser AST adapter remains unchanged. The independent shared
+Unicode cursor repair is recorded in `JS_MVP_Integration.md`.
+
+Artifacts: `temp/notion-kafka-tuning/` contains before/after release executables,
+matching module sets, native samples/link maps, phase logs and result JSON.
+Final repeat measurements and aggregate qualification follow below.
+
+**Build-profile isolation:** native consumers shared the
+`build/lib/liblambda-lib-cpp.a` output across configurations. The utility target
+now isolates platform/build configuration in JSON; wrappers and explicit Linux
+linker groups follow that directory. The generator regression builds and
+executes consumers through debug → release → debug → release and checks
+preservation of both archives. This is a build correctness fix, not a measured
+page speedup: rebuilding the original source with the corrected policy produces
+exactly the original 7508 CLI hash. Its utility functions come from the CLI's
+own release objects, so the intermediate CLI timings remain valid.
+
+**Qualification:** the full Lambda/Input baseline passes **7,988/7,988**,
+including 319 forced-GC cases. The Radiant baseline has **zero unexpected
+failures**: 6,114 passed, 143 existing partial outcomes and 2 skipped. The
+subsequent release rebuild with isolated utility archives passes all 153 CSS
+animation/cascade, 43 item/shape, 188 native text/layout and 838 MVP cases.
+The build-profile switch regression, layout integer-cast lint and diff checks
+also pass. The new inline-size/generated-content fixture settles both initial
+and retained flow at 120×30; navigation tests retain same-document timers and
+current-task microtasks while deferring discarded-document timers.
+
+**Final isolated release trials:** three interleaved before/after Kafka pairs
+and three Notion loads, normal HTTP cache, profiling disabled, fresh process per
+load. Times include script settlement, render and cleanup.
+
+| Page | Before (s) | After (s) | Median after |
+|---|---|---|---:|
+| Kafka | 86.267 / 84.067 / 84.279 | 38.144 / 38.533 / 38.365 | **38.365 s** |
+| Notion AI | >240 s timeout | 9.139 / 7.648 / 7.711 | **7.711 s** |
+
+Kafka's median falls **84.279→38.365 s (54.5%)**. All nine final loads exit 0,
+render, match no runtime/resource error patterns and report **0 live tracked
+bytes / 0 allocations**. Kafka's remaining median script settlement is
+**37.418 s**, versus **0.104 s layout**; the final document's genuine search
+index is still expensive. Notion's median layout is 6.357 s, with query
+convergence completing rather than oscillating. Browser-speed completion is
+still open for the JavaScript workload.
+
+The final hash correction mixes name entropy into the root table's low bucket
+bits; the complete 7,988-case core baseline and all four focused native suites
+pass again afterwards. The Radiant sources remain those qualified by the
+aggregate above. Main CLI and frozen Node images match the measured candidate;
+release archive members were checked against their release object files.
+
+Reproduction/provenance: `temp/notion-kafka-tuning/{final-summary,final-trials,
+qualification,source-hashes,final-module-hashes}.json`; per-run stdout, phase
+TSV and Lambda logs are beside them. Source base `b8521d3c1` plus the working
+patch; before CLI SHA-256 `7508594d94e582397aafe10e1766fcf74673cd3657595b87b909d545880d0e54`,
+after `3d9d230c4a311c7c4c1c04e7594bc40f9dcb8a13001c24e2d5610f71648f0335`.
+
+## Session regression coverage (2026-10-21)
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: retain the earlier
+milestone regressions and add cross-operation tests for the remaining gaps.
+Work bounds use cache/computation/layout counters, not wall-clock thresholds.
+These are deterministic local fixtures; online timing remains separate evidence.
+
+| Session change | Regression coverage |
+|---|---|
+| Geometry-only CSS rebinding and stable inherited identity | `IncrementalCssTest.RebindsOnlyChangedGeometryAndRestoresAuthoredValues`, `InheritedIdentityFollowsComputedValuesAndKeepsFontMetricsOwned`, and new `RepeatedContextChangesDoNotAmplifyAncestorStyleInvalidations`: 32 alternating contexts preserve descendant CSS; an inherited font edit updates them and stabilizes again. |
+| Demand-driven intrinsic sizing and independent query identities | Existing axis, A→B→A, percentage-base, font/resource and explicit-dirty cases; new `InterleavedIntrinsicAxesKeepComputedStyleAndMeasurementsHot` keeps both axes cached across 32 mixed requests and refreshes after a height edit. |
+| Retained flow and ordered generated effects | Existing owned-fragment, ancestor-replay, nested-natural-height and stretch cases; `CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrderedEffects` now repeats both constraint entries 16 times for lists, generated content, images, positioning, tables, grids and inline percentages, checking geometry and zero additional flow computations. |
+| Shared update/publication and Notion convergence | Existing foreign-frame, font, table/list and mutation tests; new `InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce` crosses the query threshold four times, checks generated geometry and ensures repeated reads do not lay out again. |
+| Container constant fast path and owner-relative values | Existing axis/writing-mode and absolute/em cases; new `ContainerRelativeMathUsesOwnerMetricsAndInvalidatesItsCachedResult` checks rem/viewport math against deliberately different fallback metrics, height-independent hits and owner-generation invalidation. |
+| Kafka redirect task settlement | Existing synchronous/microtask, fragment-only and cross-document→fragment cases; new nested-microtask fragment→cross-document and absolute same-document cases preserve the final checkpoint and correct timer policy. |
+| Root shape index (**D3.4.3v5 / D3.4.4v4 / D4.2.6**) | Existing type/spelling/budget and owner-retirement cases; new collision/identity test distinguishes naturally colliding FNV spellings, Symbols and private names; negative-lookup test checks later publication after budget recovery. |
+| Shared Unicode cursor (**D5.3.3 / D5.3.5 / D5.4**) | Existing compiled-call/GC/runtime-reset and UTF-16 range cases; new eviction test interleaves six sources across the four-entry cache and collection, and mutable-buffer test verifies changed bytes never reuse immutable offsets/lengths. |
+| Unboxed RegExp descriptor reads (**D6.2.2v2**) | New `JsOpt.RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion` covers inherited accessor receivers, data descriptors, thrown getters and undefined getters under AST and MIR. |
+| Native build-profile isolation | `utils/test_premake_generator.py` builds and executes debug→release→debug→release consumers, preserving utility/image/archive outputs and checking wrapper/linker paths. |
+
+The renamed `test_radiant_core_gtest` remains the registered native runner;
+no duplicate runner, network fixture or load-time cutoff is added.
+
+Qualification: **1,521/1,521** tests pass across the complete affected suites:
+core 174, text/layout 191, CSS 154, item/shape 45, MVP 840 and JS optimization
+117. Native engine suites use `release_native`; JS optimization uses the
+instrumented debug host for its trace contracts, including AST/MIR execution of
+the new descriptor case. The Premake profile-switch self-test, layout cast lint
+and diff checks also pass. Reports: `temp/session-unit-coverage/`. This addition
+changes tests/documentation only; the earlier broad engine gates and page timings
+are not rerun or presented as fresh measurements.

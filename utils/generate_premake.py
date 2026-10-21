@@ -1349,6 +1349,19 @@ class PremakeGenerator:
         resolved.update(override)
         return resolved
 
+    def _internal_static_archive(self, project_name: str) -> str:
+        """Resolve configured archive directories for explicit linker groups too."""
+        target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
+        target = next((target for target in self.config.get('targets', [])
+                       if target.get('name') == target_name), {})
+        directory = target.get('target_dir', 'build/lib').rstrip('/')
+        prefix = target.get('target_prefix', 'lib')
+        output = target.get('target_name', project_name)
+        filename = f'{prefix}{output}.a'
+        if directory == 'build/lib':
+            return f'../lib/{filename}'
+        return f'{directory}/{filename}' if os.path.isabs(directory) else f'../../{directory}/{filename}'
+
     def _executable_external_dependencies(self, target: Dict[str, Any]) -> List[str]:
         """Return the ordered static/dynamic external closure for an executable.
 
@@ -1933,7 +1946,7 @@ class PremakeGenerator:
                     target_name = dep[:-4] if dep.endswith('-cpp') else dep
                     target = configured_targets.get(target_name, {})
                     if target.get('link', 'static') != 'dynamic':
-                        linux_group_archives.append(f'../lib/lib{dep}.a')
+                        linux_group_archives.append(self._internal_static_archive(dep))
                         continue
                     target_dir = target.get('target_dir', 'build/lib').rstrip('/')
                     target_prefix = target.get('target_prefix', 'lib')
@@ -2115,7 +2128,7 @@ class PremakeGenerator:
             f'project "{lib_name}"',
             f'    kind "{kind}"',
             '    language "C++"',
-            '    targetdir "build/lib"',
+            f'    targetdir "{lib.get("target_dir", "build/lib") if lib else "build/lib"}"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
             *self._static_lib_rebuild_lines(kind),
@@ -2877,11 +2890,7 @@ class PremakeGenerator:
                 if os.path.isabs(target_dir):
                     return f'{target_dir}/{filename}'
                 return f'../../{target_dir}/{filename}'
-            else:
-                suffix = '.a'
-            if self.use_linux_config and suffix == '.a':
-                return f'../lib/lib{project_name}{suffix}'
-            return f'../lib/lib{project_name}{suffix}'
+            return self._internal_static_archive(project_name)
 
         # Initialize test frameworks tracking
         test_frameworks_added = []

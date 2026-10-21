@@ -172,9 +172,23 @@ def expect_profile_isolated_archives(module) -> None:
     if not premake:
         fail('premake5 not found')
     generator = linux_validation_generator(module)
+    providers = []
     for name in ('archive-readers', 'image-codecs'):
         library = generator.external_libraries[name]
         target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
+        providers.append((name, target, library['lib']))
+    utility = next(t for t in generator.config['targets'] if t['name'] == 'lambda-lib')
+    utility_archive = generator._internal_static_archive('lambda-lib-cpp')
+    emitted = generate_validation_host(module, 'linux', ['lambda-lib'])
+    if utility_archive not in emitted:
+        fail('native host linker groups ignore the configured utility archive directory')
+    generator._generate_complex_library(utility)
+    emitted = '\n'.join(generator.premake_content)
+    if emitted.count('targetdir "' + utility['target_dir'] + '"') != 2:
+        fail('the utility implementation and wrapper do not share profile isolation')
+    providers.append(('lambda-lib', dict(utility, name='lambda-lib-cpp'),
+                      utility_archive.removeprefix('../../')))
+    for name, target, archive_path in providers:
         with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory:
             work = Path(directory)
             (work / 'mode.c').write_text('int archive_mode(void) { return PROFILE_VALUE; }\n')
@@ -204,7 +218,7 @@ def expect_profile_isolated_archives(module) -> None:
                 '    targetextension ".exe"',
                 '    files { "app.c" }',
                 '    dependson { "' + target['name'] + '" }',
-                '    linkoptions { "../../' + library['lib'] + '" }',
+                '    linkoptions { "../../' + archive_path + '" }',
                 '',
             ]))
             commands = [[premake, '--file=' + str(script), 'gmake']]
@@ -223,7 +237,7 @@ def expect_profile_isolated_archives(module) -> None:
                 executable = work / 'bin' / profile / 'app.exe'
                 if subprocess.run([str(executable)], cwd=work).returncode:
                     fail(f'{name} {profile} executable linked the other profile archive')
-                archive = work / library['lib'].replace('%{cfg.platform}', 'native').replace('%{cfg.buildcfg}', profile)
+                archive = work / archive_path.replace('%{cfg.platform}', 'native').replace('%{cfg.buildcfg}', profile)
                 snapshots.setdefault(profile, (archive, archive.read_bytes()))
                 # switching profiles must preserve the previously built archive's contents.
                 for previous, (path, contents) in snapshots.items():

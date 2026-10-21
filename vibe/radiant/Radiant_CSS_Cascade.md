@@ -11,7 +11,7 @@ standard-host regression harness remain disabled in ordinary page loads.
 **Scope:** CSS condition evaluation, matching, specified-style storage, style
 epochs, custom properties, pseudo styles, and the seam to computed view props.  
 **Extension (2026-10-20):** native incremental computed/used resolution, §3.45;
-retained style, sizing and layout architecture, §3.47 (adopted; implementation in progress).
+retained style, sizing and layout architecture, §3.47 (common continuous-document paths qualified 2026-10-21; conservative adapters documented there).
 **Related record:** [Slow Online-Page Loading](Radiant_Issue_Slow_Page_Loading.md).  
 **Spec linkage:** [Formal Design](../../doc/Lambda_Formal_Design.md)
 **D4.1.4v4** (arena versus pool reclamation), **D4.2.1v3–D4.2.5v3**
@@ -2724,13 +2724,10 @@ validity, followed by the retained-geometry defects above. Raw counters:
 
 ### 3.47 Resolve and lay out once for unchanged inputs
 
-**Status: adopted 2026-10-20; staged implementation in progress.**
-Stable style inputs, retained height queries and the computed-box boundary are
-qualified for supported horizontal flow. The first milestone-3b consumer is
-also qualified: demand-driven flex sizing and completed text flow shared with
-final layout. General query-owned results remain pending; shared continuous-document
-update/publication is implemented and undergoing qualification;
-historical and current measurements are separated in the
+**Status: adopted 2026-10-20; integrated continuous-document implementation qualified 2026-10-21.**
+Continuous-document updates share publication, computed inheritance identity,
+demand-driven sizing and independently owned flow results. Current acceptance,
+qualification and release measurements are recorded in the
 [implementation record](../impl/Radiant_Impl_Retained_Layout.md).
 
 This extends **VR1–VR6 / VR10 / VR13**; ownership remains governed by
@@ -2779,6 +2776,35 @@ not first estimate the height of the same subtree.
   geometry, with style lifetime independent of scratch. Retained anonymous
   table/list normalization must be correct before removing the loader rebuild.
 
+**Integrated retained-result contract (VR15):**
+
+- Row and column preparation request inline contributions first; block contributions
+  wait for the assigned wrapping width. Refined auto-line stretch propagates to
+  content that reads block size, preserving definite/cyclic percentage policy.
+- An ordered source-tree stage resolves counters, quotes, list markers and generated
+  before/after content once. Sizing and flow consume that output. Closed-details and
+  scripting-enabled noscript contents are omitted. Paged, shadow-projection and
+  explicit custom-layout documents retain their existing effect adapter. Content-visibility
+  and contain-intrinsic-size producers also keep that adapter until their on-demand effects
+  and remembered sizes have an explicit preparation contract. Preparation does not
+  start animations or transitions; actual flow binds provisional used geometry.
+- Selected-view query entries own text rectangles, fragment unions, child placements,
+  baselines/trim state, used boundaries, positioned links, table borders and grid
+  track/placement output. Several entries survive A→B→A requests and destructive
+  measurement probes; only the live association expires when geometry is rewritten.
+  Generation, content/style/environment and constraint keys guard replay and teardown.
+- Assigned inline size admits horizontal percentage lengths, row percentage bases,
+  HTML image hints, ordinary lists/pseudos, contained positioning, tables and grids.
+  Root percentage bases remain keyed. Block-dependent percentages, percentage gaps,
+  first-line/letter transforms, fragmentation, SVG/form and other unmigrated consumers
+  keep conservative adapters; no result from a different sizing policy is substituted.
+- Inherited computed output has its own revision, separate from own input revision.
+  Deferred line-height kind, text/list state and transitive custom properties remain
+  part of identity. Immutable font selection/spacing inputs are interned by exact
+  field equality; mutable metrics, handles and shadow ownership remain element-owned.
+  Declaration-driven SVG values and unnormalized expressions retain conservative identity.
+
+
 The shared continuous-document checkpoint validates a selected-tree publication
 against root identity, content/style/subtree revisions, cascade,
 viewport/input capabilities, font resources/defaults, raster scale and
@@ -2791,6 +2817,13 @@ pass records its inputs before observer sampling; subsequent writes stay dirty.
 Paint-only/detached commits can advance their consumed versions only while the
 published environment still matches. Paged editions and explicit custom-layout
 lifecycle passes retain their own flow entry points.
+
+The host frame walk commits pending iframe mutations through this same checkpoint
+before sampling the child. A parent callback can write into a child document without
+dirtying the parent's layout. Paint-only commits publish their resolved-style flags
+together with presentation values. Computed transforms consequently serialize as
+matrices after both initial load and resize, as required by
+[CSS Transforms 1 §4.2](https://www.w3.org/TR/css-transforms-1/#serialization-of-transforms).
 
 Ordinary invalidation retains the existing view-pool epoch, while incremental
 updates preserve clean sibling results. Flex intrinsic
@@ -2832,6 +2865,8 @@ resolutions fall from 595,226 to 325,474. Three paired release trials give a
 computations and four document layouts remain. Retained completed flow results
 and shared publication were the next milestones at that checkpoint. The later
 implementation and evidence are recorded below and in the implementation record.
+
+**Earlier implementation checkpoints (historical):**
 
 **First flow migration (milestone 3b):** row-flex preparation requests width
 without estimating height at an unassigned wrapping width. Measurement entries
@@ -2894,6 +2929,15 @@ generated effects, resources and dependent lengths remain on existing paths;
 this does not yet provide independent fragments for multiple constraints
 (**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**).
 
+The conservative flex path also distinguishes provisional auto-line heights from
+authored constraints. Final stretch keeps its percentage-sizing policy, while
+completed child boxes can enlarge an underestimated automatic line and propagate
+that extent through nested row containers. A taller sibling's allocated stretch
+size remains a floor; definite height and min/max constraints still apply. Both
+retained content paths key this provisional policy. Block layout leaves cyclic
+resource contribution queries to flex when flex owns the formatting context,
+avoiding a subtree estimate before flex has assigned wrapping widths (**VR15**).
+
 Acceptance: nested document/flex fixtures compute unchanged style inputs and
 each sizing query once; repeated geometry reads do no additional work; A→B→A
 constraints reuse A; inherited font/color/variable edits and changed
@@ -2902,3 +2946,19 @@ correct geometry and script behavior, with duplicate computation counters
 separate from query counts. Performance evidence uses comparable release
 trials. Milestones and qualification are tracked in
 [the implementation record](../impl/Radiant_Impl_Retained_Layout.md).
+
+### Container-query convergence follow-up (2026-10-21)
+
+**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**: convergence and
+condition-result caches now use one `css_container_geometry_key`. It projects
+logical query axes through writing mode and includes only eligible physical
+dimensions. An inline-size container's changing uncontained block extent cannot
+request another whole-document cascade. The provider and convergence collector
+also share zoom-normalized content-box metrics. Size containers still observe
+both axes; container identity, font and name dependencies remain relevant.
+
+Constant query thresholds first use the existing CSS math evaluator with
+absolute units. Only unresolved expressions ask the container's CSSOM numeric
+resolver for its font/custom-property context. Relative units retain that
+owner's semantics. Native regressions cover axis projection, height-only changes,
+aspect ratio, owner-generation changes and resolver call counts.

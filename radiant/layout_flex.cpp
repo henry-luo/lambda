@@ -672,6 +672,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                   container->source_loc());
         return;
     }
+    FlexContainerLayout* parent_layout = lycon->flex_container;
     lycon->flex_container = lam::up(flex);
     flex->scratch_mark = mark;
     flex->lycon = lam::up(lycon);  // Store layout context for intrinsic sizing
@@ -823,6 +824,12 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
     }
+
+    // preserve final stretch/percentage semantics while allowing underestimated auto lines to grow.
+    flex->block_size_is_provisional = height_assigned_by_parent && !has_explicit_height &&
+        parent_layout && parent_layout->container == container->parent &&
+        is_main_axis_horizontal(parent_layout) &&
+        (parent_layout->block_size_is_provisional || !parent_layout->has_definite_cross_size);
 
     bool has_explicit_main = main_axis == LAYOUT_AXIS_X
         ? has_explicit_width : has_explicit_height;
@@ -1694,8 +1701,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // a clean item of an incremental pass replays its last measurement and content pass.
         flex_retained_item_begin(lycon, item, container_content_width, container_content_height);
         if (!(has_definite_w && has_definite_h)) {
-            bool width_only = is_main_axis_horizontal(flex_layout) &&
-                !layout_block_inline_axis_is_vertical(item_block);
+            // column bases query height after cross-width constraints are available too.
+            bool width_only = !layout_block_inline_axis_is_vertical(item_block);
             measure_flex_child_content(lycon, child, width_only);
         }
         // Step 3: Check if should skip (absolute, hidden)

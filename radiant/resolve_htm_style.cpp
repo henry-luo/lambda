@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "css_resolved_style.hpp"
 #include "rdt_video.h"
 #include "event.hpp"
 #include "render.hpp"
@@ -296,6 +297,8 @@ static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* bloc
     block->display.inner = RDT_DISPLAY_REPLACED;
     block->ensure_block(lycon);
     block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+    radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_X);
+    radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_Y);
     block->blk->given_width = lycon->block.given_width = width;
     block->blk->given_height = lycon->block.given_height = height;
 }
@@ -325,6 +328,8 @@ void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* elem
 }
 
 static void apply_html_context_default_size(LayoutContext* lycon, float width, float height) {
+    radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_X);
+    radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_Y);
     lycon->block.given_width = width;
     lycon->block.given_height = height;
 }
@@ -536,10 +541,12 @@ struct HtmlDimensionPolicy {
     bool store_resolved_percent = false;
 };
 
-static void apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
+void layout_apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
                                   LayoutAxis axis, float value, bool is_percent,
                                   float percent_base, bool clear_unresolved_percent,
                                   bool store_resolved_percent) {
+    radiant::css_resolved_style_record_html_axis(lycon, axis, value, is_percent,
+        block != nullptr, clear_unresolved_percent, store_resolved_percent);
     float resolved = is_percent
         ? (percent_base > 0.0f ? percent_base * value / 100.0f : -1.0f)
         : value;
@@ -563,7 +570,7 @@ static void apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
 static void apply_html_dimension_default(LayoutContext* lycon, ViewBlock* block,
                                          LayoutAxis axis, float value,
                                          const HtmlDimensionPolicy* policy) {
-    apply_html_axis_value(lycon, policy->persist ? block : nullptr, axis, value,
+    layout_apply_html_axis_value(lycon, policy->persist ? block : nullptr, axis, value,
                           false, 0.0f, policy->clear_unresolved_percent,
                           policy->store_resolved_percent);
 }
@@ -598,12 +605,12 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
         if (policy->positive_percent_only && dimension.value <= 0.0f) return;
         float base = axis == LAYOUT_AXIS_X
             ? policy->width_percent_base : policy->height_percent_base;
-        apply_html_axis_value(lycon, policy->persist ? block : nullptr,
+        layout_apply_html_axis_value(lycon, policy->persist ? block : nullptr,
                               axis, dimension.value, true, base,
                               policy->clear_unresolved_percent,
                               policy->store_resolved_percent);
     } else {
-        apply_html_axis_value(lycon, policy->persist ? block : nullptr,
+        layout_apply_html_axis_value(lycon, policy->persist ? block : nullptr,
                               axis, dimension.value, false, 0.0f,
                               policy->clear_unresolved_percent,
                               policy->store_resolved_percent);
@@ -1305,6 +1312,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (elmt->has_attribute("controls")) {
             block->display.inner = RDT_DISPLAY_REPLACED;
             block->ensure_block(lycon);
+            radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_X);
+            radiant::css_resolved_style_note_axis(lycon, LAYOUT_AXIS_Y);
             lycon->block.given_width = 300;
             block->blk->given_width = 300;
             lycon->block.given_height = 54;
@@ -1981,9 +1990,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_DIALOG:
         // HTML §4.12.4: <dialog> without the 'open' attribute is not rendered.
         // Chrome UA: dialog:not([open]) { display: none; }
-        if (!elmt->has_attribute("open")) {
-            block->display.outer = CSS_VALUE_NONE;
-            block->display.inner = CSS_VALUE_NONE;
+        if (layout_display_is_none(css_default_display_for_element(elmt->as_element(), elmt))) {
+            block->display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
         } else if (elmt->is_element() && elmt->as_element()->is_dialog_modal()) {
             // modal dialogs use the fixed, centered fit-content UA box before authored insets apply
             apply_html_centered_popup_style(lycon, block, 1.0f);

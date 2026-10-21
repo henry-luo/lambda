@@ -257,6 +257,9 @@ void layout_profiler_report(LayoutContext* lycon) {
         (long long)g_layout_shifted_reuse_count, (long long)g_layout_flex_retained_count);
     log_notice("[LAYOUT_PROFILE] completed-flex-flow: measured=%llu reused=%llu",
         (unsigned long long)p->flex_flow_measures, (unsigned long long)p->flex_flow_reuses);
+    log_notice("[LAYOUT_PROFILE] retained-stage: effects=%d probe=%d generation=%u",
+        lycon->generated_effects_prepared, lycon->css_query_probe,
+        lycon->doc && lycon->doc->view_tree ? lycon->doc->view_tree->measurement_cache_generation : 0);
 
     for (int i = 0; i < p->top_node_count; i++) {
         const LayoutProfileNode* entry = &p->top_nodes[i];

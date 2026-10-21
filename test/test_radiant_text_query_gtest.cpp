@@ -17,6 +17,7 @@
 #include "radiant_render_test_utils.hpp"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
+#include "../lib/hash.h"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
@@ -255,7 +256,207 @@ protected:
         ui.document = lam::up(document);
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
+    DomElement* load_script_source(const char* source) {
+        Url* base = get_current_dir();
+        if (!base) return nullptr;
+        Url* url = url_parse_path_or_url("test/html/navigation.html", base);
+        url_destroy(base);
+        Pool* pool = pool_create();
+        if (!url || !pool) {
+            if (url) url_destroy(url);
+            if (pool) pool_destroy(pool);
+            return nullptr;
+        }
+        DocumentJsHostConfig host = {}; host.ui_context = &ui;
+        host.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+        host.auto_close_event_loop = true;
+        host.virtual_clock_enabled = true;
+        // retain the redirecting document itself, before the outer loader follows it.
+        document = load_lambda_html_doc(url, nullptr, 320, 200, pool,
+            source, false, true, &host);
+        if (!document) { url_destroy(url); pool_destroy(pool); return nullptr; }
+        if (!dom_document_finalize_loader_pool(document, pool) || !document->root) return nullptr;
+        ui.document = lam::up(document);
+        return dom_find_element_by_id(document->root->as_element(), "result");
+    }
 };
+
+TEST_F(RadiantTextQuery, CrossDocumentNavigationFinishesMicrotasksWithoutDrainingOldTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        var result=document.getElementById('result');
+        setTimeout(function(){result.setAttribute('data-timer','yes')},0);
+        Promise.resolve().then(function(){result.setAttribute('data-microtask','yes')});
+        location.replace('next.html');
+        result.setAttribute('data-sync','yes');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-sync"), "yes");
+    EXPECT_STREQ(result->get_attribute("data-microtask"), "yes");
+    EXPECT_EQ(result->get_attribute("data-timer"), nullptr);
+    ASSERT_NE(document->pending_navigation_url, nullptr);
+    EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
+}
+
+TEST_F(RadiantTextQuery, FragmentNavigationRetainsCurrentDocumentTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace('#result');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, NavigationClassificationUsesTheCompletedMicrotaskCheckpoint) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace('next.html');
+        Promise.resolve().then(function(){location.replace('#result')});
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body { margin:0 }
+        #container { container-type:inline-size; width:120px }
+        @container (min-width:100px) {
+            #result::before { content:'generated'; display:block; height:30px }
+        }
+    </style><div id="container"><div id="result"></div></div>)HTML"), nullptr);
+    // probe flow suppresses generated effects; that uncontained height is not a query input.
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        layout_html_doc(&ui, document, pass != 0);
+        expect_box("container", 0, 0, 120, 30);
+        expect_box("result", 0, 0, 120, 30);
+    }
+}
+
+TEST_F(RadiantTextQuery, NestedMicrotaskNavigationDefersDiscardedDocumentTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        var result=document.getElementById('result');
+        setTimeout(function(){result.setAttribute('data-timer','ran')},0);
+        location.replace('#result');
+        Promise.resolve().then(function(){
+            result.setAttribute('data-first','yes');
+            Promise.resolve().then(function(){
+                location.replace('next.html');
+                result.setAttribute('data-last','yes');
+            });
+        });
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-first"), "yes");
+    EXPECT_STREQ(result->get_attribute("data-last"), "yes");
+    EXPECT_EQ(result->get_attribute("data-timer"), nullptr);
+    ASSERT_NE(document->pending_navigation_url, nullptr);
+    EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
+}
+
+TEST_F(RadiantTextQuery, AbsoluteSameDocumentNavigationRetainsTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace(location.href.split('#')[0]+'#result');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce) {
+    DomElement* result = load_script_source(R"HTML(<style>
+        body { margin:0 }
+        #container { container-type:inline-size; width:120px }
+        #result::before { content:'generated'; display:block; height:10px }
+        @container (min-width:100px) { #result::before { height:30px } }
+    </style><div id="container"><div id="result"></div></div>)HTML");
+    ASSERT_NE(result, nullptr);
+    DomElement* container = dom_find_element_by_id(document->root->as_element(), "container");
+    ASSERT_NE(container, nullptr);
+    layout_html_doc(&ui, document, false);
+    expect_box("result", 0, 0, 120, 30);
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        bool narrow = pass % 2 == 0;
+        ASSERT_TRUE(container->set_attribute("style", narrow ? "width:80px" : "width:120px"));
+        uint64_t layouts = document->view_tree->document_layout_count;
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts + 1);
+        expect_box("container", 0, 0, narrow ? 80.0f : 120.0f, narrow ? 10.0f : 30.0f);
+        expect_box("result", 0, 0, narrow ? 80.0f : 120.0f, narrow ? 10.0f : 30.0f);
+        layouts = document->view_tree->document_layout_count;
+        for (unsigned read = 0; read < 16; ++read) {
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            ASSERT_TRUE(layout_update_document(&ui, document));
+        }
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    }
+}
+
+TEST_F(RadiantTextQuery, PreparedStylesKeepInheritedFontsAndRebindControlPercentages) {
+    ASSERT_NE(load("test/html/layout_prepared_context.html"), nullptr);
+    DomElement* code = dom_find_element_by_id(document->root->as_element(), "code");
+    DomElement* control = dom_find_element_by_id(document->root->as_element(), "control");
+    DomElement* closed = dom_find_element_by_id(document->root->as_element(), "closed");
+    DomElement* generated = dom_find_element_by_id(document->root->as_element(), "generated-item");
+    ASSERT_NE(code, nullptr);
+    ASSERT_NE(control, nullptr);
+    ASSERT_NE(closed, nullptr);
+    ASSERT_NE(generated, nullptr);
+    for (unsigned pass = 0; pass < 3; pass++) {
+        if (pass) ASSERT_TRUE(code->set_attribute("style", pass == 1
+            ? "background:blue" : "background:silver"));
+        layout_html_doc(&ui, document, pass != 0);
+        ASSERT_NE(code->font.get(), nullptr);
+        EXPECT_FLOAT_EQ(code->font->font_size, 13.0f);
+        EXPECT_FLOAT_EQ(control->width, 100.0f);
+        EXPECT_EQ(closed->view_type, RDT_VIEW_NONE);
+        ASSERT_NE(generated->pseudo.get(), nullptr);
+        DomElement* after = generated->pseudo->after;
+        ASSERT_NE(after, nullptr);
+        ASSERT_NE(after->pseudo.get(), nullptr);
+        ASSERT_NE(after->pseudo->marker.get(), nullptr);
+        MarkerProp* marker = after->pseudo->marker->marker_prop();
+        ASSERT_NE(marker, nullptr);
+        ASSERT_NE(marker->text_content.get(), nullptr);
+        EXPECT_STREQ(marker->text_content.get(), "2. ");
+        unsigned text_count = 0;
+        for (DomNode* child = after->first_child; child; child = child->next_sibling) {
+            if (!child->is_text()) continue;
+            text_count++;
+            EXPECT_STREQ(child->as_text()->text, "tail");
+        }
+        EXPECT_EQ(text_count, 1u);
+    }
+}
+
+TEST_F(RadiantTextQuery, SharedPublicationCommitsForeignFrameWritesWithoutParentLayout) {
+    ASSERT_NE(load("test/html/layout_shared_iframe_publication.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* frame = dom_find_element_by_id(document->root->as_element(), "frame");
+    ASSERT_NE(frame, nullptr);
+    ASSERT_NE(frame->embed.get(), nullptr);
+    DomDocument* embedded = frame->embed->doc;
+    ASSERT_NE(embedded, nullptr);
+    // script-less srcdoc has no evaluator binding; supply the viewer's host for this frame tick.
+    DocumentJsHostConfig host = document_js_host_config_inherit(&ui, document);
+    document_apply_js_host_config(embedded, &host);
+    DomElement* body = radiant_document_body_element(embedded);
+    ASSERT_NE(body, nullptr);
+    uint64_t parent_passes = document->view_tree->document_layout_count;
+    uint64_t child_passes = embedded->view_tree->document_layout_count;
+    ASSERT_TRUE(body->set_attribute("style", "margin:0;width:100px;height:20px;transform:scale(2)"));
+    dom_notify_mutation(DOM_JS_MUTATION_INLINE_STYLE, body, body->parent);
+    radiant_tick_document_animations(document, 0.0, true, false);
+    EXPECT_EQ(embedded->js.mutation_count, 0);
+    EXPECT_FALSE(body->needs_style_recompute());
+    char transform[128];
+    ASSERT_TRUE(css_prop_serialize_computed(body, CSS_PROPERTY_TRANSFORM, 0, transform, sizeof(transform)));
+    EXPECT_STREQ(transform, "matrix(2, 0, 0, 2, 0, 0)");
+    EXPECT_EQ(document->view_tree->document_layout_count, parent_passes);
+    EXPECT_LE(embedded->view_tree->document_layout_count, child_passes + 1);
+    child_passes = embedded->view_tree->document_layout_count;
+    radiant_tick_document_animations(document, 0.01, true, false);
+    EXPECT_EQ(embedded->view_tree->document_layout_count, child_passes);
+}
 
 TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesInputs) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
@@ -519,7 +720,7 @@ TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConst
         EXPECT_STREQ(quote->as_text()->text, "1");
         DomElement* list = find("implicit-counter");
         ASSERT_NE(list->layout_cache, nullptr);
-        EXPECT_EQ(list->layout_cache->measured_flex_flow, nullptr);
+        EXPECT_NE(list->layout_cache->measured_flex_flow, nullptr);
     }
     DomElement* item = find("wrapped");
     ASSERT_TRUE(item->set_attribute("style", "flex-basis:100px"));
@@ -552,7 +753,7 @@ TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConst
     EXPECT_FLOAT_EQ(item->content_height, 30.0f);
     item->width = 100.0f;
     layout_flex_item_content(&context, block);
-    EXPECT_EQ(context.profiler.flex_flow_reuses, 1u);
+    EXPECT_EQ(context.profiler.flex_flow_reuses, 2u);
     EXPECT_FLOAT_EQ(item->content_height, 10.0f);
     EXPECT_EQ(item->first_child->as_text()->rect->next, nullptr);
     {
@@ -560,22 +761,183 @@ TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConst
         EXPECT_FALSE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 100.0f, &height));
     }
     EXPECT_TRUE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 100.0f, &height));
-    EXPECT_EQ(context.profiler.flex_flow_measures, 2u);
+    EXPECT_EQ(context.profiler.flex_flow_measures, 1u);
     item->width = 40.0f;
     EXPECT_TRUE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 40.0f, &height));
     EXPECT_FLOAT_EQ(height, 30.0f);
-    EXPECT_EQ(context.profiler.flex_flow_measures, 3u);
+    EXPECT_EQ(context.profiler.flex_flow_measures, 1u);
     context.root_font_size += 1.0f;
     EXPECT_TRUE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 40.0f, &height));
-    EXPECT_EQ(context.profiler.flex_flow_measures, 4u);
+    EXPECT_EQ(context.profiler.flex_flow_measures, 2u);
     context.available_space = AvailableSpace::make_definite(100.0f, 200.0f);
     EXPECT_TRUE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 40.0f, &height));
-    EXPECT_EQ(context.profiler.flex_flow_measures, 5u);
+    EXPECT_EQ(context.profiler.flex_flow_measures, 3u);
     context.node_limit = context.node_count;
     EXPECT_FALSE(flex_measure_completed_flow(&context, static_cast<ViewElement*>(block), &parent, 40.0f, &height));
     context.node_limit = 1000;
     EXPECT_TRUE(flex_measure_completed_flow(&context, lam::view_as_element(static_cast<DomNode*>(find("complex"))), &parent, 60.0f, &height));
 
+}
+
+TEST_F(RadiantTextQuery, OwnedFlowRestoresEmptyAndUnplacedTextFragments) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    DomText* empty = DomText::create_detached_copy(document, "", 0);
+    ASSERT_NE(empty, nullptr);
+    ASSERT_TRUE(item->DomNode::append_child(empty));
+    ASSERT_EQ(empty->rect, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    auto* result = radiant::layout_flow_result_capture(&flow.layout, item);
+    ASSERT_NE(result, nullptr);
+    for (unsigned pass = 0; pass < 3; pass++) {
+        empty->rect = lam::view_prop(document->view_tree->alloc_text_rect());
+        ASSERT_NE(empty->rect, nullptr);
+        empty->rect->width = 123.0f;
+        ASSERT_TRUE(radiant::layout_flow_result_apply(&flow.layout, result));
+        EXPECT_EQ(empty->rect, nullptr);
+        EXPECT_EQ(empty->width, 0.0f);
+    }
+    ASSERT_TRUE(dom_text_set_content(item->first_child->as_text(), "X"));
+    EXPECT_FALSE(radiant::layout_flow_result_apply(&flow.layout, result));
+    radiant::layout_flow_result_release(document->view_tree->prop_pool, result);
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(document->view_tree->prop_pool, &before);
+    result = radiant::layout_flow_result_capture(&flow.layout, item);
+    ASSERT_NE(result, nullptr);
+    radiant::layout_flow_result_release(document->view_tree->prop_pool, result);
+    pool_get_detailed_stats(document->view_tree->prop_pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+}
+
+static uint64_t retained_subtree_geometry(DomElement* root) {
+    struct Digest { DomNode* root; uint64_t hash; } digest = {root, HASH_FNV1A_64_OFFSET_BASIS};
+    view_geometry_walk_dom_tree(root, [](DomNode* node, void* data) {
+        auto* digest = (Digest*)data;
+        if (node != digest->root) {
+            float box[] = {node->x, node->y, node->width, node->height};
+            digest->hash = hash_fnv1a_64_extend(digest->hash, box, sizeof(box));
+        }
+        if (node->is_text()) {
+            DomText* text = node->as_text();
+            digest->hash = hash_fnv1a_64_extend(digest->hash, text->text, text->length);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                float box[] = {rect->x, rect->y, rect->width, rect->height};
+                int source[] = {rect->start_index, rect->length, rect->line_number};
+                digest->hash = hash_fnv1a_64_extend(digest->hash, box, sizeof(box));
+                digest->hash = hash_fnv1a_64_extend(digest->hash, source, sizeof(source));
+            }
+        } else if (node->is_element()) {
+            DomElement* element = node->as_element();
+            float content[] = {element->content_width, element->content_height,
+                element->block()->first_line_baseline, element->block()->last_line_baseline};
+            digest->hash = hash_fnv1a_64_extend(digest->hash, content, sizeof(content));
+            if (element->ext) {
+                digest->hash = hash_fnv1a_64_extend(digest->hash, element->ext->frags, sizeof(element->ext->frags));
+                digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, element->ext->fragment_presence_mask);
+            }
+            if (element->embed && element->embedp()->grid && element->embedp()->grid->used_track_text)
+                digest->hash = hash_fnv1a_64_extend_cstr(digest->hash, element->embedp()->grid->used_track_text);
+            if (const TableCellProp* cell = element->cell_prop()) {
+                const CollapsedBorder* borders[] = {cell->top_resolved, cell->right_resolved,
+                    cell->bottom_resolved, cell->left_resolved};
+                for (const CollapsedBorder* border : borders) if (border) {
+                    digest->hash = hash_fnv1a_64_extend(digest->hash, &border->width, sizeof(border->width));
+                    digest->hash = hash_fnv1a_64_extend_u64le(digest->hash, border->color.c);
+                }
+            }
+        }
+        return true;
+    }, &digest);
+    return digest.hash;
+}
+
+TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    float height = 0.0f;
+    ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+        &flow.parent, 60.0f, &height));
+    auto* ancestor = radiant::layout_flow_result_capture(&flow.layout, item->parent);
+    ASSERT_NE(ancestor, nullptr);
+    item->width = 100.0f;
+    ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+        &flow.parent, 100.0f, &height));
+    uint64_t wide = retained_subtree_geometry(item);
+    uint64_t computations = flow.layout.profiler.flex_flow_measures;
+    ASSERT_TRUE(radiant::layout_flow_result_apply(&flow.layout, ancestor));
+    EXPECT_NE(retained_subtree_geometry(item), wide);
+    item->width = 100.0f;
+    ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+        &flow.parent, 100.0f, &height));
+    EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations);
+    EXPECT_EQ(retained_subtree_geometry(item), wide);
+    radiant::layout_flow_result_release(document->view_tree->prop_pool, ancestor);
+}
+
+TEST_F(RadiantTextQuery, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrderedEffects) {
+    ASSERT_NE(load("test/html/layout_flex_retained_effects.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    ui.viewport_width = 320.0f; ui.viewport_height = 240.0f;
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    for (unsigned pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const char* id : {"list", "generated", "resource", "positioned", "table", "grid", "percent-inline"}) {
+            SCOPED_TRACE(id);
+            DomElement* item = find(id);
+            ASSERT_NE(item, nullptr);
+            FlexFlowTestContext flow(&ui, document, item);
+            flow.layout.generated_effects_prepared = true;
+            float height = 0.0f;
+            ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+                &flow.parent, 60.0f, &height));
+            EXPECT_GT(height, 0.0f);
+            uint64_t original = retained_subtree_geometry(item);
+            uint64_t computations = flow.layout.profiler.flex_flow_measures;
+            item->width = 30.0f;
+            ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+                &flow.parent, 30.0f, &height));
+            uint64_t narrow = retained_subtree_geometry(item);
+            EXPECT_NE(narrow, original);
+            EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations + 1);
+            item->width = 60.0f;
+            item->height = 111.0f;
+            ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+                &flow.parent, 60.0f, &height));
+            EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations + 1);
+            EXPECT_EQ(retained_subtree_geometry(item), original);
+            EXPECT_FLOAT_EQ(item->height, 111.0f);
+            // probe restoration may destroy live rectangles; the independently owned result remains usable.
+            { radiant::LayoutMeasureScope trial(&flow.layout, item); }
+            layout_flex_item_content(&flow.layout, lam::view_require_block(item));
+            EXPECT_EQ(retained_subtree_geometry(item), original);
+            // repeated ancestor probes must replay both owned entries without rerunning flow or effects.
+            for (unsigned replay = 0; replay < 16; ++replay) {
+                item->width = replay % 2 ? 60.0f : 30.0f;
+                ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+                    &flow.parent, item->width, &height));
+                EXPECT_EQ(retained_subtree_geometry(item), replay % 2 ? original : narrow);
+                EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations + 1);
+            }
+        }
+        auto generated = [&](const char* id, bool before) -> const char* {
+            DomElement* element = find(id);
+            DomElement* pseudo = before ? element->pseudo->before.get() : element->pseudo->after.get();
+            return pseudo->first_child->as_text()->text;
+        };
+        EXPECT_STREQ(generated("chapter-a", true), "1 ");
+        EXPECT_STREQ(generated("chapter-b", true), "2 ");
+        EXPECT_STREQ(generated("quote-a", true), "A");
+        EXPECT_STREQ(generated("quote-b", true), "B");
+        EXPECT_STREQ(generated("quote-b", false), "Y");
+        EXPECT_STREQ(generated("quote-a", false), "Z");
+    }
 }
 
 TEST_F(RadiantTextQuery, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockConstraint) {
@@ -623,6 +985,10 @@ TEST_F(RadiantTextQuery, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockCo
     layout_flex_item_content(&flow.layout, block);
     EXPECT_EQ(flow.layout.profiler.flex_flow_reuses, 1u);
     EXPECT_FLOAT_EQ(find("fill-first")->height, 50.0f);
+    item->height = 40.0f;
+    layout_flex_item_content(&flow.layout, block);
+    EXPECT_EQ(flow.layout.profiler.flex_flow_reuses, 2u);
+    EXPECT_FLOAT_EQ(find("fill-first")->height, 20.0f);
     ASSERT_TRUE(find("row")->set_attribute("style", "width:20px"));
     ASSERT_TRUE(dom_text_set_content(find("text")->first_child->as_text(), "XX XX XX"));
     layout_html_doc(&ui, document, true);
@@ -647,6 +1013,39 @@ TEST_F(RadiantTextQuery, ColumnContributionPreservesPublishedChildGeometry) {
     EXPECT_FLOAT_EQ(title->width, width);
     EXPECT_FLOAT_EQ(title->height, height);
     EXPECT_EQ(text->rect, fragments);
+}
+
+TEST_F(RadiantTextQuery, CompletedFlexContentEnlargesProvisionalAncestorHeight) {
+    ASSERT_NE(load("test/html/layout_flex_parent_constraints.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    ui.viewport_width = 320.0f;
+    ui.viewport_height = 240.0f;
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    for (unsigned pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const char* id : {"auto-page", "auto-main", "auto-content", "start-page", "start-main", "start-content"})
+            EXPECT_FLOAT_EQ(find(id)->height, 60.0f) << id;
+        for (const char* id : {"tall-page", "tall-main", "tall-content", "fixed-page", "fixed-main", "fixed-content"})
+            EXPECT_FLOAT_EQ(find(id)->height, 100.0f) << id;
+        EXPECT_FLOAT_EQ(find("auto-article")->height, 40.0f);
+        EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 60.0f);
+        EXPECT_FLOAT_EQ(find("auto-dependent")->height, 60.0f);
+        EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 40.0f);
+        EXPECT_FLOAT_EQ(find("tall-footer")->y - find("tall-article")->y, 80.0f);
+        EXPECT_FLOAT_EQ(find("fixed-footer")->y - find("fixed-article")->y, 80.0f);
+        EXPECT_FLOAT_EQ(find("resource-page")->height, 30.0f);
+        EXPECT_FLOAT_EQ(find("resource-content")->height, 30.0f);
+        EXPECT_FLOAT_EQ(find("resource-svg")->height, 10.0f);
+    }
+    ASSERT_TRUE(find("auto-page")->set_attribute("style", "width:20px"));
+    ASSERT_TRUE(dom_text_set_content(find("auto-text")->first_child->as_text(), "XX XX XX"));
+    layout_html_doc(&ui, document, true);
+    for (const char* id : {"auto-page", "auto-main", "auto-content"})
+        EXPECT_FLOAT_EQ(find(id)->height, 100.0f) << id;
+    EXPECT_FLOAT_EQ(find("auto-article")->height, 80.0f);
+    EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 100.0f);
+    EXPECT_FLOAT_EQ(find("auto-dependent")->height, 100.0f);
+    EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
 }
 
 TEST_F(RadiantTextQuery, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {
@@ -687,7 +1086,11 @@ TEST_F(RadiantTextQuery, CompletedFlexSubtreeFlowSharesBlocksAndInvalidatesDesce
         EXPECT_FLOAT_EQ(find("last")->y - find("first")->y, 71.0f);
         EXPECT_FLOAT_EQ(find("percent")->height, 100.0f);
         EXPECT_FLOAT_EQ(find("percent")->first_child->height, 50.0f);
-        for (const char* id : {"percent", "generated", "resource", "positioned", "intrinsic", "counter", "list-item"}) {
+        for (const char* id : {"generated", "resource", "positioned", "counter", "list-item"}) {
+            ASSERT_NE(find(id)->layout_cache, nullptr);
+            EXPECT_NE(find(id)->layout_cache->measured_flex_flow, nullptr) << id;
+        }
+        for (const char* id : {"percent", "intrinsic"}) {
             ASSERT_NE(find(id)->layout_cache, nullptr);
             EXPECT_EQ(find(id)->layout_cache->measured_flex_flow, nullptr) << id;
         }
@@ -742,17 +1145,17 @@ TEST_F(RadiantTextQuery, CompletedFlexSubtreeFlowSharesBlocksAndInvalidatesDesce
         radiant::LayoutMeasureScope trial(&context, find("nested"));
     }
     layout_flex_item_content(&context, block);
-    EXPECT_EQ(context.profiler.flex_flow_reuses, 2u);
+    EXPECT_EQ(context.profiler.flex_flow_reuses, 3u);
     ASSERT_TRUE(flex_measure_completed_flow(&context, block, &flow.parent, width, &height));
     {
         radiant::LayoutMeasureScope trial(&context, document->root);
     }
     layout_flex_item_content(&context, block);
-    EXPECT_EQ(context.profiler.flex_flow_reuses, 2u);
+    EXPECT_EQ(context.profiler.flex_flow_reuses, 5u);
     ASSERT_TRUE(flex_measure_completed_flow(&context, block, &flow.parent, width, &height));
     EXPECT_FLOAT_EQ(calculate_max_content_height(&context, find("last"), width), 20.0f);
     layout_flex_item_content(&context, block);
-    EXPECT_EQ(context.profiler.flex_flow_reuses, 2u);
+    EXPECT_EQ(context.profiler.flex_flow_reuses, 7u);
     // atomic-inline break fidelity has a separate known defect; retain its actual fragments unchanged.
     DomElement* atomic = find("atomic");
     ViewBlock* atomic_block = lam::view_require_block(atomic);
