@@ -5,6 +5,7 @@
 import t: lambda.scene3d.transform
 import v: lambda.scene3d.camera
 import assets: lambda.scene3d.asset
+import h: lambda.scene3d.motion.humanoid
 
 pub type Vec3 = float[3]
 pub type Quat = float[4]
@@ -126,15 +127,17 @@ fn keep_clip(c, wanted) element^ {
 }
 
 // `input(…, {type: 'character'})` plus the caller's options (§8.2): `format`,
-// `scale` (to metres), `up` ('y' or 'z') and `clip` (keep one clip)
+// `scale` (to metres), `up` ('y' or 'z'), `rig` (humanoid roles) and `clip`
+// (keep one clip)
 pub fn load(source, options = {}) element^ {
     let flavor = if (options.format == null) 'auto' else options.format
     let raw = input(source, {type: 'character', flavor: flavor})^
     let sized = if (options.scale == null) raw else scale(raw, options.scale)
     let upright = if (options.up == 'z') z_up(sized) else sized
     let picked = if (options.clip == null) upright else keep_clip(upright, options.clip)^
-    let checked = validate(picked)^;
-    picked
+    let tagged = if (options.rig == null) picked else humanoid(picked, options.rig)^
+    let checked = validate(tagged)^;
+    tagged
 }
 
 // ---- poses -------------------------------------------------------------------
@@ -160,6 +163,214 @@ pub fn pose(c, clip_name = null, key = 0) map^ {
     let channels = if (clip_name == null) {} else map([for (ch in content(found[0])) (ch.joint, ch)])
     let pairs = [for (root in content(skeleton_of(c))) *world_pairs(root, identity, channels, key)];
     map([for (p in pairs) (p[0], p[1])])
+}
+
+// ---- humanoid roles ------------------------------------------------------------
+
+// a source joint name without its namespace prefix (`mixamorig:Hips` → `Hips`)
+fn base_name(n) string {
+    let parts = split(n, ":");
+    string(parts[len(parts) - 1])
+}
+fn profile(rig) map^ {
+    if (rig is map) rig
+    else if (rig == 'mixamo') h.mixamo
+    else if (rig == 'cmu') h.cmu
+    else if (rig == 'vrm') h.vrm
+    else raise fail("unknown rig profile '" ++ string(rig) ++ "'; use 'mixamo', 'cmu', 'vrm' or a name map")
+}
+fn tag_joint(j, roles) element {
+    let role = if (roles[j.name] != null) roles[j.name] else roles[base_name(j.name)];
+    rebuild(j, {*: fields(j), *: (if (role != null) {humanoid: symbol(role)} else {})},
+        [for (child in content(j)) tag_joint(child, roles)])
+}
+// joint roles from a profile ('mixamo', 'cmu', 'vrm') or a caller map {joint name: role}
+pub fn humanoid(c, rig) element^ {
+    let roles = profile(rig)^
+    let tagged = rebuild(c, {*: fields(c), rig: if (rig is map) 'custom' else rig}, [for (x in content(c))
+        if (name(x) == 'skeleton') rebuild(x, fields(x), [for (j in content(x)) tag_joint(j, roles)]) else x])
+    let checked = validate(tagged)^;
+    tagged
+}
+
+fn role_joint(c, role) => [for (j in joints(c) where j.humanoid == role) j][0]
+// the joint that carries root motion: the hips, else the first root
+fn root_joint(c) {
+    let hips = role_joint(c, 'hips');
+    if (hips != null) hips else content(skeleton_of(c))[0]
+}
+// the root's rest height above the lowest joint: the leg length that scales root motion
+fn hip_height(c) float^ {
+    let rest = pose(c)^
+    let heights = [for (k, m in rest) m[13]];
+    origin(rest[root_joint(c).name])[1] - min(heights)
+}
+fn hip_ratio(source, target) float^ {
+    let from = hip_height(source)^
+    let to = hip_height(target)^;
+    if (from > 1e-9 and to > 1e-9) to / from else 1.0
+}
+
+// ---- moving clips between characters ----------------------------------------------
+
+// target joint name → source joint name: by role where both sides are tagged,
+// else by name without namespace (a CMU "Spine" is a Mixamo "Spine1")
+fn joint_map(source, target) map {
+    let by_name = map([for (j in joints(source)) (base_name(j.name), j)])
+    let by_role = map([for (j in joints(source) where j.humanoid != null) (string(j.humanoid), j.name)])
+    let named = (j) => (let s = by_name[base_name(j.name)],
+        if (s != null and (s.humanoid == null or j.humanoid == null)) s.name else null)
+    let source_of = (j) => if (j.humanoid != null and by_role[string(j.humanoid)] != null) by_role[string(j.humanoid)]
+        else named(j);
+    map([for (j in joints(target)) for (s in [source_of(j)] where s != null) (j.name, s)])
+}
+fn same_rest(source, target, pairs) bool {
+    let from = map([for (j in joints(source)) (j.name, j.quaternion)]);
+    all([for (j in joints(target) where pairs[j.name] != null)
+        abs(abs(qdot(j.quaternion, from[pairs[j.name]])) - 1) < 1e-9])
+}
+fn qdot(a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+fn clip_named(k, label) element => rebuild(k, {*: fields(k), name: label}, [for (ch in content(k)) ch])
+
+// identical rest rotations: rename channels, scale root motion, and drop other
+// translation and scale unless `keep_translation`
+fn copy_clip(k, source, target, pairs, options) element^ {
+    let back = map([for (b, s in pairs) (s, string(b))])
+    let source_root = root_joint(source).name
+    let ratio = hip_ratio(source, target)^
+    let keep = options.keep_translation == true;
+    rebuild(k, fields(k), [for (ch in content(k) where back[ch.joint] != null)
+        (let root = ch.joint == source_root,
+         <channel joint: back[ch.joint],
+            *: (if (ch.position != null and root) {position: ch.position * ratio}
+                else if (ch.position != null and keep) {position: ch.position} else {}),
+            *: (if (ch.quaternion != null) {quaternion: ch.quaternion} else {}),
+            *: (if (ch.scale != null and keep) {scale: ch.scale} else {})>)])
+}
+
+// world rotations by composing local quaternions down the skeleton, at a key or at rest
+fn world_quats(j, parent, channels, key) array {
+    let ch = channels[j.name]
+    let local = if (key != null and ch != null and ch.quaternion != null) key4(ch.quaternion, key) else j.quaternion
+    let q = t.quaternion_normalize(t.quaternion_multiply(parent, local));
+    [[j.name, q], *[for (child in content(j)) *world_quats(child, q, channels, key)]]
+}
+fn rotations(c, channels, key) map =>
+    map([for (root in content(skeleton_of(c))) for (p in world_quats(root, [0.0, 0.0, 0.0, 1.0], channels, key)) (p[0], p[1])])
+// a mapped joint takes the source's world rotation change from rest; an
+// unmapped one keeps its rest local rotation (§8.4 steps 2-3)
+fn retarget_walk(j, parent, moved, rest_from, rest_to, pairs) array {
+    let s = pairs[j.name]
+    let w = if (s != null) t.quaternion_multiply(t.quaternion_multiply(moved[s], t.quaternion_inverse(rest_from[s])), rest_to[j.name])
+        else t.quaternion_multiply(parent, j.quaternion)
+    let local = t.quaternion_normalize(t.quaternion_multiply(t.quaternion_inverse(parent), w));
+    [[j.name, local], *[for (child in content(j)) *retarget_walk(child, w, moved, rest_from, rest_to, pairs)]]
+}
+// consecutive keys on one hemisphere, so SLERP takes the short way
+fn continuous(keys) array {
+    let n = len(keys) / 4
+    let flips = [for (k in 0 to n - 1) if (k > 0 and qdot(key4(keys, k), key4(keys, k - 1)) < 0) -1.0 else 1.0]
+    let signs = math.cumprod(flips);
+    [for (k in 0 to n - 1) for (c in 0 to 3) keys[4 * k + c] * signs[k]]
+}
+
+// §8.4: each mapped joint's world rotation change from rest, re-expressed
+// locally; root motion scaled by the hip-height ratio into the target's root frame
+pub fn retarget(k, from, to, options = {}) element^ {
+    let missing = [*[for (r in h.required where role_joint(from, r) == null) "source " ++ string(r)],
+                   *[for (r in h.required where role_joint(to, r) == null) "target " ++ string(r)]]
+    let checked_roles = if (len(missing) > 0) raise fail("retarget needs the VRM required roles on both skeletons; missing " ++ join(missing, ", "))
+    let checked_clip = if (len([for (x in clips_of(from) where x.name == k.name) x]) != 1) raise fail("retarget's clip must belong to its source character")
+    let pairs = joint_map(from, to)
+    let channels = map([for (ch in content(k)) (ch.joint, ch)])
+    let rest_key = options.rest_frame
+    let rest_from = if (rest_key == null) rotations(from, channels, null) else rotations(from, channels, rest_key)
+    let rest_to = rotations(to, {}, null)
+    let n = len(k.times)
+    let poses = [for (key in 0 to n - 1) map([for (root in content(skeleton_of(to)))
+        for (p in retarget_walk(root, [0.0, 0.0, 0.0, 1.0], rotations(from, channels, key), rest_from, rest_to, pairs)) (p[0], p[1])])]
+    // root motion: the source root's world position, scaled, in the target root's parent frame
+    let source_root = root_joint(from).name
+    let target_root = root_joint(to)
+    let ratio = hip_ratio(from, to)^
+    let rest = pose(to)^
+    let parent_name = [for (j in joints(to)) for (c in content(j) where c.name == target_root.name) j.name][0]
+    let into_parent = if (parent_name == null) identity else t.inverse(rest[parent_name])^
+    let root_positions = [for (key in 0 to n - 1)
+        *t.point(into_parent, origin(pose(from, k.name, key)^[source_root]) * ratio)^]
+    let mapped = [for (j in joints(to) where pairs[j.name] != null) j.name];
+    <clip name: k.name, duration: k.duration, *: (if (k.rate != null) {rate: k.rate} else {}), times: k.times,
+        *[for (b in joints(to) where pairs[b.name] != null or b.name == target_root.name)
+            <channel joint: b.name,
+                *: (if (b.name == target_root.name) {position: root_positions} else {}),
+                *: (if (pairs[b.name] != null) {quaternion: continuous([for (key in 0 to n - 1) *poses[key][b.name]])} else {})>]>
+}
+
+// add the first clip of each source as a clip named by its key (§8.3)
+pub fn attach(c, sources, options = {}) element^ {
+    let added = [for (label, source in sources)
+        (let found = clips_of(source),
+         let checked = if (len(found) == 0) raise fail("attach source '" ++ string(label) ++ "' has no clip"),
+         let pairs = joint_map(source, c),
+         let checked_pairs = if (len(pairs) == 0) raise fail("attach source '" ++ string(label) ++ "' shares no joint with the character"),
+         let moved = if (same_rest(source, c, pairs)) copy_clip(found[0], source, c, pairs, options)^
+             else retarget(found[0], source, c, options)^,
+         clip_named(moved, string(label)))]
+    let joined = rebuild(c, fields(c), [*content(c), *added])
+    let checked = validate(joined)^;
+    joined
+}
+
+// ---- clip operations -----------------------------------------------------------
+
+fn map_clips(c, f) element => rebuild(c, fields(c), [for (x in content(c)) if (name(x) == 'clip') f(x) else x])
+
+// hold the root's translation on `axes` at its first key (Mixamo's "In Place")
+pub fn in_place(c, axes = ['x', 'z']) element^ {
+    let held = [for (a in axes) if (a == 'x') 0 else if (a == 'y') 1 else if (a == 'z') 2
+        else raise fail("in_place axes are 'x', 'y' or 'z'")]
+    let root = root_joint(c).name
+    let hold = (ch) => if (ch.joint != root or ch.position == null) ch
+        else <channel *: {*: fields(ch), position: [for (k in 0 to len(ch.position) / 3 - 1) for (i in 0 to 2)
+            if (contains(held, i)) ch.position[i] else ch.position[3 * k + i]]}>
+    let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in content(k)) hold(ch)]))
+    let checked = validate(out)^;
+    out
+}
+
+fn swap_side(role) => if (starts_with(role, "left")) "right" ++ slice(role, 4) else if (starts_with(role, "right")) "left" ++ slice(role, 5) else null
+// swap left and right joints, reflect rotations across the YZ plane and translations in X
+pub fn mirror(c) element^ {
+    let js = joints(c)
+    let checked_roles = if (all([for (j in js) j.humanoid == null])) raise fail("mirror needs humanoid roles; tag them with humanoid or the rig option")
+    let by_role = map([for (j in js where j.humanoid != null) (string(j.humanoid), j.name)])
+    let partner = map([for (j in js) (j.name, (let r = if (j.humanoid == null) null else swap_side(string(j.humanoid)),
+        if (r != null and by_role[r] != null) by_role[r] else j.name))])
+    let reflect = (ch) => <channel joint: partner[ch.joint],
+        *: (if (ch.position != null) {position: [for (k in 0 to len(ch.position) / 3 - 1) *[0.0 - ch.position[3 * k], ch.position[3 * k + 1], ch.position[3 * k + 2]]]} else {}),
+        *: (if (ch.quaternion != null) {quaternion: [for (k in 0 to len(ch.quaternion) / 4 - 1)
+            *[ch.quaternion[4 * k], 0.0 - ch.quaternion[4 * k + 1], 0.0 - ch.quaternion[4 * k + 2], ch.quaternion[4 * k + 3]]]} else {}),
+        *: (if (ch.scale != null) {scale: ch.scale} else {})>
+    let out = map_clips(c, (k) => rebuild(k, fields(k), [for (ch in content(k)) reflect(ch)]))
+    let checked = validate(out)^;
+    out
+}
+
+// keep the keys within [from, to] seconds and rebase them to 0
+pub fn trim(c, from, to) element^ {
+    let checked_range = if (not (from <= to)) raise fail("trim needs from <= to")
+    let cut = (k) => (let kept = [for (i in 0 to len(k.times) - 1 where k.times[i] >= from - 1e-6 and k.times[i] <= to + 1e-6) i],
+        if (len(kept) == 0) k else (let a = kept[0], let b = kept[len(kept) - 1],
+            rebuild(k, {*: fields(k), times: [for (i in a to b) k.times[i] - k.times[a]], duration: k.times[b] - k.times[a]},
+                [for (ch in content(k)) rebuild(ch, {*: fields(ch),
+                    *: (if (ch.position != null) {position: ch.position[3 * a to 3 * b + 2]} else {}),
+                    *: (if (ch.quaternion != null) {quaternion: ch.quaternion[4 * a to 4 * b + 3]} else {}),
+                    *: (if (ch.scale != null) {scale: ch.scale[3 * a to 3 * b + 2]} else {})}, [])])))
+    let empty = [for (k in clips_of(c) where len([for (x in k.times where x >= from - 1e-6 and x <= to + 1e-6) x]) == 0) k.name]
+    let checked_keys = if (len(empty) > 0) raise fail("trim keeps no key of clip '" ++ empty[0] ++ "'")
+    let out = map_clips(c, cut)
+    let checked = validate(out)^;
+    out
 }
 
 // ---- mannequin ---------------------------------------------------------------

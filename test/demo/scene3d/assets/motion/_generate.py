@@ -710,7 +710,29 @@ def rig_scene():
     return scene, expected
 
 
+# ---- Mixamo-named targets for attaching and retargeting ---------------------
+
+MIXAMO_OF = {"LowerBack": "Spine", "Spine": "Spine1", "Spine1": "Spine2"}
+
+
+def mixamo_scene(scale, hips_height, rest_rotations):
+    """The jump's skeleton under Mixamo names, `scale` times larger, posed at rest by `rest_rotations`."""
+    scene = FbxScene(Y_UP_CM)
+    models = {}
+    for name, parent, offset, _order, _tip in SKELETON:
+        position = (0.0, hips_height, 0.0) if parent is None else [scale * c for c in offset]
+        models[name] = scene.model("mixamorig:" + MIXAMO_OF.get(name, name), "LimbNode", models[parent] if parent else 0, [
+            P("InheritType", "enum", "", "", ("I", 1)),
+            vec("Lcl Translation", position, "Lcl Translation", "", "A"),
+            vec("Lcl Rotation", rest_rotations.get(name, (0, 0, 0)), "Lcl Rotation", "", "A")])
+    return scene
+
+
 write_bvh(root / "jump.bvh")
+# the jump's legs reach 96 cm below the hips: the giant stands 1.5 times taller
+write_fbx_binary(root / "giant.fbx", mixamo_scene(1.5, 144.0, {}), 7400, compress=False)
+# an A-pose: the same proportions with the upper arms lowered 40 degrees at rest
+write_fbx_binary(root / "apose.fbx", mixamo_scene(1.0, 96.0, {"LeftArm": (0, 0, -40), "RightArm": (0, 0, 40)}), 7400, compress=False)
 jump, jump_points, jump_influences, jump_rest = jump_scene()
 write_fbx_binary(root / "jump.fbx", jump, 7400, compress=False)
 write_fbx_binary(root / "jump-7500.fbx", jump, 7500, compress=True)

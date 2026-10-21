@@ -374,7 +374,7 @@ The canonical roles are the VRM 1.0 humanoid bone names (`hips`, `spine`, `chest
 
 `attach(character, sources)` takes a map from a new clip name to a source character, which contributes its first clip (select another with `load`'s `clip` option). The added clip is renamed to the map key, which keeps controller references readable. For each source clip:
 
-1. Match source joints to target joints: first by `name` after stripping a namespace prefix (`mixamorig:`, `mixamorig1:`), then by `humanoid` role.
+1. Match source joints to target joints: by `humanoid` role where both joints are tagged, otherwise by `name` after stripping a namespace prefix (`mixamorig:`, `mixamorig1:`). Roles come first because names collide across rigs: a CMU `Spine` is a Mixamo `Spine1` (Appendix C).
 2. If every matched pair has the same rest rotation (within tolerance), copy the channels with renamed joints: the cheap path for Mixamo character + Mixamo clips.
 3. Otherwise `retarget` (§8.4).
 4. Root translation is scaled by the ratio of target to source rest hip height. Position and scale channels on non-root joints are dropped by default (`keep_translation: false`): carried across characters they distort proportions.
@@ -567,3 +567,4 @@ Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make 
 - **2026-10-21, user selection:** a common `<character>` schema that both formats map into. The draft's direct conversion is superseded: motion no longer passes through generated IDs, and `motion.scene` is the single compile point into the scene.
 - **2026-10-21, schema detail:** the first chat sketch of the schema gave each mesh a palette of joint names with per-mesh inverse binds. The proposal instead stores body geometry in character space with one `inverse_bind` per joint, because the native renderer stores binds on bones; the alternative remains §13 decision 11.
 - **2026-10-21, decisions selected:** the user took every recommended option in §13 and asked for M0–M5 in a worktree branch.
+- **2026-10-21, implementation (M4):** §8.3 step 1 matched joints by name before roles. Tested against a CMU-named source and a Mixamo-named target, that paired CMU `Spine` (chest) with Mixamo `Spine` (spine) and shifted the whole spine. Roles now take precedence wherever both joints are tagged, and names remain the fallback for untagged joints.

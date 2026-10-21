@@ -20,6 +20,18 @@ pub fn multiply(a, b) array^ {
     let checked = if (not vector(a, 16) or not vector(b, 16)) raise error("scene3d: expected 4x4 matrices");
     [for (c in 0 to 3) for (r in 0 to 3) sum([for (k in 0 to 3) a[k * 4 + r] * b[c * 4 + k]])]
 }
+// the inverse of an affine matrix: the 3x3 adjugate over its determinant, then the translation
+pub fn inverse(m) array^ {
+    let checked = if (not affine(m)) raise error("scene3d: expected an invertible affine matrix")
+    let d = m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2])
+    let r = [(m[5] * m[10] - m[6] * m[9]) / d, (m[9] * m[2] - m[1] * m[10]) / d, (m[1] * m[6] - m[5] * m[2]) / d,
+             (m[8] * m[6] - m[4] * m[10]) / d, (m[0] * m[10] - m[8] * m[2]) / d, (m[4] * m[2] - m[0] * m[6]) / d,
+             (m[4] * m[9] - m[8] * m[5]) / d, (m[8] * m[1] - m[0] * m[9]) / d, (m[0] * m[5] - m[4] * m[1]) / d];
+    [r[0], r[1], r[2], 0.0, r[3], r[4], r[5], 0.0, r[6], r[7], r[8], 0.0,
+     0.0 - (r[0] * m[12] + r[3] * m[13] + r[6] * m[14]),
+     0.0 - (r[1] * m[12] + r[4] * m[13] + r[7] * m[14]),
+     0.0 - (r[2] * m[12] + r[5] * m[13] + r[8] * m[14]), 1.0]
+}
 pub fn point(m, p) array^ {
     let checked = if (not vector(m, 16) or not vector(p, 3)) raise error("scene3d: invalid matrix or point");
     [for (r in 0 to 2) m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]]
