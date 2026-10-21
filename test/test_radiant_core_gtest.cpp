@@ -1704,6 +1704,55 @@ TEST_F(IncrementalCssTest, ParentFontEditsInvalidateInheritedComputedLengths) {
     context.ui_context = nullptr;
 }
 
+TEST_F(IncrementalCssTest, InheritedIdentityFollowsComputedValuesAndKeepsFontMetricsOwned) {
+    DomElement* child = append_intrinsic_child();
+    set_property("font-size", "16px");
+    set_property("color", "red");
+    set_property("line-height", "1.5");
+    resolve();
+    resolve_child(child);
+    uint32_t inherited = radiant::css_resolved_style_inherited_revision(target);
+    ASSERT_NE(inherited, 0u);
+    ASSERT_NE(target->font->computed_inputs, nullptr);
+    ASSERT_NE(child->font, target->font);
+    EXPECT_EQ(child->font->computed_inputs, target->font->computed_inputs);
+    const ComputedFontInputs* font = target->font->computed_inputs;
+    child->font->ascender = 123.0f;
+    EXPECT_NE(target->font->ascender, child->font->ascender);
+
+    set_property("padding-left", "23px");
+    set_property("font-size", "16.0px");
+    set_property("color", "rgb(255, 0, 0)");
+    resolve();
+    EXPECT_EQ(radiant::css_resolved_style_inherited_revision(target), inherited);
+    EXPECT_EQ(target->font->computed_inputs, font);
+    set_property("line-height", "24px");
+    resolve();
+    // a number and an equal used length inherit differently at another font size.
+    EXPECT_NE(radiant::css_resolved_style_inherited_revision(target), inherited);
+    inherited = radiant::css_resolved_style_inherited_revision(target);
+    set_property("color", "blue");
+    resolve();
+    EXPECT_NE(radiant::css_resolved_style_inherited_revision(target), inherited);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, InheritedIdentityPropagatesCustomPropertiesThroughUnchangedValues) {
+    DomElement* child = append_intrinsic_child();
+    DomElement* grandchild = append_intrinsic_child(child);
+    set_property("--gap", "12px");
+    set_property(grandchild, "padding-left", "var(--gap)");
+    resolve(); resolve_child(child); resolve_child(grandchild);
+    uint32_t inherited = radiant::css_resolved_style_inherited_revision(child);
+    ASSERT_FLOAT_EQ(grandchild->boundary()->padding.left, 12.0f);
+    set_property("--gap", "25px");
+    resolve(); resolve_child(child); resolve_child(grandchild);
+    EXPECT_NE(radiant::css_resolved_style_inherited_revision(child), inherited);
+    EXPECT_FLOAT_EQ(grandchild->boundary()->padding.left, 25.0f);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+    radiant::css_resolved_style_release(grandchild->layout_cache, tree.prop_pool);
+}
+
 TEST_F(IncrementalCssTest, ParentStorageRestylePreservesDescendantComputedInputs) {
     DomElement* child = append_intrinsic_child();
     set_property("--gap", "12px");

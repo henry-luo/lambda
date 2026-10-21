@@ -90,7 +90,7 @@
         "selector": "body"
       },
       "property": "transform",
-      "contains": "scale("
+      "contains": "matrix("
     }
   ]
 }

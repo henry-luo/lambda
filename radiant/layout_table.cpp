@@ -4715,7 +4715,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 
 ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(tableNode);
-    dom_node_resolve_style(tableNode, lycon);
+    // the caller has bound CSS before assigning its grid/flex box; structure building preserves that constraint.
+    if (!table->styles_resolved() || table->needs_style_recompute() || table->measure_restyled())
+        dom_node_resolve_style(tableNode, lycon);
     resolve_table_properties(lycon, tableNode, table);
     if (tableNode->is_element()) {
         generate_anonymous_table_boxes(lycon, tableNode->as_element());

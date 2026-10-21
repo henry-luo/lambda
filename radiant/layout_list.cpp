@@ -10,6 +10,7 @@
  */
 
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -211,7 +212,7 @@ const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode cs
     return nullptr;
 }
 
-void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
+void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style, DomElement* implicit_item) {
     if (!lycon->counter_context || !style) return;
 
     const char* cr = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_RESET, lycon);
@@ -223,6 +224,8 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
     if (ci) {
         counter_increment(lycon->counter_context, ci);
     }
+    if (implicit_item) layout_apply_list_item_counter(lycon,
+        lam::unsafe_view_block_element_storage(implicit_item), implicit_item);
 
     const char* cs = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_SET, lycon);
     if (cs) {
@@ -607,9 +610,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     if (!lycon->counter_context) return;
     // CSS Display 3: `inline flow-root list-item` is laid out atomically but
     // retains the outside-marker behavior of its inline-level principal box.
-    bool is_inline_list_item = display.list_item &&
-        (display.outer == CSS_VALUE_INLINE ||
-         (display.outer == CSS_VALUE_INLINE_BLOCK && display.inner != CSS_VALUE_FLOW_ROOT));
+    bool is_inline_list_item = display.list_item && display.inner != CSS_VALUE_FLOW_ROOT &&
+        (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK);
     // Set default list-style-position to outside if not specified
     // CSS 2.1 Section 12.5.1: Initial value is 'outside'
     bool is_outside_position = !is_inline_list_item;  // Default is outside, but inside for inline
@@ -793,7 +795,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 // layout-specific counter scopes stay with list/pseudo-content processing.
 bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
                                DomElement* element, DisplayValue display) {
-    if (!lycon || !lycon->counter_context) return true;
+    if (!lycon || !lycon->counter_context || lycon->generated_effects_prepared) return true;
     PseudoStyleKind kind = PSEUDO_STYLE_BEFORE;
     bool generated = layout_generated_pseudo(element, nullptr, &kind);
     if (!counter_push_scope(lycon->counter_context, generated)) return false;
@@ -803,7 +805,7 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
     if (generated) {
         DomElement* origin = element->parent && element->parent->is_element()
             ? element->parent->as_element() : nullptr;
-        if (origin) apply_pseudo_counter_ops(lycon, origin->pseudo_style(kind));
+        if (origin) apply_pseudo_counter_ops(lycon, origin->pseudo_style(kind), list_item ? element : nullptr);
     } else {
         setup_list_container_counters(lycon, block, element);
         if (span->blk) {
@@ -822,7 +824,8 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
     // the element's own operations precede the boundary; generated children follow it.
     if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }
     if (generated) layout_update_pseudo_content_with_counters(lycon, element, false);
-    else if (list_item) {
+    if (list_item) {
+        // generated list-item boxes also need a prepared marker before intrinsic queries.
         process_list_item(lycon, block, element, element, display);
         if (!span->bound) span->ensure_boundary(lycon);
     }
@@ -834,4 +837,113 @@ void LayoutCounterScope::close() {
     style.close();
     counter_pop_scope_propagate(context, true);
     context = nullptr;
+}
+
+static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, unsigned depth,
+                                      int* remaining) {
+    if (!node || !node->is_element() || node->view_type == RDT_VIEW_MARKER) return true;
+    if (depth >= MAX_RADIANT_CSS_TREE_DEPTH || --*remaining < 0) return false;
+    if (layout_node_is_hidden_by_closed_details(node) ||
+        layout_noscript_content_suppressed(node->as_element())) return true;
+    DomElement* element = node->as_element();
+    ViewType previous_type = element->view_type;
+    LayoutContext saved = *context;
+    DisplayValue display = resolve_display_value(element);
+    element->display = display;
+    element->view_type = layout_view_type_for_display(display);
+    context->view = lam::up(static_cast<View*>(element));
+    context->elmt = lam::up(node);
+    context->block.parent = lam::up(&saved.block);
+    context->block.given_width = context->block.given_height = -1.0f;
+    context->font.current_font_size = -1.0f;
+    // preparation reads computed inputs without replacing already committed flow outputs.
+    bool computed_current = element->styles_resolved() && !element->needs_style_recompute() &&
+        radiant::css_resolved_style_input_revision(context, element);
+    if (!computed_current) dom_node_resolve_style(element, context);
+    // preparation computes style inputs; every first size/flow consumer must bind its own used context.
+    if (!computed_current) {
+        element->set_measure_restyled(true);
+        // legacy adapters have no frozen computed record; their real consumer owns resolution.
+        if (!radiant::css_resolved_style_cache_allowed(context, element))
+            element->set_styles_resolved(false);
+    }
+    if (layout_display_is_none(element->display)) {
+        element->view_type = previous_type;
+        radiant::layout_restore_context(context, saved);
+        return true;
+    }
+    ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    if (element == context->doc->root && element->font)
+        context->root_font_size = element->font->font_size;
+    if (element->font) setup_font(context->ui_context, &context->font, element->font);
+    setup_line_height(context, block);
+    layout_setup_block_font_metrics(context);
+    if (block->blk) {
+        context->block.text_align = block->block()->text_align;
+        context->block.text_align_last = block->block()->text_align_last;
+        context->block.direction = block->block()->direction;
+    }
+    bool complete = true;
+    {
+        // counter/quote effects follow source order independently of CSS order and sizing queries.
+        LayoutCounterScope counters;
+        if (!counters.enter(context, block, element, element->display)) complete = false;
+        else {
+            if (!layout_element_is_replaced(element))
+                layout_materialize_pseudo_content(context, block, true, false);
+            context->block.parent = lam::up(&saved.block);
+            context->block.flow_box = lam::up(block);
+            float width = layout_block_given_content_size(block, true);
+            context->block.content_width = width >= 0.0f ? width : saved.block.content_width;
+            float height = layout_block_given_content_size(block, false);
+            context->block.content_height = max(height, 0.0f);
+            context->block.given_width = width;
+            context->block.given_height = height;
+            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                if (!prepare_generated_subtree(context, child, depth + 1, remaining)) { complete = false; break; }
+            }
+        }
+    }
+    float root_font_size = context->root_font_size;
+    // prepared style does not publish geometry or make unlaid children appear placed.
+    element->view_type = previous_type;
+    radiant::layout_restore_context(context, saved);
+    context->root_font_size = root_font_size;
+    return complete;
+}
+
+bool layout_prepare_generated_effects(LayoutContext* context, DomNode* root) {
+    if (!context || context->paged || context->css_query_probe ||
+        context->generated_effects_prepared) return true;
+    int budget = context->node_limit - context->node_count;
+    bool supported = view_geometry_walk_dom_tree(root, [](DomNode* node, void* data) {
+        if (--*(int*)data < 0) return false;
+        if (!node->is_element()) return true;
+        DomElement* element = node->as_element();
+        const char* custom = custom_layout_name_for_element(element);
+        if (element->shadow_root_element() || (custom && custom[0])) return false;
+        // these producers materialize content on demand across relevance/containment passes.
+        static const CssPropertyCode deferred[] = {CSS_PROPERTY_CONTENT_VISIBILITY,
+            CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH,
+            CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT};
+        for (CssPropertyCode property : deferred)
+            if (style_tree_get_declaration(element->specified_style, property)) return false;
+        return true;
+    }, &budget);
+    // shadow/custom and relevance-driven producers retain their existing effect adapter.
+    if (!supported) return true;
+    LayoutContext saved = *context;
+    context->preparing_generated_effects = true;
+    block_context_init(&context->block, nullptr, context->pool);
+    context->root_font_size = context->font.current_font_size = -1.0f;
+    context->block.content_width = context->block.max_width = context->width;
+    context->block.content_height = context->height;
+    context->block.line_height = -1.0f;
+    context->block.line_height_is_normal = true;
+    int remaining = context->node_limit - context->node_count;
+    bool complete = prepare_generated_subtree(context, root, 0, &remaining);
+    radiant::layout_restore_context(context, saved);
+    if (!complete) return false;
+    context->generated_effects_prepared = true;
+    return true;
 }
