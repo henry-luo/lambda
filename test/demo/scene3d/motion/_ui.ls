@@ -1,5 +1,8 @@
-// the shared page shell of the motion demos: breadcrumbs back to the Scene3D
+// the shared shell of the motion demos: breadcrumbs back to the Scene3D
 // collection, a title and introduction, then the page's own (templated) stage.
+// Each page lists its choices as {id, label, clip, once}: one button and one
+// controller state each; a `once` state plays through and returns to `rest`.
+import motion: lambda.scene3d.motion
 import collection: ~~._navigation
 
 pub fn page(title, eyebrow, description, stage) element => <html
@@ -13,6 +16,15 @@ pub fn page(title, eyebrow, description, stage) element => <html
         stage>>
 >
 
-// one button per controller state; the playing one is marked
-pub fn buttons(choices, playing) element => <div class: "toolbar", role: "group", 'aria-label': "Animations",
-    for (c in choices) <button id: "play-" ++ c[0], type: "button", class: (if (c[0] == playing) "active" else ""), c[1]>>
+// one button per choice; the requested one is marked
+pub fn buttons(choices, requested) element => <div class: "toolbar", role: "group", 'aria-label': "Animations",
+    for (c in choices) <button id: "play-" ++ c.id, type: "button", class: (if (c.id == requested) "active" else ""), c.label>>
+
+pub fn states(choices, rest) => [for (c in choices)
+    if (c.once == true) motion.motion_state(symbol(c.id), c.clip, {loop: 'once', next: rest, fade: 0.15})
+    else motion.motion_state(symbol(c.id), c.clip)];
+
+// the template's [state, cue] after a click on `id`: a choice's button switches to it,
+// and the requested one's button cues it again
+pub fn pick(id, choice, cue) => if (id == null or not starts_with(id, "play-")) [choice, cue]
+    else (let next = symbol(slice(id, 5, len(id))), if (next == choice) [choice, cue + 1] else [next, cue])

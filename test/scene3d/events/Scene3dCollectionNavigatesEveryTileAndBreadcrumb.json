@@ -287,17 +287,17 @@
     {
       "type": "click",
       "target": {
-        "selector": ".demo-tile[href=\"motion/mixamo.ls\"]"
+        "selector": ".demo-tile[href=\"motion/robot.ls\"]"
       },
       "scroll_into_view": true
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Mixamo dance\""
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Animated robot\""
     },
     {
       "type": "assert_script",
-      "js": "document.querySelector('#dancer-view')!==null || document.querySelector('#mixamo-missing')!==null"
+      "js": "document.querySelector('#robot-view')!==null && document.querySelector('#workshop').getAttribute('data-state')==='idle'"
     },
     {
       "type": "click",

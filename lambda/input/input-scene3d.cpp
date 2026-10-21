@@ -76,6 +76,13 @@ bool asset_triangulate(SceneAsset& asset,const double* p,size_t count,lam::Array
             if(inside) continue;
             triangles.append(a);triangles.append(b);triangles.append(c);remaining.remove(k);clipped=true;break;
         }
+        // a corner on a straight edge or repeating its neighbour adds no area but blocks the ears
+        // beside it (Blender n-gons carry them); dropping it lets clipping go on, while a truly
+        // non-simple polygon still finds no ear
+        for(size_t k=0;k<remaining.size()&&!clipped;k++) {
+            unsigned a=remaining[(k+remaining.size()-1)%remaining.size()],b=remaining[k],c=remaining[(k+1)%remaining.size()];
+            if(fabs(cross2(p+a*3,p+b*3,p+c*3,x,y))<=1e-12) {remaining.remove(k);clipped=true;}
+        }
         if(!clipped) return asset.fail("polygon is non-simple or has repeated/collinear corners");
     }
     for(unsigned i:remaining) triangles.append(i);

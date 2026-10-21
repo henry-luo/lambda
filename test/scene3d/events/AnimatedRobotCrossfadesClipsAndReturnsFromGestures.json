@@ -1,0 +1,188 @@
+{
+  "name": "AnimatedRobotCrossfadesClipsAndReturnsFromGestures",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#robot-view",
+      "name": "start"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#robot-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "idle",
+      "source": "scene3d",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "rgba": [
+        [
+          150,
+          255
+        ],
+        [
+          50,
+          140
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "count": {
+        "min": 1500
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play-dance"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#robot-view",
+      "seconds": 0.6
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#workshop"
+      },
+      "attribute": "data-state",
+      "equals": "dance"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "reference": "idle",
+      "count": {
+        "min": 200
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play-wave"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#robot-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#robot-view",
+      "seconds": 0.2
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#workshop"
+      },
+      "attribute": "data-state",
+      "equals": "wave"
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#robot-view",
+      "seconds": 2.0
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#workshop"
+      },
+      "attribute": "data-state",
+      "equals": "idle"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#robot-view",
+      "fields": {
+        "graphics.gpu_bytes": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

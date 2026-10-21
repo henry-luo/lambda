@@ -28,6 +28,7 @@
 {"FbxJumpSkinsTexturedBodyThroughCharacterSchema", "test/scene3d/motion-fbx.ls", "test/scene3d/events/FbxJumpSkinsTexturedBodyThroughCharacterSchema.json", 10},
 {"KenneyCharacterWearsItsSkinAndJumps", "test/scene3d/motion-kenney.ls", "test/scene3d/events/KenneyCharacterWearsItsSkinAndJumps.json", 9},
 {"CubePetsSwitchClipsTogetherAndChainGestures", "test/demo/scene3d/motion/pets.ls", "test/scene3d/events/CubePetsSwitchClipsTogetherAndChainGestures.json", 23},
+{"AnimatedRobotCrossfadesClipsAndReturnsFromGestures", "test/demo/scene3d/motion/robot.ls", "test/scene3d/events/AnimatedRobotCrossfadesClipsAndReturnsFromGestures.json", 22},
 {"MotionControllerCrossfadesChainsAndReplays", "test/scene3d/motion-control.ls", "test/scene3d/events/MotionControllerCrossfadesChainsAndReplays.json", 33},
 {"MotionControllerRejectsInvalidStates", "test/scene3d/motion-control-invalid.ls", "test/scene3d/events/MotionControllerRejectsInvalidStates.json", 8},
 {"PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders", "test/scene3d/physics-rerender.ls", "test/scene3d/events/PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders.json", 35},

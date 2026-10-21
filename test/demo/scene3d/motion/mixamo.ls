@@ -9,8 +9,8 @@ import motion: lambda.scene3d.motion
 import ui: ._ui
 
 let dir = "temp/mixamo/"
-let choices = [["samba", "Samba"], ["own", "Its own dance"], ["leap", "Jump"]]
-fn states() => [motion.motion_state('samba', "samba"), motion.motion_state('own', "mixamo.com"), motion.motion_state('leap', "leap")]
+let choices = [{id: "samba", label: "Samba", clip: "samba"}, {id: "own", label: "Its own dance", clip: "mixamo.com"},
+    {id: "leap", label: "Jump", clip: "leap"}]
 
 fn dancer() element^ {
     let hero = motion.load(dir ++ "mixamo.fbx", {rig: 'mixamo'})^
@@ -26,7 +26,7 @@ fn stage(choice, cue) element^ => s.normalize(s.scene([
     s.light('ambient', {intensity: 0.6}),
     s.light('directional', {position: [1.0, 2.0, 3.0], intensity: 0.8}),
     s.mesh(s.box([4.0, 0.04, 2.6]), s.material('lambert', {color: "#2b3a52"}), {position: [0.0, -0.02, 0.0]}),
-    motion.control(compiled, states(), {state: choice, cue: cue, fade: 0.3})^
+    motion.control(compiled, ui.states(choices, 'samba'), {state: choice, cue: cue, fade: 0.3})^
 ], {id: "dancer-view", camera: "camera", width: 960, height: 440, background: "#20242b"}))^
 
 fn missing() element => <div id: "mixamo-missing", class: "missing",
@@ -42,11 +42,9 @@ view <dance> state choice: 'samba', cue: 0, playing: "samba" {
         <p class: "caption", "Mixamo's Beta character, from the Mixamo exports Three.js r186 ships. The samba comes from another Mixamo character and the jump from a CMU-named BVH; both are retargeted onto Beta.">>
 }
 on click(evt) {
-    let id = dom.get_attribute(evt.target, "id")
-    if (id != null and starts_with(id, "play-")) {
-        let next = symbol(slice(id, 5, len(id)))
-        if (next == choice) { cue = cue + 1 } else { choice = next }
-    }
+    let picked = ui.pick(dom.get_attribute(evt.target, "id"), choice, cue)
+    choice = picked[0]
+    cue = picked[1]
 }
 on statechange(evt) { playing = string(evt.to) }
 

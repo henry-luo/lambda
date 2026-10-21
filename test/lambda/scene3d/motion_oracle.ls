@@ -18,7 +18,8 @@ let offsets_bvh = motion.load(dir ++ "offsets.bvh", {scale: 0.01})^;
 "2 FBX joints agree with ufbx in every case";
 let cases = [["jump.fbx", "jump"], ["jump-ascii.fbx", "jump"], ["jump-7500.fbx", "jump"], ["rig.fbx", "curl"], ["rig.fbx", "wave"],
     ["rig.fbx", "sway"], ["kenney/characterMedium.fbx", null], ["kenney/jump.fbx", "Root|Jump"],
-    ["cube-pets/animal-cat.fbx", "walk"], ["cube-pets/animal-cat.fbx", "dance"]]
+    ["cube-pets/animal-cat.fbx", "walk"], ["cube-pets/animal-cat.fbx", "dance"],
+    ["robot/Robot.fbx", null], ["robot/Robot.fbx", "RobotArmature|Robot_Dance"], ["robot/Robot.fbx", "RobotArmature|Robot_Wave"]]
 // FBXLoader keys every curve linearly, so files whose clips need cubic keys are compared with ufbx only
 fn curved(cs) => cs[0] == "rig.fbx" or starts_with(cs[0], "cube-pets")
 let loaded = map([for (f in unique([for (cs in cases) cs[0]])) (f, motion.load(dir ++ f)^)]);
