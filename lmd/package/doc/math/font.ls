@@ -7,7 +7,7 @@ import fallback: .fallback
 import bundled: .bundled
 import tex_metrics: .tex_metrics
 import mhchem: .mhchem
-import embedded_fonts: lambda.doc.font
+import font_files: lambda.doc.font
 
 pub let UNITS = 1000.0
 
@@ -127,7 +127,7 @@ pub fn prepare(ast, options) map | error {
     }
 }
 
-pub fn stylesheet(profile, body) => embedded_fonts.stylesheet(profile.faces, body)
+pub fn stylesheet(profile, body) => font_files.stylesheet(profile.faces, body)
 
 fn lookup(profile, facts, cp) {
     let index = index_of(profile.points, cp)

@@ -1,11 +1,16 @@
-// Retain MIME type, font declarations and geometry; resource tests verify actual bytes.
+// Retain font declarations and geometry; resource tests verify URLs and custom bytes.
 import util: lambda.doc.math.util
+import font_files: lambda.doc.font
 
 type FontSource = \("src:url(data:" ("\a" | "\d" | "/" | "-" | "." | "+")+ ";base64," ("\a" | "\d" | "+" | "/" | "=")+ ")")
 // retained delimiters occupy odd slots (S17.1.1); do not rematch large font data.
-pub fn normalize(html) => join([for (i, part in split(html, FontSource, true))
-    if (i % 2 == 1) slice(part, 0, index_of(part, ";base64,") + 8) ++ "FONT_PAYLOAD)"
-    else part], "")
+pub fn normalize(html) {
+    let quoted = format(font_files.resource_path(""), 'json')^
+    let relative = replace(html, slice(quoted, 1, len(quoted) - 1), "BUNDLED_PACKAGE/");
+    join([for (i, part in split(relative, FontSource, true))
+        if (i % 2 == 1) slice(part, 0, index_of(part, ";base64,") + 8) ++ "FONT_PAYLOAD)"
+        else part], "")
+}
 
 // inspect painted glyphs without counting accessible titles or embedded font data.
 pub fn painted_text(node, ignore_kind = null) {

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 38.4.0 (2026-10-21)
+**Spec version:** 38.5.0 (2026-10-21)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1602,6 +1602,13 @@ loosely across the corpus — context disambiguates, and we live with it.
   conversion/rendering features report errors; support is a documented subset,
   not a claim of complete MathML conformance. Namespace and content identity
   follow S5.4.3 and S2.6.1v2. [Lambda_Pkg_Math §11]
+
+- **D7.2.9** **Bundled document fonts are shared file resources.** Generated
+  HTML/SVG `@font-face` rules reference the fonts in Lambda's package tree by
+  URL, rather than embedding their complete bytes in each formula or document.
+  Font measurement may still consume IO-owned byte snapshots (D7.1.2v2).
+  Caller-supplied font bytes without a resource URL retain their existing
+  embedding behavior. [USER 2026-10-21; Lambda_Pkg_Math §8]
 
 ### D7.3 Jube modules: the module system
 

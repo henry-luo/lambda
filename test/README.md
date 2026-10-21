@@ -198,9 +198,11 @@ returns that fixture to full stress. `make test-mir-gc-stress-full`
 The DocBook reference gate exports all eight publications in one Lambda process
 per output mode, sharing package compilation while rebuilding each publication.
 Single-page and chunked output retain complete body comparisons, chunk filename
-checks and local resource/link validation. Math SVG snapshots use retained
-`split` delimiters directly (S17.1.1), avoiding another pattern match over each
-embedded font payload; font declarations and geometry remain in the goldens.
+checks and local resource/link validation. Math SVG snapshots retain font
+declarations and geometry, normalizing only the installation path and custom
+font payloads. Bundled font URLs must name readable distributed files and
+contain no base64 font data (D7.2.9); bytes-only custom fonts retain their
+data-URL snapshots.
 
 Lambda emission fixtures execute in batches of 32 through `test-batch`, which
 resets the heap, roots, module state and Inputs between scripts (D5.4.3).

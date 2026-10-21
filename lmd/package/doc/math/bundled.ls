@@ -1,5 +1,7 @@
 // Reuse distributed CMU/KaTeX faces; this is resource selection, not geometry.
 // Binary acquisition stays in Lambda IO (D7.1.2v2).
+import font_files: lambda.doc.font
+
 pub let FAMILY = "Computer Modern Serif"
 // CM math symbols must resolve before platform fallback (plain.tex family 2). KaTeX_Main
 // carries those cmsy shapes and precedes KaTeX_AMS: where both faces have a code point,
@@ -28,7 +30,8 @@ let resources = [
 ]
 
 pub fn faces() array | error {
-    [for (face in resources) {font_family: face.family,
+    let base = font_files.resource_path("");
+    [for (face in resources, let path = base ++ face.file) {font_family: face.family,
         font_weight: face.weight or 400, font_style: face.style or "normal",
-        data: input(sys.lambda.home# ++ "/package/" ++ face.file, 'binary')^}]
+        src: path, data: input(path, 'binary')^}]
 }
