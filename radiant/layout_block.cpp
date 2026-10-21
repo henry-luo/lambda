@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 #include "svg_animation.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -1388,7 +1389,6 @@ static double layout_block_record_elapsed(uint64_t start) {
 
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
-void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
@@ -9924,6 +9924,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         block->block_mut()->aspect_ratio_auto_height = false;
     }
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
+    radiant::CssResolvedSize preferred_height = {};
+    if (radiant::css_resolved_style_size(lycon, dom_elem, LAYOUT_AXIS_Y, &preferred_height) &&
+        preferred_height.percentage && layout_percentage_height_is_automatic(block, lycon)) {
+        // flow consumes cyclic percentages as auto, including calc(); the computed record stays intact.
+        layout_clear_given_axis(lycon, block, false);
+    }
     const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
     bool package_mathml = !custom_layout_name && layout_is_mathml_root(dom_elem) &&
         resolve_display_value(dom_elem).inner == CSS_VALUE_MATH;

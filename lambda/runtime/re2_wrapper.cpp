@@ -445,15 +445,7 @@ static void char_set_emit_codepoint(StrBuf* regex, uint32_t codepoint) {
     }
 }
 
-// one RE2 class; an empty set becomes a class that admits nothing
-static void char_set_emit(StrBuf* regex, PatternCharSet* set) {
-    char_set_normalize(set);
-    if (!set->count) {
-        strbuf_append_format(regex, "[^\\x{0}-\\x{%X}]",
-            set->alphabet_limit ? set->alphabet_limit : PATTERN_MAX_CODEPOINT);
-        return;
-    }
-    strbuf_append_char(regex, '[');
+static void char_set_emit_ranges(StrBuf* regex, PatternCharSet* set) {
     for (size_t i = 0; i < set->count; i++) {
         char_set_emit_codepoint(regex, set->ranges[i].lo);
         if (set->ranges[i].hi > set->ranges[i].lo) {
@@ -461,7 +453,34 @@ static void char_set_emit(StrBuf* regex, PatternCharSet* set) {
             char_set_emit_codepoint(regex, set->ranges[i].hi);
         }
     }
+}
+
+// one RE2 class; an empty set becomes a class that admits nothing
+static void char_set_emit(StrBuf* regex, PatternCharSet* set) {
+    char_set_normalize(set);
+    uint32_t limit = set->alphabet_limit ? set->alphabet_limit : PATTERN_MAX_CODEPOINT;
+    if (!set->count) {
+        strbuf_append_format(regex, "[^\\x{0}-\\x{%X}]", limit);
+        return;
+    }
+    // A set reaching the top of the alphabet is a complement; emit it as `[^…]`.
+    // Spelled as positive intervals it holds U+017F and U+212A, which a
+    // case-insensitive search (S17.7.1) folds to s and k, so `!"\a"` matched letters.
+    PatternCharSet left_out = {};
+    left_out.alphabet_limit = set->alphabet_limit;
+    bool complement = set->ranges[set->count - 1].hi >= limit;
+    for (size_t i = 0; complement && i < set->count; i++) {
+        complement = char_set_add(&left_out, set->ranges[i].lo, set->ranges[i].hi);
+    }
+    if (complement && char_set_complement(&left_out) && left_out.count) {
+        strbuf_append_str(regex, "[^");
+        char_set_emit_ranges(regex, &left_out);
+    } else {
+        strbuf_append_char(regex, '[');
+        char_set_emit_ranges(regex, set);
+    }
     strbuf_append_char(regex, ']');
+    char_set_free(&left_out);
 }
 
 // Lower a single-character set, or its complement, to one RE2 class. False

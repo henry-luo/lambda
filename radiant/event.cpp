@@ -634,7 +634,7 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
         }
     }
 
-    layout_html_doc(uicon, doc, true);
+    layout_update_document(uicon, doc);
     if (iframe_container) {
         restore_embedded_document_scroll_model(doc);
     }
@@ -8002,10 +8002,11 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
                             mutations, doc->js.mutation_record_count,
                             doc->js.mutation_record_overflow,
                             "presentation-properties", "none", "retained", 0);
+    layout_publish_document_geometry(evcon->ui_context, doc);
     return true;
 }
 
-static bool post_html_handler_detached_only_commit(DomDocument* doc, int mutations) {
+static bool post_html_handler_detached_only_commit(UiContext* ui, DomDocument* doc, int mutations) {
     DocState* state = (DocState*)doc->state;
     if (!doc->view_tree || !doc->view_tree->root || doc->js.mutation_record_count <= 0 ||
         doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
@@ -8021,6 +8022,7 @@ static bool post_html_handler_detached_only_commit(DomDocument* doc, int mutatio
     dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "detached-only",
                             mutations, doc->js.mutation_record_count, 0,
                             "none", "none", "retained", 0);
+    layout_publish_document_geometry(ui, doc);
     return true;
 }
 
@@ -8044,7 +8046,7 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
     // deferring text-tree changes until load completion loses dynamic keyframes.
     dom_cssom_sync_mutated_inline_stylesheets(doc);
 
-    if (post_html_handler_detached_only_commit(doc, mutations)) {
+    if (post_html_handler_detached_only_commit(evcon->ui_context, doc, mutations)) {
         dom_js_mutation_reset_records(doc);
         return;
     }

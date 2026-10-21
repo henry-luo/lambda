@@ -1,0 +1,51 @@
+[{
+    id: "trees",
+    readerable: true,
+    article: true
+  }, {
+    id: "focaccia",
+    readerable: true,
+    article: true
+  }, {
+    id: "reader",
+    readerable: true,
+    article: true
+  }, {
+    id: "home",
+    readerable: false,
+    article: false
+  }]
+[{
+    title: "Shade by design: how street trees cool a city block",
+    byline: "Ana Okafor",
+    site: "The Meridian Ledger",
+    date: "14 July 2026",
+    minutes: 3
+  }, {
+    title: "Overnight focaccia with rosemary and sea salt",
+    byline: "Mira Lindqvist",
+    site: "Crumb & Hearth",
+    date: "2 March 2026",
+    minutes: 3
+  }, {
+    title: "How reader mode decides what to keep",
+    byline: "Jonas Peretz",
+    site: "Fieldnotes",
+    date: "18 September 2026",
+    minutes: 3
+  }]
+false
+[true, ["trees"]]
+[1, false, true]
+true
+[]
+["sepia", "light"]
+[3, 4, 0]
+[3, 1]
+true
+false
+true
+[2, 0]
+true
+["14 July 2026", "2 March 2026", null, null]
+4

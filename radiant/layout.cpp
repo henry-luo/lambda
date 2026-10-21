@@ -23,6 +23,7 @@ extern "C" {
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
@@ -2313,12 +2314,15 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
             bool measuring = layout_context_is_measuring(lycon);
-            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize),
-            // after a measurement re-resolved this element as a walked descendant,
-            // and after normal-flow collapse consumed its used boundary.
+            // probes may reset used margins without running a content pass or snapshot scope.
+            if (measuring) flex_retained_forget_content(dom_elem);
+            // validated committed boxes keep algorithm-assigned constraints; changed
+            // computed inputs or percentage bases restore clean values before flow (VR15).
             if (styles_current && !measuring && !dom_elem->measure_restyled() &&
-                !layout_boundary_consumed_by_flow(dom_elem)) {
-                // calling us. When we skip resolution, these must be restored from
+                !layout_boundary_consumed_by_flow(dom_elem) &&
+                (!radiant::css_resolved_style_cache_allowed(lycon, dom_elem) ||
+                 radiant::css_resolved_style_matches_context(lycon, dom_elem))) {
+                // these used dimensions belong to the validated committed constraint.
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
                     if (block->block()->given_width >= 0) {
@@ -5804,6 +5808,8 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     advance_measurement_cache_generation(doc->view_tree);
 
     if (!doc->skip_style_reset) {
+        // a full flow starts at computed CSS; incremental updates preserve
+        // clean sibling results and restore changed sizing inputs on demand.
         reset_styles_resolved(doc);
     }
 
@@ -6059,6 +6065,120 @@ static bool layout_clear_dirty_visitor(DomNode* node, void*) {
     return true;
 }
 
+struct DocumentLayoutPublication {
+    DomNodeRef root;
+    UiContext* host;
+    FontContext* fonts;
+    CssEngine* cascade;
+    radiant::CssFontKey default_font;
+    uint64_t mutation_epoch, style_epoch, cascade_epoch, font_generation;
+    uint32_t input_revision, generation;
+    float width, height, raster_scale, minimum_font_size;
+    CssInputCapabilities input_capabilities;
+    const char* color_scheme;
+    int html_version;
+    bool frozen_animations, print_media, reduced_motion, high_contrast, valid;
+};
+
+static DocumentLayoutPublication layout_document_inputs(UiContext* ui, DomDocument* doc) {
+    DocumentLayoutPublication inputs = {};
+    inputs.root = dom_node_ref(doc->root);
+    inputs.host = ui;
+    inputs.fonts = ui->font_ctx;
+    inputs.cascade = (CssEngine*)doc->services.cached_css_engine;
+    inputs.default_font = radiant::css_font_key(doc->html_version == HTML5
+        ? &ui->default_font : &ui->legacy_default_font);
+    inputs.mutation_epoch = doc->mutation_epoch;
+    inputs.style_epoch = doc->style_query_epoch;
+    inputs.cascade_epoch = style_epoch_current_id(doc);
+    inputs.font_generation = ui->font_ctx ? font_context_resource_generation(ui->font_ctx) : 0;
+    inputs.input_revision = doc->root ? doc->root->intrinsic_input_revision : 0;
+    inputs.generation = doc->view_tree->layout_generation;
+    inputs.width = doc->viewport.width > 0 ? doc->viewport.width
+        : (ui->viewport_width > 0.0f ? ui->viewport_width : 1200.0f);
+    inputs.height = doc->viewport.height > 0 ? doc->viewport.height
+        : (ui->viewport_height > 0.0f ? ui->viewport_height : 800.0f);
+    inputs.raster_scale = ui_context_raster_scale(ui);
+    inputs.minimum_font_size = ui->minimum_logical_font_size;
+    inputs.input_capabilities = ui->input_capabilities;
+    inputs.html_version = doc->html_version;
+    inputs.frozen_animations = doc->disable_css_animations;
+    if (inputs.cascade) {
+        inputs.color_scheme = inputs.cascade->context.color_scheme;
+        inputs.print_media = inputs.cascade->context.print_media;
+        inputs.reduced_motion = inputs.cascade->context.reduced_motion;
+        inputs.high_contrast = inputs.cascade->context.high_contrast;
+    }
+    inputs.valid = true;
+    return inputs;
+}
+
+void layout_invalidate_document_geometry(ViewTree* tree) {
+    if (tree && tree->document_layout) tree->document_layout->valid = false;
+}
+
+static void layout_store_document_geometry(UiContext* ui, DomDocument* doc) {
+    if (!ui || !doc || !doc->view_tree || !doc->view_tree->root) return;
+    ViewTree* tree = doc->view_tree;
+    if (!tree->document_layout) tree->document_layout = lam::own(
+        (DocumentLayoutPublication*)pool_calloc(tree->prop_pool, sizeof(DocumentLayoutPublication)));
+    if (tree->document_layout) *tree->document_layout = layout_document_inputs(ui, doc);
+}
+
+static bool layout_document_environment_equal(const DocumentLayoutPublication& a,
+                                               const DocumentLayoutPublication& b) {
+    return a.root.address == b.root.address && a.root.expected_id == b.root.expected_id &&
+        a.host == b.host && a.fonts == b.fonts && a.cascade == b.cascade &&
+        css_font_keys_equal(a.default_font, b.default_font) &&
+        a.font_generation == b.font_generation &&
+        a.generation == b.generation && a.width == b.width && a.height == b.height &&
+        a.raster_scale == b.raster_scale && a.minimum_font_size == b.minimum_font_size &&
+        a.html_version == b.html_version && a.frozen_animations == b.frozen_animations &&
+        a.color_scheme == b.color_scheme && a.print_media == b.print_media &&
+        a.reduced_motion == b.reduced_motion && a.high_contrast == b.high_contrast &&
+        css_input_capabilities_equal(&a.input_capabilities, &b.input_capabilities);
+}
+
+void layout_publish_document_geometry(UiContext* ui, DomDocument* doc) {
+    if (!ui || !doc || !doc->view_tree || !doc->view_tree->root ||
+        !doc->view_tree->document_layout || !doc->view_tree->document_layout->valid) return;
+    DocumentLayoutPublication inputs = layout_document_inputs(ui, doc);
+    // a proven paint-only/detached batch consumes its own input versions, but
+    // cannot also satisfy an unrelated resize or newly registered font.
+    if (layout_document_environment_equal(*doc->view_tree->document_layout, inputs))
+        *doc->view_tree->document_layout = inputs;
+}
+
+static bool layout_document_geometry_current(UiContext* ui, DomDocument* doc) {
+    if (!doc->view_tree || !doc->view_tree->root || !doc->view_tree->document_layout ||
+        !doc->view_tree->document_layout->valid || (doc->root && doc->root->layout_dirty) ||
+        (doc->state && doc->state->needs_reflow) || doc->pending_scroll_into_view_target.address)
+        return false;
+    const DocumentLayoutPublication& a = *doc->view_tree->document_layout;
+    DocumentLayoutPublication b = layout_document_inputs(ui, doc);
+    return layout_document_environment_equal(a, b) && a.mutation_epoch == b.mutation_epoch &&
+        a.style_epoch == b.style_epoch && a.cascade_epoch == b.cascade_epoch &&
+        a.input_revision == b.input_revision;
+}
+
+bool layout_update_document(UiContext* ui, DomDocument* doc) {
+    if (!ui || !doc) return false;
+    if (dom_engine_layout_active(doc)) return doc->view_tree && doc->view_tree->root;
+    process_document_font_faces(ui, doc);
+    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(ui, doc);
+    if (!doc->root) return doc->view_tree && doc->view_tree->root;
+    if (!layout_document_geometry_current(ui, doc)) {
+        // an existing selected tree owns live control/frame state; ordinary
+        // invalidation is a retained reflow, not a new view-pool epoch.
+        bool reflow = doc->view_tree && doc->view_tree->root;
+        layout_html_doc(ui, doc, reflow);
+    }
+    // scroll writes change sticky placement without invalidating box flow.
+    layout_resolve_scrolled_sticky(doc->view_tree);
+    // observer writes belong to the next update, never to the snapshot just published.
+    return doc->view_tree && doc->view_tree->root;
+}
+
 struct LayoutScriptBudgetScope {
     bool paused = ScriptRunnerHostLayoutScope::suspend_watchdog_for_layout();
     void finish() {
@@ -6076,6 +6196,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
 
     LayoutContext lycon;
     if (!doc) return;
+    // a mutation cascade may have installed faces since the caller's checkpoint.
+    process_document_font_faces(uicon, doc);
+    layout_invalidate_document_geometry(doc->view_tree);
     // CSSOM and task checkpoints run native layout between script slices;
     // charge the page-code watchdog again before delivering JS observers.
     LayoutScriptBudgetScope script_budget;
@@ -6248,6 +6371,19 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     // geometry before observers and CSSOM read the completed snapshot.
     if (doc->view_tree && doc->view_tree->root) {
         view_geometry_walk_dom_tree(root_node, layout_clear_dirty_visitor, nullptr);
+        doc->view_tree->document_layout_count++;
+        // consume reflow before callbacks; their writes must survive this publication.
+        if (doc->state) {
+            // pending scheduler/dirty requests describe the full flow just consumed.
+            doc->state->dirty_tracker.full_reflow = false;
+            reflow_clear(doc->state);
+            doc_state_clear_reflow(doc->state);
+        }
+        doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
+        if (!paged) layout_store_document_geometry(uicon, doc);
+        // pruning can invalidate selector state; those writes were not consumed by this flow.
+        if (!is_reflow && reset_script_layout && doc->state)
+            state_store_prune_after_reflow((DocState*)doc->state);
     }
     script_budget.finish();
     dom_observers_post_layout();
@@ -6256,10 +6392,4 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     log_info("[TIMING] print_view_tree: %.1fms", time_elapsed_ms_f(t_layout, t_end));
     log_layout_timing_summary();
     log_info("[TIMING] layout_html_doc total: %.1fms", time_elapsed_ms_f(t_start, t_end));
-    if (!is_reflow && doc->view_tree && doc->view_tree->root) {
-        if (reset_script_layout && doc->state) {
-            state_store_prune_after_reflow((DocState*)doc->state);
-        }
-        doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
-    }
 }

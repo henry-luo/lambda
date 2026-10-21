@@ -522,6 +522,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
         {"slides", ".slide-player"},
+        {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"wordcloud", ".gallery .card"},
         {nullptr, "#demo-home-splash", false, custom_home},
     };

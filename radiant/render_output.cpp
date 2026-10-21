@@ -590,7 +590,7 @@ static bool render_export_session_begin_internal(
         css_engine_set_viewport(engine, page_style.content_rect.width,
             page_style.content_rect.height);
     }
-    layout_html_doc(session->ui_context, session->document, false);
+    layout_update_document(session->ui_context, session->document);
 
     session->content_width = session->has_page_geometry
         ? (int)ceilf(session->page_width) : layout_width; // INT_CAST_OK: legacy export extent stores integral CSS pixels.

@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+@font-face { font-family: PublicationMetrics; src: url("../layout/data/support/fonts/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 PublicationMetrics; }
+#result { width: 80px; }
+.cell { display: table-cell; width: 40px; }
+ol { margin: 0; padding-left: 40px; }
+#generated::before { content: "X"; }
+#letter::first-letter { color: red; }
+#probe-row { display: flex; width: 300px; }
+#probe-main { display: flex; flex-direction: column; flex: 1; }
+#probe-toc { display: flex; flex-direction: column; width: 100px; height: 80px; overflow: auto; }
+#probe-title { padding: 24px 0 4px; }
+#probe-title span { font-size: 10px; }
+</style>
+<div id="result"><div id="text">XX XX XX</div><div id="table"><div class="cell" id="cell-a">XX</div><div class="cell" id="cell-b">XX</div></div><ol><li id="item-a">XX</li><li id="item-b">XX</li></ol><div id="generated">XX</div><div id="letter">XX</div><svg id="picture" width="20" height="20"><rect width="20" height="20" fill="red"/></svg><div id="probe-row"><div id="probe-main"><div>XX XX XX</div><div id="probe-leaf">XX</div></div><aside id="probe-toc"><div id="probe-title"><span>XX</span></div><ul><li>XX</li><li>XX</li></ul></aside></div></div>
+<script>
+// no diagnostic DOM writes: the loader and presentation must share this result.
+var firstPublicationHeight = document.getElementById("result").offsetHeight;
+var secondPublicationHeight = document.getElementById("result").getBoundingClientRect().height;
+</script>

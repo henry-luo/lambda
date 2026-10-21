@@ -1,0 +1,10 @@
+'1. relative references'
+["http://fakehost/test/img/a.png", "http://fakehost/a/b", "http://cdn.example.com/x", "http://fakehost/test/page.html?q=1", "http://fakehost/test/page.html#top", "http://fakehost/test/a%20b.png"]
+'2. schemes and special hosts are lowercased; opaque hosts keep case'
+["http://www.teara.govt.nz/en", "mailto:Someone@Example.COM"]
+'3. a file URL normalizes its Windows drive letter'
+["file:///C:/Documents/a.gif", "file:///C:/docs/b.gif"]
+'4. an opaque path keeps spaces and backslashes'
+["data:image/svg+xml;utf8,<svg viewBox='0 0 1 1'></svg>", "mailto:a\\b@c.d"]
+'5. long URLs are not truncated'
+[true, true]

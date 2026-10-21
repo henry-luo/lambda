@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How reader mode decides what to keep — Fieldnotes</title>
+<meta name="description" content="A tour of the small, durable heuristics behind browser reader views: paragraph scores, commas, class names and link density.">
+<meta name="author" content="Jonas Peretz">
+<meta property="og:site_name" content="Fieldnotes">
+<meta property="article:published_time" content="2026-09-18T15:00:00Z">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #0f1720; color: #d7dee7; font: 15px/1.65 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+a { color: #6cc4ff; text-decoration: none; }
+.nav { display: flex; align-items: center; gap: 22px; padding: 14px 32px; background: #0b1118; border-bottom: 1px solid #1f2b38; }
+.nav .logo { font: 600 18px Menlo, Consolas, monospace; color: #fff; margin-right: auto; }
+.nav .logo span { color: #6cc4ff; }
+.nav a { color: #9fb0c2; font-size: 14px; }
+.nav .cta { background: #6cc4ff; color: #0b1118; padding: 5px 12px; border-radius: 4px; font-weight: 600; }
+.hero-strip { background: linear-gradient(90deg, #1b3a57, #3b2a57); padding: 10px 32px; font-size: 13px; color: #d7dee7; }
+.wrap { display: flex; gap: 36px; max-width: 1120px; margin: 0 auto; padding: 32px; }
+.toc { width: 210px; flex-shrink: 0; font-size: 13px; }
+.toc h4 { text-transform: uppercase; letter-spacing: 1px; font-size: 11px; color: #73879b; margin: 0 0 8px; }
+.toc a { display: block; color: #9fb0c2; padding: 3px 0 3px 10px; border-left: 2px solid #1f2b38; }
+.toc a.current { color: #6cc4ff; border-left-color: #6cc4ff; }
+.post { flex: 1; min-width: 0; max-width: 720px; }
+.tags a { display: inline-block; font-size: 12px; background: #1b2734; color: #9fb0c2; padding: 2px 9px; border-radius: 10px; margin-right: 6px; }
+.post h1 { color: #fff; font-size: 36px; line-height: 1.2; margin: 14px 0 10px; letter-spacing: -.5px; }
+.post .meta { color: #73879b; font-size: 13px; margin-bottom: 24px; }
+.post-body h2 { color: #fff; font-size: 22px; margin: 32px 0 8px; }
+.post-body p { margin: 0 0 16px; }
+.post-body pre { background: #0b1118; border: 1px solid #1f2b38; border-radius: 6px; padding: 14px 16px; overflow-x: auto; font: 13px/1.5 Menlo, Consolas, monospace; color: #b5f0c0; }
+.post-body code { font-family: Menlo, Consolas, monospace; font-size: 13px; color: #ffcf7a; }
+.post-body table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14px; }
+.post-body th, .post-body td { border: 1px solid #263646; padding: 6px 10px; text-align: left; }
+.post-body th { background: #15202b; color: #fff; }
+.post-body figure { margin: 22px 0; }
+.post-body img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.post-body figcaption { color: #73879b; font-size: 13px; margin-top: 6px; }
+.author-card { display: flex; gap: 14px; align-items: center; background: #15202b; border-radius: 8px; padding: 16px; margin: 32px 0 18px; }
+.author-card .face { width: 54px; height: 54px; border-radius: 50%; background: linear-gradient(135deg, #6cc4ff, #a77bff); flex-shrink: 0; }
+.author-card p { margin: 2px 0 0; color: #9fb0c2; font-size: 13px; }
+.subscribe { border: 1px solid #263646; border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+.subscribe input { background: #0b1118; border: 1px solid #263646; color: #d7dee7; padding: 6px 8px; width: 60%; }
+.subscribe button { background: #6cc4ff; border: 0; padding: 7px 12px; font-weight: 600; }
+.pager { display: flex; justify-content: space-between; font-size: 14px; border-top: 1px solid #1f2b38; padding-top: 14px; }
+.discussion { margin-top: 26px; }
+.discussion .item { border-top: 1px solid #1f2b38; padding: 10px 0; font-size: 14px; }
+.discussion .item b { color: #fff; }
+.site-footer { border-top: 1px solid #1f2b38; text-align: center; padding: 22px; color: #73879b; font-size: 13px; }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="logo">field<span>notes</span>/</div>
+  <a href="#">Engineering</a><a href="#">Design</a><a href="#">Releases</a><a href="#">Careers</a><a class="cta" href="#">Try it free</a>
+</nav>
+<div class="hero-strip">New: our 2026 State of the Web report is out. <a href="#">Download the PDF →</a></div>
+<div class="wrap">
+  <nav class="toc" aria-label="On this page">
+    <h4>On this page</h4>
+    <a class="current" href="#step-1">Throw away the obvious</a>
+    <a href="#step-2">Score the paragraphs</a>
+    <a href="#step-3">Punish links</a>
+    <a href="#step-4">Gather the siblings</a>
+    <a href="#why">Why it holds up</a>
+  </nav>
+  <div class="post">
+    <div class="tags"><a href="#">#browsers</a><a href="#">#html</a><a href="#">#heuristics</a></div>
+    <h1>How reader mode decides what to keep</h1>
+    <div class="meta">Jonas Peretz · 18 September 2026 · 7 min read</div>
+    <div class="post-body">
+      <p>Every major browser ships a button that strips a web page down to its text. Press it on a news article and the navigation, the advertisements and the comment thread disappear, leaving a clean column of prose. It looks like magic, but the heuristics behind it are surprisingly small and, once you know them, rather charming.</p>
+      <p>This post walks through the approach taken by Mozilla's Readability library, the engine behind Firefox's Reader View, which we recently ported to a functional language. None of it relies on machine learning. It is a set of rules of thumb about how people write HTML, refined over more than a decade of real pages.</p>
+      <h2 id="step-1">Step 1: throw away the obvious</h2>
+      <p>The first pass removes elements that are almost never part of an article: scripts, styles, and anything whose class or id matches words like <code>sidebar</code>, <code>comment</code>, <code>footer</code>, <code>sponsor</code> or <code>popup</code>. A short list of positive words such as <code>article</code>, <code>body</code> and <code>content</code> can rescue an element that would otherwise be dropped. Containers made only of inline text are turned into paragraphs, so that the scoring pass has something consistent to count.</p>
+      <h2 id="step-2">Step 2: score the paragraphs</h2>
+      <p>Next, every paragraph with at least 25 characters awards points to its parent and grandparent. A paragraph earns one point for existing, one point per comma, and one point per hundred characters of text, up to three. Commas are a crude but effective signal: prose has them, while navigation menus and button labels do not.</p>
+      <pre><code>score = 1
+      + commas(text)
+      + min(floor(length(text) / 100), 3)
+
+parent.score      += score
+grandparent.score += score / 2</code></pre>
+      <p>Ancestors further up receive smaller shares, so the points pool in the element that directly contains the bulk of the text. Each candidate also starts with a bonus or penalty based on its tag and its class names, as the table below shows.</p>
+      <table>
+        <thead><tr><th>Signal</th><th>Example</th><th>Starting score</th></tr></thead>
+        <tbody>
+          <tr><td>Positive class or id</td><td><code>article</code>, <code>entry</code>, <code>story</code></td><td>+25</td></tr>
+          <tr><td>Negative class or id</td><td><code>comment</code>, <code>sidebar</code>, <code>promo</code></td><td>−25</td></tr>
+          <tr><td>Tag <code>div</code></td><td>Generic container</td><td>+5</td></tr>
+          <tr><td>Tag <code>pre</code>, <code>td</code>, <code>blockquote</code></td><td>Text-bearing block</td><td>+3</td></tr>
+          <tr><td>Tag <code>ul</code>, <code>ol</code>, <code>form</code></td><td>Lists and forms</td><td>−3</td></tr>
+          <tr><td>Tag <code>h1</code> to <code>h6</code>, <code>th</code></td><td>Headings</td><td>−5</td></tr>
+        </tbody>
+      </table>
+      <h2 id="step-3">Step 3: punish links</h2>
+      <p>A block that is mostly links is probably navigation, however many commas it has. So each candidate's score is multiplied by one minus its link density, the share of its text that sits inside anchors. A sidebar of headlines ends up near zero, while a paragraph with a single citation barely changes.</p>
+      <figure>
+        <img src="images/scoring.svg" alt="Diagram of a page tree in which paragraph scores flow up into the article container" width="640" height="300">
+        <figcaption>Paragraph scores flow upward; the container holding most of the prose wins, while the link-heavy sidebar scores close to zero.</figcaption>
+      </figure>
+      <h2 id="step-4">Step 4: gather the siblings</h2>
+      <p>The highest-scoring element wins, but an article rarely lives in a single container. Readability looks at the winner's siblings and pulls in any that score well enough, or that are paragraphs with plenty of text and few links. A cleaning pass then removes leftovers inside the article: share buttons, empty containers, and small tables full of links.</p>
+      <p>If the result is too short, the whole process runs again with the rules relaxed, first keeping elements with suspicious class names and then ignoring class weights altogether. Only if every attempt comes back short does the library give up and return the longest result it found.</p>
+      <h2 id="why">Why it holds up</h2>
+      <p>What makes the approach durable is that it measures how text is written rather than how a page is built. Sites redesign their markup constantly, but articles keep having paragraphs, paragraphs keep having commas, and navigation keeps being made of links. A heuristic tuned to those habits has aged far better than anyone expected.</p>
+    </div>
+    <div class="author-card"><div class="face"></div><div><b>Jonas Peretz</b><p>Jonas works on document tooling and has opinions about commas. <a href="#">More posts by Jonas</a></p></div></div>
+    <div class="subscribe"><b>Get Fieldnotes in your inbox</b><br><input placeholder="you@company.com"> <button>Subscribe</button> <a href="#">or use RSS</a></div>
+    <div class="pager"><a href="#">← Why our build got 3× faster</a><a href="#">Designing for slow networks →</a></div>
+    <section class="discussion" id="comments">
+      <h3>Discussion (12)</h3>
+      <div class="item"><b>mkoenig</b> The comma heuristic is so dumb it's brilliant.</div>
+      <div class="item"><b>ada_l</b> Would love a follow-up on how it handles paginated articles.</div>
+    </section>
+  </div>
+</div>
+<footer class="site-footer">© 2026 Fieldnotes Labs · <a href="#">Blog</a> · <a href="#">Status</a> · <a href="#">Privacy</a></footer>
+</body>
+</html>

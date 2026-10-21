@@ -1071,6 +1071,7 @@ typedef struct FlexRetainedPass {
     float laid_width, laid_height, laid_content_width, laid_content_height;
     float first_line_baseline, last_line_baseline;
     uint8_t has_measure : 1;
+    uint8_t measure_has_height : 1;
     uint8_t has_cross : 1;
     uint8_t has_content : 1;
     uint8_t content_row_parent : 1;       // parent direction the content pass saw
@@ -3165,6 +3166,8 @@ struct ViewTree {
     int measurement_cache_capacity;
     uint32_t measurement_cache_generation;
     uint32_t layout_generation; // Advances at each retained full-layout boundary.
+    lam::Own<struct DocumentLayoutPublication> document_layout; // selected-tree input snapshot, owned by prop_pool
+    uint64_t document_layout_count; // completed document flows, independent of publication reuse
     int sticky_box_count;       // sticky boxes the last layout pass solved; scrolls re-solve them
 #ifdef __cplusplus
     void init(struct MemContext* owner);
