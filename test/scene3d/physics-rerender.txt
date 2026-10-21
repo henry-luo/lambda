@@ -3,16 +3,22 @@
     <style
       "html,body{margin:0;background:#ffffff} button{font-size:10px;margin:1px}">
     <script type: "module",
-      "\nimport { operate } from '../demo/scene3d/physics/_control.ls';\nglobalThis.physicsRead = (request) => {\n    globalThis.physicsState = null;\n    return operate(document.getElementById('world'), request).then(value => { globalThis.physicsState = value; });\n};\nglobalThis.boxHeight = () => physicsState.bodies.find(b => b.id === 'box').position[1];\n">>
+      "\nimport { operate } from '../demo/scene3d/physics/_control.ls';\nglobalThis.physicsRead = (request) => {\n    globalThis.physicsState = null;\n    return operate(document.getElementById('world'), request).then(value => { globalThis.physicsState = value; });\n};\nglobalThis.boxBody = () => physicsState.bodies.find(b => b.id === 'box');\nglobalThis.boxHeight = () => boxBody().position[1];\n">>
   <body
-    <div id: "lab", data-redraws: "0", data-gravity: "-9.81",
+    <div id: "lab", data-redraws: "0", data-gravity: "-9.81", data-lift: "4", data-density: "1", data-second: "false",
       <button id: "redraw",
         "redraw">
       <button id: "heavier",
         "heavier">
+      <button id: "lift",
+        "lift">
+      <button id: "dense",
+        "dense">
+      <button id: "second",
+        "second">
       <scene3d id: "world", width: 160, height: 120, camera: "main", background: "#202936", style: "display:block",
         <physics state: 'paused', gravity: [0, -9.81, 0]>
-        <camera id: "main", type: 'perspective', position: [4, 3, 6], target: [0, 1, 0]>
+        <camera id: "main", type: 'perspective', position: [5, 4, 9], target: [0, 2, 0]>
         <light type: 'ambient', intensity: 0.6>
         <rigid-body id: "floor", type: 'fixed', position: [0, -0.1, 0],
           <collider id: "floor-shape", shape: 'box', size: [6, 0.2, 6]>
@@ -20,7 +26,7 @@
             <geometry type: 'box', size: [6, 0.2, 6]>
             <material type: 'lambert', color: "#64748b">>>
         <rigid-body id: "box", type: 'dynamic', position: [0, 4, 0],
-          <collider id: "box-shape", shape: 'box', size: [1, 1, 1]>
+          <collider id: "box-shape", shape: 'box', size: [1, 1, 1], density: 1>
           <mesh
             <geometry type: 'box', size: [1, 1, 1]>
             <material type: 'lambert', color: "#fbbf24">>>>>>>
