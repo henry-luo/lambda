@@ -69,6 +69,7 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">
                 <div class:"raster-crop-shade",*[for (edge in ["top","bottom","left","right"]) <div 'data-crop-shade':edge>]>
                 <div class:"raster-crop">
+                <div class:"raster-guides"> <div class:"raster-reference">
                 <div class:"raster-transform",'aria-label':"Layer transform controls", *[
                     *[for (handle in transforms.handles) <button type:"button",'data-raster-handle':handle.id,
                         class:"transform-handle handle-" ++ handle.id,title:"Resize " ++ handle.id,
@@ -115,7 +116,7 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <section class:"transform-panel", *[<h2 "Transform & blend">,
                 <div class:"button-grid", *[button("clipping","layer.clipping","Toggle clipping"),button("isolation","layer.isolation","Toggle isolation")]>,
                 <label "Blend mode" <select id:"blend", *[for (mode in ["normal","multiply","screen","overlay","darken","lighten","difference","exclusion"]) <option value:mode,mode>]>>,
-                <p "Transform: drag handles to resize or rotate. Shift keeps corner proportions / snaps rotation; Alt resizes about the center. Drag the image to scale; Shift-drag rotates.">,
+                <p "Transform: drag handles to resize or rotate. Shift keeps corner proportions / snaps rotation; Alt resizes about the center. Drag the image to scale; Shift-drag rotates. Reset applies to one layer; use Undo for groups or multiple layers.">,
                 <div class:"fields", *[field("transform-angle","Rotate degrees",0,"number"),field("transform-x","Scale X",1,"number"),field("transform-y","Scale Y",1,"number")]>,
                 <div class:"button-grid", *[button("transform-apply","transform-apply","Apply transform"),button("transform-reset","transform-reset","Reset transform"),
                     button("flip-x","flip-x","Flip horizontal"),button("flip-y","flip-y","Flip vertical"),button("rasterize","layer.rasterize","Rasterize layer")]>]>,
@@ -178,7 +179,17 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <div id:"curve-graph",curve_chart({},"rgb")>,<p "Input → · Output ↑. Click adds a point; drag to adjust. Curves use straight segments.">,
                 <label "Points [input,output], from 0 to 1" <textarea id:"curve-points",rows:3,"[[0,0],[1,1]]">>,
                 <div class:"button-grid",*[button("curve-reset","curve-reset","Reset channel"),button("curve-remove","curve-remove","Remove point"),
-                    button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect")]>]>]>]>,
+                    button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect")]>]>,
+            <section class:"guides-panel",*[<h2 "Guides & snapping">,
+                <p "Move drags snap to visible guides and canvas edges/centers. Alt temporarily bypasses snapping. Drag guides with Move.">,
+                <label "Guide axis" <select id:"guide-axis",<option value:"x","Vertical"> <option value:"y","Horizontal">>>,
+                field("guide-position","Position in pixels",100,"number"),
+                <div class:"button-grid",*[button("guide-add","guide-add","Add guide"),button("guide-show","guide-show","Hide guides"),
+                    button("guide-snap","guide-snap","Enable snapping"),button("guide-clear","guide.clear","Clear guides")]>,
+                <div id:"guide-list">,
+                <h2 "Straighten">,<p "Straighten (Q): draw along a horizon or upright edge on the selected layers. Release commits; Escape cancels. Canvas size stays unchanged.">,
+                <label "Align reference to" <select id:"straighten-axis",<option value:"horizontal","Horizontal"> <option value:"vertical","Vertical">>>,
+                button("straighten-tool","straighten-tool","Draw reference line")]>]>]>,
     <footer class:"statusbar",<output id:"status",role:"status",'aria-live':"polite","Opening sample…"> <span id:"dimensions","">>,
     <section id:"file-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"File operation", *[
         <h2 id:"file-title","Open image">,field("file-path","Path"),

@@ -1,0 +1,544 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos guide placement, pixel overlay, snapping, drag, undo and project reopening",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "16",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-shape"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "10",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-y"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-position"
+      },
+      "text": "14.5",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-position"
+      },
+      "text": "45",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-add"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Ready"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-axis"
+      },
+      "value": "y"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-position"
+      },
+      "text": "14",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-snap"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-snapping",
+      "equals": "true"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 18,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 36,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-canvas-20261021/snap-reference.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".raster-reference path"
+      },
+      "attribute": "d",
+      "equals": "M 45 0 V 48"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 45,
+        "offset_y": 30
+      },
+      "min_r": 120,
+      "max_g": 220,
+      "min_b": 180
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 36,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "29"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 18,
+        "offset_y": 10
+      },
+      "dx": 18,
+      "dy": 0,
+      "steps": 3,
+      "pointerType": "mouse",
+      "mods_str": "alt"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "28"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-raster-guide='guide-1']"
+      },
+      "dx": 5,
+      "dy": 0,
+      "steps": 3,
+      "pointerType": "mouse"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-guide='guide-1']"
+      },
+      "equals": "Vertical 50 px \u00b7 Remove"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-raster-guide='guide-1']"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 60,
+        "offset_y": 24
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-guide='guide-1']"
+      },
+      "equals": "Vertical 50 px \u00b7 Remove"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/canvas-guides.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/canvas-guides.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 50,
+        "offset_y": 30
+      },
+      "max_r": 180,
+      "min_g": 220,
+      "min_b": 220
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides-visible",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 50,
+        "offset_y": 30
+      },
+      "min_r": 180
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-guide='guide-1']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-canvas-20261021/guides.png"
+    }
+  ]
+}
