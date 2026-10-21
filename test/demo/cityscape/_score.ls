@@ -6,6 +6,8 @@
 // CC11 expression, chords spread a few milliseconds upward, and harp and piano ring
 // under a legato sustain pedal (CC64).
 
+import ~~.mod_midi
+
 pub let duration = 150.0
 
 // channels and their General MIDI programs; channel 9 is the GM drum kit.
@@ -23,14 +25,7 @@ let BASS_DRUM = 36, LOW_DRUM = 35, CRASH = 49, CHINA = 52
 
 // ---------------------------------------------------------------- events
 
-// times snap to whole milliseconds: 27.0 + 2 * 0.1 must equal 27.2, or a tie sorted by
-// `order` could step backwards and the native player rejects the stream.
-fn at(t) => round(t * 1000.0) / 1000.0
-// `order` keeps same-time events valid: programs, then controllers, then note-offs, then note-ons.
-fn on(t, ch, key, vel) map => {seconds: at(t), status: 144 + ch, a: key, b: vel, order: 3}
-fn off(t, ch, key) map => {seconds: at(t), status: 128 + ch, a: key, b: 0, order: 2}
-fn cc(t, ch, control, value) map => {seconds: at(t), status: 176 + ch, a: control, b: value, order: 1}
-fn program(t, ch, preset) map => {seconds: at(t), status: 192 + ch, a: preset, b: 0, order: 0}
+// event constructors (at, on, off, cc, program) live in ../mod_midi.ls
 // notes stop just before the end so nothing rings past the performance.
 fn note(t, dur, ch, key, vel) array => [on(t, ch, key, vel), off(min(t + dur, duration - 0.05), ch, key)]
 fn hit(t, key, vel) array => note(t, 1.5, DRUMS, key, vel)
@@ -271,9 +266,6 @@ pub fn performance() map {
         *growth, *shudu, *rings, *ending]
     // fades and swells are expression marks, not events; they become the CC11 lanes.
     let marks = [for (e in merged where e.kind != null) e]
-    let events = [*[for (e in merged where e.kind == null) e], *[for (ch in SWELLING) *expression(ch, marks)]]
-    // the native player requires non-decreasing times; `order` breaks ties.
-    let sorted = sort(events, (e) => e.seconds + e.order * 0.000001);
-    {kind: "music-performance", seconds: duration,
-     events: [for (e in sorted) {seconds: e.seconds, status: e.status, a: e.a, b: e.b}]}
+    let events = [*[for (e in merged where e.kind == null) e], *[for (ch in SWELLING) *expression(ch, marks)]];
+    performance_of(events, duration)
 }

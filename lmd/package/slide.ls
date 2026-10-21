@@ -5,6 +5,7 @@ import sampler: lambda.slide.sample
 import playback: lambda.slide.player
 import live: lambda.slide.live
 import paragraph: lambda.slide.paragraphs
+import clock: lambda.slide.clock
 
 pub fn compile(deck, options = {}) map^ => compiler.compile(deck, options)^
 pub fn snapshot(deck, address = {}, options = {}) element^ {
@@ -17,6 +18,12 @@ pub fn slides(deck, options = {}) array^ {
     [for (i, scene in plan.slides) renderer.stage(plan, sampler.address(plan, {slide: i, cue: 'final'})^,
         {*: options, instance: "slide" ++ string(i)})]
 }
+// autoplay as one deck clock: {duration_ms, slides: [{id, start_ms, end_ms}]}
+pub fn timeline(deck, options = {}) map^ {
+    let plan = compiler.compile(deck, options)^;
+    clock.timeline(plan, options)
+}
+pub fn position(plan, ps) float => clock.position(plan, ps)
 pub fn initial_state(plan, options = {}) => playback.initial_state(plan, options)
 pub fn reduce(plan, ps, event) map^ => playback.reduce(plan, ps, event)^
 pub fn sample(plan, ps) array^ => playback.sample(plan, ps)^

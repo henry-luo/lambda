@@ -47,12 +47,13 @@ pub fn tokens(query) => [for (t in split(lower(trim(query or "")), " ") where t 
 
 pub fn matches(p, words) => all([for (w in words) contains(p.text, w)])
 
-// mode: "library" | "album" | "favorites"; a non-empty query searches the whole library
+// mode: "library" | "album" | "favorites" | "places"; a non-empty query searches the whole library
 pub fn scope(lib, mode, album, favorites, query) {
     let words = tokens(query);
     if (len(words) > 0) [for (id in lib.order where matches(photo(lib, id), words)) id]
     else if (mode == "album") [for (id in lib.order where photo(lib, id).album == album) id]
     else if (mode == "favorites") [for (id in lib.order where contains(favorites, id)) id]
+    else if (mode == "places") [for (id in lib.order where photo(lib, id).gps != null) id]
     else lib.order
 }
 
@@ -60,7 +61,7 @@ pub fn scope_title(lib, mode, album, query) {
     let words = tokens(query);
     if (len(words) > 0) "Search: “" ++ trim(query) ++ "”"
     else if (mode == "album") [for (a in lib.albums where a.key == album) a.title][0] or "Album"
-    else if (mode == "favorites") "Favorites" else if (mode == "albums") "Albums" else "Library"
+    else if (mode == "favorites") "Favorites" else if (mode == "albums") "Albums" else if (mode == "places") "Places" else "Library"
 }
 
 // month sections only when months hold enough photos to fill rows; sparse scopes group by year

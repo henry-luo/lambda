@@ -1,10 +1,11 @@
 # Photo Album Demo — Proposal
 
-**Status:** Proposal, 2026-10-20. M0 (corpus preparation), M1 (browsing and
-viewer), M2 (slideshow), M3 (collage) and M4 (album book) are implemented; see
-the [M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20),
-[M2](#m2-checkpoint--2026-10-21), [M3](#m3-checkpoint--2026-10-21) and
-[M4](#m4-checkpoint--2026-10-21) checkpoints. M5 is not started. This
+**Status:** Proposal, 2026-10-20. All milestones are implemented: M0 (corpus
+preparation), M1 (browsing and viewer), M2 (slideshow), M3 (collage), M4 (album
+book) and M5 (film and places); see the [M0](#m0-checkpoint--2026-10-20),
+[M1](#m1-checkpoint--2026-10-20), [M2](#m2-checkpoint--2026-10-21),
+[M3](#m3-checkpoint--2026-10-21), [M4](#m4-checkpoint--2026-10-21) and
+[M5](#m5-checkpoint--2026-10-21) checkpoints. This
 document proposes a new demo application. It introduces no language or runtime
 rulings.
 
@@ -280,6 +281,13 @@ Clicking a cluster zooms in; clicking a pin opens its photos. Whether the map
 package can draw a basemap offline is checked at M5 (§5, G6). If it cannot, the
 view falls back to pins over a coarse bundled world outline.
 
+*As built (M5):* `lambda.map` has neither clustering nor tile sources, and its
+camera moves only by user input. Clusters are computed in Lambda for each
+integer zoom and shipped in one GeoJSON source; a layer filter on the map's zoom
+shows one band, so double-click, wheel or **+** splits pins. A click on a pin, or
+on a place in the side list, lists its photos; a photo opens in the viewer. The
+basemap is the bundled outline (G6).
+
 ### 3.2 Photo viewer
 
 - **Open and close.** Opening a tile animates the photo from its tile rectangle
@@ -374,6 +382,14 @@ slide package, not worked around in the demo (§5, G4).
 `lambda.music` package's SoundFont, as the cityscape film does. The tempo is
 fixed, so shot boundaries align to beats. Audible output follows D7.5.4. Tests
 run with the offline audio output.
+
+*As built (M5):* motion uses `keyframes` on each photo; a chapter card's tile
+`morph`s into the chapter's first shot, and quick-cut runs use `cut`. The film
+plays in an embedded player with `controls: false`, driven by `slide_command`
+events; the film bar reads the player's published deck clock (G4). The score is
+`mod_score.ls`, composed from the film plan at 120 BPM so every shot starts on a
+beat; the MIDI event helpers it shares with cityscape live in
+`test/demo/mod_midi.ls`.
 
 **Video files.** Exporting an MP4 or WebM file is out of scope; the slide
 package also excludes video export. A deterministic frame sequence through the
@@ -486,12 +502,15 @@ acquisition stays in `pn` code (S12.4.1v3).
 | `mod_corpus.ls` | Thumbnail and colour building shared by `_thumbs.ls` and `_fixture.ls` |
 | `mod_collage.ls` | Collage templates, mosaic split, editing commands and history, export |
 | `mod_film.ls` | Story generation and lowering of a film to a slide deck |
+| `mod_film_app.ls` | Film playback: the embedded player, film bar, scrubber, chapters and soundtrack sync |
+| `mod_places.ls` | Per-zoom clusters of located photos as GeoJSON for `lambda.map` (pure) |
 | `mod_book.ls` | Spread pagination, page-turn tracks and drag mapping |
 | `mod_ui.ls` | Markup: sidebar, toolbar, grid rows, album cards, selection bar, viewer, info, filmstrip and the slideshow sheet |
 | `mod_deck.ls` | Slideshow plan and deck generation, the postcard frame, source resolution for an embedded player, and deck file names (pure) |
 | `photo-album.css` | Visual design, the book's paper and cover textures, collage frames |
 | `_fetch.py`, `_thumbs.ls` | Corpus preparation (§2) |
-| `_score.ls` | Film soundtrack, following the cityscape `_score.ls` pattern |
+| `mod_score.ls` | Film soundtrack composed from the film plan; event helpers from `test/demo/mod_midi.ls`, shared with cityscape |
+| `world-outline.json` | The coarse hand-drawn land outline Places draws offline (G6) |
 
 The demo is registered in the demo table in `lambda/main.cpp` and listed in
 `test/demo/README.md`.
@@ -524,9 +543,9 @@ the milestone that first needs it, and fixed at its root if real.
 | G1 | Can a 1000-photo grid scroll and zoom smoothly with the thumbnail channel's 128-entry / 32 MiB cache, or with plain `<img>` thumbnails and the image cache? | M1 | **Measured, partly real.** Lambda work is about 1 ms per step; Radiant paint of the image tiles dominates. Precomputed 512 px thumbnails stay. See the M1 checkpoint. |
 | G2 | Does Radiant bound image-cache memory when the viewer pages through hundreds of 1280 px photos? | M1 | **Measured, real.** The window's image cache has no budget or eviction. Needs an ownership-aware eviction design in Radiant. See the M1 checkpoint. |
 | G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | **Resolved: no gap.** See the M3 checkpoint. |
-| G4 | Can the slide player seek continuously for a scrubber, and play a deck with its chrome hidden? | M5 | Extend the slide package's player API. |
+| G4 | Can the slide player seek continuously for a scrubber, and play a deck with its chrome hidden? | M5 | **Real, fixed in `lambda.slide`.** It had no deck clock, no host seek and no way to hide its controls. It gained `timeline`, `position`, the `seek_time` command, `controls: false` and `slide_command` host events. See the M5 checkpoint. |
 | G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | **Real for text, fixed.** Glyphs on a projected plane were bounded before the perspective divide and mostly dropped; fixed in `radiant/glyph_sampling.hpp`. Hit testing verified mid-turn. See the M4 checkpoint. |
-| G6 | Can `lambda.map` draw an offline basemap for the Places view? | M5 | Use the bundled world-outline fallback; a basemap is out of scope. |
+| G6 | Can `lambda.map` draw an offline basemap for the Places view? | M5 | **Real; fallback used.** No tile or URL sources, and no clustering. Places draws a bundled hand-drawn outline and clusters in Lambda. See the M5 checkpoint. |
 
 ## 6. Milestones and acceptance
 
@@ -829,3 +848,120 @@ in a live window.
   attribute.
 - The new toolbar button narrowed the heading enough to wrap the status line;
   the status now stays on one line and the search box shrinks first.
+
+## M5 checkpoint — 2026-10-21
+
+M5 is implemented:
+- **Film:** `mod_film.ls` (story and deck lowering), `mod_film_app.ls`
+  (playback) and `mod_score.ls` (soundtrack).
+- **Places:** `mod_places.ls` and `world-outline.json`.
+
+**Film** opens from the film icon in the toolbar (the photos shown, up to 60) or
+from the selection bar. **Places** is a sidebar view. Nothing is committed yet.
+
+**Delivered.**
+
+- **Story.** A film groups photos into chronological chapters by year, or by
+  month within one year, and lays them out at 120 BPM:
+  - a blurred-hero title card;
+  - a card per chapter, whose tile morphs into the chapter's first shot;
+  - landscapes that pan or zoom, portraits that drift over a blurred copy of
+    themselves, and paired portraits side by side;
+  - a quick-cut run every third chapter;
+  - rolling credits with each photo's author and license.
+- **Film bar.** Play or pause (Space, or a click on the picture), skip ±5 s,
+  Home and End, a draggable scrubber, chapter marks that jump, and a sound
+  toggle.
+- **Soundtrack.** It is composed from the film plan, so the chords change on
+  the chapter cards. It follows play, pause and seek, and stops at the end.
+- **Places.** Photos with GPS are drawn as pins sized by count over the bundled
+  outline. Pins split as the map zooms. A pin or a place in the side list shows
+  its photos, and a photo opens the viewer. Closing a layer returns focus to
+  the map.
+- **Toolbar.** Film, Album book and Collage are now icon buttons, so the
+  heading keeps its room.
+
+**Acceptance.** The M5 row passes.
+- `tests/album_film` makes a film of 40 photos from one album:
+  - it runs 97 s in four chapters;
+  - every photo appears once, in date order;
+  - quick runs cut, and chapter openers morph;
+  - the slide deck's own clock puts every shot on its beat, with the same total
+    length;
+  - a frame snapshot at a fixed film time is identical across renders, and
+    differs a second later;
+  - the score lasts exactly as long as the film, its events are time-ordered,
+    and a chord lands on each chapter card.
+- `tests/album_places` checks the pins at every zoom band, for the fixture and
+  for all 836 located photos:
+  - every band partitions the photos;
+  - zooming in only splits pins;
+  - pins keep library order;
+  - the outline's rings are closed.
+- `test/ui/photo_album/film.json` (56 assertions) covers playback end to end,
+  with the soundtrack on the offline audio output:
+  - opening, and the player's hidden controls;
+  - pause and resume, chapter jumps, and skips;
+  - two seeks to the same time showing the same pose;
+  - scrubbing that pauses and then resumes;
+  - click-to-pause and sound off;
+  - the end and replay;
+  - closing, and a film made from a selection.
+- `test/ui/photo_album/places.json` (31 assertions) covers the map:
+  - the fitted camera's 11 pins;
+  - list and map picks;
+  - zoom splitting the pins into 12;
+  - photos opening in the viewer;
+  - returning from the viewer and the library;
+  - a film made from Places.
+
+**G4: real, fixed in `lambda.slide`.** The embedded player had no deck-wide
+clock, no seek from its host, and no way to hide its controls. The slide
+package gained:
+- `clock.ls` (`timeline`, `position`, and a seek to deck time), with the
+  reducer's `seek_time` command;
+- `controls: false`, which hides the bar, drops the Toolbar button and leaves
+  stage clicks to the host;
+- a `slide_command` event that a host sends with `dom.dispatch`;
+- `data-slide-position` and `data-slide-position-at`, published at each command
+  or build boundary, so a host extrapolates the position on frame timestamps.
+
+`test_slide_clock` checks the clock against the reducer: positions equal
+elapsed time while autoplaying, and seeks round-trip. The
+`test/ui/slide_host_control` replay drives a player without controls. These
+are documented in [Lambda_Slide.md](../doc/Lambda_Slide.md#deck-clock-and-host-control).
+
+**G6: real; fallback used.** `lambda.map` has no tile or URL sources, so there
+is no offline basemap. It also has no clustering, and its camera moves only by
+user input.
+- Places draws `world-outline.json`, a coarse hand-drawn outline (29 land
+  masses, 838 vertices, CC0).
+- Clusters are computed in Lambda for each integer zoom and shown through a
+  layer filter on the zoom.
+- "Clicking a cluster zooms in" became "double-click, scroll or **+** zooms in";
+  a click lists the photos.
+
+**Findings outside the demo.**
+
+- **Radiant: writes made after a nested view re-render were never restyled.**
+  The bug, now fixed:
+  - A handler dispatched to another view and then called `set_inner_html` in
+    the same turn.
+  - The template splice in `rebuild_lambda_doc_incremental` cascaded only the
+    re-rendered template, then cleared the mutation ledger.
+  - The inserted nodes kept UA styles and stale inherited values.
+  - The fix commits the pending mutations first
+    (`radiant/cmd_layout.cpp`).
+  - Regression replay: `test/ui/restyle_after_nested_dispatch`.
+- **Handler binding.** A view's `on` handlers bind to the nearest preceding
+  `view`. Placing another view between a view and its handlers silently moves
+  them, and nothing reports it.
+- **Text under a fractional `translate`** is resampled bilinearly, so its edges
+  soften slightly while it moves. At integer offsets it is crisp.
+- **`lambda.chart` ring checks** treat a vertex touching another edge as an
+  intersection, so authored outlines must keep vertices off other edges.
+- **The selection bar** is centred with `left: 50%`. At seven buttons it is
+  wide enough to cover a tile near the bottom of the grid; the interactions
+  replay now aims at the tile's upper part.
+- **Not measured:** release-build film and map frame times. The film runs a
+  single bar update per frame and the player's own patching.

@@ -1,0 +1,41 @@
+{
+  timeline: {
+    duration_ms: 4650,
+    slides: [{
+        id: "a",
+        start_ms: 0,
+        end_ms: 2600
+      }, {
+        id: "b",
+        start_ms: 2600,
+        end_ms: 4400
+      }, {
+        id: "c",
+        start_ms: 4400,
+        end_ms: 4650
+      }]
+  },
+  tracks_elapsed: true,
+  ends_at_duration: true,
+  phases: [[0, 0, 'cue'], [600, 0, 'waiting'], [1450, 0, 'cue'], [2650, 1, 'transition'], [3000, 1, 'cue'], [4400, 2, 'cue']],
+  round_trip: [0, 200, 400, 900, 1450, 1500, 2650, 2800, 3400, 4500, 4650, 4650, 4650],
+  states: [[0, 0, 'cue', true], [0, 0, 'cue', true], [0, 0, 'waiting', true], [0, 0, 'waiting', true], [0, 1, 'cue', true], [0, 1, 'cue', true], [1, -1, 'transition', true], [1, -1, 'transition', true], [1, 0, 'waiting', true], [2, 0, 'cue', true], [2, 0, 'waiting', false], [2, 0, 'waiting', false], [2, 0, 'waiting', false]],
+  paused_stays: [true, 2800],
+  continues: [1450, 1550, 0, 'cue'],
+  reduced: {
+    duration_ms: 3000,
+    slides: [{
+        id: "a",
+        start_ms: 0,
+        end_ms: 2000
+      }, {
+        id: "b",
+        start_ms: 2000,
+        end_ms: 3000
+      }, {
+        id: "c",
+        start_ms: 3000,
+        end_ms: 3000
+      }]
+  }
+}
