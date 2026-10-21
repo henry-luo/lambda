@@ -8745,13 +8745,23 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         direct_refresh_recursive_type_layout(binary->right, visited);
     } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
-    } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
+    } else if ((type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) ||
+            type->type_id == LMD_TYPE_ELEMENT) {
         TypeMap* map = (TypeMap*)type;
         // Every record arm reached from a named union alias is a declared
         // contract, just like a directly named record. Marking only the outer
         // union left compiler-constructed member carriers unable to certify
         // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
-        map->is_trusted_contract = true;
+        if (type->type_id == LMD_TYPE_MAP) map->is_trusted_contract = true;
+        // a declared element's content pattern can reach records whose fields
+        // were laid out against the placeholder too
+        TypeList* content = type->type_id == LMD_TYPE_ELEMENT ?
+            ((TypeElmt*)type)->content_list : NULL;
+        for (int64_t i = 0; content && content->item_is_type_pattern && i < content->length; i++) {
+            if (content->item_is_type_pattern[i]) {
+                direct_refresh_recursive_type_layout(content->item_patterns[i].type, visited);
+            }
+        }
         bool changed_width = false;
         FOR_EACH_MAP_FIELD(map, field) {
             direct_refresh_recursive_type_layout(field->type, visited);
@@ -8778,9 +8788,11 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
-    if (lambda_type_is_union(actual)) {
+    if (lambda_type_is_union(actual) ||
+            (actual && actual->type_id == LMD_TYPE_ELEMENT)) {
         // Pattern references retain pre_type, so publish the completed union
-        // through that same wrapper rather than leaving an empty map behind.
+        // or element through that same wrapper rather than leaving an empty
+        // map behind: `type S = <s S*>` matched its own children against `{}`.
         pre_type->type = actual;
         alias->type = (Type*)pre_type;
         ArrayList* visited = arraylist_new(8);
