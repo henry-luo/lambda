@@ -2730,10 +2730,10 @@ static int run_t262_sub_batch(
         worker_timeout_arg = slow_timeout_arg;
     }
     char cmd[8192];
-    int cmd_length = snprintf(cmd, sizeof(cmd), "\"%s\" js-test-batch %s%s %s%s%s%s",
+    int cmd_length = snprintf(cmd, sizeof(cmd), "\"%s\" js-test-batch %s%s %s%s%s",
         g_lambda_exe, worker_timeout_arg, g_no_hot_reload ? " --no-hot-reload" : "",
         g_opt_level >= 0 ? g_opt_level_arg : "", g_mir_interp ? " --mir-interp" : "",
-        g_diagnose_mode ? " --diagnose" : "", g_mvp_lmd ? " --runtime=mvp-lmd" : "");
+        g_diagnose_mode ? " --diagnose" : "");
     if (cmd_length < 0 || (size_t)cmd_length >= sizeof(cmd)) {
         CloseHandle(manifest_h); CloseHandle(pipe_rd); CloseHandle(pipe_wr);
         return -1;
@@ -2919,7 +2919,6 @@ static int run_t262_sub_batch(
     if (g_diagnose_mode) {
         argv[argi++] = (char*)"--diagnose";
     }
-    if (g_mvp_lmd) argv[argi++] = (char*)"--runtime=mvp-lmd";
     extern char** environ;
     pid_t pid;
     int ret;
@@ -3150,7 +3149,6 @@ static int run_t262_persistent_sub_batches(
     if (g_diagnose_mode) {
         argv[argi++] = (char*)"--diagnose";
     }
-    if (g_mvp_lmd) argv[argi++] = (char*)"--runtime=mvp-lmd";
     extern char** environ;
     pid_t pid;
     int ret = posix_spawn(&pid, g_lambda_exe, &file_actions, NULL, argv, environ);

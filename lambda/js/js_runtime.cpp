@@ -20214,8 +20214,12 @@ extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
     }
 }
 
+extern "C" Item js_map_collection_storage_new(void) {
+    return js_collection_create(JS_COLLECTION_MAP, JS_CLASS_MAP);
+}
+
 extern "C" Item js_map_collection_new(void) {
-    Item obj = js_collection_create(JS_COLLECTION_MAP, JS_CLASS_MAP);
+    Item obj = js_map_collection_storage_new();
     js_collection_link_prototype(obj, "Map", 3);
     return obj;
 }
@@ -20312,7 +20316,7 @@ JS_FORWARD_ITEM(js_map_collection_new_from, (Item iterable), js_collection_new_f
 static void js_async_hooks_queue_destroy(Item resource);
 static bool js_async_hooks_is_gc_tracker(Item resource);
 
-static const JsCollectionStorageOps js_collection_default_storage = {
+const JsCollectionStorageOps js_collection_default_storage = {
     [](Item object, int kind) { return js_collection_has_brand(object, kind, false); },
     [](Item object) { return (int64_t)hashmap_count(js_get_collection_data(object)->hmap); },
     [](int kind) { return kind == JS_COLLECTION_SET ? js_set_collection_new() : js_map_collection_new(); },

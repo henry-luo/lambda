@@ -96,7 +96,7 @@ def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
                 sources.extend([{'input': str(path), 'sha256': sha(path)},
                                 {'frozen': str(frozen), 'sha256': sha(frozen)}])
         commands = {'node': [shutil.which('node'), str(script)],
-                    'candidate': [binary, 'js', '--runtime=mvp-lmd', '--no-log', str(script)]}
+                    'candidate': [binary, 'js', '--no-log', str(script)]}
         row = dict(id=identifier, population=population, contract=contract,
                    pending=pending, sources=sources, commands=commands, samples=[])
         if references:

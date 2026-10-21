@@ -63,7 +63,7 @@ for name, expected in oracles.items():
     source = path.read_text()
     kernel = source.rstrip().removesuffix('work()')
     timed = kernel + '\nlet start=performance.now();let result=work();let elapsed=performance.now()-start;console.log(result);console.log("__TIMING__:"+elapsed);\n'
-    commands = {'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '--runtime=mvp-lmd', '--timing', '-p', source],
+    commands = {'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '--timing', '-p', source],
         'lambda_js': ['./lambda.exe', 'js', '--no-log', '-e', timed], 'node': ['node', '-e', timed]}
     engines = list(commands)
     row = {'kernel': name, 'source': str(path), 'source_sha256': sha(path), 'expected': expected,

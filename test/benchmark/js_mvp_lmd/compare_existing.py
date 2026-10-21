@@ -93,13 +93,15 @@ for js_name, ls_name in workloads:
     mvp_source = Path(str(stem) + '.js')
     mvp_source.write_text(js + 'main()\n')
     commands = {
-        'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '--runtime=mvp-lmd', '--timing', '-p', mvp_source.read_text()],
+        'mvp_lmd': ['./lambda.exe', 'js', '--no-log', '--timing', '-p', mvp_source.read_text()],
         'lambda_js': ['./lambda.exe', 'js', '--no-log', str(js_path)],
         'lambda_untyped': ['./lambda.exe', 'run', str(ls_path), '--no-log'],
         'node': ['node', str(js_path)],
     }
     if control:
-        commands['mvp_lmd_before'] = [str(args.mvp_control.resolve()), *commands['mvp_lmd'][1:]]
+        # archived controls still need their explicit fast-entry selector.
+        commands['mvp_lmd_before'] = [str(args.mvp_control.resolve()), 'js',
+                                    '--runtime=mvp-lmd', *commands['mvp_lmd'][2:]]
     row = {'id': js_name, 'expected': expected, 'sources': [
         {'path': str(path), 'sha256': sha256(path)}
         for path in (js_path, ls_path, mvp_source)], 'samples': [], 'backend_validation': {}}
