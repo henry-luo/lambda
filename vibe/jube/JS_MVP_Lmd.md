@@ -1945,6 +1945,12 @@ engine for public Script, Module, host and Test262 execution. Rejected source
 must not fall back to retired LJS MIR. `eval`, Function-family constructors and
 other dynamic source use the retained AST interpreter.
 
+**Integration refinement (2026-10-20, USER), D8.1.3v27:** preserving fast MVP
+performance is the first gate for the default entry and shared runtime
+integration. The explicit selector and normal command share one entry;
+ownership alone cannot invalidate compilation proofs. The design and gates
+are in [JS_MVP_Integration.md](JS_MVP_Integration.md). Qualification is pending.
+
 The engine shares Lambda nominal shapes, closures, Runtime/EvalContext,
 precise roots, owned scalar storage and collection kernels (**D3.4.7,
 D5.3/D5.4, D6.2.2v2**). Public scripts retain one realm and live bindings across

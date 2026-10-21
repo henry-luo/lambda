@@ -2,6 +2,7 @@
  * JavaScript runtime built-in registry tables for Lambda.
  */
 #include "js_runtime_internal.hpp"
+#include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../../lib/hash.h"
 
 // =============================================================================
@@ -329,6 +330,8 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
 Item js_intrinsic_binding_get(JsBuiltinOwner owner, const char* name, int len) {
     const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
     if (!spec || spec->builtin_id <= JS_BUILTIN_NONE) return ItemNull;
+    Item shared = mvp_lmd_function_intrinsic(spec->builtin_id);
+    if (get_type_id(shared) == LMD_TYPE_FUNC) return shared;
     return js_create_builtin_function_from_spec(spec);
 }
 

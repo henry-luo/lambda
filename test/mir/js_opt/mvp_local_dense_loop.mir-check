@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D8.4.2v2: unrelated eval keeps guarded dense iteration and the complete generic continuation. Two loop bodies retain four native additions, while only the generic body has the two observable index fallbacks. The behavioral fixture verifies restored partial local writes, one getter per miss and exact thrown identity.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f2",
+      "expect": ["ret\t"],
+      "count": {
+        "dadd\t": 4,
+        "ubge\t": 4,
+        "call\tmvp_lmd_array_index_property": 2,
+        "call\tmvp_lmd_dynamic_reference": 0,
+        "call\tmvp_lmd_dynamic_eval": 0
+      }
+    },
+    {
+      "in_func": "mvp_lmd_f1",
+      "count": {
+        "call\tmvp_lmd_dynamic_eval": 1
+      }
+    }
+  ]
+}

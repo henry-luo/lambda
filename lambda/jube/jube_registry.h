@@ -36,6 +36,8 @@ typedef RuntimeResourceCloseCallback JubeNodeResourceCloseCallback;
 
 bool jube_specifier_catalog_contains(const char* name);
 bool jube_specifier_is_builtin(const char* name);
+// A catalog proof, checked against the descriptor before activation.
+bool jube_specifier_source_closed(const char* name);
 // Resolves only a descriptor already resident in this process, so it never
 // loads a library. Requesting its namespace may initialize and attach it.
 JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace);

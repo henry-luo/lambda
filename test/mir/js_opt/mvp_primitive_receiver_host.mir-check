@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2: proven primitive receivers cannot carry native object storage. A neighboring host import retains complete native calls while primitive property reads use the fixed property helper.",
+  "checks": [
+    {
+      "in_func": "mvp_lmd_f1",
+      "expect": ["ret\t"],
+      "count": {
+        "call\tmvp_lmd_class_property_host": 0,
+        "call\tmvp_lmd_class_property_fixed": 1
+      }
+    }
+  ]
+}

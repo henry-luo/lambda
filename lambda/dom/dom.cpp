@@ -3334,18 +3334,13 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
             js_history_set_location(value);
             return value;
         }
-        if (strcmp(prop, "title") == 0) {
-            // Store title as a static value (proxy map lacks TypeMap for map_put)
-            js_document_title_value = value;
-            return value;
-        }
-        // Allow setting defaultView (used by preamble: document.defaultView = window)
-        if (strcmp(prop, "defaultView") == 0) {
-            js_document_default_view = value;
-            return value;
-        }
-        if (strcmp(prop, "fonts") == 0) {
-            js_document_fonts_value = value;
+        Item* cached = strcmp(prop, "title") == 0 ? &js_document_title_value :
+            strcmp(prop, "defaultView") == 0 ? &js_document_default_view :
+            strcmp(prop, "fonts") == 0 ? &js_document_fonts_value : nullptr;
+        if (cached) {
+            // host writes can precede wrapper creation; register before publishing into its root range.
+            if (!dom_ensure_roots()) return ItemError;
+            *cached = value;
             return value;
         }
         if (strcmp(prop, "cookie") == 0) {

@@ -59,6 +59,16 @@ Item mvp_lmd_box_primitive(Item value, Item prototype) {
     uint64_t home = 0;
     Rooted<Item> primitive(roots, lambda_item_adopt_scalar_home(value, &home)), parent(roots, prototype),
         object(roots, ItemNull), key(roots, ItemNull), character(roots, ItemNull);
+    if (state->native_callable_values) {
+        // native prototype methods require their canonical boxed-value carrier.
+        object.set(js_to_object(primitive.get()));
+        if (item_is_error(object.get())) return object.get();
+        if (parent.get().item != ITEM_JS_UNDEFINED) {
+            Item linked = mvp_lmd_set_prototype(object.get(), parent.get());
+            if (item_is_error(linked)) return linked;
+        }
+        return object.get();
+    }
     MvpLmdClass* allocation = cls;
     if (parent.get().item != ITEM_JS_UNDEFINED && parent.get().item != mvp_lmd_class_values(cls)[1].item) {
         MvpLmdClass* derived = mvp_lmd_class_record(parent.get());
@@ -464,6 +474,10 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     LambdaError* error = it2err(carrier);
     if (!error || error->code == ERR_NOT_IMPLEMENTED || error->code == ERR_POOL_EXHAUSTED) return carrier;
     if (error->thrown_value_item) return Item{.item = error->thrown_value_item};
+    // native Error objects already own their identity; crossing a compiled
+    // frame only changes the propagation tag, not the observable allocation.
+    Item native_error = js_error_as_object(error);
+    if (js_is_resting_error(native_error)) return native_error;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, carrier), object(roots, ItemNull), text(roots, ItemNull);
@@ -484,8 +498,9 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     text.set(Item{.item = s2it(copied)});
     Item argument = text.get();
     MvpLmdClass* cls = &state->errors[kind];
-    object.set(error_construct(context, cls->program, &argument, 1,
-        mvp_lmd_class_values(cls)[0], ItemNull, Item{.item = ITEM_JS_UNDEFINED}));
+    // the canonical constructor may have either callable ABI.
+    object.set(mvp_lmd_class_invoke(mvp_lmd_class_values(cls)[0],
+        Item{.item = ITEM_JS_UNDEFINED}, &argument, 1, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(object.get())) return object.get();
     // shared host errors carry their JS class/name independently of the Lambda code.
     if (host_name && ((error->js_own_flags & JS_ERROR_OWN_NAME) ||
@@ -837,7 +852,7 @@ static Item date_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, It
 }
 
 Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
-    if (!state->date_observed) return ItemNull;
+    if (!state->date_observed || state->native_callable_values) return ItemNull;
     ((MvpLmdCallable*)state->date.values[0].function)->custom_new_target = true;
     Item result = mvp_lmd_named_set(state->date.values[1], "constructor", state->date.values[0], JSPD_NON_ENUMERABLE);
     if (item_is_error(result)) return result;
@@ -882,6 +897,18 @@ Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) 
     js_pd_set_configurable(&descriptor, true);
     return mvp_lmd_define_own_property(state->date.values[1],
         Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE))}, &descriptor);
+}
+
+Item mvp_lmd_library_class_adopt(MvpLmdClass* cls, Item* slots, Item constructor) {
+    // canonical constructors and prototypes stay rooted before later families allocate.
+    cls->values = slots;
+    slots[0] = constructor;
+    if (item_is_error(constructor)) return constructor;
+    if (get_type_id(constructor) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    slots[1] = js_get_constructor_intrinsic_prototype(constructor);
+    if (item_is_error(slots[1])) return slots[1];
+    slots[2] = constructor;
+    return ItemNull;
 }
 
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
@@ -1562,6 +1589,12 @@ Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* 
         int type = step ? step - 1 : 12;
         MvpLmdClass* cls = &state->typed_arrays[type];
         const char* name = type == 12 ? "TypedArray" : js_typed_array_spec((JsTypedArrayType)type)->name;
+        if (state->native_callable_values) {
+            Item status = mvp_lmd_library_class_adopt(cls, state->typed_values + 3 * type,
+                type == 12 ? js_get_typed_array_base() : js_get_constructor(js_name_item(name)));
+            if (item_is_error(status)) return status;
+            continue;
+        }
         Item status = mvp_lmd_library_class_initialize(program, state, cls,
             (int)(state->typed_values - state->values) + 3 * type, name, typed_array_construct, type == 12 ? 0 : 3);
         if (item_is_error(status)) return status;
@@ -1579,6 +1612,7 @@ Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* 
             if (item_is_error(status)) return status;
         }
     }
+    if (state->native_callable_values) return ItemNull;
     Item base = state->typed_arrays[12].values[1];
     const char* names[] = {"buffer", "byteLength", "byteOffset", "length", "[Symbol.toStringTag]"};
     for (int i = 0; i < 5; i++) {
@@ -1762,9 +1796,11 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
     if (!state->buffers) return ItemNull;
     Item result = ItemNull;
     if (state->atomics_value) {
-        *state->atomics_value = mvp_lmd_object_new(state->object_shape, 0);
+        *state->atomics_value = state->native_callable_values ? js_get_atomics_object_value()
+            : mvp_lmd_object_new(state->object_shape, 0);
         if (item_is_error(*state->atomics_value)) return *state->atomics_value;
         for (int i = 0; ; i++) {
+            if (state->native_callable_values) break;
             const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
             if (!method) break;
             if (method->owner != JS_BUILTIN_OWNER_ATOMICS_METHOD) continue;
@@ -1777,7 +1813,7 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
                 function.get(), JSPD_NON_ENUMERABLE);
             if (item_is_error(result)) return result;
         }
-        result = mvp_lmd_named_set(*state->atomics_value,
+        if (!state->native_callable_values) result = mvp_lmd_named_set(*state->atomics_value,
             Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
             Item{.item = s2it(heap_create_name("Atomics", 7))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
         if (item_is_error(result)) return result;
@@ -1789,6 +1825,11 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         MvpLmdClass* cls = classes[i];
         if (!cls) continue;
         const char* name = names[i];
+        if (state->native_callable_values) {
+            result = mvp_lmd_library_class_adopt(cls, values[i], js_get_constructor(js_name_item(name)));
+            if (item_is_error(result)) return result;
+            continue;
+        }
         result = mvp_lmd_library_class_initialize(program, state, cls,
             (int)(values[i] - state->values), name, buffer_construct, 1);
         if (item_is_error(result)) return result;
@@ -1811,7 +1852,10 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
             if (item_is_error(result)) return result;
         }
     }
-    if (state->test262_host) {
+    if (state->test262_host && state->native_callable_values) {
+        state->buffer_values[6] = js_get_262_object_value();
+        if (item_is_error(state->buffer_values[6])) return state->buffer_values[6];
+    } else if (state->test262_host) {
         state->buffer_values[6] = mvp_lmd_object_new(state->object_shape, 0);
         if (item_is_error(state->buffer_values[6])) return state->buffer_values[6];
         result = mvp_lmd_named_set(state->buffer_values[6], "detachArrayBuffer",
@@ -1835,6 +1879,7 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
             if (item_is_error(result)) return result;
         }
     }
+    if (state->native_callable_values) return result;
     const struct { const char* name; int operation; int owner; int arity; bool getter; } methods[] = {
         {"byteLength", BUFFER_BYTE_LENGTH, 0, 0, true}, {"maxByteLength", BUFFER_MAX_LENGTH, 0, 0, true},
         {"resizable", BUFFER_RESIZABLE, 0, 0, true}, {"detached", BUFFER_DETACHED, 0, 0, true},
@@ -1907,12 +1952,153 @@ static Item uri_call(Context*, MvpLmdProgram*, Item* args, uint64_t count,
     return js_uri_transform_string(text.get(), component, decode, uri_error);
 }
 
-Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
-    if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
-    if (!context->name_pool) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    state->prototype_key = mvp_lmd_internal_name(LMD_INTERNAL_PROTOTYPE);
-    state->extensibility_key = mvp_lmd_internal_name(LMD_INTERNAL_EXTENSIBLE);
-    if (!state->prototype_key || !state->extensibility_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+static Item mvp_lmd_primitive_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (!state->primitives) return ItemNull;
+    Item result = ItemNull;
+    state->primitive_key = mvp_lmd_internal_name(LMD_INTERNAL_PRIMITIVE);
+    if (!state->primitive_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (state->native_callable_values) {
+        // prepared realms own the complete primitive family, including boxed-value brands.
+        for (int i = 0; i < LMD_PRIMITIVE_COUNT; i++) {
+            Item result = mvp_lmd_library_class_adopt(&state->primitives[i], state->primitive_values + 3 * i,
+                js_get_constructor(js_name_item(mvp_lmd_primitive_names[i])));
+            if (item_is_error(result)) return result;
+        }
+        const struct { int id; int slot; } globals[] = {
+            {JS_BUILTIN_GLOBAL_FN_IS_NA_N, LMD_LIBRARY_GLOBAL_NAN},
+            {JS_BUILTIN_GLOBAL_FN_IS_FINITE, LMD_LIBRARY_GLOBAL_FINITE},
+            {JS_BUILTIN_GLOBAL_FN_PARSE_INT, LMD_LIBRARY_PARSE_INT},
+            {JS_BUILTIN_GLOBAL_FN_PARSE_FLOAT, LMD_LIBRARY_PARSE_FLOAT}
+        };
+        for (const auto& global : globals) {
+            state->values[global.slot] = js_get_global_builtin_fn_by_id(Item{.item = i2it(global.id)});
+            if (item_is_error(state->values[global.slot])) return state->values[global.slot];
+        }
+        return ItemNull;
+    }
+    for (int i = 0; i < LMD_PRIMITIVE_COUNT + 1; i++) {
+        MvpLmdClass* cls = i == LMD_PRIMITIVE_COUNT ? &state->symbol : &state->primitives[i];
+        if (i < LMD_PRIMITIVE_COUNT) {
+            result = mvp_lmd_library_class_initialize(program, state, cls,
+                (int)(state->primitive_values - state->values) + 3 * i, mvp_lmd_primitive_names[i], primitive_construct, 1, true);
+            if (item_is_error(result)) return result;
+            ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
+            if (i == LMD_PRIMITIVE_BIGINT) {
+                // [[Construct]] exists; primitive_construct rejects its non-undefined newTarget.
+                ((MvpLmdCallable*)cls->values[0].function)->native_constructor = true;
+            }
+        }
+        if (i < LMD_PRIMITIVE_BIGINT) {
+            Item initial = i == LMD_PRIMITIVE_STRING ? Item{.item = s2it(heap_create_name("", 0))} :
+                i == LMD_PRIMITIVE_BOOLEAN ? Item{.item = ITEM_FALSE} : Item{.item = i2it(0)};
+            if (!map_shape_set(cls->values[1].map, state->primitive_key, initial)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            if (i == LMD_PRIMITIVE_STRING) {
+                result = mvp_lmd_named_set(cls->values[1], "length", Item{.item = i2it(0)},
+                    JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+                if (item_is_error(result)) return result;
+            }
+        }
+        for (int method = 0; method < 2; method++) {
+            result = mvp_lmd_named_set(cls->values[1], method ? "toString" : "valueOf",
+                mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2 + method), primitive_method,
+                    method && i == LMD_PRIMITIVE_NUMBER ? 1 : 0,
+                    method ? "toString" : "valueOf"), JSPD_NON_ENUMERABLE);
+            if (item_is_error(result)) return result;
+        }
+        if (i >= LMD_PRIMITIVE_BIGINT) {
+            const char* tag = i == LMD_PRIMITIVE_BIGINT ? "BigInt" : "Symbol";
+            result = mvp_lmd_named_set(cls->values[1],
+                Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
+                Item{.item = s2it(heap_create_name(tag, strlen(tag)))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+            if (item_is_error(result)) return result;
+            if (i == LMD_PRIMITIVE_COUNT) {
+                result = mvp_lmd_named_set(cls->values[1],
+                    Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE))},
+                    mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2), primitive_method, 1, "[Symbol.toPrimitive]"),
+                    JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+                if (item_is_error(result)) return result;
+            }
+        }
+    }
+    for (int i = 0; i < mvp_lmd_builtin_method_count; i++) {
+        const MvpLmdBuiltinMethod& method = mvp_lmd_builtin_methods[i];
+        if (method.owner != LMD_TYPE_STRING) continue;
+        Item prototype = state->primitives[LMD_PRIMITIVE_STRING].values[1];
+        // legacy trim spellings alias the same callable rather than creating wrappers.
+        const char* alias = !strcmp(method.name, "trimLeft") ? "trimStart" :
+            !strcmp(method.name, "trimRight") ? "trimEnd" : NULL;
+        Item callable = alias ? mvp_lmd_property_get(prototype, Item{.item = s2it(heap_create_name(alias, strlen(alias)))}, 0) :
+            mvp_lmd_native_function(program, (void*)(intptr_t)method.id, string_method, method.arity, method.name);
+        if (item_is_error(callable)) return callable;
+        result = mvp_lmd_named_set(prototype, method.name, callable, JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
+    result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], "toFixed",
+        mvp_lmd_native_function(program, (void*)(intptr_t)LMD_METHOD_TO_FIXED, primitive_method, 1, "toFixed"), JSPD_NON_ENUMERABLE);
+    if (item_is_error(result)) return result;
+    const char* formats[] = {"toPrecision", "toExponential"};
+    const char* widths[] = {"asIntN", "asUintN"};
+    for (int i = 0; i < 2; i++) {
+        result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], formats[i],
+            mvp_lmd_native_function(program, (void*)(intptr_t)(PRIMITIVE_PRECISION + i), primitive_method, 1, formats[i]), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+        result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_BIGINT].values[0], widths[i],
+            mvp_lmd_native_function(program, (void*)(intptr_t)(11 + i), primitive_static, 2, widths[i]), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
+    for (int kind : {LMD_PRIMITIVE_NUMBER, LMD_PRIMITIVE_BIGINT}) {
+        // the shared no-Intl policy ignores locale arguments and keeps the primitive brand check.
+        result = mvp_lmd_named_set(state->primitives[kind].values[1], "toLocaleString",
+            mvp_lmd_native_function(program, (void*)(intptr_t)(16 + kind), primitive_method, 0, "toLocaleString"), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+    }
+    const char* statics[] = {"raw", "fromCharCode", "fromCodePoint", "isFinite", "isInteger", "isNaN", "isSafeInteger", "parseInt", "parseFloat"};
+    for (int i = 0; i < 9; i++) {
+        Item owner = state->primitives[i < 3 ? LMD_PRIMITIVE_STRING : LMD_PRIMITIVE_NUMBER].values[0];
+        result = mvp_lmd_named_set(owner, statics[i],
+            mvp_lmd_native_function(program, (void*)(intptr_t)i, primitive_static, i == 7 ? 2 : 1, statics[i]), JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+        // global parser identities survive replacement of the Number properties.
+        if (i >= 7) state->values[LMD_LIBRARY_PARSE_INT + i - 7] = result;
+    }
+    for (int i = 0; i < 2; i++) {
+        state->values[LMD_LIBRARY_GLOBAL_NAN + i] = mvp_lmd_native_function(program,
+            (void*)(intptr_t)(9 + i), primitive_static, 1, i ? "isFinite" : "isNaN");
+        if (item_is_error(state->values[LMD_LIBRARY_GLOBAL_NAN + i])) return state->values[LMD_LIBRARY_GLOBAL_NAN + i];
+    }
+    const struct { const char* name; double value; } constants[] = {
+        {"EPSILON", 0x1p-52}, {"MAX_SAFE_INTEGER", 9007199254740991.0}, {"MIN_SAFE_INTEGER", -9007199254740991.0},
+        {"MAX_VALUE", 0x1.fffffffffffffp1023}, {"MIN_VALUE", 0x1p-1074},
+        {"NaN", NAN}, {"POSITIVE_INFINITY", INFINITY}, {"NEGATIVE_INFINITY", -INFINITY}};
+    for (const auto& constant : constants) {
+        result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[0], constant.name, push_d(constant.value),
+            JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+        if (item_is_error(result)) return result;
+    }
+    return result;
+}
+
+static Item mvp_lmd_ordinary_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (state->native_callable_values) {
+        // bind the existing families before any private method graph is allocated.
+        const struct { MvpLmdClass* family; int slot; const char* name; } families[] = {
+            {&state->object, LMD_LIBRARY_OBJECT, "Object"},
+            {&state->array, LMD_LIBRARY_ARRAY, "Array"},
+            {&state->date, LMD_LIBRARY_DATE, "Date"},
+            {&state->symbol, LMD_LIBRARY_SYMBOL, "Symbol"}
+        };
+        for (const auto& family : families) {
+            Item result = mvp_lmd_library_class_adopt(family.family, state->values + family.slot,
+                js_get_constructor(js_name_item(family.name)));
+            if (item_is_error(result)) return result;
+        }
+        state->values[LMD_LIBRARY_JSON] = js_get_json_object_value();
+        if (item_is_error(state->values[LMD_LIBRARY_JSON])) return state->values[LMD_LIBRARY_JSON];
+        state->values[LMD_LIBRARY_SYMBOL_VALUES] = mvp_lmd_array_new(0);
+        if (item_is_error(state->values[LMD_LIBRARY_SYMBOL_VALUES])) return state->values[LMD_LIBRARY_SYMBOL_VALUES];
+        state->values[LMD_LIBRARY_ITERATOR_SYMBOL] = js_get_key_cstr(state->symbol.values[0], "iterator");
+        return item_is_error(state->values[LMD_LIBRARY_ITERATOR_SYMBOL]) ? state->values[LMD_LIBRARY_ITERATOR_SYMBOL] : ItemNull;
+    }
     state->values[LMD_LIBRARY_JSON] = mvp_lmd_object_new(&state->json_shape, 0);
     if (item_is_error(state->values[LMD_LIBRARY_JSON])) return state->values[LMD_LIBRARY_JSON];
     Item result = mvp_lmd_named_set(state->values[LMD_LIBRARY_JSON],
@@ -2075,12 +2261,29 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
             mvp_lmd_native_function(program, (void*)(intptr_t)method.id, array_method, method.arity, method.name));
         if (item_is_error(result)) return result;
     }
+    return result;
+}
+
+Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
+    if (!context->name_pool) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    state->prototype_key = mvp_lmd_internal_name(LMD_INTERNAL_PROTOTYPE);
+    state->extensibility_key = mvp_lmd_internal_name(LMD_INTERNAL_EXTENSIBLE);
+    if (!state->prototype_key || !state->extensibility_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item result = mvp_lmd_ordinary_initialize(program, state);
+    if (item_is_error(result)) return result;
     result = mvp_lmd_regexp_initialize(program, state);
     if (item_is_error(result)) return result;
     result = mvp_lmd_function_initialize(program, state);
     if (item_is_error(result)) return result;
     if (state->errors) for (int i = 0; i < LMD_ERROR_COUNT; i++) {
         MvpLmdClass* cls = &state->errors[i];
+        if (state->native_callable_values) {
+            result = mvp_lmd_library_class_adopt(cls, state->error_values + 3 * i,
+                js_get_constructor(js_name_item(mvp_lmd_error_names[i])));
+            if (item_is_error(result)) return result;
+            continue;
+        }
         result = mvp_lmd_library_class_initialize(program, state, cls,
             (int)(state->error_values - state->values) + 3 * i, mvp_lmd_error_names[i], error_construct,
             i == LMD_ERROR_AGGREGATE ? 2 : 1, true);
@@ -2101,107 +2304,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
             if (item_is_error(result)) return result;
         }
     }
-    if (state->primitives) {
-        state->primitive_key = mvp_lmd_internal_name(LMD_INTERNAL_PRIMITIVE);
-        if (!state->primitive_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        for (int i = 0; i < LMD_PRIMITIVE_COUNT + 1; i++) {
-            MvpLmdClass* cls = i == LMD_PRIMITIVE_COUNT ? &state->symbol : &state->primitives[i];
-            if (i < LMD_PRIMITIVE_COUNT) {
-                result = mvp_lmd_library_class_initialize(program, state, cls,
-                    (int)(state->primitive_values - state->values) + 3 * i, mvp_lmd_primitive_names[i], primitive_construct, 1, true);
-                if (item_is_error(result)) return result;
-                ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
-                if (i == LMD_PRIMITIVE_BIGINT) {
-                    // [[Construct]] exists; primitive_construct rejects its non-undefined newTarget.
-                    ((MvpLmdCallable*)cls->values[0].function)->native_constructor = true;
-                }
-            }
-            if (i < LMD_PRIMITIVE_BIGINT) {
-                Item initial = i == LMD_PRIMITIVE_STRING ? Item{.item = s2it(heap_create_name("", 0))} :
-                    i == LMD_PRIMITIVE_BOOLEAN ? Item{.item = ITEM_FALSE} : Item{.item = i2it(0)};
-                if (!map_shape_set(cls->values[1].map, state->primitive_key, initial)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-                if (i == LMD_PRIMITIVE_STRING) {
-                    result = mvp_lmd_named_set(cls->values[1], "length", Item{.item = i2it(0)},
-                        JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
-                    if (item_is_error(result)) return result;
-                }
-            }
-            for (int method = 0; method < 2; method++) {
-                result = mvp_lmd_named_set(cls->values[1], method ? "toString" : "valueOf",
-                    mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2 + method), primitive_method,
-                        method && i == LMD_PRIMITIVE_NUMBER ? 1 : 0,
-                        method ? "toString" : "valueOf"), JSPD_NON_ENUMERABLE);
-                if (item_is_error(result)) return result;
-            }
-            if (i >= LMD_PRIMITIVE_BIGINT) {
-                const char* tag = i == LMD_PRIMITIVE_BIGINT ? "BigInt" : "Symbol";
-                result = mvp_lmd_named_set(cls->values[1],
-                    Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))},
-                    Item{.item = s2it(heap_create_name(tag, strlen(tag)))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
-                if (item_is_error(result)) return result;
-                if (i == LMD_PRIMITIVE_COUNT) {
-                    result = mvp_lmd_named_set(cls->values[1],
-                        Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE))},
-                        mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2), primitive_method, 1, "[Symbol.toPrimitive]"),
-                        JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
-                    if (item_is_error(result)) return result;
-                }
-            }
-        }
-        for (int i = 0; i < mvp_lmd_builtin_method_count; i++) {
-            const MvpLmdBuiltinMethod& method = mvp_lmd_builtin_methods[i];
-            if (method.owner != LMD_TYPE_STRING) continue;
-            Item prototype = state->primitives[LMD_PRIMITIVE_STRING].values[1];
-            // legacy trim spellings alias the same callable rather than creating wrappers.
-            const char* alias = !strcmp(method.name, "trimLeft") ? "trimStart" :
-                !strcmp(method.name, "trimRight") ? "trimEnd" : NULL;
-            Item callable = alias ? mvp_lmd_property_get(prototype, Item{.item = s2it(heap_create_name(alias, strlen(alias)))}, 0) :
-                mvp_lmd_native_function(program, (void*)(intptr_t)method.id, string_method, method.arity, method.name);
-            if (item_is_error(callable)) return callable;
-            result = mvp_lmd_named_set(prototype, method.name, callable, JSPD_NON_ENUMERABLE);
-            if (item_is_error(result)) return result;
-        }
-        result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], "toFixed",
-            mvp_lmd_native_function(program, (void*)(intptr_t)LMD_METHOD_TO_FIXED, primitive_method, 1, "toFixed"), JSPD_NON_ENUMERABLE);
-        if (item_is_error(result)) return result;
-        const char* formats[] = {"toPrecision", "toExponential"};
-        const char* widths[] = {"asIntN", "asUintN"};
-        for (int i = 0; i < 2; i++) {
-            result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[1], formats[i],
-                mvp_lmd_native_function(program, (void*)(intptr_t)(PRIMITIVE_PRECISION + i), primitive_method, 1, formats[i]), JSPD_NON_ENUMERABLE);
-            if (item_is_error(result)) return result;
-            result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_BIGINT].values[0], widths[i],
-                mvp_lmd_native_function(program, (void*)(intptr_t)(11 + i), primitive_static, 2, widths[i]), JSPD_NON_ENUMERABLE);
-            if (item_is_error(result)) return result;
-        }
-        for (int kind : {LMD_PRIMITIVE_NUMBER, LMD_PRIMITIVE_BIGINT}) {
-            // the shared no-Intl policy ignores locale arguments and keeps the primitive brand check.
-            result = mvp_lmd_named_set(state->primitives[kind].values[1], "toLocaleString",
-                mvp_lmd_native_function(program, (void*)(intptr_t)(16 + kind), primitive_method, 0, "toLocaleString"), JSPD_NON_ENUMERABLE);
-            if (item_is_error(result)) return result;
-        }
-        const char* statics[] = {"raw", "fromCharCode", "fromCodePoint", "isFinite", "isInteger", "isNaN", "isSafeInteger", "parseInt", "parseFloat"};
-        for (int i = 0; i < 9; i++) {
-            Item owner = state->primitives[i < 3 ? LMD_PRIMITIVE_STRING : LMD_PRIMITIVE_NUMBER].values[0];
-            result = mvp_lmd_named_set(owner, statics[i],
-                mvp_lmd_native_function(program, (void*)(intptr_t)i, primitive_static, i == 7 ? 2 : 1, statics[i]), JSPD_NON_ENUMERABLE);
-            if (item_is_error(result)) return result;
-        }
-        for (int i = 0; i < 2; i++) {
-            state->values[LMD_LIBRARY_GLOBAL_NAN + i] = mvp_lmd_native_function(program,
-                (void*)(intptr_t)(9 + i), primitive_static, 1, i ? "isFinite" : "isNaN");
-            if (item_is_error(state->values[LMD_LIBRARY_GLOBAL_NAN + i])) return state->values[LMD_LIBRARY_GLOBAL_NAN + i];
-        }
-        const struct { const char* name; double value; } constants[] = {
-            {"EPSILON", 0x1p-52}, {"MAX_SAFE_INTEGER", 9007199254740991.0}, {"MIN_SAFE_INTEGER", -9007199254740991.0},
-            {"MAX_VALUE", 0x1.fffffffffffffp1023}, {"MIN_VALUE", 0x1p-1074},
-            {"NaN", NAN}, {"POSITIVE_INFINITY", INFINITY}, {"NEGATIVE_INFINITY", -INFINITY}};
-        for (const auto& constant : constants) {
-            result = mvp_lmd_named_set(state->primitives[LMD_PRIMITIVE_NUMBER].values[0], constant.name, push_d(constant.value),
-                JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
-            if (item_is_error(result)) return result;
-        }
-    }
+    result = mvp_lmd_primitive_initialize(program, state);
+    if (item_is_error(result)) return result;
     if (state->errors) for (int i = 0; i < js_builtin_global_count(); i++) {
         const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
         int slot = spec->id == JS_BUILTIN_GLOBAL_FN_DECODE_URI ? LMD_LIBRARY_DECODE_URI :
@@ -2211,7 +2315,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
             spec->id == JS_BUILTIN_GLOBAL_FN_ESCAPE ? LMD_LIBRARY_ESCAPE :
             spec->id == JS_BUILTIN_GLOBAL_FN_UNESCAPE ? LMD_LIBRARY_UNESCAPE : -1;
         if (slot < 0) continue;
-        state->values[slot] = mvp_lmd_native_function(program, (void*)spec, uri_call, spec->param_count, spec->name);
+        state->values[slot] = state->native_callable_values
+            ? js_get_global_builtin_fn_by_id(Item{.item = i2it(spec->id)}) : mvp_lmd_native_function(program, (void*)spec, uri_call, spec->param_count, spec->name);
         if (item_is_error(state->values[slot])) return state->values[slot];
     }
     if (!item_is_error(result)) result = mvp_lmd_buffer_initialize(program, state);
@@ -2221,6 +2326,7 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     for (int i = 0; ; i++) {
         const JsBuiltinMethodSpec* method = js_builtin_method_at(i);
         if (!method) break;
+        if (state->native_callable_values) break;
         if (method->builtin_id != JS_BUILTIN_MAP_GROUP_BY && method->builtin_id != JS_BUILTIN_OBJECT_GROUP_BY &&
                 method->builtin_id != JS_BUILTIN_OBJECT_FROM_ENTRIES) continue;
         RootFrame roots(1);

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D1.3/D8.4.1v2: Number keys keep dense reads and descriptor fallback; fractional and partial keys preserve property-key semantics.",
+  "description": "D1.3/D8.4.1v2: Number keys keep dense reads and descriptor fallback; fractional and partial keys preserve property-key semantics. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
         "call\tmvp_lmd_array_index_property",
-        "call\tmvp_lmd_class_property"
+        "ubge\t"
       ],
       "forbid": [
         "call\tmvp_lmd_to_primitive"
@@ -16,7 +16,7 @@
       "in_func": "mvp_lmd_f5",
       "expect": [
         "call\tmvp_lmd_number_to_string",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_array_index_property"
       ],
       "forbid": [
         "call\tmvp_lmd_to_primitive"
@@ -41,8 +41,12 @@
     {
       "in_func": "mvp_lmd_f10",
       "expect": [
+        "call\tmvp_lmd_array_index_property",
+        "blt\t"
+      ],
+      "forbid": [
         "call\tmvp_lmd_property_key",
-        "call\tmvp_lmd_class_property"
+        "call\tmvp_lmd_to_primitive"
       ]
     }
   ]

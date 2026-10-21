@@ -1,18 +1,20 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D3.4.6: invocation-local shared storage descriptors admit native numeric regions; type changes, negative zero and subnormals preserve JS semantics.",
-  "args": ["--runtime=mvp-lmd"],
+  "description": "D8.4.1v2/D3.4.6: invocation-local shared storage descriptors admit native numeric regions; type changes, negative zero and subnormals preserve JS semantics. D8.4.1v2: the proven Map shape now guards nominal ownership directly; shared lookup and complete semantic misses are retained.",
+  "args": [
+    "--runtime=mvp-lmd"
+  ],
   "checks": [
     {
       "in_func": "*",
       "expect": [
         "call\ttypemap_hash_lookup_key",
-        "call\tmvp_lmd_owns_properties",
         "call\tshape_entry_storage",
         "dadd",
         "call\tmvp_lmd_class_invoke"
       ],
       "forbid": [
+        "call\tmvp_lmd_owns_properties",
         "cached_shape",
         "cache_entry",
         "site_shape",

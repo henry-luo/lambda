@@ -238,8 +238,6 @@ static inline JsScript* js_script_from_script(Script* script) {
 // Direct MIR transpilation entry point
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
                           uint64_t* result_home);
-Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                             const char* filename, uint64_t* result_home);
 // Execute an admitted Test262 source with the AST tier's realm-local native
 // harness. MIR callers retain their existing lowering interception path.
 Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,

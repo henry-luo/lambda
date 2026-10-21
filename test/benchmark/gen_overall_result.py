@@ -47,7 +47,7 @@ ENGINE_LABELS = {
     "julia_e2e": "Julia (startup + warmup)",
     "java_e2e": "Java (startup + warmup)",
     "erlang_e2e": "Erlang (startup + warmup)",
-    "lambdajs_e2e": "LambdaJS (auto)",
+    "lambdajs_e2e": "LambdaJS (default)",
     "quickjs_e2e": "QuickJS",
     "nodejs_e2e": "Node.js",
     "c2mir": "C2MIR",

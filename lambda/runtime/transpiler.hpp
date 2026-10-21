@@ -131,6 +131,9 @@ struct Runtime {
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
+    // consumed by the first CLI Script: no later host Script observes its declarations.
+    bool js_terminal_script;
+    double js_execution_ms; // generated-entry timing, excluding admission and setup
     // D8.1.3v22 promotion policy, read from JS_EXEC_BACKEND /
     // JS_FUNC_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
     // than from the environment on every interpreted call.
@@ -503,8 +506,9 @@ bool text_item_is_ascii(Item item);
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
                           uint64_t* result_home);
+// an explicit Module goal applies even without import/export syntax.
 Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                             const char* filename, uint64_t* result_home);
+                             const char* filename, uint64_t* result_home, bool module = false);
 Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,
                                             size_t js_source_len, const char* filename,
                                             uint64_t* result_home);

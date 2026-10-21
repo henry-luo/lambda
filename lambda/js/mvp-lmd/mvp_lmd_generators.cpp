@@ -7,6 +7,7 @@
 #include "../js_typed_array.h"
 #include "../js_runtime_state.hpp"
 #include "../js_runtime.h"
+#include "../js_runtime_internal.hpp"
 #include "../js_interp.hpp"
 #include "../js_builtin_catalog.hpp"
 #include "../js_property_attrs.h"
@@ -306,16 +307,15 @@ static Item generator_body(Activation*, Item object) {
     JsOwnedCallActivation call_facts;
     return run();
 }
-static Item generator_resume(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
-        Item self, Item receiver, Item) {
+Item mvp_lmd_generator_resume(MvpLmdProgram* program, Item receiver, Item value, int operation) {
     if (get_type_id(receiver) != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_GENERATOR)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)receiver.map)->state;
     if (state->is_async || state->runtime_context != context || state->executing)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
-    Item value = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
-    if (state->ast_host) return operation == 1 ? js_generator_return(receiver, value)
+    if (state->ast_host || get_type_id(state->ast_function) != LMD_TYPE_FUNC ||
+            !function_has_abi(state->ast_function.function, FN_ENTRY_ABI_MVP_LMD))
+        return operation == 1 ? js_generator_return(receiver, value)
         : operation == 2 ? js_generator_throw(receiver, value) : js_generator_next(receiver, value);
     if (!state->started && operation) {
         state->done = true; activation_destroy(state->activation); state->activation = NULL;
@@ -334,6 +334,11 @@ static Item generator_resume(Context*, MvpLmdProgram* program, Item* args, uint6
     if (activation_fault(state->activation)) result.set(mvp_lmd_fail(LMD_MVP_RANGE, 0));
     if (state->done) { activation_destroy(state->activation); state->activation = NULL; }
     return item_is_error(result.get()) || delegated_result ? result.get() : mvp_lmd_iterator_result(program, result.get(), state->done);
+}
+static Item generator_resume(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item receiver, Item) {
+    return mvp_lmd_generator_resume(program, receiver, count ? args[0] : make_js_undefined(),
+        (intptr_t)((MvpLmdNativeCallable*)self.function)->state);
 }
 Item mvp_lmd_generator_create_ast(MvpLmdProgram* program, Item internal, Item wrapper,
         Item arguments, Item receiver, bool is_async) {
@@ -547,6 +552,12 @@ static Item weak_collection_initialize(MvpLmdProgram* program, MvpLmdLibraryStat
     for (int family = 0; family < state->weak_class_count; family++) {
         MvpLmdClass* cls = &state->weak_collections[family];
         const char* name = mvp_lmd_weak_families[family].name;
+        if (state->native_callable_values) {
+            Item status = mvp_lmd_library_class_adopt(cls, state->weak_values + 3 * family,
+                js_get_constructor(js_name_item(name)));
+            if (item_is_error(status)) return status;
+            continue;
+        }
         const JsBuiltinGlobalSpec* builtin = js_builtin_global_find(name, strlen(name));
         Item status = mvp_lmd_library_class_initialize(program, state, cls,
             (int)(state->weak_values - state->values) + 3 * family, name, weak_collection_construct, builtin->param_count);
@@ -670,9 +681,14 @@ static Item collection_construct(Context*, MvpLmdProgram* program, Item* args, u
     }
     return js_collection_add_entries_with_ops(output.get(), input.get(), !set, &mvp_lmd_collection_ops);
 }
-Item mvp_lmd_iterator_prototype_initialize(MvpLmdProgram*, MvpLmdClass* cls, Item* slots, const char* tag_name) {
+Item mvp_lmd_iterator_prototype_initialize(MvpLmdProgram*, MvpLmdClass* cls,
+        Item* slots, const char* tag_name, Item existing) {
     cls->values = slots;
     slots[0] = slots[2] = ItemNull;
+    if (existing.item != ITEM_NULL) {
+        slots[1] = existing;
+        return item_is_error(existing) ? existing : ItemNull;
+    }
     slots[1] = mvp_lmd_object_new(&cls->prototype_shape, 0);
     if (item_is_error(slots[1]) || !tag_name) return item_is_error(slots[1]) ? slots[1] : ItemNull;
     // program slots own the prototype before tag allocation or descriptor installation can collect.
@@ -686,15 +702,55 @@ Item mvp_lmd_iterator_prototype_initialize(MvpLmdProgram*, MvpLmdClass* cls, Ite
         Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))}, &tag);
 }
 Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
+    if (state->native_callable_values) {
+        // native sequence methods already own their carriers and iterator prototype families.
+        if (state->iterator_base) {
+            Item result = mvp_lmd_iterator_prototype_initialize(program, state->iterator_base,
+                state->iterator_base_values, NULL, js_get_iterator_proto());
+            if (item_is_error(result)) return result;
+        }
+        state->generator.values = state->values + LMD_LIBRARY_GENERATOR;
+        state->generator.values[0] = js_suspended_function_intrinsic(true, false, true);
+        if (item_is_error(state->generator.values[0])) return state->generator.values[0];
+        state->generator.values[1] = js_get_generator_shared_proto(false);
+        if (item_is_error(state->generator.values[1])) return state->generator.values[1];
+        state->generator.values[2] = state->generator.values[0];
+        Item result = mvp_lmd_iterator_prototype_initialize(program, &state->iterator,
+            state->values + LMD_LIBRARY_ITERATOR, NULL, js_get_array_iterator_proto());
+        if (item_is_error(result)) return result;
+        Item (*const prototypes[])() = {js_get_map_iterator_proto, js_get_set_iterator_proto,
+            js_get_string_iterator_proto};
+        if (state->iterator_families) for (int i = 0; i < LMD_ITERATOR_COUNT; i++) {
+            result = mvp_lmd_iterator_prototype_initialize(program, &state->iterator_families[i],
+                state->iterator_family_values + i * 3, NULL, prototypes[i]());
+            if (item_is_error(result)) return result;
+        }
+        state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, "values", 6);
+        if (item_is_error(state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return state->values[LMD_LIBRARY_SEQUENCE_ITERATOR];
+        state->values[LMD_LIBRARY_STRING_ITERATOR] = js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL, "[Symbol.iterator]", 17);
+        if (item_is_error(state->values[LMD_LIBRARY_STRING_ITERATOR])) return state->values[LMD_LIBRARY_STRING_ITERATOR];
+        for (int set = 0; set < 2; set++) {
+            result = mvp_lmd_library_class_adopt(set ? &state->set : &state->map,
+                state->values + (set ? LMD_LIBRARY_SET : LMD_LIBRARY_MAP),
+                js_get_constructor(js_name_item(set ? "Set" : "Map")));
+            if (item_is_error(result)) return result;
+        }
+        return weak_collection_initialize(program, state);
+    }
     if (state->iterator_base) {
         Item initialized = mvp_lmd_iterator_prototype_initialize(program, state->iterator_base, state->iterator_base_values, NULL);
         if (item_is_error(initialized)) return initialized;
     }
-    Item result = mvp_lmd_library_class_initialize(program, state, &state->generator,
+    bool native_generator = state->native_callable_values && state->generator_function_values;
+    state->generator.values = state->values + LMD_LIBRARY_GENERATOR;
+    Item result = native_generator ? ItemNull : mvp_lmd_library_class_initialize(program, state, &state->generator,
         LMD_LIBRARY_GENERATOR, "Generator", generator_construct, 0, state->generator_function_values == NULL);
     if (item_is_error(result)) return result;
     const char* names[] = {"next", "return", "throw"};
     for (int i = 0; i < 3; i++) {
+        if (native_generator) break;
         result = mvp_lmd_named_set(state->values[LMD_LIBRARY_GENERATOR_PROTOTYPE], names[i],
             mvp_lmd_native_function(program, (void*)(intptr_t)i, generator_resume, 1, names[i]));
         if (item_is_error(result)) return result;

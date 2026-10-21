@@ -114,6 +114,7 @@ typedef struct JubeSpecifierEntry {
     const JubeModuleDef* module;
     int32_t namespace_index;
     uint32_t state;
+    bool script_source_closed;
 } JubeSpecifierEntry;
 
 static HashMap* jube_specifier_index = NULL;
@@ -2320,10 +2321,17 @@ static bool jube_specifier_index_init(void) {
     return true;
 }
 
+static bool jube_module_source_closed(const JubeModuleDef* module) {
+    return module && module->struct_size >=
+        offsetof(JubeModuleDef, script_source_closed) + sizeof(module->script_source_closed) &&
+        module->script_source_closed == 1;
+}
+
 static bool jube_specifier_entry_upsert(const char* specifier, const char* module_name,
                                         const char* manifest_path,
                                         const JubeModuleDef* module,
-                                        int namespace_index, uint32_t state) {
+                                        int namespace_index, uint32_t state,
+                                        bool script_source_closed = false) {
     if (!specifier || !module_name || !*module_name || !jube_specifier_index_init()) return false;
     JubeSpecifierEntry entry = {};
     if (!jube_specifier_normalize(specifier, entry.normalized, sizeof(entry.normalized)) ||
@@ -2338,6 +2346,7 @@ static bool jube_specifier_entry_upsert(const char* specifier, const char* modul
     entry.module = module;
     entry.namespace_index = namespace_index;
     entry.state = state;
+    entry.script_source_closed = module ? jube_module_source_closed(module) : script_source_closed;
 
     const JubeSpecifierEntry* existing =
         (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, &entry);
@@ -2361,8 +2370,11 @@ static bool jube_specifier_entry_upsert(const char* specifier, const char* modul
         // must not replace a configured or executable-local manifest.
         if (existing->manifest_path[0]) {
             strcpy(entry.manifest_path, existing->manifest_path);
+            if (!module) entry.script_source_closed = existing->script_source_closed;
         }
         if (!entry.module && existing->module) entry.module = existing->module;
+        // an activated descriptor remains authoritative during later catalog refreshes.
+        if (entry.module) entry.script_source_closed = jube_module_source_closed(entry.module);
         if (entry.namespace_index < 0) entry.namespace_index = existing->namespace_index;
         if (entry.state < existing->state) entry.state = existing->state;
     }
@@ -2424,6 +2436,10 @@ static bool jube_specifier_descriptor_matches_catalog(const JubeModuleDef* modul
             continue;
         }
         has_manifest_provider = true;
+        if (entry->script_source_closed && !jube_module_source_closed(module)) {
+            log_error("JUBE_SPEC: descriptor '%s' does not attest closed script source", module->name);
+            return false;
+        }
         int namespace_index = jube_specifier_descriptor_namespace(module, entry->normalized);
         if (namespace_index < 0) {
             log_error("JUBE_SPEC: descriptor '%s' does not attest manifest provider '%s'",
@@ -2472,6 +2488,12 @@ static const JubeSpecifierEntry* jube_specifier_lookup(const char* name,
         return NULL;
     }
     return (const JubeSpecifierEntry*)hashmap_get(jube_specifier_index, key);
+}
+
+bool jube_specifier_source_closed(const char* name) {
+    JubeSpecifierEntry key = {};
+    const JubeSpecifierEntry* entry = jube_specifier_lookup(name, &key);
+    return entry && entry->script_source_closed;
 }
 
 JubeSpecifierResolveStatus jube_specifier_resolve_active(const char* name, Item* out_namespace) {
@@ -3527,6 +3549,9 @@ static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
     bool has_provides = jube_manifest_string_array(text, "provides", provides,
         JUBE_SPECIFIER_CATALOG_CAPACITY, &provide_count);
     bool has_language = jube_manifest_string(text, "language", language, sizeof(language));
+    char script_source[32];
+    bool script_source_closed = jube_manifest_string(text, "script_source",
+        script_source, sizeof(script_source)) && strcmp(script_source, "closed") == 0;
     bool ok = has_name && has_provides;
     // known engines only: "js" provides script specifiers, "rdb" provides RDB
     // drivers; any other engine still fails the catalog closed
@@ -3563,7 +3588,7 @@ static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
         if (!jube_specifier_normalize(provides[i], normalized, sizeof(normalized)) ||
                 strcmp(provides[i], normalized) != 0 ||
                 !jube_specifier_entry_upsert(provides[i], module_name, manifest_path, NULL,
-                                             -1, JUBE_SPECIFIER_OWNER_CATALOGED)) {
+                                             -1, JUBE_SPECIFIER_OWNER_CATALOGED, script_source_closed)) {
             log_error("JUBE_SPEC: invalid provided specifier '%s' in '%s'", provides[i],
                       manifest_path);
             free(text);

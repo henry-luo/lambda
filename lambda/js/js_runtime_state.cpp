@@ -217,8 +217,69 @@ static bool js_global_environment_key_same(Item left, Item right) {
         memcmp(left_string->chars, right_string->chars, left_string->len) == 0;
 }
 
+struct JsGlobalBindingIndexEntry {
+    uint64_t hash;
+    Item probe_key; // only lookup probes carry an Item; stored entries resolve their rooted row
+    int index;
+    JsGlobalBindingKind kind;
+};
+
+static JsGlobalBindingIndexEntry js_global_binding_index_entry(
+        JsGlobalBindingKind kind, Item key, int index = -1) {
+    uint64_t hash = key.item;
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* text = key.get_string();
+        const NameMeta* meta = property_key_meta(text);
+        hash = meta && meta->key_kind == NAME_KEY_STRING ? meta->hash :
+            typemap_name_hash(text->chars, text->len);
+    }
+    return {hash ^ ((uint64_t)kind * UINT64_C(0x9e3779b97f4a7c15)),
+        index < 0 ? key : ItemNull, index, kind};
+}
+
+static uint64_t js_global_binding_index_hash(const void* opaque, uint64_t, uint64_t) {
+    return ((const JsGlobalBindingIndexEntry*)opaque)->hash;
+}
+
+static int js_global_binding_index_compare(const void* a, const void* b, void* opaque) {
+    auto* environment = (JsGlobalEnvironment*)opaque;
+    auto* left = (const JsGlobalBindingIndexEntry*)a;
+    auto* right = (const JsGlobalBindingIndexEntry*)b;
+    if (left->kind != right->kind) return 1;
+    auto key = [&](const JsGlobalBindingIndexEntry* entry) {
+        return entry->index < 0 ? entry->probe_key :
+            js_global_environment_binding_key(environment, &environment->bindings[entry->index]);
+    };
+    return js_global_environment_key_same(key(left), key(right)) ? 0 : 1;
+}
+
+static void js_global_binding_index_drop(JsGlobalEnvironment* environment) {
+    if (environment->binding_index) hashmap_free(environment->binding_index);
+    environment->binding_index = NULL;
+}
+
+static void js_global_binding_index_insert(JsGlobalEnvironment* environment, int index) {
+    JsGlobalBinding* binding = &environment->bindings[index];
+    JsGlobalBindingIndexEntry entry = js_global_binding_index_entry(binding->kind,
+        js_global_environment_binding_key(environment, binding), index);
+    hashmap_set(environment->binding_index, &entry);
+    // an incomplete derived index must never turn an existing binding into a miss.
+    if (hashmap_oom(environment->binding_index)) js_global_binding_index_drop(environment);
+}
+
+static void js_global_binding_index_ensure(JsGlobalEnvironment* environment) {
+    if (environment->binding_index || !environment->binding_count) return;
+    environment->binding_index = hashmap_new(sizeof(JsGlobalBindingIndexEntry),
+        environment->binding_count, 0, 0, js_global_binding_index_hash,
+        js_global_binding_index_compare, NULL, environment);
+    for (int i = 0; environment->binding_index && i < environment->binding_count; i++)
+        js_global_binding_index_insert(environment, i);
+}
+
 static void js_global_environment_reset_metadata(
         JsGlobalEnvironment* environment) {
+    // RootVector heap replacement also invalidates every indexed row.
+    if (environment->binding_index) hashmap_clear(environment->binding_index, false);
     environment->binding_count = 0;
     environment->object_var_epoch = 0;
     environment->lexical_epoch = 0;
@@ -256,6 +317,7 @@ bool js_global_environment_init(JsGlobalEnvironment* environment,
 
 void js_global_environment_destroy(JsGlobalEnvironment* environment) {
     if (!environment) return;
+    js_global_binding_index_drop(environment);
     root_vector_destroy(&environment->roots);
     if (environment->bindings) mem_free(environment->bindings);
     environment->bindings = NULL;
@@ -309,6 +371,13 @@ void js_global_environment_set_binding_value(JsGlobalEnvironment* environment,
 int js_global_environment_find(JsGlobalEnvironment* environment,
         JsGlobalBindingKind kind, Item key) {
     if (!js_global_environment_ensure(environment)) return -1;
+    js_global_binding_index_ensure(environment);
+    if (environment->binding_index) {
+        JsGlobalBindingIndexEntry probe = js_global_binding_index_entry(kind, key);
+        auto* entry = (const JsGlobalBindingIndexEntry*)hashmap_get(environment->binding_index, &probe);
+        return entry ? entry->index : -1;
+    }
+    // allocation failure keeps the authoritative rows usable without a partial index.
     for (int i = environment->binding_count - 1; i >= 0; i--) {
         JsGlobalBinding* binding = &environment->bindings[i];
         if (binding->kind == kind && js_global_environment_key_same(
@@ -341,6 +410,9 @@ bool js_global_environment_upsert(JsGlobalEnvironment* environment,
         binding->immutable = immutable;
         binding->module_index = module_index;
         binding->module_state_id = module_state_id;
+        binding->storage_slots = NULL;
+        binding->storage_count = binding->storage_index = 0;
+        binding->storage_cell = false;
         return true;
     }
     RootFrame roots(2);
@@ -359,7 +431,70 @@ bool js_global_environment_upsert(JsGlobalEnvironment* environment,
     binding->module_state_id = module_state_id;
     binding->kind = kind;
     binding->immutable = immutable;
+    binding->storage_slots = NULL;
+    binding->storage_count = binding->storage_index = 0;
+    binding->storage_cell = false;
+    if (environment->binding_index)
+        js_global_binding_index_insert(environment, environment->binding_count - 1);
     return true;
+}
+
+bool js_global_environment_link_storage(JsGlobalEnvironment* environment,
+        Item key, bool immutable, Item* slots, uint32_t count, uint32_t index, bool cell) {
+    if (!slots || index >= count || !js_global_environment_upsert(environment,
+            JS_GLOBAL_BINDING_LEXICAL, key, ItemNull, immutable, -1, UINT32_MAX)) return false;
+    JsGlobalBinding* binding = js_global_environment_binding_at(environment,
+        js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key));
+    if (!binding) return false;
+    binding->storage_slots = slots;
+    binding->storage_count = count;
+    binding->storage_index = index;
+    binding->storage_cell = cell;
+    return true;
+}
+
+Item js_global_environment_read_binding(JsGlobalEnvironment* environment,
+        const JsGlobalBinding* binding, Item fallback) {
+    if (!binding) return fallback;
+    if (binding->storage_slots) {
+        Item value = owned_item_slot_read(binding->storage_slots,
+            binding->storage_count, binding->storage_index, true);
+        // a later operand can reenter and replace either the slot or its capture cell.
+        if (!binding->storage_cell) return js_retain_scalar(value);
+        return get_type_id(value) == LMD_TYPE_ARRAY && value.array->length
+            ? js_retain_scalar(value.array->items[0]) : Item{.item = ITEM_JS_TDZ};
+    }
+    if (binding->module_index >= 0) {
+        RuntimeModuleStateScope module_state(context);
+        if (binding->module_state_id != UINT32_MAX &&
+                !module_state.activate(binding->module_state_id)) return fallback;
+        // a later operand may reenter and overwrite the module's scalar home.
+        return js_retain_scalar(lambda_active_module_var_at((uint32_t)binding->module_index));
+    }
+    return js_retain_scalar(js_global_environment_binding_value(environment, binding));
+}
+
+void js_global_environment_write_binding(JsGlobalEnvironment* environment,
+        JsGlobalBinding* binding, Item value) {
+    if (!binding) return;
+    if (binding->storage_slots) {
+        if (binding->storage_cell) {
+            Item cell = binding->storage_slots[binding->storage_index];
+            if (get_type_id(cell) == LMD_TYPE_ARRAY && cell.array->length)
+                js_array_store_owned(cell.array, 0, value);
+        } else {
+            owned_item_slot_store(binding->storage_slots, binding->storage_count,
+                binding->storage_index, value);
+        }
+        return;
+    }
+    if (binding->module_index >= 0) {
+        RuntimeModuleStateScope module_state(context);
+        if (binding->module_state_id == UINT32_MAX || module_state.activate(binding->module_state_id))
+            lambda_active_module_var_store((uint32_t)binding->module_index, value);
+        return;
+    }
+    js_global_environment_set_binding_value(environment, binding, value);
 }
 
 static bool js_global_environment_prepare_removal(JsGlobalEnvironment* environment) {
@@ -381,6 +516,8 @@ void js_global_environment_clear_bindings(JsGlobalEnvironment* environment) {
 
 static bool js_global_environment_rebuild_bindings(
         JsGlobalEnvironment* environment) {
+    // removal compacts row indices; rebuild lazily even if root compaction fails.
+    js_global_binding_index_drop(environment);
     RootVector replacement = {};
     root_vector_init(&replacement, environment->roots.owner,
         "JS global environment");
@@ -444,6 +581,19 @@ void js_global_environment_release_module_bindings(
     if (!js_global_environment_rebuild_bindings(environment)) {
         log_error("js-global-environment: cannot rebuild released module bindings");
     }
+}
+
+void js_global_environment_remove_storage_bindings(JsGlobalEnvironment* environment) {
+    if (!js_global_environment_prepare_removal(environment)) return;
+    int retained = 0;
+    for (int i = 0; i < environment->binding_count; i++) {
+        if (environment->bindings[i].storage_slots) continue;
+        environment->bindings[retained++] = environment->bindings[i];
+    }
+    if (retained == environment->binding_count) return;
+    environment->binding_count = retained;
+    if (!js_global_environment_rebuild_bindings(environment))
+        log_error("js-global-environment: cannot rebuild released storage bindings");
 }
 
 static void js_runtime_state_free_records(JsRuntimeState* state) {
@@ -845,7 +995,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (!state || !visit) return;
     visit(&state->clipboard, &state->clipboard.blob_prototype, 8,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom, &state->dom.implementation, 5,
+    visit(&state->dom, &state->dom.implementation, 4,
         "DOM singleton wrappers", data);
     if (state->string_caches) {
         visit(state->string_caches,

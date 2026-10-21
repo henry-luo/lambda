@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D5.3/D5.4: formal RegExp results and named-capture graphs remain in rooted storage through generic property access.",
+  "description": "D5.3/D5.4: formal RegExp results and named-capture graphs remain in rooted storage through generic property access. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",
       "expect": [
         "call\tmvp_lmd_regexp_new",
-        "call\tmvp_lmd_property_read",
+        "call\tmvp_lmd_property_get_fixed",
         "call\towned_item_slot_store",
         "mov\ti64:80(runtime),"
       ]

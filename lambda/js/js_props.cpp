@@ -664,13 +664,10 @@ static inline Item js_props_str(const char* s, int len) {
     return js_name_item(s, (size_t)len);
 }
 
-static void js_props_fill_sparse_accessor_index(Item object,
-                                                const char* name,
-                                                int name_len,
-                                                bool is_accessor_desc) {
-    // ES array exotic define: accessor descriptors at sparse numeric indices
-    // materialize holes up to the index so later length/iteration paths see
-    // the descriptor as an own array property.
+static void js_props_finish_array_accessor_index(Item object,
+                                                 const char* name,
+                                                 int name_len,
+                                                 bool is_accessor_desc) {
     if (!is_accessor_desc || !js_props_is_array(object) ||
         name_len <= 0 || name_len > 10) {
         return;
@@ -681,6 +678,14 @@ static void js_props_fill_sparse_accessor_index(Item object,
     int64_t idx = (int64_t)index;
 
     Array* arr = object.array;
+    // the companion descriptor owns this index; a stale element would let
+    // compiled dense reads bypass the accessor after native-to-MVP promotion.
+    if (idx < arr->length && idx < container_dense_capacity(arr)) {
+        arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+    }
+    js_array_sparse_delete_index(object, idx);
+
+    // new accessor indices still extend the array's existing hole storage.
     int64_t gap = idx - (int64_t)arr->length;
     if (gap < 0 || gap >= 100000) return;
 
@@ -938,6 +943,15 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
         return js_define_own_property_from_descriptor_impl(properties, name_item,
             name, name_len, pd, is_new_property, existing_accessor);
     }
+    JsPropertyDescriptor data_update;
+    if (existing_accessor && js_pd_is_data(pd) && !(pd->flags & JS_PD_HAS_VALUE)) {
+        // writable alone converts an accessor to data with an undefined value;
+        // materialize that default through the same storage path as an explicit value.
+        data_update = *pd;
+        data_update.flags |= JS_PD_HAS_VALUE;
+        data_update.value = make_js_undefined();
+        pd = &data_update;
+    }
     String* name_key = it2s(name_item);
     bool identity_key = name_key && property_key_id(name_key) != NAME_ID_NONE;
 
@@ -1175,7 +1189,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             JSPD_NON_CONFIGURABLE, /*enabled=*/false);
     }
 
-    js_props_fill_sparse_accessor_index(object, name, name_len, is_accessor_desc);
+    js_props_finish_array_accessor_index(object, name, name_len, is_accessor_desc);
     return js_status_ok();
 }
 JS_FORWARD_ITEM(js_define_own_property_from_descriptor, (Item object,                                                         const char* name,                                                         int name_len,                                                         const JsPropertyDescriptor* pd,                                                         bool is_new_property,                                                         bool existing_accessor), js_define_own_property_from_descriptor_impl, (object, js_props_str(name, name_len), name, name_len, pd, is_new_property, existing_accessor))

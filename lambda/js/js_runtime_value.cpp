@@ -1523,6 +1523,17 @@ extern "C" Item js_equal(Item left, Item right) {
 // by an inline MIR_XOR-with-1 on the boxed result (which inverts the low bit
 // where b2it stores the bool, preserving the high-byte type tag).
 
+extern "C" int64_t js_string_equal(Item left, Item right) {
+    if (left.item == right.item) return 1;
+    String* l = it2s(left);
+    String* r = it2s(right);
+    if (l->len == r->len && !memcmp(l->chars, r->chars, l->len)) return 1;
+    // S1.11: only ASCII makes a byte mismatch conclusive; WTF-8 surrogate
+    // pairs and canonical UTF-8 can still encode identical UTF-16 units.
+    if (l->is_ascii && r->is_ascii) return 0;
+    return utf16_compare(l->chars, l->len, r->chars, r->len) == 0;
+}
+
 extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1582,16 +1593,8 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         return (Item){.item = b2it(l == r)};
     }
 
-    case LMD_TYPE_STRING: {
-        if (left.item == right.item) return (Item){.item = b2it(true)};
-        String* l_str = it2s(left);
-        String* r_str = it2s(right);
-        if (l_str->len == r_str->len && !memcmp(l_str->chars, r_str->chars, l_str->len))
-            return (Item){.item = b2it(true)};
-        // S1.11: canonical names and concatenated WTF-8 can encode the same UTF-16 units.
-        return (Item){.item = b2it(utf16_compare(l_str->chars, l_str->len,
-            r_str->chars, r_str->len) == 0)};
-    }
+    case LMD_TYPE_STRING:
+        return (Item){.item = b2it(js_string_equal(left, right))};
 
     default:
         if (left_type == LMD_TYPE_MAP || is_virtual_container_type_id(left_type)) {

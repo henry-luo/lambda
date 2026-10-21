@@ -2087,7 +2087,8 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         }
         const char* constants[] = {"EMPTY", "LOADING", "DONE"};
         for (size_t slot = 0; slot < 3; slot++) {
-            descriptor.set(js_new_object());
+            // lazy host installation must not invoke guest setters while building descriptors.
+            descriptor.set(js_object_create(ItemNull));
             dom_realm_set_cstr(descriptor.get(), "value", (Item){.item = i2it((int64_t)slot)});
             dom_realm_set_cstr(descriptor.get(), "enumerable", (Item){.item = b2it(true)});
             dom_realm_define_property(g_file_reader_proto, make_str(constants[slot]), descriptor.get());

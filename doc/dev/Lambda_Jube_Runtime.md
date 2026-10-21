@@ -42,6 +42,23 @@ it. An incompatible selected image reports an error rather than trying a
 lower-priority copy. Manifests from different modules claiming one specifier
 still conflict, and the selected manifest must match its descriptor (D7.3.4).
 
+### JavaScript source effects
+
+Under **D8.1.3v27**, a manifest may declare `"script_source": "closed"` when
+the module cannot evaluate or load additional JavaScript. The corresponding
+`JubeModuleDef.script_source_closed` tail must be present according to
+`struct_size` and equal to `1`. The loader checks that attestation before
+module activation; older descriptors and absent declarations remain unknown.
+An activated descriptor remains authoritative if the discovery catalog is
+refreshed.
+
+This contract permits native I/O, allocation, GC and invocation of callbacks
+supplied by the current Script. It does not imply purity or absence of
+reentry. It allows the MVP compiler to preserve closed-source facts for a
+direct `require` of a literal specifier. An escaped loader or unresolved
+specifier requires the complete shared realm before execution. `node-fs`
+currently declares this contract.
+
 The host exports only the symbols listed in `lambda/jube/jube_host_exports.txt`
 to modules (D7.3.6).
 

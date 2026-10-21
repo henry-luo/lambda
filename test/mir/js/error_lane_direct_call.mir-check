@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3v2, D8.1.3v25: the known throw producer has no tag test; the open Script caller retains mutable global lookup, guarded callable entry and checked catch conversion.",
+  "description": "D8.4.3v2, D8.1.3v27: the known throw producer has no tag test; the open Script caller retains mutable global lookup, guarded callable entry and checked catch conversion. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
@@ -14,12 +14,11 @@
     {
       "in_func": "mvp_lmd_f2",
       "expect": [
-        "call\tmvp_lmd_dynamic_global",
-        "call\tmvp_lmd_signature,",
+        "call\tmvp_lmd_f1_signature",
         "call\tmvp_lmd_caught_value"
       ],
       "count": {
-        "{{r}}, 27": 3
+        "{{r}}, 27": 2
       }
     }
   ]
